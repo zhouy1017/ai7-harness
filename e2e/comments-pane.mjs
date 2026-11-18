@@ -377,7 +377,15 @@ export async function commentsSelectMark(renderer, check, waitFor, markId, requi
   try {
     await waitFor(renderer, `(() => {const node=document.querySelector('[data-comment-card="'+${id}+'"]');return node.dataset.selected==='true'&&node.dataset.expanded==='true'&&!node.querySelector('.editorial-mark-expanded-content').hidden;})()`, 'comments-selected-expanded');
   } catch {
-    const state=await renderer.evaluate(`(() => {const node=document.querySelector('[data-comment-card="'+${id}+'"]');return {selected:node.dataset.selected,expanded:node.dataset.expanded,hidden:node.hidden};})()`);
+    // Each part of the check, the cards the pane holds selected, and where focus and the reads stand (Issue #1523).
+    const state=await renderer.evaluate(`(() => {
+      const node=document.querySelector('[data-comment-card="'+${id}+'"]'),content=node?.querySelector('.editorial-mark-expanded-content'),active=document.activeElement;
+      return {selected:node?.dataset.selected,expanded:node?.dataset.expanded,hidden:node?.hidden,content:content?(content.hidden?'hidden':'shown'):'missing',
+        revalidating:node?.dataset.revalidating,busy:node?.getAttribute('aria-busy'),pending:node?.dataset.commentPending!==undefined,
+        selectedCards:Array.from(document.querySelectorAll('[data-comment-card][data-selected="true"]')).map(card=>__comments.ids.indexOf(card.dataset.commentCard)),
+        focus:{tag:active?.tagName??null,card:__comments.ids.indexOf(active?.closest?.('[data-comment-card]')?.dataset.commentCard),reply:active?.dataset?.commentReply!==undefined,editor:!!active?.closest?.('[data-testid="manuscript-editor"]')},
+        loading:document.querySelector('.manuscript-comments-canvas')?.dataset.loading,pane:getComputedStyle(document.querySelector('.manuscript-comments-pane')).position,viewport:[innerWidth,innerHeight]};
+    })()`);
     check(false,'comments-selected-expanded',{point,click,state});
   }
   return {...click,before:point};
