@@ -570,12 +570,12 @@ it('a superseded explicit open of another Book keeps the remaining page paused u
  expect(resumed).toBe(true);expect(page.screen.firstElementChild).toBe(manuscript);expect(page.screen.querySelector('[data-book-reacquire]')).toBeNull();
 });
 
-it.each([
+it.each<readonly [string, () => HTMLElement | null]>([
  ['the Task Drawer', () => { const node = document.createElement('aside'); node.dataset['taskDrawer'] = 'open'; return node; }],
  ['the command palette', () => { const node = document.createElement('dialog'); node.dataset['sheet'] = ''; node.show(); return node; }],
  ['a dialog', () => { const node = document.createElement('section'); node.setAttribute('role', 'dialog'); return node; }],
  ['no overlay', () => null],
-] as const)('a late 修订记录 answer leaves focus inside %s and otherwise takes it (#1504 item 5)', async (_name, overlay) => {
+])('a late 修订记录 answer leaves focus inside %s and otherwise takes it (#1504 item 5)', async (_name, overlay) => {
  const overview = Promise.withResolvers<object>();
  const page = harness({ getBookWorkbenchRoute: async () => ({ kind: 'book', bookId: 'book-a', bookTitle: '甲' }), getBookOverview: () => overview.promise });
  page.shell['markSection' as 'follow'] = vi.fn();

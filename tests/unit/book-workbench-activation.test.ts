@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import ts from 'typescript';
 import { expect, it, vi } from 'vitest';
-import { IPC_CHANNELS, isNonActivatingBookOpen } from '../../src/shared/protocol.js';
+import { IPC_CHANNELS, isNonActivatingBookOpen, type RendererApi } from '../../src/shared/protocol.js';
 import { decodeRequest } from '../../src/service/request-frames.js';
 import { NavigationGeneration, reconcileBookWorkbenchApi } from '../../src/renderer/navigation-generation.js';
 
@@ -135,7 +135,7 @@ it('through the real ownership boundary, a superseded leave re-acquires the Book
   openBookWorkbench:(input:{bookId:string;activation?:string})=>app.open(window,input.activation==='non-activating',input.bookId),
   pollServiceJob:async(input:{jobId:string})=>{app.requireJob(window,input.jobId);return {jobId:input.jobId};},
  };
- const failed=vi.fn(),api=reconcileBookWorkbenchApi(raw as never,{bookOnScreen:()=>shown.bookId,left:vi.fn(),failed},shown);
+ const failed=vi.fn(),api=reconcileBookWorkbenchApi(raw as unknown as RendererApi,{bookOnScreen:()=>shown.bookId,left:vi.fn(),failed},shown);
  const leaving=api.leaveBookWorkbench();shown.begin();await leaving;
  expect(app.bookWindows.get(bookId)).toBe(window);expect(failed).not.toHaveBeenCalled();
  await expect(api.pollServiceJob({jobId:'job-1'})).resolves.toEqual({jobId:'job-1'});
