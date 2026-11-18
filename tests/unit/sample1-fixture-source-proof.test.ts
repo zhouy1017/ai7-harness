@@ -303,6 +303,9 @@ describe('exact sample1 fixture exemption source proof', () => {
   });
 
   it.each(['unit', 'synthesis'] as const)('proves writing %s from the frozen writing row and refuses altered inputs or source records (#810)', async (stage) => {
+    // This historical writing task has no synopsis supplement in its frozen execution plan.
+    const execution = canonicalJson({});
+    database.prepare('INSERT INTO analysis_plan_records VALUES (?,1,?,?,?)').run(request.sample1Task, 'execution-plan', execution, sha256Hex(execution));
     const row = database.prepare("SELECT canonical_json FROM analysis_plan_records WHERE component='coverage-manifest'").get()!;
     const manifest = JSON.parse(String(row.canonical_json)) as CoverageManifestProjection;
     const blocks: ManifestBlockInput[] = [];

@@ -1043,6 +1043,20 @@ The evidence no page can supply — the live test items the ADR 0067 Provider Te
 | `S17c/editorial-dialogue/15` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-19 | #990 |
 | `S17c/editorial-dialogue/16` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-19 | #990 |
 | `S17c/editorial-dialogue/17` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-19 | #990 |
+| `S40/first-baseline/461` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/462` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/463` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/464` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/465` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/466` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/467` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/468` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/reanalyze-book/9` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/reanalyze-book/10` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/reanalyze-book/11` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/reanalyze-book/12` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/reanalyze-book/13` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/reanalyze-book/14` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
 
 | Baseline | Route | Models | Stated on |
 | --- | --- | --- | --- |
