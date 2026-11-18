@@ -8992,7 +8992,7 @@ export class EditorialStore {
       withRecoveryObjectLifecycle: this.#withRecoveryObjectLifecycle.bind(this),
       captureManual: (source) => new EditorialMemoryFacade(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope),
       analysisResultSetRevision: (bookId) => this.#baselineAnalysis.inspect(bookId, undefined, null).resultSetRevision,
-      get cancelReplacement() { return store.cancelReplacement.bind(store); },
+      cancelReplacement: (previewId) => this.cancelReplacement(previewId),
     };
   }
 
