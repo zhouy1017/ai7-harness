@@ -121,7 +121,10 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       paint('title');
     }, 'primary');
     create.disabled = busy || projection.unavailableReason !== null || projection.types.length === 0;
-    toolbar.replaceChildren(create, button('管理衍生稿件类别', () => { managing = !managing; paintCategories(); }));
+    create.dataset['derivativeAction'] = 'new';
+    const manageCategories = button('管理衍生稿件类别', () => { managing = !managing; paintCategories(); });
+    manageCategories.dataset['derivativeAction'] = 'categories';
+    toolbar.replaceChildren(create, manageCategories);
     paintCreate(focus); paintCategories(); paintChips(); paintList();
   }
 
@@ -231,27 +234,33 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       };
       const up = button('上移', () => move(-1)); up.disabled = busy || index === 0;
       const down = button('下移', () => move(1)); down.disabled = busy || index === types.length - 1;
-      row.append(name, button('保存名称', () => void act(async () => { await api.saveProductionDocumentType({ typeId: type.typeId, name: name.value }); })), up, down,
-        button('删除类别', () => requestDeleteType(type), 'quiet'));
+      const remove = button('删除类别', () => requestDeleteType(type), 'quiet');
+      remove.dataset['derivativeAction'] = 'delete-type';
+      row.append(name, button('保存名称', () => void act(async () => { await api.saveProductionDocumentType({ typeId: type.typeId, name: name.value }); })), up, down, remove);
       categories.append(row);
     });
     const name = el('input'); name.placeholder = '新类别名称'; name.setAttribute('aria-label', '新类别名称'); name.maxLength = 80; name.disabled = busy;
-    categories.append(name, button('添加类别', () => void act(async () => { await api.saveProductionDocumentType({ name: name.value }); })));
+    const add = button('添加类别', () => void act(async () => { await api.saveProductionDocumentType({ name: name.value }); }));
+    add.dataset['derivativeAction'] = 'add-type';
+    categories.append(name, add);
   }
 
   /** 删除类别 asks in an in-app strip that names the category and how many documents it holds. */
   function requestDeleteType(type: ProductionDocumentsProjection['types'][number]): void {
     const count = type.documents.length;
+    const yes = count === 0
+      ? button('确认删除', () => { confirmStrip.hidden = true; confirmStrip.replaceChildren(); void act(async () => { await api.deleteProductionDocumentType({ typeId: type.typeId }); }, '已删除类别'); }, 'danger')
+      : button('知道了', () => { confirmStrip.hidden = true; confirmStrip.replaceChildren(); }, 'quiet');
+    yes.dataset['derivativeConfirm'] = count === 0 ? 'yes' : 'know';
+    const no = button('取消', () => { confirmStrip.hidden = true; confirmStrip.replaceChildren(); }, 'quiet');
+    no.dataset['derivativeConfirm'] = 'no';
     confirmStrip.replaceChildren(
       el('span', count === 0
         ? `删除「${type.label}」类别？`
         : `「${type.label}」类别里有 ${count} 篇衍生稿件，先把它们改到别的类别才能删除。`),
-      ...(count === 0
-        ? [button('确认删除', () => { confirmStrip.hidden = true; confirmStrip.replaceChildren(); void act(async () => { await api.deleteProductionDocumentType({ typeId: type.typeId }); }, '已删除类别'); }, 'danger')]
-        : [button('知道了', () => { confirmStrip.hidden = true; confirmStrip.replaceChildren(); }, 'quiet')]),
-      button('取消', () => { confirmStrip.hidden = true; confirmStrip.replaceChildren(); }, 'quiet'));
+      yes, no);
     confirmStrip.hidden = false;
-    confirmStrip.querySelector('button')?.focus();
+    yes.focus();
   }
 
   function paintChips(): void {
@@ -313,20 +322,22 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       const actions = el('div', undefined, 'derivatives-item-actions');
       const open = button('打开编辑', () => void act(() => options.openDocument(doc, type), ''), 'primary');
       open.dataset['derivativeAction'] = 'open';
-      const exportMenu = rowMenu('导出 ▾', 'export', [
-        button('导出 DOCX', () => void act(() => exportDocument(doc, 'docx'), ''), 'secondary'),
-        button('导出 MD', () => void act(() => exportDocument(doc, 'markdown'), ''), 'secondary'),
-      ]);
+      const exportDocx = button('导出 DOCX', () => void act(() => exportDocument(doc, 'docx'), ''), 'secondary');
+      exportDocx.dataset['derivativeAction'] = 'export-docx';
+      const exportMarkdown = button('导出 MD', () => void act(() => exportDocument(doc, 'markdown'), ''), 'secondary');
+      exportMarkdown.dataset['derivativeAction'] = 'export-markdown';
+      const exportMenu = rowMenu('导出 ▾', 'export', [exportDocx, exportMarkdown]);
       // One step with 撤销 (Issue #1431 item 28): the delete is a soft record the toast's action restores.
-      const moreMenu = rowMenu('⋯', 'more', [
-        button(doc.finalized ? '取消定稿' : '设为定稿', () => void act(async () => { await api.updateProductionDocumentMeta({ documentId: doc.documentId, finalized: !doc.finalized }); }), 'secondary'),
-        button('删除', () => void act(async () => {
-          await api.updateProductionDocumentMeta({ documentId: doc.documentId, deleted: true });
-          showToast(`已删除「${doc.title}」`, { tone: 'success', action: { label: '撤销', run: () => void act(async () => {
-            await api.updateProductionDocumentMeta({ documentId: doc.documentId, deleted: false });
-          }, '已恢复衍生稿件') } });
-        }, ''), 'quiet'),
-      ]);
+      const finalize = button(doc.finalized ? '取消定稿' : '设为定稿', () => void act(async () => { await api.updateProductionDocumentMeta({ documentId: doc.documentId, finalized: !doc.finalized }); }), 'secondary');
+      finalize.dataset['derivativeAction'] = doc.finalized ? 'unfinalize' : 'finalize';
+      const remove = button('删除', () => void act(async () => {
+        await api.updateProductionDocumentMeta({ documentId: doc.documentId, deleted: true });
+        showToast(`已删除「${doc.title}」`, { tone: 'success', action: { label: '撤销', run: () => void act(async () => {
+          await api.updateProductionDocumentMeta({ documentId: doc.documentId, deleted: false });
+        }, '已恢复衍生稿件') } });
+      }, ''), 'quiet');
+      remove.dataset['derivativeAction'] = 'delete';
+      const moreMenu = rowMenu('⋯', 'more', [finalize, remove]);
       moreMenu.querySelector('summary')!.setAttribute('aria-label', `更多操作：${doc.title}`);
       actions.append(open, exportMenu, moreMenu);
       row.append(titleRow, meta, el('p', doc.preview ?? '', 'derivatives-preview'), actions); list.append(row);

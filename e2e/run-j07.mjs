@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx, addReadOnlySourceObjects } from './composed-docx.mjs';
 import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { openArchivePackageExport, openRemainingPackageExport } from './package-export-readiness.mjs';
+import { pointerClick } from './dispatch-chooser.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -3121,6 +3122,98 @@ async function main() {
     await waitFor(renderer, `Array.from(document.querySelectorAll('.deliverables-package ul.package-included > li'), (item) => item.textContent).includes('宣传文章 · 《另一篇宣传文章》 · 版本 1')`, 'multi-package-included');
     const deliveriesAfter = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).reduce((total, doc)=>total+doc.deliveries.length, 0))`);
     requireJourney(deliveriesAfter === 0, 'multi-package-no-delivery', deliveriesAfter);
+
+    at('derivatives-management');
+    // Issue #1551: 衍生稿件's management page makes a document through 稿件's own four-mode form, renames a title in
+    // place, and asks about deleting a category in an app strip that names it and how many documents it holds.
+    await openManuscript(renderer, 'management-manuscript');
+    const openManagement = async (name) => {
+      await waitFor(renderer, `document.querySelector('.manuscript-switcher-bar [data-manuscript-switch="manage"]:not(:disabled)') !== null`, `${name}-switcher`, 60_000);
+      await clickSelector(renderer, '[data-derivative-menu]', `${name}-menu`);
+      await clickSelector(renderer, '.manuscript-switcher-bar [data-manuscript-switch="manage"]', `${name}-open`);
+      await waitFor(renderer, `document.querySelector('[data-screen="book-derivatives"] [data-derivative-action="new"]') !== null`, `${name}-ready`, 60_000);
+    };
+    const managementForm = `(() => { const form=document.querySelector('[data-screen="book-derivatives"] .derivative-create-form'); return form instanceof HTMLFormElement && form.querySelector('[data-document-field]')?.dataset.documentField==='title' && Array.from(form.querySelectorAll('.derivative-modes input'),(radio)=>radio.value).join('|')==='blank|writing|source|import'; })()`;
+    const managementTitle = () => renderer.evaluate(`document.querySelector('[data-screen="book-derivatives"] .derivative-create-form [data-document-field="title"]')?.value ?? null`);
+    const managementMode = async (mode, name) => {
+      await assertRenderer(renderer, `(() => { const form=document.querySelector('[data-screen="book-derivatives"] .derivative-create-form'); if(!(form instanceof HTMLFormElement)) return false; const type=form.querySelector('select[data-document-field="type"]'); if(!(type instanceof HTMLSelectElement)) return false; type.value='promotion-article'; type.dispatchEvent(new Event('change',{bubbles:true})); const radio=form.querySelector('.derivative-modes input[value=${JSON.stringify(mode)}]'); if(!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return type.value==='promotion-article' && radio.checked; })()`, `${name}-type-and-mode`);
+    };
+    await openManagement('management-page');
+    await clickSelector(renderer, '[data-screen="book-derivatives"] [data-derivative-action="new"]', 'management-create-open');
+    await assertRenderer(renderer, managementForm, 'management-one-create-form');
+    at('derivatives-management-blank');
+    await managementMode('blank', 'management-blank');
+    const managementBlankTitle = await managementTitle();
+    requireJourney(typeof managementBlankTitle === 'string' && managementBlankTitle.startsWith(`《${WRITING_TITLE}》宣传文章`), 'management-blank-title', managementBlankTitle);
+    await clickSelector(renderer, '[data-screen="book-derivatives"] .derivative-create-form [data-document-action="create-derivative"]', 'management-blank-create');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(managementBlankTitle)}`, 'management-blank-open', 120_000);
+    const managementBlankId = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.find(doc=>doc.title===${JSON.stringify(managementBlankTitle)})?.documentId ?? null)`);
+    requireJourney(UUID_PATTERN.test(managementBlankId ?? ''), 'management-blank-id', managementBlankId);
+    at('derivatives-management-rename');
+    // 改名 makes the row's own 稿件题目 editable: Enter saves, leaving the field saves, and the title is the service's.
+    await openManagement('management-rename');
+    const renamedTitle = `${managementBlankTitle} 改名`;
+    const renamedRow = `[data-screen="book-derivatives"] [data-derivative-document=${JSON.stringify(managementBlankId)}]`;
+    await pointerClick(renderer, waitFor, `${renamedRow} [data-derivative-action="rename"]`, 'management-rename-open');
+    await waitFor(renderer, `document.activeElement === document.querySelector('.derivatives-item-title-input') && document.querySelector('.derivatives-item-title-input').value === ${JSON.stringify(managementBlankTitle)}`, 'management-rename-input');
+    await fill(renderer, '[data-screen="book-derivatives"] .derivatives-item-title-input', renamedTitle, 'management-rename-title');
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${renamedRow} .derivatives-item-title-text`)})?.textContent === ${JSON.stringify(renamedTitle)}`, 'management-renamed', 60_000);
+    await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(renamedTitle)}) === true`, 'management-renamed-recorded');
+    const blurredTitle = `${renamedTitle} 2`;
+    await pointerClick(renderer, waitFor, `${renamedRow} [data-derivative-action="rename"]`, 'management-rename-again');
+    await fill(renderer, '[data-screen="book-derivatives"] .derivatives-item-title-input', blurredTitle, 'management-rename-second');
+    await pointerClick(renderer, waitFor, '[data-screen="book-derivatives"] .derivatives-filters input[type="search"]', 'management-rename-blur');
+    await waitFor(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(blurredTitle)}) === true`, 'management-renamed-on-blur', 60_000);
+    at('derivatives-management-import');
+    // 导入文件 in the same form: the file names the document unless the editor wrote a title.
+    await openManagement('management-import');
+    await clickSelector(renderer, '[data-screen="book-derivatives"] [data-derivative-action="new"]', 'management-import-form');
+    await managementMode('import', 'management-import');
+    await clickSelector(renderer, '[data-screen="book-derivatives"] .derivative-create-form [data-document-action="create-derivative"]', 'management-import-create');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(WRITING_LIBRARY_TITLE)}`, 'management-import-open', 120_000);
+    at('derivatives-management-source');
+    // 从来源材料创建 begins with the Book's first source chosen; the document opens at its first paragraph.
+    await openManagement('management-source');
+    await clickSelector(renderer, '[data-screen="book-derivatives"] [data-derivative-action="new"]', 'management-source-form');
+    await managementMode('source', 'management-source');
+    await waitFor(renderer, `(() => { const radios=Array.from(document.querySelectorAll('[data-screen="book-derivatives"] .derivative-create-form input[name="derivative-source"]')); return radios.length>0 && radios[0].checked; })()`, 'management-source-chosen');
+    await clickSelector(renderer, '[data-screen="book-derivatives"] .derivative-create-form [data-document-action="create-derivative"]', 'management-source-create');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] [data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'management-source-open', 120_000);
+    at('derivatives-management-writing');
+    // AI 写作生成 opens the one writing sheet here with the title and type carried; its draft becomes the document.
+    await openManagement('management-writing');
+    await clickSelector(renderer, '[data-screen="book-derivatives"] [data-derivative-action="new"]', 'management-writing-form');
+    await managementMode('writing', 'management-writing');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-derivatives"] .writing-task-sheet')?.open === true`, 'management-writing-sheet', 60_000);
+    const managementWritingTitle = await renderer.evaluate(`document.querySelector('[data-screen="book-derivatives"] .writing-task-sheet [data-document-field="title"]')?.value ?? null`);
+    requireJourney(typeof managementWritingTitle === 'string' && managementWritingTitle.length > 0, 'management-writing-title', managementWritingTitle);
+    await fill(renderer, '[data-screen="book-derivatives"] .writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'management-writing-audience');
+    await fill(renderer, '[data-screen="book-derivatives"] .writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'management-writing-channel');
+    await clickSelector(renderer, '[data-screen="book-derivatives"] .writing-task [data-writing-action="start"]', 'management-writing-start');
+    await launchTaskFromBar(renderer, waitFor, 'management-writing');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="promotion-article"] .editor-toolbar h2')?.textContent === ${JSON.stringify(`${managementWritingTitle} · 版本 1`)}`, 'management-writing-open', 120_000);
+    at('derivatives-management-category');
+    // 删除类别 asks in an app strip: a category with documents says how many must move first; an empty one is deleted.
+    await openManagement('management-category');
+    await clickSelector(renderer, '[data-screen="book-derivatives"] [data-derivative-action="categories"]', 'management-category-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-derivatives"] [data-derivative-type="promotion-article"]') !== null`, 'management-category-rows');
+    const promotionCount = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article')?.documents.length ?? -1)`);
+    requireJourney(Number.isSafeInteger(promotionCount) && promotionCount > 0, 'management-category-count', promotionCount);
+    await pointerClick(renderer, waitFor, '[data-screen="book-derivatives"] [data-derivative-type="promotion-article"] [data-derivative-action="delete-type"]', 'management-category-ask');
+    await assertRenderer(renderer, `(() => { const strip=document.querySelector('[data-screen="book-derivatives"] .derivatives-confirm'); return strip instanceof HTMLElement && !strip.hidden && strip.textContent.includes('宣传文章') && strip.textContent.includes(${JSON.stringify(`${promotionCount} 篇衍生稿件`)}); })()`, 'management-category-strip');
+    await pointerClick(renderer, waitFor, '[data-screen="book-derivatives"] .derivatives-confirm [data-derivative-confirm="no"]', 'management-category-cancel');
+    await assertRenderer(renderer, `document.querySelector('[data-screen="book-derivatives"] .derivatives-confirm').hidden === true`, 'management-category-cancelled');
+    await fill(renderer, '[data-screen="book-derivatives"] .derivatives-category-editor [aria-label="新类别名称"]', '校样', 'management-category-name');
+    await clickSelector(renderer, '[data-screen="book-derivatives"] .derivatives-category-editor [data-derivative-action="add-type"]', 'management-category-add');
+    const proofTypeId = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.label==='校样')?.typeId ?? null)`);
+    requireJourney(typeof proofTypeId === 'string' && proofTypeId.length > 0, 'management-category-added', proofTypeId);
+    const proofRow = `[data-screen="book-derivatives"] [data-derivative-type=${JSON.stringify(proofTypeId)}]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(proofRow)}) !== null`, 'management-category-row');
+    await pointerClick(renderer, waitFor, `${proofRow} [data-derivative-action="delete-type"]`, 'management-category-empty-ask');
+    await assertRenderer(renderer, `(() => { const strip=document.querySelector('[data-screen="book-derivatives"] .derivatives-confirm'); return strip instanceof HTMLElement && !strip.hidden && strip.textContent.includes('校样'); })()`, 'management-category-empty-strip');
+    await pointerClick(renderer, waitFor, '[data-screen="book-derivatives"] .derivatives-confirm [data-derivative-confirm="yes"]', 'management-category-delete');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-derivatives"] .derivatives-confirm').hidden === true && document.querySelector(${JSON.stringify(proofRow)}) === null`, 'management-category-deleted', 60_000);
 
     at('scoped-ai-edit');
     // 就选中部分让 AI 修改… (Issue #1412) on the writing Book's exact sample1 manuscript, on a launch whose adapter answers from the
