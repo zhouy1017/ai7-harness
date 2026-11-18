@@ -3109,17 +3109,16 @@ async function main() {
         at(`review-report-export-${form}`);
         await renderer.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
         await waitFor(renderer, `innerWidth===${width}&&innerHeight===${height}`, `report-export-${form}-viewport`);
-        saveAnswerPath = width===1280 ? resolve(exportsRoot,'review-wide-temporary.md') : reportExportPath;
         await pointerClick(renderer, waitFor, '.review-header-export > summary', `report-header-export-menu-${form}`);
         await pointerClick(renderer, waitFor, '.review-header-export [data-export-format-action="markdown"]', `report-export-open-${form}`);
         await assertRenderer(renderer, `document.querySelector('.review-header-export').open===false`, `report-header-menu-closed-${form}`);
         await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created'`, `report-export-written-${form}`, 60_000);
         await pointerClick(renderer, waitFor, 'section.review-report .review-report-export-slot [data-export-action="close"]', `report-export-close-${form}`);
         await waitFor(renderer, `${reportCard}===null && document.activeElement===document.querySelector('.review-header-export > summary')`, `report-export-closed-focus-returns-${form}`, 10_000);
-        if (width===1280) await rm(saveAnswerPath);
+        // The Save-dialog answer is fixed at launch: remove the file so the next form writes it again as created.
+        if (width===1280) await rm(reportExportPath);
       }
     } finally {
-      saveAnswerPath = reportExportPath;
       await renderer.send('Emulation.clearDeviceMetricsOverride');
       await waitFor(renderer, `innerWidth===${exportNativeViewport.width}&&innerHeight===${exportNativeViewport.height}`, 'report-export-native-viewport');
     }
