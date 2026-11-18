@@ -1,8 +1,11 @@
 import { pointerClick, pointerElementDescription, pointerFailureDetail } from './dispatch-chooser.mjs';
 import { SIDEBAR, sidebarNavigate } from './controller.mjs';
 
-// Docking is possible only when an icon sidebar leaves the full reading measure, padding and edge rail.
-const commentsCanDock = `(() => { const pane=document.querySelector('.manuscript-comments-pane'),editor=document.querySelector('.editor-window'),style=getComputedStyle(editor),root=getComputedStyle(document.documentElement),page=getComputedStyle(document.body),outside=innerWidth-document.querySelector('.editor-workspace').getBoundingClientRect().width-parseFloat(page.paddingLeft)-parseFloat(page.paddingRight);return innerWidth-outside-parseFloat(root.getPropertyValue('--sidebar-icons-width'))-document.querySelector('.editor-edge').getBoundingClientRect().width-pane.getBoundingClientRect().width-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)>=28*parseFloat(getComputedStyle(editor.querySelector('.ProseMirror')).fontSize); })()`;
+// Docking is possible only when an icon sidebar leaves the full reading measure, padding and edge rail. The rail counts at its
+// design width (4.75rem), never at the page's own measured width, so a rail moved on top of the pane cannot excuse an overlay.
+const commentsCanDock = `(() => { const pane=document.querySelector('.manuscript-comments-pane'),editor=document.querySelector('.editor-window'),style=getComputedStyle(editor),root=getComputedStyle(document.documentElement),page=getComputedStyle(document.body),outside=innerWidth-document.querySelector('.editor-workspace').getBoundingClientRect().width-parseFloat(page.paddingLeft)-parseFloat(page.paddingRight);return innerWidth-outside-parseFloat(root.getPropertyValue('--sidebar-icons-width'))-4.75*parseFloat(root.fontSize)-pane.getBoundingClientRect().width-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)>=28*parseFloat(getComputedStyle(editor.querySelector('.ProseMirror')).fontSize); })()`;
+// The permanent rail keeps its own grid place beside an overlaid column: static, and to the right of the pane.
+const commentsRailBeside = `(() => { const edge=document.querySelector('.editor-edge'),pane=document.querySelector('.manuscript-comments-pane'); return getComputedStyle(edge).position==='static' && pane.getBoundingClientRect().right<=edge.getBoundingClientRect().left+1; })()`;
 
 async function commentsReadingSize(renderer, check, waitFor, size) {
   await pointerClick(renderer,waitFor,SIDEBAR.settings,'comments-reading-settings');
@@ -120,7 +123,7 @@ export async function commentsLayouts(renderer, check, waitFor) {
   for (const size of [native, { width: 1280, height: 800 }, { width: 1008, height: 681 }, { width: 640, height: 681 }]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
     check(await renderer.evaluate(`(() => { const entry=document.querySelector('[data-edge-entry="comments"]'); if(!entry||entry.disabled)return false; if(entry.getAttribute('aria-expanded')!=='true')entry.click(); return true; })()`), 'comments-layout-open');
-    await waitFor(renderer, `(() => { const panel=document.querySelector('.manuscript-comments-pane'), text=document.querySelector('.manuscript-surface'), edge=document.querySelector('.editor-edge'), editor=document.querySelector('.editor-window'), prose=editor.querySelector('.ProseMirror'); const p=panel.getBoundingClientRect(), t=text.getBoundingClientRect(), e=edge.getBoundingClientRect(), style=getComputedStyle(editor); const measure=28*parseFloat(getComputedStyle(prose).fontSize), content=editor.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight); return !panel.hidden && p.height>100 && p.right<=e.left+1 && p.bottom<=innerHeight+1 && (${commentsCanDock} ? content>=measure-1 && t.right<=p.left+1 && getComputedStyle(panel).position==='static' : getComputedStyle(panel).position==='absolute' && (innerWidth<1008 || content>=measure-1)); })()`, 'comments-responsive-geometry');
+    await waitFor(renderer, `(() => { const panel=document.querySelector('.manuscript-comments-pane'), text=document.querySelector('.manuscript-surface'), edge=document.querySelector('.editor-edge'), editor=document.querySelector('.editor-window'), prose=editor.querySelector('.ProseMirror'); const p=panel.getBoundingClientRect(), t=text.getBoundingClientRect(), e=edge.getBoundingClientRect(), style=getComputedStyle(editor); const measure=28*parseFloat(getComputedStyle(prose).fontSize), content=editor.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight); const w=document.querySelector('.editor-workspace').getBoundingClientRect(); return !panel.hidden && p.height>100 && p.right<=e.left+1 && p.bottom<=innerHeight+1 && ${commentsRailBeside} && p.width>=Math.min(300,w.width-e.width)-1 && p.width<=341 && (${commentsCanDock} ? content>=measure-1 && t.right<=p.left+1 && getComputedStyle(panel).position==='static' : getComputedStyle(panel).position==='absolute' && p.left>=w.left-1 && (innerWidth<1008 || content>=measure-1)); })()`, 'comments-responsive-geometry');
     check(await renderer.evaluate(`(() => { document.querySelector('[data-view-command="focus-mode"]').click(); return document.documentElement.dataset.focusMode==='on' && getComputedStyle(document.querySelector('.manuscript-comments-pane')).display==='none'; })()`), 'comments-focus-hidden');
     check(await renderer.evaluate(`(() => { document.querySelector('[data-view-command="focus-mode"]').click(); return document.documentElement.dataset.focusMode==='off' && !document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-focus-restored');
     check(await renderer.evaluate(`(() => { document.querySelector('.manuscript-comments-heading [aria-label="关闭批注栏"]').click(); return document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-layout-close');
@@ -149,7 +152,11 @@ export async function commentsPaneForms(renderer, check, waitFor, at, action) {
         const originalSize=await renderer.evaluate(`parseFloat(getComputedStyle(document.querySelector('.ProseMirror')).fontSize)`);
         try {
           await commentsReadingSize(renderer,check,waitFor,24);
-          await waitFor(renderer, `!${commentsCanDock} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position==='absolute'`, 'comments-reading-overlay-measure');
+          await seedCommentsPane(renderer,check,waitFor,size);
+          await waitFor(renderer, `!${commentsCanDock} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position==='absolute' && ${commentsRailBeside}`, 'comments-reading-overlay-measure');
+          await commentsGeometryAndScroll(renderer,check,waitFor);
+          if(action==='apply')await commentsApplyAndReject(renderer,check,waitFor);
+          else await commentsReplyAndResolve(renderer,check,waitFor);
           await commentsSeedConnectorCases(renderer,check,waitFor);
         } finally { await commentsReadingSize(renderer,check,waitFor,originalSize); }
       }
@@ -696,8 +703,10 @@ export async function rightColumnGeometry(renderer, check, waitFor) {
       await waitFor(renderer, `!document.querySelector('.manuscript-comments-pane').hidden && localStorage.getItem('ai7.comments-pane.'+document.querySelector('.editor-shell').dataset.bookId)==='true'`, 'right-column-comments-restored');
       await click('[data-edge-entry="tasks"]');
       await waitFor(renderer, `${measure} && document.querySelector('.manuscript-comments-pane').hidden && !document.querySelector('#task-drawer').hidden && document.documentElement.dataset.sidebar==='icons'`, 'right-column-drawer-measure');
+      if (size.width === 1280) await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer').getBoundingClientRect(), text=document.querySelector('.manuscript-surface').getBoundingClientRect(); return parseFloat(getComputedStyle(document.body).paddingRight)>0 && text.right<=drawer.left+1; })()`, 'right-column-drawer-docked');
       await click('.task-drawer-close');
       await waitFor(renderer, `!document.querySelector('.manuscript-comments-pane').hidden && ${measure}`, 'right-column-drawer-restores');
+      if (size.width === 1280) await waitFor(renderer, `document.documentElement.dataset.sidebarCollapsed==='true' || document.documentElement.dataset.sidebar==='full'`, 'right-column-sidebar-full-again');
     }
     if(initial) await click('[data-edge-entry="comments"]');
   } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
