@@ -5,6 +5,7 @@ import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../../
 import { preferenceDefaults } from '../../src/shared/preferences.js';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { MODEL_SERVICE_CONNECTION_IDS } from '../../src/shared/protocol/model-service.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 import { WRITING_REQUEST } from '../support/writing-task.js';
 
@@ -216,4 +217,27 @@ it('keeps 去设置 available beside a missing model after a refused start', asy
   expect(settings.hidden).toBe(false); settings.click();
   expect(openSettings).toHaveBeenCalledOnce();
   expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')!.disabled).toBe(false);
+});
+
+it('offers the ordinary 本次用量 as the four shared tiers, keeps a custom ceiling as 上次上限, and marks a change on 选项', async () => {
+  setTechnicalLayerVisible(false);
+  try {
+    const { api, launch } = launchApi('launchWritingTask');
+    const { bar } = await mount(api, { operation: 'launchWritingTask', bookId: 'book', title: '写作',
+      input: { ...WRITING_REQUEST, planEdits: { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 75_000 } } } });
+    const budget = miniDocument.querySelector('[data-task-launch-option="budget"]')!;
+    expect(budget.querySelectorAll('option').map(option => [option.value, option.textContent])).toEqual([
+      ['50000', '较少'], ['100000', '标准（推荐）'], ['200000', '较多'], ['', '不设上限'], ['75000', '上次上限']]);
+    expect(budget.value).toBe('75000');
+    const summary = miniDocument.querySelector('.task-launch-options summary')!;
+    expect(summary.textContent).toBe('选项');
+    choose('[data-task-launch-option="budget"]', '50000', 'change');
+    expect(summary.textContent).toBe('选项 · 已调整');
+    choose('[data-task-launch-option="budget"]', '75000', 'change');
+    expect(summary.textContent).toBe('选项');
+    choose('[data-task-launch-option="budget"]', '', 'change');
+    await bar.start();
+    expect(launch.mock.calls[0]![0]).toMatchObject({ planEdits: { removedSteps: [], disallowedAdaptations: [] } });
+    expect((launch.mock.calls[0]![0] as { planEdits: Record<string, unknown> }).planEdits).not.toHaveProperty('runBudgetCeiling');
+  } finally { setTechnicalLayerVisible(true); }
 });
