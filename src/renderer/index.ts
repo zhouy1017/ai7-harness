@@ -1522,7 +1522,7 @@ async function renderStartupProjection(
       api.listBooks({ after: null }),
     ]);
     if (!navigationRoute.isCurrent()) return;
-    navigation.present(() => renderLanding(priorWork, recoveryReturn, books));
+    await navigation.presentAsync(() => renderLanding(priorWork, recoveryReturn, books));
     return;
   }
   if (startup.state === 'committed-recovered') {
@@ -1541,7 +1541,7 @@ async function renderApplicationStartup(startup: StartupProjection, navigationRo
   } else {
     const books = await api.listBooks({ after: null });
     if (!navigationRoute.isCurrent()) return;
-    navigation.present(() => renderLanding(startup.priorWork, undefined, books));
+    await navigation.presentAsync(() => renderLanding(startup.priorWork, undefined, books));
   }
 }
 
@@ -1552,7 +1552,7 @@ async function renderLandingFromAuthority(
 ): Promise<void> {
   const books = await api.listBooks({ after: null });
   if (!navigationRoute.isCurrent()) return;
-  renderLanding(priorWork, recoveryReturn, books);
+  await navigation.presentAsync(() => renderLanding(priorWork, recoveryReturn, books));
 }
 
 function recoveryCandidateCard(
@@ -3610,7 +3610,7 @@ const { renderBookOverview } = createBookOverviewScreen({
   editorialRecordLabel: (...args) => editorialRecordLabel(...args),
   appendRecoveryReturnAction: (...args) => appendRecoveryReturnAction(...args),
   replaceScreen: (...args) => replaceScreen(...args),
-  shell,
+  shell, modelSettings: () => renderModelServiceSettings(),
   renderBookWorkbenchChooser: (...args) => renderBookWorkbenchChooser(...args),
   get taskSurfaceRefresh() { return taskSurfaceRefresh; },
   set taskSurfaceRefresh(value) { taskSurfaceRefresh = value; },
@@ -3625,13 +3625,13 @@ const { renderBookFilter, renderLanding, renderImported, reimportUnfollowedLine,
   element: (...args) => element(...args),
   button: (...args) => button(...args),
   setStatus: (...args) => setStatus(...args),
-  api,
+  api, startReview: (id, title) => { renderBookReview(id, title); reviewWorkspace?.openNew(); },
   rendererErrorMessage: (...args) => rendererErrorMessage(...args),
   panel: (...args) => panel(...args),
   renderBookCreationForm: (...args) => renderBookCreationForm(...args),
   renderTargetChoice: (...args) => renderTargetChoice(...args),
   renderError: (...args) => renderError(...args),
-  renderDataAndStorage: (...args) => renderDataAndStorage(...args),
+  renderDataAndStorage: () => renderDataAndStorage(),
   renderModelServiceSettings: (...args) => renderModelServiceSettings(...args),
   get authorityInterrupted() { return authorityInterrupted; },
   set authorityInterrupted(value) { authorityInterrupted = value; },

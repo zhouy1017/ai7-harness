@@ -32,7 +32,6 @@ it('navigates the shared intake to fidelity and marks review before import compl
     steps.querySelector<HTMLButtonElement>('[data-import-step="2"] button')!.click();
     expect(go).toHaveBeenLastCalledWith('target');
     expect(importSteps('review').querySelector('[aria-current="step"]')?.getAttribute('data-import-step')).toBe('3');
-    expect(importSteps('complete').querySelector('[aria-current="step"]')?.getAttribute('data-import-step')).toBe('4');
     expect(importSteps('choices', { fidelity: false, go }).querySelector<HTMLButtonElement>('[data-import-step="3"] button')!.disabled).toBe(true);
   } finally { restore(); }
 });

@@ -1,7 +1,6 @@
 import { reportResult } from './notifications.js';
 
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
-import { importSteps } from './components/import-steps.js';
 import { technicalWords, technicalLayerVisible } from './technical-layer.js';
 import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
 import type { BookRecordPresentation, BookSummaryPageProjection, BookWorkOverviewProjection, ImportCommitProjection, ManuscriptReimportCommitProjection, ResolvedBookWorkbenchRoute, SourceImportCommitProjection, StagedImportProjection, TaskAuthorizationProjection, TaskPlanKind } from '../shared/protocol.js';
@@ -10,7 +9,7 @@ import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import { mountBookSeries } from './series.js';
 import { EVALUATION_STATUS, EVALUATION_TITLE, evaluationOverviewLine } from './evaluation-labels.js';
 import { DELIVERABLES_ENTRY_LABEL, DELIVERABLES_UNAVAILABLE, PUBLICATION_ACTION_LABELS, deliverablesOverviewLine, publicationStateOf } from './deliverables-labels.js';
-import { analysisRefusalView } from './overview-refusal-labels.js';
+import { overviewAnalysisRefusalView } from './overview-refusal-labels.js';
 import { type ReviewFocus } from './review-workspace.js';
 import { TASK_DRAWER_TITLE } from './task-drawer-labels.js';
 import { REVIEW_ACTION_LABELS, REVIEW_CARD_HEADING, REVIEW_WORKSPACE_UNAVAILABLE, reviewOverviewLine } from './review-labels.js';
@@ -46,6 +45,7 @@ interface Options {
   editorialRecordLabel: (record: BookRecordPresentation) => string;
   appendRecoveryReturnAction: (content: HTMLElement, context: RecoveryReturnContext | undefined) => void;
   replaceScreen: (state: string, content: HTMLElement, place?: ShellPlace | null) => void;
+  modelSettings: () => Promise<void>;
   shell: import("./shell.js").ShellSurface;
   renderBookWorkbenchChooser: (currentOverview: BookWorkOverviewProjection, accumulated?: ReadonlyArray<BookSummaryPageProjection["items"][number]>, after?: BookSummaryPageProjection["nextCursor"]) => Promise<void>;
   taskSurfaceRefresh: Partial<Record<TaskPlanKind, () => void>>;
@@ -204,11 +204,13 @@ function renderBookOverview(
   // here — what state it is in — and its own destination under 资料与记录 is one step away (§3).
   const analysisHost = element('section', 'book-analysis-summary');
   analysisHost.dataset['analysisBookId'] = overview.book.bookId;
+  const analysisState = element('div');
+  const analysisOpen = button('打开分析', 'secondary', () => renderBookAnalysis(overview.book.bookId, overview.book.title));
+  analysisOpen.dataset['analysisAction'] = 'open-analysis';
+  analysisHost.append(element('h3', undefined, '分析'), analysisState, analysisOpen);
   const inspectBaselineAnalysis = (): void => {
     const page = navigation.read(analysisHost);
     if (!page.isCurrent() || !analysisHost.isConnected || overview.manuscriptState.state !== 'populated') return;
-    const open = button('打开分析', 'secondary', () => renderBookAnalysis(overview.book.bookId, overview.book.title));
-    open.dataset['analysisAction'] = 'open-analysis';
     void api.inspectBaselineAnalysis().then(
       (projection) => {
         if (!page.isCurrent() || !analysisHost.isConnected || projection.bookId !== analysisHost.dataset['analysisBookId']) return;
@@ -216,20 +218,22 @@ function renderBookOverview(
         if (projection.resultSetRevision !== null) void api.getPreferences().then((preferences) => {
           if (guidance.isConnected && preferences.values['onboarding.state'] !== null) guidance.remove();
         }, () => undefined);
-        analysisHost.replaceChildren(
-          element('h3', undefined, '分析'),
+        analysisState.replaceChildren(
           element('p', undefined, projection.resultSetRevision === null
             ? `${technicalWords('基线分析', '稿件分析')} · ${projection.stateLabel}`
             : technicalWords(`基线分析 · ${projection.stateLabel} · 读的是 ${projection.resultSetRevision.manuscriptPin.revisionLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '稿件此后没有改动' : '稿件此后有改动'}`,
               `稿件分析 · ${projection.stateLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '与当前稿件一致' : '稿件已更新，可重新分析'}`)),
-          open,
         );
       },
       (error) => {
         if (!page.isCurrent() || !analysisHost.isConnected) return;
         analysisHost.dataset['analysisState'] = 'unavailable';
-        const refusal = analysisRefusalView(rendererErrorCode(error), rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。'));
-        analysisHost.replaceChildren(element('h3', undefined, '分析'), element('p', 'attention-note', refusal.text));
+        const code = rendererErrorCode(error);
+        const refusal = overviewAnalysisRefusalView(code, '暂时无法读取分析状态，请打开分析重试。');
+        analysisState.replaceChildren(element('p', 'attention-note', technicalWords(rendererErrorMessage(error, refusal.text), refusal.text)));
+        if (refusal.actionLabel !== null) {
+          analysisState.append(button('去设置', 'quiet', () => void state.modelSettings()));
+        }
 
       },
     );
@@ -238,26 +242,26 @@ function renderBookOverview(
   // editor, one step from its destination under 工作, which comes before 资料与记录's 分析.
   const reviewHost = element('section', 'book-review-summary');
   reviewHost.dataset['reviewBookId'] = overview.book.bookId;
+  const reviewState = element('div');
+  const reviewOpen = button(REVIEW_ACTION_LABELS['open-review'], 'secondary', () => renderBookReview(overview.book.bookId, overview.book.title));
+  reviewOpen.dataset['reviewAction'] = 'open-review';
+  reviewHost.append(element('h3', undefined, REVIEW_CARD_HEADING), reviewState, reviewOpen);
   const inspectReviewSummary = (): void => {
     const page = navigation.read(reviewHost);
     if (!page.isCurrent() || !reviewHost.isConnected || overview.manuscriptState.state !== 'populated') return;
-    const open = button(REVIEW_ACTION_LABELS['open-review'], 'secondary', () => renderBookReview(overview.book.bookId, overview.book.title));
-    open.dataset['reviewAction'] = 'open-review';
     // The line needs the Runs and the coverage only, so it asks for the page after the last finding —
     // an empty one — and never carries a Run's findings onto the overview.
     void api.inspectReviewWorkspace({ reviewRunId: null, findingsAfterOrdinal: Number.MAX_SAFE_INTEGER }).then(
       (workspace) => {
         if (!page.isCurrent() || !reviewHost.isConnected || workspace.bookId !== reviewHost.dataset['reviewBookId']) return;
         reviewHost.dataset['reviewState'] = workspace.run === null ? 'empty' : workspace.run.state;
-        reviewHost.replaceChildren(element('h3', undefined, REVIEW_CARD_HEADING), element('p', undefined, reviewOverviewLine(workspace)), open);
+        reviewState.replaceChildren(element('p', undefined, reviewOverviewLine(workspace)));
       },
       (error) => {
         if (!page.isCurrent() || !reviewHost.isConnected) return;
         reviewHost.dataset['reviewState'] = 'unavailable';
-        reviewHost.replaceChildren(
-          element('h3', undefined, REVIEW_CARD_HEADING),
-          element('p', 'attention-note', rendererErrorMessage(error, REVIEW_WORKSPACE_UNAVAILABLE)),
-          open,
+        reviewState.replaceChildren(
+          element('p', 'attention-note', technicalWords(rendererErrorMessage(error, REVIEW_WORKSPACE_UNAVAILABLE), REVIEW_WORKSPACE_UNAVAILABLE)),
         );
       },
     );
@@ -267,28 +271,26 @@ function renderBookOverview(
   // 工作, after 审阅. No percentage (WORK-007).
   const deliverablesHost = element('section', 'book-deliverables-summary');
   deliverablesHost.dataset['deliverablesBookId'] = overview.book.bookId;
+  const deliverablesState = element('div');
+  const deliverablesOpen = button(PUBLICATION_ACTION_LABELS.open, 'secondary', () => renderBookDeliverables(overview.book.bookId, overview.book.title));
+  deliverablesOpen.dataset['deliverablesAction'] = 'open';
+  deliverablesHost.append(element('h3', undefined, DELIVERABLES_ENTRY_LABEL), deliverablesState, deliverablesOpen);
   const inspectDeliverablesSummary = (): void => {
     const page = navigation.read(deliverablesHost);
     if (!page.isCurrent() || !deliverablesHost.isConnected || overview.manuscriptState.state !== 'populated') return;
-    const open = button(PUBLICATION_ACTION_LABELS.open, 'secondary', () => renderBookDeliverables(overview.book.bookId, overview.book.title));
-    open.dataset['deliverablesAction'] = 'open';
     void api.inspectDeliverables().then(
       (deliverables) => {
         if (!page.isCurrent() || !deliverablesHost.isConnected || deliverables.bookId !== deliverablesHost.dataset['deliverablesBookId']) return;
         deliverablesHost.dataset['deliverablesState'] = publicationStateOf(deliverables);
-        deliverablesHost.replaceChildren(
-          element('h3', undefined, DELIVERABLES_ENTRY_LABEL),
+        deliverablesState.replaceChildren(
           element('p', undefined, deliverablesOverviewLine(deliverables)),
-          open,
         );
       },
       (error) => {
         if (!page.isCurrent() || !deliverablesHost.isConnected) return;
         deliverablesHost.dataset['deliverablesState'] = 'unavailable';
-        deliverablesHost.replaceChildren(
-          element('h3', undefined, DELIVERABLES_ENTRY_LABEL),
-          element('p', 'attention-note', rendererErrorMessage(error, DELIVERABLES_UNAVAILABLE)),
-          open,
+        deliverablesState.replaceChildren(
+          element('p', 'attention-note', technicalWords(rendererErrorMessage(error, DELIVERABLES_UNAVAILABLE), DELIVERABLES_UNAVAILABLE)),
         );
       },
     );
@@ -297,24 +299,24 @@ function renderBookOverview(
   // from its destination.
   const evaluationHost = element('section', 'book-evaluation-summary');
   evaluationHost.dataset['evaluationBookId'] = overview.book.bookId;
+  const evaluationState = element('div');
+  const evaluationOpen = button('打开评估', 'secondary', () => renderBookEvaluation(overview.book.bookId, overview.book.title));
+  evaluationOpen.dataset['evaluationAction'] = 'open';
+  evaluationHost.append(element('h3', undefined, EVALUATION_TITLE), evaluationState, evaluationOpen);
   const inspectEvaluationSummary = (): void => {
     const page = navigation.read(evaluationHost);
     if (!page.isCurrent() || !evaluationHost.isConnected || overview.manuscriptState.state !== 'populated') return;
-    const open = button('打开评估', 'secondary', () => renderBookEvaluation(overview.book.bookId, overview.book.title));
-    open.dataset['evaluationAction'] = 'open';
     void api.inspectEvaluation({ recordId: null }).then(
       (workspace) => {
         if (!page.isCurrent() || !evaluationHost.isConnected || workspace.bookId !== evaluationHost.dataset['evaluationBookId']) return;
         evaluationHost.dataset['evaluationState'] = workspace.records[0]?.state ?? 'empty';
-        evaluationHost.replaceChildren(element('h3', undefined, EVALUATION_TITLE), element('p', undefined, evaluationOverviewLine(workspace)), open);
+        evaluationState.replaceChildren(element('p', undefined, evaluationOverviewLine(workspace)));
       },
       (error) => {
         if (!page.isCurrent() || !evaluationHost.isConnected) return;
         evaluationHost.dataset['evaluationState'] = 'unavailable';
-        evaluationHost.replaceChildren(
-          element('h3', undefined, EVALUATION_TITLE),
-          element('p', 'attention-note', rendererErrorMessage(error, EVALUATION_STATUS.unavailable)),
-          open,
+        evaluationState.replaceChildren(
+          element('p', 'attention-note', technicalWords(rendererErrorMessage(error, EVALUATION_STATUS.unavailable), EVALUATION_STATUS.unavailable)),
         );
       },
     );
@@ -468,8 +470,11 @@ function renderBookOverview(
     const open = Array.from(receiptActions.querySelectorAll('button')).find((action) => action.textContent === '继续编辑稿件');
     if (open) actions.append(open);
   }
-  (content.querySelector('.manuscript-anchor') ?? content).append(actions);
-  if (completion) content.prepend(importSteps('complete'));
+  if (overview.manuscriptState.state === 'empty') {
+    if (actions.children.length > 0) content.querySelector('h2')?.after(actions);
+  }
+  else (content.querySelector('.manuscript-anchor') ?? content).append(actions);
+
   appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen(completion ? 'imported' : 'book-overview', content, { bookId: overview.book.bookId, title: overview.book.title, section: 'overview' });
   shell.setContextActions(button('打开另一本图书', 'quiet', () => renderBookWorkbenchChooser(overview)));
