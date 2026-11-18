@@ -1000,7 +1000,7 @@ Added by [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as
 - **V2-UX-EXP-021**: Target change after native resolution invalidates stale Effect Approval and reopens the native conflict workflow. After commit AI7 reconciles the actual final path and verified created/replaced outcome into one per-file Effect Receipt; an ambiguous OS outcome becomes `结果待确认` and blocks blind retry.
 - **V2-UX-EXP-022**: Windows and macOS retain the same normalized target, cancellation, approval, receipt, and no-blind-retry semantics while native wording, ordering, geometry, accessibility, system language, and equivalent rename/replace mechanics may differ. A native apply-to-all choice can bind only the exact currently enumerated colliding files and never grants standing overwrite authority for unseen or future files.
 - **V2-UX-EXP-023**: Export of a Manuscript offers `不含批注` and `不含修改建议` as explicit options; 备注 is not included by default and the editor may include it with an explicit `含备注` option (MARK-006, ADR 0079 §3 as amended 2026-09-10). Selecting an option changes the exported file only and never the manuscript or its marks (ADR 0076).
-- **V2-UX-EXP-024**: `含批注` and `含修改建议（作为修订）` are on by default; a 修改建议 exports as a tracked change and a 批注 as a comment with its author name. Exporting a Production Document as part of a delivery (DELIV-003) uses the same export surface and receipt (ADR 0077).
+- **V2-UX-EXP-024**: `含批注` and `含修改建议` are on by default; a 修改建议 exports as a tracked change and a 批注 as a comment with its author name. Exporting a Production Document as part of a delivery (DELIV-003) uses the same export surface and receipt (ADR 0077).
 
 ## Publication Version
 

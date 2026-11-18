@@ -82,6 +82,7 @@ export class MiniElement {
 
   get className(): string { return this.attributes.get('class') ?? ''; }
   get childElementCount(): number { return this.children.filter((child) => child.tagName !== '#TEXT').length; }
+  get firstElementChild(): MiniElement | null { return this.children.find((child) => child.tagName !== '#TEXT') ?? null; }
   set className(value: string) { this.attributes.set('class', value); }
   get classList(): { contains(name: string): boolean; add(...names: string[]): void; remove(...names: string[]): void } {
     return {
@@ -306,6 +307,7 @@ export const miniDocument = {
   activeElement: null as MiniElement | null,
   querySelector(selector: string): MiniElement | null { return miniDocument.body.querySelector(selector); },
   createElementNS(_namespace: string, tag: string): MiniElement { return new MiniElement(tag); },
+  createTextNode(data: string): MiniElement { const text = new MiniElement('#text'); text.textContent = data; return text; },
   createElement(tag: string): MiniElement {
     if (tag === 'button') return new MiniButton(tag);
     if (tag === 'input') return new MiniInput(tag);

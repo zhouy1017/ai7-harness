@@ -38,6 +38,18 @@ it('navigates visible disclosure summaries and skips enabled controls in closed 
   expect(menuDestinations(panel).map((node) => node.textContent)).toEqual(['保存为里程碑版本', '导出稿件']);
 });
 
+it('a closed menu panel drops its placement so the next opening starts at its summary', () => {
+  const source = readFileSync('src/renderer/components/controls.ts', 'utf8');
+  const body = source.slice(source.indexOf('const position = (): void => {', source.indexOf('export function mountMenuControls')), source.indexOf('  const close = (menu: HTMLDetailsElement'));
+  const style = { values: { position: 'fixed', left: '742px', top: '43px' } as Record<string, string>, removeProperty(name: string) { delete this.values[name]; } };
+  const panel = { style };
+  const position = runInNewContext(transpileModule(`${body}; position;`, {}).outputText, {
+    menus: () => [{ open: false }], panelOf: () => panel,
+  });
+  position();
+  expect(style.values).toEqual({});
+});
+
 it('Space chooses the active option in an open select and preserves spaces in its filter', () => {
   const source = readFileSync('src/renderer/components/controls.ts', 'utf8');
   const handler = source.slice(source.indexOf('const keydown = (event: KeyboardEvent)'), source.indexOf('  function destroy()'));

@@ -593,7 +593,7 @@ const READ_DIALOGUE = `(() => {
     title: text(drawer.querySelector('#task-drawer-title')),
     selection: text(dialogue.querySelector('.dialogue-selection')),
     question: text(dialogue.querySelector('.dialogue-question')),
-    attempts: Array.from(dialogue.querySelectorAll('section.dialogue-attempt')).map((attempt) => ({
+    attempts: Array.from(dialogue.querySelectorAll('.dialogue-attempt')).map((attempt) => ({
       kind: attempt.dataset.dialogueKind ?? null,
       state: attempt.dataset.dialogueState ?? null,
       heading: text(attempt.querySelector('.dialogue-attempt-heading')),
@@ -603,7 +603,7 @@ const READ_DIALOGUE = `(() => {
       incomplete: text(attempt.querySelector('.dialogue-incomplete')),
       converted: text(attempt.querySelector('.dialogue-converted')),
     })),
-    actions: Array.from(dialogue.querySelectorAll('.dialogue-actions [data-dialogue-action]')).map((button) => [button.dataset.dialogueAction, button.textContent, button.disabled ? 'disabled' : 'enabled']),
+    actions: Array.from(dialogue.querySelectorAll('.dialogue-actions [data-dialogue-action]')).filter(button => !button.hidden).map((button) => [button.dataset.dialogueAction, button.textContent, button.disabled ? 'disabled' : 'enabled']),
     note: text(dialogue.querySelector('.dialogue-authority')),
   };
 })()`;
@@ -669,7 +669,10 @@ async function composerAction(renderer, action, name) {
 }
 
 async function dialogueAction(renderer, action, name) {
-  await clickSelector(renderer, `#task-drawer .dialogue [data-dialogue-action=${JSON.stringify(action)}]`, name);
+  const menu = action === 'continue' ? '.dialogue-more' : action === 'convert' || action === 'convert-edit' ? '.dialogue-convert-menu' : null;
+  if (menu && !await renderer.evaluate(`document.querySelector('#task-drawer ${menu}')?.open === true`)) await pointerClick(renderer, waitFor, `#task-drawer ${menu} > summary`, name);
+
+  await pointerClick(renderer, waitFor, `#task-drawer .dialogue [data-dialogue-action=${JSON.stringify(action)}]`, name);
 }
 
 async function main() {
@@ -1386,8 +1389,9 @@ async function main() {
     const stopped = await waitForDialogue(renderer, (dialogue) => dialogue.attempts[0]?.state === 'stopped', 'dialogue-stopped');
     requireJourney(stopped.attempts[0].label === '回答已停止 · 内容不完整' && stopped.attempts[0].incomplete === '你停止了回答；只保留了完整的句子。' &&
       JSON.stringify(stopped.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) &&
-      JSON.stringify(stopped.actions) === JSON.stringify([['continue', '继续回答', 'enabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'disabled'], ['convert-edit', '编辑后转为修改建议…', 'disabled']]), 'dialogue-stopped-words', stopped);
-    await assertRenderer(renderer, `document.querySelector('#task-drawer .dialogue [data-dialogue-action="convert"]')?.title === '内容不完整的回答不能转为修改建议。'`, 'dialogue-stopped-convert-why');
+      JSON.stringify(stopped.actions) === JSON.stringify([['regenerate', '重新回答', 'enabled'], ['continue', '继续回答', 'enabled']]), 'dialogue-stopped-words', stopped);
+    at('dialogue-stopped-convert-hidden');
+    await assertRenderer(renderer, `document.querySelector('#task-drawer .dialogue [data-dialogue-action="convert"]') === null`, 'dialogue-stopped-convert-hidden');
 
     at('dialogue-continue-after-mid-stream-stop');
     // Issue #833 synchronized J-16 delta: the held answer is stopped with complete fragments and an
@@ -1410,9 +1414,15 @@ async function main() {
     requireJourney(regenerated.attempts[0].state === 'stopped' && JSON.stringify(regenerated.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) &&
       regenerated.attempts[2].kind === 'regenerate' && regenerated.attempts[2].heading === '第 3 次 · 重新回答' && regenerated.attempts[2].label === '回答完成' &&
       JSON.stringify(regenerated.attempts[2].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND, ANSWER_TAIL]) && regenerated.attempts[2].incomplete === null &&
-      JSON.stringify(regenerated.actions) === JSON.stringify([['continue', '继续回答', 'disabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'enabled'], ['convert-edit', '编辑后转为修改建议…', 'enabled']]), 'dialogue-regenerated-words', regenerated);
+      JSON.stringify(regenerated.actions) === JSON.stringify([['convert', '直接', 'enabled'], ['convert-edit', '编辑后', 'enabled'], ['regenerate', '重新回答', 'enabled']]), 'dialogue-regenerated-words', regenerated);
     const attempts = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => dialogue.attempts.map((attempt) => [attempt.ordinal, attempt.kind, attempt.state, attempt.source]))`);
     requireJourney(JSON.stringify(attempts) === JSON.stringify([[1, 'ask', 'stopped', 'ledger'], [2, 'continue', 'completed', 'ledger'], [3, 'regenerate', 'completed', 'ledger']]), 'dialogue-attempts-linked', attempts);
+
+    for (const [width, height] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await assertRenderer(renderer, `(() => { const attempts = [...document.querySelectorAll('#task-drawer .dialogue-attempt')]; const latest = attempts.at(-1); const form = document.querySelector('#task-drawer .dialogue-follow-up'); return attempts.slice(0,-1).every(attempt => !attempt.open) && latest.open && form.getBoundingClientRect().top >= latest.getBoundingClientRect().bottom && getComputedStyle(form).position === 'static'; })()`, 'dialogue-follow-up-after-latest');
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     at('dialogue-panel-answer');
     // In 最近完成 the card says 已回答 and offers 回答 and 打开对话 (TASK-044); 回答 shows the latest answer in the window.
@@ -1432,11 +1442,13 @@ async function main() {
     await pressEnter(renderer);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'dialogue' && document.activeElement === document.querySelector('#task-drawer-title') && document.querySelector('#task-drawer .dialogue')?.dataset.dialogue === 'ready'`, 'dialogue-keyboard-open', 10_000);
     let reached = false;
-    for (let presses = 0; presses < 12 && !reached; presses += 1) {
+    for (let presses = 0; presses < 24 && !reached; presses += 1) {
       await pressTab(renderer);
+      if (await renderer.evaluate(`document.activeElement?.matches('#task-drawer .dialogue-convert-menu > summary') === true`)) await pressEnter(renderer);
       reached = await renderer.evaluate(`document.activeElement?.matches('#task-drawer .dialogue-actions [data-dialogue-action]:focus-visible') === true`);
     }
     requireJourney(reached, 'dialogue-keyboard-actions');
+    await pressEscape(renderer);
     await pressEscape(renderer);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'dialogue-keyboard-closed', 10_000);
 
@@ -1454,7 +1466,7 @@ async function main() {
     at('j14-dialogue-forced-colors');
     // Without colour each answer keeps its left rule — heavier once incomplete — and its state in words.
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
-    await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const [first, second] = document.querySelectorAll('#task-drawer section.dialogue-attempt'); if (!(first instanceof HTMLElement) || !(second instanceof HTMLElement)) return false; const width = (node) => parseFloat(getComputedStyle(node).borderLeftWidth); return getComputedStyle(first).borderLeftStyle === 'solid' && width(first) > width(second) && width(second) >= 2 && first.querySelector('[data-dialogue-state-label]')?.textContent === '回答已停止 · 内容不完整'; })()`, 'dialogue-without-colour');
+    await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const [first, second] = document.querySelectorAll('#task-drawer .dialogue-attempt'); if (!(first instanceof HTMLElement) || !(second instanceof HTMLElement)) return false; const width = (node) => parseFloat(getComputedStyle(node).borderLeftWidth); return getComputedStyle(first).borderLeftStyle === 'solid' && width(first) > width(second) && width(second) >= 2 && first.querySelector('[data-dialogue-state-label]')?.textContent === '回答已停止 · 内容不完整'; })()`, 'dialogue-without-colour');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     const dialogueBefore = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => JSON.stringify(dialogue))`);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'dialogue-before-restart-close');
@@ -1543,8 +1555,11 @@ async function main() {
       retrievalDialogue.anchors[0].sourceKind === 'manuscript' && retrievalDialogue.anchors[0].anchor.blockId === askBlock &&
       retrievalDialogue.anchors[0].anchor.end > retrievalDialogue.anchors[0].anchor.start && retrievalDialogue.retrievalWarning === null,
       'dialogue-retrieval-exact-anchor');
-    await clickSelector(renderer, '#task-drawer .dialogue [data-dialogue-retrieval-anchor]', 'dialogue-retrieval-jump');
-    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${askBlock}"]') !== null`, 'dialogue-retrieval-jumped');
+    at('dialogue-numbered-citation');
+    await waitFor(renderer, `document.querySelector('#task-drawer .dialogue-citation')?.textContent === '〔1〕'`, 'dialogue-numbered-citation-visible');
+    await pointerClick(renderer, waitFor, '#task-drawer .dialogue-citation', 'dialogue-numbered-citation-jump');
+    // The jump lands the caret at the start of the cited paragraph and gives the editor focus; the pressed citation held focus until then.
+    await waitFor(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${askBlock}"]'); const selection = getSelection(); return block !== null && document.activeElement?.closest('[data-testid="manuscript-editor"]') !== null && selection?.anchorNode != null && block.contains(selection.anchorNode) && selection.isCollapsed; })()`, 'dialogue-retrieval-jumped');
 
     // ---- 就这段发起任务… (Issue #423, plan slice S77b; TASK-001 to 004, TASK-044, TASK-046) -------------------------------
     at('selection-task-menu');
@@ -1787,7 +1802,8 @@ async function main() {
     const promoting = await waitForDialogue(renderer, (dialogue) => dialogue.state === 'ready' && dialogue.attempts.at(-1)?.state === 'completed', 'dialogue-promote-ready');
     const promotingId = promoting.dialogueId;
     const promotingRead = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(promotingId)}, afterFragment: 0 }).then((dialogue) => ({ attemptId: dialogue.attempts.at(-1).attemptId, selection: dialogue.selection, attempts: dialogue.attempts.length }))`);
-    await clickSelector(renderer, '#task-drawer .dialogue [data-dialogue-promote]', 'dialogue-promote-click');
+    await pointerClick(renderer, waitFor, '#task-drawer .dialogue-more > summary', 'dialogue-promote-more');
+    await pointerClick(renderer, waitFor, '#task-drawer .dialogue [data-dialogue-promote]', 'dialogue-promote-click');
     const answerDraft = await waitForComposer(renderer, (composer) => composer.state === 'draft' && composer.answer !== null, 'dialogue-promote-composer', 30_000);
     const answerRecord = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({ draftId: ${JSON.stringify(answerDraft.draftId)} }).then((read) => { const draft = read.drafts[0]; return { origin: draft.origin, answer: draft.version.answer, ranges: draft.version.ranges.map((range) => range.text), promotion: draft.promotion }; })`);
     requireJourney(answerDraft.answer === promotingRead.attemptId && answerRecord.origin === 'dialogue-answer' && answerRecord.answer?.dialogueId === promotingId &&
