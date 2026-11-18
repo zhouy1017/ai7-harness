@@ -1,0 +1,57 @@
+{
+  "schema": "ai7.editorial-case/1",
+  "id": "review-nahan-two-chapters",
+  "kind": "review",
+  "title": "错别字与规范用语、体例与格式 · 《呐喊》前两章（原文，计分专用）",
+  "manuscript": {
+    "source": "public-samplebook",
+    "file": "luxun-nahan.docx"
+  },
+  "bookTitle": "呐喊",
+  "input": {
+    "categories": [
+      "typos-and-usage",
+      "style-and-format"
+    ],
+    "scope": {
+      "chapters": {
+        "from": 2,
+        "to": 3
+      }
+    },
+    "chapterTitles": [
+      "狂人日记",
+      "孔乙己"
+    ]
+  },
+  "fixture": null,
+  "measuredPass": "review",
+  "replay": {
+    "route": "score-only"
+  },
+  "expectedConcerns": [],
+  "falsePositiveChecks": [
+    {
+      "id": "nh-name-langzicun",
+      "paragraph": 44,
+      "words": "狼子村",
+      "reason": "小说中的地名，不是用字错误"
+    },
+    {
+      "id": "nh-period-nali",
+      "paragraph": 48,
+      "words": "那里猜得到",
+      "reason": "“那里”作疑问词是作者时代的写法（今作“哪里”）；重印本保留原貌，不应改动"
+    },
+    {
+      "id": "nh-period-yubei",
+      "paragraph": 121,
+      "words": "豫备",
+      "reason": "“豫备”是作者时代的写法（今作“预备”）；重印本保留原貌，不应改动"
+    }
+  ],
+  "observations": {
+    "acceptance": "规则（#1074，测量前写定）：四部公版书按钉住的原文审阅，不植入任何缺陷；原文即参照。定位率=已定位÷列出；三处误报陷阱为人名地名或作者时代的通行写法；其余每条已定位意见都在改动或标注原文，计为“改动原文”——误报的上限，比现代稿件的编辑标准更严。修改建议若只把“著”改为“着”，单列为繁简转换残留（可能有用）。",
+    "rework": "若意见把陷阱处的人名地名或时代写法当作错误改动或标注，即为误报；本案例不计有用率和关切召回率。"
+  }
+}

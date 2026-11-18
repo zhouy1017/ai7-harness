@@ -1,0 +1,57 @@
+{
+  "schema": "ai7.editorial-case/1",
+  "id": "review-rulin-waishi-two-chapters",
+  "kind": "review",
+  "title": "错别字与规范用语、体例与格式 · 《儒林外史》前两章（原文，计分专用）",
+  "manuscript": {
+    "source": "public-samplebook",
+    "file": "wujingzi-rulin-waishi.docx"
+  },
+  "bookTitle": "儒林外史",
+  "input": {
+    "categories": [
+      "typos-and-usage",
+      "style-and-format"
+    ],
+    "scope": {
+      "chapters": {
+        "from": 1,
+        "to": 2
+      }
+    },
+    "chapterTitles": [
+      "第一回　说楔子敷陈大义　借名流隐括全文",
+      "第二回　王孝廉村学识同科　周蒙师暮年登上第"
+    ]
+  },
+  "fixture": null,
+  "measuredPass": "review",
+  "replay": {
+    "route": "score-only"
+  },
+  "expectedConcerns": [],
+  "falsePositiveChecks": [
+    {
+      "id": "rl-name-qinlao",
+      "paragraph": 12,
+      "words": "秦老",
+      "reason": "人物称呼，不是用字错误"
+    },
+    {
+      "id": "rl-period-nali",
+      "paragraph": 15,
+      "words": "那里害甚么病",
+      "reason": "“那里”“甚么”是原作时代的写法（今作“哪里”“什么”）；重印本保留原貌，不应改动"
+    },
+    {
+      "id": "rl-period-zende",
+      "paragraph": 16,
+      "words": "怎的",
+      "reason": "“怎的”是原作时代的口语写法（今多作“怎么”）；重印本保留原貌，不应改动"
+    }
+  ],
+  "observations": {
+    "acceptance": "规则（#1074，测量前写定）：四部公版书按钉住的原文审阅，不植入任何缺陷；原文即参照。定位率=已定位÷列出；三处误报陷阱为人名地名或作者时代的通行写法；其余每条已定位意见都在改动或标注原文，计为“改动原文”——误报的上限，比现代稿件的编辑标准更严。修改建议若只把“著”改为“着”，单列为繁简转换残留（可能有用）。",
+    "rework": "若意见把陷阱处的人名地名或时代写法当作错误改动或标注，即为误报；本案例不计有用率和关切召回率。"
+  }
+}

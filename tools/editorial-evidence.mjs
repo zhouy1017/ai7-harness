@@ -7,6 +7,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
  *
  *   node tools/editorial-evidence.mjs --replay fixtures [--case <id>]... [--out <dir>] [--ledger <provider-cache-root>]
  *     [--baseline <file> | --update-baseline <file>]
+ *   node tools/editorial-evidence.mjs --check-references
+ *   node tools/editorial-evidence.mjs --score <developer-live data root> --case <id> [--out <dir>]
+ *
+ * Score-only cases (#1074) name one of the four ADR 0091 books, for which no fixture may be generated. `--replay` skips them;
+ * `--check-references` imports each one's exact file into a disposable product and checks its chapter rule and false-positive
+ * anchors; `--score` scores one on a COPY of the developer-live data root its Run was made in — the root itself is never opened —
+ * with `fetch` refused, and writes `score-<case>.json` (counts only).
  *
  * Runs every case of `tests/editorial-cases/cases/` through the product's own path — the store, the execution owners, the marks
  * and Apply authority — on its model fixture, and writes `metrics.json` and `metrics.md` (default `test-results/editorial-evidence/`,
@@ -41,7 +48,8 @@ export class EditorialEvidenceError extends Error {
 }
 
 export function parseArguments(argv) {
-  const options = { replay: null, cases: [], out: join(ROOT, 'test-results', 'editorial-evidence'), ledger: null, baseline: null, updateBaseline: null };
+  const options = { replay: null, cases: [], out: join(ROOT, 'test-results', 'editorial-evidence'), ledger: null, baseline: null, updateBaseline: null,
+    score: null, checkReferences: false };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -56,7 +64,15 @@ export function parseArguments(argv) {
     else if (flag === '--ledger') options.ledger = resolve(take());
     else if (flag === '--baseline') options.baseline = resolve(take());
     else if (flag === '--update-baseline') options.updateBaseline = resolve(take());
+    else if (flag === '--score') options.score = resolve(take());
+    else if (flag === '--check-references') options.checkReferences = true;
     else throw new EditorialEvidenceError('EDITORIAL_EVIDENCE/argument-unknown', String(flag).slice(0, 40));
+  }
+  if (options.score !== null || options.checkReferences) {
+    if (options.replay !== null || options.ledger !== null || options.baseline !== null || options.updateBaseline !== null ||
+      (options.score !== null && options.checkReferences)) throw new EditorialEvidenceError('EDITORIAL_EVIDENCE/mode-ambiguous');
+    if (options.score !== null && options.cases.length !== 1) throw new EditorialEvidenceError('EDITORIAL_EVIDENCE/score-case-required');
+    return options;
   }
   if (options.replay !== 'fixtures') throw new EditorialEvidenceError('EDITORIAL_EVIDENCE/replay-required', '--replay fixtures');
   if (options.baseline !== null && options.updateBaseline !== null) throw new EditorialEvidenceError('EDITORIAL_EVIDENCE/baseline-ambiguous');
@@ -231,11 +247,36 @@ function boundedCode(error) {
   return match === null ? 'EDITORIAL_EVIDENCE/case-failed' : match[0];
 }
 
+async function scoreOnly(options, runner) {
+  const cases = (await loadCases(runner, options.cases)).filter((entry) => entry.replay.route === 'score-only');
+  if (options.score !== null) {
+    if (cases.length !== 1) throw new EditorialEvidenceError('EDITORIAL_EVIDENCE/score-only-case-required');
+    const metrics = await runner.scoreEditorialCase({ codeRoot: ROOT, testCase: cases[0], dataRoot: options.score });
+    await mkdir(options.out, { recursive: true });
+    await writeFile(join(options.out, `score-${metrics.id}.json`), `${JSON.stringify({ schema: METRICS_SCHEMA, mode: 'score developer-live store copy', case: metrics }, null, 2)}
+`);
+    const changes = metrics.result.changesToOriginal;
+    console.log(`EDITORIAL_EVIDENCE/score/${metrics.id} state=${metrics.outcome.state} listed=${metrics.findings.listed} located=${metrics.findings.located} excluded=${metrics.findings.excluded} checks=${metrics.checks.triggered.length}/${metrics.checks.total} changes=${changes.suggestions}+${changes.annotations}`);
+    return 0;
+  }
+  if (cases.length === 0) throw new EditorialEvidenceError('EDITORIAL_EVIDENCE/score-only-cases-absent');
+  for (const testCase of cases) {
+    const checked = await runner.checkScoreOnlyCase({ codeRoot: ROOT, testCase });
+    console.log(`EDITORIAL_EVIDENCE/references/${checked.id} paragraphs=${checked.chapterRange.startPosition}-${checked.chapterRange.endPosition} checks=${checked.checks}`);
+  }
+  return 0;
+}
+
 export async function main(argv) {
   const options = parseArguments(argv);
   refuseNetwork();
   const runner = await loadRunner();
-  const cases = await loadCases(runner, options.cases);
+  if (options.score !== null || options.checkReferences) return scoreOnly(options, runner);
+  const cases = (await loadCases(runner, options.cases)).filter((entry) => {
+    if (entry.replay.route !== 'score-only') return true;
+    console.log(`EDITORIAL_EVIDENCE/case/${entry.id} score-only, not replayed`);
+    return false;
+  });
   const ledgerItems = options.ledger === null ? null : await readLedgerItems(options.ledger);
   const results = [];
   for (const testCase of cases) {

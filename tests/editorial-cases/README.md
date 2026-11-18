@@ -22,6 +22,13 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
   authored fixture `synthetic-editorial-review-authored`: nothing of them is transmitted or recorded, and they measure the
   harness and the product path, never a model.
 
+- **The four ADR 0091 Public SampleBooks** (`luxun-zhaohua-xishi.docx`, `luxun-nahan.docx`, `liue-laocan-youji.docx`,
+  `wujingzi-rulin-waishi.docx`) — **score-only** cases (#1074). Each is reviewed developer-live on its exact, unedited file over
+  its first two body chapters; no tester edit is made to them (only `sample1` admits a tester's edits), and no fixture may be
+  generated from them (ADR 0091 §3.3), so their evidence stays in the Provider Test Ledger and the developer-live data root
+  outside the repository. The cases fix their references before any live output: the chapter rule, three false-positive traps
+  (a name, and period-authentic forms a reprint keeps), and the reprint-fidelity rule below.
+
 ## Files
 
 - `cases/<id>.json` — one case, schema `ai7.editorial-case/1` below.
@@ -37,12 +44,12 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
 | `id` | `^[a-z0-9][a-z0-9-]{0,63}$`, equal to the file name |
 | `kind` | `review`, `polish`, `initial-evaluation`, `readers-report`, `writing-draft`, `clarification`, `cross-deliverable` or `material-review` |
 | `title` | The case in the editor's words |
-| `manuscript` | `{ "source": "sample1" }` or `{ "source": "synthetic", "id": "synthetic-lighthouse" \| "synthetic-museum" }` |
+| `manuscript` | `{ "source": "sample1" }`, `{ "source": "synthetic", "id": "synthetic-lighthouse" \| "synthetic-museum" }`, or for a score-only case `{ "source": "public-samplebook", "file": "<one of the four ADR 0091 files>" }` |
 | `bookTitle` | The title the Book is imported under. The live driver and the harness use the same title, so contracts that freeze Book metadata ask the same question |
 | `input` | Kind-specific Task input (below) |
-| `fixture` | The model fixture identity `--replay fixtures` replays |
+| `fixture` | The model fixture identity `--replay fixtures` replays; `null` for a score-only case |
 | `measuredPass` | The kind of the one developer-live pass that produced the fixture (`review`, `polish`, `initial-evaluation`, `readers-report`, `writing-draft`), or `null` when the case replays earlier evidence or an authored fixture |
-| `replay` | `{ "route": "deterministic" }` (the product's fixture route), or `{ "route": "developer-live", "modelQuestions": true | false }` — the developer-live owner whose transport is the product's deterministic adapter, with the v14 model-question wrapper on for a capture made under it and off for an earlier one |
+| `replay` | `{ "route": "score-only" }` for the four ADR 0091 books (never replayed), `{ "route": "deterministic" }` (the product's fixture route), or `{ "route": "developer-live", "modelQuestions": true | false }` — the developer-live owner whose transport is the product's deterministic adapter, with the v14 model-question wrapper on for a capture made under it and off for an earlier one |
 | `expectedConcerns` | What an editor expects the Task to raise; each is a false-negative check (a *miss* when nothing matches it) |
 | `falsePositiveChecks` | Words or results that must not be raised as problems; a finding that touches one is a *false positive* |
 | `observations` | `acceptance` and `rework`: what the editor would accept as useful, and what would send the result back |
@@ -50,7 +57,8 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
 ### `input` by kind
 
 - `review`, `material-review`: `categories` (built-in review category ids) and `scope` (`whole`, or `{ "paragraph": n }` for a
-  one-paragraph selection). `material-review` adds `material: "sample1-derived-library-item"`, the #809 library item.
+  one-paragraph selection, or for a score-only case `{ "chapters": { "from": a, "to": b } }`: 1-based ordinals among the Book's
+  level-1 chapters, with `chapterTitles` the exact titles those chapters must have, so a changed importer refuses). `material-review` adds `material: "sample1-derived-library-item"`, the #809 library item.
 - `polish`: `selection: { paragraph, start, end }` — the selection runs from the first occurrence of `start` to the end of the
   first occurrence of `end` after it, in that paragraph.
 - `initial-evaluation`: `{}`. `readers-report`: `template` (`author` or `editorial`), `evaluationRecord: "j11"` (the
@@ -73,6 +81,17 @@ A **structural concern** (evaluation, report, writing) anchors to paragraphs a r
 require an evaluation `item`, a report passage `passageKind`, or one of `keywords` in the model's own words for that anchor.
 A structural false-positive check fires when model words tied to its `paragraphs` (or anywhere, when it names none) contain one
 of its `keywords`. Keyword checks are a coarse proxy; the report says so.
+
+## Score-only cases (#1074)
+
+`node tools/editorial-evidence.mjs --check-references` imports each score-only case's exact file into a disposable product and checks
+its chapter rule and every check anchor; `pnpm test` runs it. After a developer-live Review Run, `--score <data root> --case <id>`
+copies that data root into a disposable directory (the root itself is never opened), refuses every `fetch`, scores the copy's one
+Book's latest Review Run with the same scoring, simulated editor, Apply and reversal as a replayed case, and writes
+`score-<id>.json` (counts only). With no planted defect the original is the reference: there is no useful rate or concern recall.
+Every located finding proposes to change (修改建议) or flags (批注) the pinned original — the **reprint-fidelity** count
+`changesToOriginal`, an upper bound of false positives, stricter than a modern manuscript's editor would be; a 修改建议 that only
+turns 著 into 着 (the zh-hans conversion's residue) is counted apart as `variantResidue`, plausibly useful.
 
 ## Metrics (per case)
 

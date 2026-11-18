@@ -111,10 +111,36 @@ describe('the case set', () => {
     }
     expect(cases.filter((entry) => entry.manuscript.source === 'synthetic').map((entry) => (entry.manuscript as { id: string }).id).sort()).toEqual([...SYNTHETIC_MANUSCRIPT_IDS].sort());
     for (const entry of cases) {
-      expect(entry.expectedConcerns.length, entry.id).toBeGreaterThan(0);
+      // #1074: a score-only case reviews an unedited ADR 0091 book, so it has checks and no planted concern.
+      expect(entry.expectedConcerns.length > 0, entry.id).toBe(entry.replay.route !== 'score-only');
       expect(entry.falsePositiveChecks.length, entry.id).toBeGreaterThan(0);
     }
+    expect(cases.filter((entry) => entry.replay.route === 'score-only').map((entry) => (entry.manuscript as { file: string }).file).sort())
+      .toEqual(['liue-laocan-youji.docx', 'luxun-nahan.docx', 'luxun-zhaohua-xishi.docx', 'wujingzi-rulin-waishi.docx']);
   });
+
+  it('resolves every score-only chapter rule and check on the product import, and scores only a store that holds a Run', async () => {
+    const references = spawnSync(process.execPath, [join(ROOT, 'tools', 'editorial-evidence.mjs'), '--check-references'],
+      { cwd: ROOT, encoding: 'utf8', timeout: 120_000, windowsHide: true });
+    expect(references.status, references.stderr).toBe(0);
+    expect(references.stdout.split('\n').filter((line) => line.startsWith('EDITORIAL_EVIDENCE/references/')).map((line) => line.replace(/ paragraphs=\S+/u, ''))).toEqual([
+      'EDITORIAL_EVIDENCE/references/review-laocan-youji-two-chapters checks=3',
+      'EDITORIAL_EVIDENCE/references/review-nahan-two-chapters checks=3',
+      'EDITORIAL_EVIDENCE/references/review-rulin-waishi-two-chapters checks=3',
+      'EDITORIAL_EVIDENCE/references/review-zhaohua-xishi-two-chapters checks=3',
+    ]);
+    const roots = await createCaseRoots();
+    const store = await openStore(roots, ROOT, null);
+    try {
+      await importManuscript(store, ROOT, roots, { source: 'public-samplebook', file: 'luxun-zhaohua-xishi.docx' }, '朝花夕拾');
+    } finally { store.markCleanShutdown(); store.close(); }
+    try {
+      const scored = spawnSync(process.execPath, [join(ROOT, 'tools', 'editorial-evidence.mjs'), '--score', roots.dataRoot,
+        '--case', 'review-zhaohua-xishi-two-chapters', '--out', roots.inputRoot], { cwd: ROOT, encoding: 'utf8', timeout: 120_000, windowsHide: true });
+      expect(scored.status).toBe(1);
+      expect(scored.stderr).toContain('EDITORIAL_CASE/score-run-absent');
+    } finally { await roots.dispose(); }
+  }, 240_000);
 
   it('generates each synthetic manuscript deterministically with every anchor where the table says', () => {
     for (const id of SYNTHETIC_MANUSCRIPT_IDS) {
