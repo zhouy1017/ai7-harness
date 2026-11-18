@@ -53,8 +53,8 @@ export function globalAttentionEntryView(count: number | null): { text: string; 
 export const GLOBAL_ATTENTION_SECTION_LABEL = '全局 · 待我处理';
 export const GLOBAL_ATTENTION_HEADING = '待我处理';
 export const GLOBAL_ATTENTION_LEDE = '所有图书里需要你处理的事项。点开一项回到它自己的记录，在那里决定；这里只列出，不替你做任何决定。';
-/** IA-013: a Book's own findings stay in that Book's 发现; this view keeps only what crosses Books. */
-export const GLOBAL_ATTENTION_FINDINGS_NOTE = '书内的发现在那本书的「发现」里。';
+/** IA-013: a Book's own findings stay in that Book's 待办汇总; this view keeps only what crosses Books. */
+export const GLOBAL_ATTENTION_FINDINGS_NOTE = '书内的发现在那本书的「待办汇总」里。';
 export const GLOBAL_ATTENTION_ACTIONS = ['返回图书列表'] as const;
 
 export const GLOBAL_ATTENTION_STATUS_LINES = {
