@@ -41,6 +41,7 @@ import {
 import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnitRequestDigest, parseCrossUnitCitedBlocks, parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { PLAN_CEILING_LAUNCH_REASON } from '../../src/service/analysis/plan-edits.js';
+import { PLAN_EDIT_DRIFT_REASON } from '../../src/service/task-plan.js';
 import {
   OPENCODE_GO_ROUTE_PROFILE,
   OPENCODE_GO_SESSION_HEADER,
@@ -1086,6 +1087,18 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       expect(live.diff).toEqual([{ field: 'runBudgetCeiling', label: expect.any(String), prior: CEILING, proposed: OTHER, materiality: 'material' }]);
       expect(drifted.planVersion).toMatchObject({ ordinal: 1, state: 'superseded' });
       expect(drifted.actions).toEqual({ canPrepare: false, canAuthorize: false, canReconfirmPlan: true });
+    });
+
+    it('never offers the ceiling in a plan frozen under developer-live once the launch is rebound to ordinary production', async () => {
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy: launchPolicy, live: null });
+      // The rebinding moves the plan's key content, so it is drifted and the gate refuses before the ceiling is read.
+      expect(store.inspectBaselineAnalysis(bookId).planRevision?.state).toBe('pending');
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).edit.budget)
+        .toEqual({ ceiling: CEILING, settable: false, reason: PLAN_EDIT_DRIFT_REASON });
+      expect(() => store.editBaselineAnalysisPlan({
+        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1000 },
+      })).toThrowError(expect.objectContaining({ code: 'ANALYSIS_PLAN_REVISION_PENDING' }));
     });
 
     it('reconfirms the detected ceiling as a new authorizable plan version', async () => {

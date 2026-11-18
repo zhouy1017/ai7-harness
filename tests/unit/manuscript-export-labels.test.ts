@@ -65,7 +65,7 @@ describe('the words of 导出', () => {
       reveal: '在文件夹中显示',
     });
     expect(EXPORT_OPTION_ORDER.map((key) => [EXPORT_OPTION_LABELS[key], DEFAULT_MANUSCRIPT_EXPORT_OPTIONS[key]])).toEqual([
-      ['含批注', true], ['含修改建议（作为修订）', true], ['含备注', false],
+      ['含批注', true], ['含修改建议', true], ['含备注', false],
     ]);
     expect(EXPORT_OPTION_NOTES.includeEditorNotes).toBe('备注默认不随导出；勾选后作为批注写出，作者为「备注」。');
     expect(EXPORT_OPTIONS_NOTE).toBe('这些选项只改变导出的文件，不改变稿件和稿件上的标记。');

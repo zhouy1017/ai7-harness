@@ -10,8 +10,6 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
-  MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
-  PRODUCTION_DOCUMENT_PHASE_IDS,
   type ProductionDocumentPhaseAction,
   type ProductionDocumentPhaseId,
   type ProductionDocumentWorkflowProjection,
@@ -85,7 +83,9 @@ function states(workflow: ProductionDocumentWorkflowProjection): Array<[string, 
 }
 
 describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)', () => {
-  it('follows the built-in profile\'s seven phases from its making, moved only by the editor\'s four commands and their reasons', async () => {
+  // The phase rules and refusals are proven over the domain relations (tests/unit/domain/production-documents). What only a real
+  // store can prove stays here: the six moves survive closing and reopening the store, and a historical reason reads through actual startup.
+  it('keeps its six moves across a restart, and reads a move\'s recorded reason after a relabel or a retired key (WORK-009, Issue #626)', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let bookId: string;
     let settled: string;
@@ -96,54 +96,13 @@ describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)',
         store.transitionProductionDocumentPhase({
           bookId, documentId: document.documentId, phaseId, action, expectedTransitions: workflowOf(store, bookId).transitions, reason,
         });
-
-      // WORK-002/003: pinned to the built-in profile when the document was made; seven phases, none started.
-      const fresh = workflowOf(store, bookId);
-      expect(fresh.profile).toMatchObject({ name: '基础书稿编辑流程', version: '2.0.0', activatedAt: document.createdAt });
-      expect([fresh.summary, fresh.next, fresh.transitions]).toEqual(['七个阶段都未开始', [], 0]);
-      expect(fresh.phases.map((phase) => phase.phaseId)).toEqual(PRODUCTION_DOCUMENT_PHASE_IDS);
-      expect(fresh.phases.map((phase) => phase.label)).toEqual(['接收与准备', '来源建设', '起草', '审阅与核查', '定稿', '交付', '维护']);
-      expect(fresh.phases.every((phase) => phase.state === 'not-started' && phase.latest === null && phase.moves === 0 &&
-        phase.actions.join() === 'start,skip')).toBe(true);
-
-      // 开始 and 完成 take no reason; several phases may be open at once.
-      expect(code(() => move('drafting', 'start', { choice: 'not-needed', text: null }))).toBe('PRODUCTION_DOCUMENT_PHASE_INVALID');
       move('drafting', 'start');
       move('intake', 'start');
-      let now = workflowOf(store, bookId);
-      expect(now.summary).toBe('2 个阶段进行中 · 0 项等待处理');
-      expect(now.next).toEqual([{ phaseId: 'intake', text: '接收与准备 · 进行中' }, { phaseId: 'drafting', text: '起草 · 进行中' }]);
       move('drafting', 'complete');
-      expect(code(() => move('drafting', 'complete'))).toBe('PRODUCTION_DOCUMENT_PHASE_INVALID');
-      expect(code(() => move('maintenance', 'reopen', { choice: 'needs-change', text: null }))).toBe('PRODUCTION_DOCUMENT_PHASE_INVALID');
-
-      // A move against a count the editor did not see is refused: someone else moved the workflow first.
-      const seen = workflowOf(store, bookId).transitions;
       move('intake', 'complete');
-      expect(code(() => store.transitionProductionDocumentPhase({
-        bookId, documentId: document.documentId, phaseId: 'finalization', action: 'start', expectedTransitions: seen, reason: null,
-      }))).toBe('PRODUCTION_DOCUMENT_WORKFLOW_CHANGED');
-
-      // 跳过 needs a reason from its set, and 自行输入 needs the editor's words, within their bound.
-      expect(code(() => move('source-development', 'skip'))).toBe('PRODUCTION_DOCUMENT_PHASE_REASON_REQUIRED');
-      expect(code(() => move('source-development', 'skip', { choice: 'needs-change', text: null }))).toBe('PRODUCTION_DOCUMENT_PHASE_REASON_REQUIRED');
-      expect(code(() => move('source-development', 'skip', { choice: 'custom', text: '   ' }))).toBe('PRODUCTION_DOCUMENT_PHASE_REASON_REQUIRED');
-      expect(code(() => move('source-development', 'skip', { choice: 'custom', text: '因'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS + 1) })))
-        .toBe('PRODUCTION_DOCUMENT_PHASE_REASON_INVALID');
       move('source-development', 'skip', { choice: 'done-elsewhere', text: null });
-      // 重新打开 the same way, keeping the editor's words as written, trimmed.
       move('drafting', 'reopen', { choice: 'custom', text: '  读者反馈后要改开头  ' });
-      now = workflowOf(store, bookId);
-      const phase = (id: ProductionDocumentPhaseId) => now.phases.find((entry) => entry.phaseId === id)!;
-      expect(phase('source-development')).toMatchObject({
-        state: 'skipped', stateLabel: '已跳过', actions: ['reopen'], moves: 1,
-        latest: { action: 'skip', fromState: 'not-started', toState: 'skipped', reason: { choice: 'done-elsewhere', label: '这一阶段已在别处完成', text: null } },
-      });
-      expect(phase('drafting')).toMatchObject({
-        state: 'reopened', stateLabel: '已重新打开', actions: ['complete', 'skip'], moves: 3,
-        latest: { action: 'reopen', fromState: 'completed', toState: 'reopened', reason: { choice: 'custom', label: '自行输入', text: '读者反馈后要改开头' } },
-      });
-      expect(phase('intake')).toMatchObject({ state: 'completed', actions: ['reopen'], moves: 2 });
+      const now = workflowOf(store, bookId);
       expect([now.transitions, now.summary]).toEqual([6, '1 个阶段进行中 · 0 项等待处理']);
       settled = JSON.stringify(now);
       store.markCleanShutdown();
