@@ -529,6 +529,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   let card: HTMLElement | undefined;
   let focusFindingId: string | null = options.focus?.findingId ?? retained?.findingId ?? null;
   let restoreScroll = retained?.scroll;
+  /**
+   * Where the page stood when 回到原文 was pressed: what the way back returns to. Read then, since by the time 审阅 is left the
+   * manuscript is already being drawn and the page may have moved.
+   */
+  let leaveScroll: number | undefined;
+  const pageScroll = (): number => document.scrollingElement?.scrollTop ?? options.root.parentElement?.scrollTop ?? 0;
   let focusPages = 0;
   let focusRunHeading = false;
   let pendingProcedureId: string | null = options.procedureId ?? null;
@@ -1174,6 +1180,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
               after = next;
             }
             if (finding !== undefined) focusFindingId = finding.findingId;
+            leaveScroll = pageScroll();
             const jumping = options.goToText({ ordinal: finding?.ordinal, manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId,
               blockId: evidence.blockId!, markId: finding?.markId != null && finding.markStatus !== null && LIVE_MARK_STATUSES.has(finding.markStatus) ? finding.markId : null });
             current = navigation.route();
@@ -1634,6 +1641,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // From a row, the way back names the row's finding, as 回到原文 on its card does; a row with none offers no numbered return.
     const factJump = (finding: ReviewFindingProjection | undefined, target: { blockId: string; markId: string | null }): Promise<void> => {
       if (finding !== undefined) focusFindingId = finding.findingId;
+      leaveScroll = pageScroll();
       return options.goToText({ ordinal: finding?.ordinal, manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, ...target });
     };
     const row = el('li', 'fact-lens-row');
@@ -2383,6 +2391,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     options.setStatus(REVIEW_STATUS_LINES.openingText, 'busy');
     try {
       focusFindingId = finding.findingId;
+      leaveScroll = pageScroll();
       await options.goToText({
         ordinal: finding.ordinal,
         manuscriptId: run.manuscript.manuscriptId,
@@ -2392,6 +2401,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       });
     } catch (error) {
       if (focusFindingId === finding.findingId) focusFindingId = null;
+      leaveScroll = undefined;
       options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.openTextFailed), 'error');
     }
   }
@@ -3419,7 +3429,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     destroy: () => {
       reviewPlaces.set(bookId, { runId: projection?.run?.reviewRunId ?? query.reviewRunId, filters: { ...query.filters }, pages: query.pages,
         collapsed: [...collapsedGroups], history: historyShown(), excluded: excludedOpen, excludedPages,
-        scroll: document.scrollingElement?.scrollTop ?? options.root.parentElement?.scrollTop ?? 0, findingId: focusFindingId });
+        scroll: leaveScroll ?? pageScroll(), findingId: focusFindingId });
       destroyed = true;
       if (toastShown) hideToast();
       unregisterCommands?.();

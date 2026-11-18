@@ -1234,11 +1234,6 @@ async function main() {
         // The way back re-reads under the same filter: the decided cards leave the pending list, so compare with that read.
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
         await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null && ${JSON.stringify(decided)}.every((id)=>document.querySelector('article[data-finding-id='+JSON.stringify(id)+']')===null) && document.querySelector('article.review-finding')!==null`, 'review-return-filter-reread');
-        // Diagnostic (#1525 review): every change of 历史's open state from here to the return, and who set it when a script did.
-        await renderer.evaluate(`(() => { window.__j05History=[]; const ids=new WeakMap(); let next=0; const id=(node)=>{ if(!ids.has(node)) ids.set(node,++next); return ids.get(node); }; const log=(entry)=>window.__j05History.push({t:Math.round(performance.now()), folds:document.querySelectorAll('.review-history-fold').length, active:document.activeElement?.tagName+'.'+(document.activeElement?.className??''), ...entry});
-          document.addEventListener('toggle', (event) => { if (event.target?.matches?.('.review-history-fold')) log({kind:'toggle', fold:id(event.target), open:event.target.open, connected:event.target.isConnected}); }, true);
-          const own=Object.getOwnPropertyDescriptor(HTMLDetailsElement.prototype,'open'); Object.defineProperty(HTMLDetailsElement.prototype,'open',{configurable:true, get(){return own.get.call(this);}, set(value){ if(this.matches?.('.review-history-fold')) log({kind:'set', fold:id(this), value, connected:this.isConnected, stack:String(new Error().stack).split('\\n').slice(2,7).join(' | ')}); own.set.call(this,value); }});
-          return true; })()`);
         // 历史 ▾ open — by a real click unless this Book's 审阅 kept it open from the previous form — so the way back has a fold to keep.
         if (await renderer.evaluate(`document.querySelector('.review-history-fold')?.open===false`)) await triageClick(renderer,'.review-history-fold > summary');
         await waitFor(renderer, `document.querySelector('.review-history-fold')?.open===true`, 'review-return-history-open');
@@ -1253,8 +1248,7 @@ async function main() {
         await triageClick(renderer,'[data-review-return]');
         await waitFor(renderer, `document.activeElement?.dataset.findingId===${JSON.stringify(kept)} && document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-return-same-filter-and-finding');
         const after=await renderer.evaluate(PLACE);
-        const trace=await renderer.evaluate(`JSON.stringify(window.__j05History??null)`);
-        requireJourney(JSON.stringify(after.groups)===JSON.stringify(placed.groups) && after.history===placed.history && after.findings===placed.findings && after.more===placed.more, 'review-return-same-groups-and-pages', {placed, after, trace});
+        requireJourney(JSON.stringify(after.groups)===JSON.stringify(placed.groups) && after.history===placed.history && after.findings===placed.findings && after.more===placed.more, 'review-return-same-groups-and-pages', {placed, after});
         requireJourney(Math.abs(after.scroll-Math.min(placed.scroll, after.maxScroll))<=2, 'review-return-same-scroll', {placed, after});
         await press(renderer,'Enter');
         await waitFor(renderer, `document.querySelector('[data-screen="editor"]')!==null`, 'review-triage-back-on-text');

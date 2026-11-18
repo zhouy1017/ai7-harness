@@ -1019,6 +1019,8 @@ describe('the round trip through 回到原文 (#1525)', () => {
       scroller.scrollTop = 420;
       first.root.querySelector('article[data-finding-id="rvf_n3"] [data-review-action="go-to-text"]')!.click(); await flush();
       expect(first.goToText).toHaveBeenCalledWith(expect.objectContaining({ ordinal: 3 }));
+      // The page moves while the manuscript is being drawn; the way back returns to where 回到原文 was pressed.
+      scroller.scrollTop = 459;
       first.surface.destroy(); first.root.remove();
       scroller.scrollTop = 0;
       // Handled in the manuscript meanwhile: 批注 1 no longer has its ⋯ menu, so every fold after it stands one place earlier.
