@@ -637,7 +637,19 @@ export async function commentsBookMemory(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('.recent-work-item')`, 'comments-return-books-ready');
   check(await renderer.evaluate(`(() => { const original=document.querySelector('.recent-work-item button[data-manuscript-id="'+__comments.manuscriptId+'"]'); if(!original)return false; original.click(); return true; })()`), 'comments-original-book-open');
   await waitFor(renderer, `document.querySelector('.editor-shell')?.dataset.bookId===__comments.bookId && document.querySelector('[data-edge-entry="comments"]').getAttribute('aria-expanded')==='true' && document.querySelector('.manuscript-comments-pane').hidden===false`, 'comments-per-book-toggle-restored');
-  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[2]+'"] [data-mark-region="replies"]')?.textContent.includes('公开合成待发回复') && document.querySelector('[data-comment-card="'+__comments.ids[2]+'"] [data-mark-state]')?.textContent.includes('已处理')`, 'comments-return-book-current-content');
+  try { await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[2]+'"] [data-mark-region="replies"]')?.textContent.includes('公开合成待发回复') && document.querySelector('[data-comment-card="'+__comments.ids[2]+'"] [data-mark-state]')?.textContent.includes('已处理')`, 'comments-return-book-current-content'); } catch {
+    // The hosted log prints only the label: name the part that never held.
+    const reason=await renderer.evaluate(`(() => {
+      const id=__comments.ids[2],card=document.querySelector('[data-comment-card="'+id+'"]'),canvas=document.querySelector('.manuscript-comments-canvas');
+      if(!document.querySelector('.editor-window [data-mark-id="'+id+'"]'))return card?'anchor-absent-card':'anchor-absent';
+      if(canvas?.dataset.loading==='true')return 'loading';
+      if(!card)return 'no-card';if(card.hidden)return 'card-hidden';
+      if(!card.querySelector('[data-mark-region="replies"]')?.textContent.includes('公开合成待发回复'))return 'no-reply';
+      return 'not-handled';
+    })()`);
+    const names={'anchor-absent-card':'comments-return-book-current-content-anchor-absent-card','anchor-absent':'comments-return-book-current-content-anchor-absent',loading:'comments-return-book-current-content-loading','no-card':'comments-return-book-current-content-no-card','card-hidden':'comments-return-book-current-content-card-hidden','no-reply':'comments-return-book-current-content-no-reply','not-handled':'comments-return-book-current-content-not-handled'};
+    check(false,names[reason]??'comments-return-book-current-content');
+  }
 }
 
 export async function commentsOrdinaryForEditor(renderer, check, waitFor) {
