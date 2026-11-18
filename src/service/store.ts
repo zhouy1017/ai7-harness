@@ -775,7 +775,7 @@ import {
   taskDraftsPage,
   bookTasksPage,
   reviewWorkspacePage,
-  REVIEW_CHAPTER_PAGE_PATH,
+  REVIEW_WORKSPACE_PAGE_PATHS,
 } from './task-plan.js';
 import {
   decisionResolvesConflict,
@@ -3318,9 +3318,9 @@ export class EditorialStore {
         requireStore(input.path === 'drafts', 'TASK_PLAN_PAGE_INVALID', '任务草稿读取范围无效。');
         return taskDraftsPage(this.inspectTaskIntentDrafts({ bookId: input.bookId, draftId: input.ref }), input.afterOrdinal, input.digest);
       }
-      if (input.path === REVIEW_CHAPTER_PAGE_PATH) {
-        requireStore(input.kind === 'review-run', 'TASK_PLAN_PAGE_INVALID', '章节读取范围无效。');
-        return reviewWorkspacePage(this.inspectReviewWorkspace(input.bookId, input.ref), input.afterOrdinal, input.digest);
+      if (REVIEW_WORKSPACE_PAGE_PATHS.includes(input.path)) {
+        requireStore(input.kind === 'review-run', 'TASK_PLAN_PAGE_INVALID', '审阅读取范围无效。');
+        return reviewWorkspacePage(this.inspectReviewWorkspace(input.bookId, input.ref), input.path, input.afterOrdinal, input.digest);
       }
       requireStore(input.ref !== null, 'TASK_PLAN_PAGE_INVALID', '任务计划读取范围无效。');
       const plan = connectedPlan && !('groups' in connectedPlan) ? connectedPlan : this.inspectTaskPlan({ ...input, kind: input.kind });
