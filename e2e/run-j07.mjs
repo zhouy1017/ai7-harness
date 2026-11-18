@@ -3209,7 +3209,7 @@ async function main() {
     await renderer.send('Input.insertText', { text: renamedTitle });
     await pressEnter(renderer);
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${renamedRow} .derivatives-item-title-text`)})?.textContent === ${JSON.stringify(renamedTitle)}`, 'management-renamed', 60_000);
-    await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(renamedTitle)}) === true`, 'management-renamed-recorded');
+    await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(renamedTitle)})`, 'management-renamed-recorded');
     await doubleClick(`${renamedRow} .derivatives-item-title-text`, 'management-rename-double');
     await renderer.send('Input.insertText', { text: `${renamedTitle} 不要` });
     await pressEscape();
@@ -3218,7 +3218,7 @@ async function main() {
     await pointerClick(renderer, waitFor, `${renamedRow} [data-derivative-action="rename"]`, 'management-rename-again');
     await renderer.send('Input.insertText', { text: blurredTitle });
     await pointerClick(renderer, waitFor, `${managementPage} .derivatives-filters input[type="search"]`, 'management-rename-blur');
-    await waitFor(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(blurredTitle)}) === true`, 'management-renamed-on-blur', 60_000);
+    await waitFor(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(blurredTitle)})`, 'management-renamed-on-blur', 60_000);
     at('derivatives-management-import');
     // 导入文件 in the same form: the file names the document unless the editor wrote a title. The launch's scripted picker
     // answers once and the stage 'multi-import' used it, so the product is launched again with the file as its answer
@@ -3298,7 +3298,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); return strip instanceof HTMLElement && strip.textContent.includes('宣传文章') && strip.textContent.includes(${JSON.stringify(`${promotionCount} 篇衍生稿件`)}); })()`, 'management-category-strip');
     await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="yes"]`, 'management-category-refuse');
     await waitFor(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); const problem=strip?.querySelector('.derivatives-confirm-problem'); return strip instanceof HTMLElement && problem instanceof HTMLElement && (problem.textContent ?? '').trim().length > 0 && strip.textContent.includes('宣传文章'); })()`, 'management-category-refusal', 60_000);
-    await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.some(type=>type.typeId==='promotion-article' && type.documents.length === ${promotionCount})) === true`, 'management-category-kept');
+    await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.some(type=>type.typeId==='promotion-article' && type.documents.length === ${promotionCount}))`, 'management-category-kept');
     await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="no"]`, 'management-category-cancel');
     await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}) === null && document.activeElement?.textContent === '删除类别'`, 'management-category-cancelled');
     await typeInto(`${managementPage} .derivatives-category-editor [aria-label="新类别名称"]`, '校样', 'management-category-name');
