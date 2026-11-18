@@ -986,7 +986,7 @@ describe('the round trip through 回到原文 (#1525)', () => {
   const note = (ordinal: number): ReviewFindingProjection => ({ ...finding(), findingId: `rvf_n${ordinal}`, categoryId: 'local-text-check', categoryLabel: '本地文字检查',
     ordinal, markId: `m${ordinal}`, blockId: `blk_${String(ordinal).repeat(24)}` });
 
-  it('comes back to the same Run, filters, pages, groups, scroll and finding, with a finding handled meanwhile', async () => {
+  it('comes back to the same Run, filters, pages, groups, 历史 and finding, with a finding handled meanwhile', async () => {
     // Page 1: 批注 1 and 修改建议 2 (typos), 批注 3 (local); page 2: 批注 4 (local). The jump is from 3, on page 1, so only the
     // kept page count can bring 4 back.
     const findings = [{ ...note(1), categoryId: 'typos-and-usage', categoryLabel: '错别字与规范用语' }, typo(2), note(3), note(4)];
@@ -1019,8 +1019,6 @@ describe('the round trip through 回到原文 (#1525)', () => {
       scroller.scrollTop = 420;
       first.root.querySelector('article[data-finding-id="rvf_n3"] [data-review-action="go-to-text"]')!.click(); await flush();
       expect(first.goToText).toHaveBeenCalledWith(expect.objectContaining({ ordinal: 3 }));
-      // The page moves while the manuscript is being drawn; the way back returns to where 回到原文 was pressed.
-      scroller.scrollTop = 459;
       first.surface.destroy(); first.root.remove();
       scroller.scrollTop = 0;
       // Handled in the manuscript meanwhile: 批注 1 no longer has its ⋯ menu, so every fold after it stands one place earlier.
@@ -1035,8 +1033,52 @@ describe('the round trip through 回到原文 (#1525)', () => {
       expect(back.root.querySelector('section.review-group[data-review-category="local-text-check"] details.review-category-fold')!.open).toBe(true);
       expect(back.root.querySelectorAll('details.review-card-more').filter((node) => node.open)).toHaveLength(0);
       expect(miniDocument.activeElement).toBe(back.root.querySelector('article[data-finding-id="rvf_n3"]'));
-      expect(scroller.scrollTop).toBe(420);
       expect(back.root.querySelector('details.review-history-fold')!.open).toBe(true);
     } finally { Reflect.deleteProperty(miniDocument, 'scrollingElement'); }
+  });
+
+  it('puts the card the editor left back at its place on screen, even when the page above it grows after the return', async () => {
+    const findings = [typo(1), note(2)];
+    const page = (): ReviewWorkspaceProjection => {
+      const base = workspace(RUN, 'settled', findings.length);
+      const run = base.run!;
+      return { ...base, run: { ...run, findingsTotal: findings.length, categories: [{ ...run.categories[0]!, categoryId: 'typos-and-usage', label: '错别字与规范用语',
+        output: 'change-suggestion', batchApply: false, state: 'settled', findingsCount: 1 }, { ...run.categories[0]!, categoryId: 'local-text-check', label: '本地文字检查',
+        output: 'annotation', batchApply: false, state: 'settled', findingsCount: 1 }], findings: findings.map((entry) => ({ ...entry })) } };
+    };
+    // A page with no layout of its own: each card stands at a fixed place on the page, below whatever has grown above it.
+    const scroller = { scrollTop: 0 };
+    let above = 0;
+    const placeOf: Record<string, number> = { rvf_t1: 300, rvf_n2: 1000 };
+    Object.defineProperty(miniDocument, 'scrollingElement', { configurable: true, value: scroller });
+    const empty = Object.getOwnPropertyDescriptor(MiniElement.prototype, 'getBoundingClientRect')!;
+    Object.defineProperty(MiniElement.prototype, 'getBoundingClientRect', { configurable: true, value(this: MiniElement) {
+      const top = (placeOf[this.dataset['findingId'] ?? ''] ?? 0) + above - scroller.scrollTop;
+      return { top, bottom: top + 120, left: 0, right: 800, width: 800, height: 120 };
+    } });
+    try {
+      const first = mount('failed', 1, null, false, page); await flush();
+      scroller.scrollTop = 420;
+      first.root.querySelector('article[data-finding-id="rvf_n2"] [data-review-action="go-to-text"]')!.click(); await flush();
+      // The page moves while the manuscript is drawn; what counts is where the card stood when 回到原文 was pressed.
+      scroller.scrollTop = 0;
+      first.surface.destroy(); first.root.remove();
+      const back = mount('failed', 1, null, true, page); await flush();
+      const top = () => back.root.querySelector('article[data-finding-id="rvf_n2"]')!.getBoundingClientRect().top;
+      expect(top()).toBe(580);
+      // A part of the page above the card arrives after the first paint and is painted in: the card stays where it was left.
+      above = 39;
+      back.surface.refresh(); await flush();
+      expect(top()).toBe(580);
+      expect(scroller.scrollTop).toBe(459);
+      // Once the editor scrolls, the page is theirs again.
+      miniDocument.body.dispatchEvent({ type: 'wheel' });
+      above = 80;
+      back.surface.refresh(); await flush();
+      expect(top()).toBe(621);
+    } finally {
+      Reflect.deleteProperty(miniDocument, 'scrollingElement');
+      Object.defineProperty(MiniElement.prototype, 'getBoundingClientRect', empty);
+    }
   });
 });

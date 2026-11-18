@@ -508,7 +508,9 @@ function focusKeyOf(node: HTMLElement): string {
 
 // Session navigation hints, scoped by Book; never persisted as editorial authority.
 type ReviewPlace = { runId: string | null; filters: Filters; pages: number; collapsed: string[];
-  history: boolean; excluded: boolean; excludedPages: number; scroll: number; findingId: string | null };
+  history: boolean; excluded: boolean; excludedPages: number; scroll: number; findingId: string | null;
+  /** The finding card the editor left from and where it stood in the window then; the way back puts it there again. */
+  anchor: { findingId: string; top: number } | null };
 const reviewSessions = new WeakMap<Document, Map<string, ReviewPlace>>();
 
 export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): ReviewWorkspaceSurface {
@@ -534,7 +536,39 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
    * manuscript is already being drawn and the page may have moved.
    */
   let leaveScroll: number | undefined;
-  const pageScroll = (): number => document.scrollingElement?.scrollTop ?? options.root.parentElement?.scrollTop ?? 0;
+  let leaveAnchor: ReviewPlace['anchor'] = null;
+  const scroller = (): Element | null => document.scrollingElement ?? options.root.parentElement;
+  const pageScroll = (): number => scroller()?.scrollTop ?? 0;
+  const cardOf = (findingId: string): HTMLElement | null => card?.querySelector<HTMLElement>(`article.review-finding[data-finding-id="${findingId}"]`) ?? null;
+  /** Remembers where the page and the finding's card stand as a jump to the manuscript begins. */
+  const rememberLeave = (findingId: string | null): void => {
+    leaveScroll = pageScroll();
+    const left = findingId === null ? null : cardOf(findingId);
+    leaveAnchor = findingId === null || left === null ? null : { findingId, top: left.getBoundingClientRect().top };
+  };
+  /**
+   * Back where the editor was (Issue #1525): the card they left at the place on screen it had then. Held while the return settles —
+   * every paint and every change of the page's size puts it back — and let go at the editor's first scroll, click or key.
+   */
+  let anchor: ReviewPlace['anchor'] = retained?.anchor ?? null;
+  const holdAnchor = (): boolean => {
+    const held = anchor === null ? null : cardOf(anchor.findingId);
+    const page = scroller();
+    if (anchor === null || held === null || page === null) return false;
+    const drift = held.getBoundingClientRect().top - anchor.top;
+    if (Math.abs(drift) >= 1) page.scrollTop += drift;
+    return true;
+  };
+  const releaseAnchor = (): void => {
+    anchor = null;
+    anchorWatch?.disconnect();
+    for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) document.removeEventListener(type, releaseAnchor, true);
+  };
+  let anchorWatch: ResizeObserver | undefined;
+  if (anchor !== null) {
+    for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) document.addEventListener(type, releaseAnchor, true);
+    anchorWatch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { holdAnchor(); }) : undefined;
+  }
   let focusPages = 0;
   let focusRunHeading = false;
   let pendingProcedureId: string | null = options.procedureId ?? null;
@@ -817,9 +851,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // A Run waiting to start once online is read again too (Issue #760, S74c), so 审阅 follows it into running.
     if (next.run?.state === 'running' || next.run?.state === 'waiting') schedulePoll();
     followFocus(next);
+    if (anchor !== null && card !== undefined) {
+      // The card the editor left, where it stood; failing that (gone from these pages), the page's own position.
+      anchorWatch?.disconnect();
+      anchorWatch?.observe(card);
+      if (holdAnchor()) restoreScroll = undefined;
+    }
     if (restoreScroll !== undefined) {
-      const scroller = document.scrollingElement ?? options.root.parentElement;
-      if (scroller) scroller.scrollTop = restoreScroll;
+      const page = scroller();
+      if (page) page.scrollTop = restoreScroll;
       restoreScroll = undefined;
     }
 
@@ -1180,7 +1220,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
               after = next;
             }
             if (finding !== undefined) focusFindingId = finding.findingId;
-            leaveScroll = pageScroll();
+            rememberLeave(finding?.findingId ?? null);
             const jumping = options.goToText({ ordinal: finding?.ordinal, manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId,
               blockId: evidence.blockId!, markId: finding?.markId != null && finding.markStatus !== null && LIVE_MARK_STATUSES.has(finding.markStatus) ? finding.markId : null });
             current = navigation.route();
@@ -1641,7 +1681,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // From a row, the way back names the row's finding, as 回到原文 on its card does; a row with none offers no numbered return.
     const factJump = (finding: ReviewFindingProjection | undefined, target: { blockId: string; markId: string | null }): Promise<void> => {
       if (finding !== undefined) focusFindingId = finding.findingId;
-      leaveScroll = pageScroll();
+      rememberLeave(finding?.findingId ?? null);
       return options.goToText({ ordinal: finding?.ordinal, manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, ...target });
     };
     const row = el('li', 'fact-lens-row');
@@ -2391,7 +2431,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     options.setStatus(REVIEW_STATUS_LINES.openingText, 'busy');
     try {
       focusFindingId = finding.findingId;
-      leaveScroll = pageScroll();
+      rememberLeave(finding.findingId);
       await options.goToText({
         ordinal: finding.ordinal,
         manuscriptId: run.manuscript.manuscriptId,
@@ -2402,6 +2442,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     } catch (error) {
       if (focusFindingId === finding.findingId) focusFindingId = null;
       leaveScroll = undefined;
+      leaveAnchor = null;
       options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.openTextFailed), 'error');
     }
   }
@@ -3429,7 +3470,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     destroy: () => {
       reviewPlaces.set(bookId, { runId: projection?.run?.reviewRunId ?? query.reviewRunId, filters: { ...query.filters }, pages: query.pages,
         collapsed: [...collapsedGroups], history: historyShown(), excluded: excludedOpen, excludedPages,
-        scroll: leaveScroll ?? pageScroll(), findingId: focusFindingId });
+        scroll: leaveScroll ?? pageScroll(), findingId: focusFindingId, anchor: leaveAnchor });
+      releaseAnchor();
       destroyed = true;
       if (toastShown) hideToast();
       unregisterCommands?.();
