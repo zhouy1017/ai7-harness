@@ -1176,52 +1176,65 @@ async function main() {
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.findingId===window.__j05LocalFinding); return run.localCheck.planDigest===window.__j05LocalDigest && run.localCheck.state==='materialized' && finding.categoryId==='local-text-check' && finding.stateLine.startsWith('P02/v1') && run.report!==null; })()`, 'local-lineage-survives-editor-actions');
     await settled(renderer, 'local-workflow-settled');
 
-    // #1525: a fresh local review supplies real findings for keyboard triage and the return route.
-    await assertRenderer(renderer, `(() => {return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。');})()`, 'review-triage-tester-edit');
+    // #1525: a fresh local review supplies real findings for keyboard triage and the return route. A tester's edit of sample1:
+    // each single 「…」 is one 修改建议 (P02), and enough of them that the pending list needs a second page.
+    await assertRenderer(renderer, `(() => {return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。'+'甲…'.repeat(360));})()`, 'review-triage-tester-edit');
     await settled(renderer, 'review-triage-edit-saved');
+    const ACTIVE_CARD = `document.activeElement?.closest('article.review-finding')`;
     try {
       for (const viewport of [{width:1280,height:800},{width:1008,height:681}]) {
         at(viewport.width===1280?'review-keyboard-wide':'review-keyboard-gate');
         await renderer.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1,mobile:false});
         await triageClick(renderer,'[data-nav-book-section="review"]');
         await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'review-triage-ready');
+        // The Run on screen before this start: the findings waited on below must be this start's, never the previous form's.
+        const before=await renderer.evaluate(`document.querySelector('.review-workspace-card')?.dataset.reviewRunId??null`);
         await triageClick(renderer,'.review-new-actions > details > summary');
         await triageClick(renderer,'[data-review-action="new-local-check"]');
         await waitFor(renderer, `document.querySelector('dialog.review-sheet[open] [data-review-action="start"]')?.disabled===false`, 'review-triage-start-ready');
         await triageClick(renderer,'dialog.review-sheet [data-review-action="start"]');
-        await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled' && document.querySelectorAll('article.review-finding[data-status="pending"]').length>=3`, 'review-triage-findings');
+        await waitFor(renderer, `(() => { const card=document.querySelector('.review-workspace-card'); return card?.dataset.reviewRunId!==undefined && card.dataset.reviewRunId!==${JSON.stringify(before)} && card.dataset.reviewState==='settled' && document.querySelectorAll('article.review-finding[data-status="pending"]').length>=3; })()`, 'review-triage-findings');
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
         await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-triage-filter');
         // 下一条待处理 is #1523's view.nextPending (Alt+↓ on Windows): the review page answers the same command.
         await press(renderer,'ArrowDown',1);
         const decided=[];
-        for (const key of ['r','a','r']) {
-          const id=await renderer.evaluate(`document.activeElement?.closest('article.review-finding')?.dataset.findingId??null`);
-          requireJourney(id!==null && !decided.includes(id),'review-keyboard-focused-distinct',{id,decided});
-          await press(renderer,key);
-          decided.push(id);
+        let outside=0;
+        // R, A, R, then R until a decision has moved focus to a card that started below the window, at least once.
+        for (let index=0; index<3 || outside===0; index+=1) {
+          requireJourney(index<24,'review-keyboard-next-below-window',{decided});
+          const state=await renderer.evaluate(`(() => { const card=${ACTIVE_CARD}; const next=Array.from(document.querySelectorAll('article.review-finding[data-status="pending"]')).find((node)=>node!==card && (card.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)); return {id:card?.dataset.findingId??null, below:next!==undefined && next.getBoundingClientRect().top>=innerHeight}; })()`);
+          requireJourney(state.id!==null && !decided.includes(state.id),'review-keyboard-focused-distinct',{state,decided});
+          if (state.below) outside+=1;
+          await press(renderer,index===1?'a':'r');
+          decided.push(state.id);
           // Decided in place; focus moves on, and the card it lands on is within the window, so the next key decides what is seen.
-          await waitFor(renderer, `(() => { const card=document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(id)})+']'); const next=document.activeElement?.closest('article.review-finding'); if(card?.dataset.status!=='handled'||!next||next===card)return false; const r=next.getBoundingClientRect(); return r.top>=0 && r.top<innerHeight && r.bottom>0; })()`, 'review-keyboard-decided-next-in-view');
+          await waitFor(renderer, `(() => { const card=document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(state.id)})+']'); const next=${ACTIVE_CARD}; if(card?.dataset.status!=='handled'||!next||next===card)return false; const r=next.getBoundingClientRect(); return r.top>=0 && r.top<innerHeight && r.bottom>0; })()`, 'review-keyboard-decided-next-in-view');
         }
-        // What the service recorded for the three, not the card's own words.
-        await waitFor(renderer, `(async () => { const runId=document.querySelector('.review-workspace-card')?.dataset.reviewRunId; const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:runId})).run; const ids=${JSON.stringify(decided)}; return ids.every((id)=>run.findings.find((item)=>item.findingId===id)?.status==='handled'); })()`, 'review-keyboard-service-statuses');
-        const id=await renderer.evaluate(`document.activeElement?.dataset.findingId??null`);
-        requireJourney(id!==null,'review-return-finding-focused');
-        const PLACE = `(() => { const groups={}; for (const group of document.querySelectorAll('section.review-group[data-review-category]')) groups[group.dataset.reviewCategory]=group.querySelector('details.review-category-fold')?.open===true; return {groups, findings:document.querySelectorAll('article.review-finding').length, more:document.querySelector('[data-review-action="more-findings"]')?.textContent??null, scroll:document.scrollingElement.scrollTop, maxScroll:document.scrollingElement.scrollHeight-innerHeight}; })()`;
-        // The way back re-reads under the same filter: the three decided cards leave the pending list, so compare with that read.
+        // What the service recorded for every decided finding, not the card's own words.
+        await waitFor(renderer, `(async () => { const runId=document.querySelector('.review-workspace-card')?.dataset.reviewRunId; const ids=${JSON.stringify(decided)}; let after=null; const found=new Map(); for (let page=0; page<8 && found.size<ids.length; page+=1) { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:runId, findingsAfterOrdinal:after, categoryId:null, severity:null, status:null, chapterBlockId:null})).run; for (const item of run.findings) if (ids.includes(item.findingId)) found.set(item.findingId,item.status); if(!run.findingsTruncated)break; after=run.findings.at(-1).ordinal; } return ids.every((id)=>found.get(id)==='handled'); })()`, 'review-keyboard-service-statuses');
+        // The way back re-reads under the same filter: the decided cards leave the pending list, so compare with that read.
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
-        await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null && ${JSON.stringify(decided)}.every((id)=>document.querySelector('article[data-finding-id='+JSON.stringify(id)+']')===null) && document.querySelector('article.review-finding')!==null`, 'review-return-filter-reread');
+        await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null && ${JSON.stringify(decided)}.every((id)=>document.querySelector('article[data-finding-id='+JSON.stringify(id)+']')===null) && document.querySelector('[data-review-action="more-findings"]')?.disabled===false`, 'review-return-filter-reread');
+        // A second page loaded and 历史 ▾ opened, both by real clicks, so the way back has pages and a fold to keep.
+        const firstPage=await renderer.evaluate(`document.querySelectorAll('article.review-finding').length`);
+        await triageClick(renderer,'[data-review-action="more-findings"]');
+        await waitFor(renderer, `document.querySelectorAll('article.review-finding').length>${firstPage}`, 'review-return-second-page');
+        await triageClick(renderer,'.review-history-fold > summary');
+        await waitFor(renderer, `document.querySelector('.review-history-fold')?.open===true`, 'review-return-history-open');
         await press(renderer,'ArrowDown',1);
         await waitFor(renderer, `document.activeElement?.matches('article.review-finding[data-status="pending"]')===true`, 'review-return-next-pending-focused');
         const kept=await renderer.evaluate(`document.activeElement.dataset.findingId`);
-        const before=await renderer.evaluate(PLACE);
+        const PLACE = `(() => { const groups={}; for (const group of document.querySelectorAll('section.review-group[data-review-category]')) groups[group.dataset.reviewCategory]=group.querySelector('details.review-category-fold')?.open===true; return {groups, history:document.querySelector('.review-history-fold')?.open===true, findings:document.querySelectorAll('article.review-finding').length, more:document.querySelector('[data-review-action="more-findings"]')?.textContent??null, scroll:document.scrollingElement.scrollTop, maxScroll:document.scrollingElement.scrollHeight-innerHeight}; })()`;
+        const placed=await renderer.evaluate(PLACE);
+        requireJourney(placed.findings>firstPage && placed.history===true, 'review-return-place-set', placed);
         await press(renderer,'Enter');
         await waitFor(renderer, `document.querySelector('[data-review-return]')!==null`, 'review-return-chip-ready');
         await triageClick(renderer,'[data-review-return]');
         await waitFor(renderer, `document.activeElement?.dataset.findingId===${JSON.stringify(kept)} && document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-return-same-filter-and-finding');
         const after=await renderer.evaluate(PLACE);
-        requireJourney(JSON.stringify(after.groups)===JSON.stringify(before.groups) && after.findings===before.findings && after.more===before.more, 'review-return-same-groups-and-pages', {before, after});
-        requireJourney(Math.abs(after.scroll-Math.min(before.scroll, after.maxScroll))<=2, 'review-return-same-scroll', {before, after});
+        requireJourney(JSON.stringify(after.groups)===JSON.stringify(placed.groups) && after.history===placed.history && after.findings===placed.findings && after.more===placed.more, 'review-return-same-groups-and-pages', {placed, after});
+        requireJourney(Math.abs(after.scroll-Math.min(placed.scroll, after.maxScroll))<=2, 'review-return-same-scroll', {placed, after});
         await press(renderer,'Enter');
         await waitFor(renderer, `document.querySelector('[data-screen="editor"]')!==null`, 'review-triage-back-on-text');
       }
