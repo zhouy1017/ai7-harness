@@ -1339,7 +1339,7 @@ async function renderGlobalAgent(dialogueId?: string): Promise<void> {
     await api.leaveBookWorkbench();
     if (!navigationRoute.isCurrent()) return;
     replaceScreen('global-agent', mountGlobalAgent({ api: api, setStatus, errorMessage: rendererErrorMessage,
-      ...(dialogueId === undefined ? {} : { dialogueId }), openAudit: () => void leaveThen(() => renderQualityLearning('audit', null)) }));
+      ...(dialogueId === undefined ? {} : { dialogueId }), openAudit: () => void leaveThen(() => renderQualityLearning('audit', null)), openModelService: () => void leaveThen(() => renderModelServiceSettings()) }));
   } catch (error) {
     if (navigation.errorIsCurrent(error, navigationRoute)) throw error;
   }

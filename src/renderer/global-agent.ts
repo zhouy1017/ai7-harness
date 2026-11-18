@@ -56,6 +56,8 @@ export function mountGlobalAgent(options: {
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly openAudit: () => void;
+  /** 去设置 › 模型服务: the key and the model are set there. */
+  readonly openModelService: () => void;
   readonly dialogueId?: string;
 }): HTMLElement {
   const root = el('section');
@@ -69,6 +71,9 @@ export function mountGlobalAgent(options: {
   state.className = 'global-agent-status';
   state.setAttribute('role', 'status');
   state.dataset['globalAgentPolicy'] = 'state';
+  const setup = el('button', '去设置 › 模型服务'); setup.type = 'button'; setup.className = 'btn secondary'; setup.hidden = true;
+  setup.dataset['globalAgentSetup'] = 'model-service';
+  setup.addEventListener('click', options.openModelService);
   const items = el('fieldset');
   items.className = 'global-agent-sources';
   items.append(el('legend', technicalWords('本社审阅偏好与记忆', '审阅偏好')),
@@ -193,7 +198,7 @@ export function mountGlobalAgent(options: {
         ...(dialogue.toolCalls ?? []).map((call) => {
           const card = el('article'); card.className = 'global-agent-tool-card';
           card.append(el('h4', toolLabel(call.tool)),
-            el('p', call.tool === 'retrieve' ? technicalWords('在所选图书与记忆中查找相关内容。', '在所选图书与审阅偏好中查找相关内容。') : call.tool === 'exact_fetch' ? '读取检索结果对应的原文。' : call.tool === 'read_procedure' ? '读取选入工序的说明与阶段。' : technicalWords('整理可由你确认的学习监督建议。', '整理可由你采用的审阅偏好建议。')),
+            el('p', call.tool === 'retrieve' ? '在所选图书与审阅偏好中查找相关内容。' : call.tool === 'exact_fetch' ? '读取检索结果对应的原文。' : call.tool === 'read_procedure' ? '读取选入工序的说明与阶段。' : technicalWords('整理可由你确认的学习监督建议。', '整理可由你采用的审阅偏好建议。')),
             el('p', call.outcome === 'returned' ? toolResultSummary(call.tool, call.result) : call.outcome === 'refused' ? '未能读取，请检查所选范围。' : '正在读取所选范围…'),
             technical(`工具：${call.tool}`, `参数：${call.arguments}`, `结果：${call.result ?? '等待返回'}`, `回答：${call.attemptId}`, `调用：${call.callId}`));
           return card;
@@ -245,7 +250,7 @@ export function mountGlobalAgent(options: {
   // The closed fold says what it holds: how many Books and preferences the question carries (#1553 review).
   let referencesSummary: HTMLElement | null = null;
   const updateReferencesSummary = (): void => {
-    if (referencesSummary !== null) referencesSummary.textContent = `参考哪些书和偏好 · 已选 ${scopedBooks.size} 本书、${selectedSources.size} 条偏好`;
+    if (referencesSummary !== null) referencesSummary.textContent = `参考哪些书和偏好 · 已选 ${scopedBooks.size} 本书、${selectedSources.size} 条偏好${scopedProcedures.size > 0 ? `、${scopedProcedures.size} 个工序` : ''}`;
   };
   const invalidatePreview = (): void => { previewGeneration += 1; disclosure.replaceChildren(); disclosure.hidden = true; updateReferencesSummary(); };
   question.addEventListener('input', invalidatePreview);
@@ -355,7 +360,7 @@ export function mountGlobalAgent(options: {
   // page. 引用范围 / 记忆与治理 / 全局指令, the governance form, the directives, the sending preview and the habits summary are
   // developer-only.
   const main = el('div'); main.className = 'global-agent-main';
-  main.append(state, conversation);
+  main.append(state, setup, conversation);
   if (technicalLayerVisible) {
     const pills = el('div'); pills.className = 'global-agent-pills';
     pills.setAttribute('role', 'group'); pills.setAttribute('aria-label', '提问设置');
@@ -443,11 +448,12 @@ export function mountGlobalAgent(options: {
     invalidatePreview();
     // Ordinary mode writes its own blocked sentence: the service explanation names operations the page no longer offers.
     const ordinaryBlocked = projection.dialogueState === MODEL_SERVICE_SETUP_REQUIRED_REASON
-      ? '暂时无法提问 · 请先在「设置 › 模型服务」里配置模型密钥。'
+      ? '暂时无法提问 · 请先在「设置 › 模型服务」里设置好模型密钥和模型。'
       : '暂时无法提问 · 此处暂不能调用模型。';
     state.textContent = projection.dialogueState === 'available'
       ? technicalWords('可以提问 · 只参考你选入的来源；记忆管理在本机单独记录。', '可以提问 · 只参考你选入的内容。')
       : technicalLayerVisible ? `暂时无法提问 · ${projection.explanation}` : ordinaryBlocked;
+    setup.hidden = projection.dialogueState !== MODEL_SERVICE_SETUP_REQUIRED_REASON;
     list.replaceChildren();
     // Ordinary mode lists only what a question can carry; the not-yet-active items and the governance records stay in 质量与学习.
     const candidates = projection.sourceCandidates ?? [];

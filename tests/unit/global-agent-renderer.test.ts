@@ -44,6 +44,7 @@ beforeEach(() => {
 afterEach(() => { delete (MiniElement.prototype as unknown as Record<string, unknown>)['selectedOptions']; vi.unstubAllGlobals(); uninstall(); });
 const settle = async () => { for (let index = 0; index < 10; index += 1) await Promise.resolve(); };
 function harness(initial = dialogue(), open = false, initialProjection = projection) {
+  const openModelService = vi.fn();
   let active = initial;
   let state = initialProjection;
   const api: GlobalAgentRendererApi = {
@@ -54,12 +55,12 @@ function harness(initial = dialogue(), open = false, initialProjection = project
     continueGlobalAgentAnswer: vi.fn(async () => active), regenerateGlobalAgentAnswer: vi.fn(async () => active), stopGlobalAgentAnswer: vi.fn(async () => active),
     recordLearningSupervision: vi.fn(async () => state),
   };
-  const root = mountGlobalAgent({ ...(open ? { dialogueId: initial.dialogueId } : {}), api, setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback, openAudit: vi.fn() }) as unknown as MiniElement;
+  const root = mountGlobalAgent({ ...(open ? { dialogueId: initial.dialogueId } : {}), api, setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback, openAudit: vi.fn(), openModelService }) as unknown as MiniElement;
   miniDocument.body.append(root);
   const find = (selector: string) => root.querySelector(selector)! as unknown as MiniElement;
   const choose = (selector: string) => { const input = find(selector); input.checked = !input.checked; input.dispatchEvent({ type: 'change' }); };
   const submit = (value: string) => { find('[data-global-agent-question]').value = value; find('[data-global-agent-question-form]').dispatchEvent({ type: 'submit' }); };
-  return { root, api, find, choose, submit, setProjection: (next: GlobalAgentProjection) => { state = next; } };
+  return { root, api, find, choose, submit, openModelService, setProjection: (next: GlobalAgentProjection) => { state = next; } };
 }
 
 it('sends directly once, omits empty tool scope, and leaves the composer ready for another question', async () => {
@@ -169,7 +170,7 @@ it('shows one 参考哪些书和偏好 fold in ordinary mode and sends the same 
   expect(fold.tagName).toBe('DETAILS');
   expect(fold.open).toBe(false);
   // The closed fold counts what the question carries (#1553 review).
-  expect(fold.children[0]?.textContent).toBe('参考哪些书和偏好 · 已选 1 本书、2 条偏好');
+  expect(fold.children[0]?.textContent).toBe('参考哪些书和偏好 · 已选 1 本书、2 条偏好、1 个工序');
   expect(ordinary.root.querySelectorAll('.global-agent-pill')).toHaveLength(0);
   expect(ordinary.root.querySelector('[data-global-agent-governance]')).toBeNull();
   expect(ordinary.root.textContent).not.toMatch(/治理|监督/u);
@@ -202,12 +203,20 @@ it('writes its own ordinary blocked sentence instead of the service explanation'
   setTechnicalLayerVisible(false);
   const blocked = harness(dialogue(), false, { ...projection, dialogueState: MODEL_SERVICE_SETUP_REQUIRED_REASON,
     explanation: '此处暂不能调用模型。记忆与学习监督操作仅在本机记录，不读取稿件。' }); await settle();
-  expect(blocked.find('[data-global-agent-policy]').textContent).toBe('暂时无法提问 · 请先在「设置 › 模型服务」里配置模型密钥。');
+  // The state means no model is bound — a saved key with no model chosen is the same — so the sentence names both, and the
+  // page offers the action that opens 设置 › 模型服务.
+  expect(blocked.find('[data-global-agent-policy]').textContent).toBe('暂时无法提问 · 请先在「设置 › 模型服务」里设置好模型密钥和模型。');
   expect(blocked.root.textContent).not.toMatch(/治理|监督/u);
+  const setup = blocked.find('[data-global-agent-setup]');
+  expect(setup.hidden).toBe(false);
+  expect(setup.textContent).toBe('去设置 › 模型服务');
+  setup.click();
+  expect(blocked.openModelService).toHaveBeenCalledTimes(1);
   const refused = harness(dialogue(), false, { ...projection, dialogueState: '当前处理策略未允许',
     explanation: '此处暂不能调用模型。记忆与学习监督操作仅在本机记录，不读取稿件。' }); await settle();
   expect(refused.find('[data-global-agent-policy]').textContent).toBe('暂时无法提问 · 此处暂不能调用模型。');
   expect(refused.root.textContent).not.toMatch(/治理|监督/u);
+  expect(refused.find('[data-global-agent-setup]').hidden).toBe(true);
 });
 
 it('keeps one send, retained selections and regenerate in ordinary mode', async () => {
@@ -230,6 +239,19 @@ it('keeps one send, retained selections and regenerate in ordinary mode', async 
   expect(view.api.prepareGlobalAgentTurn).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'regenerate', attemptId: 'internal-attempt-id' }));
 });
 
+it('lists only what a question can carry in ordinary mode: a frozen item has no checkbox, developer mode lists it', async () => {
+  const FROZEN = 'b0000000-0000-4000-8000-000000000009';
+  const withFrozen: GlobalAgentProjection = { ...projection, items: [...projection.items,
+    { ...PIN, itemId: FROZEN, revisionId: 'frozen@base', kind: 'preference', text: '已冻结的偏好。', categoryId: 'typos-and-usage', bookId: null, state: 'frozen', lineage: [] }] };
+  setTechnicalLayerVisible(false);
+  const ordinary = harness(dialogue(), false, withFrozen); await settle();
+  expect(ordinary.root.querySelectorAll('[data-global-agent-item]').map((input) => input.dataset['globalAgentItem'])).toEqual([ITEM]);
+  expect(ordinary.root.textContent).not.toContain('已冻结的偏好。');
+  setTechnicalLayerVisible(true);
+  const developer = harness(dialogue(), false, withFrozen); await settle();
+  expect(developer.root.querySelectorAll('[data-global-agent-item]').map((input) => input.dataset['globalAgentItem'])).toEqual([ITEM, FROZEN]);
+});
+
 it('scans an ordinary dialogue with a tool call, a proposal, a directive and an adopted direction (#1315, #1553)', async () => {
   setTechnicalLayerVisible(false);
   const turn = { ...dialogue(),
@@ -238,9 +260,13 @@ it('scans an ordinary dialogue with a tool call, a proposal, a directive and an 
     supervisionProposals: [{ attemptId: 'internal-attempt-id', callId: 'proposal',
       input: { operation: 'supervise' as const, targets: [PIN], scope: { kind: 'house' as const }, categoryId: 'typos-and-usage', text: '谨慎归纳。', effect: 'freeze' as const } }] };
   try {
-    const view = harness(turn, true, { ...adopted, directives: [DIRECTIVE] }); await settle();
+    const view = harness(turn, true, { ...adopted, directives: [{ ...DIRECTIVE, text: '指令专用文字。' }] }); await settle();
     expectNoTechnicalText(view.root);
-    expect(view.root.textContent).not.toMatch(/治理|监督/u);
-    expect(view.root.textContent).not.toContain(DIRECTIVE.recordedAt);
+    // The page's own sentences — status, lede, legend, composer label, retrieve card — hold no developer word, so reverting any
+    // of them to the developer wording fails here. 记忆 is the developer word for 审阅偏好.
+    expect(view.root.textContent).not.toMatch(/治理|监督|记忆/u);
+    // The directives list is developer-only: neither its heading, its text nor its time is on an ordinary page.
+    expect(view.root.textContent).not.toContain('指令专用文字');
+    expect(view.root.querySelector('.global-agent-directives')).toBeNull();
   } finally { setTechnicalLayerVisible(true); }
 });
