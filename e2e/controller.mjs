@@ -225,17 +225,17 @@ export const SIDEBAR = Object.freeze({
 
 /** An expression that follows one sidebar row, `false` while that row is missing, hidden or unavailable. */
 export function sidebarNavigate(selector) {
-  const labels = { attention: '待我处理', tasks: '任务', library: '书库', series: '书系', knowledge: '知识库', quality: '质量与学习', 'global-agent': '全域智能体', manuscript: '主稿件', derivatives: '衍生稿件', review: '审阅', evaluation: '评估', deliverables: '交付物', findings: '发现', analysis: '分析', sources: '来源与证据', overview: '工作概览', history: '历史与恢复', hub: '设置' };
+  const labels = { attention: '待我处理', tasks: '任务', library: '书库', series: '书系', knowledge: '知识库', quality: '质量与学习', 'global-agent': 'AI 助手', manuscript: '主稿件', derivatives: '衍生稿件', review: '审阅', evaluation: '评估', deliverables: '交付物', findings: '待办汇总', analysis: '分析', sources: '来源与证据', overview: '工作概览', hub: '设置' };
   return `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.closest('[hidden]')||node.getAttribute('aria-disabled')==='true'||(node instanceof HTMLButtonElement&&node.disabled))return false; const key=node.dataset.navDestination??node.dataset.navBookSection??node.dataset.navSettings; const labels=${JSON.stringify(labels)}; if(key && (node.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')!==labels[key])return false; node.click(); return true; })()`;
 }
 
 /** The sidebar on the library: the seven destinations in their order with their exact names, 书库 current, 设置 at the foot. */
-export const SIDEBAR_LIBRARY_READY = `(() => { const rows=Array.from(document.querySelectorAll('#app-sidebar .sidebar-destinations [data-nav-destination]')); const names=rows.map((row)=>row.dataset.navDestination+':'+(row.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')); return JSON.stringify(names)===${JSON.stringify(JSON.stringify(['attention:待我处理', 'tasks:任务', 'library:书库', 'series:书系', 'knowledge:知识库', 'quality:质量与学习', 'global-agent:全域智能体']))} && document.querySelector('#app-sidebar [data-nav-destination="library"]')?.getAttribute('aria-current')==='page' && document.querySelector('#app-sidebar [data-nav-settings]')?.textContent==='设置' && document.querySelector('#context-title')?.textContent==='书库'; })()`;
+export const SIDEBAR_LIBRARY_READY = `(() => { const rows=Array.from(document.querySelectorAll('#app-sidebar .sidebar-destinations [data-nav-destination]')); const names=rows.map((row)=>row.dataset.navDestination+':'+(row.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')); return JSON.stringify(names)===${JSON.stringify(JSON.stringify(['attention:待我处理', 'tasks:任务', 'library:书库', 'series:书系', 'knowledge:知识库', 'quality:质量与学习', 'global-agent:AI 助手']))} && document.querySelector('#app-sidebar [data-nav-destination="library"]')?.getAttribute('aria-current')==='page' && document.querySelector('#app-sidebar [data-nav-settings]')?.textContent==='设置' && document.querySelector('#context-title')?.textContent==='书库'; })()`;
 
 /** The current Book's groups in the sidebar — for that Book, or any when `bookId` is null — with one section marked current. */
 export function sidebarBookCurrent(bookId, section) {
   const book = bookId === null ? 'true' : `group.dataset.bookId===${JSON.stringify(bookId)}`;
-  const groups = [['工作', ['主稿件', '衍生稿件', '审阅', '评估', '交付物']], ['处理', ['发现']], ['资料与记录', ['分析', '来源与证据', '工作概览', '历史与恢复']]];
+  const groups = [['工作', ['主稿件', '衍生稿件', '审阅', '待办汇总', '评估', '交付物']], ['资料与记录', ['分析', '来源与证据', '工作概览']]];
   return `(() => { const group=document.querySelector('#app-sidebar .sidebar-book'); const groups=Array.from(group?.querySelectorAll('[data-nav-book-group]')??[], node=>[node.getAttribute('aria-label'),Array.from(node.querySelectorAll('[data-nav-book-section] .nav-label'),item=>item.textContent)]); return group instanceof HTMLElement && !group.hidden && ${book} && JSON.stringify(groups)===${JSON.stringify(JSON.stringify(groups))} && group.querySelector('[data-nav-book-section="${section}"]')?.getAttribute('aria-current')==='page'; })()`;
 }
 
@@ -494,6 +494,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'reimport-commit',
     'reimport-landed',
     'reimport-history',
+    // Issue #1521: a populated Book's records through 工作概览 by real input, once the 历史与恢复 row is gone.
+    'book-records-reachable',
     // The source-only intake of a PDF: identified from its bytes, refused as editable, retained.
     'synthetic-pdf-identity',
     'source-only-pdf-landing',
@@ -924,6 +926,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'keyboard-remap-dispatch',
     'keyboard-restore-default',
     'editorial-book-switcher',
+    'sidebar-settings-pinned',
+    'sidebar-long-book-list',
+    'sidebar-current-book-pin',
     'editorial-disclosure-motion',
     'acknowledged-edit',
     'j14-ime-focus',

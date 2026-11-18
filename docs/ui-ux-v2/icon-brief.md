@@ -23,5 +23,6 @@
 | `i-history` | 历史与恢复 · 回转时钟 |
 | `i-menu` | 侧栏展开 / 收起 · 三条横线 |
 | `i-back` | 返回 · 向左箭头 |
+| `i-derivative` | 衍生稿件 · 一页压在另一页上（#1521 增补；其余 ID 不变，`i-history` 保留但侧栏不再使用） |
 
 风格稿是视觉参考。后续矢量化时保留以上全部 ID、`viewBox="0 0 24 24"`、`fill="none"` 与 `stroke="currentColor"`，仅替换 `src/renderer/components/icon-sprite.ts` 中的几何定义，不改变导航、状态、事件或持久化。过渡图形取自 [editor-surfaces §0.4](editor-surfaces.md#04-屏幕索引) 的 ②B 原型；右缘另保留 ① 原型的 `i-nav`（导航与查找）和 `i-task`（任务）扩展符号，不计入本次 17 个风格稿。
