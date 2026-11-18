@@ -710,7 +710,6 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         observeRequestActivity(transportRequest, () => deadline.activity());
         return transport(assembly.url, transportRequest);
       });
-      deadline.headersReceived();
       responseStatus = response.status;
       let body: unknown = null;
       // An in-stream account limit is read under the status its error names; every other response under its own.

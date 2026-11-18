@@ -14,7 +14,7 @@ describe('execution settings from the selected launch', () => {
     const configured = structuredClone(production);
     configured.providerProcessing = { ...configured.providerProcessing,
       execution: { ...production.providerProcessing.execution!, backgroundShare: { configurable: true, default: 2 } },
-      transport: { firstByteSeconds: 600, idleSeconds: 90, totalCeilingSeconds: 3600, rateLimitRetry: { honourRetryAfter: true, maxRetries: 0 } },
+      transport: { firstByteSeconds: 600, idleSeconds: 90, totalCeilingSeconds: 3600, connectionTestSeconds: 60, rateLimitRetry: { honourRetryAfter: true, maxRetries: 0 } },
     };
     expect(executionBackgroundShare(configured, 5)).toBe(2);
     expect(rateLimitRetryAllowed(configured)).toBe(false);

@@ -1,24 +1,30 @@
 import defaults from '../../../config/runtime-execution-defaults.json' with { type: 'json' };
-import type { TransportSettings } from '../../shared/protocol/transport-settings.js';
+import { validatedTransportSettings, type TransportSettings } from '../../shared/protocol/transport-settings.js';
 
 /**
  * The transport record every model request without a projected one reads (developer-live, and any caller that passes none):
- * the same `transport` record the ordinary-production projection copies, never a constant in source (#1599).
+ * the same `transport` record the ordinary-production projection copies, never a constant in source (#1599). A malformed
+ * record is refused here, when the service loads it.
  */
-export const DEFAULT_TRANSPORT_SETTINGS: TransportSettings = defaults.transport;
+export const DEFAULT_TRANSPORT_SETTINGS: TransportSettings = validatedTransportSettings(defaults.transport);
+
+/** A connection test asks a tiny question: it waits `connectionTestSeconds` for any answer at all, and no longer. */
+export function connectionTestTransport(settings: TransportSettings = DEFAULT_TRANSPORT_SETTINGS): TransportSettings {
+  return { ...settings, firstByteSeconds: settings.connectionTestSeconds, totalCeilingSeconds: settings.connectionTestSeconds };
+}
 
 /**
  * The bounds of one sent model request (#1599). It is bounded by what it waits for, not by how long its answer is:
- * `firstByteSeconds` from the send until the response headers (a whole-answer request returns them only once the answer is
- * finished), then `idleSeconds` of silence between received bytes, and `totalCeilingSeconds` as a far larger safety net.
- * Reaching any of them aborts `signal` with a `TimeoutError`; the adapter reads that as an unknown outcome, never resent.
+ * `firstByteSeconds` from the send until the first byte of the answer body arrives (a whole-answer request has none before
+ * its answer is finished, so this is the longest generation tolerated), then `idleSeconds` of silence between received
+ * bytes, and `totalCeilingSeconds` as a far larger safety net. Reaching any of them aborts `signal` with a `TimeoutError`;
+ * the adapter reads that as an unknown outcome, never resent.
  */
 export class RequestDeadlines {
   readonly #abort: AbortController = new AbortController();
   readonly #settings: Pick<TransportSettings, 'firstByteSeconds' | 'idleSeconds' | 'totalCeilingSeconds'>;
   #pending: ReturnType<typeof setTimeout> | undefined;
   #ceiling: ReturnType<typeof setTimeout> | undefined;
-  #receiving = false;
   #stopped = false;
 
   constructor(settings: Pick<TransportSettings, 'firstByteSeconds' | 'idleSeconds' | 'totalCeilingSeconds'>) { this.#settings = settings; }
@@ -31,15 +37,9 @@ export class RequestDeadlines {
     this.#ceiling = setTimeout(() => this.#expire(), this.#settings.totalCeilingSeconds * 1000);
   }
 
-  /** The response headers arrived: the first-byte bound ends and the idle bound takes over. */
-  headersReceived(): void {
-    this.#receiving = true;
-    this.#arm(this.#settings.idleSeconds);
-  }
-
-  /** Bytes arrived: the idle gap starts again. Before the headers it changes nothing. */
+  /** Answer bytes arrived: the first-byte bound ends at the first of them, and the idle gap starts again with each. */
   activity(): void {
-    if (this.#receiving) this.#arm(this.#settings.idleSeconds);
+    this.#arm(this.#settings.idleSeconds);
   }
 
   /** Every exit: no timer outlives the request. */

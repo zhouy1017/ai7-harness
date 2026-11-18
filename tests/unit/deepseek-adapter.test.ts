@@ -736,9 +736,10 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
   });
 
   // #1599: a request is bounded by what it waits for — the first byte, then the gap between bytes — never by its answer's length.
+  // A whole-answer request has no byte before its answer is complete, so one bound covers the headers and the body alike.
   it.each([
-    ['headers', 'firstByteSeconds', undefined], ['body', 'idleSeconds', undefined], ['headers', 'firstByteSeconds', 2], ['body', 'idleSeconds', 2],
-  ] as const)('bounds a stalled %s read by its configured %s (%s) without resending', async (stage, bound, seconds) => {
+    ['headers', undefined], ['body', undefined], ['headers', 2], ['body', 2],
+  ] as const)('bounds a whole-answer request stalled before its %s completes by firstByteSeconds (%s) without resending', async (stage, seconds) => {
     vi.useFakeTimers();
     try {
       let sent = false;
@@ -756,12 +757,29 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(sent).toBe(true);
       expect(signal).toBeInstanceOf(AbortSignal);
-      await vi.advanceTimersByTimeAsync((seconds ?? DEFAULT_TRANSPORT_SETTINGS[bound]) * 1000 - 1);
+      await vi.advanceTimersByTimeAsync((seconds ?? DEFAULT_TRANSPORT_SETTINGS.firstByteSeconds) * 1000 - 1);
       expect(signal?.aborted).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       expect((await completed).at(-1)).toMatchObject({ reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN } } });
       expect(signal?.aborted).toBe(true);
       expect(stalled.calls).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('lets a whole-answer request whose headers come early and whose body completes at 200 s settle', async () => {
+    vi.useFakeTimers();
+    try {
+      const slow = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: async () => ({ status: 200, json: () => new Promise((resolve) => {
+        setTimeout(() => resolve({ choices: [{ message: { content: '{"ok":true}' } }], usage: { prompt_tokens: 10, completion_tokens: 2 } }), 200_000);
+      }) }) });
+      const completed = collect(slow.adapter.stream(request()));
+      await vi.advanceTimersByTimeAsync(199_999);
+      expect(slow.adapter.lastCanonicalResult).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await completed).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } });
+      expect(slow.adapter.lastCanonicalResult).toMatchObject({ kind: 'answer', text: '{"ok":true}' });
+      expect(slow.calls).toHaveLength(1);
       expect(vi.getTimerCount()).toBe(0);
     } finally { vi.useRealTimers(); }
   });
@@ -787,7 +805,7 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
     vi.useFakeTimers();
     try {
       let signal: AbortSignal | undefined;
-      const endless = adapter({ ticket: ticketFor(), secret: 'placeholder', transportSettings: { ...DEFAULT_TRANSPORT_SETTINGS, idleSeconds: 1000, totalCeilingSeconds: 200 }, transport: async (_url, init) => {
+      const endless = adapter({ ticket: ticketFor(), secret: 'placeholder', transportSettings: { ...DEFAULT_TRANSPORT_SETTINGS, firstByteSeconds: 1000, totalCeilingSeconds: 200 }, transport: async (_url, init) => {
         signal = init.signal;
         return { status: 200, json: () => new Promise<never>((_resolve, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true })) };
       } });

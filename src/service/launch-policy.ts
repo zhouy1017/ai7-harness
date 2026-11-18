@@ -7,6 +7,7 @@ import { modelDisposition, providerPreflight, type ProviderPreflightRefusal } fr
 import { modelProfileFor, validModelId, type ProviderModelProfile } from './provider/model-profile.js';
 import { GENERATED_MODEL_PROFILES } from './provider/provider-profiles.generated.js';
 import type { RemoteExecutionRoute } from './provider/egress-gate.js';
+import { DEFAULT_TRANSPORT_SETTINGS } from './provider/request-deadlines.js';
 export { ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
   isSupportedProviderProcessingVersion, selectedPolicyIdentityOf, localFixtureProfileOf, LOCAL_FIXTURE_RULE_IDS } from '../shared/protocol.js';
 
@@ -314,7 +315,7 @@ export function resolveSourceCheckoutLaunchPolicySync(_codeRoot: string,
       authorizedLiveTransmissionCount: ci ? 0 : 'bounded-by-run', liveTransmissionAllowed: configured,
       crossUnitReductionAllowed: !ci, assuranceSamplingAllowed: !ci, runReportReflectionAllowed: !ci, admittedRules,
       ...(ordinary ? { bindingState: configured ? 'configured' : 'setup-required',
-        execution: structuredClone(defaults.execution), transport: structuredClone(defaults.transport), research: structuredClone(defaults.research),
+        execution: structuredClone(defaults.execution), transport: structuredClone(DEFAULT_TRANSPORT_SETTINGS), research: structuredClone(defaults.research),
         searchConnectionTest: structuredClone(defaults.searchConnectionTest) as SearchConnectionTestPolicy,
         settingsSearchTools: structuredClone(defaults.platformTools[0]) as unknown as AdmittedPlatformTools,
         subAgents: structuredClone(defaults.subAgents), backgroundProcessingEnrollment: structuredClone(defaults.backgroundProcessingEnrollment) } : {}),
