@@ -705,6 +705,7 @@ body:has(.task-drawer[data-task-drawer-view="launch"]:not([hidden])) #task-drawe
 }
 @media (min-width: 1120px) {
   :root:not([data-right-column]) body[data-task-drawer="open"] { padding-right: var(--task-drawer-width); }
+  :root:not([data-right-column]) .task-drawer { box-shadow: none; }
 }
 .task-drawer-head { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .5rem; padding: .55rem .8rem; border-bottom: 1px solid var(--boundary); background: var(--surface-subdued); }
 .task-drawer-identity { display: grid; gap: .2rem; min-width: 0; justify-items: start; }
@@ -1665,8 +1666,9 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 }
 .editor-workspace:has(> .manuscript-comments-pane:not([hidden])) { grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 340px) 4.75rem; }
 :root[data-right-column="overlay"] .manuscript-comments-leaders { z-index: 9; }
-:root[data-right-column="overlay"] .editor-workspace:has(> aside:not([hidden])) { grid-template-columns: minmax(0, 1fr) 4.75rem; }
-:root[data-right-column="overlay"] .editor-workspace > aside:not([hidden]) { position: absolute; grid-area: auto; z-index: 8; inset: 0 4.75rem 0 auto; width: clamp(300px, 26vw, 340px); }
+/* Only the supporting columns overlay; the permanent rail (also an aside) and a document's lens keep their grid places. */
+:root[data-right-column="overlay"] .editor-workspace:not(.document-workspace):has(> :is(.manuscript-comments-pane, .manuscript-navigator):not([hidden])) { grid-template-columns: minmax(0, 1fr) 4.75rem; }
+:root[data-right-column="overlay"] .editor-workspace > :is(.manuscript-comments-pane, .manuscript-navigator):not([hidden]) { position: absolute; grid-area: auto; z-index: 8; inset: 0 4.75rem 0 auto; width: clamp(300px, 26vw, 340px); }
 :root[data-focus-mode="on"] .manuscript-comments-pane, :root[data-focus-mode="on"] .manuscript-comments-leaders { display: none !important; }
 .editor-workspace:has(> .manuscript-navigator:not([hidden])) { grid-template-columns: minmax(0, 1fr) var(--supporting-effective-width) 4.75rem; }
 .manuscript-surface { position: relative; grid-column: 1; grid-row: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
