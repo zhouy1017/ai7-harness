@@ -1,3 +1,4 @@
+import { buildReviewReport } from '../../src/service/review/review-report.js';
 import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
 import { technicalDisclosure } from '../../src/renderer/technical-layer.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
@@ -132,6 +133,53 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     expect(view.prepare).toHaveBeenCalledOnce();
     expect(view.prepare).toHaveBeenCalledWith(expect.objectContaining({ categoryIds: expect.arrayContaining(['typos-and-usage']), scope: expect.objectContaining({ kind: 'whole' }) }));
   });
+  it('keeps exactly one flat export entry with report formats on a zero-finding run', async () => {
+    const view = mount(); const next = workspace(RUN, 'settled', 0); const run = next.run!;
+    run.findingCounts = { must: 0, should: 0, note: 0, pending: 0, handled: 0, ignored: 0 };
+    run.report = { reportId: 'report-empty', version: 1, generatedAt: AT, digest: PIN.digest,
+      record: buildReviewReport({ reviewRunId: RUN, version: 1, generatedAt: AT,
+        run: { ordinal: 1, label: run.label, createdAt: AT, scopeLabel: '全书', manuscript: { revisionId: MANUSCRIPT.revisionId, revisionLabel: MANUSCRIPT.revisionLabel, journalSequence: 0 } },
+        configuration: next.configuration, categories: [], findings: [] }) };
+    view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
+    expect(view.root.querySelectorAll('[data-review-action="export"]')).toHaveLength(1);
+    expect(view.root.querySelectorAll('[data-export-format-action]')).toHaveLength(3);
+    expect(view.root.querySelectorAll('.review-header-export .export-menu')).toHaveLength(0);
+  });
+
+  it('shows the disabled export reason and empty/filter messages outside hidden headings', async () => {
+    const view = mount(); const next = workspace(RUN, 'settled', 0);
+    view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
+    expect(view.root.querySelectorAll('[data-review-action="export"]')).toHaveLength(1);
+    expect(view.root.querySelector('[data-review-action="export-version"]')!.textContent).toContain('先生成报告，再导出');
+    view.root.querySelector('[data-review-filter="severity"] [data-filter-value="must"]')!.click(); await flush();
+    const message = view.root.querySelector('.review-no-findings')!;
+    expect(message.textContent).toContain('没有符合筛选');
+    expect(message.closest('.visually-hidden')).toBeNull();
+    expect(message.closest('.review-filters')).not.toBeNull();
+    expect(view.root.querySelector('.review-run-leading')).not.toBeNull();
+  });
+
+  it('does not draw empty categories before the populated category', async () => {
+    const view = mount(); const next = workspace(); const category = next.run!.categories[0]!;
+    next.run!.categories = [{ ...category, categoryId: 'empty', findingsCount: 0 }, category];
+    view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
+    expect(view.root.querySelector('section.review-group[data-review-category="empty"]')).toBeNull();
+    expect(view.root.querySelectorAll('section.review-group')).toHaveLength(1);
+  });
+
+  it.each(['ignore', 'convert'])('returns %s cancellation focus to the named visible more summary', async (kind) => {
+    const view = mount(); view.inspectReviewWorkspace.mockResolvedValue(workspace());
+    Object.assign(view.api, { getEditorialMarkCard: vi.fn(async () => ({ pinnedText: '公开文字', body: '备注' })) });
+    view.surface.refresh(); await flush();
+    view.root.querySelector(`[data-review-action="${kind === 'ignore' ? 'ignore' : 'convert-to-suggestion'}"]`)!.click(); await flush();
+    view.root.querySelector(`[data-review-action="${kind}-cancel"]`)!.click(); await flush();
+    const summary = view.root.querySelector('.review-card-more summary')!;
+    expect(miniDocument.activeElement).toBe(summary);
+    expect(summary.getAttribute('aria-label')).toBe('更多发现操作');
+    expect(summary.closest('details')!.open).toBe(false);
+    expect(view.root.querySelector('[data-review-action="ignore-now"]')!.closest('.review-card-more')).toBeNull();
+  });
+
   it('keeps the reopened sheet choices when the previous native close event arrives asynchronously', async () => {
     const view = mount(); const next = workspace(); const available = { available: true, unavailableReason: null };
     next.newReview = available; next.scopeOptions.whole = available;
@@ -512,6 +560,18 @@ describe('one-step review actions (#1410)', () => {
     return mounted;
   }
   const button = (root: MiniElement, action: string) => root.querySelector(`[data-review-action="${action}"]`) as MiniElement | null;
+
+  it('opens a collapsed category for its batch strip and keeps undo visible after the loaded findings empty', async () => {
+    const applying = deferred<{ application: { effectId: string } }>();
+    const mounted = await view([suggestion('m1', 1)], { applyChangeSuggestionBatch: vi.fn(() => applying.promise) });
+    const fold = mounted.root.querySelector('.review-category-fold')!;
+    fold.open = false; fold.dispatchEvent({ type: 'toggle' });
+    button(mounted.root, 'batch-prepare')!.click(); await flush();
+    expect(mounted.root.querySelector('.review-batch-strip')!.closest('details')!.open).toBe(true);
+    mounted.inspectReviewWorkspace.mockResolvedValue(typos([]));
+    applying.resolve({ application: { effectId: 'effect' } }); await flush();
+    expect(button(mounted.root, 'batch-undo')!.closest('details')!.open).toBe(true);
+  });
 
   it('applies the whole batch in one click and takes it back, newest first, with 撤销本批应用', async () => {
     const applyBatch = vi.fn(async () => ({ application: { effectId: 'effect' } }));

@@ -96,6 +96,8 @@ export const REVIEW_ACTION_LABELS = {
   'batch-cancel': '取消',
   'batch-reprepare': '重新准备应用',
   'batch-undo': '撤销本批应用',
+  'all-categories': '全部类别',
+  'export-version': '导出报告',
   'more-findings': '显示更多发现',
   'generate-report': '生成报告',
   /** 生成统合总结 (Issue #1506): the summary alone for a settled Run whose summary is absent. */
@@ -193,7 +195,8 @@ export const REVIEW_STATUS_PILLS: Readonly<Record<ReviewFindingStatus, ReviewPil
 // ---- the coverage matrix and the 审阅记录 -----------------------------------------------------------
 
 export function reviewCoverageLastReview(row: Pick<ReviewCoverageRowProjection, 'lastRunOrdinal' | 'lastReviewedRevisionLabel'>): string {
-  return row.lastRunOrdinal === null ? '—' : technicalWords(`第 ${row.lastRunOrdinal} 次 · 读的是 ${row.lastReviewedRevisionLabel ?? '—'}`, `已审阅 ${row.lastRunOrdinal} 次`);
+  // 已审阅 N 次 is the latest Run's ordinal, not a count (Issue #1524 6.4): the ordinary mode says so truthfully.
+  return row.lastRunOrdinal === null ? '—' : technicalWords(`第 ${row.lastRunOrdinal} 次 · 读的是 ${row.lastReviewedRevisionLabel ?? '—'}`, `最近：第 ${row.lastRunOrdinal} 次审阅`);
 }
 
 export function reviewCoverageChanges(row: Pick<ReviewCoverageRowProjection, 'changedBlocks'>): string {
@@ -408,8 +411,9 @@ export const REVIEW_BLOCK_GONE = '这段文字所在的段落已不在当前稿�
 export const REVIEW_CANNOT_APPLY = '原文已变，无法应用这条修改建议。';
 export const REVIEW_CANNOT_CONVERT = '原文已变，无法在这段文字上转换。';
 
-export function reviewResultsCountsLine(counts: ReviewFindingCountsProjection): string {
-  return `共 ${counts.pending + counts.handled + counts.ignored} 条 · ${reviewCountsLine(counts)}`;
+/** 共 N 条 (Issue #1524 6.1): the total announced in the findings heading; visible totals live in the filter pills. */
+export function reviewTotalLine(counts: ReviewFindingCountsProjection): string {
+  return `共 ${counts.pending + counts.handled + counts.ignored} 条`;
 }
 
 export function reviewFilteredLine(total: number): string {
@@ -420,8 +424,9 @@ export function reviewShownLine(shown: number, total: number): string {
   return `已显示 ${shown} / ${total} 条。`;
 }
 
-export function reviewGroupCountLine(findingsCount: number): string {
-  return `本类 ${findingsCount} 条`;
+export function reviewGroupCountLine(shown: number, total: number): string {
+  // 本类 N 条 ignored the filter and paging (Issue #1524 6.4): when fewer than the category's total are on show, say how many.
+  return shown === total ? `本类 ${total} 条` : `显示 ${shown} / ${total} 条`;
 }
 
 /** Where a finding stands in the manuscript now: its chapter and block, or that its block is gone. */
@@ -512,6 +517,16 @@ export function reviewRunHeading(label: string): string {
 
 export function reviewRunMetaLine(scopeLabel: string, revisionLabel: string): string {
   return `${scopeLabel.replaceAll('内容块', '段落')}${technicalWords(` · 读的是修订版 ${revisionLabel}`)}`;
+}
+
+/** 审阅页首的时间到分 (Issue #1524 6.4): the header dates read to the minute, never to the second. */
+export function reviewMinuteLabel(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  return at.toLocaleString('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  });
 }
 
 export function reviewCreatedLine(localInstant: string): string {

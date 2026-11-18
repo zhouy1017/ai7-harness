@@ -11,7 +11,7 @@ import { technicalWords, identityWords, technicalLayerVisible } from './technica
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { showToast } from './components/toast.js';
-import { filterChoices, menuPanel } from './components/controls.js';
+import { filterChoices, menuPanel, enhanceSelect } from './components/controls.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
 import { reviewExcludedHeading, estimateReviewCalls, reviewConsequenceEstimate } from './review-labels.js';
 import { learningReasonAskCard } from './analysis-feedback.js';
@@ -106,7 +106,7 @@ import {
 } from './captured-procedure-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { mountManuscriptExport } from './manuscript-export.js';
-import { EXPORT_ACTION_LABELS, exportOpenAccessibleName } from './manuscript-export-labels.js';
+import { exportOpenAccessibleName } from './manuscript-export-labels.js';
 import { TASK_PLAN_OPEN_START, taskPlanSummaryLine } from './task-drawer-labels.js';
 import {
   REVIEW_ACTION_LABELS,
@@ -210,13 +210,14 @@ import {
   reviewReportOmittedLine,
   reviewReportTotalsLine,
   reviewReportVersionLine,
-  reviewResultsCountsLine,
   reviewRunHeading,
   reviewRunLine,
   reviewRunMetaLine,
+  reviewMinuteLabel,
   reviewRunReportLine,
   reviewRunsTruncatedLine,
   reviewShownLine,
+  reviewTotalLine,
   type ReviewAction,
   type ReviewPill,
 } from './review-labels.js';
@@ -521,6 +522,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     pages: 1,
   };
   /** Whether 切换历史记录 / 查看覆盖矩阵 is open; kept across redraws (Issue #1413 cluster 6). */
+  const collapsedGroups = new Set<string>();
+  let factFiltersOpen = false;
+  let exportMenuOpen = false;
   let historyOpen = false;
   const ui: { ignore: IgnoreForm | null; convert: ConvertForm | null; batch: BatchStrip | null; capabilityFindingId: string | null;
     applied?: { categoryId: string; markIds: string[]; blockIds: string[]; skipped: number } | null; } = {
@@ -564,7 +568,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,
     onChanged: () => undefined,
-    openerOf: () => host.querySelector<HTMLElement>('section.review-report [data-review-action="export"]'),
+    openerOf: () => host.querySelector<HTMLElement>('.review-header-export > summary'),
   });
 
   // ---- reading --------------------------------------------------------------------------------------
@@ -833,7 +837,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** Paint the whole card, keep the control that had focus focused, and focus what an action just opened. */
   /** Whether the opened Run has findings on show, so they lead the page (Issue #1413 cluster 6). */
   function runHasResults(run: ReviewRunProjection): boolean {
-    return run.state !== 'prepared' && run.findings.length > 0;
+    return run.state !== 'prepared' && run.findingCounts.must + run.findingCounts.should + run.findingCounts.note > 0;
   }
 
   function renderCard(next: ReviewWorkspaceProjection): void {
@@ -868,23 +872,24 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       node.dataset['reviewRunOrdinal'] = String(run.ordinal);
     }
     node.setAttribute('aria-busy', run?.state === 'running' ? 'true' : 'false');
-    const heading = el('div', 'review-workspace-heading');
-    heading.append(el('h2', undefined, REVIEW_CARD_HEADING));
-    if (run !== null && !runHasResults(run)) heading.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
     const hasReviews = next.runs.length > 0 || next.coverage.some((row) => row.lastRunOrdinal !== null);
-    if (!hasReviews) {
-      node.classList.add('surface-empty');
-      heading.append(pillElement('尚未审阅', { tone: 'neutral', shape: 'circle' }));
-      node.append(heading, el('p', 'lede', REVIEW_LEDE));
-    } else node.append(heading);
-    const newReviewReasonId = uid('new-review-reason');
-    const actions = renderNewReview(next, newReviewReasonId);
-    if (!hasReviews) node.append(actions);
-    else if (run === null || !runHasResults(run)) heading.append(actions);
-    // 导出审阅报告（DOCX） (Issue #1430): the Book's findings in one file, once any Run has found something.
     const hasFindings = next.runs.some((summary) => summary.findingCounts.must + summary.findingCounts.should + summary.findingCounts.note > 0);
-    if (hasReviews) heading.append(reviewReportExportButton({ api, bookId, enabled: () => hasFindings, setStatus: options.setStatus, errorMessage: options.errorMessage }));
-    if (hasReviews) {
+    const resultsShown = run !== null && runHasResults(run);
+    const newReviewReasonId = uid('new-review-reason');
+    if (!hasReviews) {
+      const heading = el('div', 'review-workspace-heading');
+      heading.append(el('h2', undefined, REVIEW_CARD_HEADING), pillElement('尚未审阅', { tone: 'neutral', shape: 'circle' }));
+      node.classList.add('surface-empty');
+      if (run === null) heading.append(renderHeaderExport(null, hasFindings));
+      node.append(heading, el('p', 'lede', REVIEW_LEDE), renderNewReview(next, newReviewReasonId));
+    } else if (!resultsShown) {
+      // Before findings lead, 审阅 keeps its in-page title and the 新建审阅 actions sit beside it (Issue #1524 6.1).
+      const heading = el('div', 'review-workspace-heading');
+      heading.append(el('h2', undefined, REVIEW_CARD_HEADING));
+      if (run !== null) heading.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
+      if (run === null) heading.append(renderHeaderExport(null, hasFindings));
+      heading.append(renderNewReview(next, newReviewReasonId));
+      node.append(heading);
       const changed = next.coverage.filter((row) => row.state === 'needs-review').length;
       if (changed > 0) node.append(el('p', 'attention-note review-coverage-warning', `稿件有改动，${changed} 类审阅需要复审。`));
       const history: HTMLElement[] = [];
@@ -892,21 +897,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         history.push(renderCoverage(next, newReviewReasonId));
       }
       history.push(renderRuns(next));
-      if (run !== null && runHasResults(run)) {
-        // With results on show the findings lead (Issue #1413 cluster 6): one compact line names the Run and how many
-        // categories it reviewed; the coverage and the earlier Runs stay one keyboard-reachable disclosure away.
-        const bar = el('div', 'review-summary-bar');
-        const status = el('span', 'review-summary-status');
-        status.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]), ` ${reviewRunHeading(run.label)} · 已审 ${run.categories.length} 类`);
-        const fold = el('details', 'review-history-fold');
-        fold.open = historyOpen;
-        fold.addEventListener('toggle', () => { historyOpen = fold.open; });
-        fold.append(el('summary', undefined, '切换历史记录 / 查看覆盖矩阵'), ...history);
-        bar.append(status, fold, actions);
-        node.append(bar);
-      } else node.append(...history);
+      node.append(...history);
+    } else {
+      // Findings lead (Issue #1413 cluster 6; Issue #1524 6.1): no in-page title and no separate summary bar — renderRun
+      // draws the one-row header that names the Run and carries the history fold, the 新建审阅 actions and the one export.
+      const changed = next.coverage.filter((row) => row.state === 'needs-review').length;
+      if (changed > 0) node.append(el('p', 'attention-note review-coverage-warning', `稿件有改动，${changed} 类审阅需要复审。`));
     }
-    if (run !== null) node.append(renderRun(next, run));
+    if (run !== null) node.append(renderRun(next, run, hasFindings));
     swapCard(node);
     if (restore !== null) {
       const match = Array.from(node.querySelectorAll<HTMLElement>('button, select, textarea, input, [tabindex]'))
@@ -1062,23 +1060,42 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   // ---- the opened Run ---------------------------------------------------------------------------------
 
-  function renderRun(next: ReviewWorkspaceProjection, run: ReviewRunProjection): HTMLElement {
+  function renderRun(next: ReviewWorkspaceProjection, run: ReviewRunProjection, hasFindings: boolean): HTMLElement {
     const section = el('section', 'review-run');
     section.dataset['reviewRunId'] = run.reviewRunId;
     section.dataset['reviewRunState'] = run.state;
     const heading = el('div', 'review-run-heading');
     const title = el('h4', undefined, reviewRunHeading(run.label));
     title.tabIndex = -1;
-    heading.append(title, pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
+    heading.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]), title);
     appendProposalOffer(heading, run);
-    const meta = el('span', 'review-run-meta', `${reviewRunMetaLine(run.scope.label, run.manuscript.revisionLabel)} · ${reviewCreatedLine(localInstantLabel(run.createdAt))}`);
+    const meta = el('span', 'review-run-meta', `${reviewRunMetaLine(run.scope.label, run.manuscript.revisionLabel)} · ${reviewCreatedLine(reviewMinuteLabel(run.createdAt))}`);
     meta.append(el('span', 'technical-identity', run.createdAt));
     if (run.authorization !== null) {
-      const authorized = el('span', 'review-run-authorized', reviewAuthorizedLine(localInstantLabel(run.authorization.authorizedAt)));
+      const authorized = el('span', 'review-run-authorized', reviewAuthorizedLine(reviewMinuteLabel(run.authorization.authorizedAt)));
       authorized.append(el('span', 'technical-identity', run.authorization.authorizedAt));
       meta.append(authorized);
     }
     heading.append(meta);
+    if (runHasResults(run)) {
+      section.classList.add('review-run-leading');
+      meta.textContent = `${run.scope.label.replaceAll('内容块', '段落')} · 创建于 ${reviewMinuteLabel(run.createdAt)}`;
+      // One row (Issue #1524 6.1): the Run's state, name, scope and date share it with the history fold, the 新建审阅
+      // actions and the one export entry. The synthesis header below keeps its own one-line behaviour (#1433 / #1510).
+      const reasonId = uid('new-review-reason');
+      const history: HTMLElement[] = [];
+      if (next.coverage.some((row) => row.lastRunOrdinal !== null) || next.runs.some((summary) => ['running', 'settled', 'partial', 'failed'].includes(summary.state))) {
+        history.push(renderCoverage(next, reasonId));
+      }
+      history.push(renderRuns(next));
+      const fold = el('details', 'review-history-fold');
+      fold.open = historyOpen;
+      fold.addEventListener('toggle', () => { historyOpen = fold.open; });
+      fold.append(el('summary', undefined, '历史 ▾'), el('p', 'review-history-categories', `已审 ${run.categories.length} 类`), ...history);
+      heading.append(fold);
+      heading.append(renderNewReview(next, reasonId));
+    }
+    heading.append(renderHeaderExport(run, hasFindings));
     section.append(heading);
     if (run.synthesis !== undefined) {
       const summary = reviewSynthesisNode(run.synthesis, run.synthesis.modelLabel ?? run.modelLabel, (evidence) => {
@@ -1189,6 +1206,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     section.append(options.technicalDetails(
       'review-facts',
+      el('dt', undefined, '开始于'), el('dd', undefined, localInstantLabel(run.createdAt)),
+      el('dt', undefined, '授权于'), el('dd', undefined, run.authorization === null ? '尚未授权' : localInstantLabel(run.authorization.authorizedAt)),
       el('dt', undefined, '审阅记录'), el('dd', 'technical-identity', `${run.reviewRunId} · ${run.label}`),
       el('dt', undefined, '稿件 pin'), el('dd', 'technical-identity', `${technicalWords(run.manuscript.revisionLabel, '修订版')} · ${run.manuscript.revisionId} · 修订日志序号 ${run.manuscript.journalSequence} · ${run.manuscript.workingDigest}`),
       el('dt', undefined, '审阅配置摘要'), el('dd', 'technical-identity', run.configurationDigest),
@@ -1372,26 +1391,40 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   function renderResults(next: ReviewWorkspaceProjection, run: ReviewRunProjection): HTMLElement {
     const section = el('section', 'review-results review-findings-first');
     const headingId = uid('results');
-    const heading = el('h5', undefined, REVIEW_RESULTS_HEADING);
+    const heading = el('h5', undefined, `${REVIEW_RESULTS_HEADING} · ${reviewTotalLine(run.findingCounts)}`);
     heading.id = headingId;
     section.setAttribute('aria-labelledby', headingId);
-    section.append(heading, el('p', 'review-results-counts', reviewResultsCountsLine(run.findingCounts)));
+    heading.classList.add('visually-hidden');
+    section.append(heading);
     const filters = el('div', 'review-filters');
     filters.setAttribute('role', 'group');
     filters.setAttribute('aria-label', '筛选发现');
     const filterSelect = (name: FilterName, choices: ReadonlyArray<readonly [string, string]>): HTMLElement => {
       const label = el('div', 'review-filter');
       label.append(el('span', undefined, REVIEW_FILTER_LABELS[name]));
-      const select = filterChoices({ label: REVIEW_FILTER_LABELS[name], choices: [['', REVIEW_FILTER_ALL], ...choices],
-        value: query.filters[FILTER_KEYS[name]] ?? '', disabled: working,
-        change: (value) => {
-          query.filters = { ...query.filters, [FILTER_KEYS[name]]: value === '' ? null : value } as Filters;
-          query.pages = 1;
-          refresh(true);
-        },
-      });
-      select.dataset['reviewFilter'] = name;
-      label.append(select);
+      if (name === 'chapter') {
+        const native = document.createElement('select');
+        native.setAttribute('aria-label', REVIEW_FILTER_LABELS[name]);
+        for (const [value, text] of [['', REVIEW_FILTER_ALL], ...choices]) native.append(new Option(text, value));
+        native.value = query.filters.chapterBlockId ?? '';
+        native.disabled = working;
+        native.dataset['reviewFilter'] = name;
+        native.addEventListener('change', () => { query.filters = { ...query.filters, chapterBlockId: native.value || null }; query.pages = 1; refresh(true); });
+        label.append(native);
+        enhanceSelect(native);
+      } else {
+        const choicesWithCounts = choices.map(([value, label]) => [value, `${label} ${name === 'severity' ? run.findingCounts[value as 'must' | 'should' | 'note'] : name === 'status' ? run.findingCounts[value as 'pending' | 'handled' | 'ignored'] : ''}`.trim()] as const);
+        const select = filterChoices({ label: REVIEW_FILTER_LABELS[name], choices: [['', `${REVIEW_FILTER_ALL} ${run.findingCounts.pending + run.findingCounts.handled + run.findingCounts.ignored}`], ...choicesWithCounts],
+          value: query.filters[FILTER_KEYS[name]] ?? '', disabled: working,
+          change: (value) => {
+            query.filters = { ...query.filters, [FILTER_KEYS[name]]: value === '' ? null : value } as Filters;
+            query.pages = 1;
+            refresh(true);
+          },
+        });
+        select.dataset['reviewFilter'] = name;
+        label.append(select);
+      }
       return label;
     };
     const chapterPage = next.listPages?.[CHAPTER_PAGE_PATH];
@@ -1402,7 +1435,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       chapterChoices.push([chosenChapter, TASK_SELECTED_CHAPTER_NOT_LOADED]);
     }
     filters.append(
-      filterSelect('category', run.categories.map((category) => [category.categoryId, category.label] as const)),
       filterSelect('severity', REVIEW_FINDING_SEVERITIES.map((severity) => [severity, REVIEW_FINDING_SEVERITY_LABELS[severity]] as const)),
       filterSelect('status', REVIEW_FINDING_STATUSES.map((status) => [status, REVIEW_FINDING_STATUS_LABELS[status]] as const)),
       filterSelect('chapter', chapterChoices),
@@ -1430,6 +1462,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       });
       filters.append(more);
     }
+    if (query.filters.categoryId !== null) {
+      const all = actionButton('all-categories', 'quiet', () => { query.filters.categoryId = null; query.pages = 1; refresh(true); }, '全部类别');
+      filters.prepend(all);
+    }
     section.append(filters);
     if ((run.excludedTotal ?? 0) > 0) {
       const details = el('details', 'review-excluded');
@@ -1456,11 +1492,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const empty = run.findings.length === 0 ? (filtered ? REVIEW_NO_FILTERED_FINDINGS : REVIEW_NO_FINDINGS) : null;
       const filter = filtered ? reviewFilteredLine(run.findingsTotal) : null;
       const status = [filter, empty].filter((line): line is string => line !== null).map((line) => line.replace(/。$/u, '')).join('；');
-      heading.append(' · ', el('span', `${filtered ? 'review-filtered' : ''}${empty === null ? '' : ' review-no-findings'}`.trim(), `${status}。`));
+      filters.append(el('span', `${filtered ? 'review-filtered' : ''}${empty === null ? '' : ' review-no-findings'}`.trim(), `${reviewShownLine(run.findings.length, run.findingsTotal)} ${status}。`));
     }
     for (const category of run.categories) {
       const findings = run.findings.filter((finding) => finding.categoryId === category.categoryId);
-      if (findings.length === 0 && ui.batch?.categoryId !== category.categoryId) continue;
+
+      if (category.findingsCount === 0 && ui.batch?.categoryId !== category.categoryId && ui.applied?.categoryId !== category.categoryId) continue;
       section.append(renderGroup(run, category, findings));
     }
     if (run.findingsTruncated) {
@@ -1525,7 +1562,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       select('sourceCondition', (Object.keys(FACTUAL_SOURCE_CONDITION_LABELS) as FactualSourceCondition[]).map((value) => [value, FACTUAL_SOURCE_CONDITION_LABELS[value]] as const)),
       select('actionNeed', (Object.keys(FACTUAL_ACTION_NEED_LABELS) as FactualActionNeed[]).map((value) => [value, FACTUAL_ACTION_NEED_LABELS[value]] as const)),
     );
-    section.append(filters);
+    const filterFold = el('details', 'review-fact-filter-fold');
+    filterFold.open = factFiltersOpen;
+    filterFold.addEventListener('toggle', () => { factFiltersOpen = filterFold.open; });
+    filterFold.append(el('summary', undefined, '筛选 ▾'), filters);
+    section.append(filterFold);
     const list = el('ol', 'fact-lens-rows');
     for (const result of fact.results) list.append(renderFactRow(run, result));
     section.append(list);
@@ -1619,7 +1660,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const group = el('section', 'review-group');
     group.dataset['reviewCategory'] = category.categoryId;
     const heading = el('div', 'review-group-heading');
-    heading.append(el('h6', undefined, `${category.label} · ${reviewGroupCountLine(category.findingsCount)}`));
+    heading.append(el('h6', undefined, `${category.label} · ${reviewGroupCountLine(findings.length, category.findingsCount)}`));
     // V2-UX-REV-006: the batch belongs to a category configured for it (错别字与规范用语); 文学性与表达改进's
     // suggestions are accepted one by one.
     if (category.batchApply && category.output === 'change-suggestion' && category.state === 'settled') {
@@ -1629,7 +1670,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       batch.disabled = working;
       heading.append(batch);
     }
-    group.append(heading);
+    const fold = el('details', 'review-category-fold');
+    fold.open = ui.batch?.categoryId === category.categoryId || ui.applied?.categoryId === category.categoryId || findings.length > 0 && !collapsedGroups.has(category.categoryId);
+    fold.addEventListener('toggle', () => { if (fold.open) collapsedGroups.delete(category.categoryId); else collapsedGroups.add(category.categoryId); });
+    const summary = el('summary');
+    summary.append(heading);
+    fold.append(summary);
+    const only = el('button', 'quiet', '只看此类');
+    only.type = 'button';
+    only.addEventListener('click', () => { query.filters.categoryId = category.categoryId; query.pages = 1; refresh(true); });
+    heading.append(only);
+    group.append(fold);
     const filteredLens = Object.values(fact.filters).some((value) => value !== null);
     const hasLens = category.categoryId === 'factual-review' && fact.lens !== null && (fact.results.length > 0 || filteredLens);
     if (hasLens) group.append(renderFactLens(run));
@@ -1640,6 +1691,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       // A partial run can retain findings for which no evidence result was produced. Keep their actions available.
       if (!hasLens || !filteredLens && fact.next === null && !lensFindings.has(finding.findingId)) group.append(renderFinding(run, category, finding));
     }
+    for (const child of Array.from(group.children)) if (child !== fold) fold.append(child);
     return group;
   }
 
@@ -1686,7 +1738,19 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (finding.status !== 'pending') main.append(el('p', 'review-finding-status-detail', finding.statusDetail));
     if (finding.ignoreReason !== null) main.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
     if (finding.historicalMarker !== null) main.append(el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker));
-    article.append(main, renderFindingActions(run, finding));
+    const actions = renderFindingActions(run, finding);
+    const controls = Array.from(actions.children).filter((child): child is HTMLElement => child instanceof HTMLElement);
+    const primary = finding.output === 'annotation' ? controls.find((control) => control.dataset['reviewAction'] === 'ignore-now') : controls[1];
+    if (primary !== undefined) actions.insertBefore(primary, controls[1] ?? null);
+    const extras = controls.filter((control) => control !== controls[0] && control !== primary);
+    if (extras.length > 0) {
+      const more = el('details', 'review-more review-card-more');
+      const summary = el('summary', undefined, '⋯');
+      summary.setAttribute('aria-label', '更多发现操作');
+      more.append(summary, menuPanel(...extras));
+      actions.append(more);
+    }
+    article.append(main, actions);
     const reasonAsk = reasonAsks.get(finding.findingId);
     if (reasonAsk !== undefined && reasonAsk.dataset['learningAskState'] !== 'dismissed') article.append(reasonAsk);
     if (ui.capabilityFindingId === finding.findingId) article.append(capabilityNote());
@@ -1933,7 +1997,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       run.state === 'running'
         ? unavailableAction('generate-report', REVIEW_REPORT_WAIT_RUNNING, label)
         : actionButton('generate-report', 'secondary', () => void generateReport(run), label),
-      report === null ? unavailableAction('export', REVIEW_EXPORT_NEEDS_REPORT, EXPORT_ACTION_LABELS.open) : exportReportAction(run, report),
       // 将以上工序保存为可复用工序 (Issue #65, S30; ADR 0087 §2): on a finished Run only, and why not otherwise.
       run.capture.available
         ? captureAction(run)
@@ -1961,15 +2024,30 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     return control;
   }
 
-  /** 导出… of the report version on show, named for a screen reader by that version. */
-  function exportReportAction(run: ReviewRunProjection, report: ReviewReportProjection): HTMLElement {
-    const reportLabel = reportExportLabel(run.label, report.version);
-    const menu = exporter.menu({ kind: 'report', reportId: report.reportId }, reportLabel);
-    const control = menu.querySelector<HTMLElement>('summary')!;
-    control.dataset['reviewAction'] = 'export';
-    menu.addEventListener('click', () => { exportRunId = run.reviewRunId; });
-    control.dataset['reportVersion'] = String(report.version);
-    control.setAttribute('aria-label', exportOpenAccessibleName({ kind: 'report', label: reportLabel }));
+  /** One export entry for every workspace state, with whole-book and versioned formats at one level. */
+  function renderHeaderExport(run: ReviewRunProjection | null, hasFindings: boolean): HTMLElement {
+    const report = run?.report ?? null;
+    const label = run !== null && report !== null ? reportExportLabel(run.label, report.version) : null;
+    const menu = (report !== null
+      ? exporter.menu({ kind: 'report', reportId: report.reportId }, label)
+      : el('details')) as HTMLDetailsElement;
+    menu.classList.add('review-more', 'review-header-export');
+    if (report === null) menu.append(el('summary', undefined, '导出 ▾'), menuPanel(unavailableAction('export-version', REVIEW_EXPORT_NEEDS_REPORT, '导出报告')));
+    const summary = menu.querySelector<HTMLElement>('summary')!;
+    summary.dataset['reviewAction'] = 'export';
+    summary.setAttribute('aria-label', label === null ? '导出审阅报告' : exportOpenAccessibleName({ kind: 'report', label }));
+    if (report !== null) summary.dataset['reportVersion'] = String(report.version);
+    const panel = menu.querySelector<HTMLElement>(report === null ? '.ui-menu-panel' : '.export-menu-body')!;
+    panel.prepend(reviewReportExportButton({ api, bookId, enabled: () => hasFindings, setStatus: options.setStatus, errorMessage: options.errorMessage }));
+    menu.open = exportMenuOpen;
+    menu.addEventListener('toggle', () => { exportMenuOpen = menu.open; });
+    menu.addEventListener('click', (event) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('[data-export-format-action], [data-review-action="export-docx-report"]')) return;
+      exportRunId = run?.reviewRunId ?? null;
+      exportMenuOpen = false;
+      menu.open = false;
+    });
     return menu;
   }
 
@@ -2262,7 +2340,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (kind === 'ignore') ui.ignore = null;
     else ui.convert = null;
     if (projection !== null) renderCard(projection);
-    card?.querySelector<HTMLElement>(`article[data-finding-id="${findingId}"] [data-review-action="${kind === 'ignore' ? 'ignore' : 'convert-to-suggestion'}"]`)?.focus();
+    const control = card?.querySelector<HTMLElement>(`article[data-finding-id="${findingId}"] [data-review-action="${kind === 'ignore' ? 'ignore' : 'convert-to-suggestion'}"]`);
+    const closed = control?.closest<HTMLDetailsElement>('details.review-card-more:not([open])');
+    (closed?.querySelector<HTMLElement>('summary') ?? control)?.focus();
   }
 
   /**

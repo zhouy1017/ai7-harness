@@ -20,6 +20,7 @@ export function mountParagraphAnalysis(options: {
   viewed(revision: { revisionId: string; ordinal: number }): Promise<void>;
   notice(): void;
   beforeOpen(): void;
+  onClose?(): void;
   openItem(item: ParagraphAnalysisProjection['items'][number], revisionId: string): void;
 }): { refresh(): void; close(): void; toggle(): void; destroy(): void } {
   const { root, entry } = options;
@@ -75,7 +76,7 @@ export function mountParagraphAnalysis(options: {
     finally { reading = false; if (pending) { pending = false; refresh(); } }
   };
   const refresh = (): void => { if (timer !== undefined) window.clearTimeout(timer); timer = window.setTimeout(() => void load(), 220); };
-  const close = (): void => { root.hidden = true; entry.setAttribute('aria-expanded', 'false'); };
+  const close = (): void => { root.hidden = true; entry.setAttribute('aria-expanded', 'false'); options.onClose?.(); };
   root.addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.preventDefault(); close(); entry.focus(); } });
   const interval = window.setInterval(refresh, 5_000);
   refresh();
