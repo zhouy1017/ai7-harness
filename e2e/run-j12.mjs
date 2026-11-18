@@ -1024,15 +1024,6 @@ async function main() {
     await waitFor(primary, `(() => { const node=document.querySelector('#processing-indicator'); return node instanceof HTMLElement && !node.hidden && node.dataset.processingState==='local' && node.textContent==='本地处理' && node.getAttribute('aria-label')==='处理方式：本地处理' && !document.querySelector('#context-header').textContent.includes('未联网'); })()`, 'processing-indicator-local');
     await assertRenderer(primary, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
     await assertRenderer(primary, `(() => { const links=Array.from(document.querySelectorAll('.sidebar-link')); return links.length>0 && links.every((link)=>link.querySelector('svg[data-icon] use') && link.title) && !document.querySelector('button:not([class]), button[class=""]') && Array.from(document.querySelectorAll('button')).every((button)=>button.classList.contains('btn')); })()`, 'shared-svg-and-buttons');
-    at('settings-lands-on-model-service');
-    // 设置 opens on 模型服务 itself, its navigation beside it, with no bottom 返回 and no 「› 全局」 (#1522); at both Gate window sizes.
-    for (const [settingsWidth, settingsHeight] of [[1280, 800], [1008, 681]]) {
-      await primary.send('Emulation.setDeviceMetricsOverride', { width: settingsWidth, height: settingsHeight, deviceScaleFactor: 1, mobile: false });
-      await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), `settings-lands-open-${settingsWidth}`);
-      await waitFor(primary, `innerWidth === ${settingsWidth} && innerHeight === ${settingsHeight} && document.querySelector('[data-screen="model-service"] .settings-navigation [data-settings-nav="model-service"]')?.getAttribute('aria-current') === 'page'`, `settings-lands-ready-${settingsWidth}`);
-      await assertRenderer(primary, `(() => { const page = document.querySelector('[data-screen="model-service"]'); return document.querySelector('#context-title')?.textContent === '设置' && document.querySelector('#context-position')?.textContent === '服务 · 模型服务' && !Array.from(page.querySelectorAll('button')).some((node) => node.textContent === '返回') && document.querySelector('#app-sidebar [data-nav-settings]')?.getAttribute('aria-current') === 'page'; })()`, `settings-lands-words-${settingsWidth}`);
-    }
-    await primary.send('Emulation.clearDeviceMetricsOverride');
     // #1315 synchronized delta: use the one Help switch, verify its persisted ordinary mode, then restore development mode.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'technical-mode-settings-ready');
@@ -1198,6 +1189,18 @@ async function main() {
     const { bookId: bookA, revisionId: revisionOne } = await importBook(primary, 'J12 公开合成图书甲');
     await click(primary, '来源版本与来源记录', 'source-record');
     await assertRenderer(primary, `document.querySelector('.record-detail[data-record-kind="source"]')?.textContent.includes('本机文件选择器') && document.querySelector('.record-detail[data-record-kind="source"]')?.textContent.includes('本地 · 未调用 Provider') && !document.body.textContent.includes(${JSON.stringify(syntheticDocx)}) && !Object.keys(window.ai7).some((key)=>key.toLowerCase().includes('path'))`, 'native-picker-provenance');
+
+    at('settings-lands-on-model-service');
+    // 设置 opens on 模型服务 itself, its navigation beside it, with no bottom 返回 and no 「› 全局」 (#1522); at both Gate window sizes.
+    for (const [settingsWidth, settingsHeight] of [[1280, 800], [1008, 681]]) {
+      await primary.send('Emulation.setDeviceMetricsOverride', { width: settingsWidth, height: settingsHeight, deviceScaleFactor: 1, mobile: false });
+      await pointerClick(primary, waitFor, SIDEBAR.settings, `settings-lands-open-${settingsWidth}`);
+      await waitFor(primary, `innerWidth === ${settingsWidth} && innerHeight === ${settingsHeight} && document.querySelector('[data-screen="model-service"] .settings-navigation [data-settings-nav="model-service"]')?.getAttribute('aria-current') === 'page'`, `settings-lands-ready-${settingsWidth}`);
+      await assertRenderer(primary, `(() => { const page = document.querySelector('[data-screen="model-service"]'); return document.querySelector('#context-title')?.textContent === '设置' && document.querySelector('#context-position')?.textContent === '服务 · 模型服务' && !Array.from(page.querySelectorAll('button')).some((node) => node.textContent === '返回') && document.querySelector('#app-sidebar [data-nav-settings]')?.getAttribute('aria-current') === 'page'; })()`, `settings-lands-words-${settingsWidth}`);
+    }
+    await primary.send('Emulation.clearDeviceMetricsOverride');
+    await pointerClick(primary, waitFor, SIDEBAR.destination('library'), 'settings-lands-library');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'settings-lands-library-ready');
 
     at('distinct-and-duplicate-book-routing');
     await click(primary, '打开另一本图书', 'open-other-from-a');

@@ -429,9 +429,11 @@ async function runSettingsPages(renderer, cancellation) {
     await waitFor(renderer, `innerWidth === ${paletteWidth} && innerHeight === ${paletteHeight}`, `command-palette-size-${paletteWidth}`);
     await chord('KeyK', 'k', mod);
     await waitFor(renderer, `(() => { const sheet=document.querySelector('.command-palette'); const text=sheet?.querySelector('.command-palette-results')?.textContent ?? ''; const rect=sheet?.getBoundingClientRect(); return sheet?.open===true && text.includes('书库') && text.includes('发起任务') && !text.includes('新建审阅') && !text.includes('开始评估') && !text.includes('查找') && !text.includes('保存') && rect.right <= innerWidth && rect.bottom <= innerHeight; })()`, `command-palette-open-${paletteWidth}`);
-    await fill(renderer, '.command-palette input[type="search"]', '没有这样的命令', `command-palette-search-${paletteWidth}`);
+    await renderer.send('Input.insertText', { text: '没有这样的命令' });
     await waitFor(renderer, `document.querySelector('.command-palette-none')?.textContent === '没有匹配的命令'`, `command-palette-none-${paletteWidth}`);
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('.command-palette'); sheet.close(); return !sheet.open; })()`, `command-palette-close-${paletteWidth}`);
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...ESCAPE_KEY });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...ESCAPE_KEY });
+    await waitFor(renderer, `document.querySelector('.command-palette')?.open === false`, `command-palette-close-${paletteWidth}`);
   }
   await renderer.send('Emulation.clearDeviceMetricsOverride');
 

@@ -963,12 +963,12 @@ async function main() {
     // With no task the 任务 page is one sentence: no box per empty group, no second title, no 「› 全局」 in the header (#1522); at both Gate window sizes.
     for (const [overviewWidth, overviewHeight] of [[1280, 800], [1008, 681]]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width: overviewWidth, height: overviewHeight, deviceScaleFactor: 1, mobile: false });
-      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), `overview-empty-entry-${overviewWidth}`);
+      await pointerClick(renderer, waitFor, SIDEBAR.destination('tasks'), `overview-empty-entry-${overviewWidth}`);
       await waitFor(renderer, `innerWidth === ${overviewWidth} && innerHeight === ${overviewHeight} && document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')?.disabled===false`, `overview-empty-ready-${overviewWidth}`);
       await assertRenderer(renderer, `(() => { const page = document.querySelector('[data-screen="task-overview"]'); const none = page.querySelector('.task-overview-none'); const rect = none?.getBoundingClientRect(); const position = document.querySelector('#context-position'); return document.querySelector('#context-title')?.textContent === '任务' && position.hidden === true && getComputedStyle(position).display === 'none' && page.querySelectorAll('.task-overview-group').length === 0 && none?.textContent === '现在没有任务，可以用上面的「发起任务」开始一项。' && rect.width > 0 && rect.right <= innerWidth && rect.bottom <= innerHeight && rect.top < innerHeight / 2 && !page.querySelector('h1:not(.visually-hidden)'); })()`, `overview-empty-sentence-${overviewWidth}`);
     }
     await renderer.send('Emulation.clearDeviceMetricsOverride');
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'overview-empty-library');
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('library'), 'overview-empty-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'overview-empty-library-ready');
 
     at('first-book-import');
@@ -1722,7 +1722,7 @@ async function main() {
     await waitFor(renderer, `!document.querySelector('.task-overview-sheet')?.open && document.activeElement?.matches('[data-task-overview-start]')`, 'overview-sheet-focus-return');
     await pointerClick(renderer, waitFor, '[data-task-overview-start]', 'overview-sheet-reopen');
     // The sheet opens with no Book ticked on this page (#1522), and each tick is a real press that the button's count follows.
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('.task-overview-sheet'); return sheet.querySelectorAll('input[type="checkbox"]:checked').length===0 && document.querySelector('[data-task-overview-enqueue]')?.textContent==='加入队列（0 本）'; })()`, 'overview-sheet-none-ticked');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('.task-overview-sheet'); return sheet.open===true && sheet.querySelectorAll('input[type="checkbox"]:checked').length===0 && document.querySelector('[data-task-overview-enqueue]')?.textContent==='加入队列（0 本）'; })()`, 'overview-sheet-none-ticked');
     const selectOverviewBooks = async (ids) => {
       const toggle = await renderer.evaluate(`Array.from(document.querySelectorAll('.task-overview-sheet input[type="checkbox"][value]')).filter((input) => input.checked !== ${JSON.stringify(ids)}.includes(input.value)).map((input) => input.value)`);
       for (const id of toggle) await pointerClick(renderer, waitFor, `.task-overview-sheet input[value="${id}"]`, 'overview-sheet-book');

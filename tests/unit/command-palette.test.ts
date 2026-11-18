@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { createCommandPalette } from '../../src/renderer/command-palette.js';
 import { commandUsable, goBack } from '../../src/renderer/command-usable.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { ScreenReturnHistory } from '../../src/renderer/screen-return.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 
@@ -154,4 +155,22 @@ it('ignores a held Enter on a row that starts a task', async () => {
     row.dispatchEvent(held as never);
     expect(held.defaultPrevented).toBe(true); expect(start).not.toHaveBeenCalled();
   } finally { restore(); }
+});
+
+it('lists AI 助手 anywhere its entry is, and AI 改稿 only with a Book on screen', async () => {
+  const restore = installMiniDom();
+  try {
+    setTechnicalLayerVisible(false);
+    const link = (attribute: 'navDestination' | 'navAgentWorkspace', value: string): void => { const node = document.createElement('a'); node.dataset[attribute] = value; miniDocument.body.append(node as never); };
+    const open = async (currentBookId: string | null): Promise<string[]> => {
+      miniDocument.body.replaceChildren(); link('navDestination', 'global-agent'); link('navAgentWorkspace', 'row');
+      const palette = make({ screen: { ...everything, has: () => false, currentBookId: () => currentBookId } });
+      await palette.open(); await settled();
+      const shown = labels();
+      miniDocument.body.querySelector('.command-palette')?.close();
+      return shown.filter((label) => label === 'AI 助手' || label === 'AI 改稿');
+    };
+    expect(await open(null)).toEqual(['AI 助手']);
+    expect(await open('book-one')).toEqual(['AI 改稿', 'AI 助手']);
+  } finally { setTechnicalLayerVisible(true); restore(); }
 });

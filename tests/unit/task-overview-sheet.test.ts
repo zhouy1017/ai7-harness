@@ -87,13 +87,20 @@ describe('任务 page', () => {
     expect(busy.querySelector('.task-overview-none')).toBeNull();
   });
 
-  it('keeps one button per Book up to six and a list above', async () => {
+  const named = (count: number) => Array.from({ length: count }, (_, index) => ({ bookId: `b${index}`, title: `书${index}` }));
+  it('keeps one button per Book for three Books', async () => {
     const few = await mount([running('a')]);
     expect(few.querySelectorAll('.task-overview-filter-row select')).toHaveLength(0);
-    surface?.destroy();
-    const many = Array.from({ length: 7 }, (_, index) => ({ bookId: `b${index}`, title: `书${index}` }));
-    const lots = await mount([running('a')], many);
+  });
+  it('keeps one button per Book at exactly six', async () => {
+    const six = await mount([running('a')], named(6));
+    expect(six.querySelectorAll('.task-overview-filter-row select')).toHaveLength(0);
+    expect(six.querySelectorAll('.task-overview-filter-row')[0]!.querySelectorAll('button')).toHaveLength(7);
+  });
+  it('offers a list above six Books', async () => {
+    const lots = await mount([running('a')], named(7));
     expect(lots.querySelector('.task-overview-filter-row select')).not.toBeNull();
+    expect(lots.querySelectorAll('.task-overview-filter-row')[0]!.querySelectorAll('button')).toHaveLength(0);
   });
 
   it('names the Book and the task in the cancel confirmation, and hands focus back to the card on 继续保留 and Escape', async () => {
