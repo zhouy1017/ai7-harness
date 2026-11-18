@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { mountLaunchBar, type LaunchBar } from '../../src/renderer/components/launch-bar.js';
+import { createLaunchBarPresentation, mountLaunchBar, type LaunchBar } from '../../src/renderer/components/launch-bar.js';
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../../src/shared/runtime-execution-config.js';
 import { preferenceDefaults } from '../../src/shared/preferences.js';
@@ -256,4 +256,17 @@ it('reads no plan and offers no start while the surface says it cannot start, an
   await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')!.disabled).toBe(false));
   await bar.openPlan();
   expect(previewTaskLaunch).toHaveBeenCalledOnce();
+});
+
+it('closes a launch popover when focus moves on past it, and keeps it while focus stays inside', () => {
+  const options = document.createElement('div'); const inside = document.createElement('select'); options.append(inside);
+  const start = document.createElement('button');
+  const bar = createLaunchBarPresentation(document.createElement('span'), start, { title: '选项', content: options }, null);
+  document.body.append(bar);
+  const details = bar.querySelector<HTMLDetailsElement>('.task-launch-options')!;
+  details.open = true;
+  details.dispatchEvent({ type: 'focusout', bubbles: true, relatedTarget: inside } as never);
+  expect(details.open).toBe(true);
+  details.dispatchEvent({ type: 'focusout', bubbles: true, relatedTarget: start } as never);
+  expect(details.open).toBe(false);
 });
