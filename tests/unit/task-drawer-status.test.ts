@@ -62,7 +62,7 @@ async function openDrawer(plan: TaskPlanProjection, opening: Opening = {}) {
     const details = document.createElement('details'); details.append(...rows); return details;
   };
   const drawer = mountTaskDrawer({ root, shell: document.body, api, technicalDetails, errorMessage: (_error: unknown, fallback: string) => fallback,
-    errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onClose: vi.fn(), onRecorded: vi.fn(), openTaskResult } as unknown as MountTaskDrawerOptions);
+    errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onRecorded: vi.fn(), openTaskResult } as unknown as MountTaskDrawerOptions);
   const task: TaskPlanRequest = { bookId: 'book', kind: 'baseline-analysis', ref: 'task' };
   const open = async () => { drawer.open(task, () => null, undefined, opening.how); await vi.waitFor(() => expect(root.dataset['taskPlanState']).toBe(plan.state.key)); };
   await open();
