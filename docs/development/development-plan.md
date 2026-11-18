@@ -55,10 +55,32 @@ The Owner's 2026-11-16 / 17 decisions moved the programme to this order and put 
 | --- | --- | --- | --- |
 | R4 | 0.7.3 Alpha | The service-layer domain split and faster service tests; in parallel, the interface lane (39 review items plus the review's additions); the #1504 remainder, #1506 and a bounded #1152 check; the networking session (re-recording and the #1074 re-measurement) | [#1517](https://github.com/zhouy1017/ai7-harness/issues/1517) |
 | Interface and pages round | 0.7.4 Alpha | Interface lane two (9 items) and the rarely used pages (17 items); 学习回溯 cleaned up and opened; the review's additions; the styled icon set | [#1539](https://github.com/zhouy1017/ai7-harness/issues/1539) |
-| R5 | 0.8.0 Alpha | The storage rearrangement and the in-app upgrade tool; trustworthy undo (3 items); the real version list; the #1027 decision point | [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540) |
+| R5 | 0.8.0 Alpha | The storage rearrangement and the in-app upgrade tool; trustworthy undo (3 items); the real version list; the #1027 decision point. Design accepted in [ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md) (#1555; the Owner’s 「R5按照推荐」, 2026-11-18); no code started. Slices R5-1 … R5-7 below start after 0.7.3 is delivered | [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540) |
 | One human test | — | Arranged by the Owner after 0.8.0 is delivered; the real-editor evaluation (the second half of #1074) happens here too | — |
 
 The three rounds overlap in development and keep this delivery order. The [wave Issue #1517](https://github.com/zhouy1017/ai7-harness/issues/1517) owns the R4 batches, file ownership and merge order; [PROGRESS](../../PROGRESS.md) owns what is delivered.
+
+## R5 → 0.8.0 Alpha: accepted design (#1540, ADR 0105)
+
+The storage design of [#1555](https://github.com/zhouy1017/ai7-harness/issues/1555) is accepted in [ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md). The Owner answered all 13 of its decisions as recommended: 「R5按照推荐」, 2026-11-18, recorded on [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540#issuecomment-6975379870).
+
+0.8.0 introduces schema revision 117, a single baseline that raises the store to **Data Version 2**; 0.7.4 adds no schema revision. All 408 `RAISE(ABORT)` triggers stay, including the 12 import abandonment-cleanup blockers and their 2 validators. Every Data Version 1 store, from 0.7.2 on, reaches 0.8.0 only through the in-app upgrade tool, and the old store is kept until the editor deletes it.
+
+R5 builds on `codex/integration-0.8.0`. R5-2 through R5-6 travel as one train, so the fold never lands without its converter.
+
+| Slice | What the editor can newly do | Order |
+| --- | --- | --- |
+| R5-1 | A suggestion moved whole by 分段 / 合段 keeps its 撤销本次修改 | After #1536 merges; beside 0.7.4 |
+| R5-2 | (internal) One baseline at revision 117 / Data Version 2; the migration chain is deleted | First on the train |
+| R5-3 + R5-4 | Structural edits on a 46,000-paragraph manuscript stop rewriting every later paragraph; Ctrl+Z undoes accepted suggestions, replace-all and AI edits as one step each, says where, survives a restart and never gets stuck | After R5-2 and R5-1, one train |
+| R5-5 | A real version list in 工作概览: view, export as DOCX, restore (undoable once) | After R5-3 + R5-4 |
+| R5-6 | One-click upgrade to 0.8.0 with a before/after comparison, the old data kept, and 「回到升级前的数据」; `.ai7db` from 0.7.2 on imports directly | After R5-5 and #1556; lands the train |
+| R5-7 | Acceptance on real 0.7.x stores built from `SampleBooks/`, interrupted at every phase, with rollback drills, DOCX round trip, 15 Journeys, the full guest ladder and the hosted Full Gate; 0.8.0 | After the train and 0.7.4 |
+
+Measured targets, against the [#1557](https://github.com/zhouy1017/ai7-harness/issues/1557) baseline:
+- a split or join at 46,000 paragraphs writes under 1 % of today's write-ahead bytes;
+- reads stay within 10 % of the baseline;
+- undoing a 2,000-place replace-all holds the write lock at most 2 s.
 
 ## Delivered #1444 (0.6.5 Beta)
 
