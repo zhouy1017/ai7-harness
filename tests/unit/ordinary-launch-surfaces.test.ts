@@ -170,7 +170,7 @@ async function ordinaryRedo() {
   return { root, api, capture, bookId, close };
 }
 
-it('shows the ordinary baseline redo budget lock with its reason and starts with the retained budget', async () => {
+it('lets an ordinary baseline redo change its budget tier, revising the plan and then authorizing it', async () => {
   const view = await ordinaryRedo();
   const button = (name: string) => miniDocument.querySelector(`[data-task-drawer-control="${name}"]`);
   try {
@@ -178,14 +178,20 @@ it('shows the ordinary baseline redo budget lock with its reason and starts with
       await vi.waitFor(() => expect(button('redo')?.disabled).toBe(false)); button('redo')!.click();
       await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-launch-option="budget"]')).not.toBeNull());
       const budget = miniDocument.querySelector('[data-task-launch-option="budget"]')!;
-      // #1526 / #1573: flip to editable/new-budget execution when the service projection companion fix joins this lane.
-      expect(budget.disabled).toBe(true); expect(budget.value).toBe('50000');
-      expect(view.root.querySelector('.task-launch-budget-reason')?.textContent).toContain('启动设置');
-      expect(miniDocument.activeElement).not.toBe(budget); expect(button('start')!.disabled).toBe(false);
+      // #1573 joined: the ordinary redo plan takes a budget edit; the tier goes through the existing revise-plan request.
+      const [retained, chosen] = iteration === 0 ? ['50000', 100_000] : ['100000', 200_000];
+      expect(budget.disabled).toBe(false); expect(budget.value).toBe(retained);
+      expect(view.root.querySelector('.task-launch-budget-reason')).toBeNull();
+      budget.value = String(chosen); budget.dispatchEvent({ type: 'change', bubbles: true });
       const before = view.capture.wireRequests.length; button('start')!.click();
       await vi.waitFor(() => expect(view.capture.wireRequests.length).toBeGreaterThan(before));
-      expect(view.api.editBaselineAnalysisPlan).not.toHaveBeenCalled();
+      expect(view.api.editBaselineAnalysisPlan).toHaveBeenCalledTimes(iteration + 1);
+      const edit = view.api.editBaselineAnalysisPlan.mock.calls[iteration]![0];
+      expect(edit.runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: chosen });
+      const editFrame = { id: randomUUID(), op: 'editBaselineAnalysisPlan', input: { ...edit, bookId: view.bookId } };
+      expect(decodeRequest(new TextEncoder().encode(JSON.stringify(editFrame)))).toEqual(editFrame);
       const input = view.api.authorizeBaselineAnalysis.mock.calls[iteration]![0];
+      expect(input.planEnvelopeDigest).not.toBe(edit.planEnvelopeDigest);
       const frame = { id: randomUUID(), op: 'authorizeBaselineAnalysis', input: { ...input, bookId: view.bookId } };
       expect(decodeRequest(new TextEncoder().encode(JSON.stringify(frame)))).toEqual(frame);
       await vi.waitFor(() => expect(button('cancel-run')?.disabled).toBe(false));
@@ -227,8 +233,7 @@ it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('%
       ref = store.inspectTaskPlan({ ...target, ref: null }).ref;
     }
     const redo = store.inspectTaskPlan({ ...target, ref });
-    // #1526 / #1573: baseline and custom ordinary projections currently report the remote route as a budget lock.
-    expect(redo.edit.budget?.settable).toBe(operation !== 'launchBaselineAnalysis' && operation !== 'launchCustomAnalysis');
-    if (!redo.edit.budget?.settable) expect(redo.edit.budget?.reason).toContain('开发者实时启动参数');
+    // #1573 joined: every ordinary redo plan takes a budget edit (developer-live alone still locks it, see launch-redo.test.ts).
+    expect(redo.edit.budget).toMatchObject({ settable: true, reason: null });
   } finally { await jobs.dispose(); await capture.owner.dispose(); governor.close(); await governor.whenIdle(); capture.assertMatched(); store.close(); await roots.dispose(); }
 }, 60_000);

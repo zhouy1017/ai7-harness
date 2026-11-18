@@ -121,3 +121,20 @@ it('revises a changed tier and then records the when-online start when the redo 
   expect(authorizeBaselineAnalysis).not.toHaveBeenCalled();
   drawer.close(false);
 });
+
+it('keeps a developer-live redo budget locked with its reason in ordinary words, and starts with the retained ceiling', async () => {
+  // After #1573 only developer-live answers a prepared redo's budget as not settable (its launch sets the ceiling).
+  const prepared = { ...planWith({}), ref: 'redo-task' };
+  const editBaselineAnalysisPlan = vi.fn(async () => ({ planVersion: { ordinal: 2 } }));
+  const authorizeBaselineAnalysis = vi.fn(async () => ({ state: 'queued' }));
+  const { root, drawer } = await openBudgetRedo(prepared, { editBaselineAnalysisPlan, authorizeBaselineAnalysis });
+  const budget = miniDocument.querySelector('[data-task-launch-option="budget"]')!;
+  expect(budget.disabled).toBe(true);
+  expect(budget.value).toBe('240000');
+  const reason = root.querySelector('.task-launch-budget-reason')!.textContent;
+  expect(reason).toContain('启动设置'); expect(reason).not.toContain('开发者实时启动参数');
+  miniDocument.querySelector('[data-task-drawer-control="start"]')!.click();
+  await vi.waitFor(() => expect(authorizeBaselineAnalysis).toHaveBeenCalledWith({ taskIntentId: 'redo-task', planEnvelopeDigest: 'e'.repeat(64) }));
+  expect(editBaselineAnalysisPlan).not.toHaveBeenCalled();
+  drawer.close(false);
+});
