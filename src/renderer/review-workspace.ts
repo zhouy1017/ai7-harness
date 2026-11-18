@@ -828,6 +828,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (asked === null || meta === undefined || meta.nextOrdinal === null || working) return;
     const runId = asked.run?.reviewRunId ?? null;
     pagesReading.add(path);
+    const earlierFailure = pageFailures.get(path);
     pageFailures.delete(path);
     const control = card?.querySelector<HTMLButtonElement>(`[data-review-page="${path}"] button`);
     if (control) control.disabled = true;
@@ -835,10 +836,13 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const release = (): void => {
       pagesReading.delete(path);
       const free = card?.querySelector<HTMLButtonElement>(`[data-review-page="${path}"] button`);
-      if (free && !working) free.disabled = false;
+      // While a finding action is in flight the control waits for it, and that action's end frees it.
+      if (free) { if (working) free.dataset['workHeld'] = ''; else free.disabled = false; }
     };
     void api.getTaskPlanPage({ kind: 'review-run', ref: runId, path, afterOrdinal: meta.nextOrdinal, digest: meta.digest }).then((page) => {
       release();
+      // The page that failed before has now been read: its error in the status bar is over.
+      if (earlierFailure !== undefined) options.setStatus.settle(earlierFailure);
       const current = projection;
       const now = current?.listPages?.[path];
       if (destroyed || current === null || page.path !== path || (current.run?.reviewRunId ?? null) !== runId || now === undefined ||
@@ -902,13 +906,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
    * reason until a read succeeds, through every repaint. The status bar and the card's alert hear it only when the words change.
    */
   let readFailure: string | null = null;
+  let rereadPressed = false;
   function readFailedNote(reason: string): HTMLElement {
     const note = el('p', 'review-read-failed attention-note', reviewReadFailedLine(reason));
     note.setAttribute('role', 'alert');
     return note;
   }
   function markReadFailed(reason: string): void {
-    const changed = readFailure !== reason;
+    // The editor's own 重新读取 hears its answer even when the words are the same as before.
+    const changed = readFailure !== reason || rereadPressed;
+    rereadPressed = false;
     readFailure = reason;
     if (changed) options.setStatus(reason, 'error');
     if (card === undefined || card.dataset['reviewState'] === 'unavailable') return;
@@ -923,9 +930,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const previous = projection;
     next = retainTaskPlanPages(next, previous);
     projection = next;
+    // A failed page of another Run's list is not this Run's to say.
+    if ((previous?.run?.reviewRunId ?? null) !== (next.run?.reviewRunId ?? null)) pageFailures.clear();
     // A read that succeeds after refused ones ends the error they raised, silently, unless another has replaced it.
     if (readFailure !== null) options.setStatus.settle(readFailure);
     readFailure = null;
+    rereadPressed = false;
     if (card !== undefined) {
       delete card.dataset['reviewRead'];
       card.querySelector('.review-read-failed')?.remove();
@@ -974,7 +984,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const reread = el('button', 'secondary', REVIEW_REREAD);
     reread.type = 'button';
     reread.dataset['reviewAction'] = 'reread';
-    reread.addEventListener('click', () => { reread.disabled = true; refresh(true); });
+    reread.addEventListener('click', () => { reread.disabled = true; rereadPressed = true; refresh(true); });
     unavailable.append(reread);
     const refocus = document.activeElement instanceof HTMLElement && document.activeElement.dataset['reviewAction'] === 'reread';
     swapCard(unavailable);
