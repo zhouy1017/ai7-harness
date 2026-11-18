@@ -1,4 +1,4 @@
-import { AnalysisError } from './analysis/baseline-analysis-store.js';
+import type { AnalysisError } from './analysis/baseline-analysis-store.js';
 import { StoreError } from './store-records.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { link, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
@@ -2319,12 +2319,12 @@ export function defaultExportOptions(): ManuscriptExportOptions {
   return { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS };
 }
 
-export function inspectManuscriptExportReceipt(host: { assertAvailable(): void; readonly manuscriptExport: ManuscriptExportStore }, input: InspectManuscriptExportReceiptInput): ManuscriptExportReceiptProjection {
+export function inspectManuscriptExportReceipt(host: { assertAvailable(): void; readonly manuscriptExport: ManuscriptExportStore; readonly AnalysisError: typeof AnalysisError }, input: InspectManuscriptExportReceiptInput): ManuscriptExportReceiptProjection {
     host.assertAvailable();
     try {
       return host.manuscriptExport.receipt(input);
     } catch (error) {
-      if (error instanceof ExportLedgerError || error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      if (error instanceof ExportLedgerError || error instanceof host.AnalysisError) throw new StoreError(error.code, error.message);
       throw error;
     }
   }

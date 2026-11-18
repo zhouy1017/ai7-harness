@@ -45,7 +45,7 @@ import {
 import {
   EditorialMarkStore
 } from './editorial-marks.js';
-import { canonicalDegradationDecision, type DraftSnapshot, type IngestedDocx, type ResolvedImportTarget, type WordIntakePlan } from './import-review-records.js';
+import type { canonicalDegradationDecision, DraftSnapshot, IngestedDocx, ResolvedImportTarget, WordIntakePlan } from './import-review-records.js';
 import type { createWordImportedMarks, validateWordImportedMarkSources, stageImportedMarks, stagedImportedMarksMatch } from './imported-marks.js';
 import {
   LOCAL_LEARNING_POLICY_BASIS,
@@ -55,7 +55,7 @@ import {
 import {
   EditorialLearningLedger
 } from './learning/ledger.js';
-import { EditorialMemoryFacade } from './learning/memory-facade.js';
+import type { EditorialMemoryFacade } from './learning/memory-facade.js';
 import { stageParagraphPieces, stagedParagraphPiecesMatch, type StagedParagraphPiece } from './manuscript/import-structure.js';
 import {
   legacyBlockSources,
@@ -1914,6 +1914,8 @@ export function recordTextBoxChoice(db: DatabaseSync, fidelityReviewId: string, 
 }
 
 export interface ImportRetentionOperationsHost {
+  readonly EditorialMemoryFacade: typeof EditorialMemoryFacade;
+  readonly canonicalDegradationDecision: typeof canonicalDegradationDecision;
   readonly stageImportedMarks: typeof stageImportedMarks;
   readonly stagedImportedMarksMatch: typeof stagedImportedMarksMatch;
   readonly createWordImportedMarks: typeof createWordImportedMarks;
@@ -2178,7 +2180,7 @@ export function commitWordEvidence(host: ImportRetentionOperationsHost, word: Wo
     // This import's three operations historically shared one ledger/read proof across its writes.
     // A facade factory per method would re-read controls here; retain that operation-local lifetime.
     const learning = host.learningLedger();
-    const ledger = new EditorialMemoryFacade(host.authority, () => learning);
+    const ledger = new host.EditorialMemoryFacade(host.authority, () => learning);
     const controls = ledger.wordImportControls(bookId, materials);
     if (reviewedTarget.kind === 'existing-book') requireStore(canonicalJson(controls) === canonicalJson(reviewedTarget.controls),
       'WORD_ADMISSION_STALE', 'Word 相关学习设置或材料排除在审阅后已经变化。');
@@ -2375,7 +2377,7 @@ export function assertImportPostconditions(host: ImportRetentionOperationsHost, 
       const decision = one(decisions, 'IMPORT_POSTCONDITION_FAILED', '降级导入未形成唯一决定。');
       requireStore(
         asString(decision.degradation_decision_id) === input.degradationDecisionId &&
-          asString(decision.decision) === canonicalDegradationDecision(input.fidelityPlan),
+          asString(decision.decision) === host.canonicalDegradationDecision(input.fidelityPlan),
         'IMPORT_POSTCONDITION_FAILED',
         '降级导入决定与保真审阅不匹配。',
       );

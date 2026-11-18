@@ -641,6 +641,7 @@ export function createReimportResolutionWork(host: ManuscriptReimportOperationsH
     return { workId, total: totalMappings };
   }
 
+/** The mappings on one side of a row, in the row's order, with what the commit needs of each. */
 export function reimportGroupMembers(host: ManuscriptReimportOperationsHost, groupId: string, side: 'current' | 'staged'): Array<{ mappingId: string; changeKind: 'unchanged' | 'move' | 'edit' | 'insert' | 'delete'; currentBlockId: string | null }> {
     return (host.authority.prepare(
       `SELECT m.mapping_id, m.change_kind, m.current_block_id
@@ -653,6 +654,7 @@ export function reimportGroupMembers(host: ManuscriptReimportOperationsHost, gro
     }));
   }
 
+/** Every identity a verb writes is still unwritten, and every current identity it carries still unclaimed. */
 export function requireReimportPendingOpen(host: ManuscriptReimportOperationsHost, comparisonId: string, pending: ReadonlyMap<string, ReimportPendingResolution>): void {
     for (const resolution of pending.values()) {
       const written = host.authority.prepare(
@@ -810,6 +812,10 @@ export function advanceReimportResolutionWork(host: ManuscriptReimportOperations
     };
   }
 
+/**
+   * The resolved rows of a comparison as the marks see them (Issue #412, S63): each row's blocks in the revision the
+   * reimport replaced, and the blocks the commit put in its place, read from the commit's own rows.
+   */
 export function reimportMarkRows(host: ManuscriptReimportOperationsHost, comparisonId: string, commitWorkId: string): ReimportMarkRow[] {
     const current = host.authority.prepare(
       `SELECT m.current_block_id, m.current_position FROM manuscript_reimport_group_members gm
@@ -839,6 +845,11 @@ export function reimportMarkRows(host: ManuscriptReimportOperationsHost, compari
     });
   }
 
+/**
+   * The chapter-level rows of one comparison (Issue #412, plan slice S63), from the mappings just recorded: runs of
+   * changed blocks between exact ones, each with its members on either side, the heading it stands under, and the
+   * set that marks the comparison as grouped. In the caller's transaction, before the preparation rows are dropped.
+   */
 export function persistReimportGroups(host: ManuscriptReimportOperationsHost, comparisonId: string, draftId: string, workId: string): void {
     const mappings = (host.authority.prepare(
       `SELECT mapping_id, change_kind, current_position, staged_position
@@ -2182,6 +2193,7 @@ export function reimportEvidence(host: ManuscriptReimportOperationsHost, draftId
     };
   }
 
+/** The chapter-level rows of a comparison: how many, how many are unresolved, and how many blocks matched exactly. */
 export function reimportGroupCounts(host: ManuscriptReimportOperationsHost, draftId: string): { groups: number; unresolvedGroups: number; exactBlocks: number } {
     const counts = one(host.authority.prepare(
       `SELECT gs.group_count, gs.anchor_count,
