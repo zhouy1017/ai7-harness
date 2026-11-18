@@ -1,5 +1,5 @@
 import { chooseDispatch } from './dispatch-chooser.mjs';
-import { commentsPaneForms, commentsSelectMark } from './comments-pane.mjs';
+import { commentsPaneForms, commentsSelectMark, commentsTriageForms } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { existsSync } from 'node:fs';
@@ -572,6 +572,8 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'dispatch-chooser-back-to-text');
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'dispatch-chooser-back-ready');
     await renderer.evaluate(`window.ai7.removeModelServiceCredential()`);
+    fastCredentialSaved = false;
+    fastCredentialReference = undefined;
     at('selection-menu-empty');
 
     // Two paragraphs long enough to mark, whose first 80 code units are 80 graphemes.
@@ -1162,6 +1164,7 @@ async function main() {
     await settled(renderer, 'local-workflow-settled');
 
     await commentsPaneForms(renderer, requireJourney, waitFor, at, 'apply');
+    await commentsTriageForms(renderer, requireJourney, waitFor, at);
 
     at('editor-revision');
     // Inline revision editing (#1428): ordinary input creates cards after settle, with automatic application or pending redlines.
@@ -1218,6 +1221,7 @@ async function main() {
     at('ai-locks');
     // Earlier missing-connection checks removed the placeholder. Restore it before opening the chooser; locked text
     // is still refused before execution, so this stage sends no model request.
+    fastCredentialSaved = true;
     fastCredentialReference = await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}}).then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.connection?.credentialReference)`);
     requireJourney(typeof fastCredentialReference==='string','scoped-placeholder-reference');
     // 🔒 锁定 (Issue #1412) in ordinary mode: the selection's paragraph is locked from the menu and drawn with its badge; the menu then

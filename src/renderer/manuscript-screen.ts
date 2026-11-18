@@ -1797,7 +1797,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     currentWindow = next;
     updateWindowChrome();
     editorialMarks?.refreshComments();
-    updateCommentsBadge();
     manuscriptRail?.refresh();
     await invalidateSearchIfStale('稿件已由 AI 局部修改；先前搜索结果和返回位置已失效。');
     await loadOutline();
@@ -2324,7 +2323,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         return;
       }
       editorialMarks?.refreshComments();
-      updateCommentsBadge();
       manuscriptRail?.refresh();
       setStatus(written.completionLabel, 'success');
     } catch (error) {
@@ -2464,7 +2462,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       // The text is the text on screen: only the marks are new, so nothing open over the text is touched (review P2-7).
       editor.setMarks(next.marks, next.marksTruncated);
       editorialMarks?.refreshComments();
-      updateCommentsBadge();
       manuscriptRail?.refresh();
       const refreshed = [...(editorHost.dataset['marksRefreshed'] ?? '').split(',').filter((entry) => entry.length > 0), 'review-settled'].slice(-12);
       editorHost.dataset['marksRefreshed'] = refreshed.join(',');
@@ -2556,7 +2553,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         if (bindingChanged) {
           currentWindow = editorWindowProjection;
           editorialMarks?.refreshComments();
-          updateCommentsBadge();
           updateWindowChrome();
           void loadOutline();
           scheduleRailRefresh();
@@ -2584,7 +2580,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       analysisPositionSource = 'caret';
       localParagraphPanel?.refresh();
       editorialMarks?.reanchor();
-      updateCommentsBadge();
       const loads = [...(editorHost.dataset['windowLoads'] ?? '').split(',').filter((entry) => entry.length > 0), windowLoadCause].slice(-12);
       editorHost.dataset['windowLoads'] = loads.join(',');
     },
@@ -2609,6 +2604,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     // 专注模式 (Issue #951; ED-004): the same toggle as the header's 专注.
     'view.focusMode': () => focusMode.toggle(),
     'view.comments': () => { focusMode.leave(); setCommentsOpen(!rightColumn.commentsVisible()); },
+    'view.previousPending': () => editorialMarks?.stepPending('previous'),
+    'view.nextPending': () => editorialMarks?.stepPending('next'),
   });
   // Typing moves every place behind the caret a little; the rail is read again once the typing rests,
   // never per keystroke, and its cost follows the chapters and marks, not the manuscript's length.
@@ -2629,6 +2626,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     onRead: (rail) => {
       railProjection = rail;
       paintOutline();
+      // The 批注 entry's badge and the 批注栏 header count the Book's pending marks (Issue #1523).
+      updateCommentsBadge();
+      editorialMarks?.bookPendingChanged();
       // The 导航 badge is the active search's hit count alone (Issue #1409); the marks are the 批注 entry's.
       updateNavigationBadge();
       const analysisBadge = analysisEntry.querySelector<HTMLElement>('.edge-badge')!;
@@ -2680,15 +2680,14 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     document.addEventListener('visibilitychange', taskBadgeVisibility);
     void readTaskBadge();
   }
+  /** The Book's pending marks as the rail last read them (Issue #1523); nothing is shown before that first read. */
   function updateCommentsBadge(): void {
-    if (!editor) return;
-    const count = editor.currentWindow().marks.filter((mark) => mark.kind !== 'personal-highlight').length;
+    const count = railProjection?.marks.length ?? 0;
     const badge = commentsEntry.querySelector<HTMLElement>('.edge-badge')!;
-    badge.dataset['count'] = String(count);
+    badge.dataset['count'] = `${count}${railProjection?.marksTruncated === true ? '+' : ''}`;
     badge.hidden = count === 0;
     updateEdgeName(commentsEntry);
   }
-  updateCommentsBadge();
   editorialMarks = mountEditorialMarks({
     comments: { host: commentsPane, enabled: () => rightColumn.commentsVisible() && !focusMode.active },
     scroll: editorWindow,
@@ -2698,7 +2697,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     busy: () => authoritativeMutationBusy() || serviceJobBusy(),
     // A mark changes what a Production Document's workflow waits on (N 条修改建议待处理), which its lens reads again.
     marksChanged: () => {
-      updateCommentsBadge();
       manuscriptRail?.refresh();
       documentLens?.refresh();
     },
@@ -2783,7 +2781,13 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       return { ...result, revisionId: result.window.revisionId, journalSequence: result.window.journalSequence,
         workingDigest: result.window.workingDigest, completionLabel: '已更新编辑修订。' };
     }, async () => { await loadOutline(true); }),
-    scopedAiEdit: { host: scopedAiEditHost, sectionOf },
+    scopedAiEdit: { host: scopedAiEditHost, sectionOf, entry: scopedAiEditEntry },
+    // 上一条 / 下一条待处理 beyond the page (Issue #1523): the rail's list of the Book's pending marks, a page read where one stands, and the move.
+    bookPending: {
+      read: () => railProjection === undefined ? undefined : { places: railProjection.marks, truncated: railProjection.marksTruncated },
+      windowAt: (blockId) => api.getManuscriptWindowAt({ manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId, target: { kind: 'block', blockId } }),
+      go: (blockId) => navigate({ kind: 'block', blockId }),
+    },
     // ✎ 已改 (Issue #1411): the 批注栏 opens on the revision's card, unless 专注模式 keeps it closed.
     revealComments: () => {
       if (focusMode.active) return false;

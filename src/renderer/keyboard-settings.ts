@@ -24,6 +24,7 @@ import {
   type CommandDefinition,
 } from './commands.js';
 import { bindingRefusalLabel } from './commands-labels.js';
+import { TRIAGE_KEY_NAMES, triageKeyLabel } from './triage-keys.js';
 import {
   KEYBOARD_ALWAYS_ON,
   KEYBOARD_CAPTURE_ADD_STEP,
@@ -297,6 +298,13 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
       label.dataset['shortcutText'] = 'true';
       label.textContent = shortcutLabel(entry.id) ?? '';
       item.append(`${entry.name} · `, label);
+      list.append(item);
+    }
+    // The single keys of a focused card (Issue #1523): fixed, since a key without a modifier types everywhere else.
+    for (const action of ['accept', 'reject'] as const) {
+      const item = el('li');
+      item.dataset['triageKey'] = action;
+      item.append(`${TRIAGE_KEY_NAMES[action]} · `, el('kbd', undefined, triageKeyLabel(action)));
       list.append(item);
     }
     fixed.append(list);
