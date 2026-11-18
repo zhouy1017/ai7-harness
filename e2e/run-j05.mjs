@@ -1197,7 +1197,18 @@ async function main() {
           await waitFor(renderer, `(() => { const card=document.querySelector('.review-workspace-card'); return card?.dataset.reviewRunId!==undefined && card.dataset.reviewRunId!==${JSON.stringify(before)} && card.dataset.reviewState==='settled' && document.querySelectorAll('article.review-finding[data-status="pending"]').length>=3; })()`, 'review-triage-findings', 180_000);
         } catch (error) {
           // Where the new Run stands, for the debug record: the page's card and the service's own view of every Run.
-          const state=await renderer.evaluate(`(async () => { const card=document.querySelector('.review-workspace-card'); const workspace=await window.ai7.inspectReviewWorkspace({reviewRunId:null}); const run=workspace.run; return {before:${JSON.stringify(before)}, card:{run:card?.dataset.reviewRunId??null, state:card?.dataset.reviewState??null, local:document.querySelector('[data-local-check]')?.dataset.localCheck??null, pending:document.querySelectorAll('article.review-finding[data-status="pending"]').length}, status:document.querySelector('[role="status"]')?.textContent??null, runs:workspace.runs.map((item)=>[item.reviewRunId,item.state,item.categoryLabels.join('/')]), run:run===null?null:{id:run.reviewRunId,state:run.state,local:run.localCheck?.state??null,categories:run.categories.map((item)=>[item.categoryId,item.state,item.detail]),findings:run.findingsTotal} }; })()`).catch((reason)=>String(reason));
+          const state=await renderer.evaluate(`(async () => {
+            const safe = async (read) => { try { return await read(); } catch (error) { return 'error: ' + String(error?.message ?? error); } };
+            const card=document.querySelector('.review-workspace-card');
+            const page={before:${JSON.stringify(before)}, run:card?.dataset.reviewRunId??null, state:card?.dataset.reviewState??null, local:document.querySelector('[data-local-check]')?.dataset.localCheck??null,
+              pending:document.querySelectorAll('article.review-finding[data-status="pending"]').length, heading:card?.querySelector('h2, h3, .review-run h4')?.textContent??null,
+              status:Array.from(document.querySelectorAll('[role="status"]')).map((node)=>node.textContent).filter(Boolean).slice(0,4)};
+            const service=await safe(async () => { const workspace=await window.ai7.inspectReviewWorkspace({reviewRunId:page.run}); const run=workspace.run;
+              return {runs:(workspace.runs??[]).slice(0,5).map((item)=>[item.reviewRunId,item.state]), newReview:workspace.newReview,
+                run:run==null?null:{id:run.reviewRunId,state:run.state,local:run.localCheck?.state??null,localDetail:run.localCheck?.detail??null,categories:(run.categories??[]).map((item)=>[item.categoryId,item.state,item.detail]),total:run.findingsTotal}}; });
+            const plan=await safe(async () => { const value=await window.ai7.inspectTaskPlan({kind:'review-run',ref:page.run}); return JSON.stringify(value).slice(0,1500); });
+            return JSON.stringify({page, service, plan});
+          })()`).catch((reason)=>'evaluate: '+String(reason?.message??reason));
           requireJourney(false,'review-triage-findings',state);
         }
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
