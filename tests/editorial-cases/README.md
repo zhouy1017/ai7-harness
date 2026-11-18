@@ -88,7 +88,7 @@ of its `keywords`. Keyword checks are a coarse proxy; the report says so.
 its chapter rule and every check anchor; `pnpm test` runs it. After a developer-live Review Run, and only once that product has
 stopped, `--score <data root> --case <id>` copies the data root into a disposable directory (the root itself is never opened),
 refuses every `fetch`, and binds the Run to the case before scoring: the copy must hold exactly one Book and exactly one Review
-Run, a 选章 Run over the case's chapters with exactly the case's categories, on an unedited Book (its block contents equal a fresh
+Run, a settled 选章 Run over the case's chapters with exactly the case's categories, on an unedited Book (its block contents equal a fresh
 import of the exact file and its journal has not moved). It then scores that Run with the same scoring, simulated editor, Apply
 and reversal as a replayed case and writes `score-<id>.json` (counts, the Run's identity, ordinal and state, and the Run count).
 

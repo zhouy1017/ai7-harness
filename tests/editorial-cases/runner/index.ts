@@ -290,6 +290,7 @@ async function freshImport(codeRoot: string, testCase: EditorialCase): Promise<{
  * Run is bound to the case before anything is scored, and any mismatch refuses:
  * - the copy holds exactly one Book with a primary Manuscript and exactly one Review Run;
  * - that Run is a 选章 Run whose range is the case's chapters and whose categories are exactly the case's;
+ * - that Run has settled (the completed state);
  * - the Book is unedited: its content sequence equals a fresh import of the exact file, the journal has not moved since that
  *   import, and the working state is the one the Run was prepared on (its working digest names block identities, which differ
  *   between imports, so it is compared with the copy's own working state, not with the fresh import's).
@@ -325,6 +326,8 @@ export async function scoreEditorialCase(request: { readonly codeRoot: string; r
     const fresh = await freshImport(codeRoot, testCase);
     if (contentSequence(store, book) !== fresh.content || window.journalSequence !== fresh.journalSequence ||
       latest.manuscript.journalSequence !== fresh.journalSequence || latest.manuscript.workingDigest !== window.workingDigest) throw new Error(`EDITORIAL_CASE/score-book-edited: ${testCase.id}`);
+    // Only a completed Run is evidence: a prepared, running, partial, failed or cancelled Run would read as "few changes".
+    if (latest.state !== 'settled') throw new Error(`EDITORIAL_CASE/score-run-unsettled: ${testCase.id}`);
     const resolution = resolveTextAnchors(store, book, testCase);
     const observed = await observeReviewRun(store, book, latest.reviewRunId, testCase, resolution, copy);
     return {

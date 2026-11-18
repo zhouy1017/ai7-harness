@@ -21,8 +21,9 @@ import { STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.
 import { generateSyntheticManuscript, SYNTHETIC_MANUSCRIPT_IDS } from '../editorial-cases/synthetic-manuscripts.mjs';
 import { validateCase } from '../editorial-cases/runner/case-file.js';
 import { classifyFinding, locateOnce, simulatedEditor, structuralMet, type TextAnchor } from '../editorial-cases/runner/scoring.js';
-import { createCaseRoots, importManuscript, openStore } from '../editorial-cases/runner/session.js';
-import { countChangesToOriginal } from '../editorial-cases/runner/run-review.js';
+import { createCaseRoots, type ImportedBook, importManuscript, openStore, workingBlocks } from '../editorial-cases/runner/session.js';
+import { chapterScope, countChangesToOriginal } from '../editorial-cases/runner/run-review.js';
+import { randomUUID } from 'node:crypto';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -139,7 +140,7 @@ describe('the case set', () => {
     expect(countChangesToOriginal(findings, ['typos-and-usage', 'style-and-format'], null, new Set(['trap'])).variantResidue).toBe(0);
   });
 
-  it('resolves every score-only chapter rule and check on the product import, and scores only a store that holds a Run', async () => {
+  it('resolves every score-only chapter rule and check on the product import, and scores only the settled Run of its case', async () => {
     const references = spawnSync(process.execPath, [join(ROOT, 'tools', 'editorial-evidence.mjs'), '--check-references'],
       { cwd: ROOT, encoding: 'utf8', timeout: 120_000, windowsHide: true });
     expect(references.status, references.stderr).toBe(0);
@@ -149,17 +150,42 @@ describe('the case set', () => {
       'EDITORIAL_EVIDENCE/references/review-rulin-waishi-two-chapters checks=3',
       'EDITORIAL_EVIDENCE/references/review-zhaohua-xishi-two-chapters checks=3',
     ]);
-    const roots = await createCaseRoots();
-    const store = await openStore(roots, ROOT, null);
-    try {
-      await importManuscript(store, ROOT, roots, { source: 'public-samplebook', file: 'luxun-zhaohua-xishi.docx' }, '朝花夕拾');
-    } finally { store.markCleanShutdown(); store.close(); }
-    try {
-      const scored = spawnSync(process.execPath, [join(ROOT, 'tools', 'editorial-evidence.mjs'), '--score', roots.dataRoot,
-        '--case', 'review-zhaohua-xishi-two-chapters', '--out', roots.inputRoot], { cwd: ROOT, encoding: 'utf8', timeout: 120_000, windowsHide: true });
-      expect(scored.status).toBe(1);
-      expect(scored.stderr).toContain('EDITORIAL_CASE/score-run-absent');
-    } finally { await roots.dispose(); }
+    // Each refusal of the Run-to-case binding, on a disposable 朝花夕拾 store prepared through the product (nothing is driven).
+    const testCase = validateCase(JSON.parse(await readFile(join(CASES, 'review-zhaohua-xishi-two-chapters.json'), 'utf8')), 'review-zhaohua-xishi-two-chapters');
+    const policy = await resolveSourceCheckoutLaunchPolicy(ROOT);
+    const scoreRefusal = async (setup: (store: EditorialStore, book: ImportedBook) => void): Promise<string> => {
+      const roots = await createCaseRoots();
+      try {
+        const store = await openStore(roots, ROOT, null);
+        try { setup(store, await importManuscript(store, ROOT, roots, testCase.manuscript, testCase.bookTitle)); } finally { store.markCleanShutdown(); store.close(); }
+        const scored = spawnSync(process.execPath, [join(ROOT, 'tools', 'editorial-evidence.mjs'), '--score', roots.dataRoot,
+          '--case', testCase.id, '--out', roots.inputRoot], { cwd: ROOT, encoding: 'utf8', timeout: 120_000, windowsHide: true });
+        expect(scored.status).toBe(1);
+        return /EDITORIAL_CASE\/[a-z-]+/u.exec(scored.stderr)?.[0] ?? scored.stderr.slice(0, 200);
+      } finally { await roots.dispose(); }
+    };
+    const prepare = (store: EditorialStore, book: ImportedBook, categories: ReadonlyArray<string>, scope: Parameters<EditorialStore['createReviewRunPreparationWork']>[2]) => {
+      let work = store.createReviewRunPreparationWork(book.bookId, categories, scope, policy, null, []);
+      while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+      expect(work.projection!.run!.state).toBe('prepared');
+    };
+    const categories = testCase.input.categories as ReadonlyArray<string>;
+    const chapters = (store: EditorialStore, book: ImportedBook) => chapterScope(store, book, testCase).scope;
+    expect(await scoreRefusal(() => {})).toBe('EDITORIAL_CASE/score-run-absent');
+    expect(await scoreRefusal((store, book) => prepare(store, book, categories, { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }))).toBe('EDITORIAL_CASE/score-run-not-case');
+    expect(await scoreRefusal((store, book) => prepare(store, book, categories.slice(0, 1), chapters(store, book)))).toBe('EDITORIAL_CASE/score-run-not-case');
+    expect(await scoreRefusal((store, book) => { prepare(store, book, categories, chapters(store, book)); prepare(store, book, categories, chapters(store, book)); })).toBe('EDITORIAL_CASE/score-runs-ambiguous');
+    expect(await scoreRefusal((store, book) => {
+      prepare(store, book, categories, chapters(store, book));
+      const block = workingBlocks(store, book).find((candidate) => candidate.position === chapterScope(store, book, testCase).startPosition + 1)!;
+      const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: block.blockId });
+      const current = window.blocks.find((candidate) => candidate.blockId === block.blockId)!;
+      store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+        windowStartBlockId: window.blocks[0]!.blockId, expectedJournalSequence: window.journalSequence,
+        blockId: block.blockId, baseBlockDigest: current.digest, fromGrapheme: 0, toGrapheme: 0, insertText: '一' });
+    })).toBe('EDITORIAL_CASE/score-book-edited');
+    // Every binding check passes on a never-driven Run, which must not read as "no changes to the original".
+    expect(await scoreRefusal((store, book) => prepare(store, book, categories, chapters(store, book)))).toBe('EDITORIAL_CASE/score-run-unsettled');
   }, 240_000);
 
   it('generates each synthetic manuscript deterministically with every anchor where the table says', () => {
