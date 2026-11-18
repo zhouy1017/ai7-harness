@@ -1627,7 +1627,8 @@ async function main() {
     await waitFor(renderer, `window.__j07.exportCard() === null && window.__j07.status().includes('取消')`, 'cancel-lossless-card-gone', 120_000);
     await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-menu] > summary`, 'cancel-lossy-menu');
     await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-format-action="markdown"]`, 'cancel-open');
-    await waitFor(renderer, `window.__j07.status().includes('取消') && window.__j07.exportCard()?.querySelector('.export-fidelity-details')?.open === true`, 'cancel-native-dialog', 120_000);
+    // The open rows are already drawn while the native dialog is up (phase 'choosing'); only the cancelled phase holds the retry and its focus.
+    await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'cancelled' && window.__j07.status().includes('取消') && window.__j07.exportCard().querySelector('.export-fidelity-details')?.open === true`, 'cancel-native-dialog', 120_000);
     await assertRenderer(renderer, `(() => { window.__j07.cancelledCard = window.__j07.exportCard(); return document.activeElement === window.__j07.exportAction('retry'); })()`, 'cancel-retry-focused');
     await exportAct(renderer, 'retry', 'cancel-retry');
     await waitFor(renderer, `window.__j07.exportCard() !== window.__j07.cancelledCard && window.__j07.exportCard()?.dataset.exportPhase === 'cancelled'`, 'cancel-retry-keeps-card', 120_000);
