@@ -2,7 +2,7 @@ import { createLibraryScreen } from './library-screen.js';
 import { createBookOverviewScreen } from './book-overview-screen.js';
 import { createSettingsScreens } from './settings-screens.js';
 import { createGlobalPages } from './global-pages.js';
-import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFailureLine, type NavigationCheckpoint } from './navigation-generation.js';
+import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFailureLine, focusAfterLoad, type NavigationCheckpoint } from './navigation-generation.js';
 
 
 import { mountMenuControls, mountSelectControls } from './components/controls.js';
@@ -1645,7 +1645,7 @@ function focusRecoveryHeading(content: HTMLElement): void {
   if (!heading) return;
   heading.tabIndex = -1;
   const page = navigation.read(content);
-  requestAnimationFrame(() => { if (page.isCurrent()) heading.focus(); });
+  requestAnimationFrame(() => { if (page.isCurrent()) focusAfterLoad(heading); });
 }
 
 function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void {
@@ -2530,7 +2530,7 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
         if (first && focus !== undefined) {
           host.querySelector<HTMLButtonElement>(`button[data-analysis-tab="${focus.tab}"]`)?.click();
           const item = focus.gap === undefined ? host.querySelector<HTMLElement>(`[data-analysis-panel="${focus.tab}"]`) : host.querySelector<HTMLElement>(`[data-analysis-gap-unit="${focus.gap}"]`);
-          if (item !== null) { item.tabIndex = -1; item.scrollIntoView({ block: 'center' }); item.focus({ preventScroll: true }); }
+          if (item !== null) { item.tabIndex = -1; item.scrollIntoView({ block: 'center' }); focusAfterLoad(item, { preventScroll: true }); }
         }
         if (first && judged !== undefined) showJudgedAnalysisItem(host, judged.itemKey);
       },
@@ -2574,7 +2574,7 @@ function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
   if (item === null) return;
   item.tabIndex = -1;
   item.scrollIntoView({ block: 'center' });
-  item.focus({ preventScroll: true });
+  focusAfterLoad(item, { preventScroll: true });
 }
 
 /**
@@ -2788,7 +2788,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recor
         if (start) host.querySelector<HTMLButtonElement>('[data-evaluation-action="new-evaluation"]')?.click();
         if (focus !== undefined) {
           const risk = host.querySelector<HTMLElement>(`[data-risk-id="${CSS.escape(focus.riskId)}"]`);
-          if (risk !== null) { risk.tabIndex = -1; risk.scrollIntoView({ block: 'center' }); risk.focus({ preventScroll: true }); }
+          if (risk !== null) { risk.tabIndex = -1; risk.scrollIntoView({ block: 'center' }); focusAfterLoad(risk, { preventScroll: true }); }
         }
       }
     },
@@ -2827,7 +2827,7 @@ function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: 
         if (card !== null) {
           card.tabIndex = -1;
           card.scrollIntoView({ block: 'center' });
-          card.focus();
+          focusAfterLoad(card);
         }
       }
     },
