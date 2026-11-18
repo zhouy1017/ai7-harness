@@ -3245,12 +3245,15 @@ async function main() {
       const db = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
       try {
         const row = db.prepare("SELECT json_extract(summary_json, '$.attempt.category.task.taskIntentId') task FROM review_run_synthesis WHERE review_run_id=?").get(overlapReviewed.run.reviewRunId);
-        if (typeof row?.task !== 'string') return { task: null, admitted: 0, events: [] };
-        const admitted = db.prepare(`SELECT count(*) n FROM analysis_run_states s JOIN analysis_run_records r ON r.run_record_id=s.run_record_id
-          WHERE r.task_intent_id=? AND json_extract(s.canonical_json, '$.requestAdmission.data.event.kind')='admit'`).get(row.task).n;
+        if (typeof row?.task !== 'string') return { task: null, runs: 0, sent: null, events: [] };
+        // The fixture route records no request admission; the Run's own outcome counts every request it made.
+        const runs = db.prepare('SELECT count(*) n FROM analysis_run_records WHERE task_intent_id=?').get(row.task).n;
+        const outcome = db.prepare('SELECT canonical_json FROM analysis_task_outcomes WHERE task_intent_id=?').get(row.task);
+        const stages = typeof outcome?.canonical_json === 'string' ? JSON.parse(outcome.canonical_json).report?.usagePerStage : undefined;
+        const sent = stages === undefined || stages === null ? null : Object.values(stages).reduce((sum, stage) => sum + (typeof stage?.requests === 'number' ? stage.requests : 0), 0);
         const events = db.prepare(`SELECT state FROM review_run_category_events WHERE review_run_id=? AND category_id='run-synthesis'
           AND json_extract(canonical_json, '$.synthesisAttempt')=? ORDER BY sequence`).all(overlapReviewed.run.reviewRunId, row.task).map(entry => entry.state);
-        return { task: row.task, admitted: Number(admitted), events };
+        return { task: row.task, runs: Number(runs), sent, events };
       } finally { db.close(); }
     };
     requireJourney(synthesisOnlyRequests().task === null, 'synthesis-only-none-before');
@@ -3277,7 +3280,8 @@ async function main() {
     }
     const synthesisOnlySent = synthesisOnlyRequests();
     const synthesisOnlyAfter = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
-    requireJourney(synthesisOnlySent.task !== null && synthesisOnlySent.admitted === 1 && synthesisOnlySent.events.includes('dispatched') && synthesisOnlySent.events.at(-1) === 'failed',
+    requireJourney(synthesisOnlySent.task !== null && synthesisOnlySent.runs === 1 && synthesisOnlySent.sent === 1 &&
+      synthesisOnlySent.events.filter(state => state === 'dispatched').length === 1 && ['materialized', 'failed'].includes(synthesisOnlySent.events.at(-1)),
       'synthesis-only-sent-once', synthesisOnlySent);
     requireJourney(synthesisOnlyAfter.synthesis?.state === 'missing' && synthesisOnlyAfter.synthesis.canGenerate === true && synthesisOnlyAfter.state === 'settled' &&
       JSON.stringify(synthesisOnlyAfter.findings) === JSON.stringify(synthesisOnlyBefore.findings), 'synthesis-only-findings-unchanged', { synthesis: synthesisOnlyAfter.synthesis?.state, state: synthesisOnlyAfter.state });

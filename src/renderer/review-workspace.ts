@@ -1113,6 +1113,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           const [settings, preferences] = await Promise.allSettled([api.getModelServiceSettings(), rendererApi.getPreferences()]);
           return settings.status !== 'fulfilled' ? null : { settings: settings.value, favourites: preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {} };
         }, (config) => void generateSynthesis(runId, config)) };
+        // The row is kept across redraws, so it takes the page's current working state each time it is put back.
+        const generate = synthesisGenerate.row.querySelector<HTMLButtonElement>('[data-review-action="generate-synthesis"]');
+        if (generate !== null) generate.disabled = working;
         section.append(synthesisGenerate.row);
       }
     }

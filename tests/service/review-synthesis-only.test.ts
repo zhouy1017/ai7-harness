@@ -18,6 +18,8 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { reportContentDigest } from '../../src/service/review/review-report.js';
+import { renderReportExport } from '../../src/service/report-export.js';
+import { strFromU8, unzipSync } from 'fflate';
 
 // 生成统合总结 (Issue #1506): the summary alone for a settled Review Run, over the captured ordinary-production transport.
 const TYPOS = 'typos-and-usage';
@@ -118,6 +120,13 @@ it('sends the stage’s own request once under the model chosen now, keeps every
     const report = session.store.generateReviewReport(book.bookId, runId).run!.report!;
     expect(report.record.synthesis?.summary).toEqual(after.synthesis?.summary);
     expect(report.record.synthesis?.modelLabel).toBe(after.synthesis?.modelLabel);
+    // The published DOCX's summary carries its own source mark, the model 生成统合总结 used.
+    const docx = renderReportExport({ bookTitle: 'sample1 单独统合', version: report.version, generatedAt: report.generatedAt, record: report.record }, 'docx', { emit: true });
+    const xml = strFromU8(unzipSync(docx.bytes!)['word/document.xml']!);
+    const summaryAt = xml.indexOf('>全书审阅统合总结</w:t>');
+    expect(summaryAt).toBeGreaterThan(-1);
+    expect(xml.indexOf(`>${after.synthesis!.modelLabel}</w:t>`, summaryAt)).toBeGreaterThan(summaryAt);
+    expect(after.synthesis!.modelLabel).not.toBe(after.modelLabel);
   } finally { await closeSession(session); }
 });
 
@@ -128,6 +137,52 @@ it('refuses 生成统合总结 for a run with no model finding (#1506)', async (
     const runId = await settledReview(session, book);
     expect(run(session, book.bookId, runId).synthesis).toBeUndefined();
     expect(refusal(() => generate(session, book.bookId, runId))).toBe('REVIEW_SYNTHESIS_UNAVAILABLE');
+    expect(synthesisRequests(session)).toHaveLength(0);
+  } finally { await closeSession(session); }
+});
+
+it('counts every summary request in the Run’s usage: the stage’s and each 生成统合总结’s (#1506)', async () => {
+  const session = await openSession(call => call <= 2);
+  try {
+    const book = await importBook(session, 'sample1 统合用量');
+    const runId = await settledReview(session, book);
+    const stage = run(session, book.bookId, runId).usage!.requests;
+    generate(session, book.bookId, runId);
+    await session.driver.drive(runId);
+    const first = run(session, book.bookId, runId);
+    expect(first.synthesis?.state).toBe('missing');
+    expect(first.usage!.requests).toBe(stage + 1);
+    generate(session, book.bookId, runId);
+    await session.driver.drive(runId);
+    const second = run(session, book.bookId, runId);
+    expect(second.synthesis?.state).toBe('completed');
+    expect(second.usage!.requests).toBe(stage + 2);
+    expect(synthesisRequests(session)).toHaveLength(3);
+  } finally { await closeSession(session); }
+});
+
+it('refuses 生成统合总结 for a one-range chapter review and for a selection review (#1506)', async () => {
+  const session = await openSession(null);
+  try {
+    const book = await importBook(session, 'sample1 单范围统合');
+    const chapters = session.store.inspectReviewWorkspace(book.bookId, null).scopeOptions.chapters.chapters;
+    // sample1's first chapter is one reading range with model findings.
+    const first = chapters[0]!;
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS],
+      scope: { kind: 'chapters', fromChapterBlockId: first.blockId, toChapterBlockId: first.blockId } }, launchPolicy));
+    const oneRange = session.store.inspectReviewWorkspace(book.bookId, null).run!;
+    // It has model findings: one range alone is why no summary is offered.
+    expect(oneRange.findings.length).toBeGreaterThan(0);
+    expect(oneRange.synthesis).toBeUndefined();
+    expect(refusal(() => generate(session, book.bookId, oneRange.reviewRunId))).toBe('REVIEW_SYNTHESIS_UNAVAILABLE');
+    const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS],
+      scope: { kind: 'selection', fromChapterBlockId: blocks[0]!.blockId, toChapterBlockId: blocks[Math.min(blocks.length, 40) - 1]!.blockId } }, launchPolicy));
+    const selection = session.store.inspectReviewWorkspace(book.bookId, null).run!;
+    expect(selection.reviewRunId).not.toBe(oneRange.reviewRunId);
+    expect(selection.scope.kind).toBe('selection');
+    expect(selection.synthesis).toBeUndefined();
+    expect(refusal(() => generate(session, book.bookId, selection.reviewRunId))).toBe('REVIEW_SYNTHESIS_UNAVAILABLE');
     expect(synthesisRequests(session)).toHaveLength(0);
   } finally { await closeSession(session); }
 });
@@ -306,3 +361,4 @@ it('gives an eligible 0.7.1 run its summary from its stored findings, and the su
   try { expect(target.inspectReviewWorkspace(bookId, runId).run!.synthesis).toEqual(written); }
   finally { target.markCleanShutdown(); target.close(); }
 });
+

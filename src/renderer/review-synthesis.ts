@@ -3,8 +3,7 @@ import type { ModelFavourites } from '../shared/preferences.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { reviewSynthesisLines } from '../shared/review-synthesis-wording.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
-
-export const REVIEW_SYNTHESIS_GENERATE_LABEL = '生成统合总结';
+import { REVIEW_ACTION_LABELS } from './review-labels.js';
 
 /**
  * 生成统合总结 (Issue #1506): the usual dispatch chooser, offering the Run's own model and 思考强度 first, and the one button.
@@ -15,7 +14,7 @@ export function reviewSynthesisGenerateRow(runChoice: RuntimeExecutionConfig | u
   let config: RuntimeExecutionConfig = runChoice ?? {};
   const chooser = createDispatchChooser({ role: 'main-editorial', changed: (next) => { config = next; } });
   const button = document.createElement('button');
-  button.type = 'button'; button.className = 'secondary'; button.dataset['reviewAction'] = 'generate-synthesis'; button.textContent = REVIEW_SYNTHESIS_GENERATE_LABEL;
+  button.type = 'button'; button.className = 'secondary'; button.dataset['reviewAction'] = 'generate-synthesis'; button.textContent = REVIEW_ACTION_LABELS['generate-synthesis'];
   button.addEventListener('click', () => generate(config));
   const row = document.createElement('div'); row.className = 'button-row review-synthesis-generate';
   row.append(chooser.element, button);

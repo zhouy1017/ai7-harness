@@ -2563,7 +2563,8 @@ export class ReviewRunStore {
         continue;
       }
       const snapshot = this.#snapshotOf(row);
-      if (this.#waits(snapshot)) waiting.push({ bookId: snapshot.bookId, reviewRunId, authorizedAt: text(row.approved_at) });
+      // A waiting 生成统合总结 (Issue #1506) takes its turn by when it was asked for, not by the Run's own approval.
+      if (this.#waits(snapshot)) waiting.push({ bookId: snapshot.bookId, reviewRunId, authorizedAt: this.#synthesisAttempt(reviewRunId)?.requestedAt ?? text(row.approved_at) });
       else if (this.#begun(snapshot)) settled.push(reviewRunId);
     }
     // Dropped only outside a transaction: what a surrounding write recorded may still be rolled back.
@@ -2895,7 +2896,7 @@ export class ReviewRunStore {
     const row = this.#db.prepare('SELECT summary_json, summary_digest FROM review_run_synthesis WHERE review_run_id = ?').get(snapshot.reviewRunId);
     const saved = row?.summary_json == null ? null : recordOf(text(row.summary_json), text(row.summary_digest));
     if (saved?.summary != null) return '这次审阅已有统合总结。';
-    if (saved?.notNeeded === true || !this.#synthesisEligible(snapshot)) return '这次审阅只读了一个阅读范围或没有模型发现，无需统合总结。';
+    if (saved?.notNeeded === true || !this.#synthesisEligible(snapshot)) return '这次审阅只覆盖一个部分或没有模型发现，无需统合总结。';
     return null;
   }
 
@@ -2960,12 +2961,15 @@ export class ReviewRunStore {
 
   #runUsage(snapshot: RunSnapshot): { requests: number; inputTokens: number; outputTokens: number } {
     const total = { requests: 0, inputTokens: 0, outputTokens: 0 };
-    // The stage's own synthesis request stays in the Run's usage after a 生成统合总结 took the member's place (Issue #1506).
-    const replaced = this.#synthesisAttempt(snapshot.reviewRunId) === null ? [] : this.#frozenRun(snapshot.reviewRunId).categories
-      .filter((category) => category.categoryId === RUN_SYNTHESIS_CATEGORY);
-    for (const entry of [...snapshot.categories, ...replaced]) {
-      if (entry.task === null) continue;
-      const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_task_outcomes WHERE task_intent_id = ?').get(entry.task.taskIntentId);
+    // Every synthesis request the Run made counts (Issue #1506): the stage's own, and each 生成统合总结's, not only the latest.
+    const tasks = new Set(snapshot.categories.flatMap((entry) => entry.task === null ? [] : [entry.task.taskIntentId]));
+    if (this.#synthesisAttempt(snapshot.reviewRunId) !== null) {
+      for (const entry of this.#frozenRun(snapshot.reviewRunId).categories) if (entry.categoryId === RUN_SYNTHESIS_CATEGORY && entry.task !== null) tasks.add(entry.task.taskIntentId);
+      for (const row of this.#db.prepare(`SELECT DISTINCT json_extract(canonical_json, '$.synthesisAttempt') task FROM review_run_category_events
+        WHERE review_run_id = ? AND category_id = ? AND json_extract(canonical_json, '$.synthesisAttempt') IS NOT NULL`).all(snapshot.reviewRunId, RUN_SYNTHESIS_CATEGORY)) tasks.add(text(row.task));
+    }
+    for (const taskIntentId of tasks) {
+      const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_task_outcomes WHERE task_intent_id = ?').get(taskIntentId);
       if (row === undefined) continue;
       const outcome = recordOf(text(row.canonical_json), text(row.sha256));
       const report = isRecord(outcome.report) ? outcome.report : null;
