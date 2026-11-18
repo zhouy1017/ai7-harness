@@ -18,7 +18,7 @@ afterEach(() => { vi.unstubAllGlobals(); setTechnicalLayerVisible(true); restore
 it('names the chosen update mode on the start and keeps the pressed button on it, by button and by range', async () => {
   const projection = baselineAnalysisWire(longSettledAnalysis(longPreparedAnalysis(3), 2, false));
   const controls = projection.updateControls!;
-  for (const mode of ['sync-current', 'reanalyze-range', 'reanalyze-book'] as const) controls.actions[mode] = { ...controls.actions[mode], available: true, unavailableReason: null };
+  for (const mode of ['sync-current', 'reanalyze-range', 'reanalyze-book'] as const) Object.assign(controls.actions[mode], { available: true, unavailableReason: null });
   const option = controls.actions['reanalyze-range'].options[0]!;
   vi.stubGlobal('window', { setTimeout, clearTimeout, localStorage: { getItem: () => 'full', setItem: vi.fn() }, ai7: {
     inspectCustomAnalysisDimensions: vi.fn(async () => { throw new Error('unused custom dimensions'); }),
@@ -29,11 +29,11 @@ it('names the chosen update mode on the start and keeps the pressed button on it
   const drawer = mountTaskDrawer({ root: drawerRoot, shell: document.body, onOpen: vi.fn(), onRecorded: vi.fn(), setStatus: vi.fn(), errorCode: () => null,
     errorMessage: (_error: unknown, fallback: string) => fallback, technicalDetails: () => document.createElement('details'),
     api: { getModelServiceSettings: async () => ({ channels: [], roles: [], routeChoice: { routes: [] } }), getPreferences: async () => ({ values: preferenceDefaults() }) } } as never);
-  const root = document.createElement('main'); document.body.append(root);
-  const card = createBaselineAnalysisCard({ screen: root, technicalDetails: () => document.createElement('details'), rendererErrorMessage: (_error: unknown, fallback: string) => fallback,
+  const root = miniDocument.createElement('main'); miniDocument.body.append(root);
+  const card = createBaselineAnalysisCard({ screen: root as unknown as HTMLElement, technicalDetails: () => document.createElement('details'), rendererErrorMessage: (_error: unknown, fallback: string) => fallback,
     setStatus: vi.fn(), taskDrawer: drawer, taskPlanOpenButton: () => document.createElement('button'), awaitServiceJob: vi.fn(), jumpToManuscript: vi.fn(),
     leaveReturnChip: vi.fn(), openEditorWindow: vi.fn(), openTaskPlan: vi.fn(), quickStartStartedLine: () => '', renderBookReview: vi.fn() } as never);
-  card.renderBaselineAnalysis(root, projection, '公开样书');
+  card.renderBaselineAnalysis(root as unknown as HTMLElement, projection, '公开样书');
   const launch = () => root.querySelector('[data-task-launch-kind="baseline-analysis"] [data-task-drawer-control="launch"]')!;
   const pressed = () => root.querySelectorAll('.analysis-update-action [aria-pressed="true"]').map(node => node.dataset['analysisAction']);
   await vi.waitFor(() => expect(launch()).not.toBeNull());
