@@ -67,6 +67,11 @@ export async function attentionNoticeClearsMenu(renderer, waitFor, requireJourne
   try {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1008, height: 681, deviceScaleFactor: 1, mobile: false });
     await waitFor(renderer, `innerWidth === 1008 && document.querySelector('[data-attention-toast]')?.hidden === false`, `${name}-size`);
+    // A Task Drawer left open (500 px wide) covers the header's save menu at this width: it is closed first, as the editor would.
+    if (await renderer.evaluate(`document.querySelector('#task-drawer')?.hidden === false`)) {
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close`);
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden !== false`, `${name}-drawer-closed`);
+    }
     await pointerClick(renderer, waitFor, summary, `${name}-open`);
     const covered = await renderer.evaluate(`(() => {
       const body = document.querySelector('#context-actions details[data-save-menu="manuscript"][open] .editor-save-menu-body');
