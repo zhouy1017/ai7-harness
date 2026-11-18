@@ -313,7 +313,7 @@ export interface MountTaskDrawerOptions {
   /** The one side slot (IA): the drawer is opening, so 导航 closes. */
   onOpen(): void;
   /** The one side slot closed: the manuscript brings the 批注栏 it temporarily replaced back (no preference write). */
-  onClose(): void;
+  onClose?(): void;
   /** The bar started the Task or reconfirmed its plan: the surfaces of that kind on screen read it again. `ref` is the Task's plan. */
   onRecorded(kind: TaskPlanKind, bookId: string, ref?: string): void;
   /** 查看运行 / 查看运行记录 / 查看审阅: the started Task's own surface (AUTH-007). */
@@ -3124,7 +3124,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       root.hidden = true;
       root.dataset['taskDrawer'] = 'closed';
       shell.dataset['taskDrawer'] = 'closed';
-      options.onClose();
+      options.onClose?.();
       const target = restoreFocus ? returnFocus() : null;
       returnFocus = () => null;
       if (target !== null && target.isConnected) target.focus();
