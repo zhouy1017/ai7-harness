@@ -77,6 +77,21 @@ it('coalesces pending reads, keeps a card across an unrelated autosave, and read
   expect(watched.cards.get(card.markId)).toBe(replied); expect(changed).toHaveBeenCalledWith(card.markId);
 });
 
+it('an explicit open reads a held card again once its words changed, and returns an unchanged card at once (#1523)', async () => {
+  const cache = new EditorialCardCache(); const page = windowOf(); cache.sync(page);
+  await cache.read(card.markId, async () => card);
+  const unchanged = vi.fn(async () => card);
+  expect(await cache.current(card.markId, unchanged)).toBe(card); expect(unchanged).not.toHaveBeenCalled();
+  // Typing inside the words drifts the mark: the pane keeps the card on screen, but an open must not show 接受并应用 as before.
+  cache.sync({ ...page, marks: page.marks.map(mark => ({ ...mark, anchorState: 'drifted' as const })), blocks: page.blocks.map(block => ({ ...block, digest: 'typed' })) });
+  const drifted = { ...card, anchorState: 'drifted' as const };
+  const pending = deferred<EditorialMarkCardProjection>(); const fetch = vi.fn(() => pending.promise);
+  const opened = cache.current(card.markId, fetch);
+  expect(await cache.read(card.markId, fetch)).toBe(card);
+  pending.resolve(drifted);
+  expect(await opened).toBe(drifted); expect(fetch).toHaveBeenCalledTimes(1);
+});
+
 it('stacks around the chosen card and clamps it without losing earlier cards (#1451)', () => {
   const items = Array.from({ length: 4 }, (_, i) => ({ desiredTop: 100 + i, measuredHeight: 50 }));
   expect(stackEditorialComments(items, 2).map(item => item.top)).toEqual([-18, 42, 102, 162]);

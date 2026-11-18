@@ -374,6 +374,17 @@ export class EditorialCardCache {
     if (card.kind === 'personal-highlight') this.cards.delete(card.markId);
     else this.cards.set(card.markId, card);
   }
+  /**
+   * The card as it is now, for an explicit open: a card held while its mark or paragraph changed is read again before it is
+   * returned, so a card opened on purpose never shows a decision its words no longer allow.
+   */
+  async current(markId: string, fetch: () => Promise<EditorialMarkCardProjection>): Promise<EditorialMarkCardProjection | undefined> {
+    while (this.cards.has(markId) && (this.#due.has(markId) || this.#checks.has(markId))) {
+      if (!this.#checks.has(markId)) this.#check(markId, fetch);
+      await this.#checks.get(markId);
+    }
+    return this.read(markId, fetch, true);
+  }
   read(markId: string, fetch: () => Promise<EditorialMarkCardProjection>, retryFailed = false): Promise<EditorialMarkCardProjection | undefined> {
     if (retryFailed && this.#failed.has(markId)) this.invalidate(markId);
     const cached = this.cards.get(markId);
@@ -2717,7 +2728,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     try {
       const current = editor.currentWindow();
       cardCache.sync(current);
-      const card = await cardCache.read(markId, () => api.getEditorialMarkCard({ manuscriptId: current.manuscriptId, branchId: current.branchId, markId }), true);
+      const card = await cardCache.current(markId, () => api.getEditorialMarkCard({ manuscriptId: current.manuscriptId, branchId: current.branchId, markId }));
       if (destroyed || !card || editor.currentWindow() !== current || !stillRequested()) return;
       scheduleCommentsLayout();
       showCard(card, form ? (cancel) => form(card, cancel) : undefined);
