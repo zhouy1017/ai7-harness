@@ -15,6 +15,8 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 
 // 全部替换 as per-occurrence editor revisions (Issue #1409, #1411), on the service's own stores over the admitted SampleBook. Every
 // replaced word is an authored marker typed here; manuscript text is compared by the markers only.
+// Kept on disk (Issue #1536): the preview is prepared on the store's journal connection and committed on a second
+// connection to the same file. The rest of the claim, and the all-or-none case, run in tests/unit/domain/manuscript-marks.
 
 const MARKER = '〔替换靶〕';
 const REPLACED = '〔已替换〕';
@@ -95,24 +97,6 @@ describe('全部替换 as editor revisions', () => {
       store.reverseAppliedChangeSuggestion({ ...setup.book, windowStartBlockId: now.blocks[0]!.blockId, markId: result.markIds[1]!, clientEffectId: randomUUID() });
       expect([setup.count(MARKER), setup.count(REPLACED)]).toEqual([1, 2]);
       expect(() => commitReplacementAsRevisions(setup.stores, { previewId: setup.previewId, windowStartBlockId: now.blocks[0]!.blockId })).toThrow();
-    } finally { setup.db.close(); store.markCleanShutdown(); store.close(); }
-  }, 120_000);
-
-  it('writes nothing when any occurrence fails, and leaves the preview to be committed again', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const setup = await prepared(store);
-    try {
-      const before = setup.window();
-      let applied = 0;
-      const failing: ReplacementRevisionStores = { ...setup.stores, apply: { apply: (input: Parameters<ManuscriptApplyStore['apply']>[0]) => {
-        if (++applied === 2) throw new Error('second occurrence refused');
-        return setup.stores.apply.apply(input);
-      } } as unknown as ManuscriptApplyStore };
-      expect(() => commitReplacementAsRevisions(failing, { previewId: setup.previewId, windowStartBlockId: before.blocks[0]!.blockId })).toThrow('second occurrence refused');
-      const after = setup.window();
-      expect([after.journalSequence, after.workingDigest, setup.count(MARKER), setup.count(REPLACED)]).toEqual([before.journalSequence, before.workingDigest, 3, 0]);
-      expect(after.marks.filter((mark) => mark.kind === 'change-suggestion')).toHaveLength(0);
-      expect(commitReplacementAsRevisions(setup.stores, { previewId: setup.previewId, windowStartBlockId: before.blocks[0]!.blockId }).replaced).toBe(3);
     } finally { setup.db.close(); store.markCleanShutdown(); store.close(); }
   }, 120_000);
 });

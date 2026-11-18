@@ -1900,12 +1900,12 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
   })()`, 'word-preview-never-selects-accepted-baseline');
   // The two modes by their ADR 0094 names, the tagged preview, and why an unusable reading cannot be prepared.
   const previewLabel = `当前预览：${allInserted ? '接受修订后的阅读' : '撤销修订后的阅读'}；尚未建立稿件基线。`;
-  const readingReason = allInserted ? '撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文 · 定稿基线」。'
+  const readingReason = allInserted ? '撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修改建议」准备；仍可明确选择并确认「直接并入正文 · 定稿基线」。'
     : '最终保真、导入方式及本机保留范围随导入记录保存，可按需查看导入详情。';
   await assertRenderer(renderer, `(() => {
     const controls = document.querySelector('[data-word-import-controls="ready"]');
     const option = (mode) => controls.querySelector('[data-word-import-mode="' + mode + '"]').closest('label').textContent;
-    return option('suggestions') === '转为 AI7 修订建议 · 推荐' && option('accepted-baseline') === '直接并入正文 · 定稿基线' &&
+    return option('suggestions') === '转为 AI7 修改建议 · 推荐以修改前的正文导入，可精确对应的文字修改转为待处理的修改建议，结构修改作为关联原文件的批注保留。' && option('accepted-baseline') === '直接并入正文 · 定稿基线以接受全部修订后的正文导入，原始修订留在原文件中。' &&
       controls.querySelector('legend')?.textContent.includes(${JSON.stringify(previewLabel)}) &&
       controls.querySelector('[data-word-reading-availability]').textContent === ${JSON.stringify(readingReason)};
   })()`, 'word-preview-label-and-reading-reason');
