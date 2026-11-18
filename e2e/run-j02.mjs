@@ -1021,17 +1021,19 @@ async function milestoneIpcTimeoutCategory(renderer, beforeObservation) {
 }
 
 async function panelGeometry(renderer, selector, width, height, facts = false) {
-  const fits = await renderer.evaluate(`(async () => {
+  const measured = await renderer.evaluate(`(async () => {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const panel = document.querySelector(${JSON.stringify(selector)});
-    if (!(panel instanceof HTMLElement) || panel.hidden || innerWidth !== ${width} || innerHeight !== ${height}) return false;
+    if (!(panel instanceof HTMLElement) || panel.hidden || innerWidth !== ${width} || innerHeight !== ${height}) return { fits: false, why: 'absent-or-size', w: innerWidth, h: innerHeight };
     const box = panel.getBoundingClientRect();
     const nodes = ${facts} ? [...panel.querySelectorAll('[data-protection-fact]')] : [];
-    return box.width > 0 && box.height > 0 && (${facts} ? nodes.length === 3 : true) && box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight
+    const fits = box.width > 0 && box.height > 0 && (${facts} ? nodes.length === 3 : true) && box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight
       && panel.scrollWidth <= panel.clientWidth + 1
       && nodes.every(node => node.textContent.length > 0 && node.getBoundingClientRect().width > 0);
+    return { fits, l: box.left, r: box.right, t: box.top, b: box.bottom, sw: panel.scrollWidth, cw: panel.clientWidth, w: innerWidth, h: innerHeight, style: panel.style.cssText, open: panel.parentElement?.open };
   })()`);
-  requireJourney(fits === true, 'shared-panel-geometry');
+  if (measured?.fits !== true) console.log(`TEMP-GEOMETRY ${selector} ${JSON.stringify(measured)}`);
+  requireJourney(measured?.fits === true, 'shared-panel-geometry');
 }
 
 async function milestoneGeometry(renderer) {
