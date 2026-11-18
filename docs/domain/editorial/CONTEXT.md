@@ -375,6 +375,11 @@ _Avoid_: Harness Session, project copy
 The durable ordered record of continuous changes to one Manuscript Branch since its base revision, used to reconstruct working state without making every saved edit a Manuscript Revision.
 _Avoid_: Manuscript history, Operation journal
 
+**Editor Step**:
+One editor action — typing, a structural edit, a replacement, an accepted suggestion or batch, a replace-all, an AI edit, a card's 撤销本次修改, an in-place revision decision or a version restore — recorded as the unit Ctrl+Z takes back and redo replays, owning the command groups and Apply Effects it wrote; a step that can no longer be undone is set aside and the next Ctrl+Z moves on ([ADR 0105 §1](../../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md#1--undo-is-an-editor-step)).
+_中文_: 编辑步骤
+_Avoid_: Edit Journal entry, command group, Apply Effect
+
 **Editor Revision**:
 An editor's own change to manuscript text recorded as a Proposal Change Item and applied in the same action, so it keeps an Apply Effect, a card and its own reversal; it is how changes are made in Reading and Revision Mode and how each occurrence of a replacement is written. Typing under free direct editing stays an ordinary Edit Journal edit ([ADR 0096 §4.3–4.4](../../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#43-reading-and-revision-mode-by-default)).
 _Avoid_: AI suggestion, Word tracked change, direct edit, Manuscript Checkpoint
