@@ -1179,12 +1179,13 @@ async function main() {
     // #1525: a fresh local review supplies real findings for keyboard triage and the return route. A tester's edit of sample1:
     // each single 「…」 is one 修改建议 (P02), enough of them that deciding walks focus past the window. (A Run with several
     // hundred findings cannot be read at all today — the service refuses the workspace as too large — so no second page here.)
-    await assertRenderer(renderer, `(() => {return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。'+'甲…'.repeat(24));})()`, 'review-triage-tester-edit');
-    await settled(renderer, 'review-triage-edit-saved');
     const ACTIVE_CARD = `document.activeElement?.closest('article.review-finding')`;
     try {
       for (const viewport of [{width:1280,height:800},{width:1008,height:681}]) {
         at(viewport.width===1280?'review-keyboard-wide':'review-keyboard-gate');
+        // Each form reviews its own tester edit, and takes away what it leaves (below), so the Book is as it found it.
+        await assertRenderer(renderer, `(() => {return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。'+'甲…'.repeat(24));})()`, 'review-triage-tester-edit');
+        await settled(renderer, 'review-triage-edit-saved');
         await renderer.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1,mobile:false});
         await triageClick(renderer,'[data-nav-book-section="review"]');
         await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'review-triage-ready');
@@ -1212,6 +1213,7 @@ async function main() {
           })()`).catch((reason)=>'evaluate: '+String(reason?.message??reason));
           requireJourney(false,'review-triage-findings',state);
         }
+        const runId=await renderer.evaluate(`document.querySelector('.review-workspace-card').dataset.reviewRunId`);
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
         await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-triage-filter');
         // 下一条待处理 is #1523's view.nextPending (Alt+↓ on Windows): the review page answers the same command.
@@ -1258,6 +1260,15 @@ async function main() {
         }
         await press(renderer,'Enter');
         await waitFor(renderer, `document.querySelector('[data-screen="editor"]')!==null`, 'review-triage-back-on-text');
+        // The Book as the stage found it: this Run's remaining 「…」 suggestions are accepted together with the product's own
+        // 批量采纳机械修正, so no pending suggestion of this stage is left for the stages after it.
+        await triageClick(renderer,'[data-nav-book-section="review"]');
+        await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewRunId===${JSON.stringify(runId)} && document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]')?.disabled===false`, 'review-triage-cleanup-ready');
+        await triageClick(renderer,'section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]');
+        await waitFor(renderer, `document.querySelector('.review-batch-applied [data-review-action="batch-undo"]')!==null`, 'review-triage-cleanup-applied');
+        await waitFor(renderer, `(async () => (await window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(runId)}})).run?.findingCounts.pending===0)()`, 'review-triage-cleanup-none-pending');
+        await triageClick(renderer,'[data-nav-book-section="manuscript"]');
+        await waitFor(renderer, `document.querySelector('[data-screen="editor"]')!==null`, 'review-triage-cleanup-back-on-text');
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 

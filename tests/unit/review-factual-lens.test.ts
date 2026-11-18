@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountReviewWorkspace, type MountReviewWorkspaceOptions, type ReviewWorkspaceSurface } from '../../src/renderer/review-workspace.js';
 import { mountEvidenceWorkspace } from '../../src/renderer/evidence-workspace.js';
+import { createCommandDispatcher } from '../../src/renderer/commands.js';
 import type { EvidenceWorkspaceProjection, FactualVerificationLensProjection, FactualVerificationResultProjection, RendererApi, ReviewFindingProjection, ReviewRunCategoryState, ReviewWorkspaceProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
@@ -102,7 +103,8 @@ const flush = async (): Promise<void> => { for (let count = 0; count < 25; count
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 
 function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1, procedureId: string | null = null, resume = false,
-  read?: (input: Parameters<RendererApi['inspectReviewWorkspace']>[0]) => ReviewWorkspaceProjection) {
+  read?: (input: Parameters<RendererApi['inspectReviewWorkspace']>[0]) => ReviewWorkspaceProjection,
+  registerCommands?: MountReviewWorkspaceOptions['registerCommands']) {
   const root = new MiniElement('main');
   miniDocument.body.append(root);
   const inspectReviewWorkspace = vi.fn<RendererApi['inspectReviewWorkspace']>().mockImplementation(async (input) => read?.(input) ?? workspace(input?.reviewRunId ?? RUN, state, findingsCount));
@@ -115,7 +117,7 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1, proc
   const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: resume ? null : { reviewRunId: RUN, findingId: null }, api, procedureId,
     awaitServiceJob: async (initial) => initial, technicalDetails: (_className, ...rows) => { const node = new MiniElement('dl'); node.append(...rows as unknown as MiniElement[]); return technicalDisclosure(node as unknown as HTMLElement); },
     setStatus: status, errorMessage: (_error, fallback) => fallback, errorCode: () => null, openManuscript: async () => undefined,
-    goToText, openPlan: () => undefined, openSearchSettings: searchSettings, planChanged: () => undefined });
+    goToText, openPlan: () => undefined, openSearchSettings: searchSettings, planChanged: () => undefined, ...(registerCommands === undefined ? {} : { registerCommands }) });
   surfaces.push(surface);
   surface.start();
   return { root, surface, status, unexpected, api, searchSettings, goToText, ...calls };
@@ -1108,5 +1110,27 @@ describe('生成统合总结 on the mounted review workspace (#1506)', () => {
     view.root.querySelector('[data-review-action="generate-report"]')!.click(); await flush();
     expect(generateReviewReport).toHaveBeenCalledTimes(1);
     expect(offer().disabled).toBe(false);
+  });
+});
+
+describe('上一条 / 下一条待处理 across a round trip through 审阅 (#1525)', () => {
+  it('leaves the manuscript handlers in place, whichever screen is set up or taken down first', async () => {
+    for (const enter of ['review-first', 'manuscript-first'] as const) {
+      for (const leave of ['manuscript-first', 'review-first'] as const) {
+        const dispatcher = createCommandDispatcher({ platform: 'win32', bindings: () => ({}), composing: () => false, announce: () => undefined });
+        const ran: string[] = [];
+        // The manuscript screen registers its two handlers when it is set up and takes them away when it is taken down.
+        const manuscript = (name: string) => dispatcher.register({ 'view.previousPending': () => ran.push(`${name}:previous`), 'view.nextPending': () => ran.push(`${name}:next`) });
+        let offFirst: (() => void) | null = manuscript('first');
+        let review: ReturnType<typeof mount> | null = null;
+        const openReview = async () => { review = mount('settled', 1, null, false, undefined, (handlers) => dispatcher.register(handlers)); await flush(); };
+        if (enter === 'review-first') { await openReview(); offFirst!(); } else { offFirst!(); await openReview(); }
+        offFirst = null;
+        if (leave === 'manuscript-first') { manuscript('second'); review!.surface.destroy(); } else { review!.surface.destroy(); manuscript('second'); }
+        dispatcher.execute('view.previousPending');
+        dispatcher.execute('view.nextPending');
+        expect(ran, `${enter} / ${leave}`).toEqual(['second:previous', 'second:next']);
+      }
+    }
   });
 });
