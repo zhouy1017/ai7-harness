@@ -546,6 +546,30 @@ it('a change of failure kind rewrites the existing notice in place, keeping its 
  expect(page.setStatus).toHaveBeenCalledExactlyOnceWith(held,'error');
 });
 
+it('a superseded explicit open of another Book keeps the remaining page paused until its own recovery, which then resumes it (#1504 item 13)', async () => {
+ const leave=Promise.withResolvers<void>(),answerB=Promise.withResolvers<object>();let elsewhere=true;
+ const leaving=vi.fn().mockReturnValueOnce(leave.promise).mockResolvedValue({state:'library'});
+ const open=vi.fn(async(input:{bookId:string;activation?:string})=>input.activation===undefined?answerB.promise
+  :elsewhere?{target:'held-elsewhere'}:{target:'requesting-window',route:{kind:'book',bookId:input.bookId,bookTitle:'甲'}});
+ const page=harness({leaveBookWorkbench:leaving,openBookWorkbench:open,getBookWorkbenchRoute:async()=>null,inspectBookTasks:async()=>({groups:[]})});
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ // The task poll of the page on screen pauses on the failure until its Book is held again.
+ const paused=await page.run('api.inspectBookTasks()').then(()=>null,(error:unknown)=>error as BookOwnershipFailure);
+ expect(paused).toBeInstanceOf(BookOwnershipFailure);let resumed=false;void paused!.recovered.then(()=>{resumed=true;});
+ // An explicit open of Book B is answered "this window" after a later click superseded its page.
+ const opening=page.run("openBookSection({bookId:'book-b',title:'乙'},'overview')");await vi.waitFor(()=>expect(open).toHaveBeenCalledTimes(2));
+ await page.run('leaveThen(() => renderGlobalAgent())');
+ answerB.resolve({target:'requesting-window',route:{kind:'book',bookId:'book-b',bookTitle:'乙'}});await opening;
+ expect(page.screen.firstElementChild).toBe(manuscript);expect(page.screen.querySelector('[data-book-reacquire]')).not.toBeNull();
+ await Promise.resolve();expect(resumed).toBe(false);
+ // The page's own recovery hands B back and re-acquires A; the paused poll resumes.
+ elsewhere=false;await page.actions.get('重试连接当前图书')!();await Promise.resolve();
+ expect(leaving).toHaveBeenCalledTimes(2);expect(open).toHaveBeenLastCalledWith({kind:'book',bookId:'book-a',activation:'non-activating'});
+ expect(resumed).toBe(true);expect(page.screen.firstElementChild).toBe(manuscript);expect(page.screen.querySelector('[data-book-reacquire]')).toBeNull();
+});
+
 it('five background Book reads after failed reconciliation send no retry and keep the existing notice', async () => {
  const leave=Promise.withResolvers<void>();const open=vi.fn(async()=>({target:'held-elsewhere'})),read=vi.fn();
  const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:open,inspectBookTasks:read});

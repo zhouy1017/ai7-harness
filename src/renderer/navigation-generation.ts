@@ -141,6 +141,8 @@ export function reconcileBookWorkbenchApi<Api extends RendererApi>(raw: Api, she
   let held: string | null = null;
   let failure: BookOwnershipFailure | null = null;
   let recovered = Promise.withResolvers<void>();
+  // The Book on screen whose paused readers wait on `recovered`; null while none wait.
+  let paused: string | null = null;
   const attemptedActions = new WeakSet<object>();
   const wrappers = new Map<PropertyKey, unknown>();
   const settled = async (): Promise<void> => {
@@ -176,6 +178,7 @@ export function reconcileBookWorkbenchApi<Api extends RendererApi>(raw: Api, she
     try { await reconcile(leave); clearFailure(); }
     catch (error) {
       retryRequired = true;
+      if (paused !== shell.bookOnScreen()) { recovered = Promise.withResolvers<void>(); paused = shell.bookOnScreen(); }
       const next = new BookOwnershipFailure(error, recovered.promise);
       if (failure?.message !== next.message) { failure = next; shell.failed(failure, retry); }
       throw failure;
@@ -184,14 +187,19 @@ export function reconcileBookWorkbenchApi<Api extends RendererApi>(raw: Api, she
   const clearFailure = (): void => {
     retryRequired = false;
     failure = null;
+    const onScreen = shell.bookOnScreen();
+    // An open of another Book whose page never arrives leaves the page on screen without its Book:
+    // its paused readers and its notice wait for the recovery that page reaches next.
+    if (paused !== null && paused === onScreen && held !== onScreen) return;
     // An old Book's paused readers must not resume against a different Book.
-    if (held === shell.bookOnScreen()) recovered.resolve();
+    if (held === onScreen) recovered.resolve();
     recovered = Promise.withResolvers<void>();
+    paused = null;
     shell.recovered?.();
   };
   const retry = (): Promise<void> => {
     if (pending !== null) return settled();
-    if (!retryRequired) return Promise.resolve();
+    if (!retryRequired && paused === null) return Promise.resolve();
     return tracked(recover());
   };
   const api = new Proxy({ ...raw }, {
