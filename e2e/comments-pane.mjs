@@ -696,7 +696,7 @@ export async function rightColumnGeometry(renderer, check, waitFor) {
     for (const size of [{width:1280,height:800},{width:1008,height:681}]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', {...size,deviceScaleFactor:1,mobile:false});
       if(await renderer.evaluate(`document.querySelector('.manuscript-comments-pane').hidden`)) await click('[data-edge-entry="comments"]');
-      await waitFor(renderer, `${measure} && (()=>{const p=document.querySelector('.manuscript-comments-pane'),t=document.querySelector('.manuscript-surface');return !p.hidden&&t.getBoundingClientRect().right<=p.getBoundingClientRect().left+1;})()`, 'right-column-docked-measure');
+      await waitFor(renderer, `innerWidth===${size.width} && innerHeight===${size.height} && ${measure} && (()=>{const p=document.querySelector('.manuscript-comments-pane'),t=document.querySelector('.manuscript-surface');return !p.hidden&&t.getBoundingClientRect().right<=p.getBoundingClientRect().left+1;})()`, 'right-column-docked-measure');
       await click('[data-edge-entry="navigation"]');
       await waitFor(renderer, `document.querySelector('.manuscript-comments-pane').hidden && !document.querySelector('.manuscript-navigator').hidden`, 'right-column-navigation-replaces');
       await click('[data-edge-entry="navigation"]');

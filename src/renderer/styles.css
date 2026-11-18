@@ -1666,8 +1666,10 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 }
 .editor-workspace:has(> .manuscript-comments-pane:not([hidden])) { grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 340px) 4.75rem; }
 :root[data-right-column="overlay"] .manuscript-comments-leaders { z-index: 9; }
-/* Only the supporting columns overlay; the permanent rail (also an aside) and a document's lens keep their grid places. */
-:root[data-right-column="overlay"] .editor-workspace:not(.document-workspace):has(> :is(.manuscript-comments-pane, .manuscript-navigator):not([hidden])) { grid-template-columns: minmax(0, 1fr) 4.75rem; }
+/* Only the supporting columns overlay; the permanent rail (also an aside) keeps its grid place. A document keeps its lens
+   beside the text at the lens's narrowest width while the 批注栏 overlays it; with 导航 open the lens lies below the text. */
+:root[data-right-column="overlay"] .editor-workspace.document-workspace:has(> .manuscript-comments-pane:not([hidden])) { grid-template-columns: minmax(0, 1fr) 14rem 4.75rem; }
+:root[data-right-column="overlay"] .editor-workspace:has(> :is(.manuscript-comments-pane, .manuscript-navigator):not([hidden])) { grid-template-columns: minmax(0, 1fr) 4.75rem; }
 :root[data-right-column="overlay"] .editor-workspace > :is(.manuscript-comments-pane, .manuscript-navigator):not([hidden]) { position: absolute; grid-area: auto; z-index: 8; inset: 0 4.75rem 0 auto; width: clamp(300px, 26vw, 340px); }
 :root[data-focus-mode="on"] .manuscript-comments-pane, :root[data-focus-mode="on"] .manuscript-comments-leaders { display: none !important; }
 .editor-workspace:has(> .manuscript-navigator:not([hidden])) { grid-template-columns: minmax(0, 1fr) var(--supporting-effective-width) 4.75rem; }
