@@ -637,6 +637,9 @@ export async function commentsBookMemory(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('.recent-work-item')`, 'comments-return-books-ready');
   check(await renderer.evaluate(`(() => { const original=document.querySelector('.recent-work-item button[data-manuscript-id="'+__comments.manuscriptId+'"]'); if(!original)return false; original.click(); return true; })()`), 'comments-original-book-open');
   await waitFor(renderer, `document.querySelector('.editor-shell')?.dataset.bookId===__comments.bookId && document.querySelector('[data-edge-entry="comments"]').getAttribute('aria-expanded')==='true' && document.querySelector('.manuscript-comments-pane').hidden===false`, 'comments-per-book-toggle-restored');
+  // The Book reopens at its reading place, which the connector cases left away from the last seed; the pane lays out cards only near
+  // the visible text, so bring the handled mark's words into view, as the editor would, before reading its card.
+  check(await renderer.evaluate(`(() => { const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[2]+'"]'); if(!words)return false; words.scrollIntoView({block:'center',behavior:'instant'}); return true; })()`), 'comments-return-book-words-in-view');
   try { await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[2]+'"] [data-mark-region="replies"]')?.textContent.includes('公开合成待发回复') && document.querySelector('[data-comment-card="'+__comments.ids[2]+'"] [data-mark-state]')?.textContent.includes('已处理')`, 'comments-return-book-current-content'); } catch {
     // The hosted log prints only the label: name the part that never held.
     const reason=await renderer.evaluate(`(() => {
