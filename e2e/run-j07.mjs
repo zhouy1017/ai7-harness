@@ -3125,95 +3125,173 @@ async function main() {
 
     at('derivatives-management');
     // Issue #1551: 衍生稿件's management page makes a document through 稿件's own four-mode form, renames a title in
-    // place, and asks about deleting a category in an app strip that names it and how many documents it holds.
+    // place, and asks about deleting a category in an app strip that names it and how many documents it holds. Every
+    // press and every text entry below is a pointer or a key event; nothing about the page is set from script.
     await openManuscript(renderer, 'management-manuscript');
+    const managementPage = '[data-screen="book-derivatives"]';
+    const managementForm = `${managementPage} .derivative-create-form`;
     const openManagement = async (name) => {
       await waitFor(renderer, `document.querySelector('.manuscript-switcher-bar [data-manuscript-switch="manage"]:not(:disabled)') !== null`, `${name}-switcher`, 60_000);
-      await clickSelector(renderer, '[data-derivative-menu]', `${name}-menu`);
-      await clickSelector(renderer, '.manuscript-switcher-bar [data-manuscript-switch="manage"]', `${name}-open`);
-      await waitFor(renderer, `document.querySelector('[data-screen="book-derivatives"] [data-derivative-action="new"]') !== null`, `${name}-ready`, 60_000);
+      await pointerClick(renderer, waitFor, '[data-derivative-menu]', `${name}-menu`);
+      await pointerClick(renderer, waitFor, '.manuscript-switcher-bar [data-manuscript-switch="manage"]', `${name}-open`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} [data-derivative-action="new"]`)}) !== null`, `${name}-ready`, 60_000);
     };
-    const managementForm = `(() => { const form=document.querySelector('[data-screen="book-derivatives"] .derivative-create-form'); return form instanceof HTMLFormElement && form.querySelector('[data-document-field]')?.dataset.documentField==='title' && Array.from(form.querySelectorAll('.derivative-modes input'),(radio)=>radio.value).join('|')==='blank|writing|source|import'; })()`;
-    const managementTitle = () => renderer.evaluate(`document.querySelector('[data-screen="book-derivatives"] .derivative-create-form [data-document-field="title"]')?.value ?? null`);
-    const managementMode = async (mode, name) => {
-      await assertRenderer(renderer, `(() => { const form=document.querySelector('[data-screen="book-derivatives"] .derivative-create-form'); if(!(form instanceof HTMLFormElement)) return false; const type=form.querySelector('select[data-document-field="type"]'); if(!(type instanceof HTMLSelectElement)) return false; type.value='promotion-article'; type.dispatchEvent(new Event('change',{bubbles:true})); const radio=form.querySelector('.derivative-modes input[value=${JSON.stringify(mode)}]'); if(!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return type.value==='promotion-article' && radio.checked; })()`, `${name}-type-and-mode`);
+    const openCreateForm = async (name) => {
+      await pointerClick(renderer, waitFor, `${managementPage} [data-derivative-action="new"]`, `${name}-new`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementForm} [data-document-field="title"]`)}) !== null`, `${name}-form`, 60_000);
+    };
+    /** The type is chosen from the select's own control by pointer, then read back before anything else is pressed. */
+    const chooseCreateType = async (value, name) => {
+      const select = `${managementForm} select[data-document-field="type"]`;
+      const index = await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(select)})?.options ?? []).findIndex((option) => option.value === ${JSON.stringify(value)})`);
+      requireJourney(Number.isSafeInteger(index) && index >= 0, `${name}-type-offered`, index);
+      await pointerClick(renderer, waitFor, `${select} + .ui-select-trigger`, `${name}-type-open`);
+      await pointerClick(renderer, waitFor, `${select} ~ .ui-select-popover .ui-select-option[data-index="${index}"]`, `${name}-type-choice`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(select)})?.value === ${JSON.stringify(value)}`, `${name}-type`, 30_000);
+    };
+    /** One of the form's four ways, pressed on its own radio; the form stays until a way is chosen. */
+    const chooseCreateMode = async (mode, name) => {
+      await pointerClick(renderer, waitFor, `${managementForm} .derivative-modes input[value="${mode}"]`, `${name}-mode`);
+      if (mode === 'writing') return;
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementForm} .derivative-modes input[value="${mode}"]`)})?.checked === true`, `${name}-mode-chosen`, 30_000);
+    };
+    /** Text written into one field as a hand writes it: the field is pressed, its text selected, then typed. */
+    const typeInto = async (selector, text, name) => {
+      await pointerClick(renderer, waitFor, selector, `${name}-field`);
+      await renderer.evaluate(`document.querySelector(${JSON.stringify(selector)})?.select?.()`);
+      await renderer.send('Input.insertText', { text });
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(text)}`, `${name}-text`, 30_000);
+    };
+    const confirmCreate = async (name) => {
+      await pointerClick(renderer, waitFor, `${managementForm} [data-document-action="create-derivative"]`, `${name}-confirm`);
+    };
+    const pressEscape = async () => {
+      await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...KEYS.Escape });
+      await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...KEYS.Escape });
+    };
+    /** Two presses on one point, the way a hand opens a title for editing. */
+    const doubleClick = async (selector, name) => {
+      const point = await renderer.evaluate(`(() => { const node=document.querySelector(${JSON.stringify(selector)}); node.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'}); const box=node.getBoundingClientRect(); return { x: box.left+box.width/2, y: box.top+box.height/2 }; })()`);
+      for (const clickCount of [1, 2]) {
+        await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount });
+        await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount });
+      }
+      await waitFor(renderer, `document.activeElement === document.querySelector('.derivatives-item-title-input')`, `${name}-input`, 30_000);
     };
     await openManagement('management-page');
-    await clickSelector(renderer, '[data-screen="book-derivatives"] [data-derivative-action="new"]', 'management-create-open');
-    await assertRenderer(renderer, managementForm, 'management-one-create-form');
+    await openCreateForm('management-form');
+    await assertRenderer(renderer, `(() => { const form=document.querySelector(${JSON.stringify(managementForm)}); if(!(form instanceof HTMLFormElement)) return false; if(form.querySelector('[data-document-field]')?.dataset.documentField!=='title') return false; return Array.from(form.querySelectorAll('.derivative-modes input'),(radio)=>radio.value).join('|')==='blank|writing|source|import'; })()`, 'management-one-create-form');
     at('derivatives-management-blank');
-    await managementMode('blank', 'management-blank');
-    const managementBlankTitle = await managementTitle();
-    requireJourney(typeof managementBlankTitle === 'string' && managementBlankTitle.startsWith(`《${WRITING_TITLE}》宣传文章`), 'management-blank-title', managementBlankTitle);
-    await clickSelector(renderer, '[data-screen="book-derivatives"] .derivative-create-form [data-document-action="create-derivative"]', 'management-blank-create');
+    const managementBlankTitle = `《${WRITING_TITLE}》管理页稿`;
+    await chooseCreateType('promotion-article', 'management-blank');
+    await chooseCreateMode('blank', 'management-blank');
+    await typeInto(`${managementForm} [data-document-field="title"]`, managementBlankTitle, 'management-blank-title');
+    await confirmCreate('management-blank');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(managementBlankTitle)}`, 'management-blank-open', 120_000);
     const managementBlankId = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.find(doc=>doc.title===${JSON.stringify(managementBlankTitle)})?.documentId ?? null)`);
     requireJourney(UUID_PATTERN.test(managementBlankId ?? ''), 'management-blank-id', managementBlankId);
     at('derivatives-management-rename');
-    // 改名 makes the row's own 稿件题目 editable: Enter saves, leaving the field saves, and the title is the service's.
+    // 改名 makes the row's own 稿件题目 editable: Enter saves, leaving the field saves, Escape leaves it alone, and a
+    // double-click starts the same edit.
     await openManagement('management-rename');
+    const renamedRow = `${managementPage} [data-derivative-document=${JSON.stringify(managementBlankId)}]`;
     const renamedTitle = `${managementBlankTitle} 改名`;
-    const renamedRow = `[data-screen="book-derivatives"] [data-derivative-document=${JSON.stringify(managementBlankId)}]`;
     await pointerClick(renderer, waitFor, `${renamedRow} [data-derivative-action="rename"]`, 'management-rename-open');
     await waitFor(renderer, `document.activeElement === document.querySelector('.derivatives-item-title-input') && document.querySelector('.derivatives-item-title-input').value === ${JSON.stringify(managementBlankTitle)}`, 'management-rename-input');
-    await fill(renderer, '[data-screen="book-derivatives"] .derivatives-item-title-input', renamedTitle, 'management-rename-title');
+    await renderer.evaluate(`document.querySelector('.derivatives-item-title-input')?.select?.()`);
+    await renderer.send('Input.insertText', { text: renamedTitle });
     await pressEnter(renderer);
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${renamedRow} .derivatives-item-title-text`)})?.textContent === ${JSON.stringify(renamedTitle)}`, 'management-renamed', 60_000);
     await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(renamedTitle)}) === true`, 'management-renamed-recorded');
+    await doubleClick(`${renamedRow} .derivatives-item-title-text`, 'management-rename-double');
+    await renderer.evaluate(`document.querySelector('.derivatives-item-title-input')?.select?.()`);
+    await renderer.send('Input.insertText', { text: `${renamedTitle} 不要` });
+    await pressEscape();
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${renamedRow} .derivatives-item-title-text`)})?.textContent === ${JSON.stringify(renamedTitle)} && document.activeElement?.textContent === '改名'`, 'management-rename-escaped', 30_000);
     const blurredTitle = `${renamedTitle} 2`;
     await pointerClick(renderer, waitFor, `${renamedRow} [data-derivative-action="rename"]`, 'management-rename-again');
-    await fill(renderer, '[data-screen="book-derivatives"] .derivatives-item-title-input', blurredTitle, 'management-rename-second');
-    await pointerClick(renderer, waitFor, '[data-screen="book-derivatives"] .derivatives-filters input[type="search"]', 'management-rename-blur');
+    await renderer.evaluate(`document.querySelector('.derivatives-item-title-input')?.select?.()`);
+    await renderer.send('Input.insertText', { text: blurredTitle });
+    await pointerClick(renderer, waitFor, `${managementPage} .derivatives-filters input[type="search"]`, 'management-rename-blur');
     await waitFor(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(blurredTitle)}) === true`, 'management-renamed-on-blur', 60_000);
     at('derivatives-management-import');
     // 导入文件 in the same form: the file names the document unless the editor wrote a title.
     await openManagement('management-import');
-    await clickSelector(renderer, '[data-screen="book-derivatives"] [data-derivative-action="new"]', 'management-import-form');
-    await managementMode('import', 'management-import');
-    await clickSelector(renderer, '[data-screen="book-derivatives"] .derivative-create-form [data-document-action="create-derivative"]', 'management-import-create');
+    await openCreateForm('management-import');
+    await chooseCreateType('promotion-article', 'management-import');
+    await chooseCreateMode('import', 'management-import');
+    await confirmCreate('management-import');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(WRITING_LIBRARY_TITLE)}`, 'management-import-open', 120_000);
     at('derivatives-management-source');
     // 从来源材料创建 begins with the Book's first source chosen; the document opens at its first paragraph.
     await openManagement('management-source');
-    await clickSelector(renderer, '[data-screen="book-derivatives"] [data-derivative-action="new"]', 'management-source-form');
-    await managementMode('source', 'management-source');
-    await waitFor(renderer, `(() => { const radios=Array.from(document.querySelectorAll('[data-screen="book-derivatives"] .derivative-create-form input[name="derivative-source"]')); return radios.length>0 && radios[0].checked; })()`, 'management-source-chosen');
-    await clickSelector(renderer, '[data-screen="book-derivatives"] .derivative-create-form [data-document-action="create-derivative"]', 'management-source-create');
+    await openCreateForm('management-source');
+    await chooseCreateType('promotion-article', 'management-source');
+    await chooseCreateMode('source', 'management-source');
+    await waitFor(renderer, `(() => { const radios=Array.from(document.querySelectorAll(${JSON.stringify(`${managementForm} input[name="derivative-source"]`)})); return radios.length>0 && radios[0].checked; })()`, 'management-source-chosen');
+    await confirmCreate('management-source');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] [data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'management-source-open', 120_000);
     at('derivatives-management-writing');
     // AI 写作生成 opens the one writing sheet here with the title and type carried; its draft becomes the document.
     await openManagement('management-writing');
-    await clickSelector(renderer, '[data-screen="book-derivatives"] [data-derivative-action="new"]', 'management-writing-form');
-    await managementMode('writing', 'management-writing');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-derivatives"] .writing-task-sheet')?.open === true`, 'management-writing-sheet', 60_000);
-    const managementWritingTitle = await renderer.evaluate(`document.querySelector('[data-screen="book-derivatives"] .writing-task-sheet [data-document-field="title"]')?.value ?? null`);
+    await openCreateForm('management-writing');
+    await chooseCreateType('promotion-article', 'management-writing');
+    await chooseCreateMode('writing', 'management-writing');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .writing-task-sheet`)})?.open === true`, 'management-writing-sheet', 60_000);
+    const managementWritingTitle = await renderer.evaluate(`document.querySelector(${JSON.stringify(`${managementPage} .writing-task-sheet [data-document-field="title"]`)})?.value ?? null`);
     requireJourney(typeof managementWritingTitle === 'string' && managementWritingTitle.length > 0, 'management-writing-title', managementWritingTitle);
-    await fill(renderer, '[data-screen="book-derivatives"] .writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'management-writing-audience');
-    await fill(renderer, '[data-screen="book-derivatives"] .writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'management-writing-channel');
-    await clickSelector(renderer, '[data-screen="book-derivatives"] .writing-task [data-writing-action="start"]', 'management-writing-start');
+    await typeInto(`${managementPage} .writing-task [data-writing-field="audience"]`, WRITING_REQUEST.audience, 'management-writing-audience');
+    await typeInto(`${managementPage} .writing-task [data-writing-field="channel"]`, WRITING_REQUEST.channel, 'management-writing-channel');
+    await pointerClick(renderer, waitFor, `${managementPage} .writing-task [data-writing-action="start"]`, 'management-writing-start');
     await launchTaskFromBar(renderer, waitFor, 'management-writing');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="promotion-article"] .editor-toolbar h2')?.textContent === ${JSON.stringify(`${managementWritingTitle} · 版本 1`)}`, 'management-writing-open', 120_000);
+    at('derivatives-management-menus');
+    // 导出 ▾ and ⋯ on a row: both open on a press, hold their entries inside the window at both sizes, and 设为定稿
+    // turns the entry into 取消定稿.
+    await openManagement('management-menus');
+    const menusRow = `${managementPage} [data-derivative-document=${JSON.stringify(managementBlankId)}]`;
+    const menusPill = `document.querySelector(${JSON.stringify(`${menusRow} .status-pill`)})?.textContent`;
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="export"]`, `management-export-${width}`);
+        await waitFor(renderer, `(() => { const panel=document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu-body="export"]`)}); const summary=document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="export"]`)}); if(!(panel instanceof HTMLElement)||summary?.parentElement?.open!==true) return false; const box=panel.getBoundingClientRect(); return box.width>0 && box.height>0 && box.left>=0 && box.top>=0 && box.right<=innerWidth && box.bottom<=innerHeight; })()`, `management-export-panel-${width}`, 30_000);
+        await assertRenderer(renderer, `Array.from(document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu-body="export"]`)}).querySelectorAll('button'), (button)=>button.textContent).join('|')==='导出 DOCX|导出 MD'`, `management-export-entries-${width}`);
+        await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="export"]`, `management-export-close-${width}`);
+        await waitFor(renderer, `document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="export"]`)})?.parentElement?.open === false`, `management-export-closed-${width}`, 30_000);
+        await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="more"]`, `management-more-${width}`);
+        await waitFor(renderer, `document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="more"]`)})?.parentElement?.open === true`, `management-more-open-${width}`, 30_000);
+        await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-action="finalize"]`, `management-finalize-${width}`);
+        await waitFor(renderer, `${menusPill} === '已定稿'`, `management-finalized-${width}`, 60_000);
+        await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="more"]`, `management-more-again-${width}`);
+        await assertRenderer(renderer, `(() => { const panel=document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu-body="more"]`)}); return Array.from(panel?.querySelectorAll('button') ?? [], (button)=>button.textContent).includes('取消定稿'); })()`, `management-unfinalize-entry-${width}`);
+        await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-action="unfinalize"]`, `management-unfinalize-${width}`);
+        await waitFor(renderer, `${menusPill} === '草稿'`, `management-unfinalized-${width}`, 60_000);
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     at('derivatives-management-category');
-    // 删除类别 asks in an app strip: a category with documents says how many must move first; an empty one is deleted.
+    // 删除类别 asks in an app strip that names the category and how many documents it holds; the service's refusal for a
+    // category still in use is said there, and 取消 returns to the row it was asked from.
     await openManagement('management-category');
-    await clickSelector(renderer, '[data-screen="book-derivatives"] [data-derivative-action="categories"]', 'management-category-open');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-derivatives"] [data-derivative-type="promotion-article"]') !== null`, 'management-category-rows');
+    await pointerClick(renderer, waitFor, `${managementPage} [data-derivative-action="categories"]`, 'management-category-open');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} [data-derivative-type="promotion-article"]`)}) !== null`, 'management-category-rows');
     const promotionCount = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article')?.documents.length ?? -1)`);
     requireJourney(Number.isSafeInteger(promotionCount) && promotionCount > 0, 'management-category-count', promotionCount);
-    await pointerClick(renderer, waitFor, '[data-screen="book-derivatives"] [data-derivative-type="promotion-article"] [data-derivative-action="delete-type"]', 'management-category-ask');
-    await assertRenderer(renderer, `(() => { const strip=document.querySelector('[data-screen="book-derivatives"] .derivatives-confirm'); return strip instanceof HTMLElement && !strip.hidden && strip.textContent.includes('宣传文章') && strip.textContent.includes(${JSON.stringify(`${promotionCount} 篇衍生稿件`)}); })()`, 'management-category-strip');
-    await pointerClick(renderer, waitFor, '[data-screen="book-derivatives"] .derivatives-confirm [data-derivative-confirm="no"]', 'management-category-cancel');
-    await assertRenderer(renderer, `document.querySelector('[data-screen="book-derivatives"] .derivatives-confirm').hidden === true`, 'management-category-cancelled');
-    await fill(renderer, '[data-screen="book-derivatives"] .derivatives-category-editor [aria-label="新类别名称"]', '校样', 'management-category-name');
-    await clickSelector(renderer, '[data-screen="book-derivatives"] .derivatives-category-editor [data-derivative-action="add-type"]', 'management-category-add');
+    await pointerClick(renderer, waitFor, `${managementPage} [data-derivative-type="promotion-article"] [data-derivative-action="delete-type"]`, 'management-category-ask');
+    await assertRenderer(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); return strip instanceof HTMLElement && strip.textContent.includes('宣传文章') && strip.textContent.includes(${JSON.stringify(`${promotionCount} 篇衍生稿件`)}); })()`, 'management-category-strip');
+    await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="no"]`, 'management-category-cancel');
+    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}) === null && document.activeElement?.textContent === '删除类别'`, 'management-category-cancelled');
+    await typeInto(`${managementPage} .derivatives-category-editor [aria-label="新类别名称"]`, '校样', 'management-category-name');
+    await pointerClick(renderer, waitFor, `${managementPage} .derivatives-category-editor [data-derivative-action="add-type"]`, 'management-category-add');
+    await waitFor(renderer, `Array.from(document.querySelectorAll(${JSON.stringify(`${managementPage} [data-derivative-type] input`)}), (input)=>input.value).includes('校样')`, 'management-category-added', 60_000);
     const proofTypeId = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.label==='校样')?.typeId ?? null)`);
-    requireJourney(typeof proofTypeId === 'string' && proofTypeId.length > 0, 'management-category-added', proofTypeId);
-    const proofRow = `[data-screen="book-derivatives"] [data-derivative-type=${JSON.stringify(proofTypeId)}]`;
+    requireJourney(typeof proofTypeId === 'string' && proofTypeId.length > 0, 'management-category-id', proofTypeId);
+    const proofRow = `${managementPage} [data-derivative-type=${JSON.stringify(proofTypeId)}]`;
     await waitFor(renderer, `document.querySelector(${JSON.stringify(proofRow)}) !== null`, 'management-category-row');
     await pointerClick(renderer, waitFor, `${proofRow} [data-derivative-action="delete-type"]`, 'management-category-empty-ask');
-    await assertRenderer(renderer, `(() => { const strip=document.querySelector('[data-screen="book-derivatives"] .derivatives-confirm'); return strip instanceof HTMLElement && !strip.hidden && strip.textContent.includes('校样'); })()`, 'management-category-empty-strip');
-    await pointerClick(renderer, waitFor, '[data-screen="book-derivatives"] .derivatives-confirm [data-derivative-confirm="yes"]', 'management-category-delete');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-derivatives"] .derivatives-confirm').hidden === true && document.querySelector(${JSON.stringify(proofRow)}) === null`, 'management-category-deleted', 60_000);
+    await assertRenderer(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); return strip instanceof HTMLElement && strip.textContent.includes('校样'); })()`, 'management-category-empty-strip');
+    await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="yes"]`, 'management-category-delete');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}) === null && document.querySelector(${JSON.stringify(proofRow)}) === null`, 'management-category-deleted', 60_000);
 
     at('scoped-ai-edit');
     // 就选中部分让 AI 修改… (Issue #1412) on the writing Book's exact sample1 manuscript, on a launch whose adapter answers from the

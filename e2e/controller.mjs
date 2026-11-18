@@ -1331,6 +1331,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'derivatives-management-import',
     'derivatives-management-source',
     'derivatives-management-writing',
+    'derivatives-management-menus',
     'derivatives-management-category',
     'zero-loopback-requests',
     'completion-browser-close',
