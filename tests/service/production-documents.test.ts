@@ -366,6 +366,8 @@ describe('Production Documents', () => {
         await vi.waitFor(() => expect(view.opened).toHaveBeenCalledTimes(1));
         // An imported file is named after itself when the editor wrote no title of their own (Issue #1404).
         expect(view.opened.mock.calls[0]![0].title).toBe('同页材料');
+        // The status line names the document the editor's menu made, as the management page's does.
+        expect(view.status).toHaveBeenCalledWith('已创建「同页材料」', 'success');
         expect(acknowledge).toHaveBeenCalledTimes(1);
         expect(abandon).not.toHaveBeenCalled();
         expect((await store.getImportStartup()).state).toBe('none');

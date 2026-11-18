@@ -57,8 +57,10 @@ function setup(extraTypes: ProductionDocumentsProjection['types'] = []) {
       return projection;
     }),
     renameProductionDocument: vi.fn(async (input: { documentId: string; title: string }) => {
+      // A call over the bridge resolves later than the key that made it: a second save in between must be refused by the page.
+      await Promise.resolve();
       const renamed = projection.types.flatMap((type) => type.documents).find((entry) => entry.documentId === input.documentId);
-      if (renamed !== undefined) renamed.title = input.title;
+      if (renamed !== undefined) { renamed.title = input.title; renamed.updatedAt = '2026-12-01T00:00:00Z'; }
       return { document: renamed ?? null };
     }),
     createProductionDocument: vi.fn(async (input: { typeId: string; sourceVersionId?: string | null; title?: string }) => ({
@@ -239,17 +241,81 @@ it('keeps a click on another row\'s 改名 working while a title is edited or sa
   surface.destroy();
 });
 
-it('keeps a failed rename\'s text in its field (#1551)', async () => {
+it('keeps a failed rename\'s text in its field and lets it be saved again or given up (#1551)', async () => {
   const { root, methods, surface } = setup(); await flush();
+  const row = (): HTMLElement => root.querySelector<HTMLElement>('[data-derivative-document="doc-0"]')!;
   methods.renameProductionDocument.mockRejectedValueOnce(new Error('题目没有保存'));
-  click(root.querySelector<HTMLElement>('[data-derivative-document="doc-0"]')!, '改名');
-  const input = root.querySelector<HTMLElement>('.derivatives-item-title-input')!;
+  click(row(), '改名');
+  const input = row().querySelector<HTMLElement>('.derivatives-item-title-input')!;
   (input as unknown as MiniElement).value = '保存不了';
   key(input, 'Enter'); await flush();
-  const again = root.querySelector<HTMLElement>('.derivatives-item-title-input');
-  expect(again).not.toBeNull();
+  const again = row().querySelector<HTMLElement>('.derivatives-item-title-input');
+  expect(again).toBe(input);
   expect((again as unknown as MiniElement).value).toBe('保存不了');
   expect(document.activeElement).toBe(again);
+  // The field is not dead: Enter saves the same text now.
+  key(input, 'Enter'); await flush();
+  expect(methods.renameProductionDocument).toHaveBeenCalledTimes(2);
+  expect(row().querySelector('.derivatives-item-title-text')?.textContent).toBe('保存不了');
+  // And after another failure Escape gives the edit up.
+  methods.renameProductionDocument.mockRejectedValueOnce(new Error('题目没有保存'));
+  click(row(), '改名');
+  const second = row().querySelector<HTMLElement>('.derivatives-item-title-input')!;
+  (second as unknown as MiniElement).value = '又保存不了';
+  key(second, 'Enter'); await flush();
+  key(second, 'Escape');
+  expect(row().querySelector('.derivatives-item-title-input')).toBeNull();
+  expect(row().querySelector('.derivatives-item-title-text')?.textContent).toBe('保存不了');
+  expect(methods.renameProductionDocument).toHaveBeenCalledTimes(3);
+  surface.destroy();
+});
+
+it('returns focus to 改名 after a key\'s save, names the ⋯ menu by the new title and reads the list again (#1551)', async () => {
+  const { root, methods, surface } = setup(); await flush();
+  const row = (id: string): HTMLElement => root.querySelector<HTMLElement>(`[data-derivative-document="${id}"]`)!;
+  const first = (): string | undefined => root.querySelector<HTMLElement>('.derivatives-item')?.dataset['derivativeDocument'];
+  expect(first()).toBe('doc-0');
+  const reads = methods.inspectProductionDocuments.mock.calls.length;
+  click(row('doc-5'), '改名');
+  const input = row('doc-5').querySelector<HTMLElement>('.derivatives-item-title-input')!;
+  (input as unknown as MiniElement).value = '换了名字';
+  key(input, 'Enter'); await flush();
+  expect(methods.inspectProductionDocuments.mock.calls.length).toBe(reads + 1);
+  // The re-read moves the renamed row to the top (its time is the newest) and focus stays on its 改名.
+  expect(first()).toBe('doc-5');
+  expect(document.activeElement?.textContent).toBe('改名');
+  expect(row('doc-5').contains(document.activeElement as unknown as HTMLElement)).toBe(true);
+  expect(row('doc-5').querySelector('[data-derivative-row-menu="more"]')?.getAttribute('aria-label')).toBe('更多操作：换了名字');
+  surface.destroy();
+});
+
+it('repaints no other row while a save by leaving the field is read back, so the next press is not lost (#1551)', async () => {
+  const { root, methods, surface } = setup(); await flush();
+  const row = (id: string): HTMLElement => root.querySelector<HTMLElement>(`[data-derivative-document="${id}"]`)!;
+  click(row('doc-5'), '改名');
+  const typed = row('doc-5').querySelector<HTMLElement>('.derivatives-item-title-input')!;
+  (typed as unknown as MiniElement).value = '离开时保存';
+  blur(typed);
+  const target = row('doc-6').querySelector<HTMLElement>('[data-derivative-action="rename"]')!;
+  await flush();
+  expect(methods.renameProductionDocument).toHaveBeenCalledTimes(1);
+  // The read-back did not rebuild the list: the button the press was aimed at is still the one on the page.
+  expect(target.isConnected).toBe(true);
+  expect(row('doc-6').querySelector('[data-derivative-action="rename"]')).toBe(target);
+  // Nothing was repainted, so the ⋯ menu's name follows the new title in place.
+  expect(row('doc-5').querySelector('[data-derivative-row-menu="more"]')?.getAttribute('aria-label')).toBe('更多操作：离开时保存');
+  surface.destroy();
+});
+
+it('builds both row menus on the component\'s own menu class with the shared panel (#1551)', async () => {
+  const { root, surface } = setup(); await flush();
+  const row = root.querySelector<HTMLElement>('[data-derivative-document="doc-0"]')!;
+  for (const name of ['export', 'more']) {
+    const menu = row.querySelector(`[data-derivative-row-menu="${name}"]`)!.parentElement!;
+    expect(menu.tagName).toBe('DETAILS');
+    expect(menu.className).toBe('derivative-menu');
+    expect(menu.querySelector('.ui-menu-panel')).not.toBeNull();
+  }
   surface.destroy();
 });
 
@@ -275,9 +341,14 @@ it('asks about a category in an app strip that names it and its documents, and s
   expect(methods.deleteProductionDocumentType).toHaveBeenCalledWith({ typeId: 'news-release' });
   // The service's own refusal stands in the strip; the renderer copied none of its rule.
   expect(strip()!.textContent).toContain('这个类别下还有衍生稿件，请先改到别的类别。');
+  // Asking and cancelling repaint only the strip: a category name being typed stays as it is.
+  const typed = root.querySelector<HTMLInputElement>('[aria-label="新类别名称"]')!; typed.value = '还没保存的名称';
+  click(root.querySelector<HTMLElement>('[data-derivative-type="custom"]')!, '删除类别');
   click(strip()!, '取消');
   expect(strip()).toBeNull();
   expect(document.activeElement?.textContent).toBe('删除类别');
+  expect(root.querySelector('[aria-label="新类别名称"]')).toBe(typed);
+  expect(typed.value).toBe('还没保存的名称');
   surface.destroy();
 });
 
@@ -290,6 +361,12 @@ it('keeps the category strip working after another action and drops it when its 
   expect(strip()!.textContent).toContain('0 篇衍生稿件');
   click(root, '添加类别'); await flush();
   expect(strip()).not.toBeNull();
+  // Closing the category editor takes the question with it, and opening it again does not bring it back.
+  click(root, '管理衍生稿件类别');
+  expect(strip()).toBeNull();
+  click(root, '管理衍生稿件类别');
+  expect(strip()).toBeNull();
+  click(root.querySelector<HTMLElement>('[data-derivative-type="empty"]')!, '删除类别');
   click(strip()!, '确认删除'); await flush();
   expect(methods.deleteProductionDocumentType).toHaveBeenCalledWith({ typeId: 'empty' });
   expect(root.querySelector('[data-derivative-type="empty"]')).toBeNull();

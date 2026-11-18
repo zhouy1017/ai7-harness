@@ -55,6 +55,8 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
   const createPanel = el('div', undefined, 'derivatives-create-panel');
   const writingHost = el('div', undefined, 'derivative-writing-host');
   const categories = el('section', undefined, 'derivatives-category-editor');
+  /** Where 删除类别's question stands, so asking and cancelling repaint only it and never the names being typed above. */
+  const stripSlot = el('div');
   const chips = el('nav', undefined, 'derivatives-category-chips');
   chips.setAttribute('aria-label', '按衍生稿件类别筛选');
   const filters = el('div', undefined, 'derivatives-filters');
@@ -224,7 +226,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
 
   function paintCategories(): void {
     categories.replaceChildren(); categories.hidden = !managing;
-    if (!managing || projection === null) { pendingDelete = null; deleteProblem = null; return; }
+    if (!managing || projection === null) { pendingDelete = null; deleteProblem = null; stripSlot.replaceChildren(); return; }
     categories.append(el('h3', '管理衍生稿件类别'));
     const types = projection.types;
     types.forEach((type, index) => {
@@ -240,7 +242,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       const up = button('上移', () => move(-1)); up.disabled = busy || index === 0;
       const down = button('下移', () => move(1)); down.disabled = busy || index === types.length - 1;
       const remove = button('删除类别', () => {
-        pendingDelete = type.typeId; deleteProblem = null; paintCategories();
+        pendingDelete = type.typeId; deleteProblem = null; paintStrip();
         categories.querySelector<HTMLElement>('.derivatives-confirm [data-derivative-confirm="yes"]')?.focus();
       }, 'quiet');
       remove.dataset['derivativeAction'] = 'delete-type';
@@ -250,13 +252,17 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
     const name = el('input'); name.placeholder = '新类别名称'; name.setAttribute('aria-label', '新类别名称'); name.maxLength = 80; name.disabled = busy;
     const add = button('添加类别', () => void act(async () => { await api.saveProductionDocumentType({ name: name.value }); }));
     add.dataset['derivativeAction'] = 'add-type';
-    categories.append(name, add);
-    if (pendingDelete !== null) {
-      const type = types.find((entry) => entry.typeId === pendingDelete);
-      // A category removed elsewhere takes its question with it.
-      if (type === undefined) { pendingDelete = null; deleteProblem = null; }
-      else categories.append(deleteStrip(type));
-    }
+    categories.append(name, add, stripSlot);
+    paintStrip();
+  }
+
+  function paintStrip(): void {
+    stripSlot.replaceChildren();
+    if (pendingDelete === null || projection === null) return;
+    const type = projection.types.find((entry) => entry.typeId === pendingDelete);
+    // A category removed elsewhere takes its question with it.
+    if (type === undefined) { pendingDelete = null; deleteProblem = null; return; }
+    stripSlot.append(deleteStrip(type));
   }
 
   /**
@@ -270,7 +276,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
     if (deleteProblem !== null) strip.append(el('p', deleteProblem, 'derivatives-confirm-problem'));
     const yes = button('确认删除', () => void deleteType(type), 'danger');
     yes.dataset['derivativeConfirm'] = 'yes';
-    const no = button('取消', () => { pendingDelete = null; deleteProblem = null; paintCategories(); focusDeleteType(type.typeId); }, 'quiet');
+    const no = button('取消', () => { pendingDelete = null; deleteProblem = null; paintStrip(); focusDeleteType(type.typeId); }, 'quiet');
     no.dataset['derivativeConfirm'] = 'no';
     strip.append(yes, no);
     return strip;
@@ -328,6 +334,29 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       const row = el('li', undefined, 'derivatives-item'); row.dataset['derivativeDocument'] = doc.documentId;
       const titleRow = el('div', undefined, 'derivatives-item-title');
       const titleText = el('span', doc.title, 'derivatives-item-title-text');
+      const timeNode = el('time', localInstantLabel(doc.updatedAt ?? doc.createdAt));
+      let moreSummary: HTMLElement | null = null;
+      /**
+       * A saved title changes the row's time and place, so the list is read again. Only a key's save repaints it (and
+       * gives 改名 its focus back); a save by leaving the field may be the first half of a press on another row, so it
+       * only refreshes this row's time, and a row being edited elsewhere keeps its field.
+       */
+      const reread = async (byKey: boolean): Promise<void> => {
+        const hadFocus = document.activeElement === rename;
+        try {
+          const next = await api.inspectProductionDocuments();
+          if (stopped) return;
+          if (next.bookId !== options.bookId) throw new Error('衍生稿件不属于当前图书。');
+          projection = next;
+          const fresh = next.types.flatMap((entry) => entry.documents).find((entry) => entry.documentId === doc.documentId);
+          if (fresh !== undefined) timeNode.textContent = localInstantLabel(fresh.updatedAt ?? fresh.createdAt);
+          if (!byKey || list.querySelector('.derivatives-item-title-input') !== null) return;
+          paintList();
+          if (hadFocus) list.querySelector<HTMLElement>(`[data-derivative-document="${doc.documentId}"] [data-derivative-action="rename"]`)?.focus();
+        } catch (error) {
+          if (!stopped) options.setStatus(options.errorMessage(error, '无法读取衍生稿件。'), 'error');
+        }
+      };
       const beginRename = (): void => {
         if (titleRow.querySelector('.derivatives-item-title-input') !== null) return;
         const input = el('input', undefined, 'derivatives-item-title-input');
@@ -335,34 +364,38 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
         input.setAttribute('aria-label', `稿件题目：${doc.title}`);
         let done = false;
         const restore = (focusRename: boolean): void => { titleRow.replaceChildren(titleText, rename); if (focusRename) rename.focus(); };
-        const finish = (save: boolean): void => {
+        const finish = (save: boolean, byKey = false): void => {
           if (done) return; done = true;
           const title = input.value.trim();
           // Only a changed, non-empty title is written; Enter and leaving the field both save once. Nothing of the page
           // is disabled here, so the click that took focus away still reaches what it was aimed at.
           if (!save || title === '' || title === doc.title) { restore(true); return; }
-          void commitTitle(title);
+          void commitTitle(title, byKey);
         };
-        const commitTitle = async (title: string): Promise<void> => {
+        const commitTitle = async (title: string, byKey: boolean): Promise<void> => {
           input.disabled = true;
           try {
             const result = await api.renameProductionDocument({ documentId: doc.documentId, title });
             if (stopped) return;
             doc.title = result.document?.title ?? title;
             titleText.textContent = doc.title;
-            restore(false);
+            moreSummary?.setAttribute('aria-label', `更多操作：${doc.title}`);
+            restore(byKey);
             options.setStatus('已保存', 'success');
           } catch (error) {
             if (stopped) return;
-            // The typed text stays where it is, ready to be saved again.
+            // The typed text stays where it is, ready to be saved again (or given up with Escape).
             input.disabled = false;
             input.focus();
+            done = false;
             options.setStatus(options.errorMessage(error, '题目未改成，请重试。'), 'error');
+            return;
           }
+          await reread(byKey);
         };
         input.addEventListener('keydown', (event) => {
           if (event.isComposing || event.keyCode === 229) return;
-          if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+          if (event.key === 'Enter') { event.preventDefault(); finish(true, true); }
           else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
         });
         input.addEventListener('blur', () => finish(true));
@@ -378,7 +411,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       categorySelect.addEventListener('change', () => void act(async () => { await api.updateProductionDocumentMeta({ documentId: doc.documentId, typeId: categorySelect.value }); }));
       const meta = el('div', undefined, 'derivatives-item-meta');
       meta.append(categorySelect, el('span', doc.finalized ? '已定稿' : '草稿', 'status-pill'), el('span', `${doc.characterCount ?? 0} 字`),
-        el('time', localInstantLabel(doc.updatedAt ?? doc.createdAt)));
+        timeNode);
       const actions = el('div', undefined, 'derivatives-item-actions');
       const open = button('打开编辑', () => void act(() => options.openDocument(doc, type), ''), 'primary');
       open.dataset['derivativeAction'] = 'open';
@@ -386,7 +419,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       exportDocx.dataset['derivativeAction'] = 'export-docx';
       const exportMarkdown = button('导出 MD', () => void act(() => exportDocument(doc, 'markdown'), ''), 'secondary');
       exportMarkdown.dataset['derivativeAction'] = 'export-markdown';
-      const exportMenu = rowMenu('export-menu', '导出 ▾', 'export', [exportDocx, exportMarkdown]);
+      const exportMenu = rowMenu('导出 ▾', 'export', [exportDocx, exportMarkdown]);
       // One step with 撤销 (Issue #1431 item 28): the delete is a soft record the toast's action restores.
       const finalize = button(doc.finalized ? '取消定稿' : '设为定稿', () => void act(async () => { await api.updateProductionDocumentMeta({ documentId: doc.documentId, finalized: !doc.finalized }); }), 'secondary');
       finalize.dataset['derivativeAction'] = doc.finalized ? 'unfinalize' : 'finalize';
@@ -397,16 +430,17 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
         }, '已恢复衍生稿件') } });
       }, ''), 'quiet');
       remove.dataset['derivativeAction'] = 'delete';
-      const moreMenu = rowMenu('review-more', '⋯', 'more', [finalize, remove]);
-      moreMenu.querySelector('summary')!.setAttribute('aria-label', `更多操作：${doc.title}`);
+      const moreMenu = rowMenu('⋯', 'more', [finalize, remove]);
+      moreSummary = moreMenu.querySelector('summary')!;
+      moreSummary.setAttribute('aria-label', `更多操作：${doc.title}`);
       actions.append(open, exportMenu, moreMenu);
       row.append(titleRow, meta, el('p', doc.preview ?? '', 'derivatives-preview'), actions); list.append(row);
     }
   }
 
   /** A row's secondary actions in the shared disclosure menu, so Escape, an outside click and focus behave as elsewhere. */
-  function rowMenu(className: 'export-menu' | 'review-more', summaryText: string, name: string, items: HTMLButtonElement[]): HTMLDetailsElement {
-    const menu = el('details', undefined, className);
+  function rowMenu(summaryText: string, name: string, items: HTMLButtonElement[]): HTMLDetailsElement {
+    const menu = el('details', undefined, 'derivative-menu');
     const summary = el('summary', summaryText, 'btn secondary');
     summary.dataset['derivativeRowMenu'] = name;
     const body = menuPanel(...items);
