@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as marks from '../../../src/service/editorial-mark-operations.js';
 import * as manuscript from '../../../src/service/manuscript/operations.js';
+import { StoreError } from '../../../src/service/store-records.js';
 import { graphemesOf } from '../../../src/shared/mark-anchor.js';
 import type { ManuscriptWindowProjection } from '../../../src/shared/protocol.js';
 import type { ManuscriptMarksBook } from './manuscript-marks.js';
@@ -54,16 +55,12 @@ export function suggest(book: ManuscriptMarksBook, blockId: string, from: number
   return { markId: made.markId, pinned: made.card!.pinnedText };
 }
 
-/**
- * The refusal code an operation throws. The store's wrappers map an owner's refusal to `StoreError` with the same code;
- * here the wrappers are pass-through, so the code is read from whichever owner refused.
- */
+/** The code of the StoreError an operation throws, as the store's wrappers throw it; any other error fails the case. */
 export function refusal(operation: () => unknown): string {
   try {
     operation();
   } catch (error) {
-    const code = (error as { code?: unknown }).code;
-    if (typeof code === 'string') return code;
+    if (error instanceof StoreError) return error.code;
     throw error;
   }
   return 'no-error';

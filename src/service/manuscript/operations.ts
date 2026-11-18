@@ -61,7 +61,7 @@ export interface ManuscriptOperationsHost {
   journalWritten(): void;
 }
 
-// ---- Windows and places ---------------------------------------------------------------------------------------
+// ---- Windows, places, the edit journal, search and replacement ---------------------------------------------------------------------------------------
 
 export function readManuscriptImageChunk(host: ManuscriptOperationsHost, input: import('../../shared/protocol.js').ServiceOperationMap['readManuscriptImageChunk']['input']) {
   const branch = host.authority.prepare('SELECT base_revision_id FROM manuscript_branches WHERE manuscript_id = ? AND branch_id = ?')
@@ -116,17 +116,6 @@ export function getManuscriptRail(host: ManuscriptOperationsHost, manuscriptId: 
     unread = null;
   }
   return host.boundedCall(() => host.bounded.getRail(manuscriptId, branchId, unread));
-}
-
-export function commitReplacement(host: ManuscriptOperationsHost, previewId: string): ReplacementCommitProjection {
-  return host.boundedCall(() => host.bounded.commitReplacement(previewId, host.lifetimeId, (source) =>
-    host.captureManual(source)));
-}
-
-export function dismissReplacementPreview(host: ManuscriptOperationsHost, previewId: string): ReplacementDismissalProjection {
-  const cancelled = host.cancelReplacement(previewId);
-  requireStore(cancelled, 'REPLACEMENT_STATE_CHANGED', '替换预览已提交、失败或不再可取消。');
-  return { previewId, state: 'cancelled' };
 }
 
 export function getManuscriptWindow(host: ManuscriptOperationsHost, manuscriptId: string, branchId: string, cursor: string | null): ManuscriptWindowProjection {
@@ -219,6 +208,17 @@ export function advanceReplacementWork(host: ManuscriptOperationsHost, previewId
 
 export function cancelReplacement(host: ManuscriptOperationsHost, previewId: string): boolean {
   return host.boundedCall(() => host.bounded.cancelReplacement(previewId));
+}
+
+export function commitReplacement(host: ManuscriptOperationsHost, previewId: string): ReplacementCommitProjection {
+  return host.boundedCall(() => host.bounded.commitReplacement(previewId, host.lifetimeId, (source) =>
+    host.captureManual(source)));
+}
+
+export function dismissReplacementPreview(host: ManuscriptOperationsHost, previewId: string): ReplacementDismissalProjection {
+  const cancelled = host.cancelReplacement(previewId);
+  requireStore(cancelled, 'REPLACEMENT_STATE_CHANGED', '替换预览已提交、失败或不再可取消。');
+  return { previewId, state: 'cancelled' };
 }
 
 // ---- History: the storage-facing interface for R5 (undo, redo, revisions, milestones, recovery) -----------------

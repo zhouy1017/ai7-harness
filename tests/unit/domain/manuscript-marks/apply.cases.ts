@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
+import { StoreError } from '../../../../src/service/store-records.js';
 import { graphemesOf } from '../../../../src/shared/mark-anchor.js';
 import { manuscriptMarksBook, type ManuscriptMarksBook } from '../../../support/domain/manuscript-marks.js';
 import { binding, blockText, marks, paragraphs, refusal, suggest, typeInto, windowOf } from '../../../support/domain/manuscript-marks-drive.js';
@@ -165,7 +166,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
     } catch (error) {
       refused = error;
     }
-    // The store's wrapper carries this code and message as a StoreError (kept on disk by manuscript-apply.test.ts).
+    expect(refused).toBeInstanceOf(StoreError);
     expect(refused).toMatchObject({ code: 'APPLY_TARGET_DRIFTED', message: '应用后的文字又改过，不能直接撤销这次应用。' });
     expect(windowOf(book).workingDigest).toBe(spanned.workingDigest);
     expect(marks.getManuscriptApplyOutcome(h, book.manuscriptId, book.branchId, clientEffectId).state).toBe('not-committed');

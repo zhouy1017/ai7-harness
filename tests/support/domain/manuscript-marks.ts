@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { initializeAiEditLockSchema } from '../../../src/service/ai-edit-locks.js';
-import { BoundedManuscriptStore, initializeManuscriptEntryPositionSchema } from '../../../src/service/bounded-manuscript.js';
-import { initializeDecisionFeedbackSchema } from '../../../src/service/decision-feedback.js';
+import { AnalysisError } from '../../../src/service/analysis/canonical.js';
+import { BoundedManuscriptStore, BoundedStoreError, BoundedStoreFatalError, initializeManuscriptEntryPositionSchema } from '../../../src/service/bounded-manuscript.js';
+import { DecisionFeedbackError, initializeDecisionFeedbackSchema } from '../../../src/service/decision-feedback.js';
 import { DOCX_PARSER_IDENTITY, parseDocx, type ParsedDocxBlock } from '../../../src/service/docx.js';
 import * as editorialMarkOperations from '../../../src/service/editorial-mark-operations.js';
-import { EditorialMarkStore, initializeEditorialMarkSchema, initializeProposalReviewSchema } from '../../../src/service/editorial-marks.js';
+import { EditorialMarkError, EditorialMarkStore, initializeEditorialMarkSchema, initializeProposalReviewSchema } from '../../../src/service/editorial-marks.js';
 import { writeImportedManuscriptRows } from '../../../src/service/import-intake-operations.js';
 import { IMPORT_FIDELITY_CATEGORIES_SQL, initializeImportRetentionSchema } from '../../../src/service/import-retention.js';
 import { initializeInlineEditorRevisionSchema } from '../../../src/service/inline-editor-revisions.js';
@@ -20,8 +21,10 @@ import { NOTE_BLOCK_SCHEMA_SQL, NOTE_BLOCK_TRIGGER_SQL, widenedBlockKindTables }
 import * as manuscriptOperations from '../../../src/service/manuscript/operations.js';
 import { STRUCTURAL_EDIT_SCHEMA_SQL } from '../../../src/service/manuscript/structural-schema.js';
 import { MANUSCRIPTS_REVISION_37_SQL, PRODUCTION_DOCUMENT_INDEX_SQL } from '../../../src/service/production-document-ledger.js';
-import { initializeProposalConflictSchema, ProposalConflictStore } from '../../../src/service/proposal-conflicts.js';
-import { canonicalJson, sha256 } from '../../../src/service/store-records.js';
+import { initializeReimportGroupSchema } from '../../../src/service/reimport-group-ledger.js';
+import { initializeImportStructureSchema } from '../../../src/service/manuscript/structure-schema.js';
+import { initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore } from '../../../src/service/proposal-conflicts.js';
+import { canonicalJson, sha256, StoreError, StoreFatalError } from '../../../src/service/store-records.js';
 import { admittedSourcePath, ADMITTED_BASELINE_DOCX } from '../composed-fixture.js';
 import { DOCX_SOURCE_STUBS } from './docx-stubs.js';
 import { transaction } from './transaction.js';
@@ -133,6 +136,11 @@ export function manuscriptMarksDatabase(): DatabaseSync {
     // production initializer (learning/ledger.ts), compared whole with an opened store by the parity case.
     initializeEditorialLearningSchema(db);
     initializeLearningEligibilitySchema(db);
+    // The relations whose presence the readers test (a mark set aside by a reimport, a comparison's group sets, the
+    // imported structure's lineage): their owners' production initializers, so every reader takes the branch an opened
+    // store takes, on a Book that was never reimported.
+    initializeReimportGroupSchema(db);
+    initializeImportStructureSchema(db);
     return db;
   } catch (error) { db.close(); throw error; }
 }
@@ -167,8 +175,8 @@ export interface ManuscriptMarksBook {
 
 /**
  * One Book committed from the first `blocks` body blocks of sample1 through the production import row writer, with the
- * real owners the store builds over it and the two operation Hosts. The store's error wrappers are pass-through here:
- * an owner's refusal reaches the case as the owner's error, with the same `code` the store's wrapper would carry.
+ * real owners the store builds over it and the two operation Hosts, whose wrappers map an owner's refusal to a StoreError
+ * exactly as the store's do.
  */
 export async function manuscriptMarksBook(blocks = 40, startBlock = 1): Promise<ManuscriptMarksBook> {
   const available = await sample1Blocks();
@@ -212,10 +220,24 @@ export async function manuscriptMarksBook(blocks = 40, startBlock = 1): Promise<
   const editorialMarks = new EditorialMarkStore(db);
   const manuscriptApply = new ManuscriptApplyStore(db, boundedAuthority, editorialMarks, lifetimeId);
   const proposalConflicts = new ProposalConflictStore(db, editorialMarks);
-  const passThrough = <T>(operation: () => T): T => operation();
+  // The store's #markCall, #conflictCall and #boundedCall class mappings, so a refusal reaches the case as the StoreError
+  // the store would throw. Poisoning the store on a fatal error is store state and stays in the service suite.
+  const mapped = (refusals: ReadonlyArray<new (...args: never[]) => Error & { code: string }>, fatal: (error: unknown) => boolean) =>
+    <T>(operation: () => T): T => {
+      try {
+        return operation();
+      } catch (error) {
+        if (refusals.some((type) => error instanceof type)) throw new StoreError((error as { code: string }).code, (error as Error).message);
+        if (fatal(error)) throw new StoreFatalError(error as Error);
+        throw error;
+      }
+    };
+  const markCall = mapped([EditorialMarkError, ProposalConflictError, DecisionFeedbackError], () => false);
+  const conflictCall = mapped([ProposalConflictError, EditorialMarkError, AnalysisError], (error) => error instanceof AggregateError);
+  const boundedCall = mapped([BoundedStoreError], (error) => error instanceof BoundedStoreFatalError);
   const marksHost: editorialMarkOperations.EditorialMarkOperationsHost = {
     authority: db, boundedAuthority, lifetimeId, editorialMarks, manuscriptApply, proposalConflicts,
-    markCall: passThrough, conflictCall: passThrough, boundedCall: passThrough, transaction,
+    markCall, conflictCall, boundedCall, transaction,
     // Labelled stub read: no factual-verification ledger here, so no mark has a Correction Proposal lineage.
     factualLineageOfMark: () => null,
   };
@@ -223,7 +245,7 @@ export async function manuscriptMarksBook(blocks = 40, startBlock = 1): Promise<
     authority: db, bounded, boundedAuthority, lifetimeId,
     // Labelled stub: recovery objects live on disk; the milestone and recovery cases stay in tests/service.
     get recoveryObjects(): never { throw new Error('recovery objects are files; this case belongs in tests/service'); },
-    assertAvailable: () => undefined, boundedCall: passThrough, withRecoveryObjectLifecycle: (operation) => operation(),
+    assertAvailable: () => undefined, boundedCall, withRecoveryObjectLifecycle: (operation) => operation(),
     // Labelled stubs: learning capture and the baseline analysis belong to other owners.
     captureManual: () => undefined, analysisResultSetRevision: () => null,
     cancelReplacement: (previewId) => manuscriptOperations.cancelReplacement(manuscriptHost, previewId),

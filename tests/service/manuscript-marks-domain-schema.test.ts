@@ -7,7 +7,7 @@ import { createServiceTestRoots } from '../support/temp-data-root.js';
 
 // The in-memory manuscript and mark suite (Issue #1536) stands on this: every table its helper creates is either a
 // production definition, compared whole (text, indexes, triggers) with an opened store, or a labelled stub whose every
-// column (type, NOT NULL, key) and unique key the opened store has.
+// column (type, NOT NULL, key) and unique key the opened store has, and which keeps every owner key over its columns.
 it('checks every manuscript and mark fixture table against its production owner or source-column contract', async () => {
   const roots = await createServiceTestRoots();
   const memory = manuscriptMarksDatabase();
@@ -32,6 +32,11 @@ it('checks every manuscript and mark fixture table against its production owner 
         if (manuscriptMarksStubTables.has(table)) {
           for (const column of columns(memory, table)) expect(columns(disk, table), table).toContainEqual(column);
           for (const key of keys(memory, table)) expect(keys(disk, table), table).toContain(key);
+          // Every unique key of the owner over columns the stub carries is a key of the stub too.
+          const carried = new Set(columns(memory, table).map(column => String(column.name)));
+          for (const key of keys(disk, table).filter(key => key.split(',').every(column => carried.has(column)))) {
+            expect(keys(memory, table), table).toContain(key);
+          }
         } else expect(schema(memory, table), table).toEqual(schema(disk, table));
       }
       for (const stub of manuscriptMarksStubTables) expect(names, stub).toContain(stub);
