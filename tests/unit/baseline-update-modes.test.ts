@@ -46,3 +46,29 @@ it('names the chosen update mode on the start and keeps the pressed button on it
   root.querySelector('.analysis-update-action [data-analysis-action="sync-current"]')!.click();
   expect([launch().textContent, pressed()]).toEqual(['开始同步', ['sync-current']]);
 });
+
+// A Task prepared and not yet started keeps 0.7.2's path (#1526, J-04 legacy plan): the mode's button prepares it again with the
+// mode chosen and opens its plan; on any other card it only chooses the mode.
+it.each([['prepared', 1], ['settled', 0]] as const)('a %s card prepares again from the mode button %i time(s)', async (state, calls) => {
+  const projection = baselineAnalysisWire(longSettledAnalysis(longPreparedAnalysis(3), 2, false));
+  Object.assign(projection, { state });
+  for (const mode of ['sync-current', 'reanalyze-range', 'reanalyze-book'] as const) Object.assign(projection.updateControls!.actions[mode], { available: true, unavailableReason: null });
+  const prepareBaselineAnalysis = vi.fn(() => new Promise(() => undefined));
+  vi.stubGlobal('window', { setTimeout, clearTimeout, localStorage: { getItem: () => 'full', setItem: vi.fn() }, ai7: {
+    inspectCustomAnalysisDimensions: vi.fn(async () => { throw new Error('unused custom dimensions'); }),
+    inspectAnalysisFeedback: vi.fn(async () => { throw new Error('unused feedback'); }), prepareBaselineAnalysis,
+  } });
+  const drawerRoot = document.createElement('aside'); document.body.append(drawerRoot);
+  const drawer = mountTaskDrawer({ root: drawerRoot, shell: document.body, onOpen: vi.fn(), onRecorded: vi.fn(), setStatus: vi.fn(), errorCode: () => null,
+    errorMessage: (_error: unknown, fallback: string) => fallback, technicalDetails: () => document.createElement('details'),
+    api: { getModelServiceSettings: async () => ({ channels: [], roles: [], routeChoice: { routes: [] } }), getPreferences: async () => ({ values: preferenceDefaults() }) } } as never);
+  const root = miniDocument.createElement('main'); miniDocument.body.append(root);
+  const card = createBaselineAnalysisCard({ screen: root as unknown as HTMLElement, technicalDetails: () => document.createElement('details'), rendererErrorMessage: (_error: unknown, fallback: string) => fallback,
+    setStatus: vi.fn(), taskDrawer: drawer, taskPlanOpenButton: () => document.createElement('button'), awaitServiceJob: vi.fn(), jumpToManuscript: vi.fn(),
+    leaveReturnChip: vi.fn(), openEditorWindow: vi.fn(), openTaskPlan: vi.fn(), quickStartStartedLine: () => '', renderBookReview: vi.fn() } as never);
+  card.renderBaselineAnalysis(root as unknown as HTMLElement, projection, '公开样书');
+  root.querySelector('.analysis-update-action [data-analysis-action="reanalyze-book"]')!.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(prepareBaselineAnalysis).toHaveBeenCalledTimes(calls);
+  if (calls > 0) expect(prepareBaselineAnalysis).toHaveBeenCalledWith(expect.objectContaining({ update: { mode: 'reanalyze-book', selectedRange: null }, reconfirm: false }));
+});

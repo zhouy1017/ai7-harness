@@ -1029,7 +1029,15 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         }
         block.append(fieldset);
       }
-      const start = button(action.label, 'secondary', () => selectMode(mode));
+      // A Task prepared and not yet started (a quick start held offline, say) keeps 0.7.2's path: the mode's button prepares it again
+      // with the mode and range chosen and opens its plan, where a changed plan is reconfirmed; otherwise it only chooses the mode.
+      const start = button(action.label, 'secondary', async () => {
+        selectMode(mode);
+        if (projection.state !== 'prepared') return;
+        if (mode === 'reanalyze-range' && selectedRange === null) { setStatus('请先选择要重新分析的范围。', 'error'); return; }
+        await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update: { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null }, reconfirm: false },
+          { start, cancel, others: actionButtons.filter((other) => other !== start) }, null, true);
+      });
       start.setAttribute('aria-pressed', String(activeMode === mode));
       modeButtons.set(mode, start);
       start.dataset['analysisAction'] = mode;
