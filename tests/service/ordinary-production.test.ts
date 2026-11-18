@@ -999,7 +999,7 @@ it('starts the selected finite model deadline only after real shared capacity gr
   vi.spyOn(requestGovernor, 'acquire').mockImplementation((producer, signal) => { const waiting = acquire(producer, signal); queued.resolve(); return waiting; });
   const cancellation = new AbortController(); const consuming = deferred(); let sends = 0; let settled = false;
   vi.useFakeTimers();
-  const deadlineMs = production.policy.providerProcessing.transport!.requestDeadlineSeconds * 1000;
+  const deadlineMs = production.policy.providerProcessing.transport!.idleSeconds * 1000;
   const probe = testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: (async (_url: unknown, init: RequestInit) => {
     sends += 1;
     return { status: 200, json: () => new Promise<never>((_resolve, reject) => {

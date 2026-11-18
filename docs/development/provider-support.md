@@ -34,6 +34,10 @@ All four implemented protocol families support text, streaming and function tool
 | reasoningContinuation | supported | supported | supported | supported |
 | providerTools | unsupported | unsupported | unsupported | unsupported |
 
+### Transport bounds (#1599)
+
+A model request is bounded by what it is waiting for, never by how long its answer is. The three bounds are the `transport` record of [`config/runtime-execution-defaults.json`](../../config/runtime-execution-defaults.json), the same for every route and model: `firstByteSeconds` (600) from the send to the response headers, `idleSeconds` (90) of silence between received bytes once the headers are in, and `totalCeilingSeconds` (3600) as a far larger safety net. A streamed answer (the dialogue stream) keeps its request alive for as long as bytes keep arriving, reasoning frames and keep-alive comments included. A whole-answer request (every Review, analysis and writing unit) is not streamed, so its headers arrive only when the answer is finished: `firstByteSeconds` is the longest generation tolerated, and a unit whose answer takes minutes, such as a dense chapter at a high reasoning effort, settles inside it. A request that reaches a bound after it was sent is an unknown outcome and is never resent on its own.
+
 ## 阿里云百炼 Qwen
 
 | | |

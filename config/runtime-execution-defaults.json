@@ -1155,7 +1155,9 @@
     }
   },
   "transport": {
-    "requestDeadlineSeconds": 180,
+    "firstByteSeconds": 600,
+    "idleSeconds": 90,
+    "totalCeilingSeconds": 3600,
     "rateLimitRetry": {
       "honourRetryAfter": true,
       "maxRetries": 1
