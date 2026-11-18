@@ -1,48 +1,59 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { BoundedManuscriptStore, initializeBoundedSchema } from '../../../src/service/bounded-manuscript.js';
+import { BoundedManuscriptStore } from '../../../src/service/bounded-manuscript.js';
 import { compileWordTrackedDocxBytes, DOCX_PARSER_IDENTITY, WORD_DOCX_PARSER_IDENTITY } from '../../../src/service/docx.js';
 import { EditorialMarkStore, initializeEditorialMarkSchema } from '../../../src/service/editorial-marks.js';
 import { writeImportedManuscriptRows } from '../../../src/service/import-intake-operations.js';
 import {
-  bindWordReadingToRevision,
-  initializeImportRetentionSchema, initializeWordImportRetentionSchema, readWordParentSourcePin, retainWordRevisionSource,
+  bindWordReadingToRevision, IMPORT_FIDELITY_CATEGORIES_SQL, initializeImportRetentionSchema, initializeWordImportRetentionSchema, readWordParentSourcePin, retainWordRevisionSource,
   WORD_EXTRACTOR_IDENTITY,
   wordParentSourcePinRecord,
   type WordImportChoiceRecord
 } from '../../../src/service/import-retention.js';
 import { initializeImportedMarkSchema } from '../../../src/service/imported-marks.js';
-import { initializeLearningEligibilitySchema } from '../../../src/service/learning-eligibility.js';
-import { EditorialLearningLedger, initializeEditorialLearningSchema } from '../../../src/service/learning/ledger.js';
-import { initializeNoteBlockSchema } from '../../../src/service/manuscript/note-schema.js';
-import { initializeImportStructureSchema } from '../../../src/service/manuscript/structure-schema.js';
-import { loadBuiltInManuscriptProfile } from '../../../src/service/native-workflow-profile.js';
+import { LOCAL_LEARNING_POLICY_BASIS } from '../../../src/service/learning-eligibility.js';
+import { TARGET_VIRTUAL_TABLE_SQL, V6_TARGET_INDEX_SQL, V6_TARGET_SCHEMA_SQL } from '../../../src/service/manuscript/bounded-schema-sql.js';
+import { initializeProductionDocumentSchema, MANUSCRIPTS_REVISION_37_SQL, MULTI_DOCUMENT_INDEX_SQL } from '../../../src/service/production-document-ledger.js';
 import { canonicalJson, sha256 } from '../../../src/service/store-records.js';
-import { configureDatabase, initializeManuscriptIntakeSchema, initializeManuscriptReimportSchema, initializeSchema, initializeSourceImportSchema, initializeTextConversionSchema } from '../../../src/service/store-schema.js';
 import { buildWordProfileRecipe } from '../../fixtures/docx-fidelity/builder.js';
+import { DOCX_SOURCE_STUBS } from './docx-stubs.js';
 
-/** Domain tables use production initializers; file retention and migration proof remain in service tests. */
+/** Production retention/mark definitions plus labelled external-owner source stubs; no store-schema import. */
 export async function docxDatabase(): Promise<DatabaseSync> {
   const db = new DatabaseSync(':memory:');
-  configureDatabase(db);
-  initializeSchema(db);
+  db.exec('PRAGMA foreign_keys = ON');
   try {
-    const profile = await loadBuiltInManuscriptProfile(process.cwd());
-    initializeBoundedSchema(db, profile);
-    initializeSourceImportSchema(db, profile);
-    initializeManuscriptReimportSchema(db, profile);
-    initializeManuscriptIntakeSchema(db);
-    initializeTextConversionSchema(db);
+    for (const sql of Object.values(DOCX_SOURCE_STUBS)) db.exec(sql);
+    db.exec(MANUSCRIPTS_REVISION_37_SQL);
+    initializeProductionDocumentSchema(db);
+    db.exec(MULTI_DOCUMENT_INDEX_SQL.production_documents_book_type);
+    db.exec(IMPORT_FIDELITY_CATEGORIES_SQL);
     initializeEditorialMarkSchema(db);
-    initializeImportRetentionSchema(db);
-    initializeLearningEligibilitySchema(db);
-    initializeEditorialLearningSchema(db);
-    initializeWordImportRetentionSchema(db);
     initializeImportedMarkSchema(db);
-    initializeNoteBlockSchema(db);
-    initializeImportStructureSchema(db);
+    initializeImportRetentionSchema(db);
+    initializeWordImportRetentionSchema(db);
+    db.exec(V6_TARGET_SCHEMA_SQL.manuscript_outline);
+    db.exec(V6_TARGET_SCHEMA_SQL.working_offset_nodes);
+    db.exec(TARGET_VIRTUAL_TABLE_SQL);
+    db.exec(V6_TARGET_INDEX_SQL.manuscript_outline_order);
     return db;
   } catch (error) { db.close(); throw error; }
+}
+
+/** Every table this helper creates is either a production definition or a labelled source stub. */
+export const docxStubTables = new Set<string>(Object.keys(DOCX_SOURCE_STUBS));
+
+/** Test-owned connection/transaction seam; production operations are never reimplemented here. */
+export function docxTestHost(db: DatabaseSync) {
+  return {
+    get authority() { return db; },
+    transaction<T>(connection: DatabaseSync, operation: () => T): T {
+      if (connection.isTransaction) return operation();
+      connection.exec('BEGIN IMMEDIATE');
+      try { const result = operation(); connection.exec('COMMIT'); return result; }
+      catch (error) { connection.exec('ROLLBACK'); throw error; }
+    },
+  };
 }
 
 /** Real compiler bytes and the production manuscript-row writer; caller owns the transaction. */
@@ -54,6 +65,7 @@ export function wordRetentionFixture(db: DatabaseSync) {
   const branchId = randomUUID(), revisionId = randomUUID(), commitId = randomUUID(), fidelityReviewId = randomUUID();
   const provenanceId = randomUUID(), recordedAt = '2026-10-25T00:00:00Z', reading = compiled.readings.rejected;
   const reviewDigest = sha256(canonicalJson({ draftId, sourceVersionId }));
+  // External-owner stub inserts — not a schema or provenance proof; the selected reading is their only claim.
   db.prepare('INSERT INTO books(book_id, stable_identity, title, created_at) VALUES (?, ?, ?, ?)').run(bookId, randomUUID(), 'Word 对应契约', recordedAt);
   db.prepare('INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at) VALUES (?, ?, ?, ?)')
     .run(compiled.sourceDigest, compiled.sourceDigest + '.docx', originalBytes.length, recordedAt);
@@ -78,7 +90,7 @@ export function wordRetentionFixture(db: DatabaseSync) {
   const revisionDigest = sha256(canonicalJson({ manuscriptId, contentDigest: reading.contentDigest }));
   const bounded = new BoundedManuscriptStore(db);
   writeImportedManuscriptRows(db, { input: { draftId }, bookId, manuscriptId, branchId, revisionId, sourceVersionId,
-    revisionDigest, workingDigest: revisionDigest, now: recordedAt, shaped: false, word: compiled,
+    revisionDigest, workingDigest: revisionDigest, now: recordedAt, shaped: false, word: { compiled },
     snapshot: { blockCount: reading.blocks.length }, blockCount: reading.blocks.length, unmappedBlocks: 0,
     characterCount: reading.characterCount, merged: null, structure: null }, () => {
     db.prepare(`INSERT INTO import_fidelity_reviews(fidelity_review_id, book_id, source_version_id, review_digest, outcome, round_trip_guaranteed, created_at)
@@ -101,6 +113,8 @@ export function wordRetentionFixture(db: DatabaseSync) {
     readings: { rejected: { digest: reading.readingDigest, blockCount: reading.blocks.length, usable: reading.usable },
       accepted: { digest: compiled.readings.accepted.readingDigest, blockCount: compiled.readings.accepted.blocks.length, usable: compiled.readings.accepted.usable } },
     mappingDigest: bound.mappingDigest, templateManifestDigest: compiled.templateManifestDigest,
-    effectiveControls: new EditorialLearningLedger(db).wordImportControls(bookId, []) };
+    // External-owner stub read: default learning controls; learning-policy proofs remain in service tests.
+    effectiveControls: { global: { enabled: true, reference: { kind: 'default', basis: LOCAL_LEARNING_POLICY_BASIS } },
+      book: { excluded: false, reference: { kind: 'default', basis: LOCAL_LEARNING_POLICY_BASIS } }, materials: [] } };
   return { bookId, compiled, originalBytes, choice, bound, sourceVersionId, commitId, recordedAt, branchId, markStore: new EditorialMarkStore(db) };
 }
