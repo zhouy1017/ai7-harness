@@ -1,4 +1,3 @@
-import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { attentionNoticeClearsMenu, attentionNoticeHolds, pressQuietResult, READ_CARET } from './attention-notice.mjs';
