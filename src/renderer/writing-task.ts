@@ -374,17 +374,13 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       form.append(problem);
     }
     const row = el('div', 'button-row');
-    const plan = action('查看计划', 'secondary', 'plan', () => void prepare(null));
-    const start = action('开始写作', 'primary', 'start', () => void prepare(null, true));
-    plan.disabled = busy || page.unavailable !== null;
-    start.disabled = plan.disabled;
-    plan.setAttribute('aria-controls', 'task-drawer');
     const cancel = action(WRITING_ACTIONS.cancel, 'quiet', 'cancel', () => {
       sheet = null;
       paint('[data-writing-action="new"]');
     });
     cancel.disabled = busy;
     options.openLaunch({ bookId: page.bookId, operation: 'launchWritingTask', title: '写作', mount: row, inputEvents: form, lifetime: state,
+      startDisabled: busy || page.unavailable !== null,
       input: { typeId: state.typeId ?? '', audience: state.audience, channel: state.channel,
         requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds] },
       readInput: () => ({ typeId: state.typeId ?? '', audience: state.audience, channel: state.channel,

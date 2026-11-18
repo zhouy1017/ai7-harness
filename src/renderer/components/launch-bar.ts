@@ -23,6 +23,8 @@ export type TaskLaunchRequest = { [K in TaskLaunchOperation]: { bookId: string; 
   inputEvents?: HTMLElement;
   lifetime?: object;
   startLabel?: string;
+  /** The surface cannot start now (busy, or the bound choice is refused); the bar shows its start disabled. */
+  startDisabled?: boolean;
   beforeLaunch?: () => Promise<boolean>;
   readInput?: () => Omit<ServiceOperationMap[K]['input'], 'bookId' | 'clientCommandId' | 'executionConfig' | 'rememberedChoice'>;
   input: Omit<ServiceOperationMap[K]['input'], 'bookId' | 'clientCommandId' | 'executionConfig' | 'rememberedChoice'> } }[TaskLaunchOperation];
@@ -71,6 +73,8 @@ export interface LaunchBar {
    * Its options stay editable, and the plan shown still goes stale when one changes.
    */
   interrupt(): void;
+  /** The surface repainted its request: show its current start label and whether it may start now. */
+  sync(): void;
   /** This launch is no longer on screen: stop its asynchronous work and detach its document listeners. */
   dispose(): void;
 }
@@ -120,13 +124,19 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
     details.append(summary, panel);
     if (typeof panel.showPopover === 'function') {
       panel.setAttribute('popover', 'auto');
+      const place = (): void => {
+        if (!panel.matches(':popover-open')) return;
+        const anchor = summary.getBoundingClientRect(), bounds = panel.getBoundingClientRect();
+        panel.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - bounds.width - 8))}px`;
+        panel.style.top = `${Math.max(8, anchor.top >= bounds.height + 8 ? anchor.top - bounds.height : Math.min(anchor.bottom, innerHeight - bounds.height - 8))}px`;
+      };
+      // The plan and the references arrive after the panel opens: place it again whenever its size changes.
+      if (typeof ResizeObserver === 'function') new ResizeObserver(place).observe(panel);
       details.addEventListener('toggle', event => {
         if (event.target !== details) return;
         if (!details.open) { if (panel.matches(':popover-open')) panel.hidePopover(); return; }
         panel.showPopover();
-        const anchor = summary.getBoundingClientRect(), bounds = panel.getBoundingClientRect();
-        panel.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - bounds.width - 8))}px`;
-        panel.style.top = `${Math.max(8, anchor.top >= bounds.height + 8 ? anchor.top - bounds.height : Math.min(anchor.bottom, innerHeight - bounds.height - 8))}px`;
+        place();
       });
       panel.addEventListener('toggle', () => { if (!panel.matches(':popover-open')) details.open = false; });
     }
@@ -267,21 +277,23 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
 
   refreshPreview.addEventListener('click', () => { void openPlan(); });
 
-  const startButton = control(options.startLabel ?? request.startLabel ?? `开始${request.title}`, 'primary', 'launch'); startButton.disabled = true;
+  const startButton = control(request.startLabel ?? options.startLabel ?? `开始${request.title}`, 'primary', 'launch'); startButton.disabled = true;
+  let settingsRead = false; let launching = false;
+  const syncStart = (): void => { startButton.disabled = stopped || interrupted || !settingsRead || launching || request.startDisabled === true; };
   const start = async (): Promise<void> => {
-    if (stopped || startButton.disabled) return;
-    startButton.disabled = true;
+    if (stopped || startButton.disabled || request.startDisabled === true) return;
+    launching = true; syncStart();
     problem.textContent = '';
     const controls = [
       ...[description, planContent, runOptions, references].flatMap(node => [...node.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')]),
       ...chooser.element.querySelectorAll<HTMLSelectElement | HTMLButtonElement>('select,button'),
     ].map(control => ({ control, disabled: control.disabled }));
     for (const { control } of controls) control.disabled = true;
-    const restore = (): void => { for (const { control, disabled } of controls) control.disabled = disabled; };
+    const restore = (): void => { for (const { control, disabled } of controls) control.disabled = disabled; launching = false; syncStart(); };
     try {
-      if (request.beforeLaunch !== undefined && !await request.beforeLaunch()) { restore(); startButton.disabled = false; return; }
-      if (!applyOptions()) { restore(); startButton.disabled = false; return; }
-      if (!(await settle())) { restore(); startButton.disabled = false; return; }
+      if (request.beforeLaunch !== undefined && !await request.beforeLaunch()) { restore(); return; }
+      if (!applyOptions()) { restore(); return; }
+      if (!(await settle())) { restore(); return; }
       let result: TaskExecutionLaunchResult;
       switch (request.operation) {
         case 'launchBaselineAnalysis': result = await api.launchBaselineAnalysis({ ...request.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
@@ -296,7 +308,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
       onRecorded(kind, request.bookId, result.taskIntentId);
       setStatus(result.launchNotice ?? (result.waitingForNetwork ? '已记录任务，联网后开始。' : '已开始任务'), 'success');
       if (!stopped) openRun(request.bookId, kind, result.taskIntentId, result.launchNotice);
-    } catch (error) { if (!stopped) { restore(); startButton.disabled = false; problem.textContent = errorMessage(error, '无法开始任务。'); } }
+    } catch (error) { if (!stopped) { restore(); problem.textContent = errorMessage(error, '无法开始任务。'); } }
   };
   startButton.addEventListener('click', () => { void start(); });
 
@@ -327,7 +339,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {}, executionConfig);
     else chooser.unavailable();
     syncLaunchModelSettings(presentation);
-  }).catch(() => { if (!stopped) chooser.unavailable(); }).finally(() => { if (!stopped) startButton.disabled = interrupted; });
+  }).catch(() => { if (!stopped) chooser.unavailable(); }).finally(() => { settingsRead = true; syncStart(); });
 
   return {
     body: [description],
@@ -335,6 +347,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     start,
     openPlan,
     interrupt(): void { stopped = true; startButton.disabled = true; refreshPreview.disabled = true; },
+    sync(): void { startButton.textContent = request.startLabel ?? options.startLabel ?? `开始${request.title}`; syncStart(); },
     dispose(): void {
       stopped = true; disposed = true;
       document.removeEventListener('input', onDocumentInput);

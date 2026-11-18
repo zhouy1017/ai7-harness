@@ -2,6 +2,7 @@ import { mountLaunchBar, type LaunchBar, type TaskLaunchRequest } from '../../sr
 import { preferenceDefaults } from '../../src/shared/preferences.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mountEvaluation, type MountEvaluationOptions } from '../../src/renderer/evaluation.js';
+import { mountTaskDrawer } from '../../src/renderer/task-drawer.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { BUILTIN_EVALUATION_PROFILE, emptyEvaluationContent } from '../../src/service/evaluation-records.js';
 import type { EvaluationWorkspaceProjection } from '../../src/shared/protocol.js';
@@ -20,6 +21,8 @@ function mountLaunch(request: TaskLaunchRequest, launch = vi.fn(async () => ({ t
 }
 beforeEach(() => { uninstall = installMiniDom(); setTechnicalLayerVisible(false); vi.stubGlobal('window', { setTimeout, clearTimeout }); });
 afterEach(() => { for (const bar of bars.splice(0)) bar.dispose(); vi.unstubAllGlobals(); setTechnicalLayerVisible(true); uninstall(); });
+vi.mock('../../src/renderer/task-panel.js', () => ({ mountTaskPanel: () => ({ element: document.createElement('div'), stop: vi.fn() }), mountTaskComposer: () => ({ element: document.createElement('div'), stop: vi.fn() }) }));
+vi.mock('../../src/renderer/dialogue.js', () => ({ mountDialogue: () => ({ element: document.createElement('div'), stop: vi.fn() }) }));
 vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({}), rememberActionDefaults: async () => undefined }));
 const details = (className: string | undefined, ...rows: HTMLElement[]) => { const node = document.createElement('details'); node.className = className ?? 'technical-details'; node.append(...rows); return node; };
 
@@ -173,4 +176,85 @@ it('starts nothing when the save before regenerating is refused, and keeps the t
   expect(view.api.authorizeEvaluationRewrite).not.toHaveBeenCalled();
   expect(view.launch).not.toHaveBeenCalled();
   expect(view.root.querySelector('.evaluation-lists [data-evaluation-field="verdict"]')!.value).toBe('按编辑意见收紧中段。');
+});
+
+it('keeps 查看计划 of a prepared regeneration beside its start (Issue #1407)', async () => {
+  const view = rewriting(async () => view.editing);
+  (view.editing as { rewrite: unknown }).rewrite = { ...view.editing.rewrite, task: { taskIntentId: 'rewrite-task', recordId: 'report', state: 'prepared', label: '尚未开始' } };
+  await view.surface.load();
+  view.root.querySelector('[data-evaluation-action="edit-report"]')!.click();
+  await vi.waitFor(() => expect(view.root.dataset['evaluationView']).toBe('record'));
+  const open = view.root.querySelector('[data-evaluation-action="open-rewrite-plan"]')!;
+  expect(open.textContent).toBe('查看计划');
+  expect(view.root.querySelector('[data-evaluation-action="open-rewrite-task"]')).toBeNull();
+  open.click();
+  expect(view.openRewritePlan).toHaveBeenCalledWith('rewrite-task');
+});
+
+// 审稿意见's bar (#1526 review): bound and labelled to one template that may start now; a row's 起草 starts its own template; no
+// bar where no template may start; the bar's start is disabled while the page is busy.
+type ReportTemplate = { template: 'author' | 'editorial'; label: string; prepare: { allowed: true; mode: 'readers-report-first' } | { allowed: false; reason: string };
+  drafted: null | { revisionId: string; recordOrdinal: number; createdAt: string }; draft: null };
+const allowed = { allowed: true, mode: 'readers-report-first' } as const;
+function readersReportPage(templates: ReportTemplate[]): EvaluationWorkspaceProjection {
+  return { ...page, readersReport: { basis: { recordId: 'report', ordinal: 2, revisionLabel: 'r2', finalizedAt: 'x' }, exemplars: { count: 0, statement: '本社暂无审稿意见范例。' }, task: null, templates } } as unknown as EvaluationWorkspaceProjection;
+}
+async function mountReadersReport(current: EvaluationWorkspaceProjection, extra: Record<string, unknown> = {}) {
+  const launchReadersReport = vi.fn(async () => ({ taskIntentId: 'report-task', runRecordId: 'run' }));
+  vi.stubGlobal('window', { setTimeout, clearTimeout, localStorage: { getItem: () => 'full', setItem: vi.fn() } });
+  const drawerRoot = miniDocument.createElement('aside'); miniDocument.body.append(drawerRoot);
+  const drawer = mountTaskDrawer({ root: drawerRoot, shell: document.body, onOpen: vi.fn(), onRecorded: vi.fn(), setStatus: vi.fn(), errorCode: () => null, settle: async () => true,
+    errorMessage: (_error: unknown, fallback: string) => fallback, technicalDetails: () => document.createElement('details'),
+    api: { launchReadersReport, inspectEvaluation: async () => current, inspectTaskPlan: () => new Promise(() => undefined),
+      getModelServiceSettings: async () => ({ channels: [], roles: [], routeChoice: { routes: [] } }), getPreferences: async () => ({ values: preferenceDefaults() }) } } as never);
+  const root = miniDocument.createElement('section'); miniDocument.body.append(root);
+  const surface = mountEvaluation({ root: root as unknown as HTMLElement, api: { inspectEvaluation: async () => current, ...extra }, bookId: 'book', technicalDetails: details,
+    setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback, openLaunch: drawer.openLaunch, openReadersReportPlan: vi.fn(), openDraft: vi.fn() } as unknown as MountEvaluationOptions);
+  await surface.load();
+  const launch = () => root.querySelector('.evaluation-readers-report-launch [data-task-drawer-control="launch"]');
+  return { root, launch, launchReadersReport, drawer };
+}
+
+it('binds 审稿意见\'s bar to a template that may start, and a row\'s 起草 starts that row\'s template', async () => {
+  const view = await mountReadersReport(readersReportPage([
+    { template: 'author', label: '给作者的修改意见', prepare: allowed, drafted: null, draft: null },
+    { template: 'editorial', label: '给编辑部 / 选题会的审读报告', prepare: allowed, drafted: null, draft: null }]));
+  await vi.waitFor(() => expect(view.launch()?.disabled).toBe(false));
+  expect(view.launch()!.textContent).toBe('起草给作者的修改意见');
+  view.root.querySelector('li[data-template="editorial"] [data-readers-report-action="prepare"]')!.click();
+  await vi.waitFor(() => expect(view.launchReadersReport).toHaveBeenCalledOnce());
+  expect(view.launchReadersReport).toHaveBeenCalledWith(expect.objectContaining({ template: 'editorial' }));
+  view.drawer.close(false);
+});
+
+it('offers no 审稿意见 start where no template may start, and binds the bar past a refused first template', async () => {
+  const refused = { allowed: false, reason: '需要先有定稿的评估版本。' } as const;
+  const none = await mountReadersReport(readersReportPage([
+    { template: 'author', label: '给作者的修改意见', prepare: refused, drafted: null, draft: null },
+    { template: 'editorial', label: '给编辑部 / 选题会的审读报告', prepare: refused, drafted: null, draft: null }]));
+  expect(none.root.querySelector('.evaluation-readers-report')).not.toBeNull();
+  expect(none.launch()).toBeNull();
+  none.drawer.close(false);
+  const second = await mountReadersReport(readersReportPage([
+    { template: 'author', label: '给作者的修改意见', prepare: allowed, drafted: { revisionId: 'drafted', recordOrdinal: 2, createdAt: 'x' }, draft: null },
+    { template: 'editorial', label: '给编辑部 / 选题会的审读报告', prepare: allowed, drafted: null, draft: null }]));
+  await vi.waitFor(() => expect(second.launch()?.disabled).toBe(false));
+  expect(second.launch()!.textContent).toBe('起草给编辑部 / 选题会的审读报告');
+  second.drawer.close(false);
+});
+
+it('disables 审稿意见\'s start while the page is busy opening a draft', async () => {
+  let open!: () => void;
+  const createReadersReportDraft = vi.fn(() => new Promise(resolve => { open = () => resolve(readersReportPage([])); }));
+  const view = await mountReadersReport(readersReportPage([
+    { template: 'author', label: '给作者的修改意见', prepare: allowed, drafted: { revisionId: 'drafted', recordOrdinal: 2, createdAt: 'x' }, draft: null },
+    { template: 'editorial', label: '给编辑部 / 选题会的审读报告', prepare: allowed, drafted: null, draft: null }]), { createReadersReportDraft });
+  await vi.waitFor(() => expect(view.launch()?.disabled).toBe(false));
+  view.root.querySelector('li[data-template="author"] [data-readers-report-action="create-draft"]')!.click();
+  await vi.waitFor(() => expect(createReadersReportDraft).toHaveBeenCalledOnce());
+  expect(view.launch()!.disabled).toBe(true);
+  view.launch()!.click();
+  expect(view.launchReadersReport).not.toHaveBeenCalled();
+  open();
+  view.drawer.close(false);
 });
