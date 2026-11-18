@@ -1272,17 +1272,18 @@ async function main() {
     await waitFor(renderer, `window.__j05.block(${JSON.stringify(lockBlock)})?.dataset.aiLocked===undefined && !window.__j05.block(${JSON.stringify(lockBlock)})?.querySelector('[data-ai-lock-block]') && window.__j05.notice().startsWith('已解锁 1 段')`, 'unlocked', 30_000);
     await settled(renderer, 'locks-settled');
 
-    // Last before closing (#1592): the large Run leaves several hundred open marks in one paragraph, more than one manuscript
+    // Last before closing (#1592): the large Run leaves several hundred marks in one paragraph, more than one manuscript
     // window carries (400, Issue #1604), so every 批注栏 and later stage runs before it on the Book state it was written for.
     // #1525: a fresh local review supplies real findings for keyboard triage and the return route. A tester's edit of sample1:
     // each single 「…」 is one 修改建议 (P02): several hundred of them, so the Run's findings need a second page (#1592) and
     // deciding walks focus past the window.
-    await assertRenderer(renderer, `(() => {return (() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05TriageBlock=block.dataset.blockId; return window.__j05.place(window.__j05TriageBlock,0,0); })() && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。'+'甲…'.repeat(360));})()`, 'review-triage-tester-edit');
-    await settled(renderer, 'review-triage-edit-saved');
     const ACTIVE_CARD = `document.activeElement?.closest('article.review-finding')`;
     try {
       for (const viewport of [{width:1280,height:800},{width:1008,height:681}]) {
         at(viewport.width===1280?'review-keyboard-wide':'review-keyboard-gate');
+        // Each form reviews its own tester edit, and takes away what it leaves (below), so the Book is as it found it.
+        await assertRenderer(renderer, `(() => {return (() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05TriageBlock=block.dataset.blockId; return window.__j05.place(window.__j05TriageBlock,0,0); })() && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。'+'甲…'.repeat(360));})()`, 'review-triage-tester-edit');
+        await settled(renderer, 'review-triage-edit-saved');
         await renderer.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1,mobile:false});
         await triageClick(renderer,'[data-nav-book-section="review"]');
         await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'review-triage-ready');
@@ -1310,6 +1311,7 @@ async function main() {
           })()`).catch((reason)=>'evaluate: '+String(reason?.message??reason));
           requireJourney(false,'review-triage-findings',state);
         }
+        const runId=await renderer.evaluate(`document.querySelector('.review-workspace-card').dataset.reviewRunId`);
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
         await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-triage-filter');
         // The large Run reads (#1592): its first page is on screen, no refused read is standing, and a second page is offered.
@@ -1318,16 +1320,17 @@ async function main() {
         await press(renderer,'ArrowDown',1);
         const decided=[];
         let outside=0;
-        // R, A, R, then R until a decision has moved focus to a card that started below the window, at least once.
+        // R, A, R, then R until a decision has moved focus to a card that was not wholly in the window before it, at least once.
         for (let index=0; index<3 || outside===0; index+=1) {
-          if (index>=24) requireJourney(false,'review-keyboard-next-below-window',{decided, page:await renderer.evaluate(`(() => { const card=${ACTIVE_CARD}; const pending=Array.from(document.querySelectorAll('article.review-finding[data-status="pending"]')); return {innerHeight, scroll:document.scrollingElement.scrollTop, pending:pending.length, articles:document.querySelectorAll('article.review-finding').length, focused:card===null?null:Math.round(card.getBoundingClientRect().top), next:pending.slice(0,6).map((node)=>[Math.round(node.getBoundingClientRect().top), Math.round(node.getBoundingClientRect().height)])}; })()`)});
-          const state=await renderer.evaluate(`(() => { const card=${ACTIVE_CARD}; const next=Array.from(document.querySelectorAll('article.review-finding[data-status="pending"]')).find((node)=>node!==card && (card.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)); return {id:card?.dataset.findingId??null, below:next!==undefined && next.getBoundingClientRect().top>=innerHeight}; })()`);
+          requireJourney(index<24,'review-keyboard-next-not-wholly-visible',{decided});
+          const state=await renderer.evaluate(`(() => { const card=${ACTIVE_CARD}; const next=Array.from(document.querySelectorAll('article.review-finding[data-status="pending"]')).find((node)=>node!==card && (card.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)); return {id:card?.dataset.findingId??null, next:next?.dataset.findingId??null, hidden:next!==undefined && next.getBoundingClientRect().bottom>innerHeight}; })()`);
           requireJourney(state.id!==null && !decided.includes(state.id),'review-keyboard-focused-distinct',{state,decided});
-          if (state.below) outside+=1;
+          if (state.hidden) outside+=1;
           await press(renderer,index===1?'a':'r');
           decided.push(state.id);
-          // Decided in place; focus moves on, and the card it lands on is within the window, so the next key decides what is seen.
-          await waitFor(renderer, `(() => { const card=document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(state.id)})+']'); const next=${ACTIVE_CARD}; if(card?.dataset.status!=='handled'||!next||next===card)return false; const r=next.getBoundingClientRect(); return r.top>=0 && r.top<innerHeight && r.bottom>0; })()`, 'review-keyboard-decided-next-in-view');
+          // Decided in place; focus moves to the next pending card — the one not wholly in view before — and it is now wholly inside
+          // the window, so the next key decides what is seen.
+          await waitFor(renderer, `(() => { const card=document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(state.id)})+']'); const next=${ACTIVE_CARD}; if(card?.dataset.status!=='handled'||!next||next===card)return false; if(${JSON.stringify(state.next)}!==null && next.dataset.findingId!==${JSON.stringify(state.next)})return false; const r=next.getBoundingClientRect(); return r.top>=0 && r.bottom<=innerHeight; })()`, 'review-keyboard-decided-next-in-view');
         }
         // What the service recorded for every decided finding, not the card's own words.
         await waitFor(renderer, `(async () => { const runId=document.querySelector('.review-workspace-card')?.dataset.reviewRunId; const ids=${JSON.stringify(decided)}; let after=null; const found=new Map(); for (let page=0; page<8 && found.size<ids.length; page+=1) { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:runId, findingsAfterOrdinal:after, categoryId:null, severity:null, status:null, chapterBlockId:null})).run; for (const item of run.findings) if (ids.includes(item.findingId)) found.set(item.findingId,item.status); if(!run.findingsTruncated)break; after=run.findings.at(-1).ordinal; } return ids.every((id)=>found.get(id)==='handled'); })()`, 'review-keyboard-service-statuses');
@@ -1373,6 +1376,31 @@ async function main() {
         }
         await press(renderer,'Enter');
         await waitFor(renderer, `document.querySelector('[data-screen="editor"]')!==null`, 'review-triage-back-on-text');
+        // The Book as the stage found it: this Run's remaining 「…」 suggestions are accepted together with the product's own
+        // 批量采纳机械修正, so no pending suggestion of this stage is left for the stages after it.
+        await triageClick(renderer,'[data-nav-book-section="review"]');
+        await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewRunId===${JSON.stringify(runId)} && document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]')?.disabled===false`, 'review-triage-cleanup-ready');
+        await triageClick(renderer,'section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]');
+        await waitFor(renderer, `document.querySelector('.review-batch-applied [data-review-action="batch-undo"]')!==null`, 'review-triage-cleanup-applied');
+        // What the Book's pending list counts: a pending finding with a mark on the manuscript. One with none (its words already
+        // carry another mark) adds nothing to it and cannot be accepted.
+        const leftover=`(async () => (await window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(runId)}, findingsAfterOrdinal:null, categoryId:null, severity:null, status:'pending', chapterBlockId:null})).run.findings.filter((item)=>item.markId!==null).map((item)=>[item.ordinal,item.quote,item.output,item.markStatus,item.anchorState]))()`;
+        // The whole-Book check also left 批注 (on 「著」) open on the manuscript: each is marked handled from its own card's ⋯ menu.
+        const NOTE=`article.review-finding[data-status="pending"][data-output="annotation"]`;
+        for (let note=0; note<16 && await renderer.evaluate(`document.querySelector('${NOTE} details.review-card-more')!==null`); note+=1) {
+          const id=await renderer.evaluate(`document.querySelector('${NOTE}').dataset.findingId`);
+          const card=`article.review-finding[data-finding-id="${id}"]`;
+          await triageClick(renderer,`${card} details.review-card-more > summary`);
+          await triageClick(renderer,`${card} [data-review-action="mark-handled"]`);
+          await waitFor(renderer, `document.querySelector('${card}')?.dataset.status==='handled'`, 'review-triage-cleanup-note-handled');
+        }
+        try {
+          await waitFor(renderer, `${leftover}.then((items)=>items.length===0)`, 'review-triage-cleanup-none-pending', 20_000);
+        } catch {
+          requireJourney(false, 'review-triage-cleanup-none-pending', await renderer.evaluate(leftover));
+        }
+        await triageClick(renderer,'[data-nav-book-section="manuscript"]');
+        await waitFor(renderer, `document.querySelector('[data-screen="editor"]')!==null`, 'review-triage-cleanup-back-on-text');
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
