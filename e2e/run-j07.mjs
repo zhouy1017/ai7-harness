@@ -1,6 +1,5 @@
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
-import { pointerClick } from './dispatch-chooser.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { unzipSync } from 'fflate';
