@@ -1084,6 +1084,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'book-findings-disposition',
     'review-report',
     'review-report-export',
+    'review-report-export-wide',
+    'review-report-export-gate',
     'review-coverage-moves',
     // Issue #425 (S70): 资料与记录 › 来源与证据 reads this Book's provider-free answer — nothing retained, nothing to save.
     'research-evidence-source-view',
