@@ -2038,10 +2038,11 @@ async function main() {
       [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选`, 'all']]), 'series-sheet-offered', offeredHere);
     at('procedure-recommendation');
     await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure"]'); if(!(select instanceof HTMLSelectElement))return false;select.value=${JSON.stringify(seriesProcedureId)};select.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'series-procedure-choose');
-    // The sheet itself says what it ticked — nothing, here — in its own words (S31b review P3-5): version 1 chosen and settled,
-    // no category checked, and its procedure line saying the categories are the editor's to tick. A toast is transient (#1519).
+    // The sheet itself says what it ticked — nothing, here — in its own words (S31b review P3-5): version 1 chosen (the only
+    // version: its selector, when shown, names it), no category checked, and its procedure line saying the categories are the
+    // editor's to tick. A toast is transient (#1519).
     const seriesSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1', 'series-sheet-filled');
-    await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1' && read.chosen !== null && read.chosen >= 0 && read.versionDisabled === false &&
+    await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1' && (read.chosen === null ? read.options.length === 0 : read.options[read.chosen]?.includes('第 1 版') === true) &&
       read.checked.length === 0 && read.lines[0]?.includes('要运行的类别由你勾选') === true, 'series-sheet-status');
     at('procedure-series-step-optin');
     const seriesCeiling = await renderer.evaluate(`(async () => { const procedure=await window.ai7.inspectCapturedProcedure({procedureId:${JSON.stringify(seriesProcedureId)},before:null}); const preview=await window.ai7.previewCapturedProcedureValidation({versionId:procedure.versions[0].versionId}); return preview.ceiling.runSourceScope; })()`);

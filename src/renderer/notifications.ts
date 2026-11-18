@@ -78,13 +78,14 @@ export function createStatusSurface(surface: HTMLElement, announcer?: HTMLElemen
 }
 
 /**
- * The page's bottom controls (#1519): the manuscript's 向后浏览 and technical disclosure, a sticky action bar. The bar is an
+ * The page's bottom controls (#1519): the manuscript's 向后浏览 and technical disclosure, a sticky action bar, and developer
+ * mode's fixed technical-details control. The bar is an
  * overlay at the bottom of the content area that reserves nothing while hidden; while it shows it stands above each of these
  * that is in the lower half of the window, and on the manuscript it keeps to the text column (clear of the right edge, the
  * supporting regions and an overlaying Task Drawer). The page publishes that clearance as `--bottom-controls`; the scroll
  * padding that lets a page's last line be scrolled clear of the bar applies only while `data-status-bar="shown"`.
  */
-const BOTTOM_CONTROLS = '#screen .commit-bar, #screen .workbench-actions, #screen .task-overview-confirm:not([hidden]), #screen .window-actions .btn:not([hidden]), #screen .editor-identities';
+const BOTTOM_CONTROLS = '#screen .commit-bar, #screen .workbench-actions, #screen .task-overview-confirm:not([hidden]), #screen .window-actions .btn:not([hidden]), #screen .editor-identities, .technical-layer-control';
 const STATUS_AREA = '#screen .manuscript-surface';
 
 export function followBottomControls(bar: HTMLElement): void {

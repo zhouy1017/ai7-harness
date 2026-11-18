@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { DIRECT_EDIT, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, manuscriptBoundary, applyRendererDiagnostics, attachProductOutput, discloseJ02Viewport, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass, statusBarClear } from './controller.mjs';
+import { DIRECT_EDIT, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, manuscriptBoundary, applyRendererDiagnostics, attachProductOutput, discloseJ02Viewport, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass, statusBarClear, statusBarOverlaps } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { measureCpuShares } from './readiness-trace.mjs';
 
@@ -2223,7 +2223,7 @@ async function main() {
       const barLayout = `(() => {
         const bar = document.querySelector('#persistence-status'); const side = document.querySelector('#app-sidebar'); const shell = document.querySelector('.editor-shell');
         const box = bar.getBoundingClientRect(); const surface = document.querySelector('.manuscript-surface');
-        return { shell: Math.round(shell.getBoundingClientRect().height * 100), surface: Math.round(surface.getBoundingClientRect().height * 100), page: document.documentElement.scrollHeight, shown: !bar.hidden && box.width > 0,
+        return { shell: Math.round(shell.getBoundingClientRect().height * 100), surface: Math.round(surface.getBoundingClientRect().height * 100), toolbar: Math.round((document.querySelector('.editor-toolbar')?.getBoundingClientRect().height ?? 0) * 100), padding: getComputedStyle(document.querySelector('.editor-window')).paddingBottom, page: document.documentElement.scrollHeight, shown: !bar.hidden && box.width > 0,
           fixed: getComputedStyle(bar).position === 'fixed',
           inView: box.top >= 0 && box.bottom <= innerHeight && box.left >= side.getBoundingClientRect().right - 0.5 && box.right <= innerWidth + 0.5 };
       })()`;
@@ -2239,6 +2239,15 @@ async function main() {
       // The Task Drawer is open beside the page — docked at the wide size, over it at 1008×681 — and the bar stays clear of it.
       if (await renderer.evaluate(`document.querySelector('#task-drawer')?.hidden !== false`)) await clickVisibleControl(renderer, '[data-edge-entry="tasks"]', 'status-bar-drawer-open');
       await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === false`, 'status-bar-drawer-ready');
+      // The docked drawer eases the body's padding: the page is measured once that movement has ended, or a toolbar that wraps
+      // after it would read as the bar's doing.
+      const SETTLED = `(async () => {
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        await Promise.all(document.body.getAnimations().map((animation) => animation.finished));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        return true;
+      })()`;
+      requireJourney(await renderer.evaluate(SETTLED) === true, 'status-bar-drawer-settled');
       const quiet = await renderer.evaluate(barLayout);
       await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').focus({ preventScroll: true })`);
       await renderer.send('Input.imeSetComposition', { text: '编', selectionStart: 1, selectionEnd: 1, replacementStart: 0, replacementEnd: 0 });
@@ -2252,6 +2261,15 @@ async function main() {
       // clear of every control and of the drawer, the manuscript keeps its height, and the last line can be scrolled clear of it.
       // The fault is armed apart from the press: the next 发起全书任务… has its reading rejected through the one-shot promise hook.
       const LONG_FAILURE = '任务撰写没有打开：本机业务服务暂时没有回答，请稍后再试；这条说明故意写得很长，用来确认它在稿件页里自行折行，既不超出窗口，也不压住稿件的控件、侧栏或任务栏。'.repeat(5);
+      // Folding the sidebar widens the page, and the toolbar may wrap differently: the icons form has its own baseline, taken
+      // before the error is raised.
+      await clickVisibleControl(renderer, '#sidebar-toggle', 'status-bar-baseline-fold');
+      await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons'`, 'status-bar-baseline-folded');
+      requireJourney(await renderer.evaluate(SETTLED) === true, 'status-bar-baseline-folded-settled');
+      const quietIcons = await renderer.evaluate(barLayout);
+      await clickVisibleControl(renderer, '#sidebar-toggle', 'status-bar-baseline-open');
+      await waitFor(renderer, `document.documentElement.dataset.sidebar !== 'icons'`, 'status-bar-baseline-opened');
+      requireJourney(await renderer.evaluate(SETTLED) === true, 'status-bar-baseline-opened-settled');
       await waitFor(renderer, `document.querySelector('#task-drawer .task-panel [data-task-compose-action="compose"]')?.disabled === false`, 'status-bar-compose-ready');
       await assertRenderer(renderer, `(() => {
         const arm = (event) => {
@@ -2270,9 +2288,16 @@ async function main() {
           await clickVisibleControl(renderer, '#sidebar-toggle', 'status-bar-long-fold-sidebar');
           await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons'`, 'status-bar-long-folded');
         }
-        await waitFor(renderer, `${statusBarClear(MANUSCRIPT_CONTROLS)} && ${LAST_LINE_CLEAR} && (() => { const line = document.querySelector('#persistence-status .status-line'); return line.scrollHeight > line.clientHeight && document.querySelector('#persistence-status').getBoundingClientRect().height <= innerHeight / 4; })()`, `status-bar-long-clear-${form}`, 10_000);
+        const longClear = `${statusBarClear(MANUSCRIPT_CONTROLS)} && ${LAST_LINE_CLEAR} && (() => { const line = document.querySelector('#persistence-status .status-line'); return line.scrollHeight > line.clientHeight && document.querySelector('#persistence-status').getBoundingClientRect().height <= innerHeight / 4; })()`;
+        try {
+          await waitFor(renderer, longClear, `status-bar-long-clear-${form}`, 30_000);
+        } catch {
+          requireJourney(false, `status-bar-long-clear-${form}`, { overlaps: await renderer.evaluate(statusBarOverlaps(MANUSCRIPT_CONTROLS)), lastLine: await renderer.evaluate(LAST_LINE_CLEAR) });
+        }
+        requireJourney(await renderer.evaluate(SETTLED) === true, `status-bar-long-settled-${form}`);
         const long = await renderer.evaluate(barLayout);
-        requireJourney(long?.inView === true && long.shell === quiet?.shell && long.surface === quiet?.surface, `status-bar-long-layout-${form}`, { quiet, long });
+        const before = form === 'full' ? quiet : quietIcons;
+        requireJourney(long?.inView === true && long.shell === before?.shell && long.surface === before?.surface, `status-bar-long-layout-${form}`, { before, long });
       }
       await clickVisibleControl(renderer, '#sidebar-toggle', 'status-bar-long-open-sidebar');
       await waitFor(renderer, `document.documentElement.dataset.sidebar !== 'icons'`, 'status-bar-long-opened');
