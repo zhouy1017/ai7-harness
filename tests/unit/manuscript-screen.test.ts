@@ -27,7 +27,7 @@ const children = vi.hoisted(() => ({
   destroyed: [] as string[],
   editors: [] as unknown[],
   editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn> }>,
-  marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn> }>,
+  marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn>; refreshComments: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
   writingStates: [] as Array<(state: { underWay: boolean; drafted: number }) => void>,
   rails: [] as Array<{ onRead?: (rail: ManuscriptRailProjection) => void }>,
@@ -713,7 +713,7 @@ describe('the one right-hand column (#1542)', () => {
     });
     const analysis = app.screen.querySelector<HTMLElement>('.paragraph-analysis-panel')!;
     const marks = children.marks.at(-1)!;
-    const shows = (): boolean[] => [app.pane().hidden, analysis.hidden, app.drawerRoot.hidden];
+    const shows = (): unknown[] => [app.pane().hidden, analysis.hidden, app.drawerRoot.hidden];
     expect(shows()).toEqual([false, true, true]);
     app.entry('analysis').click();
     expect(shows()).toEqual([true, false, true]);
