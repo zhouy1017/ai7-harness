@@ -1,3 +1,5 @@
+import { AnalysisError } from './analysis/baseline-analysis-store.js';
+import { StoreError } from './store-records.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { link, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
@@ -2316,3 +2318,13 @@ export class ManuscriptExportStore {
 export function defaultExportOptions(): ManuscriptExportOptions {
   return { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS };
 }
+
+export function inspectManuscriptExportReceipt(host: { assertAvailable(): void; readonly manuscriptExport: ManuscriptExportStore }, input: InspectManuscriptExportReceiptInput): ManuscriptExportReceiptProjection {
+    host.assertAvailable();
+    try {
+      return host.manuscriptExport.receipt(input);
+    } catch (error) {
+      if (error instanceof ExportLedgerError || error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
