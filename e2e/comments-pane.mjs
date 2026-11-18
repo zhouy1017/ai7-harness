@@ -688,12 +688,13 @@ async function commentsHandledFilter(renderer, check, waitFor, indexes) {
 // Exercise the column through actual mouse input at both supported forms.
 export async function rightColumnGeometry(renderer, check, waitFor) {
   const native = await renderer.evaluate('({width:innerWidth,height:innerHeight})');
-  const click = async selector => {
-    const point = await renderer.evaluate(`(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!node)return null;const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
-    check(point !== null, 'right-column-control');
-    await renderer.send('Input.dispatchMouseEvent', {type:'mousePressed',...point,button:'left',clickCount:1});
-    await renderer.send('Input.dispatchMouseEvent', {type:'mouseReleased',...point,button:'left',clickCount:1});
+  // The docked drawer moves the page's padding over several frames (#1490): press only a target that holds still, and name what covers it.
+  // Its stability wait is an async expression, which J-02's waitFor would read as a truthy Promise: poll it through evaluate, === true.
+  const settled = async (target, expression, name) => {
+    for (const deadline = Date.now() + 10_000; Date.now() < deadline; await new Promise(done => setTimeout(done, 50))) if (await target.evaluate(expression) === true) return;
+    check(false, name);
   };
+  const click = selector => pointerClick(renderer, settled, selector, 'right-column-'+selector.replace(/[^a-z]+/g, '-').replace(/^-|-$/g, ''));
   const measure = `(() => { const editor=document.querySelector('.editor-window'), style=getComputedStyle(editor), prose=editor.querySelector('.ProseMirror'); return editor.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)>=28*parseFloat(getComputedStyle(prose).fontSize)-1; })()`;
   const initial = await renderer.evaluate(`document.querySelector('.manuscript-comments-pane').hidden`);
   try {
