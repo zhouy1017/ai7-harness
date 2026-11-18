@@ -1180,6 +1180,14 @@ async function dispatch(
         connectivity: connectivity.planConnectivity.reading(),
         ...(launched.projection.launchNotice === undefined ? {} : { launchNotice: launched.projection.launchNotice }) } };
     }
+    case 'generateReviewSynthesis': {
+      // 生成统合总结 (Issue #1506): offline it waits for Reconnect Preflight exactly as a launched Run does; a replay drives nothing new.
+      const launched = store.launchReviewSynthesis(request.input, launchPolicy, connectivity.planConnectivity.reading() === 'offline' ? 'when-online' : 'now');
+      if (launched.projection.run?.state === 'waiting') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
+      else if (!launched.repeated && !reviewRuns.isDriving(request.input.reviewRunId)) driveReviewRun(reviewRuns, request.input.reviewRunId);
+      return { id: request.id, ok: true, op: request.op, result: { ...store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress),
+        connectivity: connectivity.planConnectivity.reading(), ...(launched.projection.launchNotice === undefined ? {} : { launchNotice: launched.projection.launchNotice }) } };
+    }
     case 'prepareReviewRun':
       return {
         id: request.id,
