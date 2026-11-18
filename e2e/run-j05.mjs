@@ -1234,8 +1234,8 @@ async function main() {
         // The way back re-reads under the same filter: the decided cards leave the pending list, so compare with that read.
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
         await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null && ${JSON.stringify(decided)}.every((id)=>document.querySelector('article[data-finding-id='+JSON.stringify(id)+']')===null) && document.querySelector('article.review-finding')!==null`, 'review-return-filter-reread');
-        // 历史 ▾ opened by a real click, so the way back has a fold of its own to keep.
-        await triageClick(renderer,'.review-history-fold > summary');
+        // 历史 ▾ open — by a real click unless this Book's 审阅 kept it open from the previous form — so the way back has a fold to keep.
+        if (await renderer.evaluate(`document.querySelector('.review-history-fold')?.open===false`)) await triageClick(renderer,'.review-history-fold > summary');
         await waitFor(renderer, `document.querySelector('.review-history-fold')?.open===true`, 'review-return-history-open');
         await press(renderer,'ArrowDown',1);
         await waitFor(renderer, `document.activeElement?.matches('article.review-finding[data-status="pending"]')===true`, 'review-return-next-pending-focused');
