@@ -3267,6 +3267,11 @@ async function main() {
         await assertRenderer(renderer, `(() => { const panel=document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu-body="more"]`)}); return Array.from(panel?.querySelectorAll('button') ?? [], (button)=>button.textContent).includes('取消定稿'); })()`, `management-unfinalize-entry-${width}`);
         await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-action="unfinalize"]`, `management-unfinalize-${width}`);
         await waitFor(renderer, `${menusPill} === '草稿'`, `management-unfinalized-${width}`, 60_000);
+        // The create form fills this window too: its own confirm stays inside it, and the section closes again.
+        await pointerClick(renderer, waitFor, `${managementPage} [data-derivative-action="new"]`, `management-form-${width}`);
+        await waitFor(renderer, `(() => { const form=document.querySelector(${JSON.stringify(managementForm)}); const confirm=form?.querySelector('[data-document-action="create-derivative"]'); if(!(form instanceof HTMLFormElement)||!(confirm instanceof HTMLElement)) return false; const box=form.getBoundingClientRect(), button=confirm.getBoundingClientRect(); return box.width>0 && box.left>=0 && box.right<=innerWidth && button.left>=0 && button.right<=innerWidth; })()`, `management-form-visible-${width}`, 30_000);
+        await pointerClick(renderer, waitFor, `${managementPage} [data-derivative-action="new"]`, `management-form-close-${width}`);
+        await waitFor(renderer, `document.querySelector(${JSON.stringify(managementForm)}) === null`, `management-form-closed-${width}`, 30_000);
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     at('derivatives-management-category');
