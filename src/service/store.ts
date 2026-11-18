@@ -8969,15 +8969,7 @@ export class EditorialStore {
     sourceImports: number;
   } { return manuscriptReimportOperations.sourceImportAuthorityCounts(this.#manuscriptReimportOperationsHost, bookId); }
 
-  getManuscriptWindow(manuscriptId: string, branchId: string, cursor: string | null): ManuscriptWindowProjection {
-    return this.#boundedCall(() =>
-      this.#bounded.getWindow(
-        manuscriptId,
-        branchId,
-        cursor === null ? { kind: 'start' } : { kind: 'cursor', cursor },
-      ),
-    );
-  }
+  getManuscriptWindow(manuscriptId: string, branchId: string, cursor: string | null): ManuscriptWindowProjection { return manuscriptOperations.getManuscriptWindow(this.#manuscriptOperationsHost, manuscriptId, branchId, cursor); }
 
   /** What the Manuscript window and history operations in manuscript/operations.ts reach of the store (Issue #1536), read live. */
   readonly #manuscriptOperationsHost: manuscriptOperations.ManuscriptOperationsHost = this.#manuscriptOperationsHostOf();
@@ -8995,6 +8987,8 @@ export class EditorialStore {
       captureManual: (source) => new EditorialMemoryFacade(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope),
       analysisResultSetRevision: (bookId) => this.#baselineAnalysis.inspect(bookId, undefined, null).resultSetRevision,
       cancelReplacement: (previewId) => this.cancelReplacement(previewId),
+      admitJournalWrite: () => { if (this.#checkpointWorker) this.#checkpointWorker.admitJournalWrite(); else this.#checkpoint.admitJournalWrite(); },
+      journalWritten: () => { this.#checkpointWorker?.journalWritten(); },
     };
   }
 
@@ -9002,22 +8996,11 @@ export class EditorialStore {
 
   recordManuscriptEntryPosition(manuscriptId: string, branchId: string, blockId: string, grapheme: number): void { manuscriptOperations.recordManuscriptEntryPosition(this.#manuscriptOperationsHost, manuscriptId, branchId, blockId, grapheme); }
 
-  /** Where the editor last was, resolved against the working state now, or `null` if never recorded. */
-  readManuscriptEntryPosition(manuscriptId: string, branchId: string): ManuscriptEntryPositionProjection | null {
-    return this.#boundedCall(() => this.#bounded.readManuscriptEntryPosition(manuscriptId, branchId));
-  }
+  readManuscriptEntryPosition(manuscriptId: string, branchId: string): ManuscriptEntryPositionProjection | null { return manuscriptOperations.readManuscriptEntryPosition(this.#manuscriptOperationsHost, manuscriptId, branchId); }
 
   async waitForJournalCheckpoint(): Promise<void> { await this.#checkpointWorker?.waitForJournalWrite(); }
 
-  flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
-    this.#assertAvailable();
-    if (this.#checkpointWorker) this.#checkpointWorker.admitJournalWrite();
-    else this.#checkpoint.admitJournalWrite();
-    const ack = this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId, (source) =>
-      new EditorialMemoryFacade(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
-    this.#checkpointWorker?.journalWritten();
-    return ack;
-  }
+  flushJournalEdit(input: JournalEditInput): JournalAcknowledgement { return manuscriptOperations.flushJournalEdit(this.#manuscriptOperationsHost, input); }
 
   inspectManualLearningSource(signalId: string, cursor: import('./bounded-manuscript.js').ManualCommandSourceCursor | null = null,
     budgetBytes = MAX_FRAME_BYTES): import('./bounded-manuscript.js').ManualCommandSourcePage {
@@ -9223,72 +9206,29 @@ export class EditorialStore {
     return modelSearchSettings.recordModelConnectionTest(this.#modelSearchSettingsHost, connection, result);
   }
 
-  getManuscriptWindowAt(
-    manuscriptId: string,
-    branchId: string,
-    target: ManuscriptWindowTarget,
-  ): ManuscriptWindowProjection {
-    return this.#boundedCall(() => this.#bounded.getWindow(manuscriptId, branchId, target));
+  getManuscriptWindowAt(manuscriptId: string, branchId: string, target: ManuscriptWindowTarget): ManuscriptWindowProjection { return manuscriptOperations.getManuscriptWindowAt(this.#manuscriptOperationsHost, manuscriptId, branchId, target); }
+
+  getOutline(manuscriptId: string, branchId: string, cursor: string | null): OutlineProjection { return manuscriptOperations.getOutline(this.#manuscriptOperationsHost, manuscriptId, branchId, cursor); }
+
+  createSearch(manuscriptId: string, branchId: string, query: string): ReturnType<typeof manuscriptOperations.createSearch> { return manuscriptOperations.createSearch(this.#manuscriptOperationsHost, manuscriptId, branchId, query); }
+
+  advanceSearch(searchId: string): ReturnType<typeof manuscriptOperations.advanceSearch> { return manuscriptOperations.advanceSearch(this.#manuscriptOperationsHost, searchId); }
+
+  cancelSearch(searchId: string): void { manuscriptOperations.cancelSearch(this.#manuscriptOperationsHost, searchId); }
+
+  getSearchResults(searchId: string, cursor: string | null): SearchResultsProjection { return manuscriptOperations.getSearchResults(this.#manuscriptOperationsHost, searchId, cursor); }
+
+  prepareReplacement(searchId: string, replacement: string, excludedMatchIds: ReadonlyArray<string>): ReplacementPreviewProjection {
+    return manuscriptOperations.prepareReplacement(this.#manuscriptOperationsHost, searchId, replacement, excludedMatchIds);
   }
 
-  getOutline(manuscriptId: string, branchId: string, cursor: string | null): OutlineProjection {
-    return this.#boundedCall(() => this.#bounded.getOutline(manuscriptId, branchId, cursor));
-  }
+  freezeReplacement(previewId: string, excludedMatchIds: ReadonlyArray<string>): ReplacementPreviewProjection { return manuscriptOperations.freezeReplacement(this.#manuscriptOperationsHost, previewId, excludedMatchIds); }
 
-  createSearch(manuscriptId: string, branchId: string, query: string): SearchSummaryProjection & {
-    scannedPosition: number;
-    totalBlocks: number;
-  } {
-    return this.#boundedCall(() => this.#bounded.createSearch(manuscriptId, branchId, query));
-  }
-
-  advanceSearch(searchId: string): {
-    done: boolean;
-    summary: SearchSummaryProjection;
-    scannedPosition: number;
-    totalBlocks: number;
-  } {
-    return this.#boundedCall(() => this.#bounded.advanceSearch(searchId));
-  }
-
-  cancelSearch(searchId: string): void {
-    this.#boundedCall(() => this.#bounded.cancelSearch(searchId));
-  }
-
-  getSearchResults(searchId: string, cursor: string | null): SearchResultsProjection {
-    return this.#boundedCall(() => this.#bounded.getSearchResults(searchId, cursor));
-  }
-
-  prepareReplacement(
-    searchId: string,
-    replacement: string,
-    excludedMatchIds: ReadonlyArray<string>,
-  ): ReplacementPreviewProjection {
-    return this.#boundedCall(() => this.#bounded.prepareReplacement(searchId, replacement, excludedMatchIds));
-  }
-
-  freezeReplacement(
-    previewId: string,
-    excludedMatchIds: ReadonlyArray<string>,
-  ): ReplacementPreviewProjection {
-    return this.#boundedCall(() => this.#bounded.freezeReplacement(previewId, excludedMatchIds));
-  }
-
-  advanceReplacementWork(previewId: string): {
-    phase: 'preparing' | 'validating';
-    done: boolean;
-    completed: number;
-    total: number;
-    preview: ReplacementPreviewProjection | null;
-  } {
-    return this.#boundedCall(() => this.#bounded.advanceReplacementWork(previewId));
-  }
+  advanceReplacementWork(previewId: string): ReturnType<typeof manuscriptOperations.advanceReplacementWork> { return manuscriptOperations.advanceReplacementWork(this.#manuscriptOperationsHost, previewId); }
 
   commitReplacement(previewId: string): ReplacementCommitProjection { return manuscriptOperations.commitReplacement(this.#manuscriptOperationsHost, previewId); }
 
-  cancelReplacement(previewId: string): boolean {
-    return this.#boundedCall(() => this.#bounded.cancelReplacement(previewId));
-  }
+  cancelReplacement(previewId: string): boolean { return manuscriptOperations.cancelReplacement(this.#manuscriptOperationsHost, previewId); }
 
   dismissReplacementPreview(previewId: string): ReplacementDismissalProjection { return manuscriptOperations.dismissReplacementPreview(this.#manuscriptOperationsHost, previewId); }
 

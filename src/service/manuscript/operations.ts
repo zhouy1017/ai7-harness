@@ -2,6 +2,15 @@ import type { DatabaseSync } from 'node:sqlite';
 import {
   resolveMilestonePurpose,
   type DurableHistoryProjection,
+  type JournalAcknowledgement,
+  type JournalEditInput,
+  type ManuscriptEntryPositionProjection,
+  type ManuscriptWindowProjection,
+  type ManuscriptWindowTarget,
+  type OutlineProjection,
+  type ReplacementPreviewProjection,
+  type SearchResultsProjection,
+  type SearchSummaryProjection,
   type HistoricalRevisionProjection,
   type ManuscriptRailProjection,
   type MilestoneProjection,
@@ -46,6 +55,10 @@ export interface ManuscriptOperationsHost {
   /** The Book's latest baseline Result Set Revision; it may throw, and the rail reads a throw as nothing to show. */
   analysisResultSetRevision(bookId: string): { readonly gaps: ReadonlyArray<{ readonly blockIds: ReadonlyArray<string>; readonly reason: string }> } | null;
   cancelReplacement(previewId: string): boolean;
+  /** Admit one edit-journal write to the store's WAL checkpoint policy (its worker when one runs), before the write. */
+  admitJournalWrite(): void;
+  /** Tell the checkpoint worker, when one runs, that the admitted journal write is durable. */
+  journalWritten(): void;
 }
 
 // ---- Windows and places ---------------------------------------------------------------------------------------
@@ -114,6 +127,98 @@ export function dismissReplacementPreview(host: ManuscriptOperationsHost, previe
   const cancelled = host.cancelReplacement(previewId);
   requireStore(cancelled, 'REPLACEMENT_STATE_CHANGED', '替换预览已提交、失败或不再可取消。');
   return { previewId, state: 'cancelled' };
+}
+
+export function getManuscriptWindow(host: ManuscriptOperationsHost, manuscriptId: string, branchId: string, cursor: string | null): ManuscriptWindowProjection {
+  return host.boundedCall(() =>
+    host.bounded.getWindow(
+      manuscriptId,
+      branchId,
+      cursor === null ? { kind: 'start' } : { kind: 'cursor', cursor },
+    ),
+  );
+}
+
+export function getManuscriptWindowAt(
+  host: ManuscriptOperationsHost,
+  manuscriptId: string,
+  branchId: string,
+  target: ManuscriptWindowTarget,
+): ManuscriptWindowProjection {
+  return host.boundedCall(() => host.bounded.getWindow(manuscriptId, branchId, target));
+}
+
+/** Where the editor last was, resolved against the working state now, or `null` if never recorded. */
+export function readManuscriptEntryPosition(host: ManuscriptOperationsHost, manuscriptId: string, branchId: string): ManuscriptEntryPositionProjection | null {
+  return host.boundedCall(() => host.bounded.readManuscriptEntryPosition(manuscriptId, branchId));
+}
+
+export function flushJournalEdit(host: ManuscriptOperationsHost, input: JournalEditInput): JournalAcknowledgement {
+  host.assertAvailable();
+  host.admitJournalWrite();
+  const ack = host.boundedCall(() => host.bounded.flushJournalEdit(input, host.lifetimeId, (source) =>
+    host.captureManual(source)));
+  host.journalWritten();
+  return ack;
+}
+
+export function getOutline(host: ManuscriptOperationsHost, manuscriptId: string, branchId: string, cursor: string | null): OutlineProjection {
+  return host.boundedCall(() => host.bounded.getOutline(manuscriptId, branchId, cursor));
+}
+
+export function createSearch(host: ManuscriptOperationsHost, manuscriptId: string, branchId: string, query: string): SearchSummaryProjection & {
+  scannedPosition: number;
+  totalBlocks: number;
+} {
+  return host.boundedCall(() => host.bounded.createSearch(manuscriptId, branchId, query));
+}
+
+export function advanceSearch(host: ManuscriptOperationsHost, searchId: string): {
+  done: boolean;
+  summary: SearchSummaryProjection;
+  scannedPosition: number;
+  totalBlocks: number;
+} {
+  return host.boundedCall(() => host.bounded.advanceSearch(searchId));
+}
+
+export function cancelSearch(host: ManuscriptOperationsHost, searchId: string): void {
+  host.boundedCall(() => host.bounded.cancelSearch(searchId));
+}
+
+export function getSearchResults(host: ManuscriptOperationsHost, searchId: string, cursor: string | null): SearchResultsProjection {
+  return host.boundedCall(() => host.bounded.getSearchResults(searchId, cursor));
+}
+
+export function prepareReplacement(
+  host: ManuscriptOperationsHost,
+  searchId: string,
+  replacement: string,
+  excludedMatchIds: ReadonlyArray<string>,
+): ReplacementPreviewProjection {
+  return host.boundedCall(() => host.bounded.prepareReplacement(searchId, replacement, excludedMatchIds));
+}
+
+export function freezeReplacement(
+  host: ManuscriptOperationsHost,
+  previewId: string,
+  excludedMatchIds: ReadonlyArray<string>,
+): ReplacementPreviewProjection {
+  return host.boundedCall(() => host.bounded.freezeReplacement(previewId, excludedMatchIds));
+}
+
+export function advanceReplacementWork(host: ManuscriptOperationsHost, previewId: string): {
+  phase: 'preparing' | 'validating';
+  done: boolean;
+  completed: number;
+  total: number;
+  preview: ReplacementPreviewProjection | null;
+} {
+  return host.boundedCall(() => host.bounded.advanceReplacementWork(previewId));
+}
+
+export function cancelReplacement(host: ManuscriptOperationsHost, previewId: string): boolean {
+  return host.boundedCall(() => host.bounded.cancelReplacement(previewId));
 }
 
 // ---- History: the storage-facing interface for R5 (undo, redo, revisions, milestones, recovery) -----------------
