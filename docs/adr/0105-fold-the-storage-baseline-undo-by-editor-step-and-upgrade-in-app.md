@@ -116,7 +116,7 @@ This narrows the R5 row of the #1458 plan, 「移除阻碍正常更新的过程�
 
 **What is carried (Owner item 6).**
 - Every table is copied, including what D7 did not list: 审阅规范, 工序, 资料库, 范例, 书系知识, task process records, each Book's selected 工序, and unfinished imports with their cleanup intents.
-- Five pieces of UI session state are not kept: open searches, an open 全部替换 preview, and launch snapshots.
+- Five UI-session tables are not kept: `manuscript_search_sessions`, `manuscript_search_results`, `manuscript_replacement_previews`, `manuscript_replacement_matches` (open searches and an open 全部替换 preview) and `task_launch_snapshots` (instance-local launch commands).
 - Search indexes are rebuilt.
 
 **What is converted.**
