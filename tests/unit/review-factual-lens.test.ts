@@ -576,3 +576,27 @@ describe('one-step review actions (#1410)', () => {
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ disposition: 'ignored', reason: '编辑决定忽略' }));
   });
 });
+
+describe('生成统合总结 on the mounted review workspace (#1506)', () => {
+  it('enables the offer again after a failed call and after another action, and a retry repeats the same command', async () => {
+    const view = mount();
+    const next = workspace();
+    next.run!.synthesis = { state: 'missing', detail: '统合总结暂缺，逐条发现仍可处理；可单独生成统合总结。', summary: null, missingCategories: [],
+      omissionLabel: null, evidence: [], canGenerate: true };
+    view.inspectReviewWorkspace.mockResolvedValue(next);
+    const generateReviewSynthesis = vi.fn<RendererApi['generateReviewSynthesis']>().mockRejectedValueOnce(new Error('captured failure')).mockResolvedValue(next);
+    const generateReviewReport = vi.fn<RendererApi['generateReviewReport']>().mockResolvedValue(next);
+    Object.assign(view.api, { generateReviewSynthesis, generateReviewReport });
+    view.surface.refresh(); await flush();
+    const offer = () => view.root.querySelector('[data-review-action="generate-synthesis"]')!;
+    offer().click(); await flush();
+    expect(generateReviewSynthesis).toHaveBeenCalledTimes(1);
+    expect(offer().disabled).toBe(false);
+    offer().click(); await flush();
+    expect(generateReviewSynthesis).toHaveBeenCalledTimes(2);
+    expect(generateReviewSynthesis.mock.calls[1]![0].clientCommandId).toBe(generateReviewSynthesis.mock.calls[0]![0].clientCommandId);
+    view.root.querySelector('[data-review-action="generate-report"]')!.click(); await flush();
+    expect(generateReviewReport).toHaveBeenCalledTimes(1);
+    expect(offer().disabled).toBe(false);
+  });
+});

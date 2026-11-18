@@ -6,7 +6,7 @@ import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_DEFAULT_LEVEL, EVIDENCE_A
   EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES, type EvidenceAssuranceLevel } from '../shared/protocol/factual-verification.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { reviewReportExportButton } from './review-report-export.js';
-import { reviewSynthesisNode } from './review-synthesis.js';
+import { reviewSynthesisGenerateRow, reviewSynthesisNode } from './review-synthesis.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
@@ -252,7 +252,7 @@ type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWo
   RendererApi,
   'getModelServiceSettings' | 'launchReviewRun' | 'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
   'getTaskPlanPage' | 'searchReferableMaterials' |
-  'generateReviewReport' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
+  'generateReviewReport' | 'generateReviewSynthesis' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'updateEditorialMark' | 'getEditorialMarkCard' | 'reverseAppliedChangeSuggestion' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
@@ -661,6 +661,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   let excludedPages = 1;
   let excludedOpen = false;
   let synthesisDisclosure: { runId: string; open: boolean } | null = null;
+  // 生成统合总结 (Issue #1506): one chooser per Run across redraws, and the command a retry repeats until it is answered.
+  let synthesisGenerate: { runId: string; row: HTMLElement } | null = null;
+  let synthesisCommand: { runId: string; input: string; id: string } | null = null;
   const load = async (ticket: number): Promise<ReviewWorkspaceProjection> => {
     let first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput(), ...(sheetState?.executionConfig === undefined ? {} : { executionConfig: sheetState.executionConfig }) });
     if (first.bookId !== bookId) {
@@ -1078,7 +1081,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     heading.append(meta);
     section.append(heading);
     if (run.synthesis !== undefined) {
-      const summary = reviewSynthesisNode(run.synthesis, run.modelLabel, (evidence) => {
+      const summary = reviewSynthesisNode(run.synthesis, run.synthesis.modelLabel ?? run.modelLabel, (evidence) => {
         if (destroyed || evidence.blockId === null) return;
         const origin = navigation.read(host);
         let current = navigation.begin();
@@ -1107,6 +1110,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       summary.open = synthesisDisclosure?.runId === run.reviewRunId && synthesisDisclosure.open;
       summary.addEventListener('toggle', () => { synthesisDisclosure = { runId: run.reviewRunId, open: summary.open }; });
       section.append(summary);
+      if (run.synthesis.canGenerate === true) {
+        const runId = run.reviewRunId;
+        if (synthesisGenerate?.runId !== runId) synthesisGenerate = { runId, row: reviewSynthesisGenerateRow(run.synthesis.runChoice, async () => {
+          const [settings, preferences] = await Promise.allSettled([api.getModelServiceSettings(), rendererApi.getPreferences()]);
+          return settings.status !== 'fulfilled' ? null : { settings: settings.value, favourites: preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {} };
+        }, (config) => void generateSynthesis(runId, config)) };
+        // The row is kept across redraws, so it takes the page's current working state each time it is put back.
+        const generate = synthesisGenerate.row.querySelector<HTMLButtonElement>('[data-review-action="generate-synthesis"]');
+        if (generate !== null) generate.disabled = working;
+        section.append(synthesisGenerate.row);
+      }
     }
     const leading = runHasResults(run);
     if (leading) section.append(renderResults(next, run));
@@ -2052,7 +2066,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (record.totals !== undefined) overview.querySelector('h6')?.append(' · ', el('span', 'review-report-totals', reviewReportTotalsLine(record.totals)));
     body.append(
       ...(record.run.usage === undefined ? [] : [el('p', 'review-report-usage', `本次共进行了 ${record.run.usage.requests} 次模型调用。`)]),
-      ...(record.synthesis === undefined ? [] : [reviewSynthesisNode(record.synthesis, record.run.modelLabel)]),
+      ...(record.synthesis === undefined ? [] : [reviewSynthesisNode(record.synthesis, record.synthesis.modelLabel ?? record.run.modelLabel)]),
       overview,
       part('must-items', record.mustItems.title, must),
       ...derived,
@@ -2387,6 +2401,18 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       await api.cancelReviewRun({ reviewRunId: run.reviewRunId });
       scopeCancel = null;
       options.setStatus(REVIEW_STATUS_LINES.cancelled, 'success');
+    });
+  }
+
+  /** 生成统合总结 (Issue #1506): a repeated click after a failure repeats the same command, which sends nothing twice. */
+  async function generateSynthesis(reviewRunId: string, config: RuntimeExecutionConfig): Promise<void> {
+    const input = JSON.stringify(config);
+    if (synthesisCommand?.runId !== reviewRunId || synthesisCommand.input !== input) synthesisCommand = { runId: reviewRunId, input, id: crypto.randomUUID() };
+    const clientCommandId = synthesisCommand.id;
+    await act(REVIEW_STATUS_LINES.synthesizing, REVIEW_STATUS_LINES.synthesisFailed, async () => {
+      const answer = await api.generateReviewSynthesis({ reviewRunId, clientCommandId, ...(Object.keys(config).length === 0 ? {} : { executionConfig: config }) });
+      synthesisCommand = null; synthesisGenerate = null;
+      options.setStatus(answer.launchNotice ?? (answer.run?.state === 'waiting' ? REVIEW_STATUS_LINES.synthesisWaiting : REVIEW_STATUS_LINES.synthesisStarted), 'success');
     });
   }
 

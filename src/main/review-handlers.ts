@@ -220,6 +220,19 @@ export function registerReviewHandlers(context: {
       }),
   );
 
+  ipcMain.handle(IPC_CHANNELS.generateReviewSynthesis, (event, input: Omit<ServiceOperationMap['generateReviewSynthesis']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const generation = owned.routeGeneration;
+        const result = await service.call('generateReviewSynthesis', { ...input, bookId: route.bookId });
+        requireCurrentRouteGeneration(owned, generation);
+        return requireReviewWorkspaceOfRoute(route, result, input.reviewRunId);
+      });
+    }));
+
   // 查看任务 lives on the Mark Card, which was opened on this manuscript: the window proves that
   // capability within the route, and a mark of any other Book is answered as no Review Run's mark.
   ipcMain.handle(IPC_CHANNELS.inspectReviewFindingOfMark, (event, input: InspectReviewFindingOfMarkRendererInput) =>
