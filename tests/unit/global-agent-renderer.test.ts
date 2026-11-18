@@ -26,9 +26,9 @@ function dialogue(question = '问题', id = 'dialogue-1'): GlobalAgentDialoguePr
 }
 let uninstall: () => void;
 beforeEach(() => {
+  uninstall = installMiniDom();
   // The developer surface is the default under test; the ordinary-mode tests switch the layer off themselves.
   setTechnicalLayerVisible(true);
-  uninstall = installMiniDom();
   Object.defineProperty(MiniElement.prototype, 'selectedOptions', { configurable: true, get(this: MiniElement) { return this.children.filter((child) => child.value === this.value); } });
   Object.assign(miniDocument, { visibilityState: 'visible', addEventListener: vi.fn(), removeEventListener: vi.fn() });
   vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
