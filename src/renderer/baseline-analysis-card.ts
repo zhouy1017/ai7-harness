@@ -917,7 +917,10 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const actionButtons: HTMLButtonElement[] = [];
     const cancel = analysisCancelButton();
     const modes: BaselineAnalysisUpdateMode[] = ['sync-current', 'reanalyze-range', 'reanalyze-book'];
-    let activeMode: BaselineAnalysisUpdateMode = modes.find(mode => controls.actions[mode].available) ?? 'sync-current';
+    // A Task prepared and not yet started keeps its own mode on the card; otherwise the first mode that can run.
+    const preparedMode = projection.state === 'prepared' ? projection.update?.mode : undefined;
+    let activeMode: BaselineAnalysisUpdateMode = preparedMode !== undefined && controls.actions[preparedMode].available ? preparedMode
+      : modes.find(mode => controls.actions[mode].available) ?? 'sync-current';
     let activeRange: BaselineAnalysisSelectedRange | null = null;
     const launchHost = element('div', 'analysis-actions');
     const modeButtons = new Map<BaselineAnalysisUpdateMode, HTMLButtonElement>();
@@ -1036,7 +1039,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         if (projection.state !== 'prepared') return;
         if (mode === 'reanalyze-range' && selectedRange === null) { setStatus('请先选择要重新分析的范围。', 'error'); return; }
         await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update: { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null }, reconfirm: false },
-          { start, cancel, others: actionButtons.filter((other) => other !== start) }, null, true);
+          { start, cancel, others: [...actionButtons.filter((other) => other !== start), ...launchHost.querySelectorAll<HTMLButtonElement>('button')] }, null, true);
       });
       start.setAttribute('aria-pressed', String(activeMode === mode));
       modeButtons.set(mode, start);
