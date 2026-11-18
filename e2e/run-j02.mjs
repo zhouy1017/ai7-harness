@@ -646,6 +646,7 @@ async function clickVisibleControl(renderer, selector, name) {
   requireJourney(point !== null, name);
   await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
   await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
+  return point;
 }
 
 async function assertSupportingOverlays(renderer) {
@@ -1021,24 +1022,31 @@ async function milestoneIpcTimeoutCategory(renderer, beforeObservation) {
 }
 
 async function panelGeometry(renderer, selector, width, height, facts = false) {
-  const fits = await renderer.evaluate(`(async () => {
+  // The result names the first clause that failed, so a failing guest run says which bound was broken.
+  const verdict = await renderer.evaluate(`(async () => {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const panel = document.querySelector(${JSON.stringify(selector)});
-    if (!(panel instanceof HTMLElement) || panel.hidden || innerWidth !== ${width} || innerHeight !== ${height}) return false;
+    if (!(panel instanceof HTMLElement) || panel.hidden) return 'absent';
+    if (innerWidth !== ${width} || innerHeight !== ${height}) return 'viewport';
     const box = panel.getBoundingClientRect();
     const nodes = ${facts} ? [...panel.querySelectorAll('[data-protection-fact]')] : [];
-    return box.width > 0 && box.height > 0 && (${facts} ? nodes.length === 3 : true) && box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight
-      && panel.scrollWidth <= panel.clientWidth + 1
-      && nodes.every(node => node.textContent.length > 0 && node.getBoundingClientRect().width > 0);
+    if (box.width <= 0 || box.height <= 0) return 'unrendered';
+    if (${facts} && nodes.length !== 3) return 'facts';
+    if (!(box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight)) return 'outside-L' + Math.round(box.left) + '-R' + Math.round(box.right) + '-T' + Math.round(box.top) + '-B' + Math.round(box.bottom) + '-W' + innerWidth + '-H' + innerHeight + '-Y' + Math.round(scrollY) + '-N' + document.querySelectorAll(${JSON.stringify(selector)}).length + '-' + (() => { const c = panel.parentElement.getBoundingClientRect(); const odd = []; for (let n = panel.parentElement; n; n = n.parentElement) { const t = getComputedStyle(n).transform; if (n.scrollLeft !== 0 || t !== 'none') odd.push((n.id || n.className || n.tagName).toString().split(' ')[0] + ':' + n.scrollLeft + ':' + t); } return 'C' + Math.round(c.left) + '_' + Math.round(c.right) + '_' + Math.round(c.top) + '_' + Math.round(c.bottom) + '-M' + panel.querySelector('.milestone-section')?.open + '-' + odd.join('|') + '-P' + getComputedStyle(panel).position + '-S' + panel.style.cssText.replace(/\s+/g, '') + '-F' + document.querySelector('details.editor-save-menu')?.open; })();
+    if (panel.scrollWidth > panel.clientWidth + 1) return 'overflow';
+    if (!nodes.every(node => node.textContent.length > 0 && node.getBoundingClientRect().width > 0)) return 'fact-empty';
+    return 'fits';
   })()`);
-  requireJourney(fits === true, 'shared-panel-geometry');
+  requireJourney(verdict === 'fits', `shared-panel-geometry-${typeof verdict === 'string' ? verdict : 'unknown'}`);
 }
 
 async function milestoneGeometry(renderer) {
   for (const [width, height] of [[1280, 800], [1008, 681]]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-menu');
-    await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form');
+    const point = await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form');
+    const after = await renderer.evaluate(`(() => { const hit = document.elementFromPoint(${point.x}, ${point.y}); const open = (selector) => document.querySelector(selector)?.open; return 'x' + Math.round(${point.x}) + 'y' + Math.round(${point.y}) + '-save' + open('details.editor-save-menu') + '-form' + open('.milestone-section') + '-derived' + open('details.derivative-menu') + '-hit' + (hit?.tagName ?? 'none') + '.' + String(hit?.className ?? '').split(' ')[0]; })()`);
+    requireJourney(/-savetrue-formtrue-/.test(after), `milestone-geometry-form-opened-${width}-${after}`);
     await panelGeometry(renderer, '.editor-save-menu-body', width, height);
     await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form-close');
     await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-close');
@@ -1924,7 +1932,8 @@ async function runProtectionJourney(renderer) {
   at('protection-enter');
   await typeAtWindowEnd(renderer, protectionText(12), 'protection-enter-type');
   await protectionChecks(renderer, `({ shown: p.shown, headline: p.headline === ${JSON.stringify(PROTECTION_HEADLINE)}, boundary: p.lastDurable?.startsWith(${JSON.stringify(`最后确认写入：修订日志序号 ${durable.toLocaleString('zh-CN')} · `)}) === true, atRisk: p.atRisk === 12, retry: p.retry?.startsWith('自动重试：') === true, active: p.document === 'active' && p.readOnly === 'none', writable: p.writable, closeRisk: p.closeRisk === 'true', noEntry: p.journal === ${durable} })`, 'protection-entered');
-  await assertRenderer(renderer, `(() => { const status = document.querySelector('#persistence-status'); return status.dataset.tone !== 'busy' && !/正在(保存|自动写入)/u.test(status.textContent) && status.textContent.includes('修订日志暂时无法确认写入。') && !status.textContent.includes(${JSON.stringify(PROTECTION_HEADLINE)}); })()`, 'protection-specific-status');
+  const specificStatus = await renderer.evaluate(`(() => { const status = document.querySelector('#persistence-status'); const text = status.textContent; return status.dataset.tone !== 'busy' && !/正在(保存|自动写入)/u.test(text) && text.includes('修订日志暂时无法确认写入。') && !text.includes(${JSON.stringify(PROTECTION_HEADLINE)}) ? 'ok' : status.dataset.tone + ':' + text; })()`);
+  requireJourney(specificStatus === 'ok', `protection-specific-status-${specificStatus}`);
   at('protection-panel-geometry');
   for (const [index, [width, height]] of [[1280, 800], [1008, 681]].entries()) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
