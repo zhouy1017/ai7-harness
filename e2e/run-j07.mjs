@@ -1633,6 +1633,9 @@ async function main() {
     await exportAct(renderer, 'retry', 'cancel-retry');
     await waitFor(renderer, `window.__j07.exportCard() !== window.__j07.cancelledCard && window.__j07.exportCard()?.dataset.exportPhase === 'cancelled'`, 'cancel-retry-keeps-card', 120_000);
     requireJourney(!existsSync(cancelledPath) && JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'cancel-wrote-nothing');
+    // The cancelled card is dismissed by its own 完成, and focus goes back to the 导出… that opened it.
+    await exportAct(renderer, 'close', 'cancel-close');
+    await waitFor(renderer, `window.__j07.exportCard() === null && document.activeElement === window.__j07.exportOpener('milestone', ${JSON.stringify(first)})`, 'cancel-close-returns-focus', 10_000);
 
     at('j14-designate-keyboard');
     // The form without a pointer: Enter on 设为发稿版本… opens it on its first choice — the newest milestone, already chosen with

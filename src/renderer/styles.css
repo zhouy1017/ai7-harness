@@ -3126,4 +3126,5 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .dialogue-attempt > summary::before { content: "▸"; flex: none; }
 .dialogue-attempt[open] > summary::before { content: "▾"; }
 .dialogue .ui-disclosure-menu { position: relative; }
-.dialogue .ui-disclosure-menu > summary { cursor: pointer; }
+.dialogue .ui-disclosure-menu > summary { cursor: pointer; list-style: none; padding: .4rem .65rem; }
+.dialogue .ui-disclosure-menu > summary::-webkit-details-marker { display: none; }

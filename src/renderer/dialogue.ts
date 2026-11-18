@@ -194,8 +194,36 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     return { section, answer };
   }
 
+  /**
+   * What a repaint of the same dialogue must keep: the earlier answers the editor opened (the one that was latest folds when a newer
+   * answer starts) and the summary or control inside an attempt that had focus.
+   */
+  function keptAttemptState(next: DialogueProjection): { open: Set<string>; focus: { attemptId: string; index: number } | null } {
+    const open = new Set<string>();
+    if (dialogue === null || dialogue.dialogueId !== next.dialogueId) return { open, focus: null };
+    const latestId = dialogue.attempts.at(-1)?.attemptId;
+    for (const section of attemptsHost.querySelectorAll<HTMLDetailsElement>('details.dialogue-attempt')) {
+      const id = section.dataset['dialogueAttempt'] ?? '';
+      if (section.open && id !== latestId) open.add(id);
+    }
+    const active = document.activeElement;
+    const section = active instanceof HTMLElement && attemptsHost.contains(active) ? active.closest('details.dialogue-attempt') : null;
+    if (!(section instanceof HTMLElement) || active === null) return { open, focus: null };
+    const index = [...section.querySelectorAll('button')].indexOf(active as HTMLButtonElement);
+    return { open, focus: { attemptId: section.dataset['dialogueAttempt'] ?? '', index } };
+  }
+
+  function restoreAttemptFocus(focus: { attemptId: string; index: number } | null): void {
+    if (focus === null) return;
+    const section = [...attemptsHost.querySelectorAll<HTMLElement>('details.dialogue-attempt')].find(candidate => candidate.dataset['dialogueAttempt'] === focus.attemptId);
+    if (section === undefined) return;
+    const target = (focus.index >= 0 ? section.querySelectorAll<HTMLElement>('button')[focus.index] : undefined) ?? section.querySelector<HTMLElement>('summary');
+    target?.focus();
+  }
+
   /** Paint the whole dialogue: its context, every attempt and the actions the latest allows. */
   function paint(next: DialogueProjection): void {
+    const kept = keptAttemptState(next);
     dialogue = next;
     if (technicalLayerVisible) element.append(note); else note.remove();
     element.dataset['dialogue'] = 'ready';
@@ -230,7 +258,9 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       context.append(anchor);
     }
     const sections = next.attempts.map((attempt, index) => attemptSection(attempt, index === next.attempts.length - 1));
+    for (const entry of sections) if (kept.open.has(entry.section.dataset['dialogueAttempt'] ?? '')) entry.section.open = true;
     attemptsHost.replaceChildren(...sections.map((entry) => entry.section));
+    restoreAttemptFocus(kept.focus);
     const last = sections.at(-1);
     shown = latest === null || last === undefined ? null : { attemptId: latest.attemptId, count: latest.fragmentTotal, host: last.answer, state: latest.state };
     paintActions();
@@ -373,6 +403,15 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     }
   }
 
+  /** The first action in order that can take focus: a menu's summary, never a button inside a closed menu. */
+  function firstFocusableAction(): HTMLElement | undefined {
+    return [...actions.querySelectorAll<HTMLElement>('summary, button:not(:disabled)')].find((node) => {
+      if (node.closest('[hidden]') !== null) return false;
+      const menu = node.closest('details');
+      return menu === null || node.tagName === 'SUMMARY' || menu.open;
+    });
+  }
+
   async function act(action: 'stop' | 'continue' | 'regenerate' | 'follow-up'): Promise<void> {
     if (working || dialogue === null) return;
     const latest = dialogue.attempts.at(-1);
@@ -394,7 +433,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       paint(next);
       options.setStatus(action === 'stop' ? (latest.queued === true ? DIALOGUE_QUEUED_CANCELLED : DIALOGUE_STATUS.stopped) : words, 'success');
       options.onChanged();
-      actions.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+      firstFocusableAction()?.focus();
       if (next.attempts.at(-1)?.state === 'answering') {
         timer = window.setTimeout(() => {
           timer = undefined;

@@ -1558,7 +1558,8 @@ async function main() {
     at('dialogue-numbered-citation');
     await waitFor(renderer, `document.querySelector('#task-drawer .dialogue-citation')?.textContent === '〔1〕'`, 'dialogue-numbered-citation-visible');
     await pointerClick(renderer, waitFor, '#task-drawer .dialogue-citation', 'dialogue-numbered-citation-jump');
-    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${askBlock}"]') !== null`, 'dialogue-retrieval-jumped');
+    // The jump lands the caret at the start of the cited paragraph and gives the editor focus; the pressed citation held focus until then.
+    await waitFor(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${askBlock}"]'); const selection = getSelection(); return block !== null && document.activeElement?.closest('[data-testid="manuscript-editor"]') !== null && selection?.anchorNode != null && block.contains(selection.anchorNode) && selection.isCollapsed; })()`, 'dialogue-retrieval-jumped');
 
     // ---- 就这段发起任务… (Issue #423, plan slice S77b; TASK-001 to 004, TASK-044, TASK-046) -------------------------------
     at('selection-task-menu');

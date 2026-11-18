@@ -149,4 +149,4 @@ export function dialogueReasoningLine(anchors: number): string {
   return anchors > 0 ? `正在比对检索到的 ${anchors} 个段落…` : '正在检索与所选文字相关的段落…';
 }
 
-export const DIALOGUE_MENU_WORDS = { convert: '转为修改建议 ▾', direct: '直接', edit: '编辑后', more: '更多', followUp: '追问' } as const;
+export const DIALOGUE_MENU_WORDS = { convert: '转为修改建议 ▾', direct: '直接', edit: '编辑后', more: '更多 ▾', followUp: '追问' } as const;
