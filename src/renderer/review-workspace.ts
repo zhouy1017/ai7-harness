@@ -14,7 +14,8 @@ import { readActionDefaults, rememberActionDefaults } from './action-defaults.js
 import { hideToast, showToast } from './components/toast.js';
 import { filterChoices, menuPanel, enhanceSelect } from './components/controls.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
-import { reviewExcludedHeading, estimateReviewCalls, reviewConsequenceEstimate } from './review-labels.js';
+import { reviewExcludedHeading, estimateReviewCalls, reviewConsequenceEstimate, reviewReadFailedLine, reviewPartShownLine,
+  REVIEW_STATISTICS_TOTALS_WHOLE, REVIEW_PART_MORE, REVIEW_PART_REREAD } from './review-labels.js';
 import { learningReasonAskCard } from './analysis-feedback.js';
 import { taskMaterialSelection } from './task-material-selection.js';
 import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
@@ -444,6 +445,16 @@ const FILTER_KEYS: Readonly<Record<FilterName, keyof Filters>> = {
 };
 /** The 章节 choices a long Book's workspace carries in part (Issue #996), read on by the sheet's range and the findings filter. */
 const CHAPTER_PAGE_PATH = 'scopeOptions.chapters.chapters';
+/**
+ * The report's lists and the local check's 未生成批注 a workspace too large for one reply carries in part (Issue #1592),
+ * read on in order with the opened Run's identity. (The report's referenced rules page too; this page does not show them.)
+ */
+const REPORT_PAGE_PATHS = {
+  mustItems: 'run.report.record.mustItems.items',
+  statistics: 'run.report.record.statistics.rows',
+  findings: 'run.report.record.findings.entries',
+  localExcluded: 'run.localCheck.excluded',
+} as const;
 /** A finding's mark that 回到原文 can open a card on: it still stands on the manuscript. */
 const LIVE_MARK_STATUSES: ReadonlySet<string> = new Set(['open', 'resolved', 'applied']);
 const CAPABILITY_CODE = 'AI7_EDITOR_CAPABILITY_INVALID';
@@ -769,30 +780,101 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       },
       (error) => {
         if (destroyed || ticket !== generation || !host.isConnected) return;
+        // Any refused read stands at the bottom (Issue #1592); the card says what it shows is the last one read.
+        const reason = options.errorMessage(error, projection === null ? REVIEW_WORKSPACE_UNAVAILABLE : REVIEW_STATUS_LINES.refreshFailed);
+        options.setStatus(reason, 'error');
         if (projection === null) {
           renderUnavailable(error);
           return;
         }
-        options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.refreshFailed), 'error');
+        markReadFailed(reason);
         if (projection.run?.state === 'running' || projection.run?.state === 'waiting') schedulePoll();
       },
     );
   }
 
-  /** The next 章节 choices of the same snapshot (Issue #996), appended exactly once; a changed snapshot is refused. */
-  async function readChapterPage(workspace: ReviewWorkspaceProjection): Promise<ReviewWorkspaceProjection> {
-    const meta = workspace.listPages?.[CHAPTER_PAGE_PATH];
+  /** The next page of a list the workspace carries in part (Issues #996, #1592), appended exactly once; a changed list is refused. */
+  async function readWorkspacePage(workspace: ReviewWorkspaceProjection, path: string): Promise<ReviewWorkspaceProjection> {
+    const meta = workspace.listPages?.[path];
     if (meta === undefined || meta.nextOrdinal === null) throw new Error(TASK_PAGE_FAILED);
-    const page = await api.getTaskPlanPage({ kind: 'review-run', ref: workspace.run?.reviewRunId ?? null, path: CHAPTER_PAGE_PATH,
+    const page = await api.getTaskPlanPage({ kind: 'review-run', ref: workspace.run?.reviewRunId ?? null, path,
       afterOrdinal: meta.nextOrdinal, digest: meta.digest });
-    if (page.path !== CHAPTER_PAGE_PATH) throw new Error(TASK_PAGE_FAILED);
+    if (page.path !== path) throw new Error(TASK_PAGE_FAILED);
     return appendTaskPlanPage(workspace, page);
+  }
+  const readChapterPage = (workspace: ReviewWorkspaceProjection): Promise<ReviewWorkspaceProjection> => readWorkspacePage(workspace, CHAPTER_PAGE_PATH);
+
+  /** A page that could not be read: a list changed meanwhile reads the workspace again; any other failure is said. */
+  function pageFailed(error: unknown): void {
+    if (options.errorCode(error) === 'TASK_PLAN_PAGE_CHANGED') {
+      options.setStatus(REVIEW_PART_REREAD);
+      refresh(true);
+      return;
+    }
+    options.setStatus(options.errorMessage(error, TASK_PAGE_FAILED), 'error');
+  }
+
+  /**
+   * How much of a list the part shows, and 显示更多 reading the next page of it (Issue #1592), or nothing for a list
+   * already whole. A failed page is said beside the control, and the control stays for another try.
+   */
+  function partPaging(workspace: ReviewWorkspaceProjection, path: string, unit: '条' | '行', note?: string): HTMLElement | null {
+    const meta = workspace.listPages?.[path];
+    if (meta === undefined || meta.nextOrdinal === null) return null;
+    const row = el('p', 'review-part-paging');
+    row.dataset['reviewPage'] = path;
+    row.append(el('span', undefined, `${reviewPartShownLine(meta.shown, meta.total, unit)}${note === undefined ? '' : `；${note}`}`));
+    const more = el('button', 'secondary', REVIEW_PART_MORE);
+    more.type = 'button';
+    more.dataset['reviewAction'] = 'more-part';
+    holdForWork(more);
+    more.addEventListener('click', () => {
+      const current = projection;
+      if (current === null || working) return;
+      more.disabled = true;
+      row.querySelector('.review-page-failed')?.remove();
+      void readWorkspacePage(current, path).then((loaded) => {
+        if (destroyed || projection !== current) return;
+        projection = loaded;
+        stableKey = stableKeyOf(loaded);
+        renderCard(loaded);
+        // Focus stays on the part: its next 显示更多, or the part itself once the list is whole.
+        const part = card?.querySelector<HTMLElement>(`[data-review-page="${path}"] button`) ?? card?.querySelector<HTMLElement>(`[data-review-part-path="${path}"]`);
+        part?.focus();
+      }).catch((error: unknown) => {
+        if (destroyed || projection !== current) return;
+        more.disabled = false;
+        if (options.errorCode(error) !== 'TASK_PLAN_PAGE_CHANGED') {
+          const failed = el('span', 'review-page-failed', options.errorMessage(error, TASK_PAGE_FAILED));
+          failed.setAttribute('role', 'alert');
+          row.append(failed);
+        }
+        pageFailed(error);
+      });
+    });
+    row.append(more);
+    return row;
+  }
+
+  /** A refused read leaves the last workspace on screen, never as if it were current (Issue #1592). */
+  function markReadFailed(reason: string): void {
+    if (card === undefined) return;
+    card.dataset['reviewRead'] = 'failed';
+    const note = el('p', 'review-read-failed attention-note', reviewReadFailedLine(reason));
+    note.setAttribute('role', 'alert');
+    const earlier = card.querySelector('.review-read-failed');
+    if (earlier !== null) earlier.replaceWith(note);
+    else card.prepend(note);
   }
 
   function show(next: ReviewWorkspaceProjection): void {
     const previous = projection;
     next = retainTaskPlanPages(next, previous);
     projection = next;
+    if (card !== undefined) {
+      delete card.dataset['reviewRead'];
+      card.querySelector('.review-read-failed')?.remove();
+    }
     // The drawer beside 审阅 states where the Run stands; it reads the plan again when that changes.
     if (previous?.run !== null && previous?.run !== undefined && previous.run.reviewRunId === next.run?.reviewRunId &&
         previous.run.state !== next.run.state) options.planChanged();
@@ -1201,7 +1283,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         const exclusions = el('ul');
         exclusions.setAttribute('aria-label', '未生成批注');
         for (const exclusion of run.localCheck.excluded) exclusions.append(el('li', undefined, `${exclusion.reason}${technicalWords(` · ${exclusion.candidateId}`)}`));
+        exclusions.dataset['reviewPartPath'] = REPORT_PAGE_PATHS.localExcluded;
+        exclusions.tabIndex = -1;
         local.append(el('strong', undefined, '未生成批注'), exclusions);
+        const paging = partPaging(next, REPORT_PAGE_PATHS.localExcluded, '条');
+        if (paging !== null) local.append(paging);
       }
       section.append(local);
       if (run.authorization !== null && (run.state === 'running' || run.canContinue)) {
@@ -1245,7 +1331,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (run.historicalMarker !== null) section.append(historicalMarker(run.historicalMarker, run));
       if (run.influence.length > 0) section.append(renderInfluence(run));
       if (!leading) section.append(renderResults(next, run));
-      section.append(renderReport(run));
+      section.append(renderReport(next, run));
     }
     section.append(options.technicalDetails(
       'review-facts',
@@ -1498,7 +1584,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         }).catch((error: unknown) => {
           if (destroyed || projection !== current) return;
           more.disabled = false;
-          options.setStatus(options.errorMessage(error, TASK_PAGE_FAILED), 'error');
+          pageFailed(error);
         });
       });
       filters.append(more);
@@ -2027,7 +2113,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   // ---- the 审阅报告 ----------------------------------------------------------------------------------
 
-  function renderReport(run: ReviewRunProjection): HTMLElement {
+  function renderReport(next: ReviewWorkspaceProjection, run: ReviewRunProjection): HTMLElement {
     const section = el('section', 'review-report');
     const modelLabel = run.report?.record.run.modelLabel ?? run.modelLabel;
     if (modelLabel) section.append(el('p', 'review-report-model', modelLabel));
@@ -2060,7 +2146,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     holdForWork(...actions.querySelectorAll('button'));
     section.append(actions);
     if (report !== null) section.append(exportSlot);
-    if (run.report !== null) section.append(renderReportRecord(run.report, run.categories));
+    if (run.report !== null) section.append(renderReportRecord(next, run.report, run.categories));
     return section;
   }
 
@@ -2108,13 +2194,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     return menu;
   }
 
-  function renderReportRecord(report: ReviewReportProjection, categories: ReviewRunProjection['categories']): HTMLElement {
+  function renderReportRecord(next: ReviewWorkspaceProjection, report: ReviewReportProjection, categories: ReviewRunProjection['categories']): HTMLElement {
     const record = report.record;
     const body = el('div', 'review-report-record');
     const part = (name: string, title: string, ...children: HTMLElement[]): HTMLElement => {
       const node = el('section', 'review-report-part');
       node.dataset['reportPart'] = name;
       node.append(el('h6', undefined, title), ...children);
+      return node;
+    };
+    // A list carried in part says so and reads on (Issue #1592); its part takes focus once the list is whole.
+    const paged = (node: HTMLElement, path: string, unit: '条' | '行', note?: string): HTMLElement => {
+      node.dataset['reviewPartPath'] = path;
+      node.tabIndex = -1;
+      const paging = partPaging(next, path, unit, note);
+      if (paging !== null) node.append(paging);
       return node;
     };
     const table = el('table', 'review-report-table');
@@ -2178,7 +2272,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         statsBody.append(tr);
       }
       stats.append(statsHead, statsBody);
-      derived.push(part('statistics', record.statistics.title, stats));
+      derived.push(paged(part('statistics', record.statistics.title, stats), REPORT_PAGE_PATHS.statistics, '行', REVIEW_STATISTICS_TOTALS_WHOLE));
     }
     if (record.findings !== undefined) {
       const list = el('ol', 'review-report-list review-report-findings');
@@ -2192,7 +2286,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const omitted = reviewReportOmittedLine(record.findings.omitted);
       const findings = part('findings', record.findings.title, list);
       if (omitted !== null) findings.querySelector('h6')?.append(' · ', el('span', undefined, omitted));
-      derived.push(findings);
+      derived.push(paged(findings, REPORT_PAGE_PATHS.findings, '条'));
     }
     const appendix = el('ul', 'review-report-list');
     appendix.append(el('li', undefined, reviewReportConfigurationLine(record.appendix.configuration.version)));
@@ -2203,7 +2297,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       ...(record.run.usage === undefined ? [] : [el('p', 'review-report-usage', `本次共进行了 ${record.run.usage.requests} 次模型调用。`)]),
       ...(record.synthesis === undefined ? [] : [reviewSynthesisNode(record.synthesis, record.run.modelLabel)]),
       overview,
-      part('must-items', record.mustItems.title, must),
+      paged(part('must-items', record.mustItems.title, must), REPORT_PAGE_PATHS.mustItems, '条'),
       ...derived,
       part('category-summaries', record.categorySummaries.title, summaries),
       part('appendix', record.appendix.title, appendix, options.technicalDetails(

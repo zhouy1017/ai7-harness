@@ -1177,9 +1177,9 @@ async function main() {
     await settled(renderer, 'local-workflow-settled');
 
     // #1525: a fresh local review supplies real findings for keyboard triage and the return route. A tester's edit of sample1:
-    // each single 「…」 is one 修改建议 (P02), enough of them that deciding walks focus past the window. (A Run with several
-    // hundred findings cannot be read at all today — the service refuses the workspace as too large — so no second page here.)
-    await assertRenderer(renderer, `(() => {return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。'+'甲…'.repeat(24));})()`, 'review-triage-tester-edit');
+    // each single 「…」 is one 修改建议 (P02): several hundred of them, so the Run's findings need a second page (#1592) and
+    // deciding walks focus past the window.
+    await assertRenderer(renderer, `(() => {return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。'+'甲…'.repeat(360));})()`, 'review-triage-tester-edit');
     await settled(renderer, 'review-triage-edit-saved');
     const ACTIVE_CARD = `document.activeElement?.closest('article.review-finding')`;
     try {
@@ -1214,6 +1214,8 @@ async function main() {
         }
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
         await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-triage-filter');
+        // The large Run reads (#1592): its first page is on screen, no refused read is standing, and a second page is offered.
+        await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewRead===undefined && document.querySelector('.review-read-failed')===null && document.querySelector('[data-review-action="more-findings"]')?.disabled===false`, 'review-triage-second-page-offered');
         // 下一条待处理 is #1523's view.nextPending (Alt+↓ on Windows): the review page answers the same command.
         await press(renderer,'ArrowDown',1);
         const decided=[];
@@ -1237,6 +1239,10 @@ async function main() {
         // 历史 ▾ open — by a real click unless this Book's 审阅 kept it open from the previous form — so the way back has a fold to keep.
         if (await renderer.evaluate(`document.querySelector('.review-history-fold')?.open===false`)) await triageClick(renderer,'.review-history-fold > summary');
         await waitFor(renderer, `document.querySelector('.review-history-fold')?.open===true`, 'review-return-history-open');
+        // The second page of findings, by a real click, so the way back has two pages to keep.
+        const onePage=await renderer.evaluate(`document.querySelectorAll('article.review-finding').length`);
+        await triageClick(renderer,'[data-review-action="more-findings"]');
+        await waitFor(renderer, `document.querySelectorAll('article.review-finding').length>${onePage} && document.querySelector('.review-read-failed')===null`, 'review-return-second-page-read');
         await press(renderer,'ArrowDown',1);
         await waitFor(renderer, `document.activeElement?.matches('article.review-finding[data-status="pending"]')===true`, 'review-return-next-pending-focused');
         const kept=await renderer.evaluate(`document.activeElement.dataset.findingId`);

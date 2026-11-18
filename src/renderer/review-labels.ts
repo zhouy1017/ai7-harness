@@ -60,6 +60,14 @@ export const REVIEW_COVERAGE_NOTE = '每一类对照当前稿件：稿件改动�
 export const REVIEW_RUNS_HEADING = '审阅记录';
 export const REVIEW_NO_RUNS = '还没有审阅记录。';
 export const REVIEW_WORKSPACE_UNAVAILABLE = '无法读取这本书的审阅记录。';
+/** A refused read of a workspace already on screen (Issue #1592): what is shown is the last one read. */
+export const reviewReadFailedLine = (reason: string): string => `${reason}下面是上次读到的审阅，可能已经过时。`;
+/** A report list or the local check's 未生成批注 read only in part (Issue #1592); `unit` is 条 or 行. */
+export const reviewPartShownLine = (shown: number, total: number, unit: '条' | '行'): string => `已显示 ${shown} ${unit}，共 ${total} ${unit}`;
+export const REVIEW_STATISTICS_TOTALS_WHOLE = '合计计入全部章节';
+export const REVIEW_PART_MORE = '显示更多';
+/** The list changed between two pages, so it was read again from its first page. */
+export const REVIEW_PART_REREAD = '审阅结果已变化，已重新读取。';
 
 /** The persistent actions of the destination, in the order it builds them (V2-UX-LAYER-005). */
 export const REVIEW_DESTINATION_ACTIONS = ['打开稿件', '工作概览'] as const;
