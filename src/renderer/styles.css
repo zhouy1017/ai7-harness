@@ -3151,8 +3151,8 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 
 .review-category-fold > article.review-finding:first-of-type { margin-top: .35rem; }
 
-/* The header export's menu panel anchors to its own box: a flex container here pushed the panel out of a 1008 px window. */
-.review-header-export[open] { display: block; }
+/* The menu controls place the panel from its width while it still sits in the narrow header box; a content-sized panel keeps that width right, so the panel stays inside a 1008 px window. */
+.review-header-export > .export-menu-body { width: max-content; max-width: calc(100vw - 16px); }
 
 .dialogue-follow-up { display: grid; gap: .5rem; margin-top: 1rem; }
 .dialogue-follow-up textarea { width: 100%; box-sizing: border-box; }
