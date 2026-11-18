@@ -1,0 +1,148 @@
+import { randomUUID } from 'node:crypto';
+import type { DatabaseSync } from 'node:sqlite';
+import { editorialMemoryDatabase } from '../../../support/domain/editorial-memory.js';
+import { initializeMemorySourceProjections } from '../../../support/domain/memory-projections.js';
+import { describe, expect, it } from 'vitest';
+import { HouseReviewPreferenceLedger, withdrawalOf, preferenceLines, type HousePreferenceSource } from '../../../../src/service/house-review-preference.js';
+import { LEARNING_ELIGIBILITY_POLICY_BASIS } from '../../../../src/service/learning-eligibility.js';
+import { canonicalRecord } from '../../../../src/service/analysis/canonical.js';
+
+
+function source(overrides: Partial<HousePreferenceSource> = {}): HousePreferenceSource {
+  return { bookId: randomUUID(), bookTitle: '合成反馈图书', categoryId: 'typos-and-usage', categoryLabel: '错别字与规范用语', materialDigest: 'a'.repeat(64),
+    decisionId: randomUUID(), eligibilityDecisionId: randomUUID(), eligibility: 'house', operationalScope: 'ordinary-production',
+    disposition: 'rejected', reason: '作者甲和责编乙认为应保留原有写法', attribution: { peopleVersion: 1, authors: ['作者甲'], editors: ['责编乙'] },
+    quality: { applied: 0, surviving: 0, editVolume: 0, lineageDigest: 'b'.repeat(64) }, ...overrides };
+}
+
+function ledgerOf(mutableEligibility = false): { db: DatabaseSync; ledger: HouseReviewPreferenceLedger } {
+  const db = editorialMemoryDatabase({ mutableEligibility });
+  initializeMemorySourceProjections(db);
+  return { db, ledger: new HouseReviewPreferenceLedger(db) };
+}
+
+describe('house review preference ledger', () => {
+  it('isolates production and development, bounds text, preserves attribution and appends immutable successors only on change', () => {
+    const { db, ledger } = ledgerOf();
+    try {
+      const production = source();
+      const development = source({ operationalScope: 'developer-live', materialDigest: 'c'.repeat(64) });
+      const fixture = source({ operationalScope: 'development-ci', materialDigest: 'd'.repeat(64) });
+      expect(ledger.rebuild('ordinary-production', [development, fixture])).toBeNull();
+      const first = ledger.rebuild('ordinary-production', [production, development, fixture, source({ eligibility: 'excluded' }), source({ eligibility: 'deferred' })])!;
+      expect(first.sourceCount).toBe(1);
+      expect(first.lines[0]!.text.includes('作者甲')).toBe(false);
+      expect(first.lines[0]!.text.includes('责编乙')).toBe(false);
+      expect(first.lines[0]!.sources[0]!.attribution).toEqual(production.attribution);
+      expect(ledger.rebuild('ordinary-production', [production])!.versionId).toBe(first.versionId);
+      expect(ledger.rebuild('developer-live', [production, fixture])).toBeNull();
+      const dev = ledger.rebuild('developer-live', [development, production])!;
+      expect(dev.lines.flatMap((line) => line.sources).map((entry) => entry.materialDigest)).toEqual([development.materialDigest]);
+      const empty = ledger.rebuild('ordinary-production', [])!;
+      expect(empty.supersedes).toBe(first.versionId);
+      expect(empty.ordinal).toBe(2);
+      expect(ledger.use('ordinary-production', production.bookId, production.categoryId)).toBeNull();
+      expect(() => db.prepare('UPDATE house_review_preference_versions SET ordinal = 3').run()).toThrow('IMMUTABLE');
+      expect(() => db.prepare('DELETE FROM house_review_preference_versions').run()).toThrow('IMMUTABLE');
+      const many = Array.from({ length: 30 }, (_, index) => source({ categoryId: `category-${index}`, categoryLabel: '类别', reason: '字'.repeat(300) }));
+      const lines = preferenceLines(many);
+      expect(lines.length).toBeLessThanOrEqual(64);
+      expect(lines.reduce((sum, line) => sum + Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(line.text)).length, 0)).toBeLessThanOrEqual(6000);
+    } finally { db.close(); }
+  });
+
+  it('keeps Book-only feedback in its exact Book and records an idempotent, by-value Run pin', () => {
+    const { db, ledger } = ledgerOf();
+    try {
+      const material = source({ eligibility: 'book' });
+      ledger.rebuild('ordinary-production', [material]);
+      expect(ledger.use('ordinary-production', randomUUID(), material.categoryId)).toBeNull();
+      expect(ledger.use('ordinary-production', material.bookId, 'style-and-format')).toBeNull();
+      const use = ledger.use('ordinary-production', material.bookId, material.categoryId)!;
+      const run = randomUUID(); const task = randomUUID(); const digest = 'e'.repeat(64);
+      db.prepare('INSERT INTO review_runs(review_run_id, book_id) VALUES (?, ?)').run(run, material.bookId); db.prepare('INSERT INTO analysis_task_intents(task_intent_id, book_id, kind) VALUES (?, ?, ?)').run(task, material.bookId, 'editorial-review/typos-and-usage');
+      ledger.pin(run, task, digest, use); ledger.pin(run, task, digest, use);
+      expect(db.prepare('SELECT count(*) AS n FROM review_run_preference_pins').get()!.n).toBe(1);
+      expect(ledger.pinned(task)).toEqual(use);
+      expect(() => ledger.pin(run, task, 'f'.repeat(64), use)).toThrow();
+      expect(() => db.prepare('DELETE FROM review_run_preference_pins').run()).toThrow('IMMUTABLE');
+    } finally { db.close(); }
+  });
+
+  it('reads each source\'s own quality, strips every named person, puts house lines first and gives each category its own lines (#911 review)', () => {
+    const { db, ledger } = ledgerOf();
+    try {
+      const bookId = '00000000-0000-4000-8000-000000000001';
+      // A Book-only line would sort first by its Book; house lines, which every Book's Run reads, still lead.
+      const bookOnly = source({ bookId, eligibility: 'book', categoryId: 'typos-and-usage', reason: '只在本书', materialDigest: '1'.repeat(64) });
+      const kept = source({ categoryId: 'typos-and-usage', disposition: 'accepted', reason: '校对王四认为应统一', materialDigest: '2'.repeat(64),
+        quality: { applied: 1, surviving: 0, editVolume: 3, lineageDigest: 'c'.repeat(64) } });
+      const excluded = source({ categoryId: 'typos-and-usage', eligibility: 'excluded', disposition: 'accepted', materialDigest: '3'.repeat(64),
+        quality: { applied: 5, surviving: 5, editVolume: 0, lineageDigest: 'd'.repeat(64) } });
+      const style = source({ categoryId: 'style-and-format', categoryLabel: '体例与格式', disposition: 'rejected', reason: '体例从旧', materialDigest: '4'.repeat(64) });
+      const version = ledger.rebuild('ordinary-production', [bookOnly, kept, excluded, style], ['王四'])!;
+      expect(version.sourceCount).toBe(3);
+      expect(version.lines.map((line) => [line.categoryId, line.bookId])).toEqual([['style-and-format', null], ['typos-and-usage', null], ['typos-and-usage', bookId]]);
+      const typos = version.lines[1]!.text;
+      // The excluded source's five surviving targets never count: only the admitted one, written over, is read.
+      expect(typos).not.toMatch(/采纳\d|未采纳|应用后常再改/u);
+      expect(typos).toContain('校对认为应统一');
+      expect(typos).not.toContain('王四');
+      expect(ledger.use('ordinary-production', bookId, 'typos-and-usage')!.lines).toEqual([version.lines[2]!.text, version.lines[0]!.text, typos]);
+      expect(ledger.use('ordinary-production', randomUUID(), 'typos-and-usage')!.lines).toEqual([version.lines[0]!.text, typos]);
+      expect(ledger.use('ordinary-production', bookId, 'style-and-format')!).toMatchObject({ lines: [version.lines[0]!.text], sourceCount: 1 });
+      expect(ledger.use('ordinary-production', bookId, 'literary-expression')!.lines).toEqual([version.lines[0]!.text]);
+      // Only a changed material set, or lines that read differently, make a version: new lineage alone does not.
+      expect(ledger.rebuild('ordinary-production', [bookOnly, { ...kept, quality: { ...kept.quality, lineageDigest: 'e'.repeat(64) } }, excluded, style], ['王四'])!.versionId).toBe(version.versionId);
+      const reread = ledger.rebuild('ordinary-production', [bookOnly, { ...kept, quality: { ...kept.quality, surviving: 1 } }, excluded, style], ['王四'])!;
+      expect(reread.versionId).toBe(version.versionId);
+      expect(reread.lines[1]!.text).toBe(typos);
+      expect(ledger.history('ordinary-production').map((entry) => entry.ordinal)).toEqual([1]);
+    } finally { db.close(); }
+  });
+
+
+  it('traces a pinned category by identity when another category has identical preference text (#912 review)', () => {
+    const { db, ledger } = ledgerOf();
+    try {
+      const first = source({ categoryId: 'typos-and-usage', categoryLabel: '合成同名类别', reason: '相同的编辑规则' });
+      const other = source({ categoryId: 'plot-consistency', categoryLabel: '合成同名类别', reason: '相同的编辑规则' });
+      ledger.rebuild('ordinary-production', [first, other]);
+      const run = randomUUID(); const task = randomUUID();
+      db.prepare('INSERT INTO review_runs(review_run_id, book_id) VALUES (?, ?)').run(run, first.bookId);
+      db.prepare('INSERT INTO analysis_task_intents(task_intent_id, book_id, kind) VALUES (?, ?, ?)').run(task, first.bookId, 'editorial-review/typos-and-usage');
+      ledger.pin(run, task, 'e'.repeat(64), ledger.use('ordinary-production', first.bookId, first.categoryId)!);
+      expect(ledger.pinnedInfluence(task)!.sources.map((entry) => entry.eligibilityDecisionId)).toEqual([first.eligibilityDecisionId]);
+    } finally { db.close(); }
+  });
+
+  it('composes no block from a version whose material was withdrawn after its admission, and a re-inclusion restores none of it (#912)', () => {
+    const { db, ledger } = ledgerOf(true);
+    try {
+      const material = source();
+      const bookId = material.bookId;
+      db.prepare('INSERT INTO books(book_id, stable_identity, title, created_at) VALUES (?, ?, ?, ?)').run(bookId, `book:${bookId}`, '合成反馈图书', '2026-10-17T00:00:00.000Z');
+      const decide = (decisionId: string, ordinal: number, choice: string, supersedes: string | null, recordedAt: string) => {
+        const record = canonicalRecord({ schema: 'ai7.learning-eligibility-decision/1', decisionId, bookId, materialKey: 'review-disposition:x',
+          materialDigest: material.materialDigest, ordinal, choice, supersedes, recordedAt, actor: '本机编辑', basis: LEARNING_ELIGIBILITY_POLICY_BASIS, note: null });
+        db.prepare('INSERT INTO learning_eligibility_decisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(decisionId, bookId, 'review-disposition:x', material.materialDigest,
+          ordinal, choice, supersedes, recordedAt, record.json, record.digest);
+      };
+      decide(material.eligibilityDecisionId, 1, 'house', null, '2026-10-17T00:00:00.000Z');
+      ledger.rebuild('ordinary-production', [material]);
+      expect(ledger.use('ordinary-production', bookId, material.categoryId)).not.toBeNull();
+      expect(withdrawalOf(db, material.eligibilityDecisionId)).toEqual({ materialKey: 'review-disposition:x', withdrawnAt: null });
+      const excluded = randomUUID();
+      decide(excluded, 2, 'excluded', material.eligibilityDecisionId, '2026-10-17T01:00:00.000Z');
+      // The version still holds it (no rebuild in this scope yet): it reads as none, never as a block.
+      expect(ledger.use('ordinary-production', bookId, material.categoryId)).toBeNull();
+      decide(randomUUID(), 3, 'house', excluded, '2026-10-17T02:00:00.000Z');
+      expect(withdrawalOf(db, material.eligibilityDecisionId)).toEqual({ materialKey: 'review-disposition:x', withdrawnAt: '2026-10-17T01:00:00.000Z' });
+      expect(ledger.use('ordinary-production', bookId, material.categoryId)).toBeNull();
+      expect(withdrawalOf(db, randomUUID())).toEqual({ materialKey: null, withdrawnAt: null });
+      // A damaged SQL projection must not make the earlier exclusion disappear from the consumption guard.
+      db.prepare("UPDATE learning_eligibility_decisions SET choice = 'house' WHERE ordinal = 2").run();
+      expect(() => ledger.use('ordinary-production', bookId, material.categoryId)).toThrow('学习准入记录已损坏');
+    } finally { db.close(); }
+  });
+});
