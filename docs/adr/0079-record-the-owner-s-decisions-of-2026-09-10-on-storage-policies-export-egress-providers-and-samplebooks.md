@@ -12,6 +12,8 @@ Runtime policy-lock, selected-policy/content-admission and frozen-fixture clause
 
 > Superseded in part by [ADR 0091](./0091-admit-four-public-domain-works-as-public-samplebooks.md) (2026-10-19), for exactly four public-domain files: §5.1's "`SampleBooks/sample1.docx` is the only manuscript file admitted to the repository, CI and fixtures" now admits them beside `sample1.docx`, and §5.3's `developer-live` transmittable set gains them when slice 15c (#990) lands. §5.2, §5.4 and the five local-only files are unchanged.
 
+> Amended by [ADR 0105 §4–§5](./0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md#5--the-in-app-upgrade-tool) (2026-11-18): §1.1 — revision 117 is the breaking change that raises the Data Version to 2; §1.3 — rollback restores the kept old store, or the backup package, for the previous AI7 through a dedicated cross-version restore; a Data Version 1 package from 0.7.2 or later is converted on import instead of refused. The backup location and retention are unchanged.
+
 # 0079 · Record the Owner's decisions of 2026-09-10 on storage, policy revisions, export objects, network egress, provider assignment and the repository SampleBooks
 
 ## Context

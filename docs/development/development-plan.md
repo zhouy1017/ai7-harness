@@ -53,7 +53,29 @@ R1 is delivered as `dev@2026a9ee` through [PR #1468](https://github.com/zhouy101
 | --- | --- | --- | --- |
 | R3 closure | 0.7.2 Alpha | Merged whole-book review synthesis and integer position indexes ([#1433](https://github.com/zhouy1017/ai7-harness/issues/1433), [#1434](https://github.com/zhouy1017/ai7-harness/issues/1434)), the memory facade and navigation guards, and the retained follow-ups [#1147](https://github.com/zhouy1017/ai7-harness/issues/1147), [#1152](https://github.com/zhouy1017/ai7-harness/issues/1152), [#1074](https://github.com/zhouy1017/ai7-harness/issues/1074) | Slices merged; final closure verification, dev merge and human-test refresh pending |
 | R4 | 0.7.3 Alpha | Service-layer domain split and the fast in-memory domain tests ([#1075](https://github.com/zhouy1017/ai7-harness/issues/1075), [#1033](https://github.com/zhouy1017/ai7-harness/issues/1033)) | Not started; after the Owner's complete review and subsequent dispatch |
-| R5 | 0.8.0 Alpha | Storage baseline fold and the in-app database upgrade tool | Not started; after Owner review, R4 and a measured read-path baseline on `SampleBooks/` and the Owner's decision on per-step undo across the upgrade |
+| R5 | 0.8.0 Alpha | Storage baseline fold and the in-app database upgrade tool ([#1540](https://github.com/zhouy1017/ai7-harness/issues/1540)) | Design accepted in [ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md) (#1555; the Owner's 「R5按照推荐」, 2026-11-18); no code started. Slices R5-1 … R5-7 below start after 0.7.3 is delivered |
+
+## R5 → 0.8.0 Alpha: accepted design (#1540, ADR 0105)
+
+The storage design of [#1555](https://github.com/zhouy1017/ai7-harness/issues/1555) is accepted in [ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md). The Owner answered all 13 of its decisions as recommended: 「R5按照推荐」, 2026-11-18, recorded on [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540#issuecomment-6975379870).
+
+0.8.0 introduces schema revision 117, a single baseline that raises the store to **Data Version 2**; 0.7.4 adds no schema revision. All 408 `RAISE(ABORT)` triggers stay, including the 12 import abandonment-cleanup blockers and their 2 validators. Every Data Version 1 store, from 0.7.2 on, reaches 0.8.0 only through the in-app upgrade tool, and the old store is kept until the editor deletes it.
+
+R5 builds on `codex/integration-0.8.0`. R5-2 through R5-6 travel as one train, so the fold never lands without its converter.
+
+| Slice | What the editor can newly do | Order |
+| --- | --- | --- |
+| R5-1 | A suggestion moved whole by 分段 / 合段 keeps its 撤销本次修改 | After #1536 merges; beside 0.7.4 |
+| R5-2 | (internal) One baseline at revision 117 / Data Version 2; the migration chain is deleted | First on the train |
+| R5-3 + R5-4 | Structural edits on a 46,000-paragraph manuscript stop rewriting every later paragraph; Ctrl+Z undoes accepted suggestions, replace-all and AI edits as one step each, says where, survives a restart and never gets stuck | After R5-2 and R5-1, one train |
+| R5-5 | A real version list in 工作概览: view, export as DOCX, restore (undoable once) | After R5-3 + R5-4 |
+| R5-6 | One-click upgrade to 0.8.0 with a before/after comparison, the old data kept, and 「回到升级前的数据」; `.ai7db` from 0.7.2 on imports directly | After R5-5 and #1556; lands the train |
+| R5-7 | Acceptance on real 0.7.x stores built from `SampleBooks/`, interrupted at every phase, with rollback drills, DOCX round trip, 15 Journeys, the full guest ladder and the hosted Full Gate; 0.8.0 | After the train and 0.7.4 |
+
+Measured targets, against the [#1557](https://github.com/zhouy1017/ai7-harness/issues/1557) baseline:
+- a split or join at 46,000 paragraphs writes under 1 % of today's write-ahead bytes;
+- reads stay within 10 % of the baseline;
+- undoing a 2,000-place replace-all holds the write lock at most 2 s.
 
 ## Delivered #1444 (0.6.5 Beta)
 

@@ -1,18 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
+import { editorialMemoryDatabase } from '../../../support/domain/editorial-memory.js';
 import { describe, expect, it } from 'vitest';
 import { canonicalRecord, sha256Hex } from '../../../../src/service/analysis/canonical.js';
-import { LearningEligibilityLedger, LEARNING_ELIGIBILITY_SCHEMA_SQL, LEARNING_ELIGIBILITY_TRIGGER_SQL, LEARNING_ELIGIBILITY_POLICY_BASIS, LOCAL_LEARNING_POLICY_BASIS, reviewDispositionCandidate, learningMaterialDigest, learningRemediationPreview } from '../../../../src/service/learning-eligibility.js';
+import { LearningEligibilityLedger, LEARNING_ELIGIBILITY_POLICY_BASIS, LOCAL_LEARNING_POLICY_BASIS, reviewDispositionCandidate, learningMaterialDigest, learningRemediationPreview } from '../../../../src/service/learning-eligibility.js';
 
 describe('学习准入 policy bases', () => {
   it('reads a decision made under basis version 1 and records the next one under version 2 (Issue #1082)', () => {
-    const db = new DatabaseSync(':memory:');
+    const db = editorialMemoryDatabase();
     try {
-      db.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT');
-      for (const sql of Object.values(LEARNING_ELIGIBILITY_SCHEMA_SQL)) db.exec(sql);
-      for (const sql of Object.values(LEARNING_ELIGIBILITY_TRIGGER_SQL)) db.exec(sql);
       const bookId = randomUUID();
-      db.prepare('INSERT INTO books VALUES (?)').run(bookId);
+      db.prepare('INSERT INTO books(book_id, stable_identity, title, created_at) VALUES (?, ?, ?, ?)').run(bookId, `book:${bookId}`, '合成准入图书', '2026-10-23T00:00:00.000Z');
       const candidate = reviewDispositionCandidate({ signalId: randomUUID(), reviewRunId: randomUUID(), findingId: 'rvf_basis', categoryLabel: '文字',
         reason: '准入版本理由', recordedAt: '2026-10-23T00:00:00.000Z' }, false);
       const digest = learningMaterialDigest(candidate);

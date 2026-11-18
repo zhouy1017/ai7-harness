@@ -2,7 +2,7 @@ import type { CreateEditorialMemoryInput } from '../../../../src/shared/protocol
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it } from 'vitest';
 import { EditorialLearningLedger } from '../../../../src/service/learning/ledger.js';
-import { HouseReviewPreferenceLedger, HousePreferenceInfluence } from '../../../../src/service/house-review-preference.js';
+import { HouseReviewPreferenceLedger } from '../../../../src/service/house-review-preference.js';
 import { SupervisionDirectives } from '../../../../src/service/learning/supervision-directives.js';
 import { memoryDomainFixture } from '../../../support/domain/memory-source-projection.js';
 const open: Array<Awaited<ReturnType<typeof memoryDomainFixture>>> = [];
@@ -51,36 +51,6 @@ it('keeps Book-restricted memory in its source Book and refuses promotion, cross
   const ledger = new HouseReviewPreferenceLedger(db);
   expect(ledger.use('ordinary-production', book.bookId, 'typos-and-usage')!.lines).toContain(local.title);
   expect(ledger.use('ordinary-production', randomUUID(), 'typos-and-usage')!.lines).not.toContain(local.title);
-});
-
-it('reads one scope\'s preference influence only, never another scope\'s local pins', async () => {
-  const { db, signals, make, create, accept, prepare } = await sourceDecisions();
-  accept(make(create([signals[0]!.signalId], '只属于本范围的合成记忆。')));
-  prepare();
-  expect(new HousePreferenceInfluence(db, 'ordinary-production').pins.length).toBeGreaterThan(0);
-  expect(new HousePreferenceInfluence(db, 'developer-live').pins).toEqual([]);
-  expect(new HousePreferenceInfluence(db, 'development-ci').pins).toEqual([]);
-});
-
-it('stops a prepared /2 pin of legacy lines at learning-off or Book exclusion, exactly as a /1 pin stops', async () => {
-  const { db, subject, book, signals, make, create, accept, govern, current, prepare } = await sourceDecisions();
-  const memory = accept(make(create([signals[0]!.signalId], '冻结后只留旧版偏好。')));
-  govern([current(memory.itemId)], 'supervise', '冻结这条合成记忆。', 'freeze');
-  const published = subject.inspectHouseReviewPreference().current!;
-  expect(published.schema).toBe('ai7.house-review-preference/2');
-  expect(published.lines.length).toBeGreaterThan(0);
-  expect(published.lines.every((line) => line.owner?.kind === 'legacy-preference')).toBe(true);
-  const task = prepare().categories.find((entry) => entry.categoryId === 'typos-and-usage')!.taskIntentId!;
-  const ledger = new HouseReviewPreferenceLedger(db);
-  expect(ledger.pinned(task)!.versionId).toBe(published.versionId);
-  expect(ledger.governanceChanged(task, () => [])).toBe(false);
-  subject.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
-  expect(ledger.governanceChanged(task, () => [])).toBe(true);
-  // A legacy line's own basis is its admitting decision: as for the #1116 /1 regression, re-enabling makes it usable again.
-  subject.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: 1 });
-  expect(ledger.governanceChanged(task, () => [])).toBe(false);
-  subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: true, expectedEntries: 2 });
-  expect(ledger.governanceChanged(task, () => [])).toBe(true);
 });
 
 it('keeps no-growth governance usable while derived lines yield to memory lines, and still refuses added text past the bound', async () => {

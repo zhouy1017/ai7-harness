@@ -88,6 +88,7 @@ This maintained bilingual reference routes readers to target-qualified definitio
 | Manuscript Branch | 稿件分支 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Edit Journal | 修订日志 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Editor Revision | 编辑修订 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Editor Step | 编辑步骤 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | AI Edit Lock | AI 锁定 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Scoped AI Edit | 局部 AI 修改 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Manuscript Checkpoint | 稿件修订检查点 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
@@ -378,6 +379,7 @@ The inheritance audit resolved the definition owners for these terms. They remai
 | Book People | account / permission / Series member / Learning Eligibility Decision |
 | Writing Task | delivery / publication / Exemplar copy / Reader's Report task |
 | Data Version | software version / migration script / Manuscript Revision / Product Data Location |
+| Editor Step | Edit Journal entry / command group / Apply Effect |
 | Review Decision | Proposal Decision / Effect Approval / a Repository Development Dispatch reviewer report |
 
 `Task Skill`, `Task Skill Manifest/Package/Candidate`, `Installed Task Skill Version`, `Task Skill Enablement/Activation`, `Harness Skill Projection`, `Third-Party DSH Plugin`, `Plugin Admission Snapshot`, and `Local Plugin Pin` are legacy-only language preserved in superseded ADRs 0010/0042 and historical target commits. Do not use them as current AI7 object names. Their responsibilities now route to native DSH artifact identities plus separate AI7-owned provenance, compatibility, scope, authority, audit, rollback, update, enablement, per-Run activation, and Apply seams; exact implementation-facing sidecar and activation record names remain deliberately unresolved.

@@ -1,35 +1,30 @@
 import { randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
+import { editorialMemoryDatabase } from '../../../support/domain/editorial-memory.js';
+import { initializeMemorySourceProjections } from '../../../support/domain/memory-projections.js';
 import { expect, it } from 'vitest';
 import { EditorialLearningLedger } from '../../../../src/service/learning/ledger.js';
 import { canonicalRecord } from '../../../../src/service/analysis/canonical.js';
 
 it('pages rule adoption without loss and compares actual decisions independently for each Book/version', () => {
-  const db = new DatabaseSync(':memory:');
+  const db = editorialMemoryDatabase();
   try {
     // Synthetic decision/finding rows only: this projection reads no manuscript, text example, or provider.
-    db.exec(`CREATE TABLE books(book_id TEXT, title TEXT);
-      CREATE TABLE review_runs(review_run_id TEXT, book_id TEXT);
-      CREATE TABLE editorial_marks(mark_id TEXT, status TEXT);
-      CREATE TABLE review_findings(review_run_id TEXT, finding_id TEXT, mark_id TEXT, output TEXT, canonical_json TEXT, sha256 TEXT);
-      CREATE TABLE proposal_change_items(item_id TEXT, mark_id TEXT);
-      CREATE TABLE proposal_item_decisions(item_id TEXT, disposition TEXT, ordinal INTEGER);
-      CREATE TABLE review_finding_dispositions(review_run_id TEXT, finding_id TEXT, disposition TEXT)`);
+    initializeMemorySourceProjections(db);
     const bookId = randomUUID(); const otherBookId = randomUUID();
-    db.prepare('INSERT INTO books VALUES (?, ?), (?, ?)').run(bookId, '合成甲书', otherBookId, '合成乙书');
-    db.prepare('INSERT INTO review_runs VALUES (?, ?), (?, ?)').run('run-a', bookId, 'run-b', otherBookId);
+    db.prepare('INSERT INTO books(book_id, stable_identity, title, created_at) VALUES (?, ?, ?, ?), (?, ?, ?, ?)').run(bookId, `book:${bookId}`, '合成甲书', '2026-10-17', otherBookId, `book:${otherBookId}`, '合成乙书', '2026-10-17');
+    db.prepare('INSERT INTO review_runs(review_run_id, book_id) VALUES (?, ?), (?, ?)').run('run-a', bookId, 'run-b', otherBookId);
     const versions: string[] = [];
     for (let index = 0; index < 45; index++) {
       const versionId = randomUUID(); versions.push(versionId);
       const markId = `mark-${index}`; const accepted = index % 2 === 0;
-      db.prepare('INSERT INTO editorial_marks VALUES (?, ?)').run(markId, accepted ? 'applied' : 'resolved');
-      db.prepare('INSERT INTO proposal_change_items VALUES (?, ?)').run(markId, markId);
-      db.prepare('INSERT INTO proposal_item_decisions VALUES (?, ?, 1)').run(markId, accepted ? 'accepted' : 'rejected');
+      db.prepare('INSERT INTO editorial_marks(mark_id, book_id, manuscript_id, branch_id, block_id, status, anchor_state, from_grapheme, to_grapheme) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(markId, bookId, 'manuscript', 'branch', markId, accepted ? 'applied' : 'resolved', 'exact', 0, 1);
+      db.prepare('INSERT INTO proposal_change_items(item_id, mark_id, current_text, proposed_text) VALUES (?, ?, ?, ?)').run(markId, markId, '合成', '合成');
+      db.prepare('INSERT INTO proposal_item_decisions(decision_id, item_id, disposition, ordinal, decided_revision_id, decided_journal_sequence, recorded_at) VALUES (?, ?, ?, 1, ?, 0, ?)').run(`decision-${index}`, markId, accepted ? 'accepted' : 'rejected', 'revision', '2026-10-17');
       const record = canonicalRecord({ referencedRuleVersions: [{ versionId, ordinal: index + 1, lineIndex: 0, text: '合成规则' }] });
-      db.prepare('INSERT INTO review_findings VALUES (?, ?, ?, ?, ?, ?)').run('run-a', `finding-${index}`, markId, 'change-suggestion', record.json, record.digest);
+      db.prepare(`INSERT INTO review_findings(review_run_id, finding_id, mark_id, category_id, output, canonical_json, sha256) VALUES (?, ?, ?, 'typos-and-usage', ?, ?, ?)`).run('run-a', `finding-${index}`, markId, 'change-suggestion', record.json, record.digest);
     }
     const unreferenced = canonicalRecord({});
-    db.prepare('INSERT INTO review_findings VALUES (?, ?, NULL, ?, ?, ?)').run('run-b', 'finding-other', 'annotation', unreferenced.json, unreferenced.digest);
+    db.prepare(`INSERT INTO review_findings(review_run_id, finding_id, mark_id, category_id, output, canonical_json, sha256) VALUES (?, ?, NULL, 'typos-and-usage', ?, ?, ?)`).run('run-b', 'finding-other', 'annotation', unreferenced.json, unreferenced.digest);
     const ledger = new EditorialLearningLedger(db);
     const first = ledger.adoption(null);
     expect(first.preferenceAdoption).toHaveLength(40);
