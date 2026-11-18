@@ -124,11 +124,18 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
     details.append(summary, panel);
     if (typeof panel.showPopover === 'function') {
       panel.setAttribute('popover', 'auto');
+      // Above or below its summary, never over it: the side with more room when the panel fits on neither, bounded to that room
+      // (its content scrolls), so the summary that closes it stays reachable.
       const place = (): void => {
         if (!panel.matches(':popover-open')) return;
-        const anchor = summary.getBoundingClientRect(), bounds = panel.getBoundingClientRect();
-        panel.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - bounds.width - 8))}px`;
-        panel.style.top = `${Math.max(8, anchor.top >= bounds.height + 8 ? anchor.top - bounds.height : Math.min(anchor.bottom, innerHeight - bounds.height - 8))}px`;
+        panel.style.maxHeight = '';
+        const anchor = summary.getBoundingClientRect(), natural = panel.getBoundingClientRect();
+        const above = anchor.top - 12, below = innerHeight - anchor.bottom - 12;
+        const up = natural.height > below && above > below;
+        const height = Math.min(natural.height, up ? above : below);
+        if (height < natural.height) panel.style.maxHeight = `${Math.max(0, height)}px`;
+        panel.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - natural.width - 8))}px`;
+        panel.style.top = `${up ? anchor.top - 4 - height : anchor.bottom + 4}px`;
       };
       // The plan and the references arrive after the panel opens: place it again whenever its size changes.
       if (typeof ResizeObserver === 'function') new ResizeObserver(place).observe(panel);
