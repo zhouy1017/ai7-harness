@@ -341,6 +341,7 @@ async function loadSample1Owners() {
         "export { deriveCoverageManifest } from './src/service/analysis/coverage-manifest.ts';",
         "export { buildUnitMessage, BASELINE_PROMPT_CONTRACT_V2, BASELINE_PROMPT_CONTRACT_V2_DIGEST, BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_PROMPT_CONTRACT_V1, BASELINE_PROMPT_CONTRACT_V1_DIGEST } from './src/service/analysis/contract.ts';",
         "export { buildCrossUnitMessage } from './src/service/analysis/cross-unit-contract.ts';",
+        "export { appendTaskBaselineSynopses, freezeTaskBaselineSynopses, taskSynopsisMessageRequestDigest } from './src/service/analysis/baseline-synopsis.ts';",
         "export { buildAssuranceSamplingMessage, drawAssuranceSample, assuranceSamplingTurns } from './src/service/analysis/assurance-sampling-contract.ts';",
         "export { baselineAnalysisKindDefinition } from './src/service/analysis/kind-definition.ts';",
         "export { withModelClarification, withAmbiguousClarificationValidation, buildClarificationAnswerMessage } from './src/service/provider/clarification-contract.ts';",
@@ -606,6 +607,14 @@ export async function verifySample1Capture(request, selection, parsed) {
       });
       if (selection.promptContractDigest !== definition.crossUnit?.promptContractDigest) fail();
       expected = definition.crossUnit.step.buildMessage(closed, manifest.units.length);
+      const execution = plan('execution-plan');
+      if (execution.baselineSynopsisContext !== undefined) {
+        const context = execution.baselineSynopsisContext;
+        const rebuilt = owners.freezeTaskBaselineSynopses(database, kind, manifest.manuscript.bookId,
+          pin.revisionId, pin.revisionDigest, context.maximumMessageBytes);
+        if (canonicalJson(rebuilt.baselineSynopsisContext) !== canonicalJson(context)) fail();
+        expected = owners.appendTaskBaselineSynopses(expected, context);
+      }
     } else if (parsed.subject === 'reduction') {
       const rows = database.prepare("SELECT canonical_json, sha256 FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed' ORDER BY unit_ordinal").all(revision.revisionId);
       const closed = rows.map((row) => {
@@ -1386,6 +1395,10 @@ export async function generateModelFixture(request, now = new Date()) {
   requireStageContract(selection, parsed);
   // Keyed as the deterministic adapter of the wrapped Task asks it: under the Task's contract (Issue #812).
   if (modelQuestionSynthesis(selection, parsed)) parsed = parseCachedRequest(entry.requestBody, selection.taskPromptContractDigest);
+  if (parsed.subject === 'task-synthesis') {
+    const owners = await loadSample1Owners();
+    parsed.requestDigest = owners.taskSynopsisMessageRequestDigest(parsed.requestDigest, parsed.unitMessage);
+  }
   parsed.sample1Verified = await verifySample1Capture(request, selection, parsed);
   refuse(JSON.parse(entry.requestBody).model === selection.model, 'FIXTURE_GEN/entry-invalid', '请求体模型与捕获模型不一致。');
   refuse(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,127}$/u.test(selection.model), 'FIXTURE_GEN/entry-invalid', '模型标识无效。');

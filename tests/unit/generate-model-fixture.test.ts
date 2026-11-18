@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { appendTaskBaselineSynopses, taskSynopsisMessageRequestDigest } from '../../src/service/analysis/baseline-synopsis.js';
 import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import {
   ASSURANCE_SAMPLING_PROMPT_CONTRACT,
@@ -617,6 +618,24 @@ describe('generate-model-fixture over the namespaced cache (Issue #808)', () => 
   });
 
   const request = (selector: string): Request => ({ selector, cacheRoot: root, identity: 'generated-808', description: '合成生成夹具', out: join(root, 'out.json') });
+
+  it('keeps the product-built synopsis supplement in a final request identity (#1538)', async () => {
+    const prompt = 'e'.repeat(64);
+    const base = `写作综合 8/8 · 段落摘要 ${'a'.repeat(64)}`;
+    const message = appendTaskBaselineSynopses(base, { revisionId: randomUUID(), manuscriptRevisionId: randomUUID(),
+      maximumMessageBytes: null, maximumSupplementBytes: 24 * 1024,
+      synopses: [{ unitOrdinal: 1, synopsis: 'sample1' }], missingUnitOrdinals: [], omittedUnitOrdinals: [], shortenedUnitOrdinals: [] });
+    const cache = new ProviderResultCache(root);
+    await cache.open();
+    await transmitOnce(cache, answer('{"items":[]}'), { purpose: 'writing-first', slice: 'S84',
+      promptContractDigest: prompt, taskPromptContractDigest: prompt },
+    { intent: { family: 'writing-synopsis', case: 'sample1-context', delta: null }, step: 'writing-first/reduction', requestShape: 'openai-chat-completions' },
+    OPENCODE_GO_ROUTE_PROFILE, MODEL, ENDPOINT, { method: 'POST', headers: { authorization: 'Bearer placeholder' }, body: chatBody(message) });
+    const fixture = parseModelFixture(await tool.generateModelFixture(request('S84/writing-first/1')));
+    const oldKey = tool.parseTaskHeader(base, prompt)!.requestDigest;
+    expect(fixture.entries[0]!.requestDigest).toBe(taskSynopsisMessageRequestDigest(oldKey, message));
+    expect(fixture.entries[0]!.requestDigest).not.toBe(oldKey);
+  });
 
   it('maps only complete streamed dialogue aggregates to bounded answer chunks (Issue #833)', () => {
     const chunks = ['合成回答一。', '合成回答二。'];
