@@ -79,6 +79,19 @@ function mountSettings(calls: ReturnType<typeof api>) {
 }
 
 describe('the one model-service flow', () => {
+  it('still draws the page, with the reason and a retry, when 设置 cannot read the model service (#1522)', async () => {
+    setTechnicalLayerVisible(false);
+    const calls = api(completeSettings());
+    vi.mocked(calls.getModelServiceSettings).mockRejectedValueOnce(new Error('unreadable'));
+    const { screen, node } = mountSettings(calls);
+    try {
+      await screen.renderModelServiceSettings();
+      expect(node.querySelector('.model-service-settings h2')?.textContent).toBe('模型服务');
+      expect(node.querySelector('.attention-note')?.textContent).toBe('无法读取模型服务设置。');
+      node.querySelectorAll('button').find((item) => item.textContent === '重试')!.click();
+      await vi.waitFor(() => expect(node.querySelector('[data-model-role="main-editorial"]')).not.toBeNull());
+    } finally { setTechnicalLayerVisible(true); vi.unstubAllGlobals(); }
+  });
   it('keeps an unsaved effort when a catalogue poll finishes after focus moves to Save (#1453)', async () => {
     setTechnicalLayerVisible(false);
     const projection = completeSettings(), calls = api(projection);

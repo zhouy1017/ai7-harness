@@ -21,6 +21,16 @@ export function commandEntry(selector: string): HTMLElement | null {
 
 const SECTION_OF = new Map<string, string>(BOOK_SECTION_COMMANDS.map(([id, , section]) => [id, section]));
 
+/**
+ * 返回 (Alt+←): the screen's own 返回 button when it has one; a settings page has none, so it goes back where the editor came from
+ * (a Book, 待我处理, 交付物); anywhere else, to 书库.
+ */
+export function goBack(env: { readonly screen: ParentNode; readonly press: (selector: string) => void; readonly returnToOrigin: () => void }): void {
+  if (env.screen.querySelector('[data-shortcut-command="nav.back"]') !== null) env.press('[data-shortcut-command="nav.back"]');
+  else if (env.screen.querySelector('.settings-layout') !== null) env.returnToOrigin();
+  else env.press('[data-nav-destination="library"]');
+}
+
 export function commandUsable(id: string, screen: UsableScreen): boolean {
   if (!screen.has(id)) return false;
   if (id === 'review.new' || id === 'evaluation.start') return screen.currentBookId() !== null;

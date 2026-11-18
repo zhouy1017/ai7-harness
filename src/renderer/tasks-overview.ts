@@ -77,10 +77,12 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   const context = el('span', 'task-overview-context'); headingRow.append(heading, context, start); if (!options.bookId) headingRow.append(all);
   const filters = el('div', 'task-overview-filters'); const host = el('div', 'task-overview-groups'); const confirm = el('div', 'task-overview-confirm'); confirm.hidden = true; confirm.setAttribute('role', 'alert');
   if (options.bookId) { heading.hidden = true; context.hidden = true; selectedType = 'all'; selectedTime = 'all'; }
-  const sheet = createSheet('task-overview-sheet'); options.root.append(headingRow, filters, host, confirm, sheet);
+  // The page's one sentence while it holds tasks; with none, the sentence in its place is the empty page's.
+  const note = el('p', 'field-note', '队列顺序保存在本次使用中；重新启动后按发起顺序排列。'); note.hidden = true;
+  const sheet = createSheet('task-overview-sheet'); options.root.append(headingRow, filters, host, confirm, note, sheet);
   // The sheet is painted before it is shown, so its focus and its ticked Book are there when it opens; the sheet itself takes focus in and returns it.
   let sheetOpening = false;
-  const openSheet = (): Promise<void> => paintSheet().then(() => { if (!destroyed) sheet.show(); }, (error: unknown) => options.setStatus(rendererErrorMessage(error, '暂时无法打开发起任务。'), 'error'));
+  const openSheet = (): Promise<void> => paintSheet().then(() => { if (!destroyed) { start.focus(); sheet.show(); } }, (error: unknown) => options.setStatus(rendererErrorMessage(error, '暂时无法打开发起任务。'), 'error'));
   start.addEventListener('click', () => {
     if (sheet.open) { sheet.close(); return; }
     if (sheetOpening) return;
@@ -121,7 +123,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     if (books.length > BOOK_FILTER_BUTTONS) {
       // Above six Books a button each no longer fits one line; the same choice is a list.
       const pick = el('select'); pick.setAttribute('aria-label', '图书'); pick.add(new Option('全部', 'all')); for (const book of books) pick.add(new Option(book.title, book.bookId)); pick.value = selectedBook;
-      pick.addEventListener('change', () => { selectedBook = pick.value; remember(); filters.querySelector('select')?.focus(); }); row.append(pick);
+      pick.addEventListener('change', () => { selectedBook = pick.value; remember(); }); row.append(pick); // the repaint keeps focus on the list's trigger, as every polled page's does
     } else { row.append(filter('全部', selectedBook === 'all', () => { selectedBook = 'all'; remember(); })); for (const book of books) row.append(filter(book.title, selectedBook === book.bookId, () => { selectedBook = book.bookId; remember(); })); }
     rows.push(row);
     const types = el('div', 'task-overview-filter-row'); types.append(el('span', undefined, '类型')); for (const type of ['all', '分析', '审阅', '评估', '写作', '对话', '工序']) types.append(filter(type === 'all' ? '全部' : type, selectedType === type, () => { selectedType = type; remember(); }));
@@ -203,6 +205,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     const count = (key: string): number => projection!.groups.find((group) => group.key === key)!.items.filter((item) => !options.bookId || item.bookId === options.bookId).length;
     context.textContent = `${options.bookId ? '本书' : '全部图书'} · 同时运行 ${count('running')} 项 · 排队 ${count('queued')} 项 · 上限 ${projection.capacity}`;
     all.textContent = projection.queueFrozen ? '继续全部' : '暂停全部'; all.disabled = projection.groups.some((group) => group.items.some((item) => item.attention.state === 'analysis-pausing')); all.hidden = !projection.queueFrozen && projection.runningCount === 0;
+    note.hidden = !!options.bookId || nothingToShow();
     paintFilters(); const midnight = new Date(); midnight.setHours(0, 0, 0, 0); const since = selectedTime === 'all' ? 0 : selectedTime === 'week' ? Date.now() - 7 * 86400000 : midnight.getTime();
     const visible = projection.groups.map((group) => ({ ...group, items: group.items.filter((item) => (selectedBook === 'all' || item.bookId === selectedBook) && (selectedType === 'all' || item.taskKind === selectedType) && (group.key !== 'recent' || Date.parse(item.at) >= since)) }));
     const groups = options.bookId ? [{ key: 'waiting' as const, items: visible[2]!.items }, { key: 'running' as const, items: [...visible[0]!.items, ...visible[1]!.items, ...visible[3]!.items] }, { key: 'recent' as const, items: visible[4]!.items }] : visible;
@@ -226,5 +229,5 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   const visible = (): void => { if (document.visibilityState === 'visible') refresh(); };
   document.addEventListener('visibilitychange', visible);
   options.root.addEventListener('keydown', keydown); const timer = window.setInterval(refresh, 2000); refresh();
-  return { refresh, showStart() { void paintSheet().then(() => { if (!destroyed) sheet.show(); }); }, focus(itemId) { selectedId = itemId; pendingFocus = itemId; const node = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((row) => row.dataset['taskItem'] === itemId); node?.focus(); node?.scrollIntoView({ block: 'nearest' }); }, destroy() { destroyed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', visible); options.root.removeEventListener('keydown', keydown); if (sheet.open) sheet.close(); options.root.replaceChildren(); } };
+  return { refresh, showStart() { void openSheet(); }, focus(itemId) { selectedId = itemId; pendingFocus = itemId; const node = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((row) => row.dataset['taskItem'] === itemId); node?.focus(); node?.scrollIntoView({ block: 'nearest' }); }, destroy() { destroyed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', visible); options.root.removeEventListener('keydown', keydown); if (sheet.open) sheet.close(); options.root.replaceChildren(); } };
 }

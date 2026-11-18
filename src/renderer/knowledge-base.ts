@@ -416,8 +416,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     back.append(button('返回', 'quiet', () => void returnToOrigin()));
     if (returnToReview !== null) back.prepend(button('返回原审阅', 'quiet', returnToReview));
     content.append(
-      element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${heading}`),
-      element('h2', undefined, QUALITY_LEARNING_TITLE),
+      element('h2', 'visually-hidden', QUALITY_LEARNING_TITLE),
       element('p', 'field-note', QUALITY_LEARNING_LEDE),
       tabs,
       section,
@@ -491,7 +490,6 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     back.append(button('返回', 'quiet', () => void returnToOrigin()));
     const holds = element('p', 'lede knowledge-holds', view.holds);
     content.append(
-      element('p', 'section-label', `${KNOWLEDGE_BASE_TITLE} · ${view.label}`),
       element('h2', undefined, view.label),
       tabs,
       holds,

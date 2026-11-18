@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { createCommandPalette } from '../../src/renderer/command-palette.js';
-import { commandUsable } from '../../src/renderer/command-usable.js';
+import { commandUsable, goBack } from '../../src/renderer/command-usable.js';
+import { ScreenReturnHistory } from '../../src/renderer/screen-return.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 
 type Options = Parameters<typeof createCommandPalette>[0];
@@ -113,4 +114,44 @@ it('knows a command is usable only with a handler and, for a Book command, a Boo
   expect(commandUsable('view.openTasks', screen)).toBe(false);
   expect(commandUsable('view.openTasks', { ...screen, bookPage: () => true })).toBe(true);
   expect(commandUsable('view.toggleSidebar', screen)).toBe(true);
+});
+
+it('goes back from a settings page to where the editor came from, and from any other page without a 返回 to 书库', async () => {
+  const restore = installMiniDom();
+  try {
+    const history = new ScreenReturnHistory(); const book = vi.fn(); const library = vi.fn();
+    history.enter('book-review', library); history.enter('model-service', book);
+    const press = vi.fn();
+    const settings = document.createElement('div'); const layout = document.createElement('div'); layout.className = 'settings-layout'; settings.append(layout as never);
+    goBack({ screen: settings, press, returnToOrigin: () => void history.back('model-service', library) });
+    expect(book).toHaveBeenCalledOnce(); expect(press).not.toHaveBeenCalled();
+    goBack({ screen: document.createElement('div'), press, returnToOrigin: vi.fn() });
+    expect(press).toHaveBeenCalledWith('[data-nav-destination="library"]');
+  } finally { restore(); }
+});
+
+it('keeps the navigation commands while the sidebar is hidden, and the Book sections only with a Book', () => {
+  const restore = installMiniDom();
+  try {
+    const link = document.createElement('a'); link.dataset['navDestination'] = 'library'; link.hidden = true; miniDocument.body.append(link as never);
+    const section = document.createElement('a'); section.dataset['navBookSection'] = 'review'; miniDocument.body.append(section as never);
+    const screen = { has: () => true, currentBookId: () => null as string | null, bookPage: () => false };
+    expect(commandUsable('nav.library', screen)).toBe(true);
+    expect(commandUsable('nav.book.review', screen)).toBe(false);
+    expect(commandUsable('nav.book.review', { ...screen, currentBookId: () => 'book-one' })).toBe(true);
+  } finally { restore(); }
+});
+
+it('ignores a held Enter on a row that starts a task', async () => {
+  const restore = installMiniDom();
+  const start = vi.fn(async () => ({ results: [] }));
+  try {
+    const palette = make({ api: apiOf(start) });
+    await palette.open(); await settled();
+    type('发起任务 · sample1'); enter(); await settled();
+    const row = miniDocument.activeElement!;
+    const held = { type: 'keydown', key: 'Enter', repeat: true, bubbles: true } as never as { defaultPrevented?: boolean };
+    row.dispatchEvent(held as never);
+    expect(held.defaultPrevented).toBe(true); expect(start).not.toHaveBeenCalled();
+  } finally { restore(); }
 });

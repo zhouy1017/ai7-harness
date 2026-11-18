@@ -18,6 +18,7 @@ import { mountGlobalAgent } from './global-agent.js';
 import { createAppearance, initializeReducedMotion } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { createCommandPalette } from './command-palette.js';
+import { goBack } from './command-usable.js';
 import { applyFindingBatches } from './manuscript-apply.js';
 
 import { mountAgentWorkspace } from './agent-workspace.js';
@@ -682,11 +683,7 @@ commandDispatcher.register({
   ...Object.fromEntries(BOOK_SECTION_COMMANDS.map(([id, , section]) =>
     [id, () => clickCommandEntry(`[data-nav-book-section="${section}"]`)])),
   'nav.settings': () => clickCommandEntry('[data-nav-settings]'),
-  'nav.back': () => {
-    const back = screen.querySelector<HTMLElement>('[data-shortcut-command="nav.back"]');
-    if (back !== null) clickCommandEntry('[data-shortcut-command="nav.back"]');
-    else clickCommandEntry('[data-nav-destination="library"]');
-  },
+  'nav.back': () => goBack({ screen, press: clickCommandEntry, returnToOrigin: () => void returnToOrigin() }),
   'view.toggleSidebar': () => clickCommandEntry('#sidebar-toggle'),
   'view.openTasks': () => {
     const bookId = (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'];
@@ -3115,7 +3112,7 @@ function renderDiagnostics(): void {
     return;
   }
   const content = panel();
-  mountDiagnostics(content, api, () => void returnToLibrary());
+  mountDiagnostics(content, api);
   replaceScreen('diagnostics', content);
   setStatus(DIAGNOSTICS_OPENED);
 }
@@ -3171,7 +3168,7 @@ async function renderSeries(seriesId: string): Promise<void> {
   replaceScreen('series', content);
   const page = navigation.read(content);
   setStatus(SERIES_STATUS.loading, 'busy');
-  const surface = mountSeries({ root: host, seriesId, api: api, setStatus, errorMessage: rendererErrorMessage, reviewMember: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => renderBookReview(bookId, route.bookTitle, null, null, ['series-consistency'])) });
+  const surface = mountSeries({ root: host, seriesId, api: api, setStatus, errorMessage: rendererErrorMessage, reviewMember: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => renderBookReview(bookId, route.bookTitle, null, null, ['series-consistency'])).catch((error: unknown) => setStatus(rendererErrorMessage(error, '暂时无法打开审阅。'), 'error')) });
   try {
     const series = await surface.load();
     if (!page.isCurrent()) return;

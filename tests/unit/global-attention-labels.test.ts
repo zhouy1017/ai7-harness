@@ -114,7 +114,7 @@ describe('the entry and the screen', () => {
         return { root, surface, startTask };
       };
       const some = mount(projection({ exceptions: [item('analysis-failed')], recent: [item('analysis-completed', { group: 'recent' })] }));
-      expect(some.root.querySelectorAll('section.global-attention-group').map((group) => group.dataset['attentionGroup'])).toEqual(['exceptions', 'recent']);
+      expect(Array.from(some.root.querySelectorAll<HTMLElement>('section.global-attention-group'), (group) => group.dataset['attentionGroup'])).toEqual(['exceptions', 'recent']);
       expect(some.root.querySelector('.global-attention-empty')).toBeNull();
       some.surface.destroy();
       const none = mount(projection({}));

@@ -269,8 +269,22 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     modelServiceChannel = null;
     modelChoices.clear();
     modelFilters.clear();
+    let read: [ModelServiceSettingsProjection, Awaited<ReturnType<typeof rendererApi.getPreferences>>];
     try {
-      const [projection, preferences] = await Promise.all([rendererApi.getModelServiceSettings(), rendererApi.getPreferences()]);
+      read = await Promise.all([rendererApi.getModelServiceSettings(), rendererApi.getPreferences()]);
+    } catch (error) {
+      if (!route.isCurrent()) return;
+      // 设置 opens here, so a failed read still draws the page with its navigation, the reason inside it and a way to try again.
+      const message = rendererErrorMessage(error, '无法读取模型服务设置。');
+      const frame = panel();
+      frame.classList.add('model-service-settings');
+      frame.append(element('h2', undefined, '模型服务'), element('p', 'attention-note', message), button('重试', 'secondary', () => void renderModelServiceSettings(focus)));
+      replaceScreen('model-service', frame);
+      setStatus(message, 'error');
+      return;
+    }
+    try {
+      const [projection, preferences] = read;
       if (!route.isCurrent()) return;
       favourites = preferences.values['model.favourites'];
       paintModelServiceSettings(projection);

@@ -225,9 +225,11 @@ function settingsNavigation(state: string): HTMLElement {
   nav.setAttribute('aria-label', '设置分类');
   const pages = settingsPages();
   for (const group of SETTINGS_HUB_GROUPS) {
+    const rows = group.rows.filter((row) => technicalLayerVisible || !row.developerOnly);
+    if (rows.length === 0) continue;
     const section = element('section');
     section.append(element('h3', undefined, group.label));
-    for (const row of group.rows.filter((row) => technicalLayerVisible || !row.developerOnly)) {
+    for (const row of rows) {
       const entry = button(row.label, 'quiet', () => pages[row.route]?.());
       entry.dataset['settingsNav'] = row.route;
       if (state === row.route) entry.setAttribute('aria-current', 'page');
