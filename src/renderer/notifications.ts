@@ -87,9 +87,9 @@ const STATUS_AREA = '#screen .manuscript-surface';
 
 export function followBottomControls(bar: HTMLElement): void {
   const root = document.documentElement;
-  let frame = 0;
+  let queued = false;
   const place = (): void => {
-    frame = 0;
+    queued = false;
     if (bar.hidden) {
       delete root.dataset['statusBar'];
       for (const name of ['--bottom-controls', '--status-area-right', '--status-bar-height']) root.style.removeProperty(name);
@@ -106,8 +106,13 @@ export function followBottomControls(bar: HTMLElement): void {
     root.style.setProperty('--status-bar-height', `${Math.ceil(bar.getBoundingClientRect().height)}px`);
     root.dataset['statusBar'] = 'shown';
   };
-  // Only while the bar shows (and once more as it hides) is anything measured.
-  const schedule = (): void => { if (frame === 0 && (!bar.hidden || root.dataset['statusBar'] !== undefined)) frame = requestAnimationFrame(place); };
+  // Only while the bar shows (and once more as it hides) is anything measured: once per batch of changes, in a microtask rather
+  // than an animation frame, so a window in the background (no frames) still places its bar.
+  const schedule = (): void => {
+    if (queued || (bar.hidden && root.dataset['statusBar'] === undefined)) return;
+    queued = true;
+    queueMicrotask(place);
+  };
   new MutationObserver(schedule).observe(bar, { attributes: true, attributeFilter: ['hidden'], childList: true, subtree: true, characterData: true });
   new ResizeObserver(schedule).observe(bar);
   addEventListener('resize', schedule);

@@ -1600,6 +1600,9 @@ async function main() {
     // #1519: the refusal stands in the bar, an overlay above the page's sticky action bar: in view, over neither the sidebar nor
     // the page's sticky actions, with the sidebar open and folded to icons, at the top of the page and scrolled to its end.
     const PREFLIGHT_CONTROLS = ['.commit-bar', '.workbench-actions'];
+    // 甲's window took the focus; the import review window is brought back in front, as the editor would, before it is measured.
+    await primary.send('Page.bringToFront');
+    await waitFor(primary, `document.visibilityState === 'visible'`, 'preflight-error-window-visible');
     const preflightWheel = async (deltaY) => primary.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(await primary.evaluate('innerWidth') * 0.6), y: 300, deltaX: 0, deltaY });
     for (const [width, height] of [[1280, 800], [1008, 681]]) {
       await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
