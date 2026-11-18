@@ -5,6 +5,7 @@ import { technicalDisclosure } from '../../src/renderer/technical-layer.js';
 import type { RendererApi, ReviewReportRecord, ReviewWorkspaceProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
+import { createStatusSurface, type StatusSetter } from '../../src/renderer/notifications.js';
 
 vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({ ...DEFAULT_QUICK_ACTIONS }), rememberActionDefaults: async () => undefined }));
 
@@ -12,6 +13,7 @@ vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: as
 // 未生成批注) to the end, in order and exactly once, and a refused read is said instead of leaving the last workspace as current.
 const BOOK = '11111111-1111-4111-8111-111111111111';
 const RUN = '22222222-2222-4222-8222-222222222222';
+const OTHER = '33333333-3333-4333-8333-333333333333';
 const AT = '2026-11-18T00:00:00.000Z';
 const DIGEST = 'a'.repeat(64);
 const COUNTS = { must: 1, should: 0, note: 0, pending: 1, handled: 0, ignored: 0 };
@@ -24,9 +26,9 @@ const EXCLUDED = 'run.localCheck.excluded';
 // Each row weighs about 400 bytes: 360 of them are several pages of every list.
 const filler = (index: number): string => `公开合成第 ${index} 条`.padEnd(120, '文');
 
-function report(rows: number, version = 1): ReviewReportRecord {
+function report(rows: number, version = 1, runId = RUN): ReviewReportRecord {
   return {
-    schema: 'ai7.review.report/2', reviewRunId: RUN, version, generatedAt: AT,
+    schema: 'ai7.review.report/2', reviewRunId: runId, version, generatedAt: AT,
     run: { ordinal: 1, label: '第 1 次', createdAt: AT, scopeLabel: '全书', manuscript: { revisionId: 'revision-a', revisionLabel: 'Revision 1', journalSequence: 0 } },
     overview: { title: '概览表', rows: [] },
     mustItems: { title: '必须处理的事项', items: Array.from({ length: rows }, (_, index) => ({ findingId: `must-${index}`, categoryId: 'local-text-check',
@@ -36,22 +38,22 @@ function report(rows: number, version = 1): ReviewReportRecord {
     statistics: { title: '章节与类别统计', categories: [{ categoryId: 'local-text-check', label: '本地文字检查' }],
       rows: Array.from({ length: rows }, (_, index) => ({ label: `${filler(index)}章`, counts: [1], total: 1 })), totals: [rows], total: rows },
     findings: { title: '发现详单', omitted: 0, entries: Array.from({ length: rows }, (_, index) => ({ findingIds: [`entry-${index}`], categoryLabels: ['本地文字检查'],
-      severityLabel: '必须处理', statusLabel: '待处理', chapterLabel: '第一章', locationLabel: `第 ${index + 1} 段`, quote: filler(index), suggestedText: null, reason: '公开合成理由', sources: [] })) },
+      severityLabel: '必须处理', statusLabel: '待处理', chapterLabel: '第一章', locationLabel: `第 ${index + 1} 段`, quote: filler(index), suggestedText: null, reason: `公开合成理由 v${version}`, sources: [] })) },
   };
 }
 
-function workspace(rows: number, version = 1, state: 'partial' | 'running' = 'partial'): ReviewWorkspaceProjection {
+function workspace(rows: number, version = 1, state: 'partial' | 'running' = 'partial', runId = RUN): ReviewWorkspaceProjection {
   return { bookId: BOOK, manuscript: { ...MANUSCRIPT, totalBlocks: 1 }, configuration: { schema: 'ai7.review/1', version: '1', digest: DIGEST },
     categories: [], coverage: [], scopeOptions: { whole: unavailable, changed: unavailable, selection: unavailable, chapters: { ...unavailable, basis: 'outline', chapters: [] } },
     newReview: unavailable, runsTruncated: false,
-    runs: [{ reviewRunId: RUN, ordinal: 1, label: '第 1 次', createdAt: AT, scopeLabel: '全书', categoryLabels: ['本地文字检查'], state, stateLabel: state === 'running' ? '正在审阅' : '部分完成',
+    runs: [{ reviewRunId: runId, ordinal: 1, label: '第 1 次', createdAt: AT, scopeLabel: '全书', categoryLabels: ['本地文字检查'], state, stateLabel: state === 'running' ? '正在审阅' : '部分完成',
       findingCounts: COUNTS, reportVersion: 1, historicalMarker: null }],
-    run: { reviewRunId: RUN, ordinal: 1, label: '第 1 次', createdAt: AT, state, stateLabel: state === 'running' ? '正在审阅' : '部分完成', canContinue: false,
+    run: { reviewRunId: runId, ordinal: 1, label: '第 1 次', createdAt: AT, state, stateLabel: state === 'running' ? '正在审阅' : '部分完成', canContinue: false,
       scope: { kind: 'whole', label: '全书', selectedRange: null, selection: null }, manuscript: MANUSCRIPT, configurationDigest: DIGEST, authorization: { authorizedAt: AT },
       categories: [], findings: [], findingsTotal: 0, findingsTruncated: false, findingCounts: COUNTS,
       localCheck: { planDigest: DIGEST, options: { prose: true, numerals: 'off', publication: 'out-of-scope' } as never, state: 'materialized', paragraphs: rows, counts: null,
         excluded: Array.from({ length: rows }, (_, index) => ({ candidateId: `candidate-${index}`, reason: filler(index) })) },
-      report: { reportId: 'report-a', version, generatedAt: AT, digest: DIGEST, record: report(rows, version) },
+      report: { reportId: 'report-a', version, generatedAt: AT, digest: DIGEST, record: report(rows, version, runId) },
       reportVersions: [{ reportId: 'report-a', version, generatedAt: AT, digest: DIGEST }], historicalMarker: null, influence: [], scopeStop: null, procedure: null, capture: unavailable } };
 }
 
@@ -87,16 +89,22 @@ const refusal = (code: string, message: string): Error & { code: string } => Obj
  * The service's own paging, at a budget that forces it: `inspectReviewWorkspace` answers `reviewWorkspaceWire(full)` and
  * `getTaskPlanPage` answers `reviewWorkspacePage(full, …)`, so a page of a list that changed meanwhile is refused by digest.
  */
-function mount(state: { full: ReviewWorkspaceProjection; budget: number; refuse?: Error | null }) {
+type Stub = { full: ReviewWorkspaceProjection; budget: number; refuse?: Error | null; gate?: Promise<void> | null };
+
+function mount(state: Stub, status: StatusSetter = Object.assign(vi.fn(), { settle: vi.fn() })) {
   const root = new MiniElement('main');
   miniDocument.body.append(root);
   const inspectReviewWorkspace = vi.fn<RendererApi['inspectReviewWorkspace']>().mockImplementation(async () => {
     if (state.refuse) throw state.refuse;
     return reviewWorkspaceWire(structuredClone(state.full), state.budget);
   });
+  // A page is computed from the list as it stood when it was asked, and answered when the gate opens.
   const getTaskPlanPage = vi.fn<RendererApi['getTaskPlanPage']>().mockImplementation(async (input) => {
-    if (input.kind !== 'review-run' || input.ref !== state.full.run?.reviewRunId) throw refusal('TASK_PLAN_PAGE_INVALID', '审阅读取范围无效。');
-    try { return reviewWorkspacePage(state.full, input.path, input.afterOrdinal, input.digest); } catch (error) {
+    const full = state.full;
+    const gate = state.gate;
+    if (gate) await gate;
+    if (input.kind !== 'review-run' || input.ref !== full.run?.reviewRunId) throw refusal('TASK_PLAN_PAGE_INVALID', '审阅读取范围无效。');
+    try { return reviewWorkspacePage(full, input.path, input.afterOrdinal, input.digest); } catch (error) {
       const cause = error as { code?: string; data?: { code?: string }; message: string };
       throw refusal(cause.code ?? cause.data?.code ?? 'UNKNOWN', cause.message);
     }
@@ -105,7 +113,6 @@ function mount(state: { full: ReviewWorkspaceProjection; budget: number; refuse?
   const unexpected = vi.fn(async () => { throw new Error('unexpected API operation'); });
   const calls = { inspectReviewWorkspace, getTaskPlanPage, inspectFactualVerification };
   const api = new Proxy(calls, { get: (target, key) => Reflect.get(target, key) ?? unexpected }) as unknown as MountReviewWorkspaceOptions['api'];
-  const status = vi.fn();
   const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: { reviewRunId: RUN, findingId: null }, api,
     awaitServiceJob: async (initial) => initial,
     technicalDetails: (_className, ...rows) => { const node = new MiniElement('dl'); node.append(...rows as unknown as MiniElement[]); return technicalDisclosure(node as unknown as HTMLElement); },
@@ -113,32 +120,41 @@ function mount(state: { full: ReviewWorkspaceProjection; budget: number; refuse?
     openManuscript: async () => undefined, goToText: async () => undefined, openPlan: () => undefined, openSearchSettings: () => undefined, planChanged: () => undefined });
   surfaces.push(surface);
   surface.start();
-  return { root, surface, status, unexpected, ...calls };
+  return { root, surface, status: status as StatusSetter & ReturnType<typeof vi.fn>, unexpected, ...calls };
 }
 
 const card = (root: MiniElement): MiniElement => root.querySelector('.review-workspace-card')!;
 const paging = (root: MiniElement, path: string): MiniElement | null => root.querySelector(`[data-review-page="${path}"]`);
+const more = (root: MiniElement, path: string): MiniElement => paging(root, path)!.querySelector('button')!;
 const listed = (root: MiniElement, path: string, selector: string): string[] =>
   root.querySelector(`[data-review-part-path="${path}"]`)!.querySelectorAll(selector).map((node) => node.textContent);
+const PAGED = (): Stub => ({ full: workspace(360), budget: 120 * 1024 });
+function gate(state: Stub): () => void {
+  let open!: () => void;
+  state.gate = new Promise<void>((resolve) => { open = resolve; });
+  return () => { state.gate = null; open(); };
+}
 
 describe('a paged review workspace on the 审阅 page (#1592)', () => {
   it('says how much of each report list is shown and reads the rest in order, exactly once', async () => {
-    const view = mount({ full: workspace(360), budget: 120 * 1024 }); await flush();
+    const view = mount(PAGED()); await flush();
     const first = view.inspectReviewWorkspace.mock.results[0]!.value as Promise<ReviewWorkspaceProjection>;
     const meta = (await first).listPages!;
     for (const path of [MUST, STATS, ENTRIES, EXCLUDED]) {
       expect(meta[path]?.nextOrdinal, path).not.toBeNull();
-      expect(paging(view.root, path)!.textContent).toContain(`已显示 ${meta[path]!.shown} `);
-      expect(paging(view.root, path)!.textContent).toContain(`共 360 `);
+      expect(paging(view.root, path)!.textContent).toContain(`已显示 ${meta[path]!.shown} / 360 条。`);
     }
-    // The totals row is whole while its chapters are read in part, and says so.
-    expect(paging(view.root, STATS)!.textContent).toContain('合计计入全部章节');
+    // Each list's control names its list; the totals row is whole while its chapters are read in part, and says so.
+    expect(more(view.root, MUST).getAttribute('aria-label')).toBe('显示更多必须处理的事项');
+    expect(more(view.root, EXCLUDED).getAttribute('aria-label')).toBe('显示更多未生成批注');
+    expect(paging(view.root, STATS)!.textContent).toContain('合计计入全部章节。');
     expect(listed(view.root, STATS, 'tr').at(-1)).toContain('360');
 
     for (const path of [MUST, STATS, ENTRIES, EXCLUDED]) {
       for (let guard = 0; paging(view.root, path) !== null; guard += 1) {
         expect(guard).toBeLessThan(40);
-        paging(view.root, path)!.querySelector('button')!.click(); await flush();
+        more(view.root, path).focus();
+        more(view.root, path).click(); await flush();
       }
       expect(miniDocument.activeElement?.dataset['reviewPartPath']).toBe(path);
     }
@@ -161,37 +177,110 @@ describe('a paged review workspace on the 审阅 page (#1592)', () => {
     expect(paging(view.root, MUST)).toBeNull();
   });
 
-  it('reads the workspace again when a list changed between pages', async () => {
-    const state = { full: workspace(360), budget: 120 * 1024 };
+  it('appends a page that arrives after a poll repainted the card, and frees its control', async () => {
+    const state = PAGED();
+    const view = mount(state); await flush();
+    const shown = listed(view.root, MUST, 'li').length;
+    const open = gate(state);
+    more(view.root, MUST).click(); await flush();
+    expect(more(view.root, MUST).disabled).toBe(true);
+    // A poll answers meanwhile with the same lists: the card is drawn again and the control stays held.
+    view.surface.refresh(); await flush();
+    expect(more(view.root, MUST).disabled).toBe(true);
+    open(); await flush();
+    expect(listed(view.root, MUST, 'li').length).toBeGreaterThan(shown);
+    expect(more(view.root, MUST).disabled).toBe(false);
+    expect(view.getTaskPlanPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads two lists pressed one after the other, each once', async () => {
+    const state = PAGED();
+    const view = mount(state); await flush();
+    const before = { must: listed(view.root, MUST, 'li').length, entries: listed(view.root, ENTRIES, 'li').length };
+    const open = gate(state);
+    more(view.root, MUST).click();
+    more(view.root, ENTRIES).click(); await flush();
+    // A second press of a list already being read asks nothing more.
+    more(view.root, MUST).click(); await flush();
+    expect(view.getTaskPlanPage.mock.calls.map(([input]) => input.path)).toEqual([MUST, ENTRIES]);
+    open(); await flush();
+    expect(listed(view.root, MUST, 'li').length).toBeGreaterThan(before.must);
+    expect(listed(view.root, ENTRIES, 'li').length).toBeGreaterThan(before.entries);
+    expect(new Set(listed(view.root, MUST, 'li')).size).toBe(listed(view.root, MUST, 'li').length);
+  });
+
+  it('drops a page that no longer continues the list on screen', async () => {
+    const state = PAGED();
+    const view = mount(state); await flush();
+    const open = gate(state);
+    more(view.root, MUST).click(); await flush();
+    // The report was generated again before the page came back; the editor's next read shows the new one.
+    state.full = workspace(360, 2);
+    view.surface.refresh(); await flush();
+    open(); await flush();
+    const rows = listed(view.root, MUST, 'li');
+    expect(rows.every((text) => text.includes('v2'))).toBe(true);
+    expect(paging(view.root, MUST)!.textContent).toContain(`已显示 ${rows.length} / 360 条。`);
+    expect(more(view.root, MUST).disabled).toBe(false);
+  });
+
+  it('drops a page of the Run that was open when another Run with the same lists is opened meanwhile', async () => {
+    const state = PAGED();
+    const view = mount(state); await flush();
+    const shown = listed(view.root, MUST, 'li').length;
+    const open = gate(state);
+    more(view.root, MUST).click(); await flush();
+    state.full = workspace(360, 1, 'partial', OTHER);
+    view.surface.refresh(); await flush();
+    expect(card(view.root).dataset['reviewRunId']).toBe(OTHER);
+    open(); await flush();
+    expect(listed(view.root, MUST, 'li')).toHaveLength(shown);
+    expect(more(view.root, MUST).disabled).toBe(false);
+  });
+
+  it('reads the workspace again when a list changed between pages, keeps focus on that list and says so afterwards', async () => {
+    const state = PAGED();
     const view = mount(state); await flush();
     expect(view.inspectReviewWorkspace).toHaveBeenCalledTimes(1);
     state.full = workspace(360, 2);
-    paging(view.root, MUST)!.querySelector('button')!.click(); await flush();
+    more(view.root, ENTRIES).focus();
+    more(view.root, ENTRIES).click(); await flush();
     expect(view.getTaskPlanPage).toHaveBeenCalledTimes(1);
     expect(view.inspectReviewWorkspace).toHaveBeenCalledTimes(2);
-    expect(view.status).toHaveBeenCalledWith('审阅结果已变化，已重新读取。');
+    expect(miniDocument.activeElement?.closest('[data-review-page]')?.dataset['reviewPage']).toBe(ENTRIES);
+    expect(miniDocument.querySelector('[data-toast]')?.textContent).toBe('审阅结果已变化，已重新读取，从第一页显示。');
     expect(listed(view.root, MUST, 'li').every((text) => text.includes('v2'))).toBe(true);
     // The next page is the changed list's, read from where its own first page ended.
     const shown = listed(view.root, MUST, 'li').length;
-    paging(view.root, MUST)!.querySelector('button')!.click(); await flush();
+    more(view.root, MUST).click(); await flush();
     expect(view.getTaskPlanPage).toHaveBeenLastCalledWith(expect.objectContaining({ path: MUST, afterOrdinal: shown }));
     expect(listed(view.root, MUST, 'li').length).toBeGreaterThan(shown);
     expect(listed(view.root, MUST, 'li').every((text) => text.includes('v2'))).toBe(true);
   });
 
-  it('says a page that failed beside its control and reads it once on the next try', async () => {
-    const view = mount({ full: workspace(360), budget: 120 * 1024 }); await flush();
+  it('says a page that failed beside its control, keeps saying it through a repaint, and reads it once on the next try', async () => {
+    const view = mount(PAGED()); await flush();
     const shown = listed(view.root, MUST, 'li').length;
     view.getTaskPlanPage.mockRejectedValueOnce(refusal('SERVICE_UNAVAILABLE', '服务暂时无法回答。'));
-    paging(view.root, MUST)!.querySelector('button')!.click(); await flush();
+    more(view.root, MUST).click(); await flush();
     expect(paging(view.root, MUST)!.querySelector('[role="alert"]')!.textContent).toBe('服务暂时无法回答。');
     expect(view.status).toHaveBeenCalledWith('服务暂时无法回答。', 'error');
-    expect(paging(view.root, MUST)!.querySelector('button')!.disabled).toBe(false);
+    view.surface.refresh(); await flush();
+    expect(paging(view.root, MUST)!.querySelector('[role="alert"]')!.textContent).toBe('服务暂时无法回答。');
+    expect(more(view.root, MUST).disabled).toBe(false);
     expect(listed(view.root, MUST, 'li')).toHaveLength(shown);
-    paging(view.root, MUST)!.querySelector('button')!.click(); await flush();
+    more(view.root, MUST).click(); await flush();
     const after = listed(view.root, MUST, 'li');
     expect(after.length).toBeGreaterThan(shown);
     expect(new Set(after).size).toBe(after.length);
+    expect(paging(view.root, MUST)!.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('says a failed page in its own words when the service gives none', async () => {
+    const view = mount(PAGED()); await flush();
+    view.getTaskPlanPage.mockRejectedValueOnce(Object.assign(new Error(''), { code: 'X' }));
+    more(view.root, MUST).click(); await flush();
+    expect(paging(view.root, MUST)!.querySelector('[role="alert"]')!.textContent).toBe('无法读取更多审阅内容，请稍后再试。');
   });
 
   it('asks for nothing more when the workspace fits one reply', async () => {
@@ -209,30 +298,59 @@ describe('a paged review workspace on the 审阅 page (#1592)', () => {
 });
 
 describe('a refused workspace read on the 审阅 page (#1592)', () => {
-  it('stands as an error and marks the last workspace read as possibly out of date until a read succeeds', async () => {
-    const state: { full: ReviewWorkspaceProjection; budget: number; refuse: Error | null } = { full: workspace(3, 1, 'running'), budget: 4 * 1024 * 1024, refuse: null };
-    const view = mount(state); await flush();
+  const TOO_LARGE = '审阅摘要超出可读取范围。';
+  it('stands once in the bar and on the card through refused polls and repaints, and a read that succeeds ends it', async () => {
+    const bar = new MiniElement('div');
+    const real = createStatusSurface(bar as unknown as HTMLElement);
+    const status = Object.assign(vi.fn((message: string, tone?: 'busy' | 'success' | 'error') => real(message, tone)), { settle: vi.fn((message: string) => real.settle(message)) });
+    const state: Stub = { ...PAGED(), refuse: null };
+    state.full = workspace(360, 1, 'running');
+    const view = mount(state, status); await flush();
     expect(card(view.root).dataset['reviewState']).toBe('running');
-    state.refuse = refusal('TASK_PLAN_SUMMARY_TOO_LARGE', '审阅摘要超出可读取范围。');
-    view.surface.refresh(); await flush();
-    expect(view.status).toHaveBeenLastCalledWith('审阅摘要超出可读取范围。', 'error');
+    state.refuse = refusal('TASK_PLAN_SUMMARY_TOO_LARGE', TOO_LARGE);
+    for (let poll = 0; poll < 3; poll += 1) { view.surface.refresh(); await flush(); }
+    expect(status.mock.calls.filter(([, tone]) => tone === 'error')).toEqual([[TOO_LARGE, 'error']]);
+    expect(bar.textContent).toContain(TOO_LARGE);
     expect(card(view.root).dataset['reviewRead']).toBe('failed');
     const note = card(view.root).querySelector('.review-read-failed')!;
     expect(note.getAttribute('role')).toBe('alert');
-    expect(note.textContent).toBe('审阅摘要超出可读取范围。下面是上次读到的审阅，可能已经过时。');
-    // Another refusal replaces the note; it never piles up.
-    view.surface.refresh(); await flush();
+    expect(note.textContent).toBe(`${TOO_LARGE}下面是上次读到的审阅，可能已经过时。`);
+    // A repaint of the card on screen — a page of a list read meanwhile — keeps the note, once.
+    more(view.root, MUST).click(); await flush();
     expect(card(view.root).querySelectorAll('.review-read-failed')).toHaveLength(1);
+    expect(card(view.root).dataset['reviewRead']).toBe('failed');
     state.refuse = null;
     view.surface.refresh(); await flush();
     expect(card(view.root).querySelector('.review-read-failed')).toBeNull();
     expect(card(view.root).dataset['reviewRead']).toBeUndefined();
+    expect(status.settle).toHaveBeenCalledWith(TOO_LARGE);
+    expect(bar.textContent).not.toContain(TOO_LARGE);
   });
 
-  it('says a refused first read on the card and at the bottom', async () => {
-    const view = mount({ full: workspace(3), budget: 4 * 1024 * 1024, refuse: refusal('TASK_PLAN_SUMMARY_TOO_LARGE', '审阅摘要超出可读取范围。') }); await flush();
+  it('leaves a different standing error alone when its read recovers', async () => {
+    const bar = new MiniElement('div');
+    const real = createStatusSurface(bar as unknown as HTMLElement);
+    const status = Object.assign(vi.fn((message: string, tone?: 'busy' | 'success' | 'error') => real(message, tone)), { settle: vi.fn((message: string) => real.settle(message)) });
+    const state: Stub = { full: workspace(3, 1, 'running'), budget: 4 * 1024 * 1024, refuse: null };
+    const view = mount(state, status); await flush();
+    state.refuse = refusal('TASK_PLAN_SUMMARY_TOO_LARGE', TOO_LARGE);
+    view.surface.refresh(); await flush();
+    real('无法保存这次修改。', 'error');
+    state.refuse = null;
+    view.surface.refresh(); await flush();
+    expect(bar.textContent).toContain('无法保存这次修改。');
+    expect(card(view.root).querySelector('.review-read-failed')).toBeNull();
+  });
+
+  it('says a refused first read on the card and at the bottom, and 重新读取 asks again', async () => {
+    const state: Stub = { full: workspace(3), budget: 4 * 1024 * 1024, refuse: refusal('TASK_PLAN_SUMMARY_TOO_LARGE', TOO_LARGE) };
+    const view = mount(state); await flush();
     expect(card(view.root).dataset['reviewState']).toBe('unavailable');
-    expect(card(view.root).textContent).toContain('审阅摘要超出可读取范围。');
-    expect(view.status).toHaveBeenCalledWith('审阅摘要超出可读取范围。', 'error');
+    expect(card(view.root).textContent).toContain(TOO_LARGE);
+    expect(view.status).toHaveBeenCalledWith(TOO_LARGE, 'error');
+    state.refuse = null;
+    card(view.root).querySelector('[data-review-action="reread"]')!.click(); await flush();
+    expect(card(view.root).dataset['reviewState']).toBe('partial');
+    expect(view.status.settle).toHaveBeenCalledWith(TOO_LARGE);
   });
 });
