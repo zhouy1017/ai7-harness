@@ -270,3 +270,16 @@ it('closes a launch popover when focus moves on past it, and keeps it while focu
   details.dispatchEvent({ type: 'focusout', bubbles: true, relatedTarget: start } as never);
   expect(details.open).toBe(false);
 });
+
+it('keeps a launch popover open when a press inside it focuses the sheet around it, or focus leaves the window', () => {
+  const sheet = document.createElement('dialog'); sheet.tabIndex = -1; document.body.append(sheet);
+  const options = document.createElement('div'); options.append(document.createElement('select'));
+  const bar = createLaunchBarPresentation(document.createElement('span'), document.createElement('button'), { title: '选项', content: options }, null);
+  sheet.append(bar);
+  const details = bar.querySelector<HTMLDetailsElement>('.task-launch-options')!;
+  details.open = true;
+  details.dispatchEvent({ type: 'focusout', bubbles: true, relatedTarget: sheet } as never);
+  expect(details.open).toBe(true);
+  details.dispatchEvent({ type: 'focusout', bubbles: true, relatedTarget: null } as never);
+  expect(details.open).toBe(true);
+});

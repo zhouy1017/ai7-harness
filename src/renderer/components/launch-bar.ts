@@ -122,10 +122,12 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
     }
     const panel = el('div', 'task-launch-popover'); panel.append(content);
     details.append(summary, panel);
-    // A non-modal panel: focus moving on past it (Tab, Shift+Tab) closes it, so it never stays over the controls the editor moved to.
+    // A non-modal panel: focus moving on to another control (Tab, Shift+Tab) closes it, so it never stays over the controls the
+    // editor moved to. A press on the panel's text focuses its nearest focusable ancestor (a sheet), and a window switch moves
+    // focus nowhere: neither closes it.
     details.addEventListener('focusout', event => {
       const next = (event as FocusEvent).relatedTarget as Node | null;
-      if (details.open && next !== null && !details.contains(next)) details.open = false;
+      if (details.open && next !== null && !details.contains(next) && !next.contains(details)) details.open = false;
     });
     if (typeof panel.showPopover === 'function') {
       panel.setAttribute('popover', 'auto');
