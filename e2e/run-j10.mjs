@@ -320,9 +320,10 @@ async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); return input.value === ${JSON.stringify(value)}; })()`, name);
 }
 const TAB = Object.freeze({ key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
-async function pressTab(renderer) {
-  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...TAB });
-  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...TAB });
+async function pressTab(renderer, shift = false) {
+  const modifiers = shift ? 8 : 0;
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...TAB, modifiers });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...TAB, modifiers });
 }
 /** Space as a keyboard sends it, which chooses the focused radio. */
 async function pressSpace(renderer) {
@@ -1501,10 +1502,11 @@ async function main() {
     await waitFor(renderer, `(() => { const card=document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(fifthBookId)}] .baseline-analysis-card'); return card?.dataset.analysisState==='interrupted' && card.dataset.taskOutcomeClassification==='interrupted' && card.querySelector('.analysis-state')?.textContent===${JSON.stringify(BUDGET_RUN_LABEL)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='budget-reached'; })()`, 'budget-partial-shown', 30_000);
 
     at('budget-redo');
-    // 调整预算并重做 prepares a new Task that carries the four ranges and begins from the plan's 5,000 tokens; it opens in its
-    // editing with focus on 设置上限….
+    // 调整预算并重做 prepares a new Task that carries the four ranges and begins from the plan's 5,000 tokens; it opens with its
+    // options shown and focus on the bar's 本次用量.
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="redo"]', 'budget-redo');
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && typeof drawer.dataset.taskPlanRef==='string' && drawer.dataset.taskPlanRef!==${JSON.stringify(fifthIntentId)} && drawer.dataset.taskPlanState==='ready' && drawer.dataset.taskPlanVersion==='1' && drawer.dataset.taskDrawerMode==='full' && document.querySelector('#task-drawer [data-task-launch-option="budget"]')?.disabled===false; })()`, 'budget-redo-opened', 120_000);
+    await waitFor(renderer, `(() => { const budget=document.querySelector('#task-drawer [data-task-launch-option="budget"]'); return !!budget?.closest('.task-launch-popover')?.matches(':popover-open') && (document.activeElement===budget || document.activeElement===budget.nextElementSibling && budget.nextElementSibling.matches('.ui-select-trigger')); })()`, 'budget-redo-focus', 10_000);
     const budgetRedo = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const budgetRedoId = budgetRedo?.taskIntent?.taskIntentId ?? '';
     requireJourney(UUID_PATTERN.test(budgetRedoId) && budgetRedoId !== fifthIntentId && budgetRedo.state === 'prepared' && (budgetRedo.run ?? null) === null &&
@@ -1516,7 +1518,17 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('#task-drawer .task-plan-sentence-text')?.textContent===${JSON.stringify(BUDGET_REDO_GOAL)} && document.querySelector('#task-drawer dd[data-task-plan-term="预算上限"]')?.textContent==='任务运行预算上限：5,000 tokens'`, 'budget-redo-words');
 
     at('j14-budget-keyboard');
-    await setLaunchBudget(renderer, waitFor, '#task-drawer', '50000', 'keyboard-budget-set');
+    // Without a pointer: Shift+Tab back from the bar's 本次用量 to the plan's 设置上限…; Enter opens the field with focus in it,
+    // the count is typed and Enter sets it, focus back on 设置上限… beside 你改的; Tab reaches 去掉上限; the bar shows the same tier.
+    for (let count = 0; count < 80 && !(await renderer.evaluate(`document.activeElement?.dataset?.taskPlanEdit==='budget'`)); count += 1) await pressTab(renderer, true);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget' && document.activeElement.matches(':focus-visible')`, 'keyboard-budget-reached', 10_000);
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl==='budget-input'`, 'keyboard-budget-input', 10_000);
+    await renderer.send('Input.insertText', { text: String(RAISED.maxTotalTokens) });
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget' && document.activeElement.matches(':focus-visible') && document.querySelector('#task-drawer .task-plan-budget-edited .task-plan-edit-tag')?.textContent==='你改的 · 预算上限 50,000 tokens'`, 'keyboard-budget-set', 10_000);
+    await pressTab(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget-remove' && document.activeElement.matches(':focus-visible')`, 'keyboard-budget-remove-reached', 10_000);
     await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-launch-option="budget"]')?.value==='50000' && document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='1'`, 'keyboard-budget-selection');
 
     at('budget-redo-completed');
@@ -1528,7 +1540,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const notice = document.querySelector('[data-toast]'); if (!notice || !notice.hidden) return false; const probe = { shown: [], hiddenAt: null }; const observer = new MutationObserver(() => { const visible = !notice.hidden && notice.dataset.tone === 'analysis-completed'; const last = probe.shown.at(-1); if (visible && (last === undefined || last.hiddenAt !== null)) probe.shown.push({ at: performance.now(), hiddenAt: null, noticeClass: notice.dataset.tone ?? null, text: notice.querySelector('span')?.textContent ?? null }); if (!visible && last !== undefined && last.hiddenAt === null) last.hiddenAt = performance.now(); }); observer.observe(notice, { attributes: true, childList: true, characterData: true, subtree: true }); globalThis.__j10QuietNotice = { probe, stop: () => observer.disconnect() }; return true; })()`, 'quiet-completion-probe');
     // 开始任务: the redo reads the four ranges left, and the reduction after them, under 50,000 tokens, to its end — the
     // Book's analysis whole again, and 待我处理 no longer naming the stop.
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'budget-redo-start');
+    await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="start"]', 'budget-redo-start');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2'`, 'budget-redo-version-2', 60_000);
     const raisedPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     // The stored diff line is read field by field: its record's keys come back in canonical order.

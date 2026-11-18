@@ -32,8 +32,17 @@ export async function setLaunchBudget(renderer, waitFor, root, value, name) {
   await renderer.send('Input.insertText', { text: value });
 }
 
-/** Inspect this surface's current choices at both sizes, then start with one real click. */
-export async function launchTaskFromBar(renderer, waitFor, name, viewport, previewContains = []) {
+/** True when the bar's popover is shown, has a size, and lies inside the window (a closed popover has a zero rect). */
+export function popoverShownInside(panelExpression) {
+  return `(() => {const panel=${panelExpression};if(!panel||!panel.matches(':popover-open'))return false;const r=panel.getBoundingClientRect();
+    return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&document.documentElement.scrollWidth<=innerWidth;})()`;
+}
+
+/**
+ * Inspect this surface's current choices at both sizes, then start with one real click — on the bar's own start, or on
+ * `startSelector` when the surface's own row starts through the bar (审稿意见's template rows).
+ */
+export async function launchTaskFromBar(renderer, waitFor, name, viewport, previewContains = [], startSelector = null) {
   const id = await renderer.evaluate(`(() => {
     const active = Array.from(document.querySelectorAll('[data-task-launch-kind]')).filter(node=>node.getClientRects().length>0);
     return (active.find(node=>node.querySelector('.task-launch-estimate[open]')) ?? active.find(node=>node.id==='task-drawer') ?? active[0])?.id;
@@ -46,6 +55,7 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       const options = `${root} .task-launch-options`;
       if (!(await renderer.evaluate(`document.querySelector(${JSON.stringify(options)})?.open===true`))) await pointerClick(renderer, waitFor, `${options} > summary`, `${name}-options-${width}`);
+      if (await renderer.evaluate(popoverShownInside(`document.querySelector(${JSON.stringify(options + ' .task-launch-popover')})`)) !== true) throw new Error(`task-launch-options-unreachable-${width}x${height}`);
       const retry = `${root} [data-task-launch-option="retry"]`;
       const original = await renderer.evaluate(`document.querySelector(${JSON.stringify(retry)}).value`);
       for (const value of [original === 'never' ? 'auto' : 'never', original]) await chooseLaunchOption(renderer, waitFor, retry, value, `${name}-retry-${value}-${width}`);
@@ -53,14 +63,11 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
       const estimate = `${root} .task-launch-estimate`;
       if (!(await renderer.evaluate(`document.querySelector(${JSON.stringify(estimate)})?.open===true`))) await pointerClick(renderer, waitFor, `${estimate} > summary`, `${name}-preview-${width}`);
       else await pointerClick(renderer, waitFor, `${root} [data-task-drawer-control="preview-launch"]`, `${name}-refresh-preview-${width}`);
-      await waitFor(renderer, `document.querySelector(${JSON.stringify(estimate + ' ol')})?.children.length>0`, `${name}-preview-current-${width}`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(estimate + ' ol')})?.children.length>0 && document.querySelector(${JSON.stringify(estimate)})?.textContent.includes('阅读范围')`, `${name}-preview-current-${width}`);
       for (const text of previewContains) {
         if (!(await renderer.evaluate(`document.querySelector(${JSON.stringify(estimate)})?.textContent.includes(${JSON.stringify(text)})`))) throw new Error(`${name}-preview-missing-disclosure-${width}`);
       }
-      const reachable = await renderer.evaluate(`(() => {
-        const surface=document.querySelector(${JSON.stringify(root)}),panel=surface.querySelector('.task-launch-estimate .task-launch-popover');
-        const r=panel.getBoundingClientRect();return r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&document.documentElement.scrollWidth<=innerWidth;
-      })()`);
+      const reachable = await renderer.evaluate(popoverShownInside(`document.querySelector(${JSON.stringify(estimate + ' .task-launch-popover')})`));
       if (reachable !== true) throw new Error(`task-launch-bar-unreachable-${width}x${height}`);
       await pointerClick(renderer, waitFor, `${estimate} > summary`, `${name}-preview-close-${width}`);
     }
@@ -68,7 +75,7 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
     if (viewport === undefined) await renderer.send('Emulation.clearDeviceMetricsOverride');
     else await renderer.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
   }
-  await pointerClick(renderer, waitFor, `${root} [data-task-drawer-control="launch"]`, `${name}-start`);
+  await pointerClick(renderer, waitFor, startSelector ?? `${root} [data-task-drawer-control="launch"]`, `${name}-start`);
   await waitFor(renderer, `(document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && !!document.querySelector('#task-drawer')?.dataset.taskPlanRef) || !!document.querySelector(${JSON.stringify(root + ' .task-bar-refusal')})?.textContent`, `${name}-launched`, 120_000);
   const refusal = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' ? '' : document.querySelector(${JSON.stringify(root + ' .task-bar-refusal')})?.textContent??''`);
   if (refusal) throw new Error('task-launch-refused');

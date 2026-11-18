@@ -1,5 +1,5 @@
 import { pointerClick } from './dispatch-chooser.mjs';
-import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { launchTaskFromBar, popoverShownInside } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -2127,9 +2127,12 @@ async function main() {
         ['editorial', '给编辑部 / 选题会的审读报告', null, [['prepare', '起草', false]]],
       ]), 'readers-report-offered-words', reportOffered);
     // 起草 prepares the plan and starts it at once (Issue #1410 item 11); the plan stays one disclosure away (查看任务).
-    await clickSelector(renderer, '.evaluation-readers-report-launch .task-launch-estimate > summary', 'readers-report-prepare');
+    await pointerClick(renderer, waitFor, '.evaluation-readers-report-launch .task-launch-estimate > summary', 'readers-report-prepare');
     at('readers-report-preview-basis');
-    await launchTaskFromBar(renderer, waitFor, 'readers-report', undefined, ['评估记录', '定稿']);
+    // The template row's own 起草 starts through the bar (the bar is bound to the row's template), never the bar's first template.
+    await launchTaskFromBar(renderer, waitFor, 'readers-report', undefined, ['评估记录', '定稿'],
+      '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="prepare"]');
+    requireJourney(await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => page.readersReport.task?.template === 'author' && page.readersReport.task.taskIntentId === document.querySelector('#task-drawer')?.dataset.taskPlanRef)`) === true, 'readers-report-launched-template');
     const endedReport = await readReport((page) => ['settled', 'failed', 'interrupted'].includes(page.state), 'readers-report-ended');
     requireJourney(endedReport.state === 'settled', 'readers-report-settled', endedReport);
     // The plan in the editor's words: the 定稿 version and template it drafts from, no exemplar, its two steps, and that it writes
@@ -2224,7 +2227,7 @@ async function main() {
     // and the house's active editorial memory; the plan stays one disclosure away — the version and the save it follows, its two
     // steps, and that it moves no score and writes nothing into the version by itself. It runs on the J-04 adapter's fixture.
     requireJourney(await renderer.evaluate(`document.querySelectorAll('.evaluation [data-task-launch-kind]').length===3`)===true, 'evaluation-three-launch-bars');
-    await clickSelector(renderer, '[data-evaluation-action="preview-rewrite"]', 'evaluation-rewrite-prepare');
+    await pointerClick(renderer, waitFor, '[data-evaluation-action="preview-rewrite"]', 'evaluation-rewrite-prepare');
     await launchTaskFromBar(renderer, waitFor, 'evaluation-rewrite');
     const endedRewrite = await readEvaluation(renderer, (page) => ['settled', 'failed', 'interrupted'].includes(page.rewrite?.state), 'evaluation-rewrite-ended');
     requireJourney(endedRewrite.rewrite.state === 'settled' && endedRewrite.view === 'record', 'evaluation-rewrite-settled', endedRewrite.rewrite);
@@ -2940,9 +2943,9 @@ async function main() {
         }
         return original(callback,delay,...args);
       };
-      document.querySelector('[data-task-launch-kind] [data-task-drawer-control="launch"]').click();
       return true;
     })()`, 'feedback-pending-hold-follow');
+    await pointerClick(renderer, waitFor, '[data-task-launch-kind] [data-task-drawer-control="launch"]', 'feedback-pending-start');
     await waitFor(renderer, `typeof window.__j11HeldFeedbackFollow?.release==='function' && ['admitted','executing'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'feedback-pending-follow-held', 60_000);
     await rm(unitHoldPath, { force: true });
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'feedback-pending-close-plan');
@@ -3274,7 +3277,7 @@ async function main() {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'poll-evaluation-return');
       await waitFor(renderer, `document.querySelector('.evaluation-more') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'poll-evaluation-empty-ready');
       await writeFile(unitHoldPath, '0', 'utf8');
-      await clickSelector(renderer, '[data-evaluation-action="prepare-initial"]', `${name}-start`);
+      await pointerClick(renderer, waitFor, '[data-evaluation-action="prepare-initial"]', `${name}-start`);
       await launchTaskFromBar(renderer, waitFor, name);
       await waitFor(renderer, `document.querySelector('.evaluation-initial')?.dataset.initialState==='executing'`, 'poll-evaluation-running', 120_000);
       const taskId=await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then(page=>page.initial.task.taskIntentId)`);
@@ -3733,7 +3736,7 @@ async function main() {
         await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
         await pointerClick(renderer, waitFor, `${initialBar} .task-launch-estimate > summary`, `launch-reference-plan-${width}`);
         await waitFor(renderer, `document.querySelector('${initialBar} .task-launch-estimate')?.textContent.includes('sample1')===true`, `launch-reference-plan-current-${width}`);
-        requireJourney(await renderer.evaluate(`(() => {const r=document.querySelector('${initialBar} .task-launch-estimate .task-launch-popover').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&document.documentElement.scrollWidth<=innerWidth;})()`)===true,'launch-reference-plan-reachable');
+        requireJourney(await renderer.evaluate(popoverShownInside(`document.querySelector('${initialBar} .task-launch-estimate .task-launch-popover')`))===true,'launch-reference-plan-reachable');
         await pointerClick(renderer, waitFor, `${initialBar} .task-launch-estimate > summary`, `launch-reference-plan-close-${width}`);
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }

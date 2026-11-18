@@ -2611,7 +2611,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${legacyBook.bookId}"]')`, 'legacy-plan-book-ready');
     await openAnalysisDestination(renderer, 'legacy-plan-analysis');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card [data-analysis-action="start"]')?.disabled===false`, 'legacy-plan-first-ready');
-    await reviewAction(renderer,'.baseline-analysis-card [data-analysis-action="prepare"]','legacy-plan-first');
+    await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-analysis-action="prepare"]','legacy-plan-first');
     await launchTaskFromBar(renderer,waitFor,'legacy-plan-first'); await settleLaunchedRun(renderer,'legacy-plan-first');
     await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-first-close');
     await startUpdate(renderer,'reanalyze-book','重新分析全书','legacy-plan-book-run'); await settleLaunchedRun(renderer,'legacy-plan-book-run');
@@ -3491,7 +3491,7 @@ async function main() {
     const dimensionCard = `.baseline-analysis-card [data-analysis-panel="custom"] .custom-dimension-card[data-dimension-id=${JSON.stringify(customDimension.dimensionId)}]`;
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${dimensionCard} [data-custom-empty="not-run"]`)})?.textContent==='尚未运行' && document.querySelector(${JSON.stringify(`${dimensionCard} [data-analysis-action="custom-run"]`)})?.disabled===false`, 'custom-tab-not-run');
     // 运行 runs in one step (Issue #1410 item 13): the plan is prepared and started at once; 查看计划 stays beside the result.
-    await reviewAction(renderer, `${dimensionCard} [data-analysis-action="custom-preview"]`, 'custom-run');
+    await pointerClick(renderer, waitFor, `${dimensionCard} [data-analysis-action="custom-preview"]`, 'custom-run');
     await waitFor(renderer, `document.querySelector('[data-task-launch-kind]')?.dataset.taskLaunchKind==='custom-analysis'`, 'custom-launch-options');
     await openLaunchOptions(renderer, waitFor, '[data-task-launch-kind]', 'custom-launch-options-open');
     await chooseLaunchOption(renderer, waitFor, '[data-task-launch-kind] [data-task-launch-option="retry"]', 'never', 'custom-withdraw-safe-retry');

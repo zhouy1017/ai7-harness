@@ -1,4 +1,5 @@
 import { pointerClick } from './dispatch-chooser.mjs';
+import { popoverShownInside } from './launch-task-bar.mjs';
 
 /** Start exactly as the editor does, then open the resulting run's read-only plan. */
 export async function launchReviewFromSheet(renderer, waitFor, viewport) {
@@ -8,7 +9,7 @@ export async function launchReviewFromSheet(renderer, waitFor, viewport) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       await pointerClick(renderer, waitFor, 'dialog.review-sheet .task-launch-estimate > summary', `review-plan-${width}`);
       await waitFor(renderer, `!!document.querySelector('dialog.review-sheet .review-estimate')?.textContent`, `review-estimate-${width}`);
-      const reachable = await renderer.evaluate(`(() => {const panel=document.querySelector('dialog.review-sheet .task-launch-estimate .task-launch-popover'),r=panel.getBoundingClientRect();return !!panel.querySelector('.review-consequences')&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})()`);
+      const reachable = await renderer.evaluate(`!!document.querySelector('dialog.review-sheet .task-launch-estimate .review-consequences') && ${popoverShownInside(`document.querySelector('dialog.review-sheet .task-launch-estimate .task-launch-popover')`)}`);
       await pointerClick(renderer, waitFor, 'dialog.review-sheet .task-launch-estimate > summary', `review-plan-close-${width}`);
       if (reachable !== true) throw new Error('REVIEW_SHEET_START_OUTSIDE_VIEWPORT');
     }

@@ -1,4 +1,5 @@
 import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { pointerClick } from './dispatch-chooser.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { unzipSync } from 'fflate';
@@ -2946,7 +2947,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_REQUEST.typeId)}]'); if(!(radio instanceof HTMLInputElement))return false;radio.click();return radio.checked;})()`, 'writing-direct-type');
     await fill(renderer, '.writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-direct-audience');
     await fill(renderer, '.writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'writing-direct-channel');
-    await clickSelector(renderer, '.writing-task [data-writing-action="plan"]', 'writing-direct-start');
+    await pointerClick(renderer, waitFor, '.writing-task [data-writing-action="plan"]', 'writing-direct-start');
     await launchTaskFromBar(renderer, waitFor, 'writing-direct-start');
 
     at('writing-draft');
