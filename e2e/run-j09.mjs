@@ -961,6 +961,18 @@ async function main() {
     // 待我处理 sits in the shell's sidebar of every window, with no number while nothing needs the editor.
     await waitFor(renderer, `(() => { const entry=document.querySelector('#app-sidebar .sidebar-destinations #global-attention-entry[data-nav-destination="attention"]'); const badge=entry?.querySelector('.global-attention-badge'); return entry instanceof HTMLButtonElement && !entry.disabled && entry.querySelector('.global-attention-entry-label')?.textContent==='待我处理' && entry.dataset.attentionCount==='0' && badge instanceof HTMLElement && badge.hidden && entry.getAttribute('aria-label')==='待我处理'; })()`, 'entry-without-a-number');
 
+    at('task-overview-empty');
+    // With no task the 任务 page is one sentence: no box per empty group, no second title, no 「› 全局」 in the header (#1522); at both Gate window sizes.
+    for (const [overviewWidth, overviewHeight] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width: overviewWidth, height: overviewHeight, deviceScaleFactor: 1, mobile: false });
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), `overview-empty-entry-${overviewWidth}`);
+      await waitFor(renderer, `innerWidth === ${overviewWidth} && innerHeight === ${overviewHeight} && document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')?.disabled===false`, `overview-empty-ready-${overviewWidth}`);
+      await assertRenderer(renderer, `(() => { const page = document.querySelector('[data-screen="task-overview"]'); const none = page.querySelector('.task-overview-none'); const rect = none?.getBoundingClientRect(); const position = document.querySelector('#context-position'); return document.querySelector('#context-title')?.textContent === '任务' && position.hidden === true && getComputedStyle(position).display === 'none' && page.querySelectorAll('.task-overview-group').length === 0 && none?.textContent === '现在没有任务，可以用上面的「发起任务」开始一项。' && rect.width > 0 && rect.right <= innerWidth && rect.bottom <= innerHeight && rect.top < innerHeight / 2 && !page.querySelector('h1:not(.visually-hidden)'); })()`, `overview-empty-sentence-${overviewWidth}`);
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'overview-empty-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'overview-empty-library-ready');
+
     at('first-book-import');
     const bookA = await importSample1(renderer, FIRST.title, false, 'first-import');
 
@@ -971,8 +983,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
-    await click(renderer, '模型服务', 'model-open');
+    await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -991,7 +1002,7 @@ async function main() {
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     credentialRemoved = true;
-    await click(renderer, '返回', 'model-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-back');
 
     at('first-book-blocked-run');
     // Nothing can execute a Run in this launch: 开始任务 records it, and it is blocked before dispatch.
@@ -1700,7 +1711,7 @@ async function main() {
     }
     await writeFile(holdPath, '1', 'utf8');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-ordinary-settings');
-    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'overview-poll-ordinary-settings-ready');
+    await waitFor(renderer,`document.querySelector('#screen .settings-navigation')`,'overview-poll-ordinary-settings-ready');
     await click(renderer,'帮助','overview-poll-ordinary-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'overview-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'overview-entry');
@@ -1711,7 +1722,13 @@ async function main() {
     await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     await waitFor(renderer, `!document.querySelector('.task-overview-sheet')?.open && document.activeElement?.matches('[data-task-overview-start]')`, 'overview-sheet-focus-return');
     await pointerClick(renderer, waitFor, '[data-task-overview-start]', 'overview-sheet-reopen');
-    const selectOverviewBooks = async (ids) => assertRenderer(renderer, `(() => { const ids=${JSON.stringify(ids)}; const sheet=document.querySelector('.task-overview-sheet'); for(const input of sheet.querySelectorAll('input[type="checkbox"][value]')) input.checked=ids.includes(input.value); return ids.every(id=>sheet.querySelector('input[value="'+id+'"]')?.checked); })()`, 'overview-sheet-books');
+    // The sheet opens with no Book ticked on this page (#1522), and each tick is a real press that the button's count follows.
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('.task-overview-sheet'); return sheet.querySelectorAll('input[type="checkbox"]:checked').length===0 && document.querySelector('[data-task-overview-enqueue]')?.textContent==='加入队列（0 本）'; })()`, 'overview-sheet-none-ticked');
+    const selectOverviewBooks = async (ids) => {
+      const toggle = await renderer.evaluate(`Array.from(document.querySelectorAll('.task-overview-sheet input[type="checkbox"][value]')).filter((input) => input.checked !== ${JSON.stringify(ids)}.includes(input.value)).map((input) => input.value)`);
+      for (const id of toggle) await pointerClick(renderer, waitFor, `.task-overview-sheet input[value="${id}"]`, 'overview-sheet-book');
+      await assertRenderer(renderer, `(() => { const ids=${JSON.stringify(ids)}; const sheet=document.querySelector('.task-overview-sheet'); return sheet.querySelectorAll('input[type="checkbox"]:checked').length===ids.length && ids.every(id=>sheet.querySelector('input[value="'+id+'"]')?.checked) && document.querySelector('[data-task-overview-enqueue]')?.textContent==='加入队列（'+ids.length+' 本）'; })()`, 'overview-sheet-books');
+    };
     await selectOverviewBooks(overviewBooks.slice(0, 2));
     await clickSelector(renderer, '[data-task-overview-enqueue]', 'overview-add-two');
     await waitFor(renderer, `document.querySelector('.task-overview-sheet')?.open === true && document.querySelector('[data-task-overview-added]')?.textContent === '已加入 2 项'`, 'overview-sheet-stays-open', 60000);
@@ -1827,7 +1844,7 @@ async function main() {
     await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-developer-settings');
-    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'overview-poll-developer-settings-ready');
+    await waitFor(renderer,`document.querySelector('#screen .settings-navigation')`,'overview-poll-developer-settings-ready');
     await click(renderer,'帮助','overview-poll-developer-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`,'overview-poll-developer-mode');
 

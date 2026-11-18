@@ -55,7 +55,7 @@ import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
 
 
 
-import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
+import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_PURPOSE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 
 import { EVALUATION_STATUS } from './evaluation-labels.js';
 import { openTaskResultWindow, type TaskResultWindow } from './task-result-window.js';
@@ -696,6 +696,7 @@ commandDispatcher.register({
 
 const commandPalette = createCommandPalette({
   api: api, execute: (id) => commandDispatcher.execute(id),
+  screen: { has: (command) => commandDispatcher.has(command), currentBookId: () => shell.currentBook()?.bookId ?? null, bookPage: () => (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] !== undefined },
   openBook: (bookId) => leaveThen(() => requestBookWorkbenchRoute({ kind: 'book', bookId })),
   openResult: (item) => void leaveThen(() => openResult(item, 'palette')),
   openStart: () => { void leaveThen(async () => { renderTaskOverview(); taskOverviewSurface?.showStart(); }); },
@@ -840,7 +841,7 @@ const shell = mountShell({
   },
   openSettings: () => {
     if (authorityInterrupted) return;
-    void leaveThen(async () => renderSettingsHub());
+    void leaveThen(() => renderModelServiceSettings());
   },
 });
 
@@ -990,7 +991,6 @@ function restoreCurrentScreen(): () => void | Promise<void> {
   const restore = content instanceof HTMLElement ? agentWorkspaceReturns.get(content) : undefined;
   if (restore !== undefined) return restore;
   const state = screen.dataset['screen'];
-  if (state === 'settings') return renderSettingsHub;
   if (state === 'help') return renderHelp;
   if (state === 'data-storage') return renderDataAndStorage;
   if (state === 'quality-learning') return () => renderQualityLearning();
@@ -1045,7 +1045,7 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   leaveGuard = null;
   taskSurfaceRefresh = {};
   screen.dataset['screen'] = state;
-  if (state === 'settings' || SETTINGS_HUB_GROUPS.some((group) => group.rows.some((row) => row.route === state))) {
+  if (SETTINGS_HUB_GROUPS.some((group) => group.rows.some((row) => row.route === state))) {
     const layout = element('div', 'settings-layout');
     layout.append(settingsNavigation(state), content);
     screen.replaceChildren(layout);
@@ -2543,7 +2543,7 @@ function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
  * `review-workspace.ts`; the sidebar provides the destination routes. `focus` opens a named Review Run with one finding in
  * view, which is how a Mark Card's 查看任务 arrives here.
  */
-function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null, procedureId: string | null = null): void {
+function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null, procedureId: string | null = null, categories: ReadonlyArray<string> | null = null): void {
   const content = panel();
   content.classList.add('book-review');
   content.dataset['bookId'] = bookId;
@@ -2557,6 +2557,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     focus,
     // 运行此工序… from 知识库 (Issue #65, S30): the 新建审阅 sheet opens filled from the procedure.
     procedureId,
+    categories,
     api: api,
     awaitServiceJob,
     technicalDetails,
@@ -3110,8 +3111,7 @@ function renderBookCreationForm(): void {
 
 function renderDiagnostics(): void {
   if (!technicalLayerVisible) {
-    renderSettingsHub();
-    reportResult(setStatus, '该页在开发者模式下显示');
+    renderSettingsHome('该页在开发者模式下显示');
     return;
   }
   const content = panel();
@@ -3134,7 +3134,7 @@ async function renderSeriesList(focusSeriesId: string | null): Promise<void> {
   const host = element('div');
   const back = element('div', 'button-row');
   back.append(button('返回', 'quiet', () => void returnToOrigin()));
-  content.append(element('h2', undefined, SERIES_TITLE), element('p', 'field-note series-lede', technicalWords(SERIES_LEDE, '将相关图书归入同一书系。')), host, back);
+  content.append(element('h2', 'visually-hidden', SERIES_TITLE), element('p', 'field-note series-lede', technicalWords(SERIES_LEDE, SERIES_PURPOSE)), host, back);
   replaceScreen('series-list', content);
   const page = navigation.read(content);
   setStatus(SERIES_STATUS.loading, 'busy');
@@ -3171,7 +3171,7 @@ async function renderSeries(seriesId: string): Promise<void> {
   replaceScreen('series', content);
   const page = navigation.read(content);
   setStatus(SERIES_STATUS.loading, 'busy');
-  const surface = mountSeries({ root: host, seriesId, api: api, setStatus, errorMessage: rendererErrorMessage });
+  const surface = mountSeries({ root: host, seriesId, api: api, setStatus, errorMessage: rendererErrorMessage, reviewMember: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => renderBookReview(bookId, route.bookTitle, null, null, ['series-consistency'])) });
   try {
     const series = await surface.load();
     if (!page.isCurrent()) return;
@@ -3486,7 +3486,7 @@ const appearance = createAppearance(api);
 
 
 const { renderDataAndStorage } = createDataStorage({
-  setStatus, panel, element, button, rendererErrorMessage, initializeStartup, returnToOrigin, technicalDetails, replaceScreen,
+  setStatus, panel, element, button, rendererErrorMessage, initializeStartup, technicalDetails, replaceScreen,
 });
 
 
@@ -3497,7 +3497,7 @@ const { renderKnowledgeBase, renderQualityLearning } = createKnowledgeBase({
 
 
 const { renderModelServiceSettings } = createModelServiceSettings({
-  element, button, setStatus, rendererErrorMessage, panel, initializeStartup, returnToOrigin, replaceScreen,
+  element, button, setStatus, rendererErrorMessage, panel, initializeStartup, replaceScreen,
 });
 
 const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
@@ -3547,12 +3547,11 @@ const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNo
 });
 
 
-const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsNavigation, renderSettingsHub, renderHelp, renderAppearance } = createSettingsScreens({
+const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsNavigation, renderSettingsHome, renderHelp, renderAppearance } = createSettingsScreens({
   setStatus: (...args) => setStatus(...args),
   panel: (...args) => panel(...args),
   element: (...args) => element(...args),
   button: (...args) => button(...args),
-  returnToOrigin: (...args) => returnToOrigin(...args),
   replaceScreen: (...args) => replaceScreen(...args),
   api,
   rendererErrorMessage: (...args) => rendererErrorMessage(...args),
@@ -3565,7 +3564,6 @@ const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, r
   renderDataAndStorage: (...args) => renderDataAndStorage(...args),
   renderDiagnostics: (...args) => renderDiagnostics(...args),
   appearance,
-  initializeStartup: (...args) => initializeStartup(...args),
   viewPreferences,
 });
 

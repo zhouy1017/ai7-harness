@@ -79,7 +79,6 @@ export const SHELL_LABELS = Object.freeze({
   unpin: (title: string) => `取消置顶《${title}》`,
   pinned: '已置顶',
   bookRowName: (title: string, state: string) => `《${title}》 · ${state}`,
-  global: '全局',
   importing: '导入稿件',
   untitledBook: '未命名图书',
   bookIcon: '书',
@@ -157,14 +156,6 @@ export const SETTINGS_HUB_GROUPS: ReadonlyArray<{
     { route: 'help', label: '帮助', note: '使用说明、隐私说明与第三方许可。' },
   ] },
 ]);
-
-export const SETTINGS_HUB_WORDS = Object.freeze({
-  section: '设置',
-  title: '设置',
-  lede: '本机怎样连接模型服务、怎样保存数据、怎样显示。',
-  comingSoon: '即将提供',
-  opened: '设置已打开',
-});
 
 /** The line 数据与存储 states about the shell's own file (Issue #934 brief, Outcome 5). */
 export const PREFERENCES_LOCAL_LINE = '界面设置（侧栏收起状态、置顶与最近打开的图书等）只保存在本机，不随稿件、交付包或导出数据库带走。';

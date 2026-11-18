@@ -7,7 +7,6 @@ import {
   GLOBAL_ATTENTION_ENTRY_LABEL,
   GLOBAL_ATTENTION_HEADING,
   GLOBAL_ATTENTION_LEDE,
-  GLOBAL_ATTENTION_SECTION_LABEL,
   GLOBAL_ATTENTION_STATUS_LINES,
   GLOBAL_ATTENTION_TECHNICAL_ITEM,
   globalAttentionEntryView,
@@ -213,7 +212,8 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
   const byItem = new Map<string, GlobalAttentionItemProjection>();
   const readItems = readAttentionItems;
 
-  const heading = el('h2', 'global-attention-title', GLOBAL_ATTENTION_HEADING);
+  // The page's name is said once, by the context header; this heading stays for the page's label and the keyboard's first stop (#1522).
+  const heading = el('h2', 'global-attention-title visually-hidden', GLOBAL_ATTENTION_HEADING);
   heading.tabIndex = -1;
   heading.id = uid('title');
   const host = el('div', 'global-attention-host');
@@ -223,7 +223,6 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
   heading.append(loading);
   options.root.setAttribute('aria-labelledby', heading.id);
   options.root.append(
-    el('p', 'section-label', GLOBAL_ATTENTION_SECTION_LABEL),
     heading,
     el('p', 'lede', GLOBAL_ATTENTION_LEDE),
     host,

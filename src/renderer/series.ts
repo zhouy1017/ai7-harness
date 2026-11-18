@@ -46,6 +46,7 @@ import {
   SERIES_PREVIEW_ACTION,
   SERIES_REFRESH,
   SERIES_REMOVE_OPEN,
+  SERIES_REVIEW_OPEN,
   SERIES_SCOPE_NOTE,
   SERIES_STATUS,
   SERIES_UNCHANGED_LABEL,
@@ -311,6 +312,8 @@ export interface MountSeriesOptions {
     'previewSeriesExclusion' | 'recordSeriesExclusion'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
+  /** 去审阅 on a member whose 书系一致性 can be reviewed: that Book's 新建审阅 with 书系一致性 chosen. */
+  readonly reviewMember?: (bookId: string, title: string) => void;
 }
 
 /**
@@ -476,7 +479,14 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       consistency.append(stateTerm(reviewed, member.seriesConsistencyReview === null ? 'neutral' : 'good'), ' · ',
         stateTerm(availability, available ? 'good' : 'attention'));
       if (!available) consistency.append(el('span', 'series-consistency-detail', `：${member.seriesConsistencyUnavailableReason}`));
-      row.append(heading, people, consistency);
+      const line = el('div', 'series-consistency-line');
+      line.append(consistency);
+      if (available && options.reviewMember !== undefined) {
+        const review = action(SERIES_REVIEW_OPEN, 'quiet', 'review-open', () => options.reviewMember?.(member.bookId, member.title));
+        review.setAttribute('aria-label', `去审阅：《${member.title}》的书系一致性`);
+        line.append(review);
+      }
+      row.append(heading, people, line);
       list.append(row);
     }
     return list;

@@ -24,16 +24,15 @@ const LICENSES: ReadonlyArray<ThirdPartyLicense> = [
   { name: 'gamma', version: '3.0.0', license: 'Apache-2.0', repository: null, homepage: null, licenseText: '文本未随包提供', licenseTextDigest: 'g' },
 ];
 
-function mounted(back = vi.fn()) {
+function mounted() {
   const root = document.createElement('section');
   mountHelp({
     root,
     loadVersions: async () => ({ softwareVersion: '0.9.9', dataVersion: 1, frozen: true }),
-    back,
     licenses: LICENSES,
   });
   const find = (selector: string): MiniElement => root.querySelector(selector) as unknown as MiniElement;
-  return { root, back, find };
+  return { root, find };
 }
 
 function dispatch(node: MiniElement, key: string): void {
@@ -112,14 +111,6 @@ describe('the mounted 帮助 screen', () => {
     filter.dispatchEvent({ type: 'input' });
     expect(find('.help-license-empty').hidden).toBe(false);
   });
-
-  it('returns through its back button', () => {
-    const back = vi.fn();
-    const { root } = mounted(back);
-    const buttons = (root.querySelectorAll('button') as unknown as MiniElement[]);
-    buttons.find((node) => node.textContent === '返回')!.click();
-    expect(back).toHaveBeenCalledTimes(1);
-  });
 });
 
 it('scans Help in ordinary mode (#1315)', async () => {
@@ -175,7 +166,7 @@ it('scans the shipped Help and licence catalogue in ordinary mode (#1315)', () =
   setTechnicalLayerVisible(false);
   try {
     const root = document.createElement('section');
-    mountHelp({ root, loadVersions: async () => ({ softwareVersion: '0.9.9', dataVersion: 1, frozen: true }), back: vi.fn() });
+    mountHelp({ root, loadVersions: async () => ({ softwareVersion: '0.9.9', dataVersion: 1, frozen: true }) });
     const entries = Array.from(root.querySelectorAll('.help-license'));
     expect(entries).toHaveLength(THIRD_PARTY_LICENSES.length);
     for (const [index, license] of THIRD_PARTY_LICENSES.entries()) {

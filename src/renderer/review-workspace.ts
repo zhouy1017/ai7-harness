@@ -271,6 +271,8 @@ export interface MountReviewWorkspaceOptions {
   focus: ReviewFocus | null;
   /** 运行此工序… from 知识库 (Issue #65, S30): the Captured Procedure the 新建审阅 sheet opens filled from, once the Book is read. */
   procedureId?: string | null;
+  /** 去审阅 from 书系 (#1522): the categories the 新建审阅 sheet opens with chosen, once the Book is read. */
+  categories?: ReadonlyArray<string> | null;
   api: ReviewApi;
   awaitServiceJob(initial: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
@@ -513,6 +515,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   let focusPages = 0;
   let focusRunHeading = false;
   let pendingProcedureId: string | null = options.procedureId ?? null;
+  let pendingCategories: ReadonlyArray<string> | null = options.categories ?? null;
   const query: { reviewRunId: string | null; filters: Filters; pages: number } = {
     reviewRunId: options.focus?.reviewRunId ?? null,
     filters: { ...NO_FILTERS },
@@ -769,6 +772,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       pendingProcedureId = null;
       const opener = card.querySelector<HTMLElement>('[data-review-action="new-review"]');
       if (opener !== null && next.newReview.available) void openSheet(null, opener, procedureId);
+    }
+    if (pendingCategories !== null && card !== undefined) {
+      const categories = [...pendingCategories];
+      pendingCategories = null;
+      const opener = card.querySelector<HTMLElement>('[data-review-action="new-review"]');
+      if (opener !== null && next.newReview.available) void openSheet({ categories, scope: null, from: null, to: null }, opener);
     }
   }
 

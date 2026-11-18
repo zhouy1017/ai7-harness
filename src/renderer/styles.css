@@ -210,7 +210,7 @@ body { padding-left: var(--sidebar-width); }
 .locality[data-processing-state="sending"]::before { color: var(--status-progress); }
 .locality[data-processing-state="waiting-network"]::before { color: var(--status-attention); }
 
-/* 设置 (editor-surfaces §8.6): the three groups, one row per page; a row not yet available says 即将提供. */
+/* 设置 (editor-surfaces §8.6): a navigation of the three groups beside the page; a page's options are rows (#1522). */
 .settings-layout { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 1.8rem; align-items: start; }
 .settings-layout > :last-child { min-width: 0; }
 .settings-navigation { position: sticky; top: 1rem; display: grid; gap: .4rem; }
@@ -218,9 +218,6 @@ body { padding-left: var(--sidebar-width); }
 .settings-navigation h3 { margin: .8rem .6rem .3rem; font-size: .78rem; color: var(--text-subdued); }
 .settings-navigation .btn { justify-content: flex-start; text-align: left; padding: .35rem .6rem; min-height: 32px; }
 .settings-navigation [aria-current="page"] { background: var(--selection); color: var(--selection-text); }
-.settings-group { margin-top: 1.3rem; }
-.settings-group h3 { margin: 0 0 .5rem; }
-.settings-rows { display: grid; margin: 0; padding: 0; list-style: none; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 1.2rem; min-height: 56px; padding: .75rem 0; border: 0; border-bottom: 1px solid var(--boundary); background: transparent; }
 .settings-row-copy { min-width: 0; }
 .settings-row .secondary { flex: none; min-width: 4.5rem; }
@@ -234,7 +231,6 @@ body { padding-left: var(--sidebar-width); }
   .settings-navigation section { display: flex; flex-wrap: wrap; align-items: center; }
   .settings-navigation h3 { margin: .3rem; }
 }
-.settings-coming-soon { padding: .1rem .55rem; border: 1px dashed var(--boundary-strong); border-radius: 999px; color: var(--text-subdued); font-size: .82rem; font-weight: 700; }
 [data-developer-only="true"]::after { content: "开发者"; display: inline-flex; margin-left: .55rem; padding: .08rem .45rem; border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface); color: var(--text-subdued); font-size: .72rem; font-weight: 700; vertical-align: middle; }
 .library-home { display: grid; grid-template-columns: 1.3fr .7fr; gap: 1.5rem 3rem; align-items: center; }
 
@@ -548,7 +544,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
    its shape and whose blocked work has a heavier left rule beside its words; every line wraps, none scrolls. */
 .global-attention-findings-note { margin-top: -.8rem; }
 .global-attention-host { display: grid; gap: 1rem; margin-top: 1rem; }
-.global-attention-group { min-width: 0; padding: 1rem 1.15rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); overflow-wrap: anywhere; }
+.global-attention-group { min-width: 0; padding: 0; overflow-wrap: anywhere; }
 .global-attention-group-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem .8rem; margin: 0; font-size: 1.12rem; }
 .global-attention-group-count { color: var(--text-subdued); font-size: .9rem; font-weight: 700; }
 .global-attention-empty { margin: .55rem 0 0; color: var(--text-subdued); }
@@ -575,9 +571,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-overview-filter-label { min-width: 3rem; color: var(--text-subdued); font-weight: 700; }
 .task-overview-filter[aria-pressed="true"] { border-color: var(--action-text); background: var(--status-progress-surface); }
 .task-overview-groups { display: grid; gap: 1rem; }
-.task-overview-group { padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
+/* A group is a heading over its cards, not a box around them (#1522). */
+.task-overview-group { padding: 0; }
 .task-overview-group-heading { margin: 0; font-size: 1.08rem; }
-.task-overview-empty { margin: .6rem 0 0; color: var(--text-subdued); }
+.task-overview-empty, .task-overview-none { margin: .6rem 0 0; color: var(--text-subdued); }
 .task-overview-items { display: grid; gap: .6rem; margin-top: .7rem; }
 .task-overview-card { display:flex; align-items:center; gap:16px; position:relative; padding:14px 16px; border:1px solid var(--boundary); border-radius:10px; background:var(--surface); cursor:pointer; min-width:0; width:100%; max-width:100%; box-sizing:border-box; }
 .task-overview-card:hover { border-color: var(--action-text); }
@@ -1039,6 +1036,7 @@ body:has(.task-drawer[data-task-drawer-view="launch"]:not([hidden])) #task-drawe
 .series-member-heading { justify-content: space-between; }
 .series-member-title { margin: 0; }
 .series-member-people, .series-consistency { margin: .4rem 0 0; }
+.series-consistency-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 .8rem; }
 .series-add-chooser { display: grid; gap: .4rem; min-width: 0; margin: 0; padding: .8rem 1rem; border: 1px solid var(--boundary); border-radius: 12px; }
 .series-add-choice { display: flex; align-items: center; gap: .45rem; }
 .series-preview { display: grid; gap: .6rem; min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
@@ -2099,7 +2097,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
   .app-sidebar .global-attention-entry, .sidebar-link { color: LinkText; background: Canvas; border-color: transparent; forced-color-adjust: none; }
   .sidebar-link[aria-current="page"] { outline: 2px solid Highlight; outline-offset: -2px; border-color: CanvasText; box-shadow: none; }
   .sidebar-pin, .sidebar-toggle { color: ButtonText; background: ButtonFace; border: 1px solid ButtonText; forced-color-adjust: auto; }
-  .settings-row, .settings-coming-soon { color: CanvasText; background: Canvas; border-color: CanvasText; }
+  .settings-row { color: CanvasText; background: Canvas; border-color: CanvasText; }
   .global-attention-badge { color: CanvasText; background: Canvas; border: 2px solid CanvasText; forced-color-adjust: none; }
   .global-attention-item { border-left: 2px solid CanvasText; }
   .global-attention-item[data-attention-blocked="true"] { border-left: 6px solid CanvasText; }
@@ -2476,7 +2474,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 :root[data-density="compact"] .screen { margin-top: 1.1rem; }
 :root[data-density="compact"] .page-content { padding: clamp(1rem, 2vw, 1.6rem); }
 :root[data-density="compact"] .navigator-section { gap: .35rem; padding: .55rem 0; }
-:root[data-density="compact"] .search-results, :root[data-density="compact"] .settings-rows { gap: .3rem; }
+:root[data-density="compact"] .search-results { gap: .3rem; }
 :root[data-density="compact"] .search-result, :root[data-density="compact"] .settings-row { padding: .35rem .5rem; }
 :root[data-density="compact"] .editor-toolbar { padding: .6rem 1rem; }
 :root[data-density="compact"] .editor-meta { gap: .3rem .7rem; margin-top: .2rem; }
@@ -2736,8 +2734,7 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .task-overview-card-actions { position:static; display:flex; align-items:center; gap:4px; flex-shrink:0; flex-wrap:wrap; max-width:100%; justify-content:flex-end; }
 .task-overview-card:focus { outline:2px solid var(--focus); outline-offset:2px; }
 .task-overview-more { position:relative; }
-.task-overview-more > summary { cursor:pointer; opacity:0; }
-.task-overview-card:hover .task-overview-more > summary, .task-overview-card:focus-within .task-overview-more > summary { opacity:1; }
+.task-overview-more > summary { cursor:pointer; }
 .task-overview-more[open] { z-index:4; }
 .task-overview-more[open] > button { display:block; background:var(--surface); }
 .task-overview-more > button { white-space:nowrap; }
@@ -2930,7 +2927,6 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 :is(.ui-menu-panel, .view-menu-list, .editor-save-menu-body, .sidebar-book-menu, .editorial-mark-menu, .export-menu-body) { overflow-y: auto; overscroll-behavior: contain; max-height: min(320px, calc(100vh - 16px)); }
 :is(.ui-menu-panel, .view-menu-list, .sidebar-book-menu, .export-menu-body) .btn, .editorial-mark-menu .editorial-mark-menu-item { display: flex; align-items: center; width: 100%; min-height: 32px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-weight: 400; }
 :is(.ui-menu-panel, .view-menu-list, .sidebar-book-menu, .export-menu-body) .btn:hover:not(:disabled), :is(.ui-menu-panel, .view-menu-list, .sidebar-book-menu, .export-menu-body) .btn:focus-visible { background: var(--surface-subdued); }
-.task-overview-more[open] > summary { opacity: 1; }
 @keyframes ui-menu-enter { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { :is(.ui-select-popover, .ui-menu-panel, .view-menu-list, .editor-save-menu-body, .sidebar-book-menu, .editorial-mark-menu, .export-menu-body) { animation: none; scroll-behavior: auto; } }
 html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-menu-list, .editor-save-menu-body, .sidebar-book-menu, .editorial-mark-menu, .export-menu-body) { animation: none; scroll-behavior: auto; }

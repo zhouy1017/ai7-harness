@@ -72,7 +72,7 @@ function mountSettings(calls: ReturnType<typeof api>) {
     const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
   };
   const root = element('main'); document.body.append(root);
-  const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(), returnToOrigin: vi.fn(),
+  const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(),
     button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
     rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (_state, content) => root.replaceChildren(content) });
   return { screen, node: root as unknown as MiniElement, poll: () => poll!() };
@@ -298,7 +298,7 @@ describe('the one model-service flow', () => {
         const root = element('main');
         document.body.replaceChildren(root); // the shell's screen is in the document; a page off screen takes no late repaint (#1445)
         const page = root as unknown as MiniElement;
-        const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(), returnToOrigin: vi.fn(),
+        const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(),
           button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
           rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (_state, content) => root.replaceChildren(content) });
         await screen.renderModelServiceSettings();
@@ -395,7 +395,7 @@ describe('the one model-service flow', () => {
       const root = element('main'); document.body.append(root);
       const setStatus = vi.fn();
       const replaceScreen = vi.fn((_state: string, content: HTMLElement) => root.replaceChildren(content));
-      const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus, initializeStartup: vi.fn(), returnToOrigin: vi.fn(),
+      const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus, initializeStartup: vi.fn(),
         button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
         rendererErrorMessage: (_error, fallback) => fallback, replaceScreen });
       await screen.renderModelServiceSettings();
@@ -457,7 +457,7 @@ describe('the one model-service flow', () => {
       const root = element('main');
       const setStatus = vi.fn();
       const initializeStartup = vi.fn(async () => undefined);
-      const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus, initializeStartup, returnToOrigin: initializeStartup,
+      const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus, initializeStartup,
         button: (label, className, action) => {
           const node = element('button', className, label); node.addEventListener('click', () => void action()); return node;
         },
@@ -490,8 +490,7 @@ describe('the one model-service flow', () => {
       await screen.renderModelServiceSettings();
       expect(page.querySelector('[data-policy-integrity-state]')?.textContent).toBe('当前模型连接不在允许范围内。');
       setTechnicalLayerVisible(true);
-      page.querySelectorAll('button').find((node) => node.textContent === '返回')!.click();
-      expect(initializeStartup).toHaveBeenCalledOnce();
+      expect(page.querySelectorAll('button').some((node) => node.textContent === '返回')).toBe(false);
     } finally { setTechnicalLayerVisible(true); vi.unstubAllGlobals(); }
   });
 
@@ -669,7 +668,7 @@ it('scans connection-test feedback and the repainted model page when discovery u
         const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
       };
       const root = element('main');
-      const page = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(), returnToOrigin: vi.fn(),
+      const page = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(),
         button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
         rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (_state, content) => root.replaceChildren(content) });
       await page.renderModelServiceSettings();

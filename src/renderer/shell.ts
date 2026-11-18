@@ -67,7 +67,6 @@ const SCREEN_ACTIVE: Readonly<Record<string, ShellActive>> = Object.freeze({
   'knowledge-base': { kind: 'destination', destination: 'knowledge' },
   'quality-learning': { kind: 'destination', destination: 'quality' },
   'global-agent': { kind: 'destination', destination: 'global-agent' },
-  settings: { kind: 'settings' },
   help: { kind: 'settings' },
   'model-service': { kind: 'settings' },
   'data-storage': { kind: 'settings' },
@@ -97,13 +96,13 @@ export function contextHeading(state: string, active: ShellActive, book: ShellBo
   if (active.kind === 'section' && book !== null) {
     return { title: book.title, position: `${shellSectionGroupLabel(active.section)} · ${shellSectionLabel(active.section)}`, book: true };
   }
-  if (active.kind === 'settings') return { title: SHELL_SETTINGS.label, position: SETTINGS_PAGE_TITLES[state] ?? SHELL_LABELS.global, book: false };
+  if (active.kind === 'settings') return { title: SHELL_SETTINGS.label, position: SETTINGS_PAGE_TITLES[state] ?? '', book: false };
   if (active.kind === 'destination') {
     const label = shellDestinationLabel(active.destination);
-    return IMPORT_STATES.has(state) ? { title: SHELL_LABELS.importing, position: label, book: false } : { title: label, position: SHELL_LABELS.global, book: false };
+    return IMPORT_STATES.has(state) ? { title: SHELL_LABELS.importing, position: label, book: false } : { title: label, position: '', book: false };
   }
   if (book !== null) return { title: book.title, position: SHELL_LABELS.currentBook, book: true };
-  return { title: SHELL_LABELS.application, position: SHELL_LABELS.global, book: false };
+  return { title: SHELL_LABELS.application, position: '', book: false };
 }
 
 /** A title kept within what a preference holds; the service's titles are already bounded, this only guards the file. */
@@ -570,6 +569,8 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     options.title.textContent = heading.title;
     options.title.dataset['contextBook'] = String(heading.book);
     options.position.textContent = heading.position;
+    // A global page says its name once, in the title; only a Book's section or a settings page has a place to add (#1522).
+    options.position.hidden = heading.position === '';
   };
 
   options.toggle.addEventListener('click', () => {

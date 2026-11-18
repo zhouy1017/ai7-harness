@@ -118,7 +118,6 @@ export const NOTIFICATION_SETTINGS_WORDS = Object.freeze({
   autoResult: '正在看本书时自动显示结果',
   saved: '通知设置已保存在本机。',
   unsaved: '通知设置未保存。',
-  back: '返回设置',
   opened: '通知设置',
 });
 

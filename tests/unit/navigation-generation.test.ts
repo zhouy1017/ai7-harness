@@ -117,7 +117,7 @@ function harness(api: object = {}) {
     AGENT_WORKSPACE_RETURN_SECTIONS: {},
     modelServiceChannel:null,modelChoices:new Map(),modelFilters:new Map(),favourites:[],
     paintModelServiceSettings:()=>replaceScreen('model-service'),focusSearchSettings:vi.fn(),
-    KEYBOARD_SECTION_LABEL:'键盘',KEYBOARD_TITLE:'键盘与无障碍',USAGE_RETURN:'返回',
+    KEYBOARD_TITLE:'键盘与无障碍',USAGE_RETURN:'返回',
     mountKeyboardSettings:()=>vi.fn(),applyKeyboardBindings:vi.fn(),
     button:(label:string,_class:string,run:()=>void)=>{const button=element('button','',label);button.addEventListener('click',run);actions.set(label,run);return button;},
     renderEditorWindow: vi.fn((window:{bookId:string}) => {const node=element('section');node.dataset['bookId']=window.bookId;replaceScreen('editor',node);}),

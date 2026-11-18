@@ -85,8 +85,8 @@ async function commentsSeedConnectorCases(renderer, check, waitFor) {
 export async function commentsOrdinaryMode(renderer, check, waitFor) {
   await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'comments-startup-landing');
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.settings)), 'comments-settings');
-  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'comments-settings-ready');
-  check(await renderer.evaluate(`(() => { const help=document.querySelector('.settings-hub-row[data-settings-route="help"]') ?? Array.from(document.querySelectorAll('[data-screen="settings"] button')).find((button)=>button.textContent==='帮助'); if(!help||help.disabled)return false; help.click(); return true; })()`), 'comments-settings-help');
+  await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, 'comments-settings-ready');
+  check(await renderer.evaluate(`(() => { const help=document.querySelector('.settings-navigation [data-settings-nav="help"]'); if(!help||help.disabled)return false; help.click(); return true; })()`), 'comments-settings-help');
   await waitFor(renderer, `document.querySelector('.help-developer-mode input[aria-label="开发者模式"]')?.disabled===false`, 'comments-enabled-mode-toggle');
   check(await renderer.evaluate(`(() => { const input=document.querySelector('.help-developer-mode input[aria-label="开发者模式"]'); if(input.checked)input.click(); return true; })()`), 'comments-mode-off');
   await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'comments-ordinary-mode');

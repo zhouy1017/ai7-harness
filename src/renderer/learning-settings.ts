@@ -11,7 +11,7 @@ export function mountLearningAskFrequency(root: HTMLElement, api: PreferencesRen
   const note = document.createElement('p'); note.textContent = '设置以后可出现的轻问频率；当前版本尚不会主动询问。';
   const status = document.createElement('p'); status.setAttribute('role', 'status');
   label.append(select); section.append(label, note, status);
-  (root.querySelector('[data-settings-group="editorial"]') ?? root).append(section);
+  root.append(section);
   let previous: LearningAskFrequency = 'occasionally';
   void api.getPreferences().then((page) => { previous = page.values['learning.askFrequency']; select.value = previous; select.disabled = false; })
     .catch(() => { status.textContent = '无法读取学习询问设置。'; });
