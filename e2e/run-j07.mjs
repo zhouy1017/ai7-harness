@@ -1619,23 +1619,26 @@ async function main() {
     await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [role="menuitem"]')); const actions = Array.from(window.__j07.block().querySelectorAll('[data-publication-action]')).map((node) => node.dataset.publicationAction); return !controls.some((node) => /发布|发送/.test(node.textContent ?? '')) && controls.filter((node) => /导出/.test(node.textContent ?? '')).every((node) => node.dataset.exportAction === 'open' || node.hasAttribute('data-export-clean')) && JSON.stringify(actions) === '["designate","actuals"]' && ${EXPORT_MEMBERS_ONLY}; })()`, 'no-publish-or-send-action');
 
     at('export-cancel-creates-nothing');
-    // Native cancellation of a lossless DOCX closes the card; lossy Markdown keeps its open rows,
-    // focuses the retry, and a second native cancellation still writes and records no export.
+    // The Save dialog's launch answer is single-use, so each branch gets its own launch. This launch's cancellation goes to a lossy
+    // Markdown export: the card stays with its rows open, focuses 重新选择保存位置 and is dismissed by 完成, which returns focus to
+    // the 导出… that opened it. (Pressing 重新选择保存位置 would open the platform's own dialog; the unit tests cover that path.)
     await assertRenderer(renderer, `window.__j07.exportCard() === null`, 'cancel-no-card-after-restart');
-    await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-menu] > summary`, 'cancel-menu');
-    await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-format-action="docx"]`, 'cancel-lossless-open');
-    await waitFor(renderer, `window.__j07.exportCard() === null && window.__j07.status().includes('取消')`, 'cancel-lossless-card-gone', 120_000);
     await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-menu] > summary`, 'cancel-lossy-menu');
     await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-format-action="markdown"]`, 'cancel-open');
-    // The open rows are already drawn while the native dialog is up (phase 'choosing'); only the cancelled phase holds the retry and its focus.
+    // The open rows are already drawn while the dialog is up (phase 'choosing'); only the cancelled phase holds the retry and its focus.
     await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'cancelled' && window.__j07.status().includes('取消') && window.__j07.exportCard().querySelector('.export-fidelity-details')?.open === true`, 'cancel-native-dialog', 120_000);
-    await assertRenderer(renderer, `(() => { window.__j07.cancelledCard = window.__j07.exportCard(); return document.activeElement === window.__j07.exportAction('retry'); })()`, 'cancel-retry-focused');
-    await exportAct(renderer, 'retry', 'cancel-retry');
-    await waitFor(renderer, `window.__j07.exportCard() !== window.__j07.cancelledCard && window.__j07.exportCard()?.dataset.exportPhase === 'cancelled'`, 'cancel-retry-keeps-card', 120_000);
+    await assertRenderer(renderer, `document.activeElement === window.__j07.exportAction('retry')`, 'cancel-retry-focused');
     requireJourney(!existsSync(cancelledPath) && JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'cancel-wrote-nothing');
-    // The cancelled card is dismissed by its own 完成, and focus goes back to the 导出… that opened it.
     await exportAct(renderer, 'close', 'cancel-close');
     await waitFor(renderer, `window.__j07.exportCard() === null && document.activeElement === window.__j07.exportOpener('milestone', ${JSON.stringify(first)})`, 'cancel-close-returns-focus', 10_000);
+    // A lossless DOCX, cancelled on a launch of its own, leaves no card at all.
+    await close();
+    renderer = await launch({ save: 'cancel' });
+    await reopenDeliverables(renderer, 'cancel-lossless');
+    await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-menu] > summary`, 'cancel-lossless-menu');
+    await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-format-action="docx"]`, 'cancel-lossless-open');
+    await waitFor(renderer, `window.__j07.exportCard() === null && window.__j07.status().includes('取消')`, 'cancel-lossless-card-gone', 120_000);
+    requireJourney(!existsSync(cancelledPath) && JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'cancel-lossless-wrote-nothing');
 
     at('j14-designate-keyboard');
     // The form without a pointer: Enter on 设为发稿版本… opens it on its first choice — the newest milestone, already chosen with
