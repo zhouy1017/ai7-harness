@@ -198,7 +198,7 @@ export function registerRendererHandlers(
   serializeEffect: <Result>(operation: () => Promise<Result>) => Promise<Result>,
   claims: ApplicationAuthorityClaims,
   bindPresentedBook: (owned: OwnedRendererWindow, bookId: string, bookTitle: string) => void,
-  leaveBookWorkbench: (owned: OwnedRendererWindow) => void,
+  leaveBookWorkbench: (owned: OwnedRendererWindow, park?: boolean) => void,
   getProductDataLocation: () => Promise<ProductDataLocationProjection>,
   revealProductDataLocation: () => ProductDataLocationRevealProjection,
   getModelServiceSettings: () => Promise<ModelServiceSettingsProjection>,
@@ -1851,7 +1851,7 @@ export function registerRendererHandlers(
     envelope(async () => {
       const owned = requireSender(event);
       const result = await serializeEffect(async () => {
-        leaveBookWorkbench(owned);
+        leaveBookWorkbench(owned, true);
         return { state: 'library' as const };
       });
       // Armed only by J-11's development-ci launch. The hold never blocks main's effect queue.
@@ -3563,6 +3563,12 @@ export async function runApplication(): Promise<void> {
   let launcherLease: NodeJS.Timeout | undefined;
   const ownedWindows = new Map<number, OwnedRendererWindow>();
   const bookWindows = new Map<string, OwnedRendererWindow>();
+  // #1504: a renderer leave parks that window's own job/search/preview grants for its Book. Only the same window's next
+  // non-activating re-acquire of that Book, with no route of its own and no other holder in between, takes them back.
+  const parkedBookResources = new Map<string, { owner: OwnedRendererWindow; routeGeneration: number; resources: [string, EditorResourceCapability][] }>();
+  const unparkWindow = (owned: OwnedRendererWindow): void => {
+    for (const [bookId, parked] of parkedBookResources) if (parked.owner === owned) parkedBookResources.delete(bookId);
+  };
   const draftOwners = new Map<string, OwnedRendererWindow>();
   const attentionOwners = new Map<string, OwnedRendererWindow>();
   const commitOwners = new Map<string, OwnedRendererWindow>();
@@ -3988,6 +3994,7 @@ export async function runApplication(): Promise<void> {
         owned.bookId === null || owned.bookId === route.bookId,
         'AI7_WORKBENCH_BOOK_CONFLICT',
       );
+      parkedBookResources.delete(route.bookId);
       owned.manuscriptCapabilities.clear();
       owned.editorResourceCapabilities.clear();
       owned.bookId = route.bookId;
@@ -4057,6 +4064,7 @@ export async function runApplication(): Promise<void> {
       });
       window.on('closed', () => {
         releaseOwnedClaims(owned);
+        unparkWindow(owned);
         ownedWindows.delete(webContentsId);
         if (owned.bookId !== null && bookWindows.get(owned.bookId) === owned) bookWindows.delete(owned.bookId);
       });
@@ -4097,10 +4105,17 @@ export async function runApplication(): Promise<void> {
       if (nonActivating) {
         if ((existing && !existing.window.isDestroyed()) || requester.bookId !== null) return { route: resolved, target: 'held-elsewhere' };
         // Acquire only a free Book for this Bookless window. No other window or capability is changed.
+        const parked = parkedBookResources.get(resolved.bookId);
+        parkedBookResources.delete(resolved.bookId);
+        const reacquired = parked?.owner === requester && parked.routeGeneration === requester.routeGeneration;
         requester.bookId = resolved.bookId;
         requester.route = resolved;
         requester.routeGeneration += 1;
         bookWindows.set(resolved.bookId, requester);
+        // The window's own grants come back only when it is the Book's continuous last holder (#1504).
+        if (reacquired) for (const [key, resource] of parked.resources) {
+          requester.editorResourceCapabilities.set(key, { ...resource, routeGeneration: requester.routeGeneration });
+        }
         return { route: resolved, target: 'requesting-window' };
       }
       if (existing && !existing.window.isDestroyed()) {
@@ -4146,13 +4161,20 @@ export async function runApplication(): Promise<void> {
       requireDesktop(existing === undefined || existing === owned, 'AI7_WORKBENCH_DUPLICATE_BOOK');
       assignRoute(owned, { kind: 'book', bookId, bookTitle });
     };
-    const leaveBookWorkbench = (owned: OwnedRendererWindow): void => {
-      if (owned.bookId !== null && bookWindows.get(owned.bookId) === owned) bookWindows.delete(owned.bookId);
+    /** `park` only for the renderer's own leave; a leave main decides discards anything parked. */
+    const leaveBookWorkbench = (owned: OwnedRendererWindow, park = false): void => {
+      unparkWindow(owned);
+      const held = owned.bookId !== null && bookWindows.get(owned.bookId) === owned ? owned.bookId : null;
+      if (held !== null) bookWindows.delete(held);
+      const resources = [...owned.editorResourceCapabilities].filter(([, resource]) => resource.bookId === held);
       owned.manuscriptCapabilities.clear();
       owned.editorResourceCapabilities.clear();
       owned.bookId = null;
       owned.route = null;
       owned.routeGeneration += 1;
+      if (park && held !== null && resources.length > 0) {
+        parkedBookResources.set(held, { owner: owned, routeGeneration: owned.routeGeneration, resources });
+      }
     };
     const getProductDataLocation = async (): Promise<ProductDataLocationProjection> => {
       const footprint = await inspectBoundedDataFootprint(dataRoot);
