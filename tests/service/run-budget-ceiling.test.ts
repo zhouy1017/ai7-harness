@@ -11,12 +11,13 @@ import {
   CROSS_UNIT_BUDGET_REACHED,
   SAFE_RETRY_BUDGET_REACHED,
 } from '../../src/service/analysis/execution.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { CLARIFICATION_RECORD_GAP } from '../../src/service/analysis/clarifications.js';
 import { ASSURANCE_SAMPLING_REMOVED } from '../../src/service/analysis/plan-edits.js';
 import { RUN_REPORT_REVISION_USAGE_STAGES, runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { SET_RULE_BUDGET } from '../../src/service/default-execution-rules.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { fixtureEntryKey, loadModelFixture, resolveFixtureEntry, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import {
@@ -247,6 +248,82 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
     } finally {
       await execution.dispose();
       store.close();
+    }
+  }, 300_000);
+
+  it('lets the editor set the ceiling again in the plan of a redo after 预算已达上限 under ordinary production, and sends the redo unchanged', async () => {
+    const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    const mapped = capturedMapAnswer(happy.entries);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    const captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+      const header = parseUnitMessageHeader(message);
+      if (request.stage === 'units' && header !== null) return resolveFixtureEntry(happy.entries, header.ordinal,
+        unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, header.ordinal, header.unitDigest), request.attemptIndex)?.response;
+      if (request.stage === 'run-report-reflection') return { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
+      return mapped(request, message);
+    }, { unitHold: controlledUnitHold(holdPath, { pollMs: 5 }) });
+    launchPolicy = captured.policy;
+    const execution = captured.owner;
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 普通模式预算重做');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      const plan = (ref = taskIntentId): ReturnType<EditorialStore['inspectTaskPlan']> => store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref });
+      // Ordinary production reaches a remote route, but it is not developer-live: the plan sets the ceiling from the start.
+      expect(plan().edit.budget).toEqual({ ceiling: 'unset', settable: true, reason: null });
+      const edited = store.editBaselineAnalysisPlan({
+        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: tokens(5000),
+      });
+      const stopped = await run(store, execution, bookId, taskIntentId, edited.planEnvelope!.digest);
+      expect(stopped.taskOutcome?.stop).toMatchObject({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 5000 });
+      const reached = plan();
+      expect(reached.state.key).toBe('budget-reached');
+      expect(reached.budgetStop?.launchSetsCeiling).toBe(false);
+      const runRecordId = stopped.run!.runRecordId;
+      // The redo's plan offers the ceiling to the editor, under no developer-live reason.
+      const redo = prepare(store, bookId, SYNC, runRecordId);
+      const redoIntentId = redo.taskIntent!.taskIntentId;
+      expect(plan(redoIntentId).edit.budget).toEqual({ ceiling: tokens(5000), settable: true, reason: null });
+      const sentBefore = captured.wireRequests.length;
+      const raised = store.editBaselineAnalysisPlan({
+        bookId, taskIntentId: redoIntentId, planEnvelopeDigest: redo.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: tokens(20000),
+      });
+      expect(raised.planVersion?.materialInputs.runBudgetCeiling).toEqual(tokens(20000));
+      expect(raised.providerResolutionPlan?.runBudgetCeiling).toEqual(tokens(20000));
+      const settled = await run(store, execution, bookId, redoIntentId, raised.planEnvelope!.digest);
+      expect(settled.run?.state).toBe('completed');
+      expect(settled.run?.attempt?.spans.map((span) => span.unitOrdinal)).toEqual([5, 6, 7, 8]);
+      expect(settled.providerResolutionPlan?.runBudgetCeiling).toEqual(tokens(20000));
+      // The redo sends what an uninterrupted run under the same ceiling sends for the same ranges, and nothing more.
+      const redoRequests = captured.wireRequests.slice(sentBefore);
+      const control = (await importSample1Book(store, roots.codeRoot, 'L2 sample1 普通模式预算对照')).bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, control);
+      const controlPrepared = prepare(store, control);
+      const controlEdited = store.editBaselineAnalysisPlan({
+        bookId: control, taskIntentId: controlPrepared.taskIntent!.taskIntentId, planEnvelopeDigest: controlPrepared.planEnvelope!.digest,
+        removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: tokens(20000),
+      });
+      const controlStart = captured.wireRequests.length;
+      await run(store, execution, control, controlPrepared.taskIntent!.taskIntentId, controlEdited.planEnvelope!.digest);
+      const controlRequests = captured.wireRequests.slice(controlStart);
+      const unitOf = (request: { messages: Array<{ content: string }> }): number | null => parseUnitMessageHeader(request.messages.at(-1)!.content)?.ordinal ?? null;
+      for (const ordinal of [5, 6, 7, 8]) {
+        const redone = redoRequests.filter((request) => unitOf(request) === ordinal);
+        const original = controlRequests.filter((request) => unitOf(request) === ordinal);
+        expect(redone).toHaveLength(1);
+        expect(original).toHaveLength(1);
+        expect(redone[0]!.model).toBe(original[0]!.model);
+        // Block ids are minted per imported Book; everything else of the request is the same bytes.
+        const bytes = (request: (typeof redone)[number]): unknown => request.messages.map((message) => ({ ...message, content: message.content.replace(/blk_[0-9a-f]+/g, 'blk') }));
+        expect(bytes(redone[0]!)).toEqual(bytes(original[0]!));
+      }
+      expect(redoRequests.filter((request) => unitOf(request) !== null && ![5, 6, 7, 8].includes(unitOf(request)!))).toEqual([]);
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      try { captured.assertMatched(); } finally { store.close(); }
     }
   }, 300_000);
 
