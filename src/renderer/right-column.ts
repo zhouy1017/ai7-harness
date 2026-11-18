@@ -46,11 +46,29 @@ export function createRightColumn(commentsOpenInitially: boolean): RightColumn {
 export function mountColumnMeasure(workspace: HTMLElement, editor: HTMLElement): { destroy(): void } {
   const root = document.documentElement;
   const pixels = (value: string, rem: number): number => parseFloat(value) * (value.trim().endsWith('rem') ? rem : 1);
+  // The block the editor is on: the selection's paragraph while it is in view, else the one across the middle of the text.
+  const readingBlock = (): HTMLElement | null => {
+    const view = editor.getBoundingClientRect(), middle = (view.top + view.bottom) / 2;
+    const focus = document.getSelection?.()?.focusNode ?? null;
+    const selected = (focus?.nodeType === 1 ? focus as Element : focus?.parentElement)?.closest<HTMLElement>('[data-block-id]');
+    if (selected && editor.contains(selected)) { const r = selected.getBoundingClientRect(); if (r.bottom > view.top && r.top < view.bottom) return selected; }
+    return [...editor.querySelectorAll<HTMLElement>('[data-block-id]')].find((block) => { const r = block.getBoundingClientRect(); return r.top <= middle && r.bottom >= middle; }) ?? null;
+  };
+  // A new state changes the sidebar's form and the text's gutters, so the text reflows; the browser keeps no scroll anchor across a
+  // width or padding change of the text's own ancestors. Put the reading block back where it was once the shell has applied the form
+  // (its observer runs in the microtask queued before this one). The first state of a screen has nothing to keep.
+  const apply = (next: string): void => {
+    const previous = root.dataset['rightColumn'];
+    if (previous === next) return;
+    const block = previous === undefined ? null : readingBlock(), before = block?.getBoundingClientRect().top;
+    root.dataset['rightColumn'] = next;
+    if (block && before !== undefined) queueMicrotask(() => { if (block.isConnected) editor.scrollTop += block.getBoundingClientRect().top - before; });
+  };
   const update = (): void => {
     const style = getComputedStyle(root), rem = parseFloat(style.fontSize);
     const drawer = document.body.dataset['taskDrawer'] === 'open';
     const panel = workspace.querySelector<HTMLElement>(':scope > .manuscript-comments-pane:not([hidden]), :scope > .manuscript-navigator:not([hidden])');
-    if (!drawer && !panel) { root.dataset['rightColumn'] = 'none'; return; }
+    if (!drawer && !panel) { apply('none'); return; }
     const padding = getComputedStyle(editor);
     const minimum = parseFloat(style.getPropertyValue('--manuscript-min-measure')) * parseFloat(getComputedStyle(editor.querySelector('.ProseMirror') ?? editor).fontSize)
       + parseFloat(padding.paddingLeft) + parseFloat(padding.paddingRight);
@@ -62,7 +80,7 @@ export function mountColumnMeasure(workspace: HTMLElement, editor: HTMLElement):
     const area = workspace.getBoundingClientRect().width + parseFloat(page.paddingLeft) + parseFloat(page.paddingRight);
     const available = area - edge - column - minimum;
     const next = available >= full ? 'wide' : available >= icons ? 'icons' : 'overlay';
-    if (root.dataset['rightColumn'] !== next) root.dataset['rightColumn'] = next;
+    apply(next);
   };
   const resize = new ResizeObserver(update);
   resize.observe(workspace); resize.observe(editor);
