@@ -1071,6 +1071,10 @@ describe('the round trip through 回到原文 (#1525)', () => {
       back.surface.refresh(); await flush();
       expect(top()).toBe(580);
       expect(scroller.scrollTop).toBe(459);
+      // A scroll no hand of the editor's made — a focus move, a late scrollIntoView — is undone as well.
+      scroller.scrollTop += 39;
+      miniDocument.body.dispatchEvent({ type: 'scroll' });
+      expect(top()).toBe(580);
       // Once the editor scrolls, the page is theirs again.
       miniDocument.body.dispatchEvent({ type: 'wheel' });
       above = 80;

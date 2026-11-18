@@ -573,14 +573,18 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (Math.abs(drift) >= 1) page.scrollTop += drift;
     return true;
   };
+  // A scroll the editor did not make (none of their wheel, pointer, key or touch came first) is undone while the return settles.
+  const holdOnScroll = (): void => { holdAnchor(); };
   const releaseAnchor = (): void => {
     anchor = null;
     anchorWatch?.disconnect();
     for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) document.removeEventListener(type, releaseAnchor, true);
+    document.removeEventListener('scroll', holdOnScroll, true);
   };
   let anchorWatch: ResizeObserver | undefined;
   if (anchor !== null) {
     for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) document.addEventListener(type, releaseAnchor, true);
+    document.addEventListener('scroll', holdOnScroll, true);
     anchorWatch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { holdAnchor(); }) : undefined;
   }
   let focusPages = 0;
@@ -2609,10 +2613,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   async function goToText(run: ReviewRunProjection, finding: ReviewFindingProjection): Promise<void> {
     if (destroyed || working) return;
+    // Where the card stands at the press itself, before anything this jump shows can move the page.
+    rememberLeave(finding.findingId);
+    focusFindingId = finding.findingId;
     options.setStatus(REVIEW_STATUS_LINES.openingText, 'busy');
     try {
-      focusFindingId = finding.findingId;
-      rememberLeave(finding.findingId);
       await options.goToText({
         ordinal: finding.ordinal,
         manuscriptId: run.manuscript.manuscriptId,
