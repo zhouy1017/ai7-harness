@@ -2956,7 +2956,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       }
     })().catch(() => { chooser.unavailable(); }).finally(() => { if (!state.dismissed) { state.choicePending = false; sheetUpdate(); } }); }
     const primaryActions = el('div', 'button-row'); primaryActions.append(chooser.element, start, prepare);
-    actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));
+    actions.append(procedureField, primaryActions, el('small', 'review-management-note', technicalWords('规范文件与工序在知识库里管理；这里只选用', '规范文件在知识库里管理；这里只选用')));
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
     form.append(categories, localOptions, assurance, scopes, consequences, networkNotice, networkSettings, problem, estimateNotice, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());

@@ -411,7 +411,7 @@ function renderBookOverview(
 
 
   const records = element('section', 'review-section record-navigation');
-  records.append(element('h3', undefined, technicalWords('精确记录', '导入记录')));
+  if (technicalLayerVisible) records.append(element('h3', undefined, '精确记录'));
   const recordButtons = element('div', 'button-row');
   for (const record of overview.records) {
     if (!technicalLayerVisible && ['book', 'manuscript', 'revision', 'workflow'].includes(record.kind)) continue;
@@ -451,11 +451,11 @@ function renderBookOverview(
     historyNavigation.append(next);
   }
   records.append(historyNavigation);
-  // 导入与历史记录 folds away below the work (Issue #1413 cluster 4); a Book with no manuscript yet, an import just finished
-  // and 历史与恢复 open it.
+  // 导入记录 folds away below the work (Issue #1413 cluster 4); a Book with no manuscript yet or an import just finished
+  // opens it. It is where the removed 历史与恢复 row led (#1521).
   const history = element('details', 'book-overview-history');
   history.open = overview.manuscriptState.state !== 'populated' || sourceCompletion !== undefined;
-  history.append(element('summary', undefined, technicalWords('精确记录', '导入与历史记录')), records);
+  history.append(element('summary', undefined, technicalWords('精确记录', '导入记录')), records);
   secondary.prepend(peopleSlot, seriesSlot, agentEntry);
   content.append(secondary, history);
   if (technicalLayerVisible) content.append(identity);
