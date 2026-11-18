@@ -3327,6 +3327,8 @@ async function main() {
     // feedback-prerequisites, is enabled for this Book from its card on the overview the import lands on, as J-16 does.
     await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'empty'`, `${name}-summary`);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), `${name}-open`);
+    // The bar's start is offered once its model settings are read.
+    await waitFor(renderer, `document.querySelector('[data-evaluation-action="start-initial"]')?.disabled===false`, `${name}-start-ready`);
     const fresh = await readEvaluation(renderer, (page) => page.state === 'ready' && page.initial?.state === 'none', `${name}-ready`);
     requireJourney(JSON.stringify(fresh.initial.actions) === JSON.stringify([['start-initial', '生成评估报告', false], ['prepare-initial', '先看计划', false]]), `${name}-prepare-offered`, fresh.initial);
     await runInitialEvaluation(name);

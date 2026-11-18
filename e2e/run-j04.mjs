@@ -423,6 +423,12 @@ async function startUpdate(renderer, mode, label, name, launch = true) {
   void label;
   // The previous Run's 查看结果 window may have opened over the page when it finished; the editor closes it first.
   if (await renderer.evaluate(`!!document.querySelector('.task-result-window')`)) await pointerClick(renderer, waitFor, '.task-result-window [data-task-result-action="close"]', `${name}-result-close`);
+  // Below 1120 px the Task Drawer overlays the page: when it covers the history tab, the editor closes it first.
+  const tabCovered = `(() => { const tab=document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]'); if(!tab)return false; tab.scrollIntoView({block:'center',behavior:'instant'}); const r=tab.getBoundingClientRect(); return !tab.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)) && !!document.querySelector('#task-drawer:not([hidden])')?.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)); })()`;
+  if (await renderer.evaluate(tabCovered)) {
+    await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close`);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `${name}-drawer-closed`);
+  }
   await pointerClick(renderer, waitFor, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab`);
   const choice = `.baseline-analysis-card [data-analysis-action="${mode}"]`;
   await waitFor(renderer, `document.querySelector(${JSON.stringify(choice)})?.disabled===false`, `${name}-selected-plan-ready`);

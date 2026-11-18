@@ -142,13 +142,20 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
       };
       // The plan and the references arrive after the panel opens: place it again whenever its size changes.
       if (typeof ResizeObserver === 'function') new ResizeObserver(place).observe(panel);
+      // A scroll or a resize moves the summary under a fixed panel: the panel follows it while it is shown.
+      const follow = (): void => place();
       details.addEventListener('toggle', event => {
         if (event.target !== details) return;
         if (!details.open) { if (panel.matches(':popover-open')) panel.hidePopover(); return; }
         panel.showPopover();
         place();
+        document.addEventListener('scroll', follow, { capture: true, passive: true }); window.addEventListener('resize', follow);
       });
-      panel.addEventListener('toggle', () => { if (!panel.matches(':popover-open')) details.open = false; });
+      panel.addEventListener('toggle', () => {
+        if (panel.matches(':popover-open')) return;
+        document.removeEventListener('scroll', follow, { capture: true }); window.removeEventListener('resize', follow);
+        details.open = false;
+      });
     }
     return details;
   };

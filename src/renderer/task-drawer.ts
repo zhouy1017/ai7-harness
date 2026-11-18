@@ -1546,7 +1546,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       model.setAttribute('aria-label', '沿用本次计划的模型与思考强度');
       const preview = el('div'); preview.append(el('p', undefined, next.scope.process), el('p', undefined, next.scope.send), listOf(next.steps.map(step => step.label), 'task-plan-list'));
       parts.push(createLaunchBarPresentation(model, begin, { title: '选项', content: optionRows }, preview));
-      for (const action of view.actions.filter(action => !['start', 'start-when-online', 'update-and-start', 'update-plan'].includes(action.name))) parts.push(barAction(action, noteId));
+      // 更新计划 stays beside the start, which itself revises then starts (保存并开始): the edited plan can be saved without starting.
+      for (const action of view.actions.filter(action => !['start', 'start-when-online', 'update-and-start'].includes(action.name))) parts.push(barAction(action, noteId));
     } else parts.push(actions);
 
     const run = next.runControl;
