@@ -1,6 +1,6 @@
 
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
-import { reportResult } from './notifications.js';
+import { AUTO_RESULT_KEY, reportResult } from './notifications.js';
 import { technicalLayerVisible } from './technical-layer.js';
 import { APPEARANCE_BACK, APPEARANCE_CHOICES, APPEARANCE_LEDE, APPEARANCE_LEGEND, APPEARANCE_SAVED, APPEARANCE_SAVE_FAILED, APPEARANCE_SECTION, APPEARANCE_STATUS, APPEARANCE_TITLE } from './appearance-labels.js';
 import { mountLearningAskFrequency } from './learning-settings.js';
@@ -121,6 +121,15 @@ async function renderNotificationSettings(): Promise<void> {
     content.append(row);
   }
   paint();
+  // 正在看本书时自动显示结果 (#1510, #1528): the editor's own switch on this device, on unless turned off; it opens no result by itself elsewhere.
+  const autoResult = element('label', 'field');
+  const autoResultControl = document.createElement('input');
+  autoResultControl.type = 'checkbox';
+  autoResultControl.dataset['taskOverviewAutoResult'] = '';
+  autoResultControl.checked = localStorage.getItem(AUTO_RESULT_KEY) !== 'off';
+  autoResultControl.addEventListener('change', () => localStorage.setItem(AUTO_RESULT_KEY, autoResultControl.checked ? 'on' : 'off'));
+  autoResult.append(autoResultControl, document.createTextNode(NOTIFICATION_SETTINGS_WORDS.autoResult));
+  content.append(autoResult);
   content.append(button(NOTIFICATION_SETTINGS_WORDS.back, 'secondary', renderSettingsHub));
   replaceScreen('notifications', content);
   setStatus(NOTIFICATION_SETTINGS_WORDS.opened);
