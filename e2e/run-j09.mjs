@@ -1,6 +1,6 @@
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
-import { attentionNoticeClearsMenu, attentionNoticeHolds, pressQuietResult, READ_CARET } from './attention-notice.mjs';
+import { attentionNoticeClearsMenu, attentionNoticeHolds, closeTaskDrawer, pressQuietResult, READ_CARET } from './attention-notice.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -1835,6 +1835,8 @@ async function main() {
     try {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'model-question-manuscript-entry');
       await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]')`, 'model-question-manuscript');
+      // At 1008 px the drawer the start left open overlays the text: closed by pointer, as an editor going on to type would.
+      await closeTaskDrawer(renderer, waitFor, 'model-question');
       // The editor returned to the window: a summary of what the earlier stages left may be showing. It is closed first, so that
       // the next notice is the question's, and so that the caret below is read after everything that could move it.
       if (await renderer.evaluate(`document.querySelector('[data-attention-toast]')?.hidden === false`)) {
@@ -1907,6 +1909,8 @@ async function main() {
     try {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'second-question-manuscript-entry');
       await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]')`, 'second-question-manuscript');
+      // At 1008 px the drawer the start left open overlays the text: closed by pointer, as an editor going on to type would.
+      await closeTaskDrawer(renderer, waitFor, 'second-question');
       if (await renderer.evaluate(`document.querySelector('[data-attention-toast]')?.hidden === false`)) {
         await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'second-question-summary-close');
         await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'second-question-summary-closed');
