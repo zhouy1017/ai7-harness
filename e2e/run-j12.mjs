@@ -1,4 +1,4 @@
-import { chooseDispatch } from './dispatch-chooser.mjs';
+import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -1597,10 +1597,25 @@ async function main() {
     await waitFor(registeredBookA, `document.hasFocus() && document.visibilityState==='visible'`, 'preflight-existing-a-focused');
     const sourceRecordsAfter = await registeredBookA.evaluate(`(async()=>{ const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}); return overview.records.filter((record)=>record.kind==='source-import-record').length; })()`);
     requireJourney(sourceRecordsBefore === sourceRecordsAfter && (await manager.list()).length === 3, 'preflight-no-durable-commit-or-window');
-    // #1519: the refusal stands in the fixed bar, in view and over neither the sidebar nor the page's sticky action bar.
+    // #1519: the refusal stands in the bar, an overlay above the page's sticky action bar: in view, over neither the sidebar nor
+    // the page's sticky actions, with the sidebar open and folded to icons, at the top of the page and scrolled to its end.
+    const PREFLIGHT_CONTROLS = ['.commit-bar', '.workbench-actions'];
+    const preflightWheel = async (deltaY) => primary.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(await primary.evaluate('innerWidth') * 0.6), y: 300, deltaX: 0, deltaY });
     for (const [width, height] of [[1280, 800], [1008, 681]]) {
       await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-      await waitFor(primary, `innerWidth === ${width} && innerHeight === ${height} && ${statusBarClear(['.commit-bar', '.workbench-actions'])}`, `preflight-error-clear-${width}`);
+      for (const form of ['full', 'icons']) {
+        if (form === 'icons') {
+          await pointerClick(primary, waitFor, '#sidebar-toggle', `preflight-error-fold-${width}`);
+          await waitFor(primary, `document.documentElement.dataset.sidebar === 'icons'`, `preflight-error-folded-${width}`);
+        }
+        await waitFor(primary, `innerWidth === ${width} && innerHeight === ${height} && ${statusBarClear(PREFLIGHT_CONTROLS)}`, `preflight-error-clear-${width}-${form}`);
+        await preflightWheel(100000);
+        await waitFor(primary, `scrollY + innerHeight >= document.documentElement.scrollHeight - 1 && ${statusBarClear(PREFLIGHT_CONTROLS)}`, `preflight-error-clear-at-end-${width}-${form}`);
+        await preflightWheel(-100000);
+        await waitFor(primary, `scrollY === 0`, `preflight-error-back-${width}-${form}`);
+      }
+      await pointerClick(primary, waitFor, '#sidebar-toggle', `preflight-error-unfold-${width}`);
+      await waitFor(primary, `document.documentElement.dataset.sidebar !== 'icons'`, `preflight-error-unfolded-${width}`);
     }
     await primary.send('Emulation.clearDeviceMetricsOverride');
     await click(primary, '取消导入', 'preflight-abandon-source');

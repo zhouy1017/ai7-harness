@@ -1413,41 +1413,48 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === 'none' && document.querySelectorAll('[data-screen="landing"] section.recent-work article.book-summary-item').length === 2 && ${notice} === '已显示全部图书'`, 'search-cleared');
 
     // #1519: a failed 查找图书 stands in the bar fixed to the bottom of the content area — a short line and a very long one, at both
-    // window sizes, with the sidebar open and folded to icons. The bar is whole inside the window, wraps its words, and covers
-    // neither the sidebar, its pinned 设置 row, nor the last line of the page; × only dismisses it.
-    const LONG_FAILURE = '查找没有完成：本机业务服务暂时没有回答，请稍后再试；这条说明故意写得很长，用来确认它在窗口里自行折行，既不超出窗口，也不压住侧栏、侧栏底部的设置，或页面的最后一行。'.repeat(3);
+    // window sizes, with the sidebar open and folded to icons. The bar is whole inside the window, wraps its words (a long one
+    // scrolls inside the bar), covers neither the sidebar nor its pinned 设置 row, and with the page scrolled to its end the last
+    // line stands clear above it; × only dismisses it. The fault is armed apart from the press, which is real pointer input.
+    const LONG_FAILURE = '查找没有完成：本机业务服务暂时没有回答，请稍后再试；这条说明故意写得很长，用来确认它在窗口里自行折行，既不超出窗口，也不压住侧栏、侧栏底部的设置，或页面的最后一行。'.repeat(5);
     const wheel = async (deltaY) => {
-      await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 640, y: 300, deltaX: 0, deltaY });
+      await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(await renderer.evaluate('innerWidth') * 0.6), y: 300, deltaX: 0, deltaY });
     };
+    const LAST_LINE_CLEAR = `(() => { const bar = document.querySelector('#persistence-status').getBoundingClientRect(); const last = document.querySelector('#screen').lastElementChild; return last instanceof HTMLElement && last.getBoundingClientRect().bottom <= bar.top + 0.5; })()`;
     try {
       for (const [width, height] of [[1280, 800], [1008, 681]]) {
         await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
         for (const [kind, failure] of [['short', `new Error('read failed')`], ['long', `{ code: 'SERVICE_UNAVAILABLE', message: ${JSON.stringify(LONG_FAILURE)} }`]]) {
           await fill(renderer, '#book-filter-text', '吴二', `library-error-${kind}-words`);
+          // The next submit of the book filter has its read rejected, through the Journey's one-shot promise hook.
           await assertRenderer(renderer, `(() => {
-            const original = Promise.prototype.then;
-            try {
+            const arm = (event) => {
+              if (!(event.target instanceof HTMLFormElement) || !event.target.classList.contains('book-filter')) return;
+              document.removeEventListener('submit', arm, true);
+              const original = Promise.prototype.then;
               Promise.prototype.then = function (success, failure) { Promise.prototype.then = original; return original.call(this, () => failure(${failure}), failure); };
-              document.querySelector('[data-book-filter-action="find"]').click();
-            } finally { Promise.prototype.then = original; }
+            };
+            document.addEventListener('submit', arm, true);
             return true;
-          })()`, `library-error-${kind}-find`);
-          await waitFor(renderer, `(() => { const bar = document.querySelector('#persistence-status'); return bar instanceof HTMLElement && !bar.hidden && bar.dataset.tone === 'error' && bar.textContent.startsWith(${JSON.stringify(kind === 'short' ? '无法查找图书。' : '查找没有完成')}); })()`, `library-error-${kind}-shown`);
-          await assertRenderer(renderer, `innerWidth === ${width} && innerHeight === ${height} && scrollY === 0 && ${width === 1008 ? 'document.documentElement.scrollHeight > innerHeight' : 'true'} && ${statusBarClear()} && ${kind === 'long' ? "document.querySelector('#persistence-status').getBoundingClientRect().height > 40" : 'true'}`, `library-error-${kind}-in-view`);
-          if (kind === 'short') {
+          })()`, `library-error-${kind}-arm`);
+          await pointerClick(renderer, waitFor, '[data-book-filter-action="find"]', `library-error-${kind}-find`);
+          await waitFor(renderer, `(() => { const bar = document.querySelector('#persistence-status'); return bar instanceof HTMLElement && !bar.hidden && bar.dataset.tone === 'error' && bar.textContent.startsWith(${JSON.stringify(kind === 'short' ? '无法查找图书。' : '查找没有完成')}) && document.documentElement.dataset.statusBar === 'shown'; })()`, `library-error-${kind}-shown`);
+          await assertRenderer(renderer, `innerWidth === ${width} && innerHeight === ${height} && ${width === 1008 ? 'document.documentElement.scrollHeight > innerHeight' : 'true'} && ${statusBarClear()} && ${kind === 'long' ? "(() => { const bar = document.querySelector('#persistence-status'), line = bar.querySelector('.status-line'); return bar.getBoundingClientRect().height > 40 && bar.getBoundingClientRect().height <= innerHeight / 4 && line.scrollHeight > line.clientHeight; })()" : 'true'}`, `library-error-${kind}-in-view`);
+          for (const form of ['full', 'icons']) {
+            if (form === 'icons') {
+              await pointerClick(renderer, waitFor, '#sidebar-toggle', `library-error-${kind}-fold-sidebar`);
+              await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons'`, `library-error-${kind}-folded`);
+            }
+            await waitFor(renderer, statusBarClear(), `library-error-${kind}-${form}-clear`);
             await wheel(100000);
-            await waitFor(renderer, `scrollY + innerHeight >= document.documentElement.scrollHeight - 1`, 'library-error-scrolled-to-end');
-            await assertRenderer(renderer, `(() => { const bar = document.querySelector('#persistence-status').getBoundingClientRect(); const last = document.querySelector('#screen').lastElementChild; return last instanceof HTMLElement && last.getBoundingClientRect().bottom <= bar.top + 0.5; })()`, 'library-error-clear-of-last-line');
+            await waitFor(renderer, `scrollY + innerHeight >= document.documentElement.scrollHeight - 1 && ${LAST_LINE_CLEAR} && ${statusBarClear()}`, `library-error-${kind}-${form}-clear-of-last-line`);
             await wheel(-100000);
-            await waitFor(renderer, `scrollY === 0`, 'library-error-scrolled-back');
+            await waitFor(renderer, `scrollY === 0`, `library-error-${kind}-${form}-scrolled-back`);
           }
-          await clickSelector(renderer, '#sidebar-toggle', `library-error-${kind}-fold-sidebar`);
-          await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons'`, `library-error-${kind}-folded`);
-          await assertRenderer(renderer, statusBarClear(), `library-error-${kind}-clear-of-folded-sidebar`);
-          await clickSelector(renderer, '#sidebar-toggle', `library-error-${kind}-open-sidebar`);
+          await pointerClick(renderer, waitFor, '#sidebar-toggle', `library-error-${kind}-open-sidebar`);
           await waitFor(renderer, `document.documentElement.dataset.sidebar !== 'icons'`, `library-error-${kind}-opened`);
-          await clickSelector(renderer, '#persistence-status .status-dismiss', `library-error-${kind}-dismiss`);
-          await waitFor(renderer, `document.querySelector('#persistence-status')?.hidden === true`, `library-error-${kind}-dismissed`);
+          await pointerClick(renderer, waitFor, '#persistence-status .status-dismiss', `library-error-${kind}-dismiss`);
+          await waitFor(renderer, `document.querySelector('#persistence-status')?.hidden === true && document.documentElement.dataset.statusBar === undefined`, `library-error-${kind}-dismissed`);
         }
       }
     } finally {

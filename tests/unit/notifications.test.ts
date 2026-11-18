@@ -318,6 +318,33 @@ describe('quiet notice lifetime', () => {
     } finally { restore(); }
   });
 
+  it('an update unrelated to a standing error leaves its text and × the same nodes; the announcer alone says it', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div'); const announcer = miniDocument.createElement('div');
+      miniDocument.body.append(surface, announcer);
+      const update = createStatusSurface(surface as unknown as HTMLElement, announcer as unknown as HTMLElement);
+      update('无法打开图书', 'error');
+      const [line, close] = surface.children;
+      const errorText = line!.children[0]!;
+      // Counts every write of the error's words: an unrelated update must not repaint them.
+      let rewrites = 0;
+      const words = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(errorText), 'textContent')!;
+      Object.defineProperty(errorText, 'textContent', { configurable: true, get() { return words.get!.call(this); }, set(value) { rewrites += 1; words.set!.call(this, value); } });
+      for (const next of [() => update('已保存'), () => reportResult(update, '已取消文件选择'), () => update('正在保存…', 'busy'), () => update('')]) {
+        next();
+        expect(surface.children[0]).toBe(line);
+        expect(surface.children[1]).toBe(close);
+        expect(line!.children[0]).toBe(errorText);
+        expect(rewrites).toBe(0);
+        expect(errorText.textContent).toBe('无法打开图书');
+      }
+      update('已保存');
+      expect(announcer.textContent).toBe('已保存');
+      expect(surface.textContent).toBe('无法打开图书');
+    } finally { restore(); }
+  });
+
   it('closing an error only dismisses it, and a new destination clears it', () => {
     const restore = installMiniDom();
     try {

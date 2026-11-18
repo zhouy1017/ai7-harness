@@ -6,7 +6,7 @@ import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFa
 
 
 import { mountMenuControls, mountSelectControls } from './components/controls.js';
-import { createStatusSurface, reportResult } from './notifications.js';
+import { createStatusSurface, followBottomControls, reportResult } from './notifications.js';
 import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
 import { ScreenReturnHistory } from './screen-return.js';
 import { startPreparedTask } from './one-action-start.js';
@@ -116,6 +116,7 @@ const unmountMenuControls = mountMenuControls(document.body);
 window.addEventListener('pagehide', unmountMenuControls, { once: true });
 const persistenceStatus = requiredElement('#persistence-status');
 const statusSurface = createStatusSurface(persistenceStatus, requiredElement('#status-announcer'));
+followBottomControls(persistenceStatus);
 /** Incremented on every status update so a delayed completion cannot overwrite a newer message. */
 let statusRevision = 0;
 
