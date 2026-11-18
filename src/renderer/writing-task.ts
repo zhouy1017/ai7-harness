@@ -142,6 +142,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   // The types whose draft this surface opens by itself once written (Issue #1403): the editor began their AI 写作 here. Each
   // remembers the draft already waiting when it began, so only the new one opens.
   const autoOpen = new Map<string, string | null>();
+  /** Sheets whose 先看计划 was opened: their start leaves 打开草稿 to the editor, as 0.7.2's plan-first start did. */
+  const planShown = new WeakSet<object>();
   const awaitDraft = (typeId: string): void => {
     autoOpen.set(typeId, projection?.types.find((type) => type.typeId === typeId)?.drafted?.revisionId ?? null);
   };
@@ -386,8 +388,13 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       readInput: () => ({ typeId: state.typeId ?? '', audience: state.audience, channel: state.channel,
         requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds] }),
       beforeLaunch: async () => await prepare(null, true, true) === true,
-      onStarted: () => { const typeId = state.typeId; if (sheet === state) { sheet = null; paint(null); } if (typeId !== null) awaitDraft(typeId); }
+      onStarted: () => { const typeId = state.typeId; if (sheet === state) { sheet = null; paint(null); } if (typeId !== null && !planShown.has(state)) awaitDraft(typeId); }
     });
+    const estimate = row.querySelector<HTMLDetailsElement>('.task-launch-estimate');
+    if (estimate !== null && estimate.dataset['writingPlanWatched'] === undefined) {
+      estimate.dataset['writingPlanWatched'] = '';
+      estimate.addEventListener('toggle', () => { if (estimate.open) planShown.add(state); });
+    }
     row.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-writing-action', 'start');
     row.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-writing-action', 'plan');
     row.append(cancel);
