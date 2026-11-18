@@ -760,8 +760,9 @@ async function commentsTriage(renderer, check, waitFor, form, keyword) {
   await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-search-input]')`, 'comments-triage-search-focused');
   await renderer.send('Input.insertText', { text: keyword });
   await waitFor(renderer, `document.querySelector('[data-mark-search-input]').value===${JSON.stringify(keyword)}`, 'comments-triage-keyword');
-  await triageKey(renderer, 'Escape', 'Escape', 27);
-  await waitFor(renderer, `!(${isOpen})`, 'comments-triage-filter-closed');
+  // Escape in a search field that holds text clears it first (the platform's search field); 筛选 closes the filter and keeps it.
+  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-filter-toggle]'))).real, 'comments-triage-filter-close-click');
+  await waitFor(renderer, `!(${isOpen}) && document.querySelector('[data-mark-search-input]').value===${JSON.stringify(keyword)}`, 'comments-triage-filter-closed');
   const nextClick = async (name) => check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-pending-step="next"]'))).real, name);
   // 下一条待处理 on the page, then across it; the card there stays selected once read.
   await nextClick('comments-triage-next-click');
