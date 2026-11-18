@@ -1754,8 +1754,11 @@ async function main() {
     // 状态卡 of a task that finished (Issue #1527): its result in one sentence, its 处理用时 from the Run Report, 查看结果 — opened from the
     // overview card's 更多 menu by pointer, at the wide window and at the Gate's.
     at('task-status-finished-overview');
-    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='recent').items.some(i=>i.itemId===${JSON.stringify(fourth.itemId)} && i.state==='completed'))()`, 'task-status-finished-recorded', 60000);
-    const finishedCard = `.task-overview-card[data-task-item="${fourth.itemId}"]`;
+    // A finished task is listed under the id of its recorded outcome, not under the id it had while it ran: find it by its Book.
+    const findFinished = `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='recent').items.find(i=>i.bookId===${JSON.stringify(overviewBooks[3])} && i.state==='completed')?.itemId ?? null)()`;
+    await waitFor(renderer, findFinished, 'task-status-finished-recorded', 60000);
+    const finishedItemId = await renderer.evaluate(findFinished);
+    const finishedCard = `.task-overview-card[data-task-item="${finishedItemId}"]`;
     for (const [statusWidth, statusHeight] of [[1280, 800], [1008, 681]]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width: statusWidth, height: statusHeight, deviceScaleFactor: 1, mobile: false });
       await pointerClick(renderer, waitFor, `${finishedCard} .task-overview-more > summary`, `task-status-finished-menu-${statusWidth}`);
