@@ -9,6 +9,8 @@ amended-by: the amendment of 2026-11-17 below (Owner, plan #1516 §1; #1518) —
 
 # 0077 · Adopt the editor-facing surface specification as the execution standard
 
+> Amended by [ADR 0105 §4–§5](./0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md#4--one-baseline-revision-117-data-version-2): §3's 数据版本 changes for the first time at 0.8.0, to Data Version 2; the upgrade that changes it backs up first, states the change, is started by one click, keeps the old data and can roll back, through the in-app upgrade tool.
+
 ## Context
 
 [ADR 0076](./0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md) recorded the first half of the Owner's September design session — manuscript-first entry, marks, review, evaluation, the knowledge base, the findings center and external evidence retention. The session then continued screen by screen through task planning and authorization (③), import, reimport and export (④), global navigation, the knowledge base and settings (⑤), and deliverables (⑥), and re-cut two earlier screens (②A to baseline-only, ②B with one more category). Every screen ended with the Owner's 「定了」.

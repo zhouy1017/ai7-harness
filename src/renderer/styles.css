@@ -789,6 +789,15 @@ body:has(.task-drawer[data-task-drawer-view="launch"]:not([hidden])) #task-drawe
 .task-plan-activity[data-task-plan-activity="cancelling"] { border-color: var(--status-attention); background: var(--status-attention-surface); }
 .task-plan-activity-title { margin: 0; font-size: .95rem; }
 .task-plan-activity .attention-note { margin: 0; }
+/* 状态卡 (Issue #1527): ordinary mode's 运行 view of a started Task — a bar, two lines, the way to the result and to the plan. */
+.task-status-card { display: grid; gap: .45rem; padding: .75rem .85rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface-subdued); }
+.task-status-card p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.task-status-card p[hidden], .task-status-card [hidden] { display: none; }
+.task-status-sentence { font-weight: 800; }
+.task-status-line, .task-status-model { color: var(--text-subdued); font-size: .9rem; font-variant-numeric: tabular-nums; }
+.task-status-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
+.task-status-actions .task-plan-full-link { margin-top: 0; }
+.task-drawer-title { overflow-wrap: anywhere; }
 .task-bar-cancel-impact { display: grid; gap: .45rem; padding: .75rem; border: 1px solid var(--status-attention); border-radius: 10px; background: var(--surface); }
 .task-bar-cancel-impact h4 { margin: 0; }
 .task-bar-cancel-impact h4:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -2055,7 +2064,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
   .book-people-related,
   .task-panel-compose, .task-panel-count, .task-card, .task-result-window, .task-result-bar, .task-result-foot, .return-chip,
   .dialogue-attempt, .dialogue-convert,
-  .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
+  .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact, .task-status-card,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
   .global-attention-group, .global-attention-item,
@@ -2481,11 +2490,11 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 .view-region-row { margin: .3rem 0; }
 
 /* Issue #961: optional guidance stays within the existing landing and Book overview. */
+.library-home > .onboarding-card { grid-column: 1 / -1; }
 .onboarding-card:empty, .onboarding-guidance:empty { display: none; }
 .onboarding-card, .onboarding-guidance { margin-block: 1.5rem; padding: 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; }
-.onboarding-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; list-style: none; padding: 0; }
-.onboarding-data-location { overflow-wrap: anywhere; }
-@media (max-width: 900px) { .onboarding-steps { grid-template-columns: 1fr; } }
+.onboarding-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; list-style: none; padding: 0; }
+.onboarding-steps li { min-width: 200px; }
 
 /* Agent 工作区 (Issue #90, wave 13 slice 13a; UI ADR 0015): the Book-bound workspace's central screen — its safety state, the
    paragraphs a range is chosen in, the 修改要求 and the proposals, which read as candidates rather than marks. */
@@ -3129,3 +3138,15 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-synthesis > summary::before { content: '▸'; }
 .review-synthesis[open] > summary::before { content: '▾'; }
 .review-synthesis-preview { display: inline; flex: 1; min-width: 0; }
+
+.dialogue-follow-up { display: grid; gap: .5rem; margin-top: 1rem; }
+.dialogue-follow-up textarea { width: 100%; box-sizing: border-box; }
+.dialogue-attempt:not([open]) > summary { flex-wrap: nowrap; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-menu-options { border-top: 1px solid var(--boundary); padding-top: .5rem; display: grid; gap: .5rem; }
+
+.dialogue-citation.btn { display: inline; min-height: 0; min-width: 0; height: auto; padding: 0 .15em; vertical-align: baseline; font: inherit; line-height: inherit; }
+.dialogue-attempt > summary::before { content: "▸"; flex: none; }
+.dialogue-attempt[open] > summary::before { content: "▾"; }
+.dialogue .ui-disclosure-menu { position: relative; }
+.dialogue .ui-disclosure-menu > summary { cursor: pointer; list-style: none; padding: .4rem .65rem; }
+.dialogue .ui-disclosure-menu > summary::-webkit-details-marker { display: none; }

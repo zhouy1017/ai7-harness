@@ -23,7 +23,7 @@ import {
   reimportFidelityHeading,
   roundTripCard,
   textBoxChoiceStatement,
-  WORD_IMPORT_MODE_NAMES,
+  WORD_IMPORT_MODE_NAMES, WORD_IMPORT_CONSEQUENCES, unsupportedWordImportText, WORD_IMPORT_REASONS,
   wordImportModeOption,
   wordIntakeRefusalLabel,
 } from '../../src/renderer/import-fidelity-labels.js';
@@ -55,9 +55,9 @@ describe('the import fidelity review words', () => {
     ]);
   });
   it('offers the two tracked-change modes by ADR 0094 §5 names, recommending the suggestions default', () => {
-    expect(WORD_IMPORT_MODE_NAMES).toEqual({ suggestions: '转为 AI7 修订建议', 'accepted-baseline': '直接并入正文 · 定稿基线' });
+    expect(WORD_IMPORT_MODE_NAMES).toEqual({ suggestions: '转为 AI7 修改建议', 'accepted-baseline': '直接并入正文 · 定稿基线' });
     expect(['suggestions', 'accepted-baseline'].map((mode) => wordImportModeOption(mode as 'suggestions' | 'accepted-baseline')))
-      .toEqual(['转为 AI7 修订建议 · 推荐', '直接并入正文 · 定稿基线']);
+      .toEqual(['转为 AI7 修改建议 · 推荐', '直接并入正文 · 定稿基线']);
   });
   it('gives every status its own shape beside its text', () => {
     expect(['preserved', 'retained', 'degraded', 'unsupported'].map((status) => fidelityStatusShape(status as never)))
@@ -156,4 +156,10 @@ describe('the import fidelity review words', () => {
     expect(index).not.toContain('不提供 DOCX 往返保证');
     expect(index).not.toContain('8 类');
   });
+});
+
+it('explains the Word revision outcomes and the unsupported-file next step', () => {
+  expect(WORD_IMPORT_CONSEQUENCES).toEqual({ suggestions: '以修改前的正文导入，可精确对应的文字修改转为待处理的修改建议，结构修改作为关联原文件的批注保留。', 'accepted-baseline': '以接受全部修订后的正文导入，原始修订留在原文件中。' });
+  expect(unsupportedWordImportText(3)).toBe('此文件含暂不支持的 Word 修订，不能作为首份稿件导入；定位到 3 处。请在 Word 中接受或拒绝全部修订后重新保存，再导入；也可以将此文件保留为来源材料。');
+  expect(WORD_IMPORT_REASONS).toBe('查看原因');
 });
