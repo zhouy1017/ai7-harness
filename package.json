@@ -19,6 +19,7 @@
     "check": "node tools/check.mjs",
     "validate:policies": "node tools/validate-policies.mjs",
     "docs:check": "node tools/check-docs.mjs",
+    "words:report": "node tools/words-report.mjs",
     "test": "vitest run tests/unit",
     "test:service": "vitest run tests/service",
     "build": "node tools/build-controller.mjs",
