@@ -3263,7 +3263,9 @@ async function main() {
     await typeInto(`${managementPage} .writing-task [data-writing-field="channel"]`, WRITING_REQUEST.channel, 'management-writing-channel');
     await pointerClick(renderer, waitFor, `${managementPage} .writing-task [data-writing-action="start"]`, 'management-writing-start');
     await launchTaskFromBar(renderer, waitFor, 'management-writing');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="promotion-article"] .editor-toolbar h2')?.textContent === ${JSON.stringify(`${managementWritingTitle} · 版本 1`)}`, 'management-writing-open', 120_000);
+    // The page is the ordinary one, so the heading is the document's title alone (the 版本 suffix is the technical layer's).
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="promotion-article"] .document-title-heading')?.textContent === ${JSON.stringify(managementWritingTitle)}`, 'management-writing-open', 120_000);
+    await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.some(doc=>doc.title===${JSON.stringify(managementWritingTitle)} && doc.origin.drafted===true))`, 'management-writing-drafted');
     at('derivatives-management-menus');
     // 导出 ▾ and ⋯ on a row: both open on a press, hold their entries inside the window at both sizes, and 设为定稿
     // turns the entry into 取消定稿.
