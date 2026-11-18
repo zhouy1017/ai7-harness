@@ -3116,3 +3116,15 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-synthesis > summary::before { content: '▸'; }
 .review-synthesis[open] > summary::before { content: '▾'; }
 .review-synthesis-preview { display: inline; flex: 1; min-width: 0; }
+
+.dialogue-follow-up { display: grid; gap: .5rem; margin-top: 1rem; }
+.dialogue-follow-up textarea { width: 100%; box-sizing: border-box; }
+.dialogue-attempt:not([open]) > summary { flex-wrap: nowrap; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-menu-options { border-top: 1px solid var(--boundary); padding-top: .5rem; display: grid; gap: .5rem; }
+
+.dialogue-citation.btn { display: inline; min-height: 0; min-width: 0; height: auto; padding: 0 .15em; vertical-align: baseline; font: inherit; line-height: inherit; }
+.dialogue-attempt > summary::before { content: "▸"; flex: none; }
+.dialogue-attempt[open] > summary::before { content: "▾"; }
+.dialogue .ui-disclosure-menu { position: relative; }
+.dialogue .ui-disclosure-menu > summary { cursor: pointer; list-style: none; padding: .4rem .65rem; }
+.dialogue .ui-disclosure-menu > summary::-webkit-details-marker { display: none; }

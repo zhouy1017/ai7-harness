@@ -1661,7 +1661,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'dialogue-streaming-held',
     'dialogue-background',
     'dialogue-return',
-    'dialogue-stop',
+    'dialogue-stop', 'dialogue-stopped-convert-hidden', 'dialogue-numbered-citation',
     'dialogue-continue-after-mid-stream-stop',
     'dialogue-regenerate',
     'dialogue-panel-answer',
