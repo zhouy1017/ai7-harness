@@ -780,6 +780,13 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="notifications"] [data-notification-settings]')`, 'notification-settings-shown');
     await assertRenderer(renderer, `document.querySelector('#context-title')?.textContent==='设置' && document.querySelector('#context-position')?.textContent==='本机 · 通知'`, 'notification-settings-place');
     await assertRenderer(renderer, `(() => { const switches = [...document.querySelectorAll('[data-notification-preference]')]; return switches.length === 4 && switches.every((control) => !control.checked) && document.querySelector('[data-notification-preference="notifications.completions"]').disabled && document.querySelector('[data-nav-settings="hub"]')?.getAttribute('aria-current') === 'page'; })()`, 'notification-settings-defaults');
+    // #1528: 正在看本书时自动显示结果 lives here now (it was in 发起任务), on until turned off, under its own stored key; the four
+    // system-notification switches above are unchanged.
+    const AUTO_RESULT = '[data-screen="notifications"] [data-task-overview-auto-result]';
+    await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(AUTO_RESULT)}); return input instanceof HTMLInputElement && input.type === 'checkbox' && input.checked && input.closest('label')?.textContent === '正在看本书时自动显示结果' && localStorage.getItem('ai7.task-overview.auto-result') !== 'off'; })()`, 'notification-settings-auto-result-default');
+    for (const [value, key] of [['off', 'notification-settings-auto-result-off'], ['on', 'notification-settings-auto-result-on']]) {
+      await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(AUTO_RESULT)}); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return input.checked === (${JSON.stringify(value)} === 'on') && localStorage.getItem('ai7.task-overview.auto-result') === ${JSON.stringify(value)}; })()`, key);
+    }
     await clickNotificationSwitch(renderer, 'notifications.enabled', 'notification-settings-enable');
     await waitFor(renderer, `document.querySelector('[data-notification-preference="notifications.completions"]')?.disabled === false`, 'notification-completions-enabled');
     await assertRenderer(renderer, `window.ai7.getPreferences().then((preferences) => preferences.values['notifications.enabled'] === true)`, 'notification-settings-saved');

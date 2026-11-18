@@ -1008,6 +1008,15 @@ async function main() {
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
     await runJ14DarkPass({ renderer, journey: 'J-16', at, representative: '#screen[data-screen="editor"] .editor-window', returnTo: SIDEBAR.section('manuscript') });
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]')`, 'panel-manuscript-after-dark-pass', 120_000);
+    // Opt out of the automatic result window in 设置 › 通知 (#1528: the switch moved there from 发起任务), so the explicit
+    // result-window steps below own their focus; the manuscript is then reopened through the sidebar.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'panel-result-popup-settings');
+    await waitFor(renderer, `document.querySelector('#screen[data-screen="settings"] [data-settings-route="notifications"]')`, 'panel-result-popup-hub');
+    await clickSelector(renderer, '[data-settings-route="notifications"]', 'panel-result-popup-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="notifications"] [data-task-overview-auto-result]')`, 'panel-result-popup-preference');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-screen="notifications"] [data-task-overview-auto-result]'); if (!(input instanceof HTMLInputElement) || !input.checked) return false; input.click(); return !input.checked && localStorage.getItem('ai7.task-overview.auto-result') === 'off'; })()`, 'panel-result-popup-off');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'panel-result-popup-return');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]')`, 'panel-manuscript-after-popup-off', 120_000);
     const opened = await openPanel(renderer, 'panel-open');
     requireJourney(opened.title === '任务' && opened.scope === '这本书 · 0 项' && opened.compose.heading === '发起全书任务' &&
       JSON.stringify(opened.compose.modes) === JSON.stringify([['first-baseline', true, false]]) && opened.compose.prepare === 'enabled' &&
@@ -1016,11 +1025,6 @@ async function main() {
         JSON.stringify([['等你处理', '0', '这里暂时没有任务。', 0], ['进行中', '0', '这里暂时没有任务。', 0], ['最近完成', '0', '这里暂时没有任务。', 0]]),
     'panel-empty', opened);
     await assertRenderer(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === true && document.body.dataset.taskDrawer === 'open'`, 'panel-one-slot');
-    // Opt out through the shared sheet so the explicit result-window steps below own their focus.
-    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-overview-start]')?.disabled===false`, 'panel-sheet-ready');
-    await clickSelector(renderer, '#task-drawer [data-task-overview-start]', 'panel-result-popup-preference');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('#task-drawer [data-task-overview-auto-result]'); if (!(input instanceof HTMLInputElement) || !input.checked) return false; input.click(); return !input.checked; })()`, 'panel-result-popup-off');
-    await clickSelector(renderer, '#task-drawer .task-overview-sheet .sheet-foot button:last-child', 'panel-sheet-close');
 
     at('panel-prepare');
     // The primary action prepares and starts in the panel, with no plan drawer.
