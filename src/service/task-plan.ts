@@ -835,7 +835,7 @@ function baselinePlanEdit(
   ordinal: number,
   blocks: ReadonlyArray<ManifestBlockInput>,
   ceiling: RunBudgetCeilingState,
-  live: boolean,
+  developerLive: boolean,
 ): TaskPlanProjection['edit'] {
   const started = projection.authorization !== null;
   const drifted = projection.planRevision !== null;
@@ -848,8 +848,8 @@ function baselinePlanEdit(
       ? null
       : { ordinal, recordedAt: madeBy.detectedAt, entries: madeBy.diff.map((entry) => driftEntry(entry, blocks)) },
     planEnvelopeDigest: started || drifted ? null : projection.planEnvelope?.digest ?? null,
-    // 设置上限… (Issue #51, S16a; MODEL-015): set with the plan's other edits — never under developer-live, whose launch sets it.
-    budget: { ceiling, settable: reason === null && !live, reason: reason ?? (live ? PLAN_CEILING_LAUNCH_REASON : null) },
+    // 设置上限… (Issue #51, S16a; MODEL-015): set with the plan's other edits — never under developer-live (the frozen envelope's `providerStatus`), whose launch sets it.
+    budget: { ceiling, settable: reason === null && !developerLive, reason: reason ?? (developerLive ? PLAN_CEILING_LAUNCH_REASON : null) },
   };
 }
 
@@ -1079,7 +1079,8 @@ export function baselineAnalysisPlan(input: {
       }),
       askFirst: [...LOCKED_BOUNDARY],
     },
-    edit: baselinePlanEdit(projection, version.ordinal, blocks, ceiling, live),
+    // The ceiling is the launch's only under developer-live (ADR 0070); a remote route in ordinary production lets the plan set it.
+    edit: baselinePlanEdit(projection, version.ordinal, blocks, ceiling, envelope.providerStatus === 'remote-eligible-developer-live'),
     drift: revision === null ? null : {
       reasons: ['计划冻结之后，它的关键内容已经变化；原计划不能再开始。'],
       entries: revision.diff.map((entry) => driftEntry(entry, blocks)),

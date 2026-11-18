@@ -1,3 +1,4 @@
+import type { BookFindingsProjection } from './protocol/review.js';
 import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, LedgerTaskLaunchOperation } from './runtime-execution-config.js';
 export type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
@@ -369,32 +370,8 @@ export * from './protocol/scoped-edit.js';
  */
 export const SERVICE_PROTOCOL_VERSION = 204 as const;
 
-export const BOOK_FINDINGS_PAGE_SIZE = 40;
-
-export interface BookFindingProjection {
-  /** Exact open suggestion offered by the owning review; Apply still revalidates this binding. */
-  suggestion?: { manuscriptId: string; branchId: string; markId: string; blockId: string; batchAllowed: boolean; quote: string; replacement: string };
-  id: string;
-  category: string;
-  categoryLabel: string;
-  severity: string;
-  status: string;
-  summary: string;
-  target:
-    | { kind: 'gap'; revisionId: string; unitOrdinal: number; blockId: string | null }
-    | { kind: 'review'; reviewRunId: string; findingId: string; blockId: string }
-    | { kind: 'risk'; recordId: string; riskId: string; revisionId: string };
-}
-
-export interface BookFindingsProjection {
-  bookId: string;
-  total: number;
-  offset: number;
-  next: number | null;
-  pageSize: typeof BOOK_FINDINGS_PAGE_SIZE;
-  groups: ReadonlyArray<{ category: string; label: string; count: number; bySeverity: Readonly<Record<string, number>>; byStatus: Readonly<Record<string, number>> }>;
-  items: ReadonlyArray<BookFindingProjection>;
-}
+export { BOOK_FINDINGS_PAGE_SIZE } from './protocol/review.js';
+export type { BookFindingProjection, BookFindingsProjection } from './protocol/review.js';
 
 export interface ParagraphAnalysisProjection {
   bookId: string;
