@@ -1516,6 +1516,8 @@ export class EditorialStore {
   #importRetentionOperationsHostOf(): importRetentionOperations.ImportRetentionOperationsHost {
     const store = this;
     return {
+      EditorialMemoryFacade,
+      canonicalDegradationDecision,
       stageImportedMarks,
       stagedImportedMarksMatch,
       createWordImportedMarks,
@@ -10442,7 +10444,7 @@ export class EditorialStore {
   }
 
   /** What one approved export came to, read by the main process before it reveals the file. */
-  inspectManuscriptExportReceipt(input: InspectManuscriptExportReceiptInput): ManuscriptExportReceiptProjection { return inspectExportReceipt({ assertAvailable: this.#assertAvailable.bind(this), manuscriptExport: this.#manuscriptExport }, input); }
+  inspectManuscriptExportReceipt(input: InspectManuscriptExportReceiptInput): ManuscriptExportReceiptProjection { return inspectExportReceipt({ assertAvailable: this.#assertAvailable.bind(this), manuscriptExport: this.#manuscriptExport, AnalysisError }, input); }
 
   // ---- 稿件冲突 of a single 修改建议 (Issue #57, plan slice S22) ----------------------------------------
 

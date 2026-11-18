@@ -173,6 +173,11 @@ export interface ImportReviewRecordsHost {
   readonly nullableString: (value: SQLOutputValue | undefined) => string | null;
 }
 
+/**
+   * The rows a Manuscript Reimport Record resolved and what its marks came to (Issue #412, plan slice S63): the first
+   * `MAX_REIMPORT_RECORD_ITEMS` of each, the counts saying how many there were. A record made before the chapter-level
+   * comparison has neither.
+   */
 export function reimportRecordResolutions(host: ImportReviewRecordsHost, reimportRecordId: string): Pick<Extract<BookRecordPresentation, { kind: 'manuscript-reimport-record' }>, 'groups' | 'markOutcomes'> {
     const groupCount = one(host.authority.prepare(
       `SELECT count(*) total FROM manuscript_reimport_groups g
@@ -1497,6 +1502,7 @@ export const REIMPORT_WIRE_HEADROOM_BYTES = 4_096;
 
 export const REIMPORT_MAPPING_PAGE_SIZE = 4;
 
+/** Rows of the chapter-level comparison per page (Issue #412, S63): each shows at most three excerpts a side. */
 export const REIMPORT_GROUP_PAGE_SIZE = 10;
 
 export const REIMPORT_GROUPING = 'ai7.reimport-groups/1' as const;
@@ -1572,6 +1578,11 @@ export function safeDisplayName(input: string): string {
   return name;
 }
 
+/**
+ * The parser's two "this is not a WordprocessingML package" refusals. They say the file is not a
+ * DOCX at all, which the router answers by classifying it as unrecognised and retaining it
+ * source-only; every other `DOCX_REJECTED` is a bound a hostile archive crossed and stays a refusal.
+ */
 export const NOT_A_WORDPROCESSING_PACKAGE = [
   'DOCX_REJECTED:not a WordprocessingML DOCX',
   'DOCX_REJECTED:package does not declare a WordprocessingML document',
@@ -1589,6 +1600,10 @@ export function requireSourceFormat(value: string): SourceFormat {
   return format!;
 }
 
+/**
+ * A file the product did not parse has no title metadata, so the file name is the only suggestion
+ * there is — the same fallback the DOCX parser uses when a package carries no title.
+ */
 export function fileNameTitleSuggestion(displayName: string): string {
   const withoutExtension = displayName.slice(0, displayName.length - extname(displayName).length).trim();
   return withoutExtension.length > 0 ? withoutExtension : displayName;
@@ -1600,6 +1615,11 @@ export function draftSourceProjection(snapshot: DraftSnapshot): StagedImportProj
     conversion: snapshot.conversion, workingObjectSha256: snapshot.workingObjectDigest };
 }
 
+/**
+ * The Import Fidelity Review for a converted file (ADR 0072 §3). The parser found nothing of its
+ * own in a working representation the product itself wrote, so every count in the review is the
+ * conversion's loss and every non-zero class names the converter as its cause.
+ */
 export function conversionFidelityReport(
   conversion: ManuscriptConversionProjection,
   loss: ConversionLoss,
@@ -1614,6 +1634,11 @@ export function conversionFidelityReport(
   );
 }
 
+/**
+ * The conversion a row carries, with the invariant `ALTER TABLE ADD COLUMN` could not express as a
+ * table `CHECK`: the working object and the converter's identity are null together or set together,
+ * and set only where the format is one the product reads through a converter (ADR 0072 §2).
+ */
 export function readConversionColumns(
   row: SqlRow,
   format: SourceFormat,
@@ -1628,6 +1653,11 @@ export function readConversionColumns(
   return { converterIdentity: asString(converterIdentity), sourceFormat: format };
 }
 
+/**
+ * The source surface of a stored commit result, read back from its Source Version row: the format
+ * and digest of record are the original's, and a converted import also names what it was read
+ * through (ADR 0072 §2).
+ */
 export function storedSourceProjection(row: SqlRow): StagedImportProjection['source'] {
   const format = requireSourceFormat(asString(row.format));
   const conversion = readConversionColumns(row, format, '来源版本的转换记录不完整。');
@@ -1642,6 +1672,7 @@ export function storedSourceProjection(row: SqlRow): StagedImportProjection['sou
   };
 }
 
+/** What such a review is rebuilt from, or `undefined` for a file the product read natively. */
 export function fidelityConversion(conversion: ManuscriptConversionProjection | null): FidelityConversionIdentity | undefined {
   return conversion === null
     ? undefined
@@ -1706,6 +1737,7 @@ export interface WordIntakePlan {
   prepared: WordPreparedIntake;
 }
 
+/** What a reviewed Word intake creates beside the ordinary import records: its eligible samples and any reused Source Version. */
 export function wordIntakeRecords(word: WordIntakePlan | undefined): { reusedSourceVersionId: string | null; eligibleSamples: number } | undefined {
   if (word === undefined) return undefined;
   const { choice, target } = word.prepared;
@@ -1727,6 +1759,10 @@ export interface CommitAttempt {
   completionAcknowledgedAt: string | null;
 }
 
+/**
+ * The working representation is always stored under `.docx` and its own digest, so a cleanup intent
+ * needs only the digest to find it again (ADR 0072 §2).
+ */
 export function workingObjectRelativeKey(objectDigest: string): string {
   return posix.join('sha256', objectDigest.slice(0, 2), `${objectDigest}${manuscriptObjectExtension('DOCX')}`);
 }
@@ -1979,6 +2015,7 @@ export interface ReimportPreparationWork {
   changedMappings: number;
 }
 
+/** One mapping's identity as a row's verb writes it (Issue #412, S63). */
 export interface ReimportPendingResolution {
   readonly mappingId: string;
   readonly resolution: 'preserve-current-identity' | 'create-new-identity' | 'retire-current-identity';
@@ -2100,6 +2137,11 @@ export function createReimportComparisonHasher(draftId: string, target: Resolved
   };
 }
 
+/**
+ * The digest of a comparison's resolutions: every mapping's identity in position order, then — since the
+ * chapter-level comparison (Issue #412, S63; schema `/3`) — every row's verb in ordinal order, so a commit reads
+ * exactly the rows the editor resolved. A comparison prepared before it keeps its `/2` digest.
+ */
 export function createReimportResolutionHasher() {
   const hash = createHash('sha256');
   hash.update(canonicalJson({ schema: 'ai7.manuscript-reimport-resolutions/3' }));
@@ -2225,6 +2267,10 @@ export function createSourceImportReviewDigest(
   }));
 }
 
+/**
+ * The fidelity a review states: the staged report with the text-box choice the review made (ADR 0086
+ * §2), and the plan it rebuilds to. The staged report itself always states the default, `retain`.
+ */
 export interface ReviewedFidelity {
   fidelity: FidelityCategoryProjection[];
   plan: ImportFidelityPlan;
@@ -2233,6 +2279,10 @@ export interface ReviewedFidelity {
   structure?: ImportStructureChoice | null;
 }
 
+/**
+ * Revision 6 of the review digest covers the text-box choice and the fidelity that states it (ADR 0086):
+ * a review that merges its text boxes and one that keeps them are different reviews.
+ */
 export function createImportReviewDigestV6(
   snapshot: DraftSnapshot,
   draftVersion: number,

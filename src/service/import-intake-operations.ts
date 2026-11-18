@@ -90,7 +90,7 @@ import {
 export function writeImportedManuscriptRows<T>(db: DatabaseSync, args: {
   input: { draftId: string }; bookId: string; manuscriptId: string; branchId: string; revisionId: string;
   sourceVersionId: string; revisionDigest: string; workingDigest: string; now: string;
-  shaped: boolean; word: unknown; snapshot: { blockCount: number }; blockCount: number; unmappedBlocks: number;
+  shaped: boolean; word: Pick<WordIntakePlan, 'compiled'> | undefined; snapshot: { blockCount: number }; blockCount: number; unmappedBlocks: number;
   characterCount: number; merged: Parameters<typeof insertMergedImportBlocks>[2] | null;
   structure: Parameters<typeof insertMergedImportBlocks>[3];
 }, betweenSourcesAndWorkingState: () => T, initializeImportedBranch: (branchId: string) => number): {
