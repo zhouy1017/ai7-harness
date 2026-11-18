@@ -258,6 +258,8 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     return true;
   };
   const openPlan = async (): Promise<void> => {
+    // A surface that cannot start now (busy) reads no plan either.
+    if (request.startDisabled === true) return;
     if (request.beforeLaunch !== undefined && !await request.beforeLaunch()) return;
     estimate.open = true;
     const version = previewVersion;

@@ -54,14 +54,15 @@ it('keeps an ordinary budget redo startable after authorization fails, revising 
 });
 
 /** A stopped baseline whose 调整预算并重做 prepares `prepared`; the drawer opens on the redo's own bar. */
-async function openBudgetRedo(prepared: ReturnType<typeof planWith>, api: Record<string, unknown>) {
+async function openBudgetRedo(prepared: ReturnType<typeof planWith> | (() => ReturnType<typeof planWith>), api: Record<string, unknown>) {
+  const current = typeof prepared === 'function' ? prepared : () => prepared;
   const stopped = planWith({ readiness: 'started', planEnvelopeDigest: null });
   stopped.state = { key: 'budget-reached', label: '已停止 · 预算已达上限' };
   stopped.edit.editable = false;
   stopped.budgetStop = { maxTotalTokens: 50000, usedTokens: 50000, unitsSettled: 1, unitsTotal: 8, launchSetsCeiling: false };
   stopped.redo = { summary: [], prepare: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, redoOf: 'old-run' } };
   const root = document.createElement('aside'); document.body.append(root);
-  const drawer = mountTaskDrawer({ root, shell: document.body, api: { inspectTaskPlan: async ({ ref }: { ref: string }) => ref === 'task' ? stopped : prepared, prepareBaselineAnalysis: vi.fn(async () => ({})), ...api },
+  const drawer = mountTaskDrawer({ root, shell: document.body, api: { inspectTaskPlan: async ({ ref }: { ref: string }) => ref === 'task' ? stopped : current(), prepareBaselineAnalysis: vi.fn(async () => ({})), ...api },
     onOpen: vi.fn(), onRecorded: vi.fn(), setStatus: vi.fn(), errorCode: () => null, errorMessage: (error: Error) => error.message,
     technicalDetails: () => document.createElement('details'), awaitServiceJob: async () => ({ state: 'completed', result: { taskIntent: { taskIntentId: 'redo-task' } } }) } as never);
   drawer.open({ bookId: 'book', kind: 'baseline-analysis', ref: 'task' }, () => null);
@@ -97,6 +98,26 @@ it('keeps the start-time choice among a ready redo\'s options, and 空闲时处�
   timing.value = 'idle'; timing.dispatchEvent({ type: 'change', bubbles: true });
   miniDocument.querySelector('[data-task-drawer-control="start"]')!.click();
   await vi.waitFor(() => expect(startTaskWhenIdle).toHaveBeenCalledWith({ kind: 'baseline-analysis', ref: 'redo-task', planEnvelopeDigest: 'e'.repeat(64), planDigests: [] }));
+  expect(authorizeBaselineAnalysis).not.toHaveBeenCalled();
+  drawer.close(false);
+});
+
+it('revises a changed tier and then records the when-online start when the redo is offline by then', async () => {
+  let prepared = { ...planWith({}), ref: 'redo-task' };
+  prepared.edit.budget = { ceiling: { kind: 'tokens', maxTotalTokens: 50000 }, settable: true, reason: null };
+  const editBaselineAnalysisPlan = vi.fn(async () => {
+    prepared = { ...prepared, planVersion: 2, start: { ...prepared.start, readiness: 'offline', planEnvelopeDigest: 'f'.repeat(64) },
+      edit: { ...prepared.edit, planEnvelopeDigest: 'f'.repeat(64), budget: { ...prepared.edit.budget!, ceiling: { kind: 'tokens', maxTotalTokens: 100000 } } } };
+    return { planVersion: { ordinal: 2 } };
+  });
+  const startBaselineAnalysisWhenOnline = vi.fn(async () => ({}));
+  const authorizeBaselineAnalysis = vi.fn(async () => ({ state: 'queued' }));
+  const { drawer } = await openBudgetRedo(() => prepared, { editBaselineAnalysisPlan, startBaselineAnalysisWhenOnline, authorizeBaselineAnalysis });
+  const budget = miniDocument.querySelector('[data-task-launch-option="budget"]')!;
+  budget.value = '100000'; budget.dispatchEvent({ type: 'change', bubbles: true });
+  miniDocument.querySelector('[data-task-drawer-control="start"]')!.click();
+  await vi.waitFor(() => expect(startBaselineAnalysisWhenOnline).toHaveBeenCalledWith({ taskIntentId: 'redo-task', planEnvelopeDigest: 'f'.repeat(64) }));
+  expect(editBaselineAnalysisPlan).toHaveBeenCalledOnce();
   expect(authorizeBaselineAnalysis).not.toHaveBeenCalled();
   drawer.close(false);
 });

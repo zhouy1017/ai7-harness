@@ -241,3 +241,19 @@ it('offers the ordinary 本次用量 as the four shared tiers, keeps a custom ce
     expect((launch.mock.calls[0]![0] as { planEdits: Record<string, unknown> }).planEdits).not.toHaveProperty('runBudgetCeiling');
   } finally { setTechnicalLayerVisible(true); }
 });
+
+it('reads no plan and offers no start while the surface says it cannot start, and both again once it can', async () => {
+  const { api, previewTaskLaunch } = launchApi('launchWritingTask');
+  const request = { operation: 'launchWritingTask', bookId: 'book', title: '写作', input: WRITING_REQUEST, startDisabled: true };
+  const bar = mountLaunchBar({ api: api as never, request: request as never, errorMessage: (_error: unknown, fallback: string) => fallback, setStatus: vi.fn(),
+    settle: async () => true, onRecorded: vi.fn(), openRun: vi.fn(), interrupted: false });
+  mounted.push(bar); document.body.append(...bar.body, ...bar.bar);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await bar.openPlan();
+  expect(previewTaskLaunch).not.toHaveBeenCalled();
+  expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')!.disabled).toBe(true);
+  request.startDisabled = false; bar.sync();
+  await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')!.disabled).toBe(false));
+  await bar.openPlan();
+  expect(previewTaskLaunch).toHaveBeenCalledOnce();
+});

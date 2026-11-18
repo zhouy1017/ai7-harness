@@ -1408,7 +1408,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const offline = next.start.readiness === 'offline';
       const begin = control(offline ? TASK_BAR_START_WHEN_ONLINE : '开始任务', 'primary', offline ? 'start-when-online' : 'start');
       begin.disabled = working || interrupted || !['ready', 'offline', 'record-only', 'no-route'].includes(next.start.readiness);
-      begin.addEventListener('click', () => { if (pendingEdits(next) > 0) void updatePlan(true); else if (offline) void startWhenOnline(); else void start(); });
+      begin.addEventListener('click', () => { if (pendingEdits(next) > 0) void updatePlan(true, true); else if (offline) void startWhenOnline(); else void start(); });
       const model = el('span', 'task-launch-retained-model', next.service.send);
       model.setAttribute('aria-label', '沿用本次计划的模型与思考强度');
       const preview = el('div'); preview.append(el('p', undefined, next.scope.process), el('p', undefined, next.scope.send), listOf(next.steps.map(step => step.label), 'task-plan-list'));
@@ -1905,7 +1905,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   }
 
   /** 更新计划 (PLAN-009, PLAN-011): the plan as the editor left it becomes the next version; a refusal is said beside the bar. */
-  async function updatePlan(andStart = false): Promise<void> {
+  async function updatePlan(andStart = false, offlineWaits = false): Promise<void> {
     const current = plan;
     let startNext: 'now' | 'when-online' | null = null;
     const asked = request;
@@ -1951,8 +1951,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         if (request !== null && request.ref === fresh.ref && request.kind === fresh.kind) {
           // This explicit revision must replace the old authorization digest even while its options are open.
           paint(retainTaskPlanPages(fresh, plan), true);
-          // Offline, the revised plan waits for the connection, as 联网后开始任务 records it.
-          startNext = fresh.start.readiness === 'ready' ? 'now' : fresh.start.readiness === 'offline' ? 'when-online' : null;
+          // The redo bar's start offline: the revised plan waits for the connection, as 联网后开始任务 records it. 保存并开始 starts only when ready.
+          startNext = fresh.start.readiness === 'ready' ? 'now' : offlineWaits && fresh.start.readiness === 'offline' ? 'when-online' : null;
         }
       }
     } catch (error) {
