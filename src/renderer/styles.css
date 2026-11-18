@@ -785,6 +785,15 @@ body:has(.task-drawer[data-task-drawer-view="launch"]:not([hidden])) #task-drawe
 .task-plan-activity[data-task-plan-activity="cancelling"] { border-color: var(--status-attention); background: var(--status-attention-surface); }
 .task-plan-activity-title { margin: 0; font-size: .95rem; }
 .task-plan-activity .attention-note { margin: 0; }
+/* 状态卡 (Issue #1527): ordinary mode's 运行 view of a started Task — a bar, two lines, the way to the result and to the plan. */
+.task-status-card { display: grid; gap: .45rem; padding: .75rem .85rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface-subdued); }
+.task-status-card p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.task-status-card p[hidden], .task-status-card [hidden] { display: none; }
+.task-status-sentence { font-weight: 800; }
+.task-status-line, .task-status-model { color: var(--text-subdued); font-size: .9rem; font-variant-numeric: tabular-nums; }
+.task-status-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
+.task-status-actions .task-plan-full-link { margin-top: 0; }
+.task-drawer-title { overflow-wrap: anywhere; }
 .task-bar-cancel-impact { display: grid; gap: .45rem; padding: .75rem; border: 1px solid var(--status-attention); border-radius: 10px; background: var(--surface); }
 .task-bar-cancel-impact h4 { margin: 0; }
 .task-bar-cancel-impact h4:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -2042,7 +2051,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
   .book-people-related,
   .task-panel-compose, .task-panel-count, .task-card, .task-result-window, .task-result-bar, .task-result-foot, .return-chip,
   .dialogue-attempt, .dialogue-convert,
-  .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
+  .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact, .task-status-card,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
   .global-attention-group, .global-attention-item,
@@ -3144,3 +3153,15 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 
 /* The header export's menu panel anchors to its own box: a flex container here pushed the panel out of a 1008 px window. */
 .review-header-export[open] { display: block; }
+
+.dialogue-follow-up { display: grid; gap: .5rem; margin-top: 1rem; }
+.dialogue-follow-up textarea { width: 100%; box-sizing: border-box; }
+.dialogue-attempt:not([open]) > summary { flex-wrap: nowrap; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-menu-options { border-top: 1px solid var(--boundary); padding-top: .5rem; display: grid; gap: .5rem; }
+
+.dialogue-citation.btn { display: inline; min-height: 0; min-width: 0; height: auto; padding: 0 .15em; vertical-align: baseline; font: inherit; line-height: inherit; }
+.dialogue-attempt > summary::before { content: "▸"; flex: none; }
+.dialogue-attempt[open] > summary::before { content: "▾"; }
+.dialogue .ui-disclosure-menu { position: relative; }
+.dialogue .ui-disclosure-menu > summary { cursor: pointer; list-style: none; padding: .4rem .65rem; }
+.dialogue .ui-disclosure-menu > summary::-webkit-details-marker { display: none; }

@@ -363,9 +363,21 @@ export function mountSelectControls(root: HTMLElement): () => void {
 export function mountMenuControls(root: HTMLElement): () => void {
   const view = root.ownerDocument?.defaultView;
   if (!view || typeof view.MutationObserver !== 'function') return () => {};
-  const selector = 'details.edit-method-menu, details.derivative-menu, details.task-overview-more, details.view-menu, details.editor-save-menu, details.export-menu, details.review-more, details.evaluation-more';
+  const selector = 'details.edit-method-menu, details.derivative-menu, details.task-overview-more, details.view-menu, details.editor-save-menu, details.export-menu, details.review-more, details.evaluation-more, details.ui-disclosure-menu';
   const menus = (): HTMLDetailsElement[] => Array.from(root.querySelectorAll<HTMLDetailsElement>(selector));
   const panelOf = (menu: HTMLElement): HTMLElement | null => menu.querySelector('.ui-menu-panel, .view-menu-list, .editor-save-menu-body, .export-menu-body');
+  /** Where `position: fixed` begins inside the nearest ancestor that contains fixed boxes (a transformed drawer), else the viewport. */
+  const fixedOrigin = (panel: HTMLElement): { left: number; top: number } => {
+    for (let node = panel.parentElement; node !== null; node = node.parentElement) {
+      const style = view.getComputedStyle?.(node);
+      if (style === undefined) break;
+      if (style.transform !== 'none' || style.filter !== 'none' || style.perspective !== 'none' || /paint|layout|strict|content/u.test(style.contain) || /transform|filter|perspective/u.test(style.willChange)) {
+        const box = node.getBoundingClientRect();
+        return { left: box.left + node.clientLeft, top: box.top + node.clientTop };
+      }
+    }
+    return { left: 0, top: 0 };
+  };
   const position = (): void => {
     for (const menu of menus().filter((item) => item.open)) {
       const panel = panelOf(menu), summary = menu.querySelector('summary');
@@ -373,12 +385,13 @@ export function mountMenuControls(root: HTMLElement): () => void {
       const rect = summary.getBoundingClientRect();
       const width = Math.min(panel.offsetWidth, view.innerWidth - 16);
       panel.style.position = 'fixed'; panel.style.margin = '0'; panel.style.right = 'auto';
-      panel.style.left = `${Math.max(8, Math.min(rect.right - width, view.innerWidth - width - 8))}px`;
+      const origin = fixedOrigin(panel);
+      panel.style.left = `${Math.max(8, Math.min(rect.right - width, view.innerWidth - width - 8)) - origin.left}px`;
       const below = view.innerHeight - rect.bottom - 12;
       const upwards = below < Math.min(panel.scrollHeight, 200) && rect.top > below;
       panel.style.maxHeight = `${Math.max(48, (upwards ? rect.top : below) - 8)}px`;
       const panelHeight = Math.min(panel.scrollHeight, Number.parseFloat(panel.style.maxHeight));
-      panel.style.top = `${Math.max(8, Math.min(upwards ? rect.top - panelHeight - 4 : rect.bottom + 4, view.innerHeight - panelHeight - 8))}px`;
+      panel.style.top = `${Math.max(8, Math.min(upwards ? rect.top - panelHeight - 4 : rect.bottom + 4, view.innerHeight - panelHeight - 8)) - origin.top}px`;
     }
   };
   const close = (menu: HTMLDetailsElement, focus = false): void => { menu.open = false; if (focus) menu.querySelector('summary')?.focus(); };
@@ -388,7 +401,7 @@ export function mountMenuControls(root: HTMLElement): () => void {
     const menu = target.closest<HTMLDetailsElement>(selector);
     if (!menu) return;
     if (event.key === 'Escape' && menu.open) { event.preventDefault(); event.stopPropagation(); close(menu, true); return; }
-    if (target.matches('input, textarea, select, [role="combobox"]')) return;
+    if (target.matches('input:not([type="checkbox"]), textarea, select, [role="combobox"]')) return;
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault(); event.stopPropagation();
     menu.open = true; position();
@@ -413,7 +426,7 @@ export function mountMenuControls(root: HTMLElement): () => void {
 }
 
 export function menuDestinations(panel: HTMLElement): HTMLElement[] {
-  return Array.from(panel.querySelectorAll<HTMLElement>('button, summary')).filter((item) => {
+  return Array.from(panel.querySelectorAll<HTMLElement>('button, summary, input[type="checkbox"]')).filter((item) => {
     if (item.matches(':disabled')) return false;
     for (let node: HTMLElement | null = item; node && panel.contains(node); node = node.parentElement) {
       if (node.hidden || node.hasAttribute('inert')) return false;
