@@ -528,6 +528,24 @@ it('the real re-acquisition notice uses editorial words even when the error form
  expect(formatter).not.toHaveBeenCalled();expect(page.screen.firstElementChild).toBe(manuscript);
 });
 
+it('a change of failure kind rewrites the existing notice in place, keeping its node, its retry and the status (#1504 item 12)', async () => {
+ const leave=Promise.withResolvers<void>();let opens=0;
+ const open=vi.fn(async()=>{if(++opens===1)throw new Error('offline');return {target:'held-elsewhere'};});
+ const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:open});
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ const notice=page.screen.querySelector('[data-book-reacquire]')!,again=notice.querySelector('button')!;
+ expect(notice.querySelector('p')!.textContent).toBe(bookOwnershipFailureLine(new Error('offline')));
+ page.setStatus.mockClear();
+ await page.actions.get('重试连接当前图书')!();
+ const held=bookOwnershipFailureLine(new BookHeldElsewhereError());
+ expect(open).toHaveBeenCalledTimes(2);expect(page.screen.firstElementChild).toBe(manuscript);
+ expect(page.screen.querySelectorAll('[data-book-reacquire]')).toHaveLength(1);expect(page.screen.querySelector('[data-book-reacquire]')).toBe(notice);
+ expect(notice.querySelector('button')).toBe(again);expect(notice.querySelector('p')!.textContent).toBe(held);
+ expect(page.setStatus).toHaveBeenCalledExactlyOnceWith(held,'error');
+});
+
 it('five background Book reads after failed reconciliation send no retry and keep the existing notice', async () => {
  const leave=Promise.withResolvers<void>();const open=vi.fn(async()=>({target:'held-elsewhere'})),read=vi.fn();
  const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:open,inspectBookTasks:read});
