@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve, relative } from 'node:path';
+import ts from 'typescript';
 import { fileURLToPath } from 'node:url';
 
 // L0 of the Local Verification Ladder (ADR 0062): the exact TypeScript check the build performs,
@@ -8,6 +9,39 @@ import { fileURLToPath } from 'node:url';
 // tool so a parse error fails here rather than riding green to Electron (#346, the #332 finding).
 // It is a developer command, never a hosted gate.
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+// Feature operations may depend on domain owners, never the composition root or UI.
+// Later extractions add one entry; targets are root-relative resolved paths or directory prefixes.
+const forbiddenFeatureImports = {
+  'src/service/import-retention.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/manuscript-export.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/manuscript-reimport-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/import-review-records.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/import-intake-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/review/review-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/book-findings.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/house-review-preference.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/learning/memory-facade.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/learning/ledger.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/production-document-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/evaluation-calibration-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/evaluation-market.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/readers-reports.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/initial-evaluation-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+};
+for (const [module, forbidden] of Object.entries(forbiddenFeatureImports)) {
+  const source = ts.createSourceFile(module, readFileSync(resolve(ROOT, module), 'utf8'), ts.ScriptTarget.Latest, true);
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) continue;
+    const specifier = statement.moduleSpecifier;
+    if (!specifier || !ts.isStringLiteral(specifier) || !specifier.text.startsWith('.')) continue;
+    const target = relative(ROOT, resolve(ROOT, dirname(module), specifier.text)).replaceAll('\\', '/').replace(/\.js$/u, '.ts');
+    if (forbidden.some((entry) => entry.endsWith('/') ? target.startsWith(entry) : target === entry)) {
+      console.error(`CHECK/feature-import-boundary: ${module} -> ${target}`);
+      process.exit(1);
+    }
+  }
+}
+
 const compiler = resolve(ROOT, 'node_modules', 'typescript', 'bin', 'tsc');
 const ENV = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR };
 
