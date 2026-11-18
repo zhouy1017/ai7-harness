@@ -140,8 +140,9 @@ export function followBottomControls(bar: HTMLElement): void {
   // The body's padding eases when the drawer docks or the sidebar folds: the text column's edge is final only when that ends.
   document.body.addEventListener('transitionend', (event) => { if (event.target === document.body) schedule(); });
   document.addEventListener('scroll', schedule, { capture: true, passive: true });
-  // A page change, the sidebar folding or the Task Drawer opening moves the controls without a scroll or a resize.
-  new MutationObserver(schedule).observe(root, { attributes: true, attributeFilter: ['data-sidebar', 'data-focus-mode'] });
+  // A page change, the sidebar folding, the right column changing form (#1542) or the Task Drawer opening moves the controls
+  // without a scroll or a resize.
+  new MutationObserver(schedule).observe(root, { attributes: true, attributeFilter: ['data-sidebar', 'data-focus-mode', 'data-right-column'] });
   new MutationObserver(schedule).observe(document.body, { attributes: true, attributeFilter: ['data-task-drawer'], childList: true, subtree: true });
 }
 
