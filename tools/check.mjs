@@ -24,6 +24,12 @@ const forbiddenFeatureImports = {
   'src/service/learning/ledger.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/editorial-mark-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/manuscript/operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/store-inventory.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/production-document-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/evaluation-calibration-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/evaluation-market.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/readers-reports.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/initial-evaluation-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
 };
 for (const [module, forbidden] of Object.entries(forbiddenFeatureImports)) {
   const source = ts.createSourceFile(module, readFileSync(resolve(ROOT, module), 'utf8'), ts.ScriptTarget.Latest, true);
