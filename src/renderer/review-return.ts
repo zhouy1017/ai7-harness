@@ -6,8 +6,10 @@
 type ReviewReturn = { bookId: string; manuscriptId: string; branchId: string; ordinal: number; back: () => void };
 let target: ReviewReturn | null = null;
 
-/** Remembers the way back to the finding just left, or forgets it (`null`) for a jump that came from no numbered finding. */
-export function rememberReviewReturn(value: ReviewReturn | null): void { target = value; }
+/** 回到原文 from `bookId`'s 审阅: a jump from a numbered finding leaves the way back to it; one from no finding leaves none. */
+export function leaveReviewReturn(bookId: string, jump: { ordinal?: number | undefined; manuscriptId: string; branchId: string }, back: () => void): void {
+  target = jump.ordinal === undefined ? null : { bookId, manuscriptId: jump.manuscriptId, branchId: jump.branchId, ordinal: jump.ordinal, back };
+}
 
 /** Forgets the way back: always, or only when it leads to `bookId`'s 审阅. */
 export function clearReviewReturn(bookId?: string): void {

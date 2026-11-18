@@ -579,6 +579,11 @@ it('scans the review results and evidence in ordinary mode (#1315)', async () =>
   finally { setTechnicalLayerVisible(true); }
 });
 
+// The real Evidence Workspace, watched so that a test can follow the jump it is given.
+vi.mock('../../src/renderer/evidence-workspace.js', async (original) => {
+  const actual = await original<typeof import('../../src/renderer/evidence-workspace.js')>();
+  return { ...actual, mountEvidenceWorkspace: vi.fn(actual.mountEvidenceWorkspace) };
+});
 vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({ ...DEFAULT_QUICK_ACTIONS }), rememberActionDefaults: async () => undefined }));
 
 // Issue #1410 items 5 and 6: one-step batch apply with 撤销本批应用, and one-click 忽略, against the real surface.
@@ -831,21 +836,114 @@ describe('review triage in place (#1525)', () => {
     const view = mount('settled', 0); await flush();
     expect(view.root.querySelector('.review-no-findings')!.textContent).toBe('这次审阅还没有发现。');
   });
+
+  it('closes the card\'s ⋯ menu once one of its entries was chosen, in a list and in the fact lens', async () => {
+    const note: ReviewFindingProjection = { ...finding(), findingId: 'rvf_note', categoryId: 'typos-and-usage', markId: 'm-note' };
+    const { root } = await view([note], { getEditorialMarkCard: vi.fn(async () => ({ pinnedText: '原文', body: '批注' })) });
+    const menu = () => root.querySelector('article[data-finding-id="rvf_note"] details.review-card-more')!;
+    for (const [open, cancel] of [['ignore', 'ignore-cancel'], ['convert-to-suggestion', 'convert-cancel']] as const) {
+      menu().open = true;
+      inCard(root, 'rvf_note', open).click(); await flush();
+      expect(menu().open).toBe(false);
+      menu().open = true;
+      inCard(root, 'rvf_note', cancel).click(); await flush();
+      expect(menu().open).toBe(false);
+    }
+    const lens = mount('settled'); await flush();
+    const lensMenu = () => lens.root.querySelector('li.fact-lens-row details.review-card-more')!;
+    lensMenu().open = true;
+    lens.root.querySelector('li.fact-lens-row [data-review-action="ignore"]')!.click(); await flush();
+    expect(lensMenu().open).toBe(false);
+  });
+
+  it('reads again when a read begun before a decision would land after it', async () => {
+    const { root, inspectReviewWorkspace, surface } = await view([suggestion(1), suggestion(2)], { recordChangeSuggestionDecision: vi.fn(async () => rejected()) });
+    const stale = deferred<ReviewWorkspaceProjection>();
+    inspectReviewWorkspace.mockImplementationOnce(() => stale.promise);
+    surface.refresh(); await flush();
+    const decided = { ...suggestion(1), status: 'handled' as const, statusLabel: '已处理', statusDetail: '已拒绝这条修改建议' };
+    inspectReviewWorkspace.mockImplementation(async () => typos([decided, suggestion(2)]));
+    const calls = inspectReviewWorkspace.mock.calls.length;
+    inCard(root, 'rvf_s1', 'reject').click(); await flush();
+    expect(inspectReviewWorkspace.mock.calls.length).toBe(calls + 1);
+    stale.resolve(typos([suggestion(1), suggestion(2)])); await flush();
+    expect(article(root, 'rvf_s1').dataset['status']).toBe('handled');
+    expect(root.querySelector('article[data-finding-id="rvf_s1"] [data-review-action="reject"]')).toBeNull();
+  });
+
+  it('moves focus only to a pending card on show, never into a collapsed category', async () => {
+    const note: ReviewFindingProjection = { ...finding(), findingId: 'rvf_n2', categoryId: 'local-text-check', ordinal: 2, markId: 'm-n2' };
+    const projection = () => {
+      const next = typos([suggestion(1), note]);
+      const run = next.run!;
+      return { ...next, run: { ...run, categories: [...run.categories, { ...run.categories[0]!, categoryId: 'local-text-check', label: '本地文字检查', output: 'annotation' as const, batchApply: false, findingsCount: 1 }] } };
+    };
+    const view0 = mount(); Object.assign(view0.api, { recordChangeSuggestionDecision: vi.fn(async () => rejected()) });
+    view0.inspectReviewWorkspace.mockImplementation(async () => projection()); view0.surface.refresh(); await flush();
+    const fold = view0.root.querySelector('section.review-group[data-review-category="local-text-check"] details.review-category-fold')!;
+    fold.open = false; fold.dispatchEvent({ type: 'toggle' });
+    article(view0.root, 'rvf_s1').focus();
+    article(view0.root, 'rvf_s1').dispatchEvent({ type: 'keydown', key: 'r' }); await flush();
+    expect(miniDocument.activeElement).toBe(article(view0.root, 'rvf_s1'));
+  });
+
+  it('says nothing and offers no 撤销 for a 拒绝 answered after the editor left 审阅, and takes its toast away on leaving', async () => {
+    const late = deferred<ReturnType<typeof rejected>>();
+    const first = await view([suggestion(1)], { recordChangeSuggestionDecision: vi.fn(() => late.promise) });
+    inCard(first.root, 'rvf_s1', 'reject').click(); await flush();
+    first.surface.destroy();
+    late.resolve(rejected()); await flush();
+    expect(first.status).not.toHaveBeenCalledWith('已拒绝这条修改建议；原文保留。', 'success');
+    expect(miniDocument.body.querySelector('[data-toast]')?.hidden ?? true).toBe(true);
+    const second = await view([suggestion(1)], { recordChangeSuggestionDecision: vi.fn(async () => rejected()) });
+    inCard(second.root, 'rvf_s1', 'reject').click(); await flush();
+    expect(miniDocument.body.querySelector('[data-toast]')!.hidden).toBe(false);
+    second.surface.destroy();
+    expect(miniDocument.body.querySelector('[data-toast]')!.hidden).toBe(true);
+  });
+
+  it('keeps focus on the page after 导出审阅报告（DOCX）, after 「全部类别」 and after a filter pill', async () => {
+    const view0 = mount('settled'); await flush();
+    const summary = view0.root.querySelector('.review-header-export summary')!;
+    view0.root.querySelector('.review-header-export')!.open = true;
+    view0.root.querySelector('[data-review-action="export-docx-report"]')!.click();
+    expect(miniDocument.activeElement).toBe(summary);
+    await flush();
+    const pending = () => view0.root.querySelector('[data-review-filter="status"] [data-filter-value="pending"]')!;
+    pending().focus(); pending().click(); await flush();
+    expect(miniDocument.activeElement).toBe(pending());
+    view0.root.querySelector('section.review-group .review-group-heading button.quiet')!.click(); await flush();
+    const all = view0.root.querySelector('[data-review-action="all-categories"]')!;
+    all.focus(); all.click(); await flush();
+    expect(view0.root.querySelector('[data-review-action="all-categories"]')).toBeNull();
+    expect(miniDocument.activeElement?.closest('.review-filters')).not.toBeNull();
+    expect(miniDocument.activeElement?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('shows the empty destination as title, pill, sentence and 新建审阅 only', async () => {
+    const view0 = mount(); await flush();
+    view0.inspectReviewWorkspace.mockImplementation(async () => ({ ...workspace(), runs: [], run: null }));
+    view0.surface.refresh(); await flush();
+    const card = view0.root.querySelector('.review-workspace-card')!;
+    expect(card.dataset['reviewState']).toBe('empty');
+    expect(card.querySelector('.review-header-export')).toBeNull();
+    expect(card.querySelector('[data-review-action="new-review"]')).not.toBeNull();
+  });
 });
 
 describe('the way back from a finding (#1525)', () => {
-  const place = (back = vi.fn()) => ({ bookId: BOOK, manuscriptId: 'manuscript-a', branchId: 'branch-a', ordinal: 4, back });
+  const jump = { manuscriptId: 'manuscript-a', branchId: 'branch-a', ordinal: 4 };
 
   it('is cleared by going back, and by opening 审阅 for that Book another way', async () => {
-    const { rememberReviewReturn, reviewReturnButton } = await import('../../src/renderer/review-return.js');
+    const { leaveReviewReturn, reviewReturnButton } = await import('../../src/renderer/review-return.js');
     const back = vi.fn();
-    rememberReviewReturn(place(back));
+    leaveReviewReturn(BOOK, jump, back);
     const chip = reviewReturnButton('manuscript-a', 'branch-a')!;
     expect(chip.textContent).toBe('回到审阅 · 第 4 条');
     chip.click();
     expect(back).toHaveBeenCalledOnce();
     expect(reviewReturnButton('manuscript-a', 'branch-a')).toBeNull();
-    rememberReviewReturn(place());
+    leaveReviewReturn(BOOK, jump, vi.fn());
     mount(); await flush();
     expect(reviewReturnButton('manuscript-a', 'branch-a')).toBeNull();
   });
@@ -854,6 +952,31 @@ describe('the way back from a finding (#1525)', () => {
     const view = mount('settled'); await flush();
     view.root.querySelector('[data-fact-action="fact-go-to-text"]')!.click(); await flush();
     expect(view.goToText).toHaveBeenCalledWith(expect.objectContaining({ ordinal: 1, blockId: result().blockId }));
+  });
+  it('names the row\'s finding for a jump from the Evidence Workspace and from the synthesis evidence', async () => {
+    const view = mount('settled'); await flush();
+    view.root.querySelector('[data-fact-action="fact-workspace"]')!.click(); await flush();
+    const workspaceOptions = vi.mocked(mountEvidenceWorkspace).mock.calls.at(-1)![0];
+    await workspaceOptions.goToText({ blockId: result().blockId, markId: null });
+    expect(view.goToText).toHaveBeenLastCalledWith(expect.objectContaining({ ordinal: 1, blockId: result().blockId }));
+    const synthesis = mount();
+    synthesis.inspectReviewWorkspace.mockImplementation(async () => {
+      const next = workspace(RUN, 'settled');
+      next.run!.synthesis = { state: 'completed', detail: '', missingCategories: [], omissionLabel: null,
+        summary: { overallAssessment: '公开合成总体评价', recurringProblems: [{ title: '公开合成问题', explanation: '公开合成说明', evidenceRefs: ['E1'], priority: '' }], contextualExplanations: [], priorities: [] },
+        evidence: [{ ref: 'E1', findingId: finding().findingId, chapterLabel: '第一章', quote: '公开合成核查文字', status: 'pending', blockId: finding().blockId }] };
+      return next;
+    });
+    synthesis.surface.refresh(); await flush();
+    synthesis.root.querySelector('[data-synthesis-evidence="E1"]')!.click(); await flush();
+    expect(synthesis.goToText).toHaveBeenLastCalledWith(expect.objectContaining({ ordinal: 1, blockId: finding().blockId }));
+  });
+
+  it('leaves no numbered way back for a jump that came from no finding', async () => {
+    const { leaveReviewReturn, reviewReturnButton } = await import('../../src/renderer/review-return.js');
+    leaveReviewReturn(BOOK, jump, vi.fn());
+    leaveReviewReturn(BOOK, { manuscriptId: jump.manuscriptId, branchId: jump.branchId }, vi.fn());
+    expect(reviewReturnButton(jump.manuscriptId, jump.branchId)).toBeNull();
   });
 });
 
@@ -864,7 +987,9 @@ describe('the round trip through 回到原文 (#1525)', () => {
     ordinal, markId: `m${ordinal}`, blockId: `blk_${String(ordinal).repeat(24)}` });
 
   it('comes back to the same Run, filters, pages, groups, scroll and finding, with a finding handled meanwhile', async () => {
-    const findings = [typo(1), typo(2), note(3), note(4)];
+    // Page 1: 批注 1 and 修改建议 2 (typos), 批注 3 (local); page 2: 批注 4 (local). The jump is from 3, on page 1, so only the
+    // kept page count can bring 4 back.
+    const findings = [{ ...note(1), categoryId: 'typos-and-usage', categoryLabel: '错别字与规范用语' }, typo(2), note(3), note(4)];
     const page = (input: Parameters<RendererApi['inspectReviewWorkspace']>[0]): ReviewWorkspaceProjection => {
       const base = workspace(RUN, 'settled', findings.length);
       const run = base.run!;
@@ -875,7 +1000,7 @@ describe('the round trip through 回到原文 (#1525)', () => {
           { ...category, categoryId: 'typos-and-usage', label: '错别字与规范用语', output: 'change-suggestion', batchApply: false, state: 'settled', findingsCount: 2 },
           { ...category, categoryId: 'local-text-check', label: '本地文字检查', output: 'annotation', batchApply: false, state: 'settled', findingsCount: 2 },
         ],
-        findings: (second ? findings.slice(2) : findings.slice(0, 2)).map((entry) => ({ ...entry })) } };
+        findings: (second ? findings.slice(3) : findings.slice(0, 3)).map((entry) => ({ ...entry })) } };
     };
     const scroller = { scrollTop: 0 };
     Object.defineProperty(miniDocument, 'scrollingElement', { configurable: true, value: scroller });
@@ -889,21 +1014,22 @@ describe('the round trip through 回到原文 (#1525)', () => {
       const typos = first.root.querySelector('section.review-group[data-review-category="typos-and-usage"] details.review-category-fold')!;
       typos.open = false; typos.dispatchEvent({ type: 'toggle' });
       scroller.scrollTop = 420;
-      first.root.querySelector('article[data-finding-id="rvf_n4"] [data-review-action="go-to-text"]')!.click(); await flush();
-      expect(first.goToText).toHaveBeenCalledWith(expect.objectContaining({ ordinal: 4 }));
+      first.root.querySelector('article[data-finding-id="rvf_n3"] [data-review-action="go-to-text"]')!.click(); await flush();
+      expect(first.goToText).toHaveBeenCalledWith(expect.objectContaining({ ordinal: 3 }));
       first.surface.destroy(); first.root.remove();
       scroller.scrollTop = 0;
-      // Accepted in the manuscript meanwhile: 修改建议 1 no longer has a ⋯ menu, so every fold after it stands one place earlier.
-      findings[0] = { ...findings[0]!, status: 'handled', statusLabel: '已处理', statusDetail: '已接受并应用', markStatus: 'applied' };
+      // Handled in the manuscript meanwhile: 批注 1 no longer has its ⋯ menu, so every fold after it stands one place earlier.
+      findings[0] = { ...findings[0]!, status: 'handled', statusLabel: '已处理', statusDetail: '已标记为已处理', markStatus: 'resolved' };
       const back = mount('failed', 1, null, true, page);
       await flush();
       const asked = back.inspectReviewWorkspace.mock.calls.map(([input]) => input);
       expect(asked[0]).toEqual(expect.objectContaining({ reviewRunId: RUN, status: 'pending' }));
-      expect(asked).toContainEqual(expect.objectContaining({ findingsAfterOrdinal: 2, status: 'pending' }));
+      expect(asked).toContainEqual(expect.objectContaining({ findingsAfterOrdinal: 3, status: 'pending' }));
+      expect(back.root.querySelector('article[data-finding-id="rvf_n4"]')).not.toBeNull();
       expect(back.root.querySelector('section.review-group[data-review-category="typos-and-usage"] details.review-category-fold')!.open).toBe(false);
       expect(back.root.querySelector('section.review-group[data-review-category="local-text-check"] details.review-category-fold')!.open).toBe(true);
       expect(back.root.querySelectorAll('details.review-card-more').filter((node) => node.open)).toHaveLength(0);
-      expect(miniDocument.activeElement).toBe(back.root.querySelector('article[data-finding-id="rvf_n4"]'));
+      expect(miniDocument.activeElement).toBe(back.root.querySelector('article[data-finding-id="rvf_n3"]'));
       expect(scroller.scrollTop).toBe(420);
     } finally { Reflect.deleteProperty(miniDocument, 'scrollingElement'); }
   });

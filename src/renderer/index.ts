@@ -1,4 +1,4 @@
-import { rememberReviewReturn } from './review-return.js';
+import { leaveReviewReturn } from './review-return.js';
 import { createLibraryScreen } from './library-screen.js';
 import { createBookOverviewScreen } from './book-overview-screen.js';
 import { createSettingsScreens } from './settings-screens.js';
@@ -2611,7 +2611,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
         target: { kind: 'block', blockId: target.blockId },
       });
       if (!current.isCurrent()) return;
-      rememberReviewReturn(target.ordinal === undefined ? null : { ...target, bookId, ordinal: target.ordinal, back: () => { void leaveThen(async () => renderBookReview(bookId, bookTitle)); } });
+      leaveReviewReturn(bookId, target, () => { void leaveThen(async () => renderBookReview(bookId, bookTitle)); });
       if (!current.isCurrent() || screen.firstElementChild !== origin) return;
       await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined, undefined, current);
     },

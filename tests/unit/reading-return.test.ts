@@ -89,7 +89,7 @@ describe('reading return hints', () => {
     vi.stubGlobal('document', { createElement: () => ({ dataset: {}, addEventListener() {} }) });
     const hints = await import('../../src/renderer/reading-return.js');
     const review = await import('../../src/renderer/review-return.js');
-    review.rememberReviewReturn({ bookId: 'book-a', manuscriptId: first.manuscriptId, branchId: first.branchId, ordinal: 2, back: () => undefined });
+    review.leaveReviewReturn('book-a', { manuscriptId: first.manuscriptId, branchId: first.branchId, ordinal: 2 }, () => undefined);
     expect(review.reviewReturnButton(first.manuscriptId, first.branchId)).not.toBeNull();
     await hints.preserveReadingReturn({ getBookOverview: vi.fn(), getManuscriptWindowAt: vi.fn() }, first, 'book-a', first.manuscriptId, first.branchId);
     expect(review.reviewReturnButton(first.manuscriptId, first.branchId)).toBeNull();

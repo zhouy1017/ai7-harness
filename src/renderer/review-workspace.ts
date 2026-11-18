@@ -11,7 +11,7 @@ import { reviewSynthesisNode } from './review-synthesis.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
-import { showToast } from './components/toast.js';
+import { hideToast, showToast } from './components/toast.js';
 import { filterChoices, menuPanel, enhanceSelect } from './components/controls.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
 import { reviewExcludedHeading, estimateReviewCalls, reviewConsequenceEstimate } from './review-labels.js';
@@ -520,6 +520,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   const { api, bookId } = options;
   let destroyed = false;
   let generation = 0;
+  /** The read now in flight, if any: a decision that settles meanwhile is read again, never painted over by an older answer. */
+  let readTicket: number | null = null;
   let pollTimer: number | undefined;
   let projection: ReviewWorkspaceProjection | null = null;
   let stableKey = '';
@@ -588,13 +590,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   const movePending = (direction: number): void => {
     if (working || sheet.open || !projection?.run) return;
-    const findings = projection.run.findings.filter((entry) => entry.status === 'pending');
+    const findings = visiblePending(projection.run);
     const active = document.activeElement?.closest<HTMLElement>('article[data-finding-id]')?.dataset['findingId'];
-    const index = findings.findIndex((entry) => entry.findingId === active);
-    const next = findings[index < 0 ? (direction > 0 ? 0 : findings.length - 1) : (index + direction + findings.length) % findings.length];
-    const target = card?.querySelector<HTMLElement>(`article[data-finding-id="${next?.findingId}"]`);
+    const index = findings.findIndex((entry) => entry.finding.findingId === active);
+    const target = findings[index < 0 ? (direction > 0 ? 0 : findings.length - 1) : (index + direction + findings.length) % findings.length]?.article;
     target?.focus({ preventScroll: true }); target?.scrollIntoView({ block: 'nearest' });
   };
+  /** The pending findings on show, in order: a card inside a collapsed category cannot take focus, so it is passed over. */
+  const visiblePending = (run: ReviewRunProjection): Array<{ finding: ReviewFindingProjection; article: HTMLElement }> => run.findings.flatMap((finding) => {
+    if (finding.status !== 'pending') return [];
+    const article = card?.querySelector<HTMLElement>(`article[data-finding-id="${finding.findingId}"]`) ?? null;
+    for (let fold = article?.closest<HTMLDetailsElement>('details') ?? null; fold !== null; fold = fold.parentElement?.closest<HTMLDetailsElement>('details') ?? null) {
+      if (!fold.open) return [];
+    }
+    return article === null ? [] : [{ finding, article }];
+  });
   const unregisterCommands = options.registerCommands?.({
     'view.nextPending': () => movePending(1),
     'view.previousPending': () => movePending(-1),
@@ -749,8 +759,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     clearPoll();
     if (force) stableKey = '';
     const ticket = ++generation;
+    readTicket = ticket;
     if (fact.reviewRunId !== null && query.reviewRunId !== fact.reviewRunId) clearFactual(true);
-    void load(ticket).then(
+    const settledRead = (): void => { if (readTicket === ticket) readTicket = null; };
+    void load(ticket).finally(settledRead).then(
       (next) => {
         if (destroyed || ticket !== generation || !host.isConnected || next.bookId !== host.dataset['reviewBookId']) return;
         show(next);
@@ -2233,7 +2245,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (!(onError?.(error) ?? false)) options.setStatus(options.errorMessage(error, failure), 'error');
     } finally {
       working = false;
-      if (localFinding === undefined || !settled) refresh(true);
+      if (localFinding === undefined || !settled || readTicket !== null) refresh(true);
       else {
         // A full repaint while the action was in flight drew every control held; draw the card again from what is now known.
         if (card !== startCard && projection !== null) renderCard(projection);
@@ -2269,7 +2281,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const row = old.closest<HTMLElement>('li.fact-lens-row');
     const before = row ?? old;
     const hadFocus = before.contains(document.activeElement);
-    const opened = new Set(Array.from(before.querySelectorAll<HTMLDetailsElement>('details')).filter((node) => node.open).map((node) => node.className));
+    // The card's own ⋯ menu closes once one of its entries was chosen; other open folds (technical facts) stay open.
+    const opened = new Set(Array.from(before.querySelectorAll<HTMLDetailsElement>('details')).filter((node) => node.open && !node.classList.contains('review-card-more'))
+      .map((node) => node.className));
     let updated: HTMLElement;
     if (row !== null) {
       const result = fact.results.find((entry) => entry.resultId === row.dataset['factResultId']);
@@ -2284,11 +2298,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     for (const node of updated.querySelectorAll<HTMLDetailsElement>('details')) if (opened.has(node.className)) node.open = true;
     before.replaceWith(updated);
     if (hadFocus && finding.status !== 'pending') {
-      const pending = run.findings.filter((entry) => entry.status === 'pending');
-      const next = pending.find((entry) => entry.ordinal > finding.ordinal) ?? pending[0];
-      const target = card?.querySelector<HTMLElement>(`article[data-finding-id="${next?.findingId ?? id}"]`);
-      target?.focus({ preventScroll: true });
-      target?.scrollIntoView({ block: 'nearest' });
+      const pending = visiblePending(run);
+      const next = pending.find((entry) => entry.finding.ordinal > finding.ordinal) ?? pending[0];
+      const target = next?.article ?? updated.querySelector<HTMLElement>('article.review-finding') ?? updated;
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({ block: 'nearest' });
     }
     applyPendingFocus();
   }
@@ -2321,18 +2335,28 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (answer.card === null) return false;
       settleFinding(finding, { status: 'handled', statusLabel: REVIEW_FINDING_STATUS_LABELS.handled, statusDetail: REVIEW_SETTLED_DETAILS.rejected, markStatus: answer.card.status });
       offerReasonAsk(finding.findingId, answer.card.suggestion?.decision?.decisionId);
+      // An answer after the editor left 审阅 says nothing here: the decision stands on the manuscript card.
+      if (destroyed) return true;
       options.setStatus(REVIEW_STATUS_LINES.rejected, 'success');
       // R is one key: its 撤销 withdraws the decision, as the mark card's 撤回 does, and the finding is pending again.
-      showToast(REVIEW_STATUS_LINES.rejected, { action: { label: REVIEW_UNDO, run: () => void act(REVIEW_STATUS_LINES.withdrawingReject, REVIEW_STATUS_LINES.withdrawFailed, async () => {
+      undoToast(REVIEW_STATUS_LINES.rejected, () => void act(REVIEW_STATUS_LINES.withdrawingReject, REVIEW_STATUS_LINES.withdrawFailed, async () => {
         const withdrawn = await decide('withdrawn');
         if (withdrawn.card === null) return false;
         settleFinding(finding, { status: 'pending', statusLabel: REVIEW_FINDING_STATUS_LABELS.pending, statusDetail: REVIEW_SETTLED_DETAILS.pending, markStatus: withdrawn.card.status });
         options.setStatus(REVIEW_STATUS_LINES.rejectWithdrawn, 'success');
         return true;
-      }, capabilityRefusal(finding), finding) } });
+      }, capabilityRefusal(finding), finding));
       return true;
     }, capabilityRefusal(finding), finding);
   }
+
+  /** The toast that offers 撤销 for a decision just made; none once the editor has left 审阅, where its 撤销 could not act. */
+  let toastShown = false;
+  const undoToast = (message: string, undo: () => void): void => {
+    if (destroyed) return;
+    toastShown = true;
+    showToast(message, { action: { label: REVIEW_UNDO, run: undo } });
+  };
 
   const isCapabilityRefusal = (error: unknown): boolean => options.errorCode(error) === CAPABILITY_CODE;
 
@@ -2386,14 +2410,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (settled) settleFinding(finding, { status: 'handled', statusLabel: REVIEW_FINDING_STATUS_LABELS.handled, statusDetail: REVIEW_SETTLED_DETAILS.applied, markStatus: 'applied' });
       if (applied.acknowledged) {
         options.setStatus(REVIEW_STATUS_LINES.applied, 'success');
-        showToast(REVIEW_STATUS_LINES.applied, { action: { label: REVIEW_UNDO, run: () => void act(REVIEW_STATUS_LINES.undoingApply, REVIEW_STATUS_LINES.undoApplyFailed, async () => {
+        undoToast(REVIEW_STATUS_LINES.applied, () => void act(REVIEW_STATUS_LINES.undoingApply, REVIEW_STATUS_LINES.undoApplyFailed, async () => {
           const result = await applyOnce(run.manuscript, (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(run, finding), markId, clientEffectId }),
             (input) => api.getManuscriptApplyOutcome(input));
           if (!result.acknowledged && result.outcome?.state !== 'committed') throw result.failure;
           settleFinding(finding, { status: 'pending', statusLabel: REVIEW_FINDING_STATUS_LABELS.pending, statusDetail: REVIEW_SETTLED_DETAILS.pending, markStatus: 'open' });
           options.setStatus(REVIEW_STATUS_LINES.applyUndone, 'success');
           return true;
-        }, undefined, finding) } });
+        }, undefined, finding));
         offerReasonAsk(finding.findingId, applied.result.card?.suggestion?.decision?.decisionId);
       } else if (isCapabilityRefusal(applied.failure)) {
         throw applied.failure;
@@ -3393,6 +3417,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         collapsed: [...collapsedGroups], history: historyOpen, excluded: excludedOpen, excludedPages,
         scroll: document.scrollingElement?.scrollTop ?? options.root.parentElement?.scrollTop ?? 0, findingId: focusFindingId });
       destroyed = true;
+      if (toastShown) hideToast();
       unregisterCommands?.();
       document.removeEventListener('keydown', escapeFromPage);
       generation += 1;
