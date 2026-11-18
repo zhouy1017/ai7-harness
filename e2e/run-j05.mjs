@@ -1234,9 +1234,9 @@ async function main() {
         // The way back re-reads under the same filter: the decided cards leave the pending list, so compare with that read.
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
         await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null && ${JSON.stringify(decided)}.every((id)=>document.querySelector('article[data-finding-id='+JSON.stringify(id)+']')===null) && document.querySelector('article.review-finding')!==null`, 'review-return-filter-reread');
-        await waitFor(renderer, `document.querySelector('.review-history-fold')?.open===true`, 'review-return-history-open');
         // 历史 ▾ open — by a real click unless this Book's 审阅 kept it open from the previous form — so the way back has a fold to keep.
         if (await renderer.evaluate(`document.querySelector('.review-history-fold')?.open===false`)) await triageClick(renderer,'.review-history-fold > summary');
+        await waitFor(renderer, `document.querySelector('.review-history-fold')?.open===true`, 'review-return-history-open');
         // Diagnostic (#1525 review): every change of 历史's open state from here to the return, and who set it when a script did.
         await renderer.evaluate(`(() => { window.__j05History=[]; const log=(entry)=>window.__j05History.push({t:Math.round(performance.now()), folds:document.querySelectorAll('.review-history-fold').length, active:document.activeElement?.tagName+'.'+(document.activeElement?.className??''), ...entry});
           document.addEventListener('toggle', (event) => { if (event.target?.matches?.('.review-history-fold')) log({kind:'toggle', open:event.target.open, connected:event.target.isConnected}); }, true);
