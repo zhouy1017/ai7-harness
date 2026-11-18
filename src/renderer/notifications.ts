@@ -89,9 +89,9 @@ const STATUS_AREA = '#screen .manuscript-surface';
 
 export function followBottomControls(bar: HTMLElement): void {
   const root = document.documentElement;
-  let frame = 0;
+  let queued = false;
   const place = (): void => {
-    frame = 0;
+    queued = false;
     if (bar.hidden) {
       delete root.dataset['statusBar'];
       for (const name of ['--bottom-controls', '--status-area-right', '--status-bar-height']) root.style.removeProperty(name);
@@ -106,13 +106,26 @@ export function followBottomControls(bar: HTMLElement): void {
     root.style.setProperty('--bottom-controls', `${Math.max(0, Math.ceil(clearance))}px`);
     root.style.setProperty('--status-area-right', `${area === undefined ? 0 : Math.max(0, Math.ceil(innerWidth - area.right))}px`);
     root.style.setProperty('--status-bar-height', `${Math.ceil(bar.getBoundingClientRect().height)}px`);
+    // The first placement adds the scroll padding and the space above a sticky bar, which moves the controls once more.
+    const first = root.dataset['statusBar'] !== 'shown';
     root.dataset['statusBar'] = 'shown';
+    if (first) schedule();
   };
-  // Only while the bar shows (and once more as it hides) is anything measured.
-  const schedule = (): void => { if (frame === 0 && (!bar.hidden || root.dataset['statusBar'] !== undefined)) frame = requestAnimationFrame(place); };
+  // Only while the bar shows (and once more as it hides) is anything measured: once per frame in a visible window, and in a
+  // microtask in a background one (it has no frames), so it still places its bar.
+  const schedule = (): void => {
+    if (queued || (bar.hidden && root.dataset['statusBar'] === undefined)) return;
+    queued = true;
+    if (document.hidden) queueMicrotask(place);
+    else requestAnimationFrame(place);
+  };
   new MutationObserver(schedule).observe(bar, { attributes: true, attributeFilter: ['hidden'], childList: true, subtree: true, characterData: true });
   new ResizeObserver(schedule).observe(bar);
   addEventListener('resize', schedule);
+  // A frame asked for just before the window went to the background never comes: place the bar now instead.
+  document.addEventListener('visibilitychange', () => { if (queued) place(); });
+  // The body's padding eases when the drawer docks or the sidebar folds: the text column's edge is final only when that ends.
+  document.body.addEventListener('transitionend', (event) => { if (event.target === document.body) schedule(); });
   document.addEventListener('scroll', schedule, { capture: true, passive: true });
   // A page change, the sidebar folding or the Task Drawer opening moves the controls without a scroll or a resize.
   new MutationObserver(schedule).observe(root, { attributes: true, attributeFilter: ['data-sidebar', 'data-focus-mode'] });

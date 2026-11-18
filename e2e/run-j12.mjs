@@ -207,12 +207,21 @@ async function createRendererManager(browser) {
   const renderers = new Map();
   const pending = new Map();
   const detachedSessions = new Set();
+  const isolatedContexts = new Map();
   let nextId = 1;
   const sendRoot = (method, params = {}, deadline = Date.now() + CDP_OPERATION_TIMEOUT_MS) =>
     awaitCdpOperation(withBrowserConnection(root.send(method, params)), deadline);
   root.on('Target.receivedMessageFromTarget', ({ sessionId, message }) => {
     let response;
     try { response = JSON.parse(message); } catch { return; }
+    // #1519: the page's other worlds (the preload's among them), for a fault armed there.
+    if (response.method === 'Runtime.executionContextCreated' && response.params?.context?.auxData?.isDefault === false) {
+      if (!isolatedContexts.has(sessionId)) isolatedContexts.set(sessionId, new Set());
+      isolatedContexts.get(sessionId).add(response.params.context.id);
+      return;
+    }
+    if (response.method === 'Runtime.executionContextDestroyed') { isolatedContexts.get(sessionId)?.delete(response.params?.executionContextId); return; }
+    if (response.method === 'Runtime.executionContextsCleared') { isolatedContexts.delete(sessionId); return; }
     if (typeof response.id !== 'number') return;
     const key = `${sessionId}:${response.id}`;
     const completion = pending.get(key);
@@ -270,6 +279,15 @@ async function createRendererManager(browser) {
           const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
           requireJourney(!response.exceptionDetails, `renderer-evaluate-${location}`);
           return response.result.value;
+        },
+        /** True when the expression is true in at least one of the page's other worlds. */
+        evaluateIsolated: async (expression) => {
+          let any = false;
+          for (const contextId of isolatedContexts.get(sessionId) ?? []) {
+            const response = await send('Runtime.evaluate', { expression, contextId, returnByValue: true }).catch(() => null);
+            if (response !== null && !response.exceptionDetails && response.result?.value === true) any = true;
+          }
+          return any;
         },
       };
       await send('Runtime.enable', {}, attachDeadline);
@@ -1600,26 +1618,62 @@ async function main() {
     const sourceRecordsAfter = await registeredBookA.evaluate(`(async()=>{ const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}); return overview.records.filter((record)=>record.kind==='source-import-record').length; })()`);
     requireJourney(sourceRecordsBefore === sourceRecordsAfter && (await manager.list()).length === 3, 'preflight-no-durable-commit-or-window');
     // #1519: the refusal stands in the bar, an overlay above the page's sticky action bar: in view, over neither the sidebar nor
-    // the page's sticky actions, with the sidebar open and folded to icons, at the top of the page and scrolled to its end.
+    // the page's sticky actions nor the control just above them, with the sidebar open and folded to icons, at the top of the page
+    // and scrolled to its end — for the product's own line and for a long one. The long one is a fault armed apart from the press:
+    // in the preload's world, the next refusal of this commit carries a long sentence; 导入来源材料到所选图书 is pressed with the pointer.
     const PREFLIGHT_CONTROLS = ['.commit-bar', '.workbench-actions'];
+    const LONG_REFUSAL = '已显示这本图书现有的工作台；来源材料未提交。这条说明故意写得很长，用来确认它在导入复核页里自行折行，既不超出窗口，也不压住贴底的操作栏、它上方的控件或侧栏。'.repeat(4);
+    // Scrolled as far as the page goes (a page that scrolls has really moved), the control just above the sticky bar is not under the bar.
+    const ABOVE_COMMIT_CLEAR = `(() => {
+      const bar = document.querySelector('#persistence-status'), commit = Array.from(document.querySelectorAll('#screen .commit-bar')).at(-1);
+      if (!(bar instanceof HTMLElement) || bar.hidden || !(commit instanceof HTMLElement)) return false;
+      const box = bar.getBoundingClientRect(), edge = commit.getBoundingClientRect();
+      const scrolls = document.documentElement.scrollHeight > innerHeight + 1;
+      if (scrolls && !(scrollY > 0 && scrollY + innerHeight >= document.documentElement.scrollHeight - 1)) return false;
+      const above = commit.previousElementSibling;
+      const aboveClear = !(above instanceof HTMLElement) || (() => { const r = above.getBoundingClientRect(); return r.height === 0 || r.bottom <= box.top + 0.5 || r.top >= box.bottom - 0.5; })();
+      const probe = document.elementFromPoint(edge.left + edge.width / 2, edge.top - 2);
+      return aboveClear && !(probe instanceof Element && bar.contains(probe)) && edge.top >= box.bottom - 0.5;
+    })()`;
     const preflightWheel = async (deltaY) => primary.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(await primary.evaluate('innerWidth') * 0.6), y: 300, deltaX: 0, deltaY });
-    for (const [width, height] of [[1280, 800], [1008, 681]]) {
-      await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-      for (const form of ['full', 'icons']) {
-        if (form === 'icons') {
-          await pointerClick(primary, waitFor, '#sidebar-toggle', `preflight-error-fold-${width}`);
-          await waitFor(primary, `document.documentElement.dataset.sidebar === 'icons'`, `preflight-error-folded-${width}`);
-        }
-        await waitFor(primary, `innerWidth === ${width} && innerHeight === ${height} && ${statusBarClear(PREFLIGHT_CONTROLS)}`, `preflight-error-clear-${width}-${form}`);
-        await preflightWheel(100000);
-        await waitFor(primary, `scrollY + innerHeight >= document.documentElement.scrollHeight - 1 && ${statusBarClear(PREFLIGHT_CONTROLS)}`, `preflight-error-clear-at-end-${width}-${form}`);
-        await preflightWheel(-100000);
-        await waitFor(primary, `scrollY === 0`, `preflight-error-back-${width}-${form}`);
+    const bringPrimaryBack = async (name) => {
+      // 甲's window took the focus; the import review window is brought back in front, as the editor would, before it is measured.
+      await primary.send('Page.bringToFront');
+      await waitFor(primary, `document.visibilityState === 'visible'`, name);
+    };
+    await bringPrimaryBack('preflight-error-window-visible');
+    for (const kind of ['short', 'long']) {
+      if (kind === 'long') {
+        requireJourney(await primary.evaluateIsolated(`(() => {
+          const freeze = Object.freeze;
+          Object.freeze = function (value) {
+            if (value !== null && typeof value === 'object' && value.code === 'BOOK_WORKBENCH_ALREADY_OPEN' && typeof value.message === 'string') { Object.freeze = freeze; value.message = ${JSON.stringify(LONG_REFUSAL)}; }
+            return freeze.call(this, value);
+          };
+          return true;
+        })()`) === true, 'preflight-long-arm');
+        await pointerClick(primary, waitFor, '[data-commit-source-import]', 'preflight-long-press');
+        await waitFor(primary, `(() => { const bar = document.querySelector('#persistence-status'); return bar.dataset.tone === 'error' && bar.textContent.includes('故意写得很长，用来确认它在导入复核页里') && document.documentElement.dataset.statusBar === 'shown'; })()`, 'preflight-long-shown');
+        await bringPrimaryBack('preflight-long-window-visible');
       }
-      await pointerClick(primary, waitFor, '#sidebar-toggle', `preflight-error-unfold-${width}`);
-      await waitFor(primary, `document.documentElement.dataset.sidebar !== 'icons'`, `preflight-error-unfolded-${width}`);
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        for (const form of ['full', 'icons']) {
+          if (form === 'icons') {
+            await pointerClick(primary, waitFor, '#sidebar-toggle', `preflight-${kind}-fold-${width}`);
+            await waitFor(primary, `document.documentElement.dataset.sidebar === 'icons'`, `preflight-${kind}-folded-${width}`);
+          }
+          await waitFor(primary, `innerWidth === ${width} && innerHeight === ${height} && ${statusBarClear(PREFLIGHT_CONTROLS)}`, `preflight-${kind}-clear-${width}-${form}`);
+          await preflightWheel(100000);
+          await waitFor(primary, `${ABOVE_COMMIT_CLEAR} && ${statusBarClear(PREFLIGHT_CONTROLS)}${kind === 'long' ? " && document.querySelector('#persistence-status').getBoundingClientRect().height > 60" : ''}`, `preflight-${kind}-clear-at-end-${width}-${form}`);
+          await preflightWheel(-100000);
+          await waitFor(primary, `scrollY === 0`, `preflight-${kind}-back-${width}-${form}`);
+        }
+        await pointerClick(primary, waitFor, '#sidebar-toggle', `preflight-${kind}-unfold-${width}`);
+        await waitFor(primary, `document.documentElement.dataset.sidebar !== 'icons'`, `preflight-${kind}-unfolded-${width}`);
+      }
+      await primary.send('Emulation.clearDeviceMetricsOverride');
     }
-    await primary.send('Emulation.clearDeviceMetricsOverride');
     await click(primary, '取消导入', 'preflight-abandon-source');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'preflight-abandoned');
 
