@@ -1762,14 +1762,21 @@ async function main() {
     for (const [statusWidth, statusHeight] of [[1280, 800], [1008, 681]]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width: statusWidth, height: statusHeight, deviceScaleFactor: 1, mobile: false });
       await pointerClick(renderer, waitFor, `${finishedCard} .task-overview-more > summary`, `task-status-finished-menu-${statusWidth}`);
+      await assertRenderer(renderer, `document.querySelector('.task-result-window')===null`, `task-status-finished-menu-no-result-${statusWidth}`);
       await pointerClick(renderer, waitFor, `${finishedCard} [data-task-action="run"]`, `task-status-finished-open-${statusWidth}`);
+      await assertRenderer(renderer, `document.querySelector('.task-result-window')===null`, `task-status-finished-open-no-result-${statusWidth}`);
       await waitFor(renderer, statusCardExpression({ ended: true, processed: true }), `task-status-finished-card-${statusWidth}`, 30_000);
       await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="full-link"]', `task-status-finished-plan-${statusWidth}`);
+      await assertRenderer(renderer, `document.querySelector('.task-result-window')===null`, `task-status-finished-plan-no-result-${statusWidth}`);
       await waitFor(renderer, planViewExpression({ running: false }), `task-status-finished-plan-view-${statusWidth}`, 30_000);
       await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-mode="compact"]', `task-status-finished-back-to-run-${statusWidth}`);
+      await assertRenderer(renderer, `document.querySelector('.task-result-window')===null`, `task-status-finished-back-to-run-no-result-${statusWidth}`);
       await waitFor(renderer, statusCardExpression({ ended: true, processed: true }), `task-status-finished-card-again-${statusWidth}`, 30_000);
       await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `task-status-finished-close-${statusWidth}`);
+      await assertRenderer(renderer, `document.querySelector('.task-result-window')===null`, `task-status-finished-close-no-result-${statusWidth}`);
       await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `task-status-finished-closed-${statusWidth}`);
+      await new Promise((resolveWait) => setTimeout(resolveWait, 1000));
+      await assertRenderer(renderer, `document.querySelector('.task-result-window')===null`, `task-status-finished-closed-no-result-${statusWidth}`);
     }
     await renderer.send('Emulation.clearDeviceMetricsOverride');
 
