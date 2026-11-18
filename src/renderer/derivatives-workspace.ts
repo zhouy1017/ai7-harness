@@ -1,8 +1,19 @@
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ProductionDocumentProjection,
-  type ProductionDocumentsProjection, type RendererApi } from '../shared/protocol.js';
-import { importedDerivativeTitle } from './manuscript-switcher.js';
+  type ProductionDocumentsProjection, type RendererApi, type ServiceWireJobProjection as ServiceJobProjection } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { documentCreatedLine } from './production-document-labels.js';
 import { showToast } from './components/toast.js';
+import { DERIVATIVE_CREATE_WORDS, createDerivative, derivativeCreateForm, suggestedDerivativeTitle,
+  type DerivativeCreateFocus, type DerivativeCreateState } from './components/derivative-create.js';
+import { mountWritingTask, type WritingTaskSurface } from './writing-task.js';
+import type { TaskLaunchRequest } from './task-drawer.js';
+
+/** What the management page needs of the writing surface it hosts for AI 写作生成, as 稿件 hosts it. */
+interface WritingOptions {
+  awaitServiceJob(job: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
+  openLaunch(request: TaskLaunchRequest): void;
+  openWritingPlan(taskIntentId: string, note?: string): void;
+}
 
 interface WorkspaceOptions {
   root: HTMLElement;
@@ -12,6 +23,8 @@ interface WorkspaceOptions {
   openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }, notice?: string | null): Promise<void>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
+  /** AI 写作生成's one writing sheet, hosted here as 稿件 hosts it. */
+  writing: WritingOptions;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
@@ -32,13 +45,15 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
   let status = '';
   let keyword = '';
   let managing = false;
-  let creating = false;
-  let createType = '';
-  let createTitle = '';
+  let form: DerivativeCreateState | null = null;
   const heading = el('h2', '衍生稿件');
   const toolbar = el('div', undefined, 'derivatives-toolbar');
   const createPanel = el('div', undefined, 'derivatives-create-panel');
+  const writingHost = el('div', undefined, 'derivative-writing-host');
   const categories = el('section', undefined, 'derivatives-category-editor');
+  const confirmStrip = el('div', undefined, 'derivatives-confirm');
+  confirmStrip.setAttribute('role', 'alert');
+  confirmStrip.hidden = true;
   const chips = el('nav', undefined, 'derivatives-category-chips');
   chips.setAttribute('aria-label', '按衍生稿件类别筛选');
   const filters = el('div', undefined, 'derivatives-filters');
@@ -53,7 +68,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
   filters.append(search, statusSelect);
   const list = el('ul', undefined, 'derivatives-list');
   const resultCount = el('p', '', 'field-note'); resultCount.setAttribute('role', 'status');
-  root.append(heading, toolbar, createPanel, categories, chips, filters, resultCount, list);
+  root.append(heading, toolbar, createPanel, writingHost, categories, confirmStrip, chips, filters, resultCount, list);
 
   function button(label: string, run: () => void, className = 'secondary'): HTMLButtonElement {
     const node = el('button', label, `btn ${className}`); node.type = 'button'; node.disabled = busy;
@@ -74,7 +89,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
     if (next.bookId !== options.bookId) throw new Error('衍生稿件不属于当前图书。');
     projection = next;
     if (!next.types.some((type) => type.typeId === category)) category = '';
-    if (!next.types.some((type) => type.typeId === createType)) createType = next.types[0]?.typeId ?? '';
+    if (form !== null && !next.types.some((type) => type.typeId === form!.typeId)) form = null;
     paint();
   }
 
@@ -93,57 +108,110 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
     }
   }
 
-  function paint(): void {
+  function paint(focus: DerivativeCreateFocus = null): void {
     if (projection === null || stopped) return;
     const total = projection.types.reduce((count, type) => count + type.documents.length, 0);
     heading.textContent = `衍生稿件 (${total})`;
-    const create = button('+ 新建衍生稿件', () => { creating = !creating; paintCreate(); }, 'primary');
-    const importFile = button('导入外部文档为衍生稿件', () => void act(() => createDocument(true), '已导入衍生稿件'));
-    create.disabled = busy || projection.unavailableReason !== null || createType === '';
-    importFile.disabled = create.disabled;
-    const importType = typeSelect(createType); importType.setAttribute('aria-label', '新建或导入的类别'); importType.disabled = busy;
-    importType.addEventListener('change', () => { createType = importType.value; paintCreate(); });
-    toolbar.replaceChildren(create, importType, importFile, button('管理衍生稿件类别', () => { managing = !managing; paintCategories(); }));
-    paintCreate(); paintCategories(); paintChips(); paintList();
+    const create = button(form === null ? '+ 新建衍生稿件' : '收起新建表单', () => {
+      if (form !== null) { form = null; paint(); return; }
+      const first = projection?.types[0];
+      if (first === undefined) return;
+      form = { title: suggestedDerivativeTitle(options.bookTitle, first.label, first.documents.length),
+        titleEdited: false, typeId: first.typeId, mode: 'blank', sourceVersionId: null, problem: null };
+      paint('title');
+    }, 'primary');
+    create.disabled = busy || projection.unavailableReason !== null || projection.types.length === 0;
+    toolbar.replaceChildren(create, button('管理衍生稿件类别', () => { managing = !managing; paintCategories(); }));
+    paintCreate(focus); paintCategories(); paintChips(); paintList();
   }
 
-  function paintCreate(): void {
-    createPanel.replaceChildren(); createPanel.hidden = !creating;
-    if (!creating) return;
-    const title = el('input'); title.placeholder = '稿件题目（可留空）'; title.setAttribute('aria-label', '新衍生稿件题目');
-    title.maxLength = 80; title.value = createTitle; title.disabled = busy;
-    title.addEventListener('input', () => { createTitle = title.value; });
-    const type = typeSelect(createType); type.disabled = busy; type.addEventListener('change', () => { createType = type.value; });
-    createPanel.append(title, type, button('创建并打开', () => void act(() => createDocument(false), '已新建衍生稿件'), 'primary'),
-      button('取消', () => { creating = false; paintCreate(); }, 'quiet'));
+  function paintCreate(focus: DerivativeCreateFocus): void {
+    createPanel.replaceChildren();
+    createPanel.hidden = form === null;
+    if (form === null || projection === null) return;
+    const state = form;
+    const built = derivativeCreateForm({
+      state,
+      types: projection.types,
+      sources: projection.sources,
+      busy,
+      focus,
+      suggest: (typeId) => {
+        const type = projection?.types.find((entry) => entry.typeId === typeId);
+        return type === undefined ? '' : suggestedDerivativeTitle(options.bookTitle, type.label, type.documents.length);
+      },
+      changed: (next) => paint(next),
+      run: () => void create(state),
+      cancel: () => { form = null; paint(); },
+    });
+    createPanel.append(built.element);
+    built.focus();
   }
 
-  async function createDocument(importFile: boolean): Promise<void> {
-    const type = projection?.types.find((entry) => entry.typeId === createType);
+  /** The four ways of the editor's menu: AI 写作生成 opens the one writing sheet, the others make the document here. */
+  async function create(state: DerivativeCreateState): Promise<void> {
+    if (busy || stopped || projection === null || form !== state) return;
+    const type = projection.types.find((entry) => entry.typeId === state.typeId);
     if (type === undefined) return;
-    let sourceVersionId: string | null = null;
-    let title = createTitle.trim();
-    if (importFile) {
-      const picked = await api.selectAndStageManuscript();
-      if (picked.status === 'cancelled' || stopped) return;
-      const staged = picked.staged;
-      if (!['DOCX', 'TXT', 'MD'].includes(staged.source.format)) {
-        await api.abandonImportDraft({ draftId: staged.draftId, expectedDraftVersion: staged.draftVersion, preserveBookRoute: true });
-        throw new Error('请选择 DOCX、TXT 或 Markdown 文件。');
-      }
-      const review = await api.prepareSourceImportReview({ draftId: staged.draftId, expectedDraftVersion: staged.draftVersion,
-        target: { kind: 'existing-book', bookId: options.bookId, relationship: 'source-only', reuseSourceVersionId: null } });
-      const imported = await api.commitSourceImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
-        reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
-      await api.acknowledgeImportCompletion({ commitId: imported.commitId });
-      sourceVersionId = imported.sourceVersionId;
-      if (!title) title = importedDerivativeTitle(staged.source.displayName);
+    if (state.mode === 'writing') {
+      form = null;
+      paint();
+      writingSurface().open(type.typeId, state.title);
+      return;
     }
-    if (type.notForThisBook) await api.decideProductionDocumentType({ typeId: type.typeId, notForThisBook: false });
-    const result = await api.createProductionDocument({ typeId: type.typeId, sourceVersionId, ...(title ? { title } : {}) });
-    if (stopped) return;
-    if (result.bookId !== options.bookId || result.document === null) throw new Error('未能创建衍生稿件。');
-    await options.openDocument(result.document, type, result.notice);
+    if (state.mode === 'source' && state.sourceVersionId === null) { state.problem = DERIVATIVE_CREATE_WORDS.pickSource; paint('source'); return; }
+    busy = true;
+    paint();
+    const mode = state.mode;
+    try {
+      const outcome = await createDerivative({ api, bookId: options.bookId, types: projection.types, state: { ...state, mode } });
+      if (stopped) return;
+      if (outcome.kind === 'cancelled') return;
+      if (outcome.kind === 'problem') { state.problem = outcome.problem; paint(outcome.focus); return; }
+      form = null;
+      await refresh();
+      options.setStatus(documentCreatedLine(outcome.type.label), 'success');
+      await options.openDocument(outcome.document, outcome.type, outcome.notice);
+    } catch (error) {
+      if (stopped) return;
+      state.problem = options.errorMessage(error, DERIVATIVE_CREATE_WORDS.createFailed);
+      options.setStatus(state.problem, 'error');
+    } finally {
+      busy = false;
+      if (!stopped) paint(form === null ? null : 'confirm');
+    }
+  }
+
+  let writing: WritingTaskSurface | null = null;
+  /** 稿件's writing surface, mounted beside this page's form the first time AI 写作生成 asks for it. */
+  function writingSurface(): WritingTaskSurface {
+    if (writing === null) {
+      writing = mountWritingTask({
+        root: writingHost,
+        api,
+        embedded: true,
+        suggestTitle: (typeId) => {
+          const type = projection?.types.find((entry) => entry.typeId === typeId);
+          return type === undefined ? '' : suggestedDerivativeTitle(options.bookTitle, type.label, type.documents.length);
+        },
+        setStatus: options.setStatus,
+        errorMessage: options.errorMessage,
+        awaitServiceJob: options.writing.awaitServiceJob,
+        openPlan: options.writing.openWritingPlan,
+        openLaunch: options.writing.openLaunch,
+        openDocument: (document, type) => options.openDocument(document, type),
+        documentsChanged: () => { void reload(); },
+      });
+    }
+    return writing;
+  }
+
+  async function reload(): Promise<void> {
+    try {
+      await refresh();
+    } catch (error) {
+      if (!stopped) options.setStatus(options.errorMessage(error, '无法读取衍生稿件。'), 'error');
+    }
   }
 
   function paintCategories(): void {
@@ -153,6 +221,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
     const types = projection.types;
     types.forEach((type, index) => {
       const row = el('div', undefined, 'derivatives-category-row');
+      row.dataset['derivativeType'] = type.typeId;
       const name = el('input'); name.value = type.label; name.maxLength = 80; name.disabled = busy;
       name.setAttribute('aria-label', `类别名称：${type.label}`);
       const move = (delta: number): void => {
@@ -163,11 +232,26 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       const up = button('上移', () => move(-1)); up.disabled = busy || index === 0;
       const down = button('下移', () => move(1)); down.disabled = busy || index === types.length - 1;
       row.append(name, button('保存名称', () => void act(async () => { await api.saveProductionDocumentType({ typeId: type.typeId, name: name.value }); })), up, down,
-        button('删除类别', () => { if (window.confirm(`删除「${type.label}」类别？`)) void act(async () => { await api.deleteProductionDocumentType({ typeId: type.typeId }); }, '已删除类别'); }, 'quiet'));
+        button('删除类别', () => requestDeleteType(type), 'quiet'));
       categories.append(row);
     });
     const name = el('input'); name.placeholder = '新类别名称'; name.setAttribute('aria-label', '新类别名称'); name.maxLength = 80; name.disabled = busy;
     categories.append(name, button('添加类别', () => void act(async () => { await api.saveProductionDocumentType({ name: name.value }); })));
+  }
+
+  /** 删除类别 asks in an in-app strip that names the category and how many documents it holds. */
+  function requestDeleteType(type: ProductionDocumentsProjection['types'][number]): void {
+    const count = type.documents.length;
+    confirmStrip.replaceChildren(
+      el('span', count === 0
+        ? `删除「${type.label}」类别？`
+        : `「${type.label}」类别里有 ${count} 篇衍生稿件，先把它们改到别的类别才能删除。`),
+      ...(count === 0
+        ? [button('确认删除', () => { confirmStrip.hidden = true; confirmStrip.replaceChildren(); void act(async () => { await api.deleteProductionDocumentType({ typeId: type.typeId }); }, '已删除类别'); }, 'danger')]
+        : [button('知道了', () => { confirmStrip.hidden = true; confirmStrip.replaceChildren(); }, 'quiet')]),
+      button('取消', () => { confirmStrip.hidden = true; confirmStrip.replaceChildren(); }, 'quiet'));
+    confirmStrip.hidden = false;
+    confirmStrip.querySelector('button')?.focus();
   }
 
   function paintChips(): void {
@@ -181,6 +265,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
     }
   }
 
+  /** One row: its 稿件题目 as text until 改名 or a double-click edits it, then its category and its two menus. */
   function paintList(): void {
     if (projection === null || stopped) return;
     list.replaceChildren();
@@ -193,27 +278,69 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
     if (!rows.length) list.append(el('li', projection.unavailableReason ?? '暂无符合条件的衍生稿件。', 'derivatives-empty'));
     for (const { type, document: doc } of rows) {
       const row = el('li', undefined, 'derivatives-item'); row.dataset['derivativeDocument'] = doc.documentId;
-      const title = el('input'); title.value = doc.title; title.maxLength = 80; title.disabled = busy; title.setAttribute('aria-label', `稿件题目：${doc.title}`);
+      const titleRow = el('div', undefined, 'derivatives-item-title');
+      const titleText = el('span', doc.title, 'derivatives-item-title-text');
+      const beginRename = (): void => {
+        const input = el('input', undefined, 'derivatives-item-title-input');
+        input.value = doc.title; input.maxLength = 80; input.disabled = busy;
+        input.setAttribute('aria-label', `稿件题目：${doc.title}`);
+        let done = false;
+        const finish = (save: boolean): void => {
+          if (done) return; done = true;
+          const title = input.value.trim();
+          // Only a changed, non-empty title is written; Enter and leaving the field both save once.
+          if (!save || title === '' || title === doc.title) { paintList(); return; }
+          void act(async () => { await api.renameProductionDocument({ documentId: doc.documentId, title }); });
+        };
+        input.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+          else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+        });
+        input.addEventListener('blur', () => finish(true));
+        titleRow.replaceChildren(input);
+        input.focus();
+        input.select?.();
+      };
+      titleText.addEventListener('dblclick', beginRename);
+      const rename = button('改名', beginRename, 'quiet small');
+      rename.dataset['derivativeAction'] = 'rename';
+      titleRow.append(titleText, rename);
       const categorySelect = typeSelect(type.typeId); categorySelect.disabled = busy;
       categorySelect.addEventListener('change', () => void act(async () => { await api.updateProductionDocumentMeta({ documentId: doc.documentId, typeId: categorySelect.value }); }));
       const meta = el('div', undefined, 'derivatives-item-meta');
       meta.append(categorySelect, el('span', doc.finalized ? '已定稿' : '草稿', 'status-pill'), el('span', `${doc.characterCount ?? 0} 字`),
         el('time', localInstantLabel(doc.updatedAt ?? doc.createdAt)));
       const actions = el('div', undefined, 'derivatives-item-actions');
-      actions.append(button('打开编辑', () => void act(() => options.openDocument(doc, type), ''), 'primary'),
-        button('保存题目', () => void act(async () => { await api.renameProductionDocument({ documentId: doc.documentId, title: title.value }); })),
-        button(doc.finalized ? '撤回草稿' : '设为定稿', () => void act(async () => { await api.updateProductionDocumentMeta({ documentId: doc.documentId, finalized: !doc.finalized }); })),
-        button('导出 DOCX', () => void act(() => exportDocument(doc, 'docx'), '')),
-        button('导出 MD', () => void act(() => exportDocument(doc, 'markdown'), '')),
-        // One step with 撤销 (Issue #1431 item 28): the delete is a soft record the toast's action restores.
+      const open = button('打开编辑', () => void act(() => options.openDocument(doc, type), ''), 'primary');
+      open.dataset['derivativeAction'] = 'open';
+      const exportMenu = rowMenu('导出 ▾', 'export', [
+        button('导出 DOCX', () => void act(() => exportDocument(doc, 'docx'), ''), 'secondary'),
+        button('导出 MD', () => void act(() => exportDocument(doc, 'markdown'), ''), 'secondary'),
+      ]);
+      // One step with 撤销 (Issue #1431 item 28): the delete is a soft record the toast's action restores.
+      const moreMenu = rowMenu('⋯', 'more', [
+        button(doc.finalized ? '取消定稿' : '设为定稿', () => void act(async () => { await api.updateProductionDocumentMeta({ documentId: doc.documentId, finalized: !doc.finalized }); }), 'secondary'),
         button('删除', () => void act(async () => {
           await api.updateProductionDocumentMeta({ documentId: doc.documentId, deleted: true });
           showToast(`已删除「${doc.title}」`, { tone: 'success', action: { label: '撤销', run: () => void act(async () => {
             await api.updateProductionDocumentMeta({ documentId: doc.documentId, deleted: false });
           }, '已恢复衍生稿件') } });
-        }, ''), 'quiet'));
-      row.append(title, meta, el('p', doc.preview ?? '', 'derivatives-preview'), actions); list.append(row);
+        }, ''), 'quiet'),
+      ]);
+      moreMenu.querySelector('summary')!.setAttribute('aria-label', `更多操作：${doc.title}`);
+      actions.append(open, exportMenu, moreMenu);
+      row.append(titleRow, meta, el('p', doc.preview ?? '', 'derivatives-preview'), actions); list.append(row);
     }
+  }
+
+  function rowMenu(summaryText: string, name: string, items: HTMLButtonElement[]): HTMLDetailsElement {
+    const menu = el('details', undefined, 'derivatives-row-menu');
+    const summary = el('summary', summaryText, 'btn secondary');
+    summary.dataset['derivativeRowMenu'] = name;
+    const body = el('div', undefined, 'derivatives-row-menu-body');
+    body.append(...items);
+    menu.append(summary, body);
+    return menu;
   }
 
   async function exportDocument(doc: ProductionDocumentProjection, format: ManuscriptExportFormat): Promise<void> {
@@ -234,6 +361,6 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
     if (!stopped) options.setStatus(result.outcomeLabel, result.outcome === 'created' || result.outcome === 'replaced' ? 'success' : 'error');
   }
 
-  return { start: () => { void refresh().catch((error: unknown) => { if (!stopped) options.setStatus(options.errorMessage(error, '无法读取衍生稿件。'), 'error'); }); },
-    destroy: () => { stopped = true; } };
+  return { start: () => { options.setStatus('衍生稿件'); void reload(); },
+    destroy: () => { stopped = true; writing?.destroy(); } };
 }

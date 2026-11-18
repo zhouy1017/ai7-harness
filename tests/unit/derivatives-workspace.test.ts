@@ -15,11 +15,12 @@ function doc(index: number): ProductionDocumentProjection {
     workflow: { profile: { id: '', name: '', version: '', activatedAt: '' }, summary: '', next: [], phases: [], transitions: 0 } };
 }
 
-function setup() {
+function setup(extraTypes: ProductionDocumentsProjection['types'] = []) {
   const projection: ProductionDocumentsProjection = { bookId: 'book', configuration: { schema: '', version: '', digest: '' }, unavailableReason: null,
     sources: [], sourcesTruncated: false, types: [
       { typeId: 'news-release', label: '新闻稿', notForThisBook: false, documents: Array.from({ length: 20 }, (_, i) => doc(i)), document: null },
       { typeId: 'custom', label: '人物资料', notForThisBook: false, documents: Array.from({ length: 20 }, (_, i) => doc(i + 20)), document: null },
+      ...extraTypes,
     ] };
   const methods = { inspectProductionDocuments: vi.fn(async () => projection),
     getManuscriptWindow: vi.fn(async () => ({ bookId: 'book' })),
@@ -27,12 +28,21 @@ function setup() {
     reviewManuscriptExport: vi.fn(async () => ({ bookId: 'book', target: { revisionId: 'saved' }, reviewDigest: 'review', suggestedFileName: '媒体稿.docx', format: 'docx' })),
     chooseManuscriptExportDestination: vi.fn(async () => ({ outcome: 'cancelled' })),
     saveProductionDocumentType: vi.fn(async () => ({ types: [] })), reorderProductionDocumentTypes: vi.fn(async () => ({ types: [] })),
-    updateProductionDocumentMeta: vi.fn(async () => projection), renameProductionDocument: vi.fn(async () => ({})) };
+    deleteProductionDocumentType: vi.fn(async () => ({ types: [] })),
+    updateProductionDocumentMeta: vi.fn(async () => projection),
+    renameProductionDocument: vi.fn(async (input: { documentId: string; title: string }) => {
+      const renamed = projection.types.flatMap((type) => type.documents).find((entry) => entry.documentId === input.documentId);
+      if (renamed) renamed.title = input.title;
+      return {};
+    }),
+    createProductionDocument: vi.fn(async (input: { typeId: string; sourceVersionId?: string | null; title?: string }) => ({
+      bookId: 'book', documents: projection, document: { ...doc(99), title: input.title ?? '媒体稿 99' }, typeId: input.typeId, notice: null })),
+    decideProductionDocumentType: vi.fn(async (input: { typeId: string }) => ({ bookId: 'book', documents: projection, document: null, typeId: input.typeId, notice: null })) };
   const api = methods as unknown as RendererApi;
   const root = document.createElement('main'); document.body.append(root);
   const openDocument = vi.fn(async () => {});
   const surface = mountDerivativesWorkspace({ root, bookId: 'book', bookTitle: '测试图书', api, openDocument, setStatus: vi.fn(),
-    errorMessage: () => '操作未完成' });
+    errorMessage: () => '操作未完成', writing: { awaitServiceJob: async (job) => job, openLaunch: vi.fn(), openWritingPlan: vi.fn() } });
   surface.start();
   return { root, methods, openDocument, surface };
 }
@@ -43,6 +53,7 @@ function click(root: HTMLElement, text: string): void {
   expect(button).toBeDefined(); button!.click();
 }
 function change(node: HTMLElement): void { (node as unknown as MiniElement).dispatchEvent({ type: 'change' }); }
+function key(node: HTMLElement, name: string): void { (node as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: name }); }
 
 it('browses dozens of documents by category, status and title while keeping total counts (#1427)', async () => {
   const { root, surface } = setup(); await flush();
@@ -91,5 +102,70 @@ it('acquires the existing editor capability before exporting an unopened documen
   expect(methods.getManuscriptWindow.mock.invocationCallOrder[0]).toBeLessThan(methods.saveProductionDocumentVersion.mock.invocationCallOrder[0]!);
   expect(methods.reviewManuscriptExport).toHaveBeenCalledWith(expect.objectContaining({ target: { kind: 'document', documentId: 'doc-0', revisionId: 'saved' }, format: 'docx' }));
   expect(methods.chooseManuscriptExportDestination).toHaveBeenCalledOnce();
+  surface.destroy();
+});
+
+it('makes a document through the editor\'s one create form, with its four modes (#1551)', async () => {
+  const { root, methods, openDocument, surface } = setup(); await flush();
+  click(root, '+ 新建衍生稿件');
+  const form = root.querySelector<HTMLElement>('.derivative-create-form')!;
+  expect(form).not.toBeNull();
+  expect(form.querySelector('[data-document-field]')?.getAttribute('data-document-field')).toBe('title');
+  expect([...form.querySelectorAll<HTMLInputElement>('.derivative-modes input')].map((radio) => radio.value))
+    .toEqual(['blank', 'writing', 'source', 'import']);
+  const type = form.querySelector<HTMLSelectElement>('select[data-document-field="type"]')!;
+  type.value = 'custom'; change(type); await flush();
+  expect(root.querySelector<HTMLInputElement>('.derivative-create-form [data-document-field="title"]')!.value).toBe('《测试图书》人物资料 21');
+  click(root.querySelector<HTMLElement>('.derivative-create-form')!, '创建并打开'); await flush();
+  expect(methods.createProductionDocument).toHaveBeenCalledWith({ typeId: 'custom', sourceVersionId: null, title: '《测试图书》人物资料 21' });
+  expect(openDocument).toHaveBeenCalledWith(expect.objectContaining({ documentId: 'doc-99' }), expect.objectContaining({ typeId: 'custom' }), null);
+  surface.destroy();
+});
+
+it('renames a row in place: Enter and leaving the field each save once, and an unchanged title saves nothing (#1551)', async () => {
+  const { root, methods, surface } = setup(); await flush();
+  const row = (): HTMLElement => root.querySelector<HTMLElement>('[data-derivative-document="doc-0"]')!;
+  expect(row().querySelector('.derivatives-item-title-text')?.textContent).toBe('媒体稿 0');
+  click(row(), '改名');
+  let input = row().querySelector<HTMLElement>('.derivatives-item-title-input')!;
+  expect((input as unknown as MiniElement).value).toBe('媒体稿 0');
+  (input as unknown as MiniElement).value = '改过的题目'; key(input, 'Enter'); await flush();
+  expect(methods.renameProductionDocument).toHaveBeenCalledTimes(1);
+  expect(methods.renameProductionDocument).toHaveBeenCalledWith({ documentId: 'doc-0', title: '改过的题目' });
+  expect(row().querySelector('.derivatives-item-title-text')?.textContent).toBe('改过的题目');
+  click(row(), '改名');
+  input = row().querySelector<HTMLElement>('.derivatives-item-title-input')!;
+  (input as unknown as MiniElement).value = '第二次改名';
+  (input as unknown as MiniElement).dispatchEvent({ type: 'blur' }); await flush();
+  expect(methods.renameProductionDocument).toHaveBeenCalledTimes(2);
+  expect(methods.renameProductionDocument).toHaveBeenLastCalledWith({ documentId: 'doc-0', title: '第二次改名' });
+  click(row(), '改名');
+  input = row().querySelector<HTMLElement>('.derivatives-item-title-input')!;
+  key(input, 'Enter'); await flush();
+  expect(methods.renameProductionDocument).toHaveBeenCalledTimes(2);
+  expect(row().querySelector('.derivatives-item-title-text')?.textContent).toBe('第二次改名');
+  click(row(), '改名');
+  input = row().querySelector<HTMLElement>('.derivatives-item-title-input')!;
+  (input as unknown as MiniElement).value = '不要这个'; key(input, 'Escape'); await flush();
+  expect(methods.renameProductionDocument).toHaveBeenCalledTimes(2);
+  expect(row().querySelector('.derivatives-item-title-text')?.textContent).toBe('第二次改名');
+  surface.destroy();
+});
+
+it('asks before deleting a category in an in-app strip that names it and how many documents it holds (#1551)', async () => {
+  const { root, methods, surface } = setup([{ typeId: 'empty', label: '空类别', notForThisBook: false, documents: [], document: null }]);
+  await flush(); click(root, '管理衍生稿件类别');
+  click(root.querySelector<HTMLElement>('[data-derivative-type="news-release"]')!, '删除类别');
+  const strip = (): HTMLElement => root.querySelector<HTMLElement>('.derivatives-confirm')!;
+  expect(strip().hidden).toBe(false);
+  expect(strip().textContent).toContain('新闻稿');
+  expect(strip().textContent).toContain('20');
+  expect(methods.deleteProductionDocumentType).not.toHaveBeenCalled();
+  click(strip(), '取消');
+  expect(strip().hidden).toBe(true);
+  click(root.querySelector<HTMLElement>('[data-derivative-type="empty"]')!, '删除类别');
+  expect(strip().textContent).toContain('空类别');
+  click(strip(), '确认删除'); await flush();
+  expect(methods.deleteProductionDocumentType).toHaveBeenCalledWith({ typeId: 'empty' });
   surface.destroy();
 });
