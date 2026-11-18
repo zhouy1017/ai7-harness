@@ -906,12 +906,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     focusBar = false;
     // The Task a redo prepared opens in its editing (Issue #422, S76c), as 返回修改 would open it.
     if (editOnOpen !== null && next.edit.editable) {
-      const target = preparedRedoRef === next.ref ? '[data-task-launch-option="budget"]:not(:disabled)' : editOnOpen === 'budget' ? '[data-task-plan-edit="budget"]:not(:disabled)' : '[data-task-plan-edit]:not(:disabled)';
+      // 调整预算并重做 lands on the redo bar's 本次用量; 改计划重做 on the plan's first edit, as before the bar (Issue #422, S76c).
+      const budgetRedo = preparedRedoRef === next.ref && editOnOpen === 'budget';
+      const target = budgetRedo ? '[data-task-launch-option="budget"]:not(:disabled)' : editOnOpen === 'budget' ? '[data-task-plan-edit="budget"]:not(:disabled)' : '[data-task-plan-edit]:not(:disabled)';
       editOnOpen = null;
       if (mode !== 'full') setMode('full', false);
-      const focusTarget = (): void => (root.querySelector<HTMLElement>(target) ?? (preparedRedoRef === next.ref ? bar.querySelector<HTMLElement>('[data-task-drawer-control^="start"]:not(:disabled)') : body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)')) ?? title).focus();
+      const focusTarget = (): void => (root.querySelector<HTMLElement>(target) ?? (budgetRedo ? bar.querySelector<HTMLElement>('[data-task-drawer-control^="start"]:not(:disabled)') : body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)')) ?? title).focus();
       // The redo's 本次用量 sits in its options popover: focus it once the popover is shown, not before.
-      const optionsPanel = preparedRedoRef === next.ref ? bar.querySelector<HTMLDetailsElement>('.task-launch-options') : null;
+      const optionsPanel = budgetRedo ? bar.querySelector<HTMLDetailsElement>('.task-launch-options') : null;
       if (optionsPanel !== null && !optionsPanel.open) { optionsPanel.addEventListener('toggle', focusTarget, { once: true }); optionsPanel.open = true; }
       else focusTarget();
     }
