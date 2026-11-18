@@ -3110,13 +3110,19 @@ async function main() {
         await renderer.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
         await waitFor(renderer, `innerWidth===${width}&&innerHeight===${height}`, `report-export-${form}-viewport`);
         await pointerClick(renderer, waitFor, '.review-header-export > summary', `report-header-export-menu-${form}`);
-        await pointerClick(renderer, waitFor, '.review-header-export [data-export-format-action="markdown"]', `report-export-open-${form}`);
-        await assertRenderer(renderer, `document.querySelector('.review-header-export').open===false`, `report-header-menu-closed-${form}`);
-        await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created'`, `report-export-written-${form}`, 60_000);
-        await pointerClick(renderer, waitFor, 'section.review-report .review-report-export-slot [data-export-action="close"]', `report-export-close-${form}`);
-        await waitFor(renderer, `${reportCard}===null && document.activeElement===document.querySelector('.review-header-export > summary')`, `report-export-closed-focus-returns-${form}`, 10_000);
-        // The Save-dialog answer is fixed at launch: remove the file so the next form writes it again as created.
-        if (width===1280) await rm(reportExportPath);
+        await waitFor(renderer, `document.querySelector('.review-header-export').open===true`, `report-header-menu-open-${form}`);
+        if (width === 1280) {
+          // The Save-dialog answer is single-use per launch: the wide form makes the one real export, the gate form only proves the menu is reachable.
+          await pointerClick(renderer, waitFor, '.review-header-export [data-export-format-action="markdown"]', `report-export-open-${form}`);
+          await assertRenderer(renderer, `document.querySelector('.review-header-export').open===false`, `report-header-menu-closed-${form}`);
+          await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created'`, `report-export-written-${form}`, 60_000);
+          await pointerClick(renderer, waitFor, 'section.review-report .review-report-export-slot [data-export-action="close"]', `report-export-close-${form}`);
+          await waitFor(renderer, `${reportCard}===null && document.activeElement===document.querySelector('.review-header-export > summary')`, `report-export-closed-focus-returns-${form}`, 10_000);
+        } else {
+          await assertRenderer(renderer, `(() => {const button=document.querySelector('.review-header-export [data-export-format-action="markdown"]'),r=button.getBoundingClientRect();return r.width>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&button.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))&&!button.disabled;})()`, `report-export-menu-reachable-${form}`);
+          await pointerClick(renderer, waitFor, '.review-header-export > summary', `report-header-export-menu-close-${form}`);
+          await waitFor(renderer, `document.querySelector('.review-header-export').open===false`, `report-header-menu-closed-${form}`);
+        }
       }
     } finally {
       await renderer.send('Emulation.clearDeviceMetricsOverride');
