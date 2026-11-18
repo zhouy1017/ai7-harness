@@ -1216,6 +1216,16 @@ async function main() {
         await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-triage-filter');
         // The large Run reads (#1592): its first page is on screen, no refused read is standing, and a second page is offered.
         await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewRead===undefined && document.querySelector('.review-read-failed')===null && document.querySelector('[data-review-action="more-findings"]')?.disabled===false`, 'review-triage-second-page-offered');
+        if (viewport.width===1280) {
+          // The Run's report is read in part too: its 发现详单 says how much is shown, and 显示更多 reads the next page through
+          // the service's report paging (#1592), by a real click.
+          const REPORT_PART=`[data-review-part-path="run.report.record.findings.entries"]`;
+          const REPORT_STATE=`(() => { const part=document.querySelector(${JSON.stringify(REPORT_PART)}); const line=part?.querySelector('.review-part-paging')?.textContent??''; const shown=/已显示 ([0-9]+) [/] ([0-9]+) 条。/.exec(line); return {rows:part?.querySelectorAll('li').length??0, shown:shown===null?null:Number(shown[1]), total:shown===null?null:Number(shown[2]), failed:part?.querySelector('.review-page-failed')?.textContent??null}; })()`;
+          const report=await renderer.evaluate(REPORT_STATE);
+          requireJourney(report.rows>0 && report.shown===report.rows && report.total>report.rows && report.failed===null, 'review-report-page-offered', report);
+          await triageClick(renderer,`${REPORT_PART} .review-part-paging button`);
+          await waitFor(renderer, `(() => { const now=${REPORT_STATE}; return now.failed===null && now.rows>${report.rows} && (now.shown===null ? now.rows===${report.total} : now.shown===now.rows && now.total===${report.total}); })()`, 'review-report-page-read');
+        }
         // 下一条待处理 is #1523's view.nextPending (Alt+↓ on Windows): the review page answers the same command.
         await press(renderer,'ArrowDown',1);
         const decided=[];
