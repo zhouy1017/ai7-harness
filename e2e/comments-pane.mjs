@@ -364,7 +364,9 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     search.value=''; search.dispatchEvent(new Event('input',{bubbles:true}));
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]');
-    words.scrollIntoView({block:'center',behavior:'instant'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-40;
+    // The text moves twice by 24 px below (pane kept, then pane back at its top): start 64 px down so the words end 16 px below the
+    // pane top, as after the single move before #1523; a card cannot rise above its 8 px floor to meet words above the pane.
+    words.scrollIntoView({block:'center',behavior:'instant'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-64;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const cards=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top));
     const first=cards[0],last=cards[cards.length-1], before=first.getBoundingClientRect().top, oldScroll=pane.scrollTop, height=pane.scrollHeight;
