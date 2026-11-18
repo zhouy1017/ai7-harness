@@ -730,8 +730,9 @@ async function commentsHandledFilter(renderer, check, waitFor, indexes) {
 
 // Issue #1523: 上一条 / 下一条待处理 within and beyond the loaded page, keyboard triage (the next card focused, across pages after a
 // key), 接受 on a compact card by pointer, the Book's pending count, docked and as the overlay. Each form seeds five 修改建议 with a
-// public synthetic reason of its own — one on the first page, outside the last page, and four beyond the first page — so with the
-// filter on that reason and on their category every step's target is certain whatever else the Book holds.
+// public synthetic reason of its own — one on the first page, outside the last page, and four in the Book's last paragraphs, so a
+// page that holds them reaches the Book's end — so with the filter on that reason and on their category every step's target is
+// certain whatever else the Book holds.
 export async function commentsTriageForms(renderer, check, waitFor, at) {
   const native = await renderer.evaluate('({width:innerWidth,height:innerHeight})');
   try {
@@ -803,7 +804,7 @@ async function commentsTriage(renderer, check, waitFor, form, keyword) {
       return taken.sort((a,b)=>a.block.position-b.block.position||a.from-b.from);
     };
     const paragraph=block=>block.kind==='paragraph'&&split(block.text).length>=8;
-    const onFirst=take(here.blocks.filter(block=>paragraph(block)&&block.position<farFirst),1), beyond=take(far.blocks.filter(block=>paragraph(block)&&block.position>last),4);
+    const onFirst=take(here.blocks.filter(block=>paragraph(block)&&block.position<farFirst),1), beyond=take(far.blocks.filter(block=>paragraph(block)&&block.position>last).reverse(),4);
     if(!onFirst||!beyond)return false;
     const ids=[];
     for(const range of [...onFirst,...beyond]){
@@ -880,7 +881,11 @@ async function commentsTriage(renderer, check, waitFor, form, keyword) {
   check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-comment-card="' + await renderer.evaluate('__triage.ids[4]') + '"] [data-mark-quick="accept"]'))).real, 'comments-triage-quick-accept-click');
   check(await triageRecord(renderer, 4, 'applied'), 'comments-triage-quick-accept-applied');
   // A pointer decision at the Book's end: the card stays, nothing moves, and that there is nothing further is said.
-  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('按当前筛选，后面没有待处理的了') && document.querySelector('[data-comment-card="'+__triage.ids[4]+'"]')?.dataset.selected==='true' && ${TRIAGE_FIRST}!==__triage.start`, 'comments-triage-book-end', 60_000);
+  try {
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('按当前筛选，后面没有待处理的了') && document.querySelector('[data-comment-card="'+__triage.ids[4]+'"]')?.dataset.selected==='true' && ${TRIAGE_FIRST}!==__triage.start`, 'comments-triage-book-end', 60_000);
+  } catch {
+    check(false, 'comments-triage-book-end', await renderer.evaluate(`({status:document.querySelector('#persistence-status')?.textContent??null,selected:document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard===__triage.ids[4],offered:document.querySelector('[data-pending-step="next"]')?.dataset.offered??null,firstPage:${TRIAGE_FIRST}===__triage.start})`));
+  }
   check(await bookCount(0), 'comments-triage-book-count-after');
   // Back to all marks, with real input: 全部, then the search field emptied.
   check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-filter-toggle]'))).real, 'comments-triage-reset-open');
