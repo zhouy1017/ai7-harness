@@ -809,7 +809,7 @@ async function importDraftAsSource(renderer, bookId) {
   await waitFor(renderer, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"] [data-commit-source-import]')`, 'draft-reviewed', 120_000);
   await clickSelector(renderer, '[data-commit-source-import]', 'draft-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'draft-committed', 120_000);
-  await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && document.querySelector('[data-screen="imported"] .book-deliverables-summary [data-deliverables-action="open"]:not(:disabled)')`, 'draft-acknowledged', 120_000);
+  await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && document.querySelector('[data-screen="imported"] .book-deliverables-summary[data-deliverables-state] [data-deliverables-action="open"]:not(:disabled)')`, 'draft-acknowledged', 120_000);
 }
 
 /** 交付物 from the manuscript: the 工作 group holds 审阅 and then 交付物, and leaving settles the manuscript first. */

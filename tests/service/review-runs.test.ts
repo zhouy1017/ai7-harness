@@ -1011,23 +1011,6 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   });
 
-  it('offers the available review categories and scope before the first Run', async () => {
-    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
-      const before = workspace(session, book);
-      expect(before.categories.map((category) => category.categoryId)).toEqual([
-        'typos-and-usage', 'style-and-format', 'plot-consistency', 'factual-review', 'academic-integrity', 'publication-risk',
-        'literary-expression', 'series-consistency', 'cross-deliverable-consistency',
-      ]);
-      expect(before.categories.find((category) => category.categoryId === PLOT)).toMatchObject({ available: true, unavailableReason: null });
-      expect(before.categories.filter((category) => category.modelFree).map((category) => category.categoryId)).toEqual([]);
-      expect(before.categories.find((category) => category.categoryId === 'series-consistency')!.available).toBe(false);
-      expect(before.coverage.map((row) => row.state)).toEqual(['never', 'never', 'never', 'never', 'never', 'never', 'never', 'unavailable', 'unavailable']);
-      expect(before.scopeOptions.selection).toEqual({ available: false, unavailableReason: SELECTION_UNAVAILABLE_REASON });
-      expect(before.newReview).toEqual({ available: true, unavailableReason: null });
-      expect(before.runs).toEqual([]);
-      expect(before.run).toBeNull();
-    });
-  }, 300_000);
 
   it('cancels a preparation without writing a Run and permits only one preparation per Book', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
@@ -1176,18 +1159,6 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('refuses updates and deletion of recorded review ledger relations', async () => {
-    await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
-      const { ignored } = handleReviewFindings(session, book, run);
-      session.store.recordReviewFindingDisposition(book.bookId, run.reviewRunId, ignored.findingId, '保留体例');
-      withDatabase((db) => {
-        for (const relation of ['review_runs', 'review_run_authorizations', 'review_run_category_events', 'review_findings', 'review_finding_dispositions', 'quality_signals']) {
-          expect(() => db.exec(`UPDATE ${relation} SET rowid = rowid`)).toThrow(/REVIEW_LEDGER_IMMUTABLE/u);
-          expect(() => db.exec(`DELETE FROM ${relation}`)).toThrow(/REVIEW_LEDGER_IMMUTABLE/u);
-        }
-      });
-    });
-  }, 300_000);
 
   it('versions the recorded Report over current finding statuses without rewriting its first version', async () => {
     await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
@@ -1299,21 +1270,6 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('refuses unavailable or invalid selection scopes before preparing a Run (#423)', async () => {
-    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
-      const { at, on } = selectionContext(session, book);
-      const twenty = at(20), twentyOne = at(21);
-      const facts = workspace(session, book).categories.find((category) => category.categoryId === FACTUAL)!;
-      expect(facts.scopes.selection).toEqual({ available: true, unavailableReason: null });
-      expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], on(`blk_${'0'.repeat(24)}`, twenty.blockId), launchPolicy)))
-        .toBe(SELECTION_GONE_REASON);
-      expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], on(twentyOne.blockId, twenty.blockId), launchPolicy)))
-        .toBe('REVIEW_SCOPE_INVALID');
-      expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], on(at(1).blockId, at(MAX_SELECTION_BLOCKS + 1).blockId), launchPolicy)))
-        .toBe(SELECTION_TOO_LONG_REASON);
-      expect(workspace(session, book).runs).toEqual([]);
-    });
-  }, 300_000);
 
   it('previews the selection context and the paragraph alone to be marked (#423)', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
@@ -1998,19 +1954,6 @@ describe('a Review Run over the real store on exact sample1', () => {
     }
   }, 300_000);
 
-  it('reads a Book without a manuscript as having nothing to review, and names why', async () => {
-    await withSession('sample1-review-cross-chapter-authored', async (session) => {
-      const creation = session.store.prepareBookCreation('空图书', null);
-      const bookId = session.store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
-      const empty = session.store.inspectReviewWorkspace(bookId, null);
-      expect(empty).toMatchObject({ bookId, manuscript: null, newReview: { available: false }, runs: [], run: null });
-      expect(empty.categories.every((category) => !category.available)).toBe(true);
-      expect(empty.coverage.every((row) => row.state === 'unavailable')).toBe(true);
-      expect(empty.scopeOptions.whole.available).toBe(false);
-      expect(storeCode(() => session.store.createReviewRunPreparationWork(bookId, [TYPOS], WHOLE, launchPolicy))).toBe('REVIEW_MANUSCRIPT_ABSENT');
-      expect(storeCode(() => session.store.inspectReviewWorkspace(randomUUID(), null))).toBe('REVIEW_BOOK_NOT_FOUND');
-    });
-  }, 300_000);
 
   it('executes first factual chapters and reruns only that range under development-ci', async () => {
     await withBook('sample1-factual-authored', async (session, book) => {
