@@ -4,6 +4,7 @@ import { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_
 export { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
 import { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
 export { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
+import type { BookFindingsProjection } from './protocol/review.js';
 import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, LedgerTaskLaunchOperation } from './runtime-execution-config.js';
 export type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
@@ -387,32 +388,8 @@ export * from './protocol/scoped-edit.js';
  */
 export const SERVICE_PROTOCOL_VERSION = 204 as const;
 
-export const BOOK_FINDINGS_PAGE_SIZE = 40;
-
-export interface BookFindingProjection {
-  /** Exact open suggestion offered by the owning review; Apply still revalidates this binding. */
-  suggestion?: { manuscriptId: string; branchId: string; markId: string; blockId: string; batchAllowed: boolean; quote: string; replacement: string };
-  id: string;
-  category: string;
-  categoryLabel: string;
-  severity: string;
-  status: string;
-  summary: string;
-  target:
-    | { kind: 'gap'; revisionId: string; unitOrdinal: number; blockId: string | null }
-    | { kind: 'review'; reviewRunId: string; findingId: string; blockId: string }
-    | { kind: 'risk'; recordId: string; riskId: string; revisionId: string };
-}
-
-export interface BookFindingsProjection {
-  bookId: string;
-  total: number;
-  offset: number;
-  next: number | null;
-  pageSize: typeof BOOK_FINDINGS_PAGE_SIZE;
-  groups: ReadonlyArray<{ category: string; label: string; count: number; bySeverity: Readonly<Record<string, number>>; byStatus: Readonly<Record<string, number>> }>;
-  items: ReadonlyArray<BookFindingProjection>;
-}
+export { BOOK_FINDINGS_PAGE_SIZE } from './protocol/review.js';
+export type { BookFindingProjection, BookFindingsProjection } from './protocol/review.js';
 
 export interface ParagraphAnalysisProjection {
   bookId: string;

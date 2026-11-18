@@ -17,6 +17,8 @@ const forbiddenFeatureImports = {
   'src/service/manuscript-reimport-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/import-review-records.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/import-intake-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/review/review-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/book-findings.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/house-review-preference.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/learning/memory-facade.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/learning/ledger.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
