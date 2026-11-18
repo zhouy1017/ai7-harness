@@ -653,6 +653,9 @@ const RUN_WAITING_REASON = '这本书有一次审阅在等待联网后开始；�
 const WAITING_DETAIL = '联网后开始：恢复联网后，AI7 先核对计划再开始这次审阅；在此之前什么都没有发送。' as const;
 /** 取消 of a Run waiting to start once online (OFF-010), as each of its categories records it. */
 const WAITING_CANCELLED_DETAIL = '编辑在开始前取消了这次等待联网的审阅；没有发送任何内容，也没有产生用量。' as const;
+/** 生成统合总结 (Issue #1506): the 暂缺 of an eligible Run made before 0.7.2, and the cancellation of a request still waiting. */
+const LEGACY_SYNTHESIS_DETAIL = '这次审阅没有统合总结；逐条发现仍可处理，可单独生成统合总结。' as const;
+const SYNTHESIS_WAITING_CANCELLED_DETAIL = '编辑在开始前取消了这次统合请求；没有发送任何内容。' as const;
 /** 继续审阅 of a Run waiting to start once online: only Reconnect Preflight starts it, after checking its plan (OFF-008). */
 const WAITING_DRIVE_REASON = '这次审阅在等待联网后开始：联网后 AI7 先核对计划再开始；请等待，或取消它。' as const;
 export const HOUSE_GUIDELINE_NOT_TRANSMITTABLE = 'REVIEW_GUIDELINE_NOT_TRANSMITTABLE' as const;
@@ -777,6 +780,8 @@ export interface ReviewRunLedgers {
   housePreference?(bookId: string, categoryId: string, kind: string, policy: LaunchPolicyProjection): HouseReviewPreferenceUse | 'closed' | null;
   materialReadings?(boundary: TaskMaterialBoundary): ReadonlyArray<TaskMaterialReading>;
   materialOffers?(bookId: string): NonNullable<ReviewWorkspaceProjection['materials']>;
+  /** The model connection a frozen plan's credential reference names now, for 生成统合总结's default choice (Issue #1506). */
+  connectionOf?(credentialReference: string): string | null;
   baseline(): BaselineAnalysisStore;
 }
 
@@ -801,6 +806,14 @@ interface SnapshotCategory {
     readonly planEnvelopeDigest: string;
     readonly plan: ReviewRunCategoryPlanProjection;
   };
+}
+
+/** 生成统合总结 (Issue #1506), as `review_run_synthesis.summary_json` keeps it beside the summary it asks for. */
+interface SynthesisAttempt {
+  readonly category: SnapshotCategory;
+  readonly launchSnapshotId: string;
+  readonly whenOnline: boolean;
+  readonly requestedAt: string;
 }
 
 /** The canonical record of `review_runs`. */
@@ -1960,7 +1973,33 @@ export class ReviewRunStore {
     requireReview(this.#db.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'REVIEW_BOOK_NOT_FOUND', '这本书不存在。');
   }
 
+  /**
+   * The Run as its categories are driven now: its snapshot, with the synthesis member a 生成统合总结 asked for since (Issue #1506)
+   * in place of the one the snapshot froze — or added, for a Run made before 0.7.2. The snapshot record itself never changes.
+   */
   #run(reviewRunId: string): RunSnapshot {
+    const snapshot = this.#frozenRun(reviewRunId);
+    const attempt = this.#synthesisAttempt(reviewRunId);
+    return attempt === null ? snapshot
+      : { ...snapshot, categories: [...snapshot.categories.filter((category) => category.categoryId !== RUN_SYNTHESIS_CATEGORY), attempt.category] };
+  }
+
+  /**
+   * The latest 生成统合总结 of a Run (Issue #1506): the synthesis member's own new Task, kept with the summary it is for. Its
+   * events carry its Task Intent, so the member reads only what this request did.
+   */
+  #synthesisAttempt(reviewRunId: string): SynthesisAttempt | null {
+    const row = this.#db.prepare('SELECT summary_json, summary_digest FROM review_run_synthesis WHERE review_run_id = ?').get(reviewRunId);
+    if (row === undefined || row.summary_json === null) return null;
+    const attempt = recordOf(text(row.summary_json), text(row.summary_digest)).attempt;
+    if (attempt === undefined) return null;
+    requireReview(isRecord(attempt) && isRecord(attempt.category) && attempt.category.categoryId === RUN_SYNTHESIS_CATEGORY && isRecord(attempt.category.task) &&
+      typeof attempt.category.task.taskIntentId === 'string' && typeof attempt.launchSnapshotId === 'string' && typeof attempt.whenOnline === 'boolean' &&
+      typeof attempt.requestedAt === 'string', 'REVIEW_RECORD_INVALID', '统合总结的单独请求记录无效。');
+    return attempt as unknown as SynthesisAttempt;
+  }
+
+  #frozenRun(reviewRunId: string): RunSnapshot {
     requireReview(typeof reviewRunId === 'string' && UUID_PATTERN.test(reviewRunId), 'REVIEW_RUN_INVALID', '审阅记录标识无效。');
     const row = this.#db.prepare('SELECT * FROM review_runs WHERE review_run_id = ?').get(reviewRunId) as SqlRow | undefined;
     requireReview(row !== undefined, 'REVIEW_RUN_NOT_FOUND', '这次审阅不存在。');
@@ -2037,12 +2076,24 @@ export class ReviewRunStore {
     const row = this.#db.prepare(`SELECT rr.review_run_id, rr.book_id FROM review_runs rr
       JOIN json_each(rr.canonical_json, '$.categories') c
       JOIN analysis_run_records r ON r.task_intent_id = json_extract(c.value, '$.task.taskIntentId')
-      WHERE r.run_record_id = ?`).get(runRecordId) as SqlRow | undefined;
+      WHERE r.run_record_id = ?`).get(runRecordId) as SqlRow | undefined ?? this.#attemptRunOwner(runRecordId);
     requireReview(row !== undefined, 'REVIEW_RUN_NOT_FOUND', '运行不属于审阅。');
     const tasks = this.controlTasks(text(row.book_id), text(row.review_run_id));
     const found = tasks.find((task) => this.#runRecordOf(task.taskIntentId) === runRecordId);
-    requireReview(found !== undefined, 'REVIEW_RECORD_INVALID', '审阅类别的运行记录缺失。');
-    return found.ledger;
+    if (found !== undefined) return found.ledger;
+    // The stage's synthesis Task, which a later 生成统合总结 took the member's place of (Issue #1506), keeps its own ledger.
+    const frozen = this.#frozenRun(text(row.review_run_id));
+    const replaced = frozen.categories.find((category) => category.categoryId === RUN_SYNTHESIS_CATEGORY && category.task !== null &&
+      this.#runRecordOf(category.task.taskIntentId) === runRecordId);
+    requireReview(replaced !== undefined, 'REVIEW_RECORD_INVALID', '审阅类别的运行记录缺失。');
+    return this.#categoryDefinitionLedger(replaced);
+  }
+
+  /** The Review Run whose latest 生成统合总结 (Issue #1506) this ledger Run is. */
+  #attemptRunOwner(runRecordId: string): SqlRow | undefined {
+    return this.#db.prepare(`SELECT rr.review_run_id, rr.book_id FROM review_run_synthesis s JOIN review_runs rr ON rr.review_run_id = s.review_run_id
+      JOIN analysis_run_records r ON r.task_intent_id = json_extract(s.summary_json, '$.attempt.category.task.taskIntentId')
+      WHERE r.run_record_id = ?`).get(runRecordId) as SqlRow | undefined;
   }
 
   defaultRuleVersion(reviewRunId: string): string | null {
@@ -2368,10 +2419,11 @@ export class ReviewRunStore {
     }
     const ledger = this.#categoryDefinitionLedger(category);
     if (ended || category.task === null || this.#ledgers.executionFor === undefined) return ledger;
-    // Only one-step launches inherit the launch choice. Retained prepared work keeps its existing drift checks.
-    const launched = this.#db.prepare(`SELECT 1 FROM review_run_authorizations WHERE review_run_id = ?
-      AND json_extract(canonical_json, '$.launchSnapshotId') IS NOT NULL`).get(snapshot.reviewRunId);
-    if (launched === undefined) return ledger;
+    // Only one-step launches inherit the launch choice — 生成统合总结 is one (Issue #1506). Retained prepared work keeps its existing drift checks.
+    const launched = category.categoryId === RUN_SYNTHESIS_CATEGORY && this.#synthesisAttempt(snapshot.reviewRunId)?.category.task!.taskIntentId === category.task.taskIntentId
+      || this.#db.prepare(`SELECT 1 FROM review_run_authorizations WHERE review_run_id = ?
+      AND json_extract(canonical_json, '$.launchSnapshotId') IS NOT NULL`).get(snapshot.reviewRunId) !== undefined;
+    if (!launched) return ledger;
     const frozen = ledger.frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
     const provider = frozen.components['provider-resolution-plan'] as Record<string, unknown>;
     const route = provider.executionRoute as Record<string, unknown>;
@@ -2476,6 +2528,10 @@ export class ReviewRunStore {
    * was authorized on its ledger is no longer waiting, and 继续审阅 takes it on as it does after any restart (Issue #657).
    */
   #waits(snapshot: RunSnapshot, authorization: RunView['authorization'] = this.#authorizationOf(snapshot.reviewRunId)): boolean {
+    // A 生成统合总结 asked for offline (Issue #1506) waits alone, until its Task is authorized or the editor cancels it.
+    const attempt = this.#synthesisAttempt(snapshot.reviewRunId);
+    if (attempt !== null) return attempt.whenOnline && !this.#driving.has(snapshot.reviewRunId) &&
+      this.#events(snapshot.reviewRunId, RUN_SYNTHESIS_CATEGORY).length === 0 && this.#runRecordOf(attempt.category.task!.taskIntentId) === null;
     if (authorization === null || (!authorization.whenOnline && authorization.startWhen !== 'idle') || this.#driving.has(snapshot.reviewRunId)) return false;
     return !this.#begun(snapshot);
   }
@@ -2507,7 +2563,8 @@ export class ReviewRunStore {
         continue;
       }
       const snapshot = this.#snapshotOf(row);
-      if (this.#waits(snapshot)) waiting.push({ bookId: snapshot.bookId, reviewRunId, authorizedAt: text(row.approved_at) });
+      // A waiting 生成统合总结 (Issue #1506) takes its turn by when it was asked for, not by the Run's own approval.
+      if (this.#waits(snapshot)) waiting.push({ bookId: snapshot.bookId, reviewRunId, authorizedAt: this.#synthesisAttempt(reviewRunId)?.requestedAt ?? text(row.approved_at) });
       else if (this.#begun(snapshot)) settled.push(reviewRunId);
     }
     // Dropped only outside a transaction: what a surrounding write recorded may still be rolled back.
@@ -2519,7 +2576,9 @@ export class ReviewRunStore {
   #whenOnlineApprovals(): Map<string, { bookId: string; authorizedAt: string }> {
     const rows = this.#db.prepare(
       `SELECT a.review_run_id, a.authorized_at, r.book_id FROM review_run_authorizations a JOIN review_runs r ON r.review_run_id = a.review_run_id
-       WHERE json_extract(a.canonical_json, '$.start') = 'when-online'`,
+       WHERE json_extract(a.canonical_json, '$.start') = 'when-online'
+       UNION ALL SELECT s.review_run_id, json_extract(s.summary_json, '$.attempt.requestedAt'), r.book_id FROM review_run_synthesis s
+       JOIN review_runs r ON r.review_run_id = s.review_run_id WHERE json_extract(s.summary_json, '$.attempt.whenOnline') = 1`,
     ).all() as SqlRow[];
     return new Map(rows.map((row) => [text(row.review_run_id), { bookId: text(row.book_id), authorizedAt: text(row.authorized_at) }] as const));
   }
@@ -2541,6 +2600,14 @@ export class ReviewRunStore {
    */
   preflightDrift(reviewRunId: string): ReadonlyArray<string> {
     const snapshot = this.#run(reviewRunId);
+    const attempt = this.#synthesisAttempt(reviewRunId);
+    if (attempt !== null) {
+      // 生成统合总结 (Issue #1506) bound its own Task's plan alone; the Run's categories finished long before.
+      let current: AnalysisProjection | null = null;
+      try { current = this.#categoryLedger(attempt.category, snapshot).inspect(snapshot.bookId); } catch (error) { if (!(error instanceof AnalysisError)) throw error; }
+      return current !== null && current.taskIntent?.taskIntentId === attempt.category.task!.taskIntentId && current.state === 'prepared' &&
+        current.actions.canAuthorize && current.planEnvelope?.digest === attempt.category.task!.planEnvelopeDigest ? [] : [`「${attempt.category.entry.label}」的计划`];
+    }
     const moved: string[] = [];
     const latest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(snapshot.bookId) as SqlRow;
     if (text(latest.review_run_id) !== reviewRunId) moved.push('这次审阅的计划');
@@ -2581,6 +2648,7 @@ export class ReviewRunStore {
     transact(this.#db, () => {
       // A Series Retrieval Exclusion that reaches a category stops the Run in SER-024's words, exactly as the exclusion stops a
       // waiting Run when it is recorded (Issue #764): 书系检索范围已变化, never the plan drift the same exclusion also causes.
+      if (this.#synthesisAttempt(reviewRunId) !== null) { this.#recordEvent(reviewRunId, RUN_SYNTHESIS_CATEGORY, 'refused', detail, { extra: { code } }); return; }
       if (cause === 'plan-moved' && this.#stopForSeriesScopeWhileWaiting(snapshot)) return;
       for (const category of snapshot.categories) this.#recordEvent(reviewRunId, category.categoryId, 'refused', detail, { extra: { code } });
     });
@@ -2611,6 +2679,10 @@ export class ReviewRunStore {
       return queued;
     }
     requireReview(this.#waits(snapshot), 'REVIEW_RUN_NOT_WAITING', '只有等待联网后开始的审阅可以在这里取消；它已经开始或已经结束。');
+    if (this.#synthesisAttempt(reviewRunId) !== null) {
+      this.#recordEvent(reviewRunId, RUN_SYNTHESIS_CATEGORY, 'refused', SYNTHESIS_WAITING_CANCELLED_DETAIL, { extra: { code: REVIEW_RUN_CANCELLED } });
+      return null;
+    }
     transact(this.#db, () => {
       for (const category of snapshot.categories) {
         this.#recordEvent(reviewRunId, category.categoryId, 'refused', WAITING_CANCELLED_DETAIL, { extra: { code: REVIEW_RUN_CANCELLED } });
@@ -2634,7 +2706,7 @@ export class ReviewRunStore {
   }
 
   #events(reviewRunId: string, categoryId: string): CategoryEvent[] {
-    return (this.#db.prepare(
+    const events = (this.#db.prepare(
       'SELECT * FROM review_run_category_events WHERE review_run_id = ? AND category_id = ? ORDER BY sequence',
     ).all(reviewRunId, categoryId) as SqlRow[]).map((row) => ({
       sequence: integer(row.sequence),
@@ -2644,6 +2716,10 @@ export class ReviewRunStore {
       resultSetRevisionId: nullableText(row.result_set_revision_id),
       record: recordOf(text(row.canonical_json), text(row.sha256)),
     }));
+    if (categoryId !== RUN_SYNTHESIS_CATEGORY) return events;
+    // The synthesis member reads the events of its current Task alone: the stage's, or the latest 生成统合总结's (Issue #1506).
+    const attempt = this.#synthesisAttempt(reviewRunId)?.category.task!.taskIntentId ?? null;
+    return events.filter((event) => (event.record.synthesisAttempt ?? null) === attempt);
   }
 
   /** Closed v1 bookkeeping is output, never successful coverage. Absence is an unfinished retention phase. */
@@ -2738,6 +2814,7 @@ export class ReviewRunStore {
       const runRecordId = facts.runRecordId ?? null;
       const resultSetRevisionId = facts.resultSetRevisionId ?? null;
       const unitPreferenceReferences = state === 'dispatched' || runRecordId === null ? undefined : this.#unitPreferenceReferences(runRecordId);
+      const attempt = categoryId === RUN_SYNTHESIS_CATEGORY ? this.#synthesisAttempt(reviewRunId)?.category.task!.taskIntentId ?? null : null;
       const record = canonicalRecord({
         schema: EVENT_SCHEMA,
         eventId,
@@ -2751,6 +2828,7 @@ export class ReviewRunStore {
         recordedAt,
         ...(facts.extra ?? {}),
         ...(unitPreferenceReferences === undefined ? {} : { unitPreferenceReferences }),
+        ...(attempt === null ? {} : { synthesisAttempt: attempt }),
       });
       this.#db.prepare(
         `INSERT INTO review_run_category_events(
@@ -2806,11 +2884,92 @@ export class ReviewRunStore {
       this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null).some(finding => members.some(member => member.categoryId === finding.categoryId));
   }
 
+  /**
+   * Why 生成统合总结 (Issue #1506) is refused for this Run now, in the editor's words; `null` when it may be asked: a whole-book
+   * or chapter Run that finished, was not stopped, reads more than one range with at least one model finding, and has no summary.
+   */
+  #summaryOnlyRefusal(snapshot: RunSnapshot): string | null {
+    if (snapshot.scope.kind !== 'whole' && snapshot.scope.kind !== 'chapters') return '只有全书或选章审阅可以生成统合总结。';
+    if (this.#authorizationOf(snapshot.reviewRunId) === null) return '这次审阅尚未开始。';
+    if (this.#driving.has(snapshot.reviewRunId) || this.#waits(snapshot) || !this.#runEnded(snapshot)) return '这次审阅还没有结束；结束后再生成统合总结。';
+    if (this.#stoppedFor(snapshot.reviewRunId) !== null) return '这次审阅已停止，不能单独生成统合总结。';
+    const row = this.#db.prepare('SELECT summary_json, summary_digest FROM review_run_synthesis WHERE review_run_id = ?').get(snapshot.reviewRunId);
+    const saved = row?.summary_json == null ? null : recordOf(text(row.summary_json), text(row.summary_digest));
+    if (saved?.summary != null) return '这次审阅已有统合总结。';
+    if (saved?.notNeeded === true || !this.#synthesisEligible(snapshot)) return '这次审阅只覆盖一个部分或没有模型发现，无需统合总结。';
+    return null;
+  }
+
+  /**
+   * 生成统合总结 (Issue #1506): one new Task of the Run's synthesis member, prepared now under the model and 思考强度 the editor
+   * chose, from the same member the stage prepares — the Run's own, or for a Run made before 0.7.2 the one its preparation would
+   * have added. The drive loop then builds its one request from the Run's stored findings exactly as the stage does; nothing
+   * of a finding changes. Recorded with the summary it asks for, so it travels with the Book.
+   */
+  launchSynthesis(bookId: string, reviewRunId: string, snapshotId: string, binding: import('../launch-policy.js').ConfiguredProviderBinding | null,
+    launchPolicy: LaunchPolicyProjection, startWhen: 'now' | 'when-online'): { reviewRunId: string; manuscript: unknown } {
+    const snapshot = this.#runOfBook(bookId, reviewRunId);
+    requireReview(!this.#bookIsDriving(bookId), 'REVIEW_RUN_ACTIVE', '这本书有一次审阅正在进行；结束后再生成统合总结。');
+    requireReview(!this.#bookWaits(bookId), 'REVIEW_RUN_WAITING', RUN_WAITING_REASON);
+    const refusal = this.#summaryOnlyRefusal(snapshot);
+    requireReview(refusal === null, 'REVIEW_SYNTHESIS_UNAVAILABLE', refusal ?? '');
+    const previous = snapshot.categories.find((category) => category.categoryId === RUN_SYNTHESIS_CATEGORY);
+    const entry = previous === undefined ? this.#legacySynthesisEntry(snapshot) : (() => {
+      // The Run's budget was spent by the Run; the editor's new request is its own and inherits none of it.
+      const { budgetCeiling: _spent, ...source } = previous.entry.synthesisSource!;
+      return { ...previous.entry, synthesisSource: source };
+    })();
+    const execution = this.#ledgers.baseline().withExecutionChoice(binding, launchPolicy).launch;
+    const ledger = this.#ledgers.ledgerOf(entry, snapshot.materialReferences, undefined, undefined,
+      previous?.task == null ? null : this.#memoryFacade().pinned(previous.task.taskIntentId));
+    const mode: AnalysisTaskMode = ledger.inspect(bookId).resultSetRevision !== null ? 'review-again' : 'review-first';
+    const requestedAt = new Date().toISOString();
+    const whenOnline = startWhen === 'when-online';
+    transact(this.#db, () => {
+      if (this.#db.prepare('SELECT 1 FROM review_run_synthesis WHERE review_run_id = ?').get(reviewRunId) === undefined) {
+        this.#db.prepare('INSERT INTO review_run_synthesis(review_run_id, synthesis_key) VALUES (?, ?)').run(reviewRunId, entry.synthesisKey!);
+      }
+      const projection = ledger.launchTask({ phase: 'start', bookId, goal: ledger.definition.mode(mode).goal as AnalysisGoal,
+        update: mode === ledger.definition.initialMode ? null : { mode, selectedRange: null }, launchPolicy, reconfirm: false }, snapshotId, execution, true);
+      requireReview(projection.state === 'prepared' && projection.taskIntent !== null && projection.planEnvelope !== null,
+        'REVIEW_PLAN_UNAVAILABLE', '统合总结的计划没有准备好。');
+      const category = this.#snapshotCategory({ position: previous?.position ?? snapshot.categories.length + 1, entry, plan: { kind: 'task', mode, selectedRange: null } }, projection);
+      const saved = canonicalRecord({ summary: null, attempt: { category, launchSnapshotId: snapshotId, whenOnline, requestedAt } satisfies SynthesisAttempt });
+      this.#db.prepare('UPDATE review_run_synthesis SET summary_json = ?, summary_digest = ? WHERE review_run_id = ?').run(saved.json, saved.digest, reviewRunId);
+    });
+    this.#launchLedgers.delete(reviewRunId);
+    if (whenOnline) this.#unsettledApprovals?.set(reviewRunId, { bookId, authorizedAt: requestedAt });
+    return { reviewRunId, manuscript: snapshot.manuscript };
+  }
+
+  /** The Task Intent of the Run's latest 生成统合总结 (Issue #1506). */
+  synthesisRequestOf(reviewRunId: string): string {
+    const attempt = this.#synthesisAttempt(reviewRunId);
+    requireReview(attempt !== null, 'REVIEW_RECORD_INVALID', '统合总结的单独请求记录缺失。');
+    return attempt.category.task!.taskIntentId;
+  }
+
+  /** The member a Run made before 0.7.2 would have had (Issue #1506), built as preparation builds it from its first model category. */
+  #legacySynthesisEntry(snapshot: RunSnapshot): ReviewCategoryConfigurationEntry {
+    const source = snapshot.categories.find((category) => category.task !== null && category.entry.executor !== 'local-text-check');
+    requireReview(source !== undefined, 'REVIEW_SYNTHESIS_UNAVAILABLE', '这次审阅没有模型审阅类别，无需统合总结。');
+    const kind = this.#ledgers.ledgerOf(source.entry).definition.kind;
+    const procedure = selectedProcedureForBook(this.#db, snapshot.bookId, kind);
+    return { ...RUN_SYNTHESIS_ENTRY, synthesisKey: randomUUID(), synthesisSource: { categoryId: source.entry.categoryId, kind, procedure,
+      ...(procedure === null ? {} : { document: resolveProcedureForKind(this.#db, procedure, kind).document }) } };
+  }
+
   #runUsage(snapshot: RunSnapshot): { requests: number; inputTokens: number; outputTokens: number } {
     const total = { requests: 0, inputTokens: 0, outputTokens: 0 };
-    for (const entry of snapshot.categories) {
-      if (entry.task === null) continue;
-      const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_task_outcomes WHERE task_intent_id = ?').get(entry.task.taskIntentId);
+    // Every synthesis request the Run made counts (Issue #1506): the stage's own, and each 生成统合总结's, not only the latest.
+    const tasks = new Set(snapshot.categories.flatMap((entry) => entry.task === null ? [] : [entry.task.taskIntentId]));
+    if (this.#synthesisAttempt(snapshot.reviewRunId) !== null) {
+      for (const entry of this.#frozenRun(snapshot.reviewRunId).categories) if (entry.categoryId === RUN_SYNTHESIS_CATEGORY && entry.task !== null) tasks.add(entry.task.taskIntentId);
+      for (const row of this.#db.prepare(`SELECT DISTINCT json_extract(canonical_json, '$.synthesisAttempt') task FROM review_run_category_events
+        WHERE review_run_id = ? AND category_id = ? AND json_extract(canonical_json, '$.synthesisAttempt') IS NOT NULL`).all(snapshot.reviewRunId, RUN_SYNTHESIS_CATEGORY)) tasks.add(text(row.task));
+    }
+    for (const taskIntentId of tasks) {
+      const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_task_outcomes WHERE task_intent_id = ?').get(taskIntentId);
       if (row === undefined) continue;
       const outcome = recordOf(text(row.canonical_json), text(row.sha256));
       const report = isRecord(outcome.report) ? outcome.report : null;
@@ -2831,7 +2990,7 @@ export class ReviewRunStore {
     const findings = views.filter((finding) => modelIds.has(finding.categoryId));
     const manifestUnits = this.#synthesisUnits(snapshot, modelCategories);
     if (new Set(manifestUnits.map((unit) => unit.ordinal)).size < 2 || findings.length === 0) {
-      const saved = canonicalRecord({ notNeeded: true });
+      const saved = canonicalRecord({ notNeeded: true, ...this.#attemptField(snapshot.reviewRunId) });
       this.#db.prepare('UPDATE review_run_synthesis SET summary_json = ?, summary_digest = ? WHERE review_run_id = ?').run(saved.json, saved.digest, snapshot.reviewRunId);
       this.#recordEvent(snapshot.reviewRunId, category.categoryId, 'refused', '本次无需全书统合。', { extra: { synthesisNotNeeded: true } });
       return false;
@@ -2889,7 +3048,7 @@ export class ReviewRunStore {
     const frozen = this.#categoryLedger(category, snapshot).frozenPlan(category.task!.taskIntentId, category.task!.planEnvelopeDigest);
     const provider = frozen.components['provider-resolution-plan'] as { runBudgetCeiling?: 'unset' | { maxTotalTokens: number } };
     if (provider.runBudgetCeiling !== undefined && provider.runBudgetCeiling !== 'unset' && priorUsage.inputTokens + priorUsage.outputTokens >= provider.runBudgetCeiling.maxTotalTokens) {
-      const saved = canonicalRecord({ budgetReached: true });
+      const saved = canonicalRecord({ budgetReached: true, ...this.#attemptField(snapshot.reviewRunId) });
       this.#db.prepare('UPDATE review_run_synthesis SET summary_json = ?, summary_digest = ? WHERE review_run_id = ?').run(saved.json, saved.digest, snapshot.reviewRunId);
       this.#recordEvent(snapshot.reviewRunId, category.categoryId, 'refused', '本次审阅已用完预算，未再发送统合请求；逐条发现仍可处理。', { extra: { synthesisBudgetReached: true } });
       return false;
@@ -2897,13 +3056,37 @@ export class ReviewRunStore {
     return true;
   }
 
-  #synthesisOf(snapshot: RunSnapshot): { synthesis?: import('../../shared/protocol.js').ReviewSynthesisProjection } {
+  /**
+   * The model and 思考强度 the Run's first model category ran under, as a dispatch choice (Issue #1506): 生成统合总结 offers it
+   * first. Absent when that plan names no connection this instance still has.
+   */
+  #runChoiceField(snapshot: RunSnapshot): { runChoice?: { modelConnectionId: string; modelId: string; reasoningEffort: string } } {
+    const member = snapshot.categories.find((category) => category.task !== null && category.categoryId !== RUN_SYNTHESIS_CATEGORY);
+    if (member === undefined || this.#ledgers.connectionOf === undefined) return {};
+    const provider = this.#categoryDefinitionLedger(member).frozenPlan(member.task!.taskIntentId, member.task!.planEnvelopeDigest).components['provider-resolution-plan'];
+    const route = isRecord(provider) ? provider.executionRoute : undefined, remote = isRecord(provider) ? provider.remoteBinding : undefined;
+    if (!isRecord(route) || typeof route.model !== 'string' || !isRecord(remote) || typeof remote.credentialReference !== 'string') return {};
+    const connection = this.#ledgers.connectionOf(remote.credentialReference);
+    return connection === null ? {} : { runChoice: { modelConnectionId: connection, modelId: route.model,
+      reasoningEffort: typeof route.reasoningEffort === 'string' ? route.reasoningEffort : 'off' } };
+  }
+
+  #attemptField(reviewRunId: string): { attempt?: SynthesisAttempt } {
+    const attempt = this.#synthesisAttempt(reviewRunId);
+    return attempt === null ? {} : { attempt };
+  }
+
+  /** `offer` is the workspace's: a report keeps what the summary is, never the way to ask for it (Issue #1506). */
+  #synthesisOf(snapshot: RunSnapshot, offer = false): { synthesis?: import('../../shared/protocol.js').ReviewSynthesisProjection } {
     const category = snapshot.categories.find((entry) => entry.entry.synthesisKey !== undefined);
-    if (category === undefined) return {};
     const row = this.#db.prepare('SELECT * FROM review_run_synthesis WHERE review_run_id = ?').get(snapshot.reviewRunId);
-    if (row === undefined) return {};
+    const canGenerate = offer && this.#summaryOnlyRefusal(snapshot) === null;
+    // A Run made before 0.7.2 has no member (Issue #1506): an eligible one reads 暂缺 and offers 生成统合总结.
+    if (category === undefined || row === undefined) return !canGenerate ? {} : { synthesis: { state: 'missing', detail: LEGACY_SYNTHESIS_DETAIL, summary: null,
+      missingCategories: [], omissionLabel: null, evidence: [], canGenerate: true, ...this.#runChoiceField(snapshot) } };
     const saved = row.summary_json === null ? null : recordOf(text(row.summary_json), text(row.summary_digest));
     if (saved?.notNeeded === true) return {};
+    const attempt = this.#synthesisAttempt(snapshot.reviewRunId);
     if (!this.#driving.has(snapshot.reviewRunId) && !this.#synthesisEligible(snapshot) && !this.#runStateView(snapshot).categories.some(view => view.category.entry.synthesisKey === undefined && view.pending)) return {};
     const input = row.input_json === null ? null : recordOf(text(row.input_json), text(row.input_digest)) as unknown as SynthesisInput;
     const summary = saved?.summary == null || input === null ? null : parseSynthesisSummary(JSON.stringify(saved.summary), input);
@@ -2919,9 +3102,17 @@ export class ReviewRunStore {
       if (![...findings.values()].some(finding => modelIds.has(finding.categoryId)) ||
         new Set(this.#synthesisUnits(snapshot, modelCategories).map(unit => unit.ordinal)).size < 2) return {};
     }
+    // The summary a 生成统合总结 wrote names its own model, which may differ from the Run's (Issue #1506).
+    const writer = summary === null || attempt === null ? undefined
+      : markModelLabels(recordedMarkModel(this.#db, attempt.category.task!.taskIntentId, new Date().toISOString())).modelLabel;
+    const waiting = attempt !== null && this.#waits(snapshot);
     return { synthesis: { state: saved?.budgetReached === true ? 'budget' : summary !== null ? 'completed' : terminal && !paused ? 'missing' : event?.state === 'dispatched' && !paused ? 'running' : 'pending',
-      detail: saved?.budgetReached === true ? '本次审阅已用完预算，未再发送统合请求；逐条发现仍可处理。' : summary !== null ? (input?.missingCategories.length ? '统合仅依据已读范围；未读部分仍需审阅。' : '已形成全书审阅统合总结。') : terminal && !paused ? '统合总结暂缺，逐条发现仍可处理；可新建一次审阅重试。'
-        : paused ? '统合已暂停；继续审阅后接着完成。' : event?.state === 'dispatched' ? '正在统合各章发现。' : '各章审阅后将统合已有发现。',
+      detail: saved?.budgetReached === true ? `本次审阅已用完预算，未再发送统合请求；逐条发现仍可处理。${canGenerate ? '可单独生成统合总结。' : ''}` : summary !== null ? (input?.missingCategories.length ? '统合仅依据已读范围；未读部分仍需审阅。' : '已形成全书审阅统合总结。')
+        : terminal && !paused ? `统合总结暂缺，逐条发现仍可处理；${canGenerate ? '可单独生成统合总结。' : '可新建一次审阅重试。'}`
+        : paused ? '统合已暂停；继续审阅后接着完成。' : event?.state === 'dispatched' ? '正在统合各章发现。'
+          : waiting ? '联网后生成统合总结。' : attempt !== null ? '即将生成统合总结。' : '各章审阅后将统合已有发现。',
+      ...(typeof writer === 'string' ? { modelLabel: writer } : {}),
+      ...(canGenerate ? { canGenerate: true, ...this.#runChoiceField(snapshot) } : {}),
       summary, missingCategories: input?.missingCategories ?? [],
       omissionLabel: input === null ? null : reviewSynthesisOmissionLabel(input.omitted),
       evidence: (input?.evidence ?? []).map((entry) => {
@@ -3024,7 +3215,9 @@ export class ReviewRunStore {
   start(reviewRunId: string, categoryId: string): ReviewRunHandOff | null {
     const { snapshot, category } = this.#category(reviewRunId, categoryId);
     requireReview(category.task !== null, 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有任务。');
-    const approved = this.#authorizationOf(reviewRunId)?.approvals.get(categoryId);
+    // 生成统合总结 (Issue #1506) is its own approval: the editor's click, under the plan its launch froze.
+    const attempt = categoryId === RUN_SYNTHESIS_CATEGORY ? this.#synthesisAttempt(reviewRunId) : null;
+    const approved = attempt?.category.task!.planEnvelopeDigest ?? this.#authorizationOf(reviewRunId)?.approvals.get(categoryId);
     requireReview(approved !== undefined, 'REVIEW_RUN_NOT_AUTHORIZED', '这次审阅尚未授权这一类的计划。');
     // An exclusion recorded while the category waited for its turn stopped it already; nothing is authorized after that.
     const last = this.#events(reviewRunId, categoryId).at(-1)?.state ?? null;
@@ -3053,11 +3246,11 @@ export class ReviewRunStore {
     }
     let dispatchRunRecordId: string | null;
     try {
-      const ruleVersionId = this.defaultRuleVersion(reviewRunId);
-      const launchSnapshotId = this.#db.prepare("SELECT json_extract(canonical_json, '$.launchSnapshotId') snapshot_id FROM review_run_authorizations WHERE review_run_id = ?")
+      const ruleVersionId = attempt === null ? this.defaultRuleVersion(reviewRunId) : null;
+      const launchSnapshotId = attempt?.launchSnapshotId ?? this.#db.prepare("SELECT json_extract(canonical_json, '$.launchSnapshotId') snapshot_id FROM review_run_authorizations WHERE review_run_id = ?")
         .get(reviewRunId)?.snapshot_id;
       // A deferred member starts on the idle lane under the Run's one approval, never sooner (Issue #1200; ADR 0095 §3).
-      dispatchRunRecordId = ledger.authorize(snapshot.bookId, category.task.taskIntentId, approved, this.backgroundOrigin(reviewRunId, categoryId) ? 'idle' : 'now',
+      dispatchRunRecordId = ledger.authorize(snapshot.bookId, category.task.taskIntentId, approved, attempt === null && this.backgroundOrigin(reviewRunId, categoryId) ? 'idle' : 'now',
         ruleVersionId === null ? { kind: 'standard-direct' } : { kind: 'default-execution-rule', ruleVersionId },
         typeof launchSnapshotId === 'string' ? launchSnapshotId : undefined).dispatchRunRecordId;
     } catch (error) {
@@ -3189,7 +3382,7 @@ export class ReviewRunStore {
        JOIN review_runs rr ON rr.book_id = i.book_id
        JOIN json_each(rr.canonical_json, '$.categories') c ON json_extract(c.value, '$.task.taskIntentId') = i.task_intent_id
        WHERE r.run_record_id = ? LIMIT 1`,
-    ).get(runRecordId) as SqlRow | undefined;
+    ).get(runRecordId) as SqlRow | undefined ?? this.#attemptRunOwner(runRecordId);
     // A Review Run a Series Retrieval Exclusion stopped, or the editor then cancelled, is never driven again (Issue #64,
     // S29b): 继续审阅 takes none of its categories on, so a start it left authorized is not its to keep.
     return row !== undefined && this.#stoppedFor(text(row.review_run_id)) === null;
@@ -3226,6 +3419,14 @@ export class ReviewRunStore {
            IN ('admitted', 'executing', 'pausing')
        ORDER BY r.recorded_at, r.rowid`,
     ).all(EDITORIAL_REVIEW_KIND_PREFIX.length, EDITORIAL_REVIEW_KIND_PREFIX) as SqlRow[];
+    // A 生成统合总结 a stopped service left sending (Issue #1506) is its Run's synthesis member, as the stage's is.
+    rows.push(...this.#db.prepare(
+      `SELECT i.kind, s.review_run_id, 'run-synthesis' AS category_id FROM review_run_synthesis s
+       JOIN analysis_task_intents i ON i.task_intent_id = json_extract(s.summary_json, '$.attempt.category.task.taskIntentId')
+       JOIN analysis_run_records r ON r.task_intent_id = i.task_intent_id
+       WHERE (SELECT x.state FROM analysis_run_states x WHERE x.run_record_id = r.run_record_id ORDER BY x.sequence DESC LIMIT 1)
+           IN ('admitted', 'executing', 'pausing')`,
+    ).all() as SqlRow[]);
     const reconciled = new Set<string>();
     let settled = 0;
     for (const row of rows) {
@@ -3282,9 +3483,12 @@ export class ReviewRunStore {
     if (category.entry.synthesisKey !== undefined) {
       const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_result_set_revisions WHERE revision_id = ?').get(revision.revisionId)!;
       const body = recordOf(text(row.canonical_json), text(row.sha256));
-      const saved = canonicalRecord({ summary: body.runSynthesis ?? null });
+      // A summary 生成统合总结 asked for stays beside its request (Issue #1506), which names the model that wrote it.
+      const attempt = this.#synthesisAttempt(reviewRunId);
+      const saved = canonicalRecord({ summary: body.runSynthesis ?? null, ...(attempt === null ? {} : { attempt }) });
       transact(this.#db, () => {
-        this.#db.prepare('UPDATE review_run_synthesis SET summary_json = ?, summary_digest = ? WHERE review_run_id = ? AND summary_json IS NULL').run(saved.json, saved.digest, reviewRunId);
+        this.#db.prepare(`UPDATE review_run_synthesis SET summary_json = ?, summary_digest = ? WHERE review_run_id = ? AND
+          (summary_json IS NULL OR json_extract(summary_json, '$.attempt.category.task.taskIntentId') = ?)`).run(saved.json, saved.digest, reviewRunId, category.task!.taskIntentId);
         this.#recordEvent(reviewRunId, categoryId, 'materialized', body.runSynthesis == null ? '统合总结暂缺，逐条发现仍可处理。' : '已形成全书审阅统合总结。',
           { runRecordId: settled.runRecordId, resultSetRevisionId: revision.revisionId, extra: { findingCount: 0 } });
       });
@@ -4277,7 +4481,10 @@ export class ReviewRunStore {
     for (const row of this.#db.prepare(
       "SELECT canonical_json, sha256 FROM review_run_category_events WHERE review_run_id = ? AND state IN ('refused', 'interrupted')",
     ).all(reviewRunId) as SqlRow[]) {
-      const code = recordOf(text(row.canonical_json), text(row.sha256)).code;
+      const event = recordOf(text(row.canonical_json), text(row.sha256));
+      // A 生成统合总结 the editor cancelled, or one that waited and was stopped, ends that request alone (Issue #1506).
+      if (Object.hasOwn(event, 'synthesisAttempt')) continue;
+      const code = event.code;
       if (code === REVIEW_RUN_CANCELLED) return 'cancelled';
       if (code === SERIES_RETRIEVAL_SCOPE_CHANGED || code === LEARNING_INFLUENCE_WITHDRAWN) stop = 'scope-changed';
       // Reconnect Preflight found the plan moved while the Run waited (Issue #760): nothing of it began.
@@ -4589,7 +4796,9 @@ export class ReviewRunStore {
     for (const row of this.#db.prepare(
       "SELECT canonical_json, sha256 FROM review_run_category_events WHERE review_run_id = ? AND state IN ('refused', 'interrupted') ORDER BY sequence",
     ).all(reviewRunId) as SqlRow[]) {
-      const code = recordOf(text(row.canonical_json), text(row.sha256)).code;
+      const event = recordOf(text(row.canonical_json), text(row.sha256));
+      if (Object.hasOwn(event, 'synthesisAttempt')) continue;
+      const code = event.code;
       if (code === SERIES_RETRIEVAL_SCOPE_CHANGED) return 'series-knowledge';
       if (code === LEARNING_INFLUENCE_WITHDRAWN) return 'house-review-preference';
     }
@@ -5368,7 +5577,7 @@ export class ReviewRunStore {
       projection: {
         usage: this.#runUsage(snapshot),
         ...this.#modelAttribution(snapshot),
-        ...this.#synthesisOf(snapshot),
+        ...this.#synthesisOf(snapshot, true),
         ...(snapshot.localPlan === undefined ? {} : { localCheck: (() => {
           const last = readLocalStageArtifacts(this.#db, snapshot.reviewRunId).at(-1)?.record;
           const result = last?.result;

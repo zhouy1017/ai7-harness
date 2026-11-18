@@ -283,7 +283,23 @@ async function commentsInsideSelection(renderer,check,waitFor) {
     }
     await commentsRangeInside(renderer,check,waitFor,selector);
     await renderer.evaluate('globalThis.__commentsInkPrevious=null');
-    await waitFor(renderer, `(() => { const words=document.querySelector(${JSON.stringify(selector)}),r=words.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2; const before=globalThis.__commentsInkPrevious;globalThis.__commentsInkPrevious={x,y};return words.contains(document.elementFromPoint(x,y))&&getSelection().containsNode(words,true)&&before?.x===x&&before?.y===y;})()`, 'comments-existing-range-inside-stable');
+    try { await waitFor(renderer, `(() => { const words=document.querySelector(${JSON.stringify(selector)}),r=words.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2; const before=globalThis.__commentsInkPrevious;globalThis.__commentsInkPrevious={x,y};return words.contains(document.elementFromPoint(x,y))&&getSelection().containsNode(words,true)&&before?.x===x&&before?.y===y;})()`, 'comments-existing-range-inside-stable'); } catch {
+      // Say which part never held (the hosted log prints only the label), with the words' box over four frames and what a hit test finds there.
+      const state=await renderer.evaluate(`(async () => {
+        const describe=${pointerElementDescription.toString()},words=document.querySelector(${JSON.stringify(selector)}),frames=[],coveringAncestors=[];
+        if(!words)return {reason:'missing',detail:null};
+        let hit=null;
+        for(let index=0;index<4;index++){await new Promise(resolve=>requestAnimationFrame(resolve));const r=words.getClientRects()[0],x=r?r.left+r.width/2:null,y=r?r.top+r.height/2:null;hit=r?document.elementFromPoint(x,y):null;frames.push({rect:r?[r.left,r.top,r.width,r.height]:null,point:r?[x,y]:null,hit:describe(hit),contains:!!hit&&words.contains(hit)});}
+        for(let ancestor=hit?.parentElement;ancestor&&coveringAncestors.length<12;ancestor=ancestor.parentElement){const box=ancestor.getBoundingClientRect();coveringAncestors.push({...describe(ancestor),rect:[box.left,box.top,box.width,box.height]});}
+        const last=frames.at(-1),moved=frames.some(frame=>JSON.stringify(frame.rect)!==JSON.stringify(last.rect));
+        const reason=last.rect===null?'no-box':last.point[0]<0||last.point[1]<0||last.point[0]>innerWidth||last.point[1]>innerHeight?'offscreen':!last.contains?'covered':!getSelection().containsNode(words,true)?'unselected':moved?'moving':'settled';
+        return {reason,detail:{viewport:[innerWidth,innerHeight],target:describe(words),frames,coveringAncestors}};
+      })()`);
+      const names=pane?{missing:'comments-existing-range-inside-stable-pane-missing','no-box':'comments-existing-range-inside-stable-pane-no-box',offscreen:'comments-existing-range-inside-stable-pane-offscreen',covered:'comments-existing-range-inside-stable-pane-covered',unselected:'comments-existing-range-inside-stable-pane-unselected',moving:'comments-existing-range-inside-stable-pane-moving',settled:'comments-existing-range-inside-stable-pane-settled'}
+        :{missing:'comments-existing-range-inside-stable-floating-missing','no-box':'comments-existing-range-inside-stable-floating-no-box',offscreen:'comments-existing-range-inside-stable-floating-offscreen',covered:'comments-existing-range-inside-stable-floating-covered',unselected:'comments-existing-range-inside-stable-floating-unselected',moving:'comments-existing-range-inside-stable-floating-moving',settled:'comments-existing-range-inside-stable-floating-settled'};
+      try { check(false,names[state.reason]??'comments-existing-range-inside-stable'); }
+      catch(error) { if(error&&typeof error==='object'&&state.detail)Object.defineProperty(error,'pointerFailure',{value:pointerFailureDetail(state.detail),configurable:true});throw error; }
+    }
     const before=await point();check(before.hit&&before.inside,'comments-existing-range-inside-hit',before);
     check((await commentsNativeClick(renderer,before)).real,'comments-existing-range-inside-real-click');
     await waitFor(renderer,pane?`document.querySelector('[data-comment-card="'+${JSON.stringify(id)}+'"]').dataset.selected==='true'`:`document.querySelector('.editorial-mark-layer [data-mark-card="'+${JSON.stringify(id)}+'"]')`,pane?'comments-existing-range-inside-pane-selected':'comments-existing-range-inside-floating-open');
@@ -633,7 +649,22 @@ export async function commentsBookMemory(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('.recent-work-item')`, 'comments-return-books-ready');
   check(await renderer.evaluate(`(() => { const original=document.querySelector('.recent-work-item button[data-manuscript-id="'+__comments.manuscriptId+'"]'); if(!original)return false; original.click(); return true; })()`), 'comments-original-book-open');
   await waitFor(renderer, `document.querySelector('.editor-shell')?.dataset.bookId===__comments.bookId && document.querySelector('[data-edge-entry="comments"]').getAttribute('aria-expanded')==='true' && document.querySelector('.manuscript-comments-pane').hidden===false`, 'comments-per-book-toggle-restored');
-  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[2]+'"] [data-mark-region="replies"]')?.textContent.includes('公开合成待发回复') && document.querySelector('[data-comment-card="'+__comments.ids[2]+'"] [data-mark-state]')?.textContent.includes('已处理')`, 'comments-return-book-current-content');
+  // The Book reopens at its reading place, which the connector cases left away from the last seed; the pane lays out cards only near
+  // the visible text, so bring the handled mark's words into view, as the editor would, before reading its card.
+  check(await renderer.evaluate(`(() => { const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[2]+'"]'); if(!words)return false; words.scrollIntoView({block:'center',behavior:'instant'}); return true; })()`), 'comments-return-book-words-in-view');
+  try { await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[2]+'"] [data-mark-region="replies"]')?.textContent.includes('公开合成待发回复') && document.querySelector('[data-comment-card="'+__comments.ids[2]+'"] [data-mark-state]')?.textContent.includes('已处理')`, 'comments-return-book-current-content'); } catch {
+    // The hosted log prints only the label: name the part that never held.
+    const reason=await renderer.evaluate(`(() => {
+      const id=__comments.ids[2],card=document.querySelector('[data-comment-card="'+id+'"]'),canvas=document.querySelector('.manuscript-comments-canvas');
+      if(!document.querySelector('.editor-window [data-mark-id="'+id+'"]'))return card?'anchor-absent-card':'anchor-absent';
+      if(canvas?.dataset.loading==='true')return 'loading';
+      if(!card)return 'no-card';if(card.hidden)return 'card-hidden';
+      if(!card.querySelector('[data-mark-region="replies"]')?.textContent.includes('公开合成待发回复'))return 'no-reply';
+      return 'not-handled';
+    })()`);
+    const names={'anchor-absent-card':'comments-return-book-current-content-anchor-absent-card','anchor-absent':'comments-return-book-current-content-anchor-absent',loading:'comments-return-book-current-content-loading','no-card':'comments-return-book-current-content-no-card','card-hidden':'comments-return-book-current-content-card-hidden','no-reply':'comments-return-book-current-content-no-reply','not-handled':'comments-return-book-current-content-not-handled'};
+    check(false,names[reason]??'comments-return-book-current-content');
+  }
 }
 
 export async function commentsOrdinaryForEditor(renderer, check, waitFor) {
