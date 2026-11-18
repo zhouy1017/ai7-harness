@@ -1932,7 +1932,8 @@ async function runProtectionJourney(renderer) {
   at('protection-enter');
   await typeAtWindowEnd(renderer, protectionText(12), 'protection-enter-type');
   await protectionChecks(renderer, `({ shown: p.shown, headline: p.headline === ${JSON.stringify(PROTECTION_HEADLINE)}, boundary: p.lastDurable?.startsWith(${JSON.stringify(`最后确认写入：修订日志序号 ${durable.toLocaleString('zh-CN')} · `)}) === true, atRisk: p.atRisk === 12, retry: p.retry?.startsWith('自动重试：') === true, active: p.document === 'active' && p.readOnly === 'none', writable: p.writable, closeRisk: p.closeRisk === 'true', noEntry: p.journal === ${durable} })`, 'protection-entered');
-  await assertRenderer(renderer, `(() => { const status = document.querySelector('#persistence-status'); return status.dataset.tone !== 'busy' && !/正在(保存|自动写入)/u.test(status.textContent) && status.textContent.includes('修订日志暂时无法确认写入。') && !status.textContent.includes(${JSON.stringify(PROTECTION_HEADLINE)}); })()`, 'protection-specific-status');
+  const specificStatus = await renderer.evaluate(`(() => { const status = document.querySelector('#persistence-status'); const text = status.textContent; return status.dataset.tone !== 'busy' && !/正在(保存|自动写入)/u.test(text) && text.includes('修订日志暂时无法确认写入。') && !text.includes(${JSON.stringify(PROTECTION_HEADLINE)}) ? 'ok' : status.dataset.tone + ':' + text; })()`);
+  requireJourney(specificStatus === 'ok', `protection-specific-status-${specificStatus}`);
   at('protection-panel-geometry');
   for (const [index, [width, height]] of [[1280, 800], [1008, 681]].entries()) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
