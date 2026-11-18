@@ -1959,6 +1959,9 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 body[data-task-drawer="open"] .status-bar { right: max(calc(min(var(--task-drawer-width), 100vw - 1rem) + .75rem), calc(var(--status-area-right, 0px) + .75rem)); }
 :root[data-focus-mode="on"] .status-bar { left: .75rem; }
 :root[data-status-bar="shown"] body:not(:has(#screen[data-screen="editor"])) { padding-bottom: calc(var(--status-bar-height, 0px) + 1rem); }
+/* A sticky action bar takes the bar's height as space above itself, so at the page's end the bar stands in that space and the
+   control just above the sticky bar is not under it. */
+:root[data-status-bar="shown"] #screen :is(.commit-bar, .workbench-actions, .task-overview-confirm) { margin-top: calc(1.4rem + var(--status-bar-height, 0px) + .45rem); }
 :root[data-status-bar="shown"] .editor-window { padding-bottom: calc(clamp(1.5rem, 3vw, 2.5rem) + var(--status-bar-height, 0px) + var(--bottom-controls, 0px)); }
 .error-panel { border-color: var(--status-blocked); background: var(--status-blocked-surface); }
 
