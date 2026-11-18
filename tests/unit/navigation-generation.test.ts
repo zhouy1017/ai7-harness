@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import ts from 'typescript';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { navigation, reconcileBookWorkbenchApi, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit } from '../../src/renderer/navigation-generation.js';
+import { navigation, reconcileBookWorkbenchApi, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad } from '../../src/renderer/navigation-generation.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
 // Execute the private shell loaders, as the existing renderer composition tests do,
@@ -74,7 +74,7 @@ function harness(api: object = {}) {
   const renderBookOverview = vi.fn((overview: { book: { bookId: string } }) => replaceScreen(overview.book.bookId, undefined));
   const renderBaselineAnalysis = vi.fn((host: HTMLElement) => host.append(element('p', '', '已读取分析')));
  const guardedApi = reconcileBookWorkbenchApi({acknowledgeImportCompletion:async()=>undefined,...api} as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:(error,retry)=>(context['reportReacquisitionFailure'] as (error:unknown,retry:()=>Promise<void>)=>void)(error,retry),recovered:()=>{(context['clearBookReacquisitionNotice'] as ()=>void)();}},navigation);
-  context = createContext({ navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
+  context = createContext({ navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
     localStorage: { getItem: () => 'on' }, showQuietNotice: vi.fn(), openCurrentBookCompletion,
     mountTaskOverview: vi.fn(() => ({ focus: vi.fn(), destroy: vi.fn() })),
     mountReviewWorkspace: vi.fn(() => ({ start: vi.fn(), refresh: vi.fn(), destroy: vi.fn() })),
@@ -568,6 +568,29 @@ it('a superseded explicit open of another Book keeps the remaining page paused u
  elsewhere=false;await page.actions.get('重试连接当前图书')!();await Promise.resolve();
  expect(leaving).toHaveBeenCalledTimes(2);expect(open).toHaveBeenLastCalledWith({kind:'book',bookId:'book-a',activation:'non-activating'});
  expect(resumed).toBe(true);expect(page.screen.firstElementChild).toBe(manuscript);expect(page.screen.querySelector('[data-book-reacquire]')).toBeNull();
+});
+
+it.each([
+ ['the Task Drawer', () => { const node = document.createElement('aside'); node.dataset['taskDrawer'] = 'open'; return node; }],
+ ['the command palette', () => { const node = document.createElement('dialog'); node.dataset['sheet'] = ''; node.show(); return node; }],
+ ['a dialog', () => { const node = document.createElement('section'); node.setAttribute('role', 'dialog'); return node; }],
+ ['no overlay', () => null],
+] as const)('a late 修订记录 answer leaves focus inside %s and otherwise takes it (#1504 item 5)', async (_name, overlay) => {
+ const overview = Promise.withResolvers<object>();
+ const page = harness({ getBookWorkbenchRoute: async () => ({ kind: 'book', bookId: 'book-a', bookTitle: '甲' }), getBookOverview: () => overview.promise });
+ page.shell['markSection' as 'follow'] = vi.fn();
+ const heading = document.createElement('h3');
+ page.context['renderBookOverview'] = () => {
+  const content = document.createElement('section'), folded = document.createElement('details'), records = document.createElement('div');
+  content.dataset['bookId'] = 'book-a'; records.className = 'record-navigation'; records.append(heading); folded.append(records); content.append(folded);
+  page.replaceScreen('book-overview', content);
+ };
+ const host = overlay(), working = document.createElement('button');
+ if (host !== null) { host.append(working); miniDocument.body.append(host as unknown as MiniElement); MiniElement.prototype.focus.call(working); }
+ const opening = page.run("openBookSection({bookId:'book-a',title:'甲'},'history')");
+ overview.resolve({ book: { bookId: 'book-a' }, manuscriptAnchor: null }); await opening;
+ expect(page.screen.querySelector('.record-navigation h3')).toBe(heading);
+ expect(miniDocument.activeElement).toBe(host === null ? heading : working);
 });
 
 it('five background Book reads after failed reconciliation send no retry and keep the existing notice', async () => {

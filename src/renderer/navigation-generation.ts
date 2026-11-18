@@ -50,6 +50,14 @@ export class NavigationGeneration {
 
 export const navigation = new NavigationGeneration();
 
+/** The one permission for a late answer to move focus: never from inside the Task Drawer, a sheet such as
+ * the command palette, or a dialog. The page still paints; the editor keeps working where they are. */
+export function focusAfterLoad(target: HTMLElement, options?: FocusOptions): void {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active !== target && active.closest('dialog, [role="dialog"], [data-task-drawer]') !== null) return;
+  target.focus(options);
+}
+
 export class BookHeldElsewhereError extends Error {
   constructor() { super('这本书已在另一个窗口打开。'); }
 }
