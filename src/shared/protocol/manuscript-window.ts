@@ -1,0 +1,132 @@
+import type { EditorialMarkAnchorProjection } from './editorial-marks.js';
+import type { ManuscriptBlockProjection } from './manuscript-notes.js';
+
+/** The manuscript window, its position rail and entry position, durable undo/redo and the edit journal acknowledgement (Issue #1536). */
+
+export interface ManuscriptWindowProjection {
+  bookId: string;
+  /**
+   * 🔒 锁定 (Issue #1412): the blocks of this window AI7 may not change — locked one by one or inside a locked section — and
+   * the digest of the branch's lock set, which a scoped AI edit or a lock change names. Absent from a store without locks.
+   */
+  aiLockedBlockIds?: ReadonlyArray<string>;
+  aiLocksDigest?: string;
+  manuscriptId: string;
+  branchId: string;
+  revisionId: string;
+  revisionLabel: string;
+  journalSequence: number;
+  workingDigest: string;
+  recoveredStateReview: null | {
+    restorationId: string;
+    recoveredRevisionId: string;
+    label: '当前为恢复的工作状态';
+  };
+  focusBlockId: string | null;
+  focusGrapheme: number | null;
+  previousCursor: string | null;
+  nextCursor: string | null;
+  position: {
+    startBlock: number;
+    endBlock: number;
+    totalBlocks: number;
+    startCharacter: number;
+    endCharacter: number;
+    totalCharacters: number;
+    proportion: number;
+    structureLabel: string | null;
+    label: string;
+  };
+  blocks: ReadonlyArray<ManuscriptBlockProjection>;
+  /**
+   * The Editorial Marks that stand in this window's blocks, as the working state holds them at
+   * `journalSequence` — so the ranges are consistent with `blocks` by construction. At most
+   * `MAX_WINDOW_MARKS`; `marksTruncated` says the window holds more than that.
+   */
+  marks: ReadonlyArray<EditorialMarkAnchorProjection>;
+  marksTruncated: boolean;
+  /**
+   * `production-document` when the window holds a Production Document (Issue #415, S66), however it was reached — 交付物's
+   * 打开, 解决冲突 → 返回, recovery, 待我处理 or 最近稿件 — so it is always drawn as the document it is. Absent for the Book's
+   * Manuscript.
+   */
+  deliverable?: 'production-document';
+}
+
+/** The most chapters and marks the Whole-manuscript Position Rail draws; beyond them it says it is sparse. */
+export const MAX_RAIL_CHAPTERS = 400;
+
+export const MAX_RAIL_MARKS = 2_000;
+
+/**
+ * What the Whole-manuscript Position Rail draws beside its track (Issue #409; V2-UX-ED-015, ED-020):
+ * chapter ticks on one side, and on the other the open 修改建议, 批注 and 备注 with the ranges the
+ * analysis left unread. Every place is a proportion of the whole manuscript's characters, so the rail
+ * never needs the manuscript's text; nothing here is a durable record.
+ */
+export interface ManuscriptRailProjection {
+  manuscriptId: string;
+  branchId: string;
+  revisionId: string;
+  journalSequence: number;
+  totalCharacters: number;
+  chapters: ReadonlyArray<{
+    blockId: string;
+    title: string;
+    level: number;
+    proportion: number;
+    suggestions: number;
+    annotations: number;
+    notes: number;
+  }>;
+  chaptersTruncated: boolean;
+  marks: ReadonlyArray<{ kind: 'change-suggestion' | 'annotation' | 'editor-note'; blockId: string; proportion: number }>;
+  marksTruncated: boolean;
+  /** `null` while the Book has no analysis to have gaps; otherwise the ranges its latest analysis left unread. */
+  uncovered: ReadonlyArray<{ fromProportion: number; toProportion: number; reason: string }> | null;
+}
+
+/**
+ * Where an editor last entered a Book's primary Manuscript, already resolved against the working
+ * state the branch holds now. It speaks the window projection's own vocabulary — a block identity
+ * and a grapheme offset inside it — so a caller passes `blockId` straight to a `block` window target.
+ * `state` says which of the two the resolution was: `exact` when the recorded Revision is still the
+ * branch's base Revision and the block it names is still there, `nearest-anchor` when the recorded
+ * position was superseded and the nearest surviving block answered for it.
+ */
+export interface ManuscriptEntryPositionProjection {
+  bookId: string;
+  manuscriptId: string;
+  branchId: string;
+  blockId: string;
+  grapheme: number;
+  /** The Manuscript Revision the stored position was recorded against. */
+  recordedRevisionId: string;
+  state: 'exact' | 'nearest-anchor';
+}
+
+export interface DurableHistoryProjection {
+  action: 'undo' | 'redo';
+  branchId: string;
+  revisionId: string;
+  revisionLabel: string;
+  journalSequence: number;
+  workingDigest: string;
+  commandGroupId: string;
+  completionLabel: string;
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+export interface JournalAcknowledgement {
+  clientEditId: string;
+  branchId: string;
+  baseRevisionId: string;
+  blockId: string;
+  sequence: number;
+  resultingBlockDigest: string;
+  resultingWorkingDigest: string;
+  durableAt: string;
+  completionLabel: '已写入修订日志';
+  window: ManuscriptWindowProjection;
+}

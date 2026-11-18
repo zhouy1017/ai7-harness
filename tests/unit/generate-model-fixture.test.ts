@@ -6,6 +6,8 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { appendTaskBaselineSynopses, taskSynopsisMessageRequestDigest } from '../../src/service/analysis/baseline-synopsis.js';
+import { RUN_SYNTHESIS_PROMPT, RUN_SYNTHESIS_PROMPT_DIGEST, synthesisMessage } from '../../src/service/review/run-synthesis-contract.js';
 import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import {
   ASSURANCE_SAMPLING_PROMPT_CONTRACT,
@@ -92,7 +94,7 @@ type Tool = {
   resolveLedgerSelection: (lines: ReadonlyArray<unknown>, selector: string) => Selection;
   cacheEntryPath: (cacheRoot: string, model: string, requestDigest: string) => string;
   readCacheEntry: (cacheRoot: string, model: string, requestDigest: string) => Promise<{ status: number; requestBody: string; response: unknown }>;
-  parseCachedRequest: (requestBody: string) => { unitMessage: string; header: Header; ownBlockTexts: string[] };
+  parseCachedRequest: (requestBody: string, promptContractDigest?: string, structuredStageContractDigest?: string) => { unitMessage: string; header: Header; ownBlockTexts: string[]; requestDigest: string };
   replaceOwnBlockTexts: (text: string, ownBlockTexts: ReadonlyArray<string>) => string;
   longestEchoRun: (field: string, collapsedBlocks: ReadonlyArray<string>) => number | null;
   findManuscriptEcho: (value: unknown, ownBlockTexts: ReadonlyArray<string>) => { path: string; runLength: number } | null;
@@ -617,6 +619,41 @@ describe('generate-model-fixture over the namespaced cache (Issue #808)', () => 
   });
 
   const request = (selector: string): Request => ({ selector, cacheRoot: root, identity: 'generated-808', description: '合成生成夹具', out: join(root, 'out.json') });
+
+  it('keeps the product-built synopsis supplement in a final request identity (#1538)', async () => {
+    const prompt = 'e'.repeat(64);
+    const base = `写作综合 8/8 · 段落摘要 ${'a'.repeat(64)}`;
+    const message = appendTaskBaselineSynopses(base, { revisionId: randomUUID(), manuscriptRevisionId: randomUUID(),
+      maximumMessageBytes: null, maximumSupplementBytes: 24 * 1024,
+      synopses: [{ unitOrdinal: 1, synopsis: 'sample1' }], missingUnitOrdinals: [], omittedUnitOrdinals: [], shortenedUnitOrdinals: [] });
+    const cache = new ProviderResultCache(root);
+    await cache.open();
+    await transmitOnce(cache, answer('{"items":[]}'), { purpose: 'writing-first', slice: 'S84',
+      promptContractDigest: prompt, taskPromptContractDigest: prompt },
+    { intent: { family: 'writing-synopsis', case: 'sample1-context', delta: null }, step: 'writing-first/reduction', requestShape: 'openai-chat-completions' },
+    OPENCODE_GO_ROUTE_PROFILE, MODEL, ENDPOINT, { method: 'POST', headers: { authorization: 'Bearer placeholder' }, body: chatBody(message) });
+    const fixture = parseModelFixture(await tool.generateModelFixture(request('S84/writing-first/1')));
+    const oldKey = tool.parseTaskHeader(base, prompt)!.requestDigest;
+    expect(fixture.entries[0]!.requestDigest).toBe(taskSynopsisMessageRequestDigest(oldKey, message));
+    expect(fixture.entries[0]!.requestDigest).not.toBe(oldKey);
+  });
+
+  it('requires source-store proof before admitting a product-built structured review synthesis (#1538)', async () => {
+    const message = synthesisMessage({ schema: 'ai7.review.run-synthesis-input/1', missingCategories: [],
+      clusters: [], findings: [], evidence: [], baseline: null, omitted: { findings: 0, clusters: 0, synopses: 0 } });
+    const body = canonicalJson({ model: MODEL, messages: [
+      { role: 'system', content: RUN_SYNTHESIS_PROMPT }, { role: 'user', content: message }], stream: false });
+    expect(tool.parseCachedRequest(body, RUN_SYNTHESIS_PROMPT_DIGEST, RUN_SYNTHESIS_PROMPT_DIGEST).requestDigest)
+      .toBe(sha256Hex(message));
+    const cache = new ProviderResultCache(root);
+    await cache.open();
+    await transmitOnce(cache, answer('{"items":[]}'), { purpose: 'review-first',
+      promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST, taskPromptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST },
+    { intent: { family: 'review-synthesis', case: 'sample1-structured', delta: null }, step: 'review-first/reduction', requestShape: 'openai-chat-completions' },
+    OPENCODE_GO_ROUTE_PROFILE, MODEL, ENDPOINT, { method: 'POST', headers: { authorization: 'Bearer placeholder' }, body });
+    await expect(tool.generateModelFixture(request('S40/review-first/1')))
+      .rejects.toThrowError(/FIXTURE_GEN\/sample1-source-unproved/u);
+  });
 
   it('maps only complete streamed dialogue aggregates to bounded answer chunks (Issue #833)', () => {
     const chunks = ['合成回答一。', '合成回答二。'];
