@@ -68,7 +68,8 @@ export function mountTaskNotices(options: TaskNoticeOptions): void {
       }).catch(() => undefined);
     },
     attention: (item) => notice.raise(item),
-    away: (item, kind) => { (kind === 'completed' ? finished : needing).push(item); },
+    // What the editor cancelled themselves is not news on return.
+    away: (item, kind) => { if (item.facts.dialogueCancelled !== true) (kind === 'completed' ? finished : needing).push(item); },
     standing: (items) => { standing = new Set(items.map((item) => item.itemId)); notice.settle(standing); },
   });
   options.reader.subscribe((reading) => {

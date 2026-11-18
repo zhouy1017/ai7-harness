@@ -655,6 +655,30 @@ describe('the notices of tasks as the window leaves and returns (#1528)', () => 
     } finally { page.done(); }
   });
 
+  it('the summary of one completion opens its result, not an attention record; one that needs the editor opens that record', () => {
+    const page = mountNotices();
+    try {
+      const done = page.later({ itemId: 'done', group: 'recent', state: 'analysis-completed' });
+      page.focus(false); page.read([done]); page.focus(true); page.read([done]);
+      expect(page.toast()?.children[0]?.textContent).toBe('你不在时，1 项任务已完成');
+      expect(page.toast()?.children[1]?.textContent).toBe('查看结果');
+      page.toast()!.children[1]!.click();
+      expect(page.calls.openResult).toHaveBeenCalledExactlyOnceWith(done);
+      expect(page.calls.openAttention).not.toHaveBeenCalled();
+    } finally { page.done(); }
+  });
+
+  it('a dialogue the editor cancelled just before the window lost focus is not counted on return', () => {
+    const page = mountNotices();
+    try {
+      page.focus(false);
+      page.read([page.later({ itemId: 'cancelled', group: 'recent', state: 'dialogue-interrupted', object: { kind: 'dialogue', question: null },
+        facts: { progress: null, categories: [], revisionOrdinal: null, dialogueCancelled: true } })]);
+      page.focus(true); page.read([]);
+      expect(page.toast()?.hidden ?? true).toBe(true);
+    } finally { page.done(); }
+  });
+
   it('a task that was settled before the editor returned is not in the summary', () => {
     const page = mountNotices();
     try {
