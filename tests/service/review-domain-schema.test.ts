@@ -23,8 +23,14 @@ it('uses the same review domain tables, indexes and triggers in memory and on di
       expect(disk.prepare('PRAGMA table_info(review_runs)').all().map(row => ({ name: row.name, type: row.type, notnull: row.notnull, pk: row.pk })))
         .toEqual(expect.arrayContaining([{ name: 'review_run_id', type: 'TEXT', notnull: 1, pk: 1 }]));
       for (const table of Object.keys(REVIEW_EXTERNAL_STUBS)) {
-        const columns = (db: DatabaseSync) => db.prepare(`PRAGMA table_info(${table})`).all().map(row => ({ name: row.name, type: row.type }));
-        expect(columns(disk)).toEqual(expect.arrayContaining(columns(memory)));
+        const diskColumns = disk.prepare(`PRAGMA table_info(${table})`).all();
+        for (const column of memory.prepare(`PRAGMA table_info(${table})`).all()) {
+          const actual = diskColumns.find(row => row.name === column.name);
+          expect(actual, `${table}.${column.name}`).toBeDefined();
+          expect(actual, `${table}.${column.name}`).toMatchObject({
+            type: column.type, notnull: column.notnull, pk: column.pk,
+          });
+        }
       }
     } finally { disk.close(); }
   } finally { memory.close(); await roots.dispose(); }

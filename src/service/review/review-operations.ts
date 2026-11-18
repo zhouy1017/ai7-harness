@@ -91,11 +91,11 @@ export function reviewCategoryLedger(host: ReviewOperationsHost, definition: Ana
 
 /** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
 export function inspectReviewCategory(host: ReviewOperationsHost,
-    bookId: string,
-    definition: AnalysisKindDefinition,
-    progress?: ProgressReader,
-    revisionId: string | null = null,
-  ): ReviewCategoryProjection {
+  bookId: string,
+  definition: AnalysisKindDefinition,
+  progress?: ProgressReader,
+  revisionId: string | null = null,
+): ReviewCategoryProjection {
   const ledger = reviewCategoryLedger(host, definition);
   return host.analysisCall(() => ledger.inspect(bookId, progress, revisionId)) as ReviewCategoryProjection;
 }
@@ -107,12 +107,12 @@ export function inspectReviewCategory(host: ReviewOperationsHost,
  * included.
  */
 export function createReviewCategoryPreparationWork(host: ReviewOperationsHost,
-    bookId: string,
-    definition: AnalysisKindDefinition,
-    request: ReviewCategoryTaskRequest,
-    launchPolicy: LaunchPolicyProjection,
-    reconfirm = false,
-  ): AnalysisPreparationResult<ReviewCategoryProjection> {
+  bookId: string,
+  definition: AnalysisKindDefinition,
+  request: ReviewCategoryTaskRequest,
+  launchPolicy: LaunchPolicyProjection,
+  reconfirm = false,
+): AnalysisPreparationResult<ReviewCategoryProjection> {
   const ledger = reviewCategoryLedger(host, definition);
   const result = host.analysisCall(() => ledger.prepare({
     phase: 'start',
@@ -139,11 +139,11 @@ export function cancelReviewCategoryPreparationWork(host: ReviewOperationsHost, 
 
 /** Records the standard-direct authorization and the Run; the caller hands the Run and this category's ledger to the execution owner. */
 export function authorizeReviewCategory(host: ReviewOperationsHost,
-    bookId: string,
-    definition: AnalysisKindDefinition,
-    taskIntentId: string,
-    planEnvelopeDigest: string,
-  ): { projection: ReviewCategoryProjection; dispatchRunRecordId: string | null } {
+  bookId: string,
+  definition: AnalysisKindDefinition,
+  taskIntentId: string,
+  planEnvelopeDigest: string,
+): { projection: ReviewCategoryProjection; dispatchRunRecordId: string | null } {
   const ledger = reviewCategoryLedger(host, definition);
   const authorized = host.analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
   return { projection: authorized.projection as ReviewCategoryProjection, dispatchRunRecordId: authorized.dispatchRunRecordId };
@@ -271,38 +271,38 @@ export function inspectReviewWorkspace(host: ReviewOperationsHost, bookId: strin
  * own ledger, one per step, then the Run itself. The projection is the workspace with the new Run open.
  */
 export function createReviewRunPreparationWork(host: ReviewOperationsHost,
-    bookId: string,
-    categoryIds: ReadonlyArray<string>,
-    scope: ReviewRunScopeRequest,
-    launchPolicy: LaunchPolicyProjection,
-    // The Captured Procedure version the sheet was pre-filled from (Issue #65, S30; ADR 0087 §4): pinned by the Run.
-    capturedProcedure: { versionId: string; documentSha256: string } | null = null,
-    materialIds: ReadonlyArray<string> = [],
-    redoOf: string | null = null,
-    // 准备计划 on a Task Intent Draft (Issue #423, slice 7a): the draft the one category's Run is prepared from.
-    intentDraft: DraftPromotion | null = null,
-    seriesId: string | null = null,
-    localCheck?: import('../../shared/protocol/procedures.js').LocalCheckOptions,
-    decisionId?: string, procedureDefinition: import('../../shared/protocol/procedures.js').ProcedureDefinitionPin | null = null,
-  ): AnalysisPreparationResult<ReviewWorkspaceProjection> {
+  bookId: string,
+  categoryIds: ReadonlyArray<string>,
+  scope: ReviewRunScopeRequest,
+  launchPolicy: LaunchPolicyProjection,
+  // The Captured Procedure version the sheet was pre-filled from (Issue #65, S30; ADR 0087 §4): pinned by the Run.
+  capturedProcedure: { versionId: string; documentSha256: string } | null = null,
+  materialIds: ReadonlyArray<string> = [],
+  redoOf: string | null = null,
+  // 准备计划 on a Task Intent Draft (Issue #423, slice 7a): the draft the one category's Run is prepared from.
+  intentDraft: DraftPromotion | null = null,
+  seriesId: string | null = null,
+  localCheck?: import('../../shared/protocol/procedures.js').LocalCheckOptions,
+  decisionId?: string, procedureDefinition: import('../../shared/protocol/procedures.js').ProcedureDefinitionPin | null = null,
+): AnalysisPreparationResult<ReviewWorkspaceProjection> {
   return reviewPreparation(host, () => host.reviewRuns.prepare(reviewRunRequest(host, bookId, categoryIds, scope, launchPolicy, capturedProcedure, materialIds, redoOf, intentDraft, seriesId, localCheck, decisionId, procedureDefinition)));
 }
 
 export function reviewRunRequest(host: ReviewOperationsHost,
-    bookId: string,
-    categoryIds: ReadonlyArray<string>,
-    scope: ReviewRunScopeRequest,
-    launchPolicy: LaunchPolicyProjection,
-    // The Captured Procedure version the sheet was pre-filled from (Issue #65, S30; ADR 0087 §4): pinned by the Run.
-    capturedProcedure: { versionId: string; documentSha256: string } | null = null,
-    materialIds: ReadonlyArray<string> = [],
-    redoOf: string | null = null,
-    // 准备计划 on a Task Intent Draft (Issue #423, slice 7a): the draft the one category's Run is prepared from.
-    intentDraft: DraftPromotion | null = null,
-    seriesId: string | null = null,
-    localCheck?: import('../../shared/protocol/procedures.js').LocalCheckOptions,
-    decisionId?: string, procedureDefinition: import('../../shared/protocol/procedures.js').ProcedureDefinitionPin | null = null,
-  ): Extract<import('./review-runs.js').ReviewRunPrepareInput, { phase: 'start' }> {
+  bookId: string,
+  categoryIds: ReadonlyArray<string>,
+  scope: ReviewRunScopeRequest,
+  launchPolicy: LaunchPolicyProjection,
+  // The Captured Procedure version the sheet was pre-filled from (Issue #65, S30; ADR 0087 §4): pinned by the Run.
+  capturedProcedure: { versionId: string; documentSha256: string } | null = null,
+  materialIds: ReadonlyArray<string> = [],
+  redoOf: string | null = null,
+  // 准备计划 on a Task Intent Draft (Issue #423, slice 7a): the draft the one category's Run is prepared from.
+  intentDraft: DraftPromotion | null = null,
+  seriesId: string | null = null,
+  localCheck?: import('../../shared/protocol/procedures.js').LocalCheckOptions,
+  decisionId?: string, procedureDefinition: import('../../shared/protocol/procedures.js').ProcedureDefinitionPin | null = null,
+): Extract<import('./review-runs.js').ReviewRunPrepareInput, { phase: 'start' }> {
   const factualDecision = decisionId === undefined ? undefined : host.verificationCall(() => {
     const row = host.authority.prepare('SELECT result_id FROM factual_review_decisions WHERE decision_id = ? AND book_id = ?').get(decisionId, bookId);
     requireStore(row !== undefined && categoryIds.length === 1 && categoryIds[0] === 'factual-review', 'FACTUAL_DECISION_INVALID', '补充核查需要当前图书的核查决定。');
@@ -333,7 +333,7 @@ export function reviewRunRequest(host: ReviewOperationsHost,
 }
 
 export function launchReviewRun(host: ReviewOperationsHost, input: import('../../shared/protocol.js').ServiceOperationMap['launchReviewRun']['input'], launchPolicy: LaunchPolicyProjection,
-    startWhen: 'now' | 'when-online' = 'now'): { projection: ReviewWorkspaceProjection; repeated: boolean } {
+  startWhen: 'now' | 'when-online' = 'now'): { projection: ReviewWorkspaceProjection; repeated: boolean } {
   try {
     const { clientCommandId, executionConfig = {}, ...request } = input;
     const launched = launchFromSnapshot(host.authority, { clientCommandId, bookId: input.bookId, kind: 'review-run', input: { ...request, executionConfig } },
@@ -381,11 +381,11 @@ export function reviewPreparation(host: ReviewOperationsHost, body: () => Review
  * Runs hold every place of the governor; the drive loop waits for one (#1080, ADR 0095 §2). `_slotBusy` is no longer read.
  */
 export function authorizeReviewRun(host: ReviewOperationsHost,
-    bookId: string,
-    reviewRunId: string,
-    approvedDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>,
-    _slotBusy = false,
-  ): ReviewWorkspaceProjection {
+  bookId: string,
+  reviewRunId: string,
+  approvedDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>,
+  _slotBusy = false,
+): ReviewWorkspaceProjection {
   return host.reviewCall(() => {
     host.reviewRuns.recordAuthorization(bookId, reviewRunId, approvedDigests, 'now');
     return host.reviewRuns.workspace(bookId, reviewRunId);
@@ -398,12 +398,12 @@ export function authorizeReviewRun(host: ReviewOperationsHost,
  * owner's `progress` reader exactly as the inspection does.
  */
 export function recordReviewFindingDisposition(host: ReviewOperationsHost,
-    bookId: string,
-    reviewRunId: string,
-    findingId: string,
-    reason: string,
-    progress?: ProgressReader,
-  ): ReviewWorkspaceProjection {
+  bookId: string,
+  reviewRunId: string,
+  findingId: string,
+  reason: string,
+  progress?: ProgressReader,
+): ReviewWorkspaceProjection {
   return host.reviewCall(() => {
     host.transaction(host.authority, () => {
       host.reviewRuns.ignoreFinding(bookId, reviewRunId, findingId, reason);
@@ -555,8 +555,8 @@ export function reviewDefaultRule(host: ReviewOperationsHost, bookId: string, re
 }
 
 export async function quickStartReviewRun(host: ReviewOperationsHost, input: { bookId: string; reviewRunId: string; planEnvelopeDigest: string; ruleVersionId: string },
-    runtime: { credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
-    progress?: ProgressReader): Promise<{ outcome: 'started' | 'fell-back'; reasons: string[]; dispatch: boolean }> {
+  runtime: { credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
+  progress?: ProgressReader): Promise<{ outcome: 'started' | 'fell-back'; reasons: string[]; dispatch: boolean }> {
   const facts = reviewRuleFacts(host, input.bookId, input.reviewRunId);
   const startedBy = host.reviewCall(() => host.reviewRuns.defaultRuleVersion(input.reviewRunId));
   if (startedBy !== null) {

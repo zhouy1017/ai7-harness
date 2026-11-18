@@ -3494,8 +3494,8 @@ export class EditorialStore {
       get authority() { return store.#authority; },
       evaluationBookTitle: this.#evaluationBookTitle.bind(this),
       latestAnalysisRevision: this.#latestAnalysisRevision.bind(this),
-      inspectReviewWorkspace: this.inspectReviewWorkspace.bind(this),
-      inspectEvaluation: this.inspectEvaluation.bind(this),
+      inspectReviewWorkspace: (bookId, reviewRunId, progress, page) => this.inspectReviewWorkspace(bookId, reviewRunId, progress, page),
+      inspectEvaluation: (bookId, recordId) => this.inspectEvaluation(bookId, recordId),
     };
   }
 
@@ -3609,12 +3609,12 @@ export class EditorialStore {
       prepareTaskMaterials: this.#prepareTaskMaterials.bind(this),
       resultBinding: this.#resultBinding.bind(this),
       launchChoice: this.#launchChoice.bind(this),
-      executionLedgerForRun: this.executionLedgerForRun.bind(this),
-      materializeFactualVerification: this.materializeFactualVerification.bind(this),
-      inspectTaskPlanWithConnection: this.inspectTaskPlanWithConnection.bind(this),
-      inspectFactualVerification: this.inspectFactualVerification.bind(this),
-      inspectEvidenceWorkspace: this.inspectEvidenceWorkspace.bind(this),
-      inspectResearchEvidence: this.inspectResearchEvidence.bind(this),
+      executionLedgerForRun: (runRecordId) => this.executionLedgerForRun(runRecordId),
+      materializeFactualVerification: (reviewRunId) => this.materializeFactualVerification(reviewRunId),
+      inspectTaskPlanWithConnection: (input, credentialReadiness, connectivity, progress) => this.inspectTaskPlanWithConnection(input, credentialReadiness, connectivity, progress),
+      inspectFactualVerification: (input) => this.inspectFactualVerification(input),
+      inspectEvidenceWorkspace: (input) => this.inspectEvidenceWorkspace(input),
+      inspectResearchEvidence: (input) => this.inspectResearchEvidence(input),
     };
   }
 
