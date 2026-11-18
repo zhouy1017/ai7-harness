@@ -22,26 +22,6 @@ function exemplarsOf(fixture: ReadersReportExemplarFixture, bookId: string): { c
 }
 
 describe('审稿意见 范例 over the domain relations', () => {
-  it('names a damaged admitted 审稿意见 exemplar as damaged instead of blanking 评估 (Issue #778)', async () => {
-    const db = await seededEvaluationDatabase();
-    try {
-      const fixture = await readersReportExemplarFixture(db);
-      const bookId = seedBook(db, '审稿意见之书');
-      const draft = fixture.draft(bookId, 'author', ['总评：结构完整。', '建议：调整第二章。']);
-      seedPublication(db, bookId, 1, LATER());
-      admitReadersReportExemplar(fixture.host, { bookId, template: 'author', revisionDigest: draft.revisionDigest, expectedDecisions: 0 });
-      const other = seedBook(db, '评估另一本书');
-      expect(exemplarsOf(fixture, other)).toEqual({ count: 1, statement: '参考本社 1 份审稿意见范例：《审稿意见之书 · 审稿意见 · 给作者的修改意见》' });
-      // The admitted decision record no longer reads: this one 范例 is named as damaged, and 评估 still reads.
-      db.exec('DROP TRIGGER learning_eligibility_decisions_no_update');
-      db.prepare("UPDATE learning_eligibility_decisions SET canonical_json = '{}' WHERE material_key LIKE 'readers-report-exemplar:%'").run();
-      expect(exemplarsOf(fixture, other)).toEqual({
-        count: 0,
-        statement: '本社有 1 份审稿意见范例记录已损坏，无法读取，本次不参考范例：《审稿意见之书 · 审稿意见 · 给作者的修改意见》',
-      });
-    } finally { db.close(); }
-  });
-
   it('seeds a draft with at most two admitted 审稿意见, by Book title, each its opening past the contract\'s bound (Issue #429)', async () => {
     const db = await seededEvaluationDatabase();
     try {

@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { canonicalRecord, parseCanonicalJson } from '../../../../src/service/analysis/canonical.js';
 import * as documents from '../../../../src/service/production-document-operations.js';
-import { PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL } from '../../../../src/service/production-document-workflow.js';
 import { StoreError } from '../../../../src/service/store-records.js';
 import {
   MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
@@ -193,44 +191,12 @@ describe('Production Documents over the domain relations', () => {
         });
         expect(phase('intake')).toMatchObject({ state: 'completed', actions: ['reopen'], moves: 2 });
         expect([now.transitions, now.summary]).toEqual([6, '1 个阶段进行中 · 0 项等待处理']);
-        const settled = JSON.stringify(now);
-
         // WORK-009: every move stays, in order, and the ledger takes no change.
         expect(db.prepare('SELECT phase_id, action FROM production_document_phase_transitions ORDER BY ordinal').all().map((row) => `${row.phase_id}:${row.action}`))
           .toEqual(['drafting:start', 'intake:start', 'drafting:complete', 'intake:complete', 'source-development:skip', 'drafting:reopen']);
         expect(() => db.exec('UPDATE production_document_phase_transitions SET reason_text = NULL WHERE ordinal = 6')).toThrow(/PRODUCTION_DOCUMENT_WORKFLOW_LEDGER_IMMUTABLE/u);
         expect(() => db.exec('DELETE FROM production_document_workflow_instances')).toThrow(/PRODUCTION_DOCUMENT_WORKFLOW_LEDGER_IMMUTABLE/u);
-        // Read again through ledgers made afresh over the same relations, it reads as it was.
-        const reopened = await productionDocumentFixture(db);
-        expect(JSON.stringify(workflowOf({ ...setup, fixture: reopened }))).toBe(settled);
-
-        // WORK-009 (Issue #626): a move records its reason's words with it, so they read as recorded — after a relabel, and for a
-        // key no longer offered. The skip of 来源建设 was the fifth move.
-        const rewrite = (change: (record: Record<string, unknown>) => Record<string, unknown>, choice: string): void => {
-          const row = db.prepare('SELECT canonical_json FROM production_document_phase_transitions WHERE ordinal = 5').get() as { canonical_json: string };
-          const record = canonicalRecord(change(parseCanonicalJson(row.canonical_json) as Record<string, unknown>));
-          db.exec('DROP TRIGGER production_document_phase_transitions_no_update');
-          db.prepare('UPDATE production_document_phase_transitions SET reason_choice = ?, canonical_json = ?, sha256 = ? WHERE ordinal = 5')
-            .run(choice, record.json, record.digest);
-          db.exec(PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL.production_document_phase_transitions_no_update!);
-        };
-        const skipOf = async (): Promise<unknown> => {
-          const afresh = await productionDocumentFixture(db);
-          try {
-            return workflowOf({ ...setup, fixture: afresh }).phases.find((entry) => entry.phaseId === 'source-development')!.latest!.reason;
-          } catch (error) {
-            return error instanceof StoreError ? error.code : error;
-          }
-        };
-        const row = db.prepare('SELECT canonical_json FROM production_document_phase_transitions WHERE ordinal = 5').get() as { canonical_json: string };
-        expect((parseCanonicalJson(row.canonical_json) as { reason: unknown }).reason).toEqual({ choice: 'done-elsewhere', label: '这一阶段已在别处完成', text: null });
-        rewrite((record) => ({ ...record, reason: { choice: 'retired-reason', label: '当时的说法', text: null } }), 'retired-reason');
-        expect(await skipOf()).toEqual({ choice: 'retired-reason', label: '当时的说法', text: null });
-        // A move recorded before its words were reads its key's words now, and one whose key no longer names a reason is refused.
-        rewrite((record) => ({ ...record, reason: { choice: 'done-elsewhere', text: null } }), 'done-elsewhere');
-        expect(await skipOf()).toEqual({ choice: 'done-elsewhere', label: '这一阶段已在别处完成', text: null });
-        rewrite((record) => ({ ...record, reason: { choice: 'retired-reason', text: null } }), 'retired-reason');
-        expect(await skipOf()).toBe('PRODUCTION_DOCUMENT_RECORD_INVALID');
+        // The restart and the historical reason words are proven on disk: tests/service/production-document-workflow.test.ts.
       });
     });
   });

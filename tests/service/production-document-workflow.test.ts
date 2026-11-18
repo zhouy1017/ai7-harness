@@ -4,6 +4,8 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
+import { PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL } from '../../src/service/production-document-workflow.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
@@ -81,6 +83,100 @@ function states(workflow: ProductionDocumentWorkflowProjection): Array<[string, 
 }
 
 describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)', () => {
+  // The phase rules and refusals are proven over the domain relations (tests/unit/domain/production-documents). What only a real
+  // store can prove stays here: the six moves survive closing and reopening the store, and a historical reason reads through actual startup.
+  it('keeps its six moves across a restart, and reads a move\'s recorded reason after a relabel or a retired key (WORK-009, Issue #626)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId: string;
+    let settled: string;
+    try {
+      bookId = await importBook(store, await compose('工作流程组稿', [1, 2, 3]));
+      const document = await newsRelease(store, bookId);
+      const move = (phaseId: ProductionDocumentPhaseId, action: ProductionDocumentPhaseAction, reason: { choice: string; text: string | null } | null = null) =>
+        store.transitionProductionDocumentPhase({
+          bookId, documentId: document.documentId, phaseId, action, expectedTransitions: workflowOf(store, bookId).transitions, reason,
+        });
+      move('drafting', 'start');
+      move('intake', 'start');
+      move('drafting', 'complete');
+      move('intake', 'complete');
+      move('source-development', 'skip', { choice: 'done-elsewhere', text: null });
+      move('drafting', 'reopen', { choice: 'custom', text: '  读者反馈后要改开头  ' });
+      const now = workflowOf(store, bookId);
+      expect([now.transitions, now.summary]).toEqual([6, '1 个阶段进行中 · 0 项等待处理']);
+      settled = JSON.stringify(now);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    // WORK-009: every move stays, in order, and the ledger takes no change.
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const database = new DatabaseSync(path);
+    try {
+      expect(database.prepare('SELECT phase_id, action FROM production_document_phase_transitions ORDER BY ordinal').all().map((row) => `${row.phase_id}:${row.action}`))
+        .toEqual(['drafting:start', 'intake:start', 'drafting:complete', 'intake:complete', 'source-development:skip', 'drafting:reopen']);
+      expect(() => database.exec("UPDATE production_document_phase_transitions SET reason_text = NULL WHERE ordinal = 6")).toThrow(/PRODUCTION_DOCUMENT_WORKFLOW_LEDGER_IMMUTABLE/u);
+      expect(() => database.exec('DELETE FROM production_document_workflow_instances')).toThrow(/PRODUCTION_DOCUMENT_WORKFLOW_LEDGER_IMMUTABLE/u);
+    } finally {
+      database.close();
+    }
+    // A restart reads it as it was.
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(JSON.stringify(workflowOf(reopened, bookId!))).toBe(settled!);
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+
+    // WORK-009 (Issue #626): a move records its reason's words with it, so they read as recorded — after a relabel, and for a
+    // key no longer offered. The skip of 来源建设 was the fifth move.
+    const rewrite = (change: (record: Record<string, unknown>) => Record<string, unknown>, choice: string): void => {
+      const tamper = new DatabaseSync(path);
+      try {
+        const row = tamper.prepare('SELECT canonical_json FROM production_document_phase_transitions WHERE ordinal = 5').get() as { canonical_json: string };
+        const record = canonicalRecord(change(parseCanonicalJson(row.canonical_json) as Record<string, unknown>));
+        tamper.exec('DROP TRIGGER production_document_phase_transitions_no_update');
+        tamper.prepare('UPDATE production_document_phase_transitions SET reason_choice = ?, canonical_json = ?, sha256 = ? WHERE ordinal = 5')
+          .run(choice, record.json, record.digest);
+        tamper.exec(PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL.production_document_phase_transitions_no_update!);
+      } finally {
+        tamper.close();
+      }
+    };
+    const skipOf = async (): Promise<unknown> => {
+      const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      try {
+        const read = (() => {
+          try {
+            return workflowOf(store, bookId!).phases.find((entry) => entry.phaseId === 'source-development')!.latest!.reason;
+          } catch (error) {
+            return error instanceof StoreError ? error.code : error;
+          }
+        })();
+        store.markCleanShutdown();
+        return read;
+      } finally {
+        store.close();
+      }
+    };
+    const recorded = new DatabaseSync(path, { readOnly: true });
+    try {
+      const row = recorded.prepare('SELECT canonical_json FROM production_document_phase_transitions WHERE ordinal = 5').get() as { canonical_json: string };
+      expect((parseCanonicalJson(row.canonical_json) as { reason: unknown }).reason).toEqual({ choice: 'done-elsewhere', label: '这一阶段已在别处完成', text: null });
+    } finally {
+      recorded.close();
+    }
+    rewrite((record) => ({ ...record, reason: { choice: 'retired-reason', label: '当时的说法', text: null } }), 'retired-reason');
+    expect(await skipOf()).toEqual({ choice: 'retired-reason', label: '当时的说法', text: null });
+    // A move recorded before its words were reads its key's words now, and one whose key no longer names a reason is refused.
+    rewrite((record) => ({ ...record, reason: { choice: 'done-elsewhere', text: null } }), 'done-elsewhere');
+    expect(await skipOf()).toEqual({ choice: 'done-elsewhere', label: '这一阶段已在别处完成', text: null });
+    rewrite((record) => ({ ...record, reason: { choice: 'retired-reason', text: null } }), 'retired-reason');
+    expect(await skipOf()).toBe('PRODUCTION_DOCUMENT_RECORD_INVALID');
+  }, 180_000);
+
   it('says what an open phase waits on from the document\'s own facts, and records none of it', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
