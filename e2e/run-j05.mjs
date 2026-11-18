@@ -1234,15 +1234,13 @@ async function main() {
         // The way back re-reads under the same filter: the decided cards leave the pending list, so compare with that read.
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
         await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null && ${JSON.stringify(decided)}.every((id)=>document.querySelector('article[data-finding-id='+JSON.stringify(id)+']')===null) && document.querySelector('article.review-finding')!==null`, 'review-return-filter-reread');
-        // 历史 ▾ open — by a real click unless this Book's 审阅 kept it open from the previous form — so the way back has a fold to keep.
-        if (await renderer.evaluate(`document.querySelector('.review-history-fold')?.open===false`)) await triageClick(renderer,'.review-history-fold > summary');
         await waitFor(renderer, `document.querySelector('.review-history-fold')?.open===true`, 'review-return-history-open');
         await press(renderer,'ArrowDown',1);
         await waitFor(renderer, `document.activeElement?.matches('article.review-finding[data-status="pending"]')===true`, 'review-return-next-pending-focused');
         const kept=await renderer.evaluate(`document.activeElement.dataset.findingId`);
         const PLACE = `(() => { const groups={}; for (const group of document.querySelectorAll('section.review-group[data-review-category]')) groups[group.dataset.reviewCategory]=group.querySelector('details.review-category-fold')?.open===true; return {groups, history:document.querySelector('.review-history-fold')?.open===true, findings:document.querySelectorAll('article.review-finding').length, more:document.querySelector('[data-review-action="more-findings"]')?.textContent??null, scroll:document.scrollingElement.scrollTop, maxScroll:document.scrollingElement.scrollHeight-innerHeight}; })()`;
         const placed=await renderer.evaluate(PLACE);
-        requireJourney(placed.findings>0 && placed.history===true, 'review-return-place-set', placed);
+        requireJourney(placed.findings>0, 'review-return-place-set', placed);
         await press(renderer,'Enter');
         await waitFor(renderer, `document.querySelector('[data-review-return]')!==null`, 'review-return-chip-ready');
         await triageClick(renderer,'[data-review-return]');

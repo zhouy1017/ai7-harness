@@ -2944,7 +2944,11 @@ async function main() {
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-access-reset-closed`);
         const citedFinding = reviewed.run.findings.find(finding => finding.findingId === synthesisEvidence.findingId);
         const hiddenSeverity = citedFinding?.severity === 'note' ? 'must' : 'note';
-        await pointerClick(renderer, waitFor, `[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]`, `review-synthesis-${viewport}-filter-away`);
+        // 审阅 keeps its filters for the Book across the sidebar return (#1525), so the second form may find the pill already pressed;
+        // pressing it again would only re-read the page under the steps that follow.
+        if (await renderer.evaluate(`document.querySelector('[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]')?.getAttribute('aria-pressed')!=='true'`)) {
+          await pointerClick(renderer, waitFor, `[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]`, `review-synthesis-${viewport}-filter-away`);
+        }
         await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${synthesisEvidence.findingId}"]')===null`, `review-synthesis-${viewport}-filtered-citation`);
         await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-expand`);
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-expanded`);
