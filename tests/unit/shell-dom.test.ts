@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountShell, ShellPreferences } from '../../src/renderer/shell.js';
+import { SHELL_LABELS } from '../../src/renderer/shell-labels.js';
 import { preferenceDefaults, PREFERENCES_NOTICES, type PreferenceValues, type PreferencesRendererApi } from '../../src/shared/preferences.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
@@ -197,7 +198,7 @@ describe('sidebar book entries', () => {
   });
 });
 
-it('automatically shows icons without saving collapse and keeps the toggle working', async () => {
+it('automatically shows icons without saving collapse and holds the toggle, saying why, until the column closes', async () => {
   let notify = () => {};
   vi.stubGlobal('MutationObserver', class { constructor(callback: () => void) { notify = callback; } observe() {} });
   const { toggle, preferences } = mounted();
@@ -205,11 +206,16 @@ it('automatically shows icons without saving collapse and keeps the toggle worki
   document.documentElement.dataset['rightColumn'] = 'icons'; notify();
   expect(document.documentElement.dataset['sidebar']).toBe('icons');
   expect(preferences.current['shell.sidebarCollapsed']).toBe(false);
-  expect(toggle.disabled).toBe(false);
+  expect([toggle.disabled, toggle.title]).toEqual([true, SHELL_LABELS.column]);
+  toggle.click();
+  expect(preferences.current['shell.sidebarCollapsed']).toBe(false);
+  // The overlay form needs the width as much: the same automatic icons, the same held toggle.
+  document.documentElement.dataset['rightColumn'] = 'overlay'; notify();
+  expect([document.documentElement.dataset['sidebar'], toggle.disabled, toggle.title]).toEqual(['icons', true, SHELL_LABELS.column]);
+  document.documentElement.dataset['rightColumn'] = 'none'; notify();
+  expect([document.documentElement.dataset['sidebar'], toggle.disabled, toggle.title]).toEqual(['full', false, SHELL_LABELS.collapse]);
   toggle.click();
   await vi.waitFor(() => expect(preferences.current['shell.sidebarCollapsed']).toBe(true));
-  document.documentElement.dataset['rightColumn'] = 'none'; notify();
   expect(document.documentElement.dataset['sidebar']).toBe('icons');
-  toggle.click();
-  await vi.waitFor(() => expect(document.documentElement.dataset['sidebar']).toBe('full'));
+  delete document.documentElement.dataset['rightColumn'];
 });

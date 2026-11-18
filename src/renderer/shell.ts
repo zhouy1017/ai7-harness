@@ -528,9 +528,10 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     const root = document.documentElement;
     root.dataset['sidebar'] = mode;
     root.dataset['sidebarCollapsed'] = String(preferences.current['shell.sidebarCollapsed']);
-    options.toggle.disabled = narrow;
+    // Under the automatic icon form a click could change nothing visible, so the toggle says why it waits; the preference stays as it was.
+    options.toggle.disabled = narrow || autoIcons;
     options.toggle.setAttribute('aria-expanded', String(mode === 'full'));
-    options.toggle.setAttribute('aria-label', narrow ? SHELL_LABELS.narrow : mode === 'full' ? SHELL_LABELS.collapse : SHELL_LABELS.expand);
+    options.toggle.setAttribute('aria-label', narrow ? SHELL_LABELS.narrow : autoIcons ? SHELL_LABELS.column : mode === 'full' ? SHELL_LABELS.collapse : SHELL_LABELS.expand);
     options.toggle.title = options.toggle.getAttribute('aria-label') ?? '';
     // A collapsed row says its name on hover too; a full row shows it already.
     for (const link of sidebar.querySelectorAll<HTMLElement>('.sidebar-link')) {
