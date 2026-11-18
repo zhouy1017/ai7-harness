@@ -1676,6 +1676,22 @@ async function main() {
     await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); return reuse instanceof HTMLInputElement && reuse.checked; })()`, 'preflight-reuse-source');
     await click(primary, '查看导入详情', 'preflight-prepare-source');
     await waitFor(primary, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'preflight-source-review');
+    // #1519: from the instant the bar appears, a press on 导入来源材料到所选图书 reaches that button — never the bar's ×. Hit-tested
+    // at once (before any frame) and in the next three frames; a button outside the window counts as unknown (null).
+    const FIRST_FRAMES_PROBE = `(() => {
+      const bar = document.querySelector('#persistence-status'); const hits = []; window.__j12FirstFrames = hits;
+      const hit = () => { const node = document.querySelector('[data-commit-source-import]'); if (!(node instanceof HTMLElement)) { hits.push(null); return; }
+        const r = node.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+        hits.push(x < 0 || y < 0 || x >= innerWidth || y >= innerHeight ? null : node.contains(document.elementFromPoint(x, y))); };
+      const observer = new MutationObserver(() => {
+        if (bar.hidden || hits.length > 0) return;
+        observer.disconnect(); hit();
+        let frames = 0; const next = () => requestAnimationFrame(() => { hit(); frames += 1; if (frames < 3) next(); }); next();
+      });
+      observer.observe(bar, { attributes: true, attributeFilter: ['hidden'] });
+      return true;
+    })()`;
+    await primary.evaluate(FIRST_FRAMES_PROBE);
     await click(primary, '导入来源材料到所选图书', 'preflight-commit-source');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('已显示这本图书现有的工作台') && document.querySelector('#persistence-status')?.textContent.includes('来源材料未提交') && !document.querySelector('[data-commit-source-import]')?.disabled`, 'preflight-duplicate-rejected');
     await waitFor(registeredBookA, `document.hasFocus() && document.visibilityState==='visible'`, 'preflight-existing-a-focused');
@@ -1706,8 +1722,14 @@ async function main() {
       await waitFor(primary, `document.visibilityState === 'visible'`, name);
     };
     await bringPrimaryBack('preflight-error-window-visible');
+    await waitFor(primary, `Array.isArray(window.__j12FirstFrames) && window.__j12FirstFrames.length === 4 && window.__j12FirstFrames.every((hit) => hit !== false)`, 'preflight-short-commit-hit-first-frame');
     for (const kind of ['short', 'long']) {
       if (kind === 'long') {
+        // At the Gate's window size, the bar appears anew for the long refusal: the standing one is dismissed first.
+        await primary.send('Emulation.setDeviceMetricsOverride', { width: 1008, height: 681, deviceScaleFactor: 1, mobile: false });
+        await pointerClick(primary, waitFor, '#persistence-status .status-dismiss', 'preflight-long-dismiss-short');
+        await waitFor(primary, `document.querySelector('#persistence-status').hidden === true && document.documentElement.dataset.statusBar === undefined`, 'preflight-long-short-dismissed');
+        await primary.evaluate(FIRST_FRAMES_PROBE);
         requireJourney(await primary.evaluateIsolated(`(() => {
           const freeze = Object.freeze;
           Object.freeze = function (value) {
@@ -1719,6 +1741,7 @@ async function main() {
         await pointerClick(primary, waitFor, '[data-commit-source-import]', 'preflight-long-press');
         await waitFor(primary, `(() => { const bar = document.querySelector('#persistence-status'); return bar.dataset.tone === 'error' && bar.textContent.includes('故意写得很长，用来确认它在导入复核页里') && document.documentElement.dataset.statusBar === 'shown'; })()`, 'preflight-long-shown');
         await bringPrimaryBack('preflight-long-window-visible');
+        await waitFor(primary, `Array.isArray(window.__j12FirstFrames) && window.__j12FirstFrames.length === 4 && window.__j12FirstFrames.every((hit) => hit === true)`, 'preflight-long-commit-hit-first-frame');
       }
       for (const [width, height] of [[1280, 800], [1008, 681]]) {
         await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
