@@ -158,7 +158,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     return node;
   }
 
-  function attemptSection(attempt: DialogueAttemptProjection, latest: boolean): { section: HTMLElement; answer: HTMLElement } {
+  function attemptSection(attempt: DialogueAttemptProjection, latest: boolean): { section: HTMLDetailsElement; answer: HTMLElement } {
     const section = el('details', 'dialogue-attempt'); section.open = latest;
     section.dataset['dialogueAttempt'] = attempt.attemptId;
     section.dataset['dialogueState'] = attempt.state;
@@ -407,7 +407,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
   function firstFocusableAction(): HTMLElement | undefined {
     return [...actions.querySelectorAll<HTMLElement>('summary, button:not(:disabled)')].find((node) => {
       if (node.closest('[hidden]') !== null) return false;
-      const menu = node.closest('details');
+      const menu = node.closest<HTMLDetailsElement>('details');
       return menu === null || node.tagName === 'SUMMARY' || menu.open;
     });
   }
