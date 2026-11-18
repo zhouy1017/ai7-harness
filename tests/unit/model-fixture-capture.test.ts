@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
-import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitResult, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import { deriveCoverageManifest, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
+import { parseDocx } from '../../src/service/docx.js';
+import { clarificationPromptContractDigest } from '../../src/service/provider/clarification-contract.js';
 import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnitRequestDigest } from '../../src/service/analysis/cross-unit-contract.js';
 import { ASSURANCE_SAMPLING_PROMPT_CONTRACT, ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, assuranceSamplingRequestDigest, parseAssuranceSamplingResult } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, runReportReflectionRequestDigest } from '../../src/service/analysis/run-report-contract.js';
@@ -21,6 +24,29 @@ import { LocalFixturePolicyCatalog, loadModelFixture, parseModelFixture } from '
 import { describeComposition } from '../../src/service/harness/primary-agent-harness.js';
 import { AGENT_WORKSPACE_COMPOSITION_OPTIONS } from '../../src/service/agent-workspace/capabilities.js';
 import { LOCAL_FIXTURE_POLICY_SHA256, ORIGINAL_FIELDS_ACTIVE_SET_SHA256, type SelectedPolicyIdentity } from '../../src/shared/protocol.js';
+
+it('replays the current recorded baseline units with their real ordinal answers (#1538)', async () => {
+  const fixture = await loadModelFixture(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), 'sample1-model-clarification-live-current');
+  const blocks: ManifestBlockInput[] = [];
+  await parseDocx(fileURLToPath(new URL('../../SampleBooks/sample1.docx', import.meta.url)), 'sample1.docx',
+    block => blocks.push({ ...block, graphemes: block.graphemeLength }));
+  const id = '11111111-1111-4111-8111-111111111111';
+  const manifest = deriveCoverageManifest({ bookId: id, manuscriptId: id, branchId: id, revisionId: id,
+    revisionLabel: 'r1', revisionDigest: 'a'.repeat(64), blocks });
+  const prompt = clarificationPromptContractDigest(BASELINE_PROMPT_CONTRACT_DIGEST);
+  expect([...fixture.entries.values()].filter(entry => entry.unitOrdinal > 0)).toHaveLength(manifest.units.length);
+  expect([...fixture.entries.values()].filter(entry => entry.unitOrdinal === 0).map(entry => entry.capture?.subject))
+    .toEqual(['reduction', 'sampling', 'sampling', 'sampling', 'sampling', 'reflection']);
+  for (const unit of manifest.units) {
+    const entry = [...fixture.entries.values()].find(value => value.unitOrdinal === unit.ordinal &&
+      value.requestDigest === unitRequestDigest(prompt, unit.ordinal, unit.digest));
+    expect(entry?.capture).toMatchObject({ model: 'deepseek-v4.1-flash', taskPromptContractDigest: prompt });
+    expect(entry?.response.kind).toBe('unit-result');
+    if (entry?.response.kind !== 'unit-result') throw new Error('RECORDED_UNIT_MISSING');
+    expect(parseUnitResult(entry.response.text, { unitOrdinal: unit.ordinal,
+      blockIds: [...unit.overlapBlockIds, ...unit.blockIds] }).ok).toBe(true);
+  }
+});
 
 it('loads the retained SampleBook fixture after byte changes without a frozen manifest (#1453)', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ai7-unpinned-fixture-'));
