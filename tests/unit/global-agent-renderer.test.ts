@@ -26,6 +26,8 @@ function dialogue(question = '问题', id = 'dialogue-1'): GlobalAgentDialoguePr
 }
 let uninstall: () => void;
 beforeEach(() => {
+  // The developer surface is the default under test; the ordinary-mode tests switch the layer off themselves.
+  setTechnicalLayerVisible(true);
   uninstall = installMiniDom();
   Object.defineProperty(MiniElement.prototype, 'selectedOptions', { configurable: true, get(this: MiniElement) { return this.children.filter((child) => child.value === this.value); } });
   Object.assign(miniDocument, { visibilityState: 'visible', addEventListener: vi.fn(), removeEventListener: vi.fn() });
@@ -101,7 +103,7 @@ it('localizes tool results and supervision effects and preserves selections on p
   const turn = { ...dialogue(), toolCalls: [{ attemptId: 'internal-attempt-id', callId: 'call', tool: 'retrieve', arguments: '{"query":"原始参数"}', outcome: 'returned' as const, result: '[{},{}]' }],
     supervisionProposals: [{ attemptId: 'internal-attempt-id', callId: 'proposal', input: { operation: 'supervise' as const, targets: [PIN], scope: { kind: 'house' as const }, categoryId: 'typos-and-usage', text: '谨慎归纳。', effect: 'freeze' as const } }] };
   const { root, find, choose, api, submit, setProjection } = harness(turn, true); await settle();
-  expect(find('[data-global-agent-tool-calls]').textContent).toContain('检索跨书与记忆');
+  expect(find('[data-global-agent-tool-calls]').textContent).toContain('检索图书与审阅偏好');
   expect(find('[data-global-agent-tool-calls]').textContent).toContain('返回 2 条结果');
   expect(find('[data-global-agent-proposals]').textContent).toContain('冻结规则');
   expect(find('[data-global-agent-tool-calls] pre').closest('details')?.hasAttribute('open')).toBe(false);
@@ -139,6 +141,43 @@ it('regenerates in one action without opening the optional preview', async () =>
   expect(api.prepareGlobalAgentTurn).toHaveBeenCalledWith({ kind: 'regenerate', dialogueId: 'dialogue-1', attemptId: 'internal-attempt-id' });
   expect(api.regenerateGlobalAgentAnswer).toHaveBeenCalledWith({ dialogueId: 'dialogue-1', attemptId: 'internal-attempt-id', sources: [PIN], disclosureSha256: 'prepared' });
   expect(find('.global-agent-preview').hidden).toBe(true);
+});
+
+it('shows one 参考哪些书和偏好 fold in ordinary mode and sends the same ask as developer mode', async () => {
+  const ask = async (developer: boolean) => {
+    setTechnicalLayerVisible(developer);
+    const view = harness(); await settle();
+    // The choices sit in a fold that is closed until opened: hidden controls still submit the values they hold.
+    view.choose('[data-global-agent-item]'); view.choose('[data-global-agent-scope-book]'); view.choose('[data-global-agent-scope-procedure]');
+    view.submit('同一个问题'); await settle();
+    return view;
+  };
+  const ordinary = await ask(false);
+  const fold = ordinary.find('[data-global-agent-fold="references"]');
+  expect(fold.tagName).toBe('DETAILS');
+  expect(fold.open).toBe(false);
+  expect(fold.children[0]?.textContent).toBe('参考哪些书和偏好');
+  expect(ordinary.root.querySelectorAll('.global-agent-pill')).toHaveLength(0);
+  expect(ordinary.root.querySelector('[data-global-agent-governance]')).toBeNull();
+  expect(ordinary.root.textContent).not.toMatch(/治理|监督/u);
+  const labels = (view: typeof ordinary) => view.root.querySelectorAll('button').map((button) => button.textContent);
+  expect(labels(ordinary)).not.toContain('查看将发送的内容');
+  // 学习回溯 opens only where its page can be opened; on this branch that page is developer-only (#1549 opens it).
+  expect(labels(ordinary).some((text) => text?.includes('学习回溯'))).toBe(false);
+  const ordinaryAsk = vi.mocked(ordinary.api.askGlobalAgent).mock.calls.at(-1)![0];
+
+  const developer = await ask(true);
+  expect(developer.root.querySelectorAll('.global-agent-pill').map((pill) => pill.dataset['globalAgentPill']))
+    .toEqual(['scope', 'governance', 'directives']);
+  expect(developer.root.querySelector('[data-global-agent-governance]')).not.toBeNull();
+  expect(labels(developer)).toContain('查看将发送的内容');
+  expect(labels(developer).some((text) => text?.includes('学习回溯'))).toBe(true);
+  const developerAsk = vi.mocked(developer.api.askGlobalAgent).mock.calls.at(-1)![0];
+
+  expect(ordinaryAsk).toEqual(developerAsk);
+  expect(ordinaryAsk).toEqual({ question: '同一个问题', sources: [PIN], scope: {
+    bookIds: [BOOK], procedures: [{ procedureId: 'review', version: 1, digest: PROCEDURE.digest }],
+  }, disclosureSha256: 'prepared' });
 });
 
 it('scans the Global Agent dialogue in ordinary mode (#1315)', async () => {

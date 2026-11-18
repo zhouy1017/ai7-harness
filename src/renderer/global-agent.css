@@ -15,6 +15,11 @@
   .global-agent-side { position: sticky; top: 1rem; }
 }
 .global-agent-pills { position: relative; display: flex; flex-wrap: wrap; gap: .4rem; }
+/* Issue #1553: ordinary mode keeps one fold of what a question may consult; the pills, governance and preview stay developer-only. */
+.global-agent-fold { min-width: 0; border: 1px solid var(--boundary); border-radius: .75rem; background: var(--surface); }
+.global-agent-fold > summary { padding: .8rem 1rem; font-weight: 600; }
+.global-agent-fold[open] > summary { border-bottom: 1px solid var(--boundary); }
+.global-agent-fold > :is(.global-agent-sources, .global-agent-scope) { margin: 0; border: 0; border-radius: 0; padding: .85rem 1rem; background: transparent; }
 .global-agent-pill > summary { display: inline-flex; align-items: center; gap: .3rem; min-height: 28px; padding: .15rem .75rem; border: 1px solid var(--boundary-strong); border-radius: 999px; background: var(--surface); color: var(--action-text); font-size: .86rem; font-weight: 700; list-style: none; }
 .global-agent-pill > summary::-webkit-details-marker { display: none; }
 .global-agent-pill > summary::after { content: '▾'; font-size: .75em; }

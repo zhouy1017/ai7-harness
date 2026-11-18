@@ -1,6 +1,7 @@
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { type GlobalAgentDialogueProjection, type GlobalAgentProcedure, type GlobalAgentProjection, type GlobalAgentRendererApi, type GlobalAgentScopeInput, type GlobalMemoryItem, type GlobalAgentSourceCandidate, type PrepareGlobalAgentTurnInput, type RecordLearningSupervisionInput } from '../shared/protocol.js';
 import { globalAgentAnswerStatus, shellDestinationLabel } from './shell-labels.js';
+import { visibleQualityLearningTabs } from './quality-learning-labels.js';
 import { CONFIGURED_RUNTIME_MODEL_LABELS } from '../shared/provider-configuration.generated.js';
 import { MODEL_SERVICE_ROUTE_BINDINGS, modelServiceChannelOf } from '../shared/protocol/model-service.js';
 
@@ -29,9 +30,12 @@ function providerLabel(provider: { route: string; model: string }): string {
   return `${channel === null ? '模型服务' : MODEL_SERVICE_ROUTE_BINDINGS[channel].providerLabel} · ${model}`;
 }
 const TOOL_LABELS: Readonly<Record<string, string>> = {
-  retrieve: '检索跨书与记忆', exact_fetch: '读取精确原文', read_procedure: '读取工序定义', propose_learning_supervision: '提出学习监督建议',
+  retrieve: '检索图书与审阅偏好', exact_fetch: '读取精确原文', read_procedure: '读取工序定义', propose_learning_supervision: '提出学习监督建议',
 };
 const EFFECT_LABELS = { guide: '引导方向', freeze: '冻结规则', correct: '纠正偏好' } as const;
+function toolLabel(tool: string): string {
+  return tool === 'propose_learning_supervision' ? technicalWords('提出学习监督建议', '整理审阅偏好建议') : TOOL_LABELS[tool] ?? '本机工具';
+}
 function toolResultSummary(tool: string, result: string | null): string {
   if (result === null) return '等待返回结果';
   try {
@@ -40,7 +44,7 @@ function toolResultSummary(tool: string, result: string | null): string {
     const rows = value['candidates'] ?? value['results'];
     if (Array.isArray(rows)) return `返回 ${rows.length} 条结果`;
   } catch { /* The raw response remains available in technical details. */ }
-  return tool === 'propose_learning_supervision' ? '返回 1 条学习监督建议' : '返回 1 项结果';
+  return tool === 'propose_learning_supervision' ? technicalWords('返回 1 条学习监督建议', '返回 1 条审阅偏好建议') : '返回 1 项结果';
 }
 /** The 审阅习惯总结 question (#1171): an ordinary scoped ask over the listed memory, so it is disclosed and sent like any other. */
 const HABITS_QUESTION = '请总结本社的审阅习惯：每条习惯用一句话说明，并注明它依据的记忆或偏好版本；只依据本次列出的来源。';
@@ -57,7 +61,8 @@ export function mountGlobalAgent(options: {
   root.className = 'panel global-agent';
   root.dataset['globalAgent'] = 'destination';
   const heading = el('header'); heading.className = 'global-agent-heading';
-  heading.append(el('h2', shellDestinationLabel('global-agent')), el('p', '讨论审阅习惯、参考选入的图书与工序，或管理本社记忆。'));
+  heading.append(el('h2', shellDestinationLabel('global-agent')),
+    el('p', technicalWords('讨论审阅习惯、参考选入的图书与工序，或管理本社记忆。', '讨论审阅习惯，或就选入的图书、工序与审阅偏好提问。')));
   root.append(heading);
   const state = el('p');
   state.className = 'global-agent-status';
@@ -65,7 +70,8 @@ export function mountGlobalAgent(options: {
   state.dataset['globalAgentPolicy'] = 'state';
   const items = el('fieldset');
   items.className = 'global-agent-sources';
-  items.append(el('legend', '本社审阅偏好与记忆'), el('p', '勾选后用于提问或管理。'));
+  items.append(el('legend', technicalWords('本社审阅偏好与记忆', '审阅偏好')),
+    el('p', technicalWords('勾选后用于提问或管理。', '勾选后用于提问。')));
   const list = el('div');
   list.className = 'global-agent-choice-list';
   items.append(list);
@@ -105,12 +111,12 @@ export function mountGlobalAgent(options: {
   directives.className = 'global-agent-directives';
   const history = el('section');
   history.className = 'global-agent-history';
-  history.append(el('h3', '全域对话历史'));
+  history.append(el('h3', '对话历史'));
   const historyList = el('div');
   historyList.className = 'global-agent-history-list';
   const answer = el('section');
   answer.className = 'global-agent-answer'; answer.hidden = true;
-  answer.setAttribute('aria-label', '全域对话回答');
+  answer.setAttribute('aria-label', '对话回答');
   history.append(historyList);
   const conversation = el('section'); conversation.className = 'global-agent-conversation';
   const previousTurns = el('div'); previousTurns.className = 'global-agent-previous-turns';
@@ -171,7 +177,7 @@ export function mountGlobalAgent(options: {
           el('p', submission.question), ...submission.sources.map((entry) => {
             const candidate = current?.sourceCandidates?.find((source) => source.itemId === entry.itemId && source.revisionId === entry.revisionId);
             const row = el('div'); row.className = 'global-agent-source-card';
-            row.append(el('h4', candidate?.title ?? '已选记忆'), el('p', entry.text), technical(`条目：${entry.itemId}`, `版本：${entry.revisionId}`));
+            row.append(el('h4', candidate?.title ?? technicalWords('已选记忆', '已选审阅偏好')), el('p', entry.text), technical(`条目：${entry.itemId}`, `版本：${entry.revisionId}`));
             return row;
           }), technical(`回答：${submission.attemptId}`));
         if (submission.kept !== null) submittedContent.append(el('p', `接着回答时保留的内容：${submission.kept}`));
@@ -185,7 +191,7 @@ export function mountGlobalAgent(options: {
       tools.replaceChildren(...(dialogue.toolCalls?.length ? [el('h3', technicalWords('本次对话的工具调用', '查阅的资料'))] : []),
         ...(dialogue.toolCalls ?? []).map((call) => {
           const card = el('article'); card.className = 'global-agent-tool-card';
-          card.append(el('h4', TOOL_LABELS[call.tool] ?? '本机工具'),
+          card.append(el('h4', toolLabel(call.tool)),
             el('p', call.tool === 'retrieve' ? '在所选图书与记忆中查找相关内容。' : call.tool === 'exact_fetch' ? '读取检索结果对应的原文。' : call.tool === 'read_procedure' ? '读取选入工序的说明与阶段。' : technicalWords('整理可由你确认的学习监督建议。', '整理可由你采用的审阅偏好建议。')),
             el('p', call.outcome === 'returned' ? toolResultSummary(call.tool, call.result) : call.outcome === 'refused' ? '未能读取，请检查所选范围。' : '正在读取所选范围…'),
             technical(`工具：${call.tool}`, `参数：${call.arguments}`, `结果：${call.result ?? '等待返回'}`, `回答：${call.attemptId}`, `调用：${call.callId}`));
@@ -215,7 +221,7 @@ export function mountGlobalAgent(options: {
         operation !== 'stop' && current?.dialogueState !== 'available';
       if (last?.state === 'answering') poll = setTimeout(() => void showDialogue(), 250);
     } catch (error) {
-      if (root.isConnected) options.setStatus(options.errorMessage(error, '无法读取全域对话。'), 'error');
+      if (root.isConnected) options.setStatus(options.errorMessage(error, '无法读取对话。'), 'error');
     }
   };
   const questionForm = el('form'); questionForm.className = 'global-agent-composer';
@@ -225,7 +231,7 @@ export function mountGlobalAgent(options: {
   const ask = el('button', '发送问题'); ask.type = 'submit'; ask.className = 'btn ' + ('primary'); ask.disabled = true; question.disabled = true;
   const previewButton = el('button', '查看将发送的内容'); previewButton.type = 'button'; previewButton.className = 'btn ' + ('secondary'); previewButton.disabled = true;
   const scopeList = el('fieldset'); scopeList.className = 'global-agent-scope';
-  scopeList.append(el('legend', '参考图书与工序'), el('p', '勾选后可检索与读取这些图书和工序；未选时只讨论问题与所选记忆。'));
+  scopeList.append(el('legend', '参考图书与工序'), el('p', technicalWords('勾选后可检索与读取这些图书和工序；未选时只讨论问题与所选记忆。', '勾选后可检索与读取这些图书和工序；未选时只讨论问题与所选偏好。')));
   const scopeBooks = el('div'); scopeBooks.className = 'global-agent-choice-list';
   const scopeProcedures = el('div'); scopeProcedures.className = 'global-agent-choice-list'; scopeList.append(scopeBooks, scopeProcedures);
   const scopedBooks = new Set<string>();
@@ -327,8 +333,10 @@ export function mountGlobalAgent(options: {
     }
     void sendTurn(askInput());
   });
-  const questionActions = el('div'); questionActions.className = 'global-agent-actions'; questionActions.append(ask, previewButton, habits);
-  questionForm.append(field('关于记忆与学习方向的问题', question), questionActions, disclosure);
+  const questionActions = el('div'); questionActions.className = 'global-agent-actions';
+  // Issue #1553: "what will be sent" is a developer-layer disclosure; the composer sends in one action either way.
+  questionActions.append(ask, ...(technicalLayerVisible ? [previewButton] : []), habits);
+  questionForm.append(field(technicalWords('关于记忆与学习方向的问题', '就审阅偏好提的问题'), question), questionActions, disclosure);
   questionForm.addEventListener('submit', (event) => {
     event.preventDefault();
     if (!ask.disabled) void sendTurn(askInput());
@@ -337,34 +345,44 @@ export function mountGlobalAgent(options: {
   audit.type = 'button';
   audit.addEventListener('click', options.openAudit);
   audit.className = 'btn ' + ('quiet');
-  // Issue #1413 cluster 7: the dialogue and the composer are the page. 引用范围, 记忆与治理 and 全局指令 are compact pills
-  // above the composer that open as popovers; the dialogue history is a short list beside the conversation.
-  const pills = el('div'); pills.className = 'global-agent-pills';
-  pills.setAttribute('role', 'group'); pills.setAttribute('aria-label', '提问设置');
-  const pill = (label: string, key: string, ...content: HTMLElement[]): HTMLDetailsElement => {
-    const details = el('details'); details.className = 'global-agent-pill'; details.dataset['globalAgentPill'] = key;
-    const summary = el('summary', label);
-    const pop = el('div'); pop.className = 'global-agent-pop'; pop.append(...content);
-    details.append(summary, pop);
-    details.addEventListener('toggle', () => {
-      if (!details.open) return;
-      for (const other of pills.querySelectorAll<HTMLDetailsElement>('details.global-agent-pill')) if (other !== details) other.open = false;
+  // Issue #1413 cluster 7, refined by #1553: the dialogue, its history and one fold of what a question may consult are the
+  // page. 引用范围 / 记忆与治理 / 全局指令, the governance form, the directives and the sending preview are developer-only.
+  const settings = el('div'); settings.className = 'global-agent-settings';
+  if (technicalLayerVisible) {
+    const pills = el('div'); pills.className = 'global-agent-pills';
+    pills.setAttribute('role', 'group'); pills.setAttribute('aria-label', '提问设置');
+    const pill = (label: string, key: string, ...content: HTMLElement[]): HTMLDetailsElement => {
+      const details = el('details'); details.className = 'global-agent-pill'; details.dataset['globalAgentPill'] = key;
+      const summary = el('summary', label);
+      const pop = el('div'); pop.className = 'global-agent-pop'; pop.append(...content);
+      details.append(summary, pop);
+      details.addEventListener('toggle', () => {
+        if (!details.open) return;
+        for (const other of pills.querySelectorAll<HTMLDetailsElement>('details.global-agent-pill')) if (other !== details) other.open = false;
+      });
+      details.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !details.open) return;
+        event.preventDefault(); event.stopPropagation(); details.open = false; summary.focus();
+      });
+      return details;
+    };
+    pills.append(pill('引用范围', 'scope', items, scopeList), pill('记忆与治理', 'governance', form), pill('全局指令', 'directives', directives));
+    root.addEventListener('pointerdown', (event) => {
+      if (!(event.target instanceof Node) || pills.contains(event.target)) return;
+      for (const details of pills.querySelectorAll<HTMLDetailsElement>('details.global-agent-pill[open]')) details.open = false;
     });
-    details.addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape' || !details.open) return;
-      event.preventDefault(); event.stopPropagation(); details.open = false; summary.focus();
-    });
-    return details;
-  };
-  pills.append(pill('引用范围', 'scope', items, scopeList), pill('记忆与治理', 'governance', form), pill('全局指令', 'directives', directives));
-  root.addEventListener('pointerdown', (event) => {
-    if (!(event.target instanceof Node) || pills.contains(event.target)) return;
-    for (const details of pills.querySelectorAll<HTMLDetailsElement>('details.global-agent-pill[open]')) details.open = false;
-  });
+    settings.append(pills);
+  } else {
+    const references = el('details'); references.className = 'global-agent-fold'; references.dataset['globalAgentFold'] = 'references';
+    references.append(el('summary', '参考哪些书和偏好'), items, scopeList);
+    settings.append(references);
+  }
   const main = el('div'); main.className = 'global-agent-main';
-  main.append(state, conversation, pills, questionForm);
+  main.append(state, conversation, settings, questionForm);
   const side = el('aside'); side.className = 'global-agent-side';
-  side.append(history, audit);
+  side.append(history);
+  // #1549 opens 学习回溯 to ordinary mode in its own owner; this button follows whether that page can be opened now.
+  if (visibleQualityLearningTabs(technicalLayerVisible).some((entry) => entry.tab === 'audit')) side.append(audit);
   root.append(main, side);
   let current: GlobalAgentProjection | null = null;
   let busy = false;
@@ -413,11 +431,14 @@ export function mountGlobalAgent(options: {
       if (next === undefined) selectedSources.delete(id); else selectedSources.set(id, next);
     }
     invalidatePreview();
-    state.textContent = projection.dialogueState === 'available' ? '可以提问 · 只参考你选入的来源；记忆管理在本机单独记录。' : `暂时无法提问 · ${projection.explanation}`;
+    state.textContent = projection.dialogueState === 'available'
+      ? technicalWords('可以提问 · 只参考你选入的来源；记忆管理在本机单独记录。', '可以提问 · 只参考你选入的内容。')
+      : `暂时无法提问 · ${projection.explanation}`;
     list.replaceChildren();
-    const candidates = projection.sourceCandidates ?? [];
+    // The governance records (学习监督) are developer-only; ordinary mode lists the preferences a question may carry.
+    const candidates = (projection.sourceCandidates ?? []).filter((entry) => technicalLayerVisible || entry.kind !== 'supervision');
     const ids = new Set([...projection.items.map((item) => item.itemId), ...candidates.map((item) => item.itemId)]);
-    if (ids.size === 0) list.append(el('p', '还没有记忆。可以新建一条本社审阅偏好。'));
+    if (ids.size === 0) list.append(el('p', technicalWords('还没有记忆。可以新建一条审阅偏好。', '还没有审阅偏好。')));
     for (const id of ids) {
       const item = projection.items.find((item) => item.itemId === id);
       const source = candidates.find((entry) => entry.itemId === id);
@@ -432,9 +453,12 @@ export function mountGlobalAgent(options: {
         } else { selected.delete(id); selectedSources.delete(id); }
         invalidatePreview();
       });
-      const title = source?.title ?? (item?.kind === 'memory' ? '编辑记忆' : '审阅偏好');
+      // A preference's own title repeats its category, which the row states anyway; ordinary mode says 审阅偏好.
+      const title = source !== undefined && source.kind === 'preference' ? technicalWords(source.title, '审阅偏好')
+        : source?.title ?? (item?.kind === 'memory' ? technicalWords('编辑记忆', '审阅偏好') : '审阅偏好');
       const categoryLabel = projection.categories.find((entry) => entry.categoryId === item?.categoryId)?.label;
-      const stateLabel = item === undefined ? '学习监督' : { proposed: '待接受', active: '已启用', frozen: '已冻结', inactive: '已停用' }[item.state];
+      const stateLabel = item === undefined ? technicalWords('学习监督', 'AI 归纳')
+        : { proposed: '待接受', active: '已启用', frozen: '已冻结', inactive: '已停用' }[item.state];
       const row = el('article'); row.className = 'global-agent-source-card';
       row.append(field([title, categoryLabel, stateLabel].filter(Boolean).join(' · '), checkbox), el('p', source?.text ?? item?.text ?? ''),
         technical(`条目：${id}`, `版本：${source?.revisionId ?? item?.revisionId ?? ''}`));
@@ -446,10 +470,14 @@ export function mountGlobalAgent(options: {
     if (projection.categories.some((entry) => entry.categoryId === previousCategory)) category.value = previousCategory;
     if (projection.books.some((entry) => entry.bookId === previousBook)) book.value = previousBook;
     directives.replaceChildren(el('h3', '学习监督与治理记录'));
-    for (const directive of projection.directives) directives.append(el('p', `${directive.ordinal} · ${directive.text || '停用所选记忆'} · ${directive.recordedAt}`));
+    // Times are local (plan #1516 §5); the stored instant stays ISO in the directive record.
+    for (const directive of projection.directives) {
+      const recordedAt = new Date(directive.recordedAt).toLocaleString('zh-CN', { hour12: false });
+      directives.append(el('p', `${directive.ordinal} · ${directive.text || '停用所选记忆'} · ${recordedAt}`));
+    }
     historyList.replaceChildren();
     for (const dialogue of projection.history) {
-      const open = el('button', dialogue.question ?? '查看全域对话'); open.type = 'button'; open.className = 'btn ' + ('quiet global-agent-history-entry');
+      const open = el('button', dialogue.question ?? '查看对话'); open.type = 'button'; open.className = 'btn ' + ('quiet global-agent-history-entry');
       open.addEventListener('click', () => {
         if (poll !== undefined) clearTimeout(poll);
         previousTurns.replaceChildren(); foreground = dialogue.dialogueId; void showDialogue();
