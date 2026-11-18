@@ -164,7 +164,7 @@ const taskDrawer = mountTaskDrawer({
   openRules: () => void renderKnowledgeBase(technicalLayerVisible ? 'rules' : 'guidelines'),
   // ① 任务面 (Issue #423, S77a): a card's own record, 查看结果's floating window and 发起全书任务.
   openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
-  openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
+  openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel, overviewDrawerBookId === null ? api : overviewApi),
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
   // 跳到所选文字 on a selection Task's card (Issue #423, S77 deferred item d): every refusal is said on the status line.
   jumpToSelection: (bookId, selection) => void jumpToSelectionText(bookId, selection),
