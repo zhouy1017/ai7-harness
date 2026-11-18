@@ -3718,7 +3718,8 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'`, 'launch-reference-ready');
     await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'launch-reference-knowledge');
     // 知识库 opens on its home of class cards; 资料库 is one of them.
-    await waitFor(renderer, `document.querySelector('.knowledge-base[data-knowledge-tab="home"] .knowledge-category[data-knowledge-category="library"]')`, 'launch-reference-knowledge-home');
+    // Each card's 最近 line fills in after the home paints; press 资料库 once the home is ready and its cards stay put.
+    await waitFor(renderer, `document.querySelector('.knowledge-base[data-knowledge-tab="home"] [data-knowledge-home-ready="true"] .knowledge-category[data-knowledge-category="library"]')`, 'launch-reference-knowledge-home');
     await pointerClick(renderer, waitFor, '.knowledge-category[data-knowledge-category="library"]', 'launch-reference-library');
     await pointerClick(renderer, waitFor, '[data-library-action="add"]', 'launch-reference-add');
     await waitFor(renderer, `document.querySelector('article.library-material [data-library-action="attribute"]')?.disabled===false`, 'launch-reference-added');
