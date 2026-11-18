@@ -1680,6 +1680,8 @@ async function main() {
     // at once (before any frame) and in the next three frames; a button outside the window counts as unknown (null).
     const FIRST_FRAMES_PROBE = `(() => {
       const bar = document.querySelector('#persistence-status'); const hits = []; window.__j12FirstFrames = hits;
+      // A bar already on screen (and placed) does not appear for this press: there is no first instant to test.
+      if (!bar.hidden) { window.__j12FirstFrames = 'already-shown'; return true; }
       const hit = () => { const node = document.querySelector('[data-commit-source-import]'); if (!(node instanceof HTMLElement)) { hits.push(null); return; }
         const r = node.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
         hits.push(x < 0 || y < 0 || x >= innerWidth || y >= innerHeight ? null : node.contains(document.elementFromPoint(x, y))); };
@@ -1692,8 +1694,8 @@ async function main() {
       return true;
     })()`;
     // A first-frame check that fails says what each hit saw: the button's box, the bar's, and what lay under the button's centre.
-    const firstFrames = async (predicate, name) => {
-      try { await waitFor(primary, `Array.isArray(window.__j12FirstFrames) && window.__j12FirstFrames.length === 4 && window.__j12FirstFrames.every(${predicate})`, name, 20_000); }
+    const firstFrames = async (predicate, name, allowShown = false) => {
+      try { await waitFor(primary, `${allowShown ? "window.__j12FirstFrames === 'already-shown' || " : ''}(Array.isArray(window.__j12FirstFrames) && window.__j12FirstFrames.length === 4 && window.__j12FirstFrames.every(${predicate}))`, name, 20_000); }
       catch { requireJourney(false, name, await primary.evaluate(`(() => { const node = document.querySelector('[data-commit-source-import]'), r = node?.getBoundingClientRect(); const under = r ? document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) : null;
         return { hits: window.__j12FirstFrames ?? null, button: r ? [r.left, r.top, r.width, r.height].map(Math.round) : null, under: under ? [under.tagName, String(under.className), under.id] : null, hidden: document.hidden, bar: ${statusBarOverlaps(['.commit-bar'])} }; })()`)); }
     };
@@ -1728,7 +1730,7 @@ async function main() {
       await waitFor(primary, `document.visibilityState === 'visible'`, name);
     };
     await bringPrimaryBack('preflight-error-window-visible');
-    await firstFrames('(hit) => hit !== false', 'preflight-short-commit-hit-first-frame');
+    await firstFrames('(hit) => hit !== false', 'preflight-short-commit-hit-first-frame', true);
     for (const kind of ['short', 'long']) {
       if (kind === 'long') {
         // At the Gate's window size, the bar appears anew for the long refusal: the standing one is dismissed first.
