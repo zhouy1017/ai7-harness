@@ -543,6 +543,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   let exportMenuOpen = false;
   /** Whether 切换历史记录 / 查看覆盖矩阵 is open; kept across redraws (Issue #1413 cluster 6). */
   let historyOpen = retained?.history ?? false;
+  /** Whether 历史 is open: as the fold on screen shows it, or as last kept while none is drawn. */
+  const historyShown = (): boolean => card?.querySelector<HTMLDetailsElement>('details.review-history-fold')?.open ?? historyOpen;
   const ui: { ignore: IgnoreForm | null; convert: ConvertForm | null; batch: BatchStrip | null; capabilityFindingId: string | null;
     applied?: { categoryId: string; markIds: string[]; blockIds: string[]; skipped: number } | null; } = {
     ignore: null,
@@ -1141,6 +1143,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         history.push(renderCoverage(next, reasonId));
       }
       history.push(renderRuns(next));
+      // What the fold on screen shows is what is kept: a toggle event that never reached its listener cannot lose it.
+      historyOpen = historyShown();
       const fold = el('details', 'review-history-fold');
       fold.open = historyOpen;
       fold.addEventListener('toggle', () => { historyOpen = fold.open; });
@@ -3414,7 +3418,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     refresh: () => refresh(true),
     destroy: () => {
       reviewPlaces.set(bookId, { runId: projection?.run?.reviewRunId ?? query.reviewRunId, filters: { ...query.filters }, pages: query.pages,
-        collapsed: [...collapsedGroups], history: historyOpen, excluded: excludedOpen, excludedPages,
+        collapsed: [...collapsedGroups], history: historyShown(), excluded: excludedOpen, excludedPages,
         scroll: document.scrollingElement?.scrollTop ?? options.root.parentElement?.scrollTop ?? 0, findingId: focusFindingId });
       destroyed = true;
       if (toastShown) hideToast();

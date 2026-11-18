@@ -1014,7 +1014,8 @@ describe('the round trip through 回到原文 (#1525)', () => {
       const typos = first.root.querySelector('section.review-group[data-review-category="typos-and-usage"] details.review-category-fold')!;
       typos.open = false; typos.dispatchEvent({ type: 'toggle' });
       const history = first.root.querySelector('details.review-history-fold')!;
-      history.open = true; history.dispatchEvent({ type: 'toggle' });
+      // Opened with no toggle event delivered: what the fold shows is what is kept.
+      history.open = true;
       scroller.scrollTop = 420;
       first.root.querySelector('article[data-finding-id="rvf_n3"] [data-review-action="go-to-text"]')!.click(); await flush();
       expect(first.goToText).toHaveBeenCalledWith(expect.objectContaining({ ordinal: 3 }));
