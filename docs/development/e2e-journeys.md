@@ -5,6 +5,7 @@
 - J-12 retains the wide first-run stage and adds 1008×681 geometry: full-row card, columns at least 200 px, required buttons on steps ① and ②. Real pointer stages open model settings and import from those steps. The prior exact data-root proof moves to Settings › Data and storage in the same developer mode, through real clicks; skip persistence remains.
 - After importing the first sample Book, `first-book-review-wide` and `first-book-review-gate` return to the library, require the named Book and step ③ button, check geometry at both forms, and open and close the review sheet using real pointer input. Sample guidance and no-task-start checks continue afterward.
 - J-01 completion checks require no intake step strip; empty-Book first import uses a real CDP file drop while retaining the target, relationship and completion assertions. Library readiness accepts either enabled import entry. The #1521 record stages remain unchanged.
+- J-04 `analysis-no-premature-prepare` now asserts that no analysis action other than the always-present `open-analysis` entry is offered on the overview while the analysis is unavailable; the absent 「开始基线稿件分析」 button stays asserted.
 - J-07 source-import acknowledgement and J-11 readers-report overview readiness wait for the deliverables/evaluation state marker as well as the immediate tile entry, preserving their prior post-read meaning.
 
 
