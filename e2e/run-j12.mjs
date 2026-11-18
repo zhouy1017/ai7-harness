@@ -527,6 +527,28 @@ async function tabUntil(renderer, expression, name, maximumTabs = 12) {
   throw journeyCheckFailure('J-12', name);
 }
 
+async function assertFirstRunGeometry(renderer, reviewExpected) {
+  requireJourney(await renderer.evaluate(`(async () => {
+    const card=document.querySelector('[data-onboarding-card]'); card.scrollIntoView({block:'center'});
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    const b=card.getBoundingClientRect(), parent=card.parentElement.getBoundingClientRect(), style=getComputedStyle(card.parentElement);
+    const available=parent.width-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
+    const steps=[...card.querySelectorAll('.onboarding-steps li')];
+    return steps.length===3 && Math.abs(b.width-available)<=2 && b.left>=0 && b.right<=innerWidth && steps.every((step,index)=> {
+      const r=step.getBoundingClientRect(); const button=step.querySelector('button'); const a=button?.getBoundingClientRect();
+      const required=index===0 || (${reviewExpected} ? index===2 : index===1);
+      return r.width>=200 && (required ? !!button : !button) && (!button || (a.width>0 && a.top>=0 && a.bottom<=innerHeight && a.left>=r.left && a.right<=r.right && a.right<=innerWidth));
+    });
+  })()`) === true, 'first-run-card-geometry');
+}
+
+async function firstRunClick(renderer, selector, label = null) {
+  const point = await renderer.evaluate(`(async () => { const node=${label === null ? `document.querySelector(${JSON.stringify(selector)})` : `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(node=>node.textContent===${JSON.stringify(label)})`}; if(!node)return null; node.scrollIntoView({block:'center'}); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); const b=node.getBoundingClientRect(); return {x:b.left+b.width/2,y:b.top+b.height/2}; })()`);
+  requireJourney(point !== null, 'first-run-pointer-target');
+  await renderer.send('Input.dispatchMouseEvent', { type:'mousePressed', ...point, button:'left', clickCount:1 });
+  await renderer.send('Input.dispatchMouseEvent', { type:'mouseReleased', ...point, button:'left', clickCount:1 });
+}
+
 async function click(renderer, label, name) {
   if (label === '向前浏览' || label === '向后浏览') await assertRenderer(renderer, manuscriptBoundary(label), name);
   if (label === '预览替换') await renderer.evaluate(`Array.from(document.querySelectorAll('.navigation-modes button')).find(button => button.textContent === '替换')?.click()`);
@@ -926,7 +948,31 @@ async function main() {
     let onboardingManager = await launch(syntheticDocx, undefined, onboardingRoot);
     let [onboardingPage] = await waitForRendererCount(onboardingManager, 1, 'onboarding-initial-window');
     await waitFor(onboardingPage, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'first-run-card-visible');
-    await assertRenderer(onboardingPage, `(() => { const card=document.querySelector('[data-onboarding-card]'); const labels=Array.from(document.querySelectorAll('button')).map(node=>node.textContent); return labels.includes('新建图书') && labels.includes('导入稿件') && card.textContent.includes('本地编辑与恢复不依赖模型服务') && card.querySelector('.onboarding-data-location')?.textContent===${JSON.stringify(onboardingRoot)}; })()`, 'first-run-actions-and-location');
+    await assertRenderer(onboardingPage, `(() => { const card=document.querySelector('[data-onboarding-card]'); const labels=Array.from(document.querySelectorAll('button')).map(node=>node.textContent); return labels.includes('新建图书') && labels.includes('导入稿件') && card.textContent.includes('AI 审阅需要') && !card.textContent.includes('① 数据位置') && !card.textContent.includes('示例书尚未提供'); })()`, 'first-run-actions');
+    for (const [width,height] of [[1280,800],[1008,681]]) {
+      at(width === 1280 ? 'first-run-card-wide' : 'first-run-card-gate');
+      await onboardingPage.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+      await assertFirstRunGeometry(onboardingPage, false);
+    }
+    await onboardingPage.send('Emulation.clearDeviceMetricsOverride');
+    at('first-run-model-step');
+    await firstRunClick(onboardingPage, '[data-onboarding-step-number="1"] button');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"]')`, 'first-run-model-step-opened');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, 'first-run-model-step-returned');
+    at('first-run-import-step');
+    await firstRunClick(onboardingPage, '[data-onboarding-step-number="2"] button');
+    await waitFor(onboardingPage, `document.querySelector('[data-import-target-choices]')`, 'first-run-import-step-opened');
+    await firstRunClick(onboardingPage, 'button', '取消导入');
+    await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, 'first-run-import-step-returned');
+    at('first-run-data-location-settings');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-settings]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="settings"]')`, 'first-run-settings-ready');
+    await firstRunClick(onboardingPage, '[data-settings-entry="data-storage"] button');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="data-storage"]')`, 'first-run-data-storage-ready');
+    await assertRenderer(onboardingPage, `document.documentElement.dataset.technicalLayerVisible==='true' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(onboardingRoot)}`, 'first-run-location-in-settings');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, 'first-run-returned-library');
     at('first-run-skip-persists');
     await click(onboardingPage, '跳过引导', 'first-run-skip');
     await waitFor(onboardingPage, `!document.querySelector('[data-onboarding-card]')`, 'first-run-skip-hidden');
@@ -944,6 +990,24 @@ async function main() {
     const sampleBook = await importBook(onboardingPage, 'J12 示例图书', true);
     const onboardingSampleDigest = createHash('sha256').update(await readFile(resolve(ROOT, 'SampleBooks', 'sample1.docx'))).digest('hex');
     await requireJourney(await onboardingPage.evaluate(`(async () => { const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(sampleBook.bookId)},historyCursor:null}); return overview.records.some(record=>record.kind==='source' && record.sourceDigest===${JSON.stringify(onboardingSampleDigest)}) && (await window.ai7.getPreferences()).values['onboarding.state']==='completed'; })()`), 'sample-admitted-source-and-completion');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-onboarding-step-number="3"] button')`, 'first-book-review-card-ready');
+    for (const [width,height] of [[1280,800],[1008,681]]) {
+      at(width === 1280 ? 'first-book-review-wide' : 'first-book-review-gate');
+      await onboardingPage.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+      await assertFirstRunGeometry(onboardingPage, true);
+      await assertRenderer(onboardingPage, `document.querySelector('[data-onboarding-step-number="3"]')?.textContent.includes('J12 示例图书')`, 'first-book-review-names-book');
+      await firstRunClick(onboardingPage, '[data-onboarding-step-number="3"] button');
+      await waitFor(onboardingPage, `document.querySelector('dialog.review-sheet')?.open===true`, 'first-book-review-sheet-opened');
+      await firstRunClick(onboardingPage, '[data-review-action="close-sheet"]');
+      await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+      await waitFor(onboardingPage, `document.querySelector('[data-onboarding-step-number="3"] button')`, 'first-book-review-returned');
+    }
+    await onboardingPage.send('Emulation.clearDeviceMetricsOverride');
+    await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-book-review-reopened-manuscript');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-book-section="overview"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="book-overview"]')`, 'first-book-review-returned-overview');
     at('guided-strip');
     await waitFor(onboardingPage, `document.querySelector('[data-onboarding-guidance="sample-book"]')`, 'guided-strip-visible');
     await requireJourney(await onboardingPage.evaluate(`(async () => { const labels=Array.from(document.querySelectorAll('[data-onboarding-step]')).map(node=>node.textContent); const tasks=await window.ai7.inspectBookTasks(); return labels.join(',')==='分析,审阅,标记,导出' && !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`), 'guided-strip-navigation-only');

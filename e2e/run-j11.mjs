@@ -2260,7 +2260,7 @@ async function main() {
     // Back in 评估 the draft names 版本 2, and 导出… writes it as DOCX through the Save dialog: the card's review, the place it
     // returned, which writes it at once (Issue #1410).
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'readers-report-overview');
-    await waitFor(renderer, `document.querySelector('.book-evaluation-summary [data-evaluation-action="open"]')`, 'readers-report-overview-ready', 60_000);
+    await waitFor(renderer, `document.querySelector('.book-evaluation-summary[data-evaluation-state] [data-evaluation-action="open"]')`, 'readers-report-overview-ready', 60_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'readers-report-evaluation');
     const versioned = await readReport((page) => (page.templates[0]?.[2] ?? '').startsWith('草稿 · 版本 2'), 'readers-report-versioned');
     requireJourney(JSON.stringify(versioned.templates[0]) === JSON.stringify(['author', '给作者的修改意见', '草稿 · 版本 2 · 依据第 14 版定稿',

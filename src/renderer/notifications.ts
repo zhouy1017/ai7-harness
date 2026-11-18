@@ -90,6 +90,9 @@ const STATUS_AREA = '#screen .manuscript-surface';
 export function followBottomControls(bar: HTMLElement): void {
   const root = document.documentElement;
   let queued = false;
+  // The bar's own frame source, taken as it mounts: placing it is not one of the frames a page's paint waits for (J-01 holds
+  // those and counts the completion's alone).
+  const nextFrame = window.requestAnimationFrame.bind(window);
   const place = (): void => {
     queued = false;
     if (bar.hidden) {
@@ -117,7 +120,7 @@ export function followBottomControls(bar: HTMLElement): void {
     if (queued || (bar.hidden && root.dataset['statusBar'] === undefined)) return;
     queued = true;
     if (document.hidden) queueMicrotask(place);
-    else requestAnimationFrame(place);
+    else nextFrame(place);
   };
   new MutationObserver(schedule).observe(bar, { attributes: true, attributeFilter: ['hidden'], childList: true, subtree: true, characterData: true });
   new ResizeObserver(schedule).observe(bar);

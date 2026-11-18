@@ -1,5 +1,6 @@
 import { rendererErrorMessage } from '../../src/renderer/error-words.js';
 import { finishedResultRoute } from '../../src/renderer/result-destination.js';
+import { showOnboardingCard } from '../../src/shared/preferences.js';
 import { createNotificationObserver, createStatusSurface, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
 import { composeTaskOverview } from '../../src/service/task-overview.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection } from '../../src/shared/protocol.js';
@@ -91,8 +92,8 @@ function harness(api: object = {}) {
   const shell = { leaveBook: vi.fn(), follow: vi.fn() };
   const renderBookOverview = vi.fn((overview: { book: { bookId: string } }) => replaceScreen(overview.book.bookId, undefined));
   const renderBaselineAnalysis = vi.fn((host: HTMLElement) => host.append(element('p', '', '已读取分析')));
- const guardedApi = reconcileBookWorkbenchApi({acknowledgeImportCompletion:async()=>undefined,...api} as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:(error,retry)=>(context['reportReacquisitionFailure'] as (error:unknown,retry:()=>Promise<void>)=>void)(error,retry),recovered:()=>{(context['clearBookReacquisitionNotice'] as ()=>void)();}},navigation);
-  context = createContext({ navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
+ const guardedApi = reconcileBookWorkbenchApi({acknowledgeImportCompletion:async()=>undefined,getPreferences:async()=>({values:{'onboarding.state':'skipped'}}),getProductDataLocation:async()=>({}),getModelServiceSettings:async()=>({roles:[]}),...api} as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:(error,retry)=>(context['reportReacquisitionFailure'] as (error:unknown,retry:()=>Promise<void>)=>void)(error,retry),recovered:()=>{(context['clearBookReacquisitionNotice'] as ()=>void)();}},navigation);
+  context = createContext({ showOnboardingCard, navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
     localStorage: { getItem: () => 'on' }, showQuietNotice: vi.fn(), openCurrentBookCompletion, AUTO_RESULT_KEY: 'ai7.task-overview.auto-result',
     notice: { raise: vi.fn(), settle: vi.fn(), summarize: vi.fn() }, finished: [], needing: [], standing: new Set(), returning: false,
     options: { get api() { return guardedApi; }, drawerView: () => (context['taskDrawer'] as { view(): unknown }).view(), openWindow: (entry: unknown) => (context['openOverviewResult'] as (entry: unknown) => void)(entry) },
@@ -563,6 +564,13 @@ it('reports a startup error after that flow committed its own landing', async ()
  expect(page.context['renderError']).toHaveBeenCalledWith(error,expect.any(Function));
 });
 
+it('reports a landing paint that rejects after reading, through the existing error path', async () => {
+ const page=harness({getStartup:async()=>({state:'none',priorWork:[]}),listBooks:async()=>({books:[],nextAfter:null})});
+ const error=new Error('paint failed');page.context['renderLanding']=async()=>{page.replaceScreen('landing');await Promise.resolve();throw error;};
+ await page.run('initializeStartup()');
+ expect(page.context['renderError']).toHaveBeenCalledWith(error,expect.any(Function));
+});
+
 it('keeps the manuscript visible when a refused second exit is followed by a failed re-acquire', async () => {
  const leave=Promise.withResolvers<void>();const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:async()=>{throw new Error('offline');}});
  const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
@@ -734,6 +742,23 @@ it('does not let an older library page overwrite a newer filter result', async (
  await Promise.resolve();await Promise.resolve();
  more.resolve({items:[{bookId:'book-c',title:'旧的下一页',people:[],internalNumber:null,manuscriptStateLabel:'有稿件'}],nextCursor:null});await pending;
  expect(page.screen.textContent).toContain('筛选图书');expect(page.screen.textContent).not.toContain('旧的下一页');
+});
+
+it('does not let a pending first-use read restore an older cleared filter', async () => {
+ const preference=Promise.withResolvers<object>(),readPreference=vi.fn(()=>preference.promise);
+ const book={bookId:'book-a',title:'原有图书',people:[],internalNumber:null,manuscriptStateLabel:'有稿件'};
+ const page=harness({getPreferences:readPreference,listBooks:async({filter}:{filter?:object})=>({items:[{...book,title:filter?'新的筛选结果':'旧的全部图书'}],nextCursor:null})});
+ runInContext(ts.transpileModule(libraryLanding,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,page.context);
+ page.context['book']=book;
+ await page.run("renderLanding([],undefined,{items:[book],nextCursor:null},{field:'all',text:'原有'})");
+ page.actions.get('显示全部图书')!(); await new Promise(resolve=>setImmediate(resolve));
+ expect(readPreference).toHaveBeenCalledOnce();
+ const input=page.screen.querySelector<HTMLInputElement>('[id="book-filter-text"]')!;input.value='新的';
+ (input as unknown as MiniElement).dispatchEvent({type:'input'});
+ (page.screen.querySelector('form') as unknown as MiniElement).dispatchEvent({type:'submit'});
+ await new Promise(resolve=>setImmediate(resolve));
+ preference.resolve({values:{'onboarding.state':'skipped'}});await new Promise(resolve=>setImmediate(resolve));
+ expect(page.screen.textContent).toContain('新的筛选结果');expect(page.screen.textContent).not.toContain('旧的全部图书');
 });
 
 it('reports a library-card error after its requested Book committed', async () => {

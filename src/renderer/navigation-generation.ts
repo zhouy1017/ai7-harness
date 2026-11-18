@@ -41,9 +41,21 @@ export class NavigationGeneration {
    * commit does not abandon the error, but any later navigation still does. */
   present(draw: () => void): void {
     try { draw(); } catch (error) {
-      if (error !== null && typeof error === 'object') this.presentationFailures.set(error, this.route());
+      this.recordPresentationFailure(error);
       throw error;
     }
+  }
+
+  /** The same contract for a paint that reads before it draws: its rejection is the failure, not an unhandled one. */
+  async presentAsync(draw: () => Promise<void>): Promise<void> {
+    try { await draw(); } catch (error) {
+      this.recordPresentationFailure(error);
+      throw error;
+    }
+  }
+
+  private recordPresentationFailure(error: unknown): void {
+    if (error !== null && typeof error === 'object') this.presentationFailures.set(error, this.route());
   }
 
   errorIsCurrent(error: unknown, origin: NavigationCheckpoint): boolean {
