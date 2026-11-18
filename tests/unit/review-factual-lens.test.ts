@@ -1120,7 +1120,7 @@ describe('上一条 / 下一条待处理 across a round trip through 审阅 (#15
         const dispatcher = createCommandDispatcher({ platform: 'win32', bindings: () => ({}), composing: () => false, announce: () => undefined });
         const ran: string[] = [];
         // The manuscript screen registers its two handlers when it is set up and takes them away when it is taken down.
-        const manuscript = (name: string) => dispatcher.register({ 'view.previousPending': () => ran.push(`${name}:previous`), 'view.nextPending': () => ran.push(`${name}:next`) });
+        const manuscript = (name: string) => dispatcher.register({ 'view.previousPending': () => { ran.push(`${name}:previous`); }, 'view.nextPending': () => { ran.push(`${name}:next`); } });
         let offFirst: (() => void) | null = manuscript('first');
         let review: ReturnType<typeof mount> | null = null;
         const openReview = async () => { review = mount('settled', 1, null, false, undefined, (handlers) => dispatcher.register(handlers)); await flush(); };
