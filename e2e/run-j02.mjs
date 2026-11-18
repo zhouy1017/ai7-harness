@@ -52,8 +52,8 @@ const CJK_SPAN = 0x1000;
 const RENDERER_TARGET_QUERY_ABANDONED = new Error('renderer-target query abandoned after the browser disconnected');
 // Editing Protection Mode (Issue #951, wave 12 slice 12a): the product's exact words, and the journal's one-edit bound
 // (src/shared/protocol.ts MAX_EDIT_GRAPHEMES) that says how many entries a buffered run of text lands as.
-const PROTECTION_HEADLINE = '本地写入中断 · 当前更改尚未持久保存';
-const PROTECTION_READ_ONLY_HEADLINE = '保护性只读 · 本地写入中断 · 当前更改尚未持久保存';
+const PROTECTION_HEADLINE = '更改尚未保存';
+const PROTECTION_READ_ONLY_HEADLINE = '已暂停编辑，更改尚未保存';
 const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有未持久保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
 const PENDING_BUFFER_REFUSED = '尚待确认的编辑已达到单次安全上限，这次输入未被接收；请等待写入确认后分段输入。';
 const JOURNAL_EDIT_GRAPHEMES = 256;
@@ -1020,7 +1020,35 @@ async function milestoneIpcTimeoutCategory(renderer, beforeObservation) {
   return 'save-result-renderer-not-r2';
 }
 
+async function panelGeometry(renderer, selector, width, height, facts = false) {
+  const fits = await renderer.evaluate(`(async () => {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const panel = document.querySelector(${JSON.stringify(selector)});
+    if (!(panel instanceof HTMLElement) || panel.hidden || innerWidth !== ${width} || innerHeight !== ${height}) return false;
+    const box = panel.getBoundingClientRect();
+    const nodes = ${facts} ? [...panel.querySelectorAll('[data-protection-fact]')] : [];
+    return box.width > 0 && box.height > 0 && (${facts} ? nodes.length === 3 : true) && box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight
+      && panel.scrollWidth <= panel.clientWidth + 1
+      && nodes.every(node => node.textContent.length > 0 && node.getBoundingClientRect().width > 0);
+  })()`);
+  requireJourney(fits === true, 'shared-panel-geometry');
+}
+
+async function milestoneGeometry(renderer) {
+  for (const [width, height] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-menu');
+    await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form');
+    await panelGeometry(renderer, '.editor-save-menu-body', width, height);
+    await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form-close');
+    await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-close');
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
+}
+
 async function runWorkspaceJourney(renderer, dataRoot) {
+  at('panels-geometry');
+  await milestoneGeometry(renderer);
   at('bounded-workspace');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32`, 'renderer-block-ceiling');
   await assertRenderer(renderer, `document.querySelector('#manuscript-position')?.getAttribute('aria-valuemax') === '1000000' && ${MANUSCRIPT_RAIL_POSITION} === 0 && !document.querySelector('.editor-meta')?.textContent.includes('%')`, 'whole-manuscript-position');
@@ -1775,7 +1803,7 @@ async function typeAtWindowEnd(renderer, text, location) {
 
 const PROTECTION_PROBE = `(() => {
   const banner = document.querySelector('#editing-protection');
-  const fact = (name) => banner?.querySelector('[data-protection-fact="' + name + '"]');
+  const fact = (name) => document.querySelector('#editing-protection-options [data-protection-fact="' + name + '"]');
   const editor = document.querySelector('[data-testid="manuscript-editor"]');
   return {
     shown: banner instanceof HTMLElement && !banner.hidden,
@@ -1886,9 +1914,32 @@ async function runProtectionJourney(renderer) {
   await typeAtWindowEnd(renderer, protectionText(initialLimit + 1, 8_000), 'protection-initial-bound-type');
   await protectionChecks(renderer, `({ refused: document.querySelector('#persistence-status')?.textContent === ${JSON.stringify(PENDING_BUFFER_REFUSED)} && document.querySelector('#persistence-status')?.dataset.tone === 'error', noInput: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength}, noProtection: !p.shown, noEntry: p.journal === ${durable} })`, 'protection-initial-bound');
   requireJourney((await renderer.setJournalFault('fail-all'))?.mode === 'fail-all', 'protection-arm');
+  at('protection-header-baseline');
+  const headerHeights = [];
+  for (const [width, height] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    headerHeights.push(await renderer.evaluate(`(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); return document.querySelector('.context-header').getBoundingClientRect().height; })()`));
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
   at('protection-enter');
   await typeAtWindowEnd(renderer, protectionText(12), 'protection-enter-type');
   await protectionChecks(renderer, `({ shown: p.shown, headline: p.headline === ${JSON.stringify(PROTECTION_HEADLINE)}, boundary: p.lastDurable?.startsWith(${JSON.stringify(`最后确认写入：修订日志序号 ${durable.toLocaleString('zh-CN')} · `)}) === true, atRisk: p.atRisk === 12, retry: p.retry?.startsWith('自动重试：') === true, active: p.document === 'active' && p.readOnly === 'none', writable: p.writable, closeRisk: p.closeRisk === 'true', noEntry: p.journal === ${durable} })`, 'protection-entered');
+  await assertRenderer(renderer, `(() => { const status = document.querySelector('#persistence-status'); return status.dataset.tone !== 'busy' && !/正在(保存|自动写入)/u.test(status.textContent) && status.textContent.includes('修订日志暂时无法确认写入。') && !status.textContent.includes(${JSON.stringify(PROTECTION_HEADLINE)}); })()`, 'protection-specific-status');
+  at('protection-panel-geometry');
+  for (const [index, [width, height]] of [[1280, 800], [1008, 681]].entries()) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await clickVisibleControl(renderer, '#editing-protection [data-protection-action="options"]', 'protection-geometry-open');
+    await panelGeometry(renderer, '#editing-protection-options', width, height, true);
+    await assertRenderer(renderer, `(() => {
+      const header = document.querySelector('.context-header');
+      const h = header.getBoundingClientRect(), b = document.querySelector('#editing-protection').getBoundingClientRect();
+      return b.width > 0 && b.height > 0 && b.left >= h.left && b.right <= h.right && b.top >= h.top && b.bottom <= h.bottom && header.getBoundingClientRect().height === ${headerHeights[index]}
+        && [...header.querySelectorAll('button, summary')].filter(node => node.getClientRects().length > 0)
+          .every(node => { const r = node.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; });
+    })()`, 'protection-header-height');
+    await clickVisibleControl(renderer, '#editing-protection-options [data-protection-action="close"]', 'protection-geometry-close');
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
   at('protection-blocked-action');
   await assertRenderer(renderer, `(() => { const back = document.querySelector('#app-sidebar [data-nav-book-section="overview"]'); if (!(back instanceof HTMLElement) || back.getAttribute('aria-disabled') === 'true') return false; back.focus(); back.click(); return true; })()`, 'protection-blocked-action-click');
   await waitForChecks(renderer, `(() => { const back = document.querySelector('#app-sidebar [data-nav-book-section="overview"]'); const label = (back?.getAttribute('aria-label') ?? back?.textContent ?? '').trim(); const note = back?.nextElementSibling; return { stayed: document.querySelector('#screen')?.dataset.screen === 'editor', reason: note instanceof HTMLElement && note.dataset.protectionBlocked === label && note.textContent.includes('暂不能执行'), noEntry: ${JOURNAL_SEQUENCE_PROBE} === ${durable} }; })()`, 'protection-blocked-action', 30_000);

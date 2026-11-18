@@ -1,4 +1,5 @@
 import { reportResult } from './notifications.js';
+import { styleInput } from './components/controls.js';
 
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { technicalWords, technicalLayerVisible } from './technical-layer.js';
@@ -77,7 +78,7 @@ function renderBookFilter(
   const textLabel = element('label', undefined, BOOK_FILTER_TEXT_LABEL);
   const text = element('input');
   text.id = 'book-filter-text';
-  text.type = 'search';
+  text.type = 'search'; styleInput(text);
   // The service reads at most this many characters; a longer paste is cut here rather than refused as a bad request.
   text.maxLength = MAX_BOOK_SUMMARY_FILTER_CHARACTERS;
   text.value = filter?.text ?? '';

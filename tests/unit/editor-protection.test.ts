@@ -1,3 +1,4 @@
+import { protectionFailureReason } from '../../src/renderer/editor-protection-labels.js';
 import { parseArguments } from '../../src/main/launch-arguments.js';
 import { packagedLaunchForm } from '../../src/main/channel.js';
 import { resolve } from 'node:path';
@@ -130,8 +131,8 @@ describe('a refused journal write', () => {
 
 describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', () => {
   it('replaces every saved implication with the exact headline and one direct action', () => {
-    expect(PROTECTION_HEADLINE).toBe('本地写入中断 · 当前更改尚未持久保存');
-    expect(PROTECTION_OPTIONS_ACTION).toBe('查看保护选项');
+    expect(PROTECTION_HEADLINE).toBe('更改尚未保存');
+    expect(PROTECTION_OPTIONS_ACTION).toBe('处理…');
     expect(PROTECTION_RETRY_ACTION).toBe('重试写入');
     expect(PROTECTION_COPY_ACTION).toBe('复制受影响内容');
     expect(PROTECTION_CLEARED).toBe('已写入修订日志');
@@ -203,4 +204,11 @@ describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
     for (const mode of ['off', 'fail-next', 'fail-all']) expect(decodeRequest(frame({ mode }))).toMatchObject({ op: 'setEditJournalFault', input: { mode } });
     for (const input of [{}, { mode: 'fail-some' }, { mode: 'off', extra: true }, null]) expect(() => decodeRequest(frame(input))).toThrowError();
   });
+});
+
+it('keeps a specific write failure while leaving the general protection statement to the banner', () => {
+  expect(protectionFailureReason(new Error('确认结果与当前编辑不符'))).toBe('确认结果与当前编辑不符');
+  expect(protectionFailureReason(new Error(PROTECTION_HEADLINE))).toBe('');
+  expect(protectionFailureReason(null)).toBe('保存失败，未提供具体原因。');
+  expect(protectionFailureReason('磁盘无法写入')).toBe('磁盘无法写入');
 });

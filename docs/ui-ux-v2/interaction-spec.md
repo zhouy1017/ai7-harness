@@ -1544,7 +1544,7 @@ Real unresolved manual choices retain the bounded material/provenance review and
 | Explicit Run Budget Ceiling reached | `任务运行预算已达上限 · 已保留部分结果` + `调整预算并重做` | Terminal Task Outcome; never success, pause, or provider-account wording |
 | Provider Account Limit | `模型服务账户限额` + affected connection + `处理模型服务` | Keep separate from AI7 ceiling; no silent fallback or `无限` claim |
 | Resume-ready interruption | `任务已中断 · 可续行` + last durable milestone + `续行` | No automatic dispatch; material drift and ambiguous Effects retain their own blockers |
-| Editing persistence failure | `本地写入中断` + last durable boundary + at-risk extent + `查看保护选项` | Never `已保存`; technical cause secondary |
+| Editing persistence failure | `保存中断` state pill + `更改尚未保存` + `处理…`; durable boundary, at-risk extent and retry facts in the dialog | Never `已保存`; technical cause secondary |
 | Proposal/decision drift | `{record}已变化 · 需要重新确认` + unchanged content boundary | Link exact current/previous pins |
 | Ambiguous external outcome | `{Effect}结果待确认` + no-repeat consequence + reconciliation action | No ordinary Retry/fallback |
 | Verified completion | Exact scoped record/receipt claim + next available action | Absolute local time and expandable identity/evidence |
