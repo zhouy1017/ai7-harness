@@ -9,6 +9,35 @@ import { SELECTION_SPAN_NOTE } from '../shared/selection-span.js';
 import { technicalWords } from './technical-layer.js';
 import { REVIEW_UNCHECKED_DISCLOSURE, REVIEW_GUESSED_ANCHOR_NOTE_PREFIX, REVIEW_PUNCTUATION_ALIGNED_NOTE, reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 
+/** The 批注栏's words for working through what is pending (Issue #1523). */
+export const COMMENTS_TRIAGE_WORDS = {
+  previous: '上一条待处理',
+  next: '下一条待处理',
+  bookPendingTitle: '全书待处理的修改建议、批注和备注',
+  statusInView: '状态 · 本页',
+  categoryInView: '分类 · 本页',
+  quickAccept: '接受',
+  quickReject: '拒绝',
+  readingPlaces: '正在读取全书待处理的位置，请稍后再试。',
+  searchFailed: '没能读取其他位置的待处理批注；没有移动。',
+  pageEnd: '本页没有待处理的了；点「下一条待处理」到后面继续。',
+} as const;
+
+/** The header's count: the Book's pending marks, `2000+` once the list stops there. */
+export function bookPendingLabel(count: number, truncated: boolean): string {
+  return `全书待处理 ${count}${truncated ? '+' : ''}`;
+}
+
+/** 上一条 / 下一条待处理 found nothing further in that direction; nothing moved. */
+export function noFurtherPendingLine(direction: 'next' | 'previous', filtered: boolean): string {
+  return `${filtered ? '按当前筛选，' : ''}${direction === 'next' ? '后面' : '前面'}没有待处理的了。`;
+}
+
+/** The search beyond the page stopped after this many places without a match; nothing moved. */
+export function pendingSearchStoppedLine(direction: 'next' | 'previous', places: number): string {
+  return `按当前筛选，${direction === 'next' ? '后面' : '前面'}最近的 ${places} 处待处理的位置都不匹配；没有移动。`;
+}
+
 /** The frozen source mark is ordinary editorial information, independent of its task/category. */
 export function markSourceMark(source: EditorialMarkCardProjection['source'], technical = false): string {
   if (source.kind === 'editor') return source.editorName?.trim() || '你';

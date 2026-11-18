@@ -3,6 +3,8 @@ import { EDITORIAL_MARK_CATEGORIES, type EditorialMarkCategoryKey } from '../sha
 import { matchesEditorialMarkFilter, type EditorialMarkFilter } from './editorial-mark-filter.js';
 import { windowStep } from './components/controls.js';
 import { showToast } from './components/toast.js';
+import { shortcutHint } from './commands.js';
+import { inTextEntry, triageKeyAction } from './triage-keys.js';
 import { technicalDisclosure, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { readProposalWorkspace } from './proposal-workspace.js';
 import { readFindingSources } from './research-evidence-labels.js';
@@ -47,6 +49,10 @@ import type {
   UpdateEditorialMarkInput,
 } from '../shared/protocol.js';
 import {
+  COMMENTS_TRIAGE_WORDS,
+  bookPendingLabel,
+  noFurtherPendingLine,
+  pendingSearchStoppedLine,
   DECISION_REASON_ADD,
   DECISION_REASON_CANCEL,
   DECISION_REASON_CHIPS,
@@ -71,8 +77,8 @@ import {
 import { applyOnce } from './manuscript-apply.js';
 import { type EditorInputMode } from './editor-input-mode.js';
 import {
-  AI_LOCK_SELECTION_LABEL, AI_UNLOCK_SELECTION_LABEL, SCOPED_AI_EDIT_MENU_LABEL, openScopedAiEditComposer, selectionLockTargets, selectionLocked,
-  setAiLocks, type ScopedAiEditHost,
+  AI_LOCK_SELECTION_LABEL, AI_UNLOCK_SELECTION_LABEL, SCOPED_AI_EDIT_ENTRY_LABELS, SCOPED_AI_EDIT_MENU_LABEL, SCOPED_AI_EDIT_WORDS, openScopedAiEditComposer,
+  selectionLockTargets, selectionLocked, setAiLocks, type ScopedAiEditHost,
 } from './scoped-ai-edit.js';
 import {
   EDITOR_REVISION_RATIONALE, QUICK_REVISE_APPLIED, QUICK_REVISE_FIELD, QUICK_REVISE_FIELD_HINT, QUICK_REVISE_HINT, QUICK_REVISE_LABEL,
@@ -148,8 +154,18 @@ export interface EditorialMarksSurface {
   recordAndApplyEditorRevision(range: Omit<RevisionSegment, 'proposedText'>, proposedText: string, rationale?: string | null): Promise<string | null>;
   /** An applied revision's card brought forward in the 批注栏 (Issue #1411): opened, scrolled to and highlighted. */
   revealRevision(markId: string): Promise<void>;
-  /** 让 AI 修改… with nothing selected (Issue #1412): the unlocked parts of the section the caret is in, or of the whole text. */
+  /**
+   * 让 AI 修改… (Issue #1412): with words selected, on 仅修改所选部分 for them (Issue #1523); with nothing selected, the unlocked
+   * parts of the section the caret is in, or of the whole text.
+   */
   composeScopedAiEdit(): void;
+  /**
+   * 上一条 / 下一条待处理 (Issue #1523): the pending card before or after the selected one (or the caret) that passes the pane's
+   * filter, selected and focused — on this page, or on the nearest page beyond it that holds one; otherwise it says so.
+   */
+  stepPending(direction: 'next' | 'previous'): Promise<void>;
+  /** The Book's pending places were read again: the header's count follows. */
+  bookPendingChanged(): void;
   /**
    * Whether the pane's position is this surface's doing: a composer or a Mark Card is open — bringing
    * one into view may rest the pane at its edge — or one just closed and the pane, shorter by the
@@ -250,35 +266,100 @@ interface MountOptions {
    * 就选中部分让 AI 修改… and 🔒 锁定 (Issue #1412), on the Book's manuscript and on a derivative document alike: the request, the
    * lock calls and the reload after them are the scoped edit's own; `sectionOf` names the heading whose section holds a block.
    */
-  scopedAiEdit?: { readonly host: ScopedAiEditHost; sectionOf(blockId: string): string | null };
+  scopedAiEdit?: {
+    readonly host: ScopedAiEditHost;
+    sectionOf(blockId: string): string | null;
+    /** The toolbar's 让 AI 修改…, which names the scope it would open on as the caret and the selection move (Issue #1523). */
+    readonly entry?: HTMLElement;
+  };
+  /**
+   * The Book's pending marks in reading order — the position rail's list (Issue #1523): the header's count, and where 上一条 /
+   * 下一条待处理 look beyond the loaded page. `read` answers `undefined` until that list was first read; `windowAt` reads the
+   * page holding a paragraph without moving the text, and `go` brings it on screen, answering whether it arrived.
+   */
+  bookPending?: {
+    read(): { readonly places: ReadonlyArray<{ readonly blockId: string; readonly proportion: number }>; readonly truncated: boolean } | undefined;
+    windowAt(blockId: string): Promise<Pick<ManuscriptWindowProjection, 'blocks' | 'marks'>>;
+    go(blockId: string): Promise<boolean>;
+  };
 }
 
-/** Window-only memory. A new projection/version fences every outstanding read, including failed reads. */
+/**
+ * Window-only memory. Another Book, manuscript or branch fences every outstanding read, including failed reads. Within one, a card
+ * already read stays on screen, enabled, and is read again in the background (Issue #1523): when its own mark or its paragraph
+ * changed, and on every fresh marks snapshot the pane's own command did not cause — a mark's projection does not carry everything
+ * its card shows (a reply, an edited body). Its content is replaced only when that read differs.
+ */
 export class EditorialCardCache {
   readonly cards = new Map<string, EditorialMarkCardProjection>();
   #identity = '';
   #marks: ReadonlyArray<EditorialMarkAnchorProjection> | undefined;
+  #blocks: ManuscriptWindowProjection['blocks'] | undefined;
+  /** What each card was last read against: its mark as the window drew it, and its paragraph's digest. */
+  #versions = new Map<string, string>();
   #reads = new Map<string, Promise<EditorialMarkCardProjection | undefined>>();
   #failed = new Set<string>();
+  /** Cards on screen to read again, and those background reads in flight. */
+  #due = new Set<string>();
+  #checks = new Map<string, Promise<void>>();
   #epoch = 0;
   #activeReads = 0;
   #queuedReads: Array<{ markId: string; start(): void; cancel(): void }> = [];
-  sync(window: Pick<ManuscriptWindowProjection, 'bookId' | 'manuscriptId' | 'branchId' | 'revisionId' | 'journalSequence' | 'workingDigest' | 'blocks' | 'marks'>): void {
-    const identity = JSON.stringify([window.bookId, window.manuscriptId, window.branchId, window.revisionId, window.journalSequence,
-      window.workingDigest, window.blocks.map((block) => block.blockId)]);
-    if (identity === this.#identity && window.marks === this.#marks) return;
-    this.#identity = identity;
+  readonly #changed: (markId: string) => void;
+  /** `changed`: a background read replaced a card on screen. */
+  constructor(changed: (markId: string) => void = () => {}) { this.#changed = changed; }
+  /** `fresh`: the snapshot is not the answer to the pane's own command, so every card on screen is read again in the background. */
+  sync(window: Pick<ManuscriptWindowProjection, 'bookId' | 'manuscriptId' | 'branchId' | 'blocks' | 'marks'>, fresh = true): void {
+    const identity = JSON.stringify([window.bookId, window.manuscriptId, window.branchId]);
+    if (identity !== this.#identity) {
+      this.#identity = identity;
+      this.#versions.clear();
+      this.clear();
+    } else if (window.marks === this.#marks && window.blocks === this.#blocks) return;
     this.#marks = window.marks;
-    this.clear();
+    this.#blocks = window.blocks;
+    const digests = new Map(window.blocks.map((block) => [block.blockId, block.digest] as const));
+    const versions = new Map(window.marks.map((mark) => [mark.markId, JSON.stringify([mark, digests.get(mark.blockId) ?? null])] as const));
+    for (const markId of new Set([...this.cards.keys(), ...this.#reads.keys(), ...this.#failed, ...this.#versions.keys()])) {
+      const changed = versions.get(markId) !== this.#versions.get(markId);
+      if (!versions.has(markId)) this.invalidate(markId);
+      else if (this.cards.has(markId)) { if (changed || fresh) this.#due.add(markId); }
+      else if (changed || fresh) this.invalidate(markId);
+    }
+    this.#versions = versions;
   }
   clear(): void {
-    this.#epoch++; this.cards.clear(); this.#reads.clear(); this.#failed.clear();
+    this.#epoch++; this.cards.clear(); this.#reads.clear(); this.#failed.clear(); this.#due.clear(); this.#checks.clear();
     for (const read of this.#queuedReads.splice(0)) read.cancel();
   }
   failed(markId: string): boolean { return this.#failed.has(markId); }
   invalidate(markId: string): void {
-    this.cards.delete(markId); this.#reads.delete(markId); this.#failed.delete(markId);
+    this.cards.delete(markId); this.#reads.delete(markId); this.#failed.delete(markId); this.#due.delete(markId); this.#checks.delete(markId);
     this.#queuedReads = this.#queuedReads.filter(read => { if (read.markId !== markId) return true; read.cancel(); return false; });
+  }
+  /** One background read of a card on screen: it stays as it is unless the answer differs; a failure leaves it. */
+  #check(markId: string, fetch: () => Promise<EditorialMarkCardProjection>): void {
+    if (this.#checks.has(markId)) return;
+    this.#due.delete(markId);
+    const epoch = this.#epoch;
+    const check: Promise<void> = new Promise<void>((resolve) => {
+      this.#queuedReads.push({ markId, cancel: resolve, start: () => {
+        const current = (): boolean => epoch === this.#epoch && this.#checks.get(markId) === check;
+        void Promise.resolve().then(() => current() ? fetch() : undefined).then((card) => {
+          const shown = this.cards.get(markId);
+          if (!card || !current() || shown === undefined || JSON.stringify(card) === JSON.stringify(shown)) return;
+          if (card.kind === 'personal-highlight') this.cards.delete(markId); else this.cards.set(markId, card);
+          this.#changed(markId);
+        }).catch(() => {}).finally(() => {
+          const mine = current();
+          if (mine) this.#checks.delete(markId);
+          this.#activeReads--; this.#startReads(); resolve();
+          if (mine && this.#due.has(markId)) this.#check(markId, fetch);
+        });
+      } });
+    });
+    this.#checks.set(markId, check);
+    this.#startReads();
   }
   #startReads(): void {
     // The service admits 16 pending requests shared by the whole window. Leave room for editing and navigation.
@@ -296,7 +377,7 @@ export class EditorialCardCache {
   read(markId: string, fetch: () => Promise<EditorialMarkCardProjection>, retryFailed = false): Promise<EditorialMarkCardProjection | undefined> {
     if (retryFailed && this.#failed.has(markId)) this.invalidate(markId);
     const cached = this.cards.get(markId);
-    if (cached) return Promise.resolve(cached);
+    if (cached) { if (this.#due.has(markId)) this.#check(markId, fetch); return Promise.resolve(cached); }
     const existing = this.#reads.get(markId);
     if (existing) return existing;
     const epoch = this.#epoch;
@@ -359,6 +440,30 @@ export function stackEditorialComments<T extends { desiredTop: number; measuredH
   for (let i = pivot + 1; i < placed.length; i++) placed[i]!.top = Math.max(placed[i]!.desiredTop, placed[i - 1]!.top + placed[i - 1]!.measuredHeight + 10);
   return placed;
 }
+
+/** A place in reading order: the paragraph's position in the manuscript, the first grapheme, then the mark's identity. */
+export type PendingKey = readonly [number, number, string];
+
+export function comparePendingKeys(a: PendingKey, b: PendingKey): number {
+  return a[0] - b[0] || a[1] - b[1] || (a[2] < b[2] ? -1 : a[2] > b[2] ? 1 : 0);
+}
+
+/** A page's pending marks — what the Book's pending list counts — in reading order, the order the position rail lists them in. */
+export function pendingInReadingOrder(window: Pick<ManuscriptWindowProjection, 'blocks' | 'marks'>): Array<{ mark: EditorialMarkAnchorProjection; key: PendingKey }> {
+  const positions = new Map(window.blocks.map((block) => [block.blockId, block.position] as const));
+  return window.marks.filter((mark) => mark.kind !== 'personal-highlight' && !markIsHandled(mark) && positions.has(mark.blockId))
+    .map((mark) => ({ mark, key: [positions.get(mark.blockId)!, mark.fromGrapheme, mark.markId] as const }))
+    .sort((a, b) => comparePendingKeys(a.key, b.key));
+}
+
+/** How far 上一条 / 下一条待处理 read beyond the page before they stop and say so: pages, and the cards a model or keyword filter reads. */
+const MAX_PENDING_PAGES = 20;
+const MAX_PENDING_CARDS = 60;
+/** How often one step goes on past a mark decided or gone while its page loaded. */
+const MAX_PENDING_WALKS = 3;
+
+/** How a decision on a pane card was asked for: by key, or by pointer (Issue #1523). */
+type DecisionInput = 'keyboard' | 'pointer';
 
 /** Shared pointer/caret rule: shortest range, starts before ends, then window order. */
 export function pickEditorialComment(marks: readonly EditorialMarkAnchorProjection[], blockId: string | undefined, grapheme: number): EditorialMarkAnchorProjection | undefined {
@@ -584,7 +689,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   void inSeries?.refresh();
   let closedAt: { top: number } | undefined;
 
-  const cardCache = new EditorialCardCache();
+  const cardCache = new EditorialCardCache(() => scheduleCommentsLayout());
   const commentNodes = new Map<string, { card: EditorialMarkCardProjection; node: HTMLElement; receipt?: ApplyReceiptProjection | undefined; readState?: string }>();
   const commentsScroll = el('div', 'manuscript-comments-scroll');
   // These nodes and this selection belong to the mounted pane, never to a polling/card redraw.
@@ -636,7 +741,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   filterPopover.id = `comments-filter-${crypto.randomUUID()}`;
   filterPopover.setAttribute('popover', 'auto');
   filterPopover.setAttribute('aria-label', '筛选批注');
-  filterPopover.append(el('strong', undefined, '分类'), categoryChips, el('strong', undefined, '模型'), modelChips, search);
+  // The chips count the page in view, and say so (Issue #1523); the header counts the Book.
+  filterPopover.append(el('strong', undefined, COMMENTS_TRIAGE_WORDS.statusInView), statusChips, el('strong', undefined, COMMENTS_TRIAGE_WORDS.categoryInView), categoryChips,
+    el('strong', undefined, '模型'), modelChips, search);
   const filterButton = el('button', 'quiet', '筛选');
   filterButton.type = 'button';
   filterButton.dataset['markFilterToggle'] = '';
@@ -652,11 +759,29 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   filterPopover.addEventListener('toggle', () => filterButton.setAttribute('aria-expanded', String(filterPopover.matches(':popover-open'))));
   const disclosureLine = el('p', 'editorial-mark-disclosure', '以下 AI 建议未联网核查');
   disclosureLine.hidden = true;
+  const bookPending = el('span', 'manuscript-comments-book-pending');
+  bookPending.dataset['commentsBookPending'] = '';
+  bookPending.title = COMMENTS_TRIAGE_WORDS.bookPendingTitle;
+  const stepButton = (direction: 'previous' | 'next', glyph: string): HTMLButtonElement => {
+    const button = el('button', 'quiet manuscript-comments-step', glyph);
+    button.type = 'button';
+    button.dataset['pendingStep'] = direction;
+    button.dataset['shortcutCommand'] = direction === 'next' ? 'view.nextPending' : 'view.previousPending';
+    button.dataset['shortcutBase'] = COMMENTS_TRIAGE_WORDS[direction];
+    button.setAttribute('aria-label', COMMENTS_TRIAGE_WORDS[direction]);
+    const hint = shortcutHint(button.dataset['shortcutCommand']);
+    button.title = hint === null ? COMMENTS_TRIAGE_WORDS[direction] : `${COMMENTS_TRIAGE_WORDS[direction]}（${hint}）`;
+    button.addEventListener('click', () => void stepPending(direction));
+    return button;
+  };
   const heading = options.comments?.host.querySelector('.manuscript-comments-heading');
-  if (heading) heading.insertBefore(statusChips, heading.lastElementChild);
-  else filterBar.append(statusChips);
-  if (heading) heading.insertBefore(filterButton, heading.lastElementChild);
-  else filterBar.append(filterButton);
+  const nextStep = stepButton('next', '↓');
+  /** A pointer decision reached the page's end: 下一条待处理 is the one click on (Issue #1523); any step or other card ends the offer. */
+  const offerNextStep = (offered: boolean): void => { if (offered) nextStep.dataset['offered'] = 'true'; else delete nextStep.dataset['offered']; };
+  for (const node of [bookPending, stepButton('previous', '↑'), nextStep, filterButton]) {
+    if (heading) heading.insertBefore(node, heading.lastElementChild);
+    else filterBar.append(node);
+  }
   filterBar.append(disclosureLine, filterSummary, filterPopover);
   const commentsCanvas = el('div', 'manuscript-comments-canvas');
   commentsCanvas.setAttribute('role', 'list');
@@ -695,6 +820,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (openCardId === undefined) editor.setActiveMark(null);
   };
   const activateComment = (markId: string | undefined): void => {
+    if (markId !== activeComment) offerNextStep(false);
     if (inlinePreviewId !== undefined && inlinePreviewId !== markId) clearInlinePreview();
     activeComment = markId;
     for (const [id, entry] of commentNodes) entry.node.dataset['active'] = entry.node.dataset['selected'] = String(id === markId);
@@ -786,8 +912,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (commentsFrame === undefined) preservePanePositions = true;
     queueCommentsLayout();
   }
+  /**
+   * The text moved: the cards are laid out again, and the pane's own scroll stays where the reader left it (Issue #1523). With no
+   * card selected the frame is measured from that scroll, so the cards meet their words again once the pane is back at its top.
+   */
   function scrollCommentsText(): void {
-    if (activeComment === undefined) { commentsFrameScroll = 0; commentsScroll.scrollTop = 0; }
+    if (activeComment === undefined) commentsFrameScroll = commentsScroll.scrollTop;
     scheduleCommentsLayout();
   }
   function releaseCommentPress(): void {
@@ -818,7 +948,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (rect && (rect.bottom < viewport.top || rect.top > viewport.bottom)) commentAnchor(mark)?.scrollIntoView({ block: 'center', behavior: 'instant' });
     activateComment(mark.markId);
   }
+  /** The header counts the Book's pending marks, as the rail last read them; nothing is shown before that first read. */
+  function paintBookPending(): void {
+    const book = options.bookPending?.read();
+    const text = book === undefined ? '' : bookPendingLabel(book.places.length, book.truncated);
+    if (bookPending.textContent !== text) bookPending.textContent = text;
+  }
   function layoutComments(): void {
+    paintBookPending();
     if (pressedComment !== undefined || textPointerDown) { layoutAfterPress = true; return; }
     const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
     leaders.replaceChildren();
@@ -827,7 +964,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const comments = marks.filter((mark) => mark.kind !== 'personal-highlight');
     const matching = new Set(comments.filter((mark) => matchesEditorialMarkFilter(mark, cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card, markFilter)).map((mark) => mark.markId));
     if (inlinePreviewId !== undefined && !matching.has(inlinePreviewId)) clearInlinePreview();
-    if (activeComment !== undefined && !matching.has(activeComment)) activateComment(undefined);
+    // A card still being read is not yet known to miss a model or keyword filter: a card just brought forward on a new page stays
+    // selected until its words are read (Issue #1523).
+    const unread = (markId: string): boolean => (markFilter.selectedModels.size > 0 || markFilter.keyword.trim() !== '')
+      && !cardCache.cards.has(markId) && !commentNodes.has(markId) && comments.some((mark) => mark.markId === markId);
+    if (activeComment !== undefined && !matching.has(activeComment) && !unread(activeComment)) activateComment(undefined);
     const filtering = markFilter.selectedCategories.size > 0 || markFilter.selectedModels.size > 0 || markFilter.status !== 'all' || markFilter.keyword.trim() !== '';
     editor.setVisibleMarkIds(filtering ? new Set([...matching, ...marks.filter((mark) => mark.kind === 'personal-highlight').map((mark) => mark.markId)]) : null);
     for (const [key, button] of categoryButtons) {
@@ -954,10 +1095,16 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); suppressCommentSelection = true; activateComment(undefined); returnToCommentAnchor(editor.currentWindow().marks.find((entry) => entry.markId === mark.markId) ?? current); return; }
           if (event.target !== node) return;
           const ordered = Array.from(commentsCanvas.children).filter((child): child is HTMLElement => child instanceof HTMLElement && !child.hidden);
-          if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+          if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !event.altKey) {
             event.preventDefault();
             ordered[Math.max(0, Math.min(ordered.length - 1, ordered.indexOf(node) + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
           } else if (event.key === 'Enter') { event.preventDefault(); void openCard(mark.markId); }
+          else {
+            // The card's single keys (Issue #1523) press its own 接受并应用 or 拒绝, exactly as a click would.
+            const triage = triageKeyAction(event);
+            const control = triage === null ? null : node.querySelector<HTMLButtonElement>(`[data-mark-action="${triage === 'accept' ? 'accept-and-apply' : 'reject'}"]`);
+            if (control) { event.preventDefault(); if (!control.disabled) pressFor(control, 'keyboard'); }
+          }
         });
       }
       const receipt = recoveryCards.get(mark.markId);
@@ -1106,7 +1253,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       for (const node of commentsCanvas.querySelectorAll('[data-comment-pending]')) node.remove();
       activateComment(undefined);
     }
-    cardCache.sync(current);
+    // While the pane's own command or Apply is under way the reload answers it; any other snapshot reads every card again.
+    cardCache.sync(current, !working);
     scheduleCommentsLayout();
     if (!options.comments?.enabled()) { activateComment(undefined); return; }
     for (const mark of current.marks) {
@@ -1120,18 +1268,195 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         .finally(() => { commentsReading--; scheduleCommentsLayout(); });
     }
   }
+  const filtering = (): boolean => markFilter.selectedCategories.size > 0 || markFilter.selectedModels.size > 0 || markFilter.status !== 'all' || markFilter.keyword.trim() !== '';
+  const passesFilter = (mark: EditorialMarkAnchorProjection, card = cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card): boolean =>
+    matchesEditorialMarkFilter(mark, card, markFilter);
+  /** The same, with a card on the page read first when a model or keyword filter needs it and it was not read yet. */
+  const passesFilterRead = async (mark: EditorialMarkAnchorProjection, page: ManuscriptWindowProjection): Promise<boolean> => {
+    const known = cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card;
+    if (known !== undefined || (markFilter.selectedModels.size === 0 && markFilter.keyword.trim() === '')) return passesFilter(mark, known);
+    const card = await cardCache.read(mark.markId, () => api.getEditorialMarkCard({ manuscriptId: page.manuscriptId, branchId: page.branchId, markId: mark.markId })).catch(() => undefined);
+    return card !== undefined && passesFilter(mark, card);
+  };
+  /** Where the next step starts: the selected card, else the caret, else the page's start. */
+  const stepOrigin = (): PendingKey => {
+    const current = editor.currentWindow();
+    const positions = new Map(current.blocks.map((block) => [block.blockId, block.position] as const));
+    const active = activeComment === undefined ? undefined : current.marks.find((mark) => mark.markId === activeComment);
+    if (active !== undefined && positions.has(active.blockId)) return [positions.get(active.blockId)!, active.fromGrapheme, active.markId];
+    const head = editor.captureContinuity().head;
+    const at = head.blockId === undefined ? undefined : positions.get(head.blockId);
+    return at === undefined ? [current.blocks[0]?.position ?? 0, -1, ''] : [at, head.grapheme, ''];
+  };
+  /** A pending card brought forward: the pane opens on it, selected and focused, and the caret the arrival placed does not move it. */
+  const bringPending = (markId: string): void => {
+    suppressCommentSelection = true;
+    void revealRevision(markId);
+  };
+  /**
+   * How a decision on a pane card was asked for (Issue #1523): its single key, or Enter / Space on its button — a click the browser
+   * made with no pointer behind it — is the keyboard; anything else is the pointer. The card keys and the compact 接受 / 拒绝 press
+   * the card's own button and say which it was.
+   */
+  let forwardedInput: DecisionInput | undefined;
+  const keyedClick = (event: Event): boolean => event.isTrusted && (event as MouseEvent).detail === 0;
+  const decisionInput = (event: Event): DecisionInput => {
+    const forwarded = forwardedInput;
+    forwardedInput = undefined;
+    return forwarded ?? (keyedClick(event) ? 'keyboard' : 'pointer');
+  };
+  const pressFor = (control: HTMLButtonElement, input: DecisionInput): void => {
+    forwardedInput = input;
+    try { control.click(); } finally { forwardedInput = undefined; }
+  };
+  /** Where a page stands in the Book, as the rail's places count it: the middle of its characters. */
+  const pageMiddle = (page: ManuscriptWindowProjection): number => {
+    const total = page.position.totalCharacters;
+    return total > 0 ? (page.position.startCharacter + page.position.endCharacter) / 2 / total : 0.5;
+  };
+  /** While a step loads another page, the caret the arrival places takes no card's selection (Issue #1523). */
+  let jumping = 0;
+  let stepping = false;
+  async function stepPending(direction: 'next' | 'previous', from: PendingKey = stepOrigin()): Promise<void> {
+    if (destroyed || stepping) return;
+    stepping = true;
+    offerNextStep(false);
+    try {
+      await walkPending(direction, from);
+    } catch (error) {
+      if (!destroyed) options.setStatus(options.errorMessage(error, COMMENTS_TRIAGE_WORDS.searchFailed), 'error');
+    } finally {
+      stepping = false;
+    }
+  }
+  /**
+   * The next (or previous) pending card after `from` that passes the filter: on this page, else on the nearest page beyond it that
+   * holds one. A mark decided or gone while its page loaded is passed over, and the walk goes on from where it stood.
+   */
+  async function walkPending(direction: 'next' | 'previous', from: PendingKey): Promise<void> {
+    const forward = direction === 'next';
+    let origin = from;
+    // One bound for the whole step: the pages read beyond the page, and the cards a model or keyword filter reads.
+    const budget = { pages: 0, cards: 0 };
+    const cardFilter = markFilter.selectedModels.size > 0 || markFilter.keyword.trim() !== '';
+    for (let walk = 0; walk < MAX_PENDING_WALKS; walk++) {
+      const start = editor.currentWindow();
+      const moved = (): boolean => destroyed || editor.currentWindow().blocks[0]?.blockId !== start.blocks[0]?.blockId;
+      const here = pendingInReadingOrder(start).filter(({ key }) => forward ? comparePendingKeys(key, origin) > 0 : comparePendingKeys(key, origin) < 0);
+      let near: EditorialMarkAnchorProjection | undefined;
+      for (const { mark } of forward ? here : here.reverse()) {
+        if (await passesFilterRead(mark, start)) { near = mark; break; }
+        if (moved()) return;
+      }
+      if (moved()) return;
+      if (near !== undefined) { bringPending(near.markId); return; }
+      const book = options.bookPending;
+      const places = book?.read();
+      if (book !== undefined && places === undefined) { options.setStatus(COMMENTS_TRIAGE_WORDS.readingPlaces, 'busy'); return; }
+      if (book === undefined || places === undefined || markFilter.status === 'handled') { options.setStatus(noFurtherPendingLine(direction, filtering()), 'success'); return; }
+      const found = await searchBeyondPage(start, forward, places.places, book.windowAt, moved, budget);
+      if (found === 'moved') return;
+      if (typeof found === 'number') { options.setStatus(pendingSearchStoppedLine(direction, found), 'success'); return; }
+      if (found === null) { options.setStatus(noFurtherPendingLine(direction, filtering()), 'success'); return; }
+      let arrived = false;
+      jumping += 1;
+      try { arrived = await book.go(found.mark.blockId); } finally { jumping -= 1; }
+      if (!arrived || destroyed) return;
+      const now = editor.currentWindow().marks.find((mark) => mark.markId === found.mark.markId);
+      if (now !== undefined && !markIsHandled(now)) {
+        // A card's words may have changed while its page loaded: a model or keyword filter is judged on the card as it is now.
+        if (cardFilter && budget.cards === MAX_PENDING_CARDS) { options.setStatus(pendingSearchStoppedLine(direction, budget.pages), 'success'); return; }
+        const page = editor.currentWindow();
+        const card = cardFilter ? (budget.cards += 1, await api.getEditorialMarkCard({ manuscriptId: page.manuscriptId, branchId: page.branchId, markId: now.markId })) : undefined;
+        if (destroyed) return;
+        if (passesFilter(now, card)) { bringPending(now.markId); return; }
+      }
+      origin = found.key;
+    }
+    options.setStatus(noFurtherPendingLine(direction, filtering()), 'success');
+  }
+  /**
+   * The pages beyond `start` that hold pending marks, nearest first, read without moving the text until one holds a mark that
+   * passes the filter: that mark, with its card when the filter read it; `null` when none does; the number of pages read when
+   * the search stopped at its bound.
+   */
+  async function searchBeyondPage(start: ManuscriptWindowProjection, forward: boolean, places: ReadonlyArray<{ readonly blockId: string; readonly proportion: number }>,
+    windowAt: NonNullable<MountOptions['bookPending']>['windowAt'], moved: () => boolean, budget: { pages: number; cards: number },
+  ): Promise<{ mark: EditorialMarkAnchorProjection; key: PendingKey; card: EditorialMarkCardProjection | undefined } | null | number | 'moved'> {
+    const positions = start.blocks.map((block) => block.position);
+    const first = Math.min(...positions), last = Math.max(...positions);
+    const middle = pageMiddle(start);
+    const ahead = forward ? places.filter((place) => place.proportion >= middle) : places.filter((place) => place.proportion <= middle).reverse();
+    const seen = new Set(start.blocks.map((block) => block.blockId));
+    const cardFilter = markFilter.selectedModels.size > 0 || markFilter.keyword.trim() !== '';
+    for (const place of ahead) {
+      if (seen.has(place.blockId)) continue;
+      if (budget.pages === MAX_PENDING_PAGES) return budget.pages;
+      budget.pages += 1;
+      const page = await windowAt(place.blockId);
+      if (moved()) return 'moved';
+      for (const block of page.blocks) seen.add(block.blockId);
+      const beyond = pendingInReadingOrder(page).filter(({ key }) => forward ? key[0] > last : key[0] < first);
+      for (const { mark, key } of forward ? beyond : beyond.reverse()) {
+        // A model or a keyword is on the card, read as the pane reads it; a category or a status is on the mark itself.
+        if (cardFilter && budget.cards === MAX_PENDING_CARDS) return budget.pages;
+        const card = cardFilter ? (budget.cards += 1, await api.getEditorialMarkCard({ manuscriptId: start.manuscriptId, branchId: start.branchId, markId: mark.markId })) : undefined;
+        if (moved()) return 'moved';
+        if (passesFilter(mark, card)) return { mark, key, card };
+      }
+    }
+    return null;
+  }
+  /** A reply being written, or a composer open over the text: a keyboard decision does not carry the editor off this page. */
+  const liveDraft = (): boolean => floating?.dataset['markComposer'] !== undefined
+    || Array.from(commentsCanvas.querySelectorAll<HTMLTextAreaElement>('[data-comment-reply]')).some((field) => field.value.length > 0);
+  /**
+   * After a decision on a pane card (Issue #1523): never away from a field being typed in. A keyboard decision walks on as
+   * 下一条待处理 does, across pages, from where the decided card stood. A pointer decision stays on the page: the next pending card
+   * here, else the card stays and 下一条待处理 is offered — or, at the Book's end, that is said once.
+   */
+  function advanceAfter(decided: EditorialMarkCardProjection, input: DecisionInput): void {
+    if (destroyed || !options.comments?.enabled() || (activeComment !== undefined && activeComment !== decided.markId) || inTextEntry(document.activeElement)) return;
+    const current = editor.currentWindow();
+    const now = current.marks.find((mark) => mark.markId === decided.markId);
+    if (now !== undefined && !markIsHandled(now)) return;
+    const at = current.blocks.find((block) => block.blockId === decided.blockId)?.position;
+    if (at === undefined) return;
+    const origin: PendingKey = [at, decided.fromGrapheme, decided.markId];
+    if (input === 'keyboard' && !liveDraft()) { void stepPending('next', origin); return; }
+    const next = pendingInReadingOrder(current).find(({ mark, key }) => mark.markId !== decided.markId && comparePendingKeys(key, origin) > 0 && passesFilter(mark));
+    if (next !== undefined) { bringPending(next.mark.markId); return; }
+    const middle = pageMiddle(current);
+    const beyond = options.bookPending?.read()?.places.some((place) => place.proportion >= middle && !current.blocks.some((block) => block.blockId === place.blockId));
+    if (beyond === true) { offerNextStep(true); options.setStatus(COMMENTS_TRIAGE_WORDS.pageEnd, 'success'); }
+    else options.setStatus(noFurtherPendingLine('next', filtering()), 'success');
+  }
   const commentsResize = new ResizeObserver(scheduleCommentsLayout);
   commentsResize.observe(options.scroll);
   commentsResize.observe(options.host);
   if (options.comments) commentsResize.observe(commentsScroll);
+  /** 让 AI 修改所选 / 本节 / 全文…: where the caret or the selection stands in the text now; elsewhere the label keeps the last place. */
+  const nameScopedAiEditEntry = (): void => {
+    const scoped = options.scopedAiEdit;
+    if (scoped?.entry === undefined) return;
+    const anchor = document.getSelection()?.anchorNode ?? null;
+    if (anchor === null || !options.host.contains(anchor)) return;
+    const node = anchor as Node & { closest?: (selector: string) => HTMLElement | null };
+    const blockId = (typeof node.closest === 'function' ? node.closest('[data-block-id]') : anchor.parentElement?.closest<HTMLElement>('[data-block-id]'))?.dataset['blockId'];
+    const kind = editor.selectedRange().kind;
+    const scope = kind === 'range' || kind === 'span' ? 'selected' : blockId !== undefined && scoped.sectionOf(blockId) !== null ? 'section' : 'document';
+    if (scoped.entry.textContent !== SCOPED_AI_EDIT_ENTRY_LABELS[scope]) scoped.entry.textContent = SCOPED_AI_EDIT_ENTRY_LABELS[scope];
+    scoped.entry.title = SCOPED_AI_EDIT_WORDS[scope];
+  };
   const commentSelection = (): void => {
+    nameScopedAiEditEntry();
     if (pendingMarkClick) { settleMarkClick(false); return; }
     if (!options.comments?.enabled()) return;
     if (textPointerDown) return;
     scheduleCommentsLayout();
     // Focusing a card leaves the editor's native selection in place; that retained selection does not own activation.
     if (!options.host.contains(document.activeElement) || !options.host.contains(document.getSelection()?.anchorNode ?? null)) return;
-    if (suppressCommentSelection || document.getSelection()?.isCollapsed === false) return;
+    if (jumping > 0 || suppressCommentSelection || document.getSelection()?.isCollapsed === false) return;
     const point = editor.captureContinuity().head;
     activateComment(pickEditorialComment(editor.currentWindow().marks, point.blockId, point.grapheme)?.markId);
   };
@@ -1223,7 +1548,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const applyCommand = (result: EditorialMarkCommandProjection): void => {
     if (destroyed) return;
     editor.setMarks(result.marks, result.marksTruncated);
-    cardCache.sync(editor.currentWindow());
+    // The pane's own command: its card comes back with the answer, and the others need no second read for it.
+    cardCache.sync(editor.currentWindow(), false);
     if (result.card) {
       const card = result.card;
       cardCache.put(card);
@@ -1627,10 +1953,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     queueMicrotask(() => { field?.focus(); field?.select(); });
   };
 
-  /** The 批注栏 opened on an applied revision's card, scrolled to it and highlighted; its floating card where the pane cannot show. */
+  /** The 批注栏 opened on a card (an applied revision's, or a pending one), scrolled to and focused; its floating card where the pane cannot show. */
   async function revealRevision(markId: string): Promise<void> {
     if (destroyed) return;
-    if (options.revealComments?.() !== true) { await openCard(markId); return; }
+    if (options.comments?.enabled() !== true && options.revealComments?.() !== true) { await openCard(markId); return; }
     // The pane lays the card out once it is read; the layout brings it forward then (see `layoutComments`), however long that takes.
     revealed = { markId, pending: true };
     revealScroll = undefined;
@@ -1738,7 +2064,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     return section;
   };
 
-  const actionButton = (action: string, label: string, tone: 'primary' | 'secondary' | 'quiet', run: () => void): HTMLButtonElement => {
+  const actionButton = (action: string, label: string, tone: 'primary' | 'secondary' | 'quiet', run: (event: Event) => void): HTMLButtonElement => {
     const control = el('button', tone, label);
     control.type = 'button';
     control.dataset['markAction'] = action;
@@ -1872,12 +2198,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
 
   function composeCard(card: EditorialMarkCardProjection, form?: (cancel: () => void) => FormConfig, inline = false): HTMLElement {
-    const cardAction = (action: string, label: string, tone: 'primary' | 'secondary' | 'quiet', run: () => void): HTMLButtonElement =>
-      actionButton(action, label, tone, () => {
+    const cardAction = (action: string, label: string, tone: 'primary' | 'secondary' | 'quiet', run: (input: DecisionInput) => void): HTMLButtonElement =>
+      actionButton(action, label, tone, (event) => {
+        const input = decisionInput(event);
         if (inline && cardCache.cards.get(card.markId) !== card) { options.setStatus('批注正在更新，请稍候再操作。', 'busy'); return; }
-        run();
+        run(input);
       });
     if (!inline) closeMenu();
+    // A decision on a pane card selects the next pending card once it is recorded (Issue #1523).
+    const triaged = (input: DecisionInput, decided: Promise<unknown>): void => { if (inline) void decided.then(() => advanceAfter(card, input)); };
     if (promptFor !== null && promptFor.markId !== card.markId) promptFor = null;
     const previous = inline ? commentNodes.get(card.markId)?.node : floating?.dataset['markCard'] === card.markId ? floating : null;
     const active = previous?.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
@@ -1973,7 +2302,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
 
       if (card.inlineRevision) {
         const act = (action: 'apply-inline-revision' | 'revert-inline-revision') => changeInlineRevision(card.markId, action);
-        if (card.status === 'open') disposition.append(cardAction('accept-and-apply', '应用修改', 'primary', () => void act('apply-inline-revision')));
+        if (card.status === 'open') disposition.append(cardAction('accept-and-apply', '应用修改', 'primary', (input) => triaged(input, act('apply-inline-revision'))));
         disposition.append(exact ? cardAction('reverse-revision', card.status === 'applied' ? REVERSE_REVISION_LABEL : '忽略/还原', 'secondary',
           () => void act('revert-inline-revision')) : disabledAction('reverse-revision', '这处文字又改过', '请先查看当前稿件。'));
         yours.append(disposition);
@@ -2040,12 +2369,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       } else if (decision === null) {
         disposition.append(
           exact
-            ? cardAction('accept-and-apply', '接受并应用', 'primary', () => void writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
+            ? cardAction('accept-and-apply', '接受并应用', 'primary', (input) => triaged(input, writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
                 ...binding(), markId: card.markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null,
-              }), '已应用这条修改建议。', null, !inline))
+              }), '已应用这条修改建议。', null, !inline)))
             : disabledAction('accept-and-apply', '接受并应用', '原文已变，无法应用这条修改建议。'),
           ...resolveConflict(),
-          cardAction('reject', '拒绝', 'secondary', () => void decide(card, 'rejected', null, null, !inline)),
+          cardAction('reject', '拒绝', 'secondary', (input) => triaged(input, decide(card, 'rejected', null, null, !inline))),
           exact
             ? cardAction('accept-with-edit', '修改后接受', 'secondary', () => showCard(card, (cancel) => ({
                 id: 'accept-with-edit',
@@ -2108,7 +2437,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             cancel,
           })); }),
           card.status === 'open'
-            ? cardAction('resolve', '标记为已处理', 'secondary', () => void change(card.markId, 'set-status', { status: 'resolved' }, '已标记为已处理。', !inline))
+            ? cardAction('resolve', '标记为已处理', 'secondary', (input) => triaged(input, change(card.markId, 'set-status', { status: 'resolved' }, '已标记为已处理。', !inline)))
             : cardAction('reopen', '重新打开', 'secondary', () => void change(card.markId, 'set-status', { status: 'open' }, '已重新打开。', !inline)),
         );
         more.append(convertOrExplain('change-suggestion'));
@@ -2154,7 +2483,26 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     more.append(technicalDisclosure(technical));
     settleEditorialMarkCard({ more, actions });
 
-    if (inline) return panel;
+    if (inline) {
+      // A compact 修改建议 offers 接受 and 拒绝 on hover and focus (Issue #1523): one click per decision, through the card's own buttons.
+      const controls = (['accept-and-apply', 'reject'] as const).map((action) => panel.querySelector<HTMLButtonElement>(`[data-mark-action="${action}"]`));
+      const preview = panel.querySelector<HTMLElement>('.editorial-mark-compact-preview');
+      if (card.kind === 'change-suggestion' && preview !== null && controls.every((control) => control !== null && !control.disabled)) {
+        const quick = el('div', 'editorial-mark-quick-actions');
+        for (const [index, control] of controls.entries()) {
+          const button = el('button', index === 0 ? 'primary' : 'secondary', index === 0 ? COMMENTS_TRIAGE_WORDS.quickAccept : COMMENTS_TRIAGE_WORDS.quickReject);
+          button.type = 'button';
+          button.dataset['markQuick'] = index === 0 ? 'accept' : 'reject';
+          button.title = control!.textContent ?? '';
+          button.addEventListener('click', (event) => { pressFor(control!, keyedClick(event) ? 'keyboard' : 'pointer'); });
+          quick.append(button);
+        }
+        const line = el('div', 'editorial-mark-compact-line');
+        preview.replaceWith(line);
+        line.append(preview, quick);
+      }
+      return panel;
+    }
     floating?.remove();
     placeBelowBlock(panel, card.blockId);
     layer.append(panel);
@@ -3225,10 +3573,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     },
     recordAndApplyEditorRevision,
     revealRevision,
+    // With words selected the composer opens on 仅修改所选部分 for them (Issue #1523); without, on the caret's section or the text.
     composeScopedAiEdit: () => {
+      const selected = editor.selectedRange().kind;
+      if (selected === 'range' || selected === 'span') { void composeScopedOnSelection(); return; }
       const blockId = editor.captureContinuity().head.blockId;
       if (blockId !== undefined) openScopedComposer(blockId, null);
     },
+    stepPending,
+    bookPendingChanged: paintBookPending,
     ownsScroll: () => composersPending > 0 || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top) ||
       (revealScroll !== undefined && options.scroll.scrollTop === revealScroll.top),
     destroy: () => {

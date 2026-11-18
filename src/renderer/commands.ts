@@ -21,7 +21,7 @@ import {
  */
 
 export type CommandPlatform = 'win32' | 'darwin';
-export type CommandContext = 'application' | 'book' | 'manuscript' | 'review';
+export type CommandContext = 'application' | 'book' | 'manuscript';
 export type CommandGroup = 'navigation' | 'search' | 'view';
 
 export interface CommandDefinition {
@@ -56,8 +56,6 @@ export const BOOK_SECTION_COMMANDS = [
 export const COMMANDS: readonly CommandDefinition[] = [
   { id: 'command.palette', name: COMMAND_NAMES['command.palette'], group: 'navigation', context: 'application', defaults: both('Mod+K') },
   { id: 'book.switch', name: COMMAND_NAMES['book.switch'], group: 'navigation', context: 'application', defaults: both('Mod+P') },
-  { id: 'review.nextPending', name: '下一条待处理发现', group: 'navigation', context: 'review', defaults: both('Mod+Shift+N') },
-  { id: 'review.previousPending', name: '上一条待处理发现', group: 'navigation', context: 'review', defaults: both('Mod+Shift+P') },
   { id: 'review.new', name: COMMAND_NAMES['review.new'], group: 'navigation', context: 'book', defaults: both('Mod+Shift+R') },
   { id: 'evaluation.start', name: COMMAND_NAMES['evaluation.start'], group: 'navigation', context: 'book', defaults: both('Mod+Shift+E') },
   { id: 'nav.tasks', name: COMMAND_NAMES['nav.tasks'], group: 'navigation', context: 'application', defaults: both('Mod+Shift+T') },
@@ -80,6 +78,9 @@ export const COMMANDS: readonly CommandDefinition[] = [
   { id: 'view.openTasks', name: COMMAND_NAMES['view.openTasks'], group: 'view', context: 'book', defaults: both('F7') },
   // 专注模式 (Issue #951, wave 12 slice 12a; ED-004): the manuscript's view command; Esc and the header's restore control leave it too.
   { id: 'view.comments', name: COMMAND_NAMES['view.comments'], group: 'view', context: 'manuscript', defaults: both('F9') },
+  // 上一条 / 下一条待处理 (Issue #1523): the 批注栏 header's two steps, beyond the loaded page too.
+  { id: 'view.previousPending', name: COMMAND_NAMES['view.previousPending'], group: 'view', context: 'manuscript', defaults: { win32: 'Alt+ArrowUp', darwin: 'Mod+Alt+ArrowUp' } },
+  { id: 'view.nextPending', name: COMMAND_NAMES['view.nextPending'], group: 'view', context: 'manuscript', defaults: { win32: 'Alt+ArrowDown', darwin: 'Mod+Alt+ArrowDown' } },
   { id: 'view.focusMode', name: COMMAND_NAMES['view.focusMode'], group: 'view', context: 'manuscript', defaults: both('F8') },
 ];
 
@@ -392,8 +393,8 @@ export function reservedReason(chord: Chord, platform: CommandPlatform): Binding
  * Whether two commands can be live together. The contexts nest — a manuscript sits inside its Book, and the application
  * around both — so every pair can be, and a conflict always names both contexts.
  */
-export function contextsOverlap(left: CommandContext, right: CommandContext): boolean {
-  return !((left === 'review' && right === 'manuscript') || (left === 'manuscript' && right === 'review'));
+export function contextsOverlap(_left: CommandContext, _right: CommandContext): boolean {
+  return true;
 }
 
 export type BindingCheck =

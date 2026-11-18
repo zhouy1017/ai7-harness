@@ -590,8 +590,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     target?.focus({ preventScroll: true }); target?.scrollIntoView({ block: 'nearest' });
   };
   const unregisterCommands = options.registerCommands?.({
-    'review.nextPending': () => movePending(1),
-    'review.previousPending': () => movePending(-1),
+    'view.nextPending': () => movePending(1),
+    'view.previousPending': () => movePending(-1),
   });
 
   // ---- reading --------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { SIDEBAR, sidebarNavigate } from './controller.mjs';
+import { SIDEBAR, manuscriptRailJump, sidebarNavigate } from './controller.mjs';
 
 // All async service operations are evaluated directly and awaited; waitFor receives synchronous DOM predicates only.
 // pointer-events:none removes SVG from hit tests; compare its sibling stacking context
@@ -364,7 +364,9 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     search.value=''; search.dispatchEvent(new Event('input',{bubbles:true}));
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]');
-    words.scrollIntoView({block:'center',behavior:'instant'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-40;
+    // The text moves twice by 24 px below (pane kept, then pane back at its top): start 64 px down so the words end 16 px below the
+    // pane top, as after the single move before #1523; a card cannot rise above its 8 px floor to meet words above the pane.
+    words.scrollIntoView({block:'center',behavior:'instant'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-64;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const cards=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top));
     const first=cards[0],last=cards[cards.length-1], before=first.getBoundingClientRect().top, oldScroll=pane.scrollTop, height=pane.scrollHeight;
@@ -373,20 +375,25 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const p=pane.getBoundingClientRect(), l=last.getBoundingClientRect();
     const moved=pane.scrollTop>oldScroll && pane.scrollTop>0 && first.getBoundingClientRect().top<before-1;
     const reachable=moved && l.top>=p.top-1 && l.bottom<=p.bottom+1 && Math.abs(first.getBoundingClientRect().top-before+pane.scrollTop-oldScroll)<=4 && pane.scrollHeight===height;
-    const beforeText=scroll.scrollTop;
+    const beforeText=scroll.scrollTop, paneBefore=pane.scrollTop;
     scroll.scrollTop+=scroll.scrollTop<scroll.scrollHeight-scroll.clientHeight?24:-24;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
-    const textMoved=scroll.scrollTop!==beforeText;
+    const textMoved=scroll.scrollTop!==beforeText, paneKept=paneBefore>0&&pane.scrollTop===paneBefore;
+    pane.scrollTop=0;
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    scroll.scrollTop+=scroll.scrollTop<scroll.scrollHeight-scroll.clientHeight?24:-24;
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const firstAnchor=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).map(card=>({card,anchor:document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')})).filter(item=>item.anchor).sort((a,b)=>a.anchor.getBoundingClientRect().top-b.anchor.getBoundingClientRect().top)[0];
     const cardTop=firstAnchor.card.getBoundingClientRect().top, wordsTop=firstAnchor.anchor.getBoundingClientRect().top;
     const selected=!!document.querySelector('[data-comment-card][data-selected="true"]');
-    return {pass:reachable && textMoved && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, textMoved, scrollTop:pane.scrollTop, cardTop,wordsTop,selected};
+    return {pass:reachable && textMoved && paneKept && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, textMoved, paneKept, paneBefore, scrollTop:pane.scrollTop, cardTop,wordsTop,selected};
   })()`);
   const assertCoordinates = coordinates => {
   check(coordinates.reachable, 'comments-scrolled-canvas-reachable', coordinates);
   check(!coordinates.selected, 'comments-scrolled-canvas-unselected', coordinates);
   check(coordinates.textMoved, 'comments-scrolled-canvas-text-moved', coordinates);
-  check(coordinates.scrollTop===0, 'comments-scrolled-canvas-text-scroll-reset', coordinates);
+  check(coordinates.paneKept, 'comments-scrolled-canvas-pane-scroll-kept', coordinates);
+  check(coordinates.scrollTop===0, 'comments-scrolled-canvas-pane-top-again', coordinates);
   check(Math.abs(coordinates.cardTop-coordinates.wordsTop)<=4, 'comments-scrolled-canvas-word-level', coordinates);
   check(coordinates.pass, 'comments-scrolled-canvas-coordinates', coordinates);
   };
@@ -498,7 +505,8 @@ export async function commentsApplyAndReject(renderer, check, waitFor) {
   check(await renderer.evaluate(`(() => {
     globalThis.__commentsApplySamples=[];globalThis.__commentsApplySampling=true;globalThis.__commentsApplyActivations=0;
     globalThis.__commentsApplySnapshot=()=>{const nodes=__comments.ids.map(id=>document.querySelector('[data-comment-card="'+id+'"]'));const first=nodes[0].getBoundingClientRect();__commentsApplySamples.push({top:first.top,height:first.height,words:document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]')?.getBoundingClientRect().top,pane:document.querySelector('.manuscript-comments-scroll').getBoundingClientRect().top,others:nodes.slice(1).map(node=>({expanded:node.dataset.expanded,top:node.getBoundingClientRect().top,height:node.getBoundingClientRect().height}))});};
-    const sample=()=>{if(!__commentsApplySampling)return;__commentsApplySnapshot();requestAnimationFrame(sample);};sample();
+    const advanced=()=>document.querySelector('[data-comment-card="'+__comments.ids[1]+'"]')?.dataset.selected==='true';
+    const sample=()=>{if(!__commentsApplySampling)return;if(advanced()){__commentsApplySampling=false;return;}__commentsApplySnapshot();requestAnimationFrame(sample);};sample();
     const button=document.querySelector('[data-comment-card="'+__comments.ids[0]+'"] [data-mark-action="accept-and-apply"]');
     button.addEventListener('click',()=>{__commentsApplyActivations++;});
     button.addEventListener('click',()=>button.click(),{once:true});
@@ -508,7 +516,8 @@ export async function commentsApplyAndReject(renderer, check, waitFor) {
   check(accept.real, 'comments-expanded-accept-real-click', accept);
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[0]+'"] [data-mark-application]') && document.querySelector('[data-comment-card="'+__comments.ids[0]+'"] [data-mark-state]').textContent.includes('已应用')`, 'comments-applied-pane-updated');
   await waitFor(renderer, `document.querySelector('.manuscript-comments-canvas').dataset.loading==='false' && __comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.dataset.revalidating==='false')`,'comments-apply-reads-settled');
-  const stable=await renderer.evaluate(`(() => {__commentsApplySnapshot();__commentsApplySampling=false;const samples=__commentsApplySamples,base=samples[0],heights=samples.map(item=>item.height),allowed=Math.max(...heights)-Math.min(...heights);return {samples:samples.length,compact:samples.every(sample=>sample.others.every(item=>item.expanded==='false')),drift:Math.max(...samples.flatMap(sample=>sample.others.map((item,index)=>Math.abs(item.top-base.others[index].top)))),allowed,selectedDrift:Math.max(...samples.map(sample=>Math.abs(sample.top-base.top))),wordsDrift:Math.max(...samples.filter(sample=>Number.isFinite(sample.words)).map(sample=>Math.abs(sample.words-base.words))),paneDrift:Math.max(...samples.map(sample=>Math.abs(sample.pane-base.pane))),relativeDrift:Math.max(...samples.flatMap(sample=>sample.others.map((item,index)=>Math.abs(item.top-sample.top-base.others[index].top+base.top)))),rowHeightDrift:Math.max(...samples.flatMap(sample=>sample.others.map((item,index)=>Math.abs(item.height-base.others[index].height)))),activations:__commentsApplyActivations};})()`);
+  await waitFor(renderer, `(() => { const next=document.querySelector('[data-comment-card="'+__comments.ids[1]+'"]'); return next?.dataset.selected==='true' && next.dataset.expanded==='true' && document.activeElement===next; })()`, 'comments-apply-next-selected');
+  const stable=await renderer.evaluate(`(() => {if(__commentsApplySampling)__commentsApplySnapshot();__commentsApplySampling=false;const samples=__commentsApplySamples,base=samples[0],heights=samples.map(item=>item.height),allowed=Math.max(...heights)-Math.min(...heights);return {samples:samples.length,compact:samples.every(sample=>sample.others.every(item=>item.expanded==='false')),drift:Math.max(...samples.flatMap(sample=>sample.others.map((item,index)=>Math.abs(item.top-base.others[index].top)))),allowed,selectedDrift:Math.max(...samples.map(sample=>Math.abs(sample.top-base.top))),wordsDrift:Math.max(...samples.filter(sample=>Number.isFinite(sample.words)).map(sample=>Math.abs(sample.words-base.words))),paneDrift:Math.max(...samples.map(sample=>Math.abs(sample.pane-base.pane))),relativeDrift:Math.max(...samples.flatMap(sample=>sample.others.map((item,index)=>Math.abs(item.top-sample.top-base.others[index].top+base.top)))),rowHeightDrift:Math.max(...samples.flatMap(sample=>sample.others.map((item,index)=>Math.abs(item.height-base.others[index].height)))),activations:__commentsApplyActivations};})()`);
   check(stable.samples>=2 && stable.compact,'comments-apply-read-state-stable',stable);
   check(stable.rowHeightDrift<=1 && stable.relativeDrift<=stable.allowed+1,'comments-apply-layout-height-bound',stable);
   check(stable.drift<=stable.allowed+stable.wordsDrift+1,'comments-apply-anchor-translation',stable);
@@ -632,4 +641,171 @@ async function commentsHandledFilter(renderer, check, waitFor, indexes) {
   await waitFor(renderer, `__comments.ids.every((id,index)=>{const handled=${JSON.stringify(indexes)}.includes(index);return document.querySelector('[data-comment-card="'+id+'"]')?.hidden===!handled && document.querySelector('.editor-window [data-mark-id="'+id+'"]')?.dataset.markFilteredOut===(handled?undefined:'true');})`, 'comments-handled-cards-and-highlights');
   check(await renderer.evaluate(`(() => {document.querySelector('[data-mark-status-filter="all"]').click();return true;})()`), 'comments-handled-reset');
   await waitFor(renderer, `__comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===false)`, 'comments-handled-all-restored');
+}
+
+// Issue #1523: 上一条 / 下一条待处理 within and beyond the loaded page, keyboard triage (the next card focused, across pages after a
+// key), 接受 on a compact card by pointer, the Book's pending count, docked and as the overlay. Each form seeds five 修改建议 with a
+// public synthetic reason of its own — one on the first page, outside the last page, and four beyond the first page — so with the
+// filter on that reason and on their category every step's target is certain whatever else the Book holds.
+export async function commentsTriageForms(renderer, check, waitFor, at) {
+  const native = await renderer.evaluate('({width:innerWidth,height:innerHeight})');
+  try {
+    for (const [form, size, suffix] of [['column', { width: 1280, height: 800 }, '甲'], ['overlay', { width: 1008, height: 681 }, '乙']]) {
+      at('comments-triage-' + form);
+      await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
+      await waitFor(renderer, `innerWidth===${size.width} && innerHeight===${size.height}`, 'comments-triage-' + form + '-viewport');
+      await commentsTriage(renderer, check, waitFor, form, '跨页待处理' + suffix);
+      check(true, 'comments-triage-' + form + '-complete');
+    }
+  } finally {
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await waitFor(renderer, `innerWidth===${native.width} && innerHeight===${native.height}`, 'comments-triage-viewport-restored');
+  }
+}
+
+const triageCentre = (renderer, selector) => renderer.evaluate(`(() => { const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
+
+async function triageKey(renderer, key, code, windowsVirtualKeyCode, modifiers = 0) {
+  const text = key.length === 1 && modifiers === 0 ? { text: key } : {};
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode, modifiers, ...text });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode, modifiers });
+}
+
+const TRIAGE_FIRST = `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]').dataset.blockId`;
+
+// The seeded card is selected, holds focus and is read: its single keys act now.
+const triageReady = (index) => `(() => { const node=document.querySelector('[data-comment-card="'+__triage.ids[${index}]+'"]'); return node?.dataset.selected==='true' && document.activeElement===node && node.dataset.revalidating==='false' && node.querySelector('[data-mark-card] [data-mark-action="reject"]')?.disabled===false; })()`;
+
+const triageRecord = (renderer, index, expected) => renderer.evaluate(`(async () => {
+  for (let turn = 0; turn < 120; turn++) {
+    const card = await window.ai7.getEditorialMarkCard({manuscriptId:__triage.manuscriptId,branchId:__triage.branchId,markId:__triage.ids[${index}]});
+    if (${JSON.stringify(expected)} === 'applied' ? card.status === 'applied' && card.suggestion.application !== null : card.suggestion.decision?.disposition === 'rejected') return true;
+    await new Promise(done => setTimeout(done, 250));
+  }
+  return false;
+})()`);
+
+async function commentsTriage(renderer, check, waitFor, form, keyword) {
+  await renderer.send('Page.bringToFront');
+  await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+  // Start from the Book's first page, with the caret at its start.
+  check(await renderer.evaluate(`(async () => {
+    const bookId=document.querySelector('.editor-shell').dataset.bookId, work=(await window.ai7.listPriorWork()).find(item=>item.bookId===bookId);
+    const binding={manuscriptId:work.manuscriptId,branchId:work.branchId}, first=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'start'}});
+    globalThis.__triage={...binding,start:first.blocks[0].blockId}; return true;
+  })()`), 'comments-triage-binding');
+  check(await renderer.evaluate(manuscriptRailJump('0')), 'comments-triage-first-page');
+  await waitFor(renderer, `${TRIAGE_FIRST}===__triage.start`, 'comments-triage-first-page-ready', 60_000);
+  check(await renderer.evaluate(`(async () => {
+    const binding={manuscriptId:__triage.manuscriptId,branchId:__triage.branchId};
+    const here=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'window-start',blockId:__triage.start}});
+    const far=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'proportion',proportion:1}});
+    const last=Math.max(...here.blocks.map(block=>block.position)), farFirst=Math.min(...far.blocks.map(block=>block.position));
+    const split=text=>Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(text??''),item=>item.segment);
+    const marks=[...here.marks,...far.marks], ranges=[];
+    const free=(block,from)=>!marks.some(mark=>mark.blockId===block.blockId&&mark.fromGrapheme<from+2&&mark.toGrapheme>from)&&!ranges.some(range=>range.block.blockId===block.blockId&&range.from<from+2&&range.from+2>from);
+    const take=(paragraphs,count)=>{
+      const taken=[];
+      while(taken.length<count){
+        const before=taken.length;
+        for(const block of paragraphs){
+          if(taken.length===count)break;
+          const words=split(block.text);
+          for(let from=1;from+2<=words.length;from++)if(free(block,from)){const range={block,from,text:words.slice(from,from+2).join('')};ranges.push(range);taken.push(range);break;}
+        }
+        if(taken.length===before)return null;
+      }
+      return taken.sort((a,b)=>a.block.position-b.block.position||a.from-b.from);
+    };
+    const paragraph=block=>block.kind==='paragraph'&&split(block.text).length>=8;
+    const onFirst=take(here.blocks.filter(block=>paragraph(block)&&block.position<farFirst),1), beyond=take(far.blocks.filter(block=>paragraph(block)&&block.position>last),4);
+    if(!onFirst||!beyond)return false;
+    const ids=[];
+    for(const range of [...onFirst,...beyond]){
+      const page=range.block.position<farFirst?here:far;
+      const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:page.blocks[0].blockId,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:range.block.blockId,baseBlockDigest:range.block.digest,fromGrapheme:range.from,toGrapheme:range.from+2,selectedText:range.text,kind:'change-suggestion',highlightColor:null,body:'',proposedText:'合成',rationale:'公开合成'+${JSON.stringify(keyword)}});
+      ids.push(result.markId);
+    }
+    __triage.ids=ids; return true;
+  })()`), 'comments-triage-seed');
+  // The manuscript opens again on the first page and reads the Book's pending list anew.
+  check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('overview'))), 'comments-triage-reload-overview');
+  await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'comments-triage-overview-ready');
+  check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('manuscript'))), 'comments-triage-reload-manuscript');
+  await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]') && ${TRIAGE_FIRST}===__triage.start`, 'comments-triage-editor-ready');
+  if (!(await renderer.evaluate(`document.querySelector('[data-edge-entry="comments"]').getAttribute('aria-expanded')==='true'`))) {
+    check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-edge-entry="comments"]'))).real, 'comments-triage-open-pane');
+  }
+  await waitFor(renderer, `document.querySelector('.manuscript-comments-pane')?.hidden===false && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position===${JSON.stringify(form === 'overlay' ? 'absolute' : 'static')}`, 'comments-triage-pane-' + form);
+  // The header and the 批注 badge count the Book's pending marks: the service's own list of them, cut off at 2000.
+  const bookCount = (least) => renderer.evaluate(`(async () => {
+    for (let turn = 0; turn < 120; turn++) {
+      const rail=await window.ai7.getManuscriptRail({manuscriptId:__triage.manuscriptId,branchId:__triage.branchId}), want=rail.marks.length+(rail.marksTruncated?'+':'');
+      const badge=document.querySelector('[data-edge-entry="comments"] .edge-badge');
+      if (document.querySelector('[data-comments-book-pending]')?.textContent==='全书待处理 '+want && badge?.dataset.count===want && badge.hidden===(rail.marks.length===0) && rail.marks.length>=${least}) return true;
+      await new Promise(done => setTimeout(done, 250));
+    }
+    return false;
+  })()`);
+  check(await bookCount(5), 'comments-triage-book-count');
+  // The filter: the seeds' category and their reason, with real clicks and typing.
+  const isOpen = `document.querySelector('.editorial-mark-filter-popover').matches(':popover-open')`;
+  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-filter-toggle]'))).real, 'comments-triage-filter-open');
+  await waitFor(renderer, isOpen, 'comments-triage-filter-opened');
+  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-category-filter="editor"]'))).real, 'comments-triage-category-click');
+  await waitFor(renderer, `document.querySelector('[data-mark-category-filter="editor"]').getAttribute('aria-pressed')==='true'`, 'comments-triage-category-on');
+  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-search-input]'))).real, 'comments-triage-search-click');
+  await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-search-input]')`, 'comments-triage-search-focused');
+  await renderer.send('Input.insertText', { text: keyword });
+  await waitFor(renderer, `document.querySelector('[data-mark-search-input]').value===${JSON.stringify(keyword)}`, 'comments-triage-keyword');
+  await triageKey(renderer, 'Escape', 'Escape', 27);
+  await waitFor(renderer, `!(${isOpen})`, 'comments-triage-filter-closed');
+  const nextClick = async (name) => check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-pending-step="next"]'))).real, name);
+  // 下一条待处理 on the page, then across it; the card there stays selected once read.
+  await nextClick('comments-triage-next-click');
+  await waitFor(renderer, `${triageReady(0)} && ${TRIAGE_FIRST}===__triage.start`, 'comments-triage-next-on-page', 60_000);
+  await nextClick('comments-triage-cross-click');
+  await waitFor(renderer, `${TRIAGE_FIRST}!==__triage.start && ${triageReady(1)}`, 'comments-triage-crossed-selected', 60_000);
+  check(await renderer.evaluate(`(async () => { await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); await new Promise(done=>setTimeout(done,400)); return ${triageReady(1)}; })()`), 'comments-triage-crossed-stays-selected');
+  // 上一条待处理 (Alt+↑) goes back across the page to the first seed.
+  await triageKey(renderer, 'ArrowUp', 'ArrowUp', 38, 1);
+  await waitFor(renderer, `${TRIAGE_FIRST}===__triage.start && ${triageReady(0)}`, 'comments-triage-previous-crossed', 60_000);
+  // Keyboard only: R on the page's last match walks on across the page; A and R then decide the next two, each next card focused.
+  await triageKey(renderer, 'r', 'KeyR', 82);
+  await waitFor(renderer, `${TRIAGE_FIRST}!==__triage.start && ${triageReady(1)}`, 'comments-triage-key-reject-crossed', 60_000);
+  check(await triageRecord(renderer, 0, 'rejected'), 'comments-triage-key-reject-recorded');
+  await triageKey(renderer, 'a', 'KeyA', 65);
+  await waitFor(renderer, triageReady(2), 'comments-triage-key-accept-next', 60_000);
+  check(await triageRecord(renderer, 1, 'applied'), 'comments-triage-key-accept-applied');
+  await triageKey(renderer, 'r', 'KeyR', 82);
+  await waitFor(renderer, triageReady(3), 'comments-triage-key-reject-next', 60_000);
+  check(await triageRecord(renderer, 2, 'rejected'), 'comments-triage-key-second-reject-recorded');
+  // 接受 on the last seed's compact card, by pointer: hovered, its controls stand beside the preview, never over it.
+  check(await renderer.evaluate(`(() => { document.querySelector('.editor-window [data-mark-id="'+__triage.ids[4]+'"]').scrollIntoView({block:'center',behavior:'instant'}); return true; })()`), 'comments-triage-quick-reveal');
+  await waitFor(renderer, `(() => { const node=document.querySelector('[data-comment-card="'+__triage.ids[4]+'"]'); if(!node||node.hidden||node.dataset.expanded!=='false'||node.dataset.revalidating!=='false')return false; const r=node.getBoundingClientRect(),p=document.querySelector('.manuscript-comments-scroll').getBoundingClientRect(); if(r.top<p.top||r.bottom>p.bottom){node.scrollIntoView({block:'center',behavior:'instant'});return false;} return node.contains(document.elementFromPoint(r.left+12,r.bottom-8)); })()`, 'comments-triage-quick-card-ready', 60_000);
+  const hover = await renderer.evaluate(`(() => { const r=document.querySelector('[data-comment-card="'+__triage.ids[4]+'"] .editorial-mark-compact-preview').getBoundingClientRect(); return {x:r.left+12,y:r.top+r.height/2}; })()`);
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hover.x, y: hover.y, buttons: 0 });
+  await waitFor(renderer, `(() => {
+    const node=document.querySelector('[data-comment-card="'+__triage.ids[4]+'"]'), preview=node.querySelector('.editorial-mark-compact-preview').getBoundingClientRect();
+    const buttons=Array.from(node.querySelectorAll('[data-mark-quick]')).map(button=>({button,r:button.getBoundingClientRect()}));
+    const apart=(a,b)=>a.right<=b.left||b.right<=a.left||a.bottom<=b.top||b.bottom<=a.top;
+    return buttons.length===2 && buttons.every(({button,r})=>r.width>0&&r.height>0&&apart(r,preview)&&button.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))) && preview.width>0 && node.dataset.expanded==='false';
+  })()`, 'comments-triage-quick-beside-text');
+  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-comment-card="' + await renderer.evaluate('__triage.ids[4]') + '"] [data-mark-quick="accept"]'))).real, 'comments-triage-quick-accept-click');
+  check(await triageRecord(renderer, 4, 'applied'), 'comments-triage-quick-accept-applied');
+  // A pointer decision at the Book's end: the card stays, nothing moves, and that there is nothing further is said.
+  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('按当前筛选，后面没有待处理的了') && document.querySelector('[data-comment-card="'+__triage.ids[4]+'"]')?.dataset.selected==='true' && ${TRIAGE_FIRST}!==__triage.start`, 'comments-triage-book-end', 60_000);
+  check(await bookCount(0), 'comments-triage-book-count-after');
+  // Back to all marks, with real input: 全部, then the search field emptied.
+  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-filter-toggle]'))).real, 'comments-triage-reset-open');
+  await waitFor(renderer, isOpen, 'comments-triage-reset-opened');
+  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-category-filter="all"]'))).real, 'comments-triage-reset-category');
+  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-search-input]'))).real, 'comments-triage-reset-search-click');
+  await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-search-input]')`, 'comments-triage-reset-search-focused');
+  await triageKey(renderer, 'a', 'KeyA', 65, 2);
+  await triageKey(renderer, 'Backspace', 'Backspace', 8);
+  await triageKey(renderer, 'Escape', 'Escape', 27);
+  await waitFor(renderer, `!(${isOpen}) && document.querySelector('[data-mark-search-input]').value==='' && document.querySelector('[data-mark-category-filter="all"]').getAttribute('aria-pressed')==='true' && document.querySelector('[data-mark-filter-toggle]').textContent==='筛选'`, 'comments-triage-filter-reset');
+  check(await renderer.evaluate(manuscriptRailJump('0')), 'comments-triage-return');
+  await waitFor(renderer, `${TRIAGE_FIRST}===__triage.start`, 'comments-triage-returned', 60_000);
 }

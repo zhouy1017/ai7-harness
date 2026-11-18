@@ -1,5 +1,5 @@
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
-import { commentsPaneForms, commentsSelectMark } from './comments-pane.mjs';
+import { commentsPaneForms, commentsSelectMark, commentsTriageForms } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { existsSync } from 'node:fs';
@@ -1192,7 +1192,7 @@ async function main() {
         await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled' && document.querySelectorAll('article.review-finding[data-status="pending"]').length>=3`, 'review-triage-findings');
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
         await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-triage-filter');
-        await press(renderer,'N',10);
+        await press(renderer,'ArrowDown',1);
         for (const key of ['r','a','r']) {
           const id=await renderer.evaluate(`document.activeElement?.closest('article.review-finding')?.dataset.findingId??null`);
           requireJourney(id!==null,'review-keyboard-focused');
@@ -1211,6 +1211,7 @@ async function main() {
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
     await commentsPaneForms(renderer, requireJourney, waitFor, at, 'apply');
+    await commentsTriageForms(renderer, requireJourney, waitFor, at);
 
     at('editor-revision');
     // Inline revision editing (#1428): ordinary input creates cards after settle, with automatic application or pending redlines.
