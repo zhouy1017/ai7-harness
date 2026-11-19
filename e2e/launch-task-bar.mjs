@@ -66,6 +66,15 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
     for (const [width, height] of [[1280, 800], [1008, 681]]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       const options = `${root} .task-launch-options`;
+      // Below 1120 px the Task Drawer overlays the page: a drawer left open beside it at a wider window now lies over a page bar's
+      // 选项, and the editor closes it first (as J-04's startUpdate does for the history tab).
+      const drawerCovers = `(() => { const summary=document.querySelector(${JSON.stringify(options + ' > summary')}); if(!summary||summary.closest('#task-drawer'))return false;
+        summary.scrollIntoView({block:'center',behavior:'instant'}); const r=summary.getBoundingClientRect(), hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+        return !summary.contains(hit) && !!document.querySelector('#task-drawer:not([hidden])')?.contains(hit); })()`;
+      if (await renderer.evaluate(drawerCovers)) {
+        await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close-${width}`);
+        await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `${name}-drawer-closed-${width}`);
+      }
       if (!(await renderer.evaluate(`document.querySelector(${JSON.stringify(options)})?.open===true`))) await pointerClick(renderer, waitFor, `${options} > summary`, `${name}-options-${width}`);
       // The popover shows on the details' toggle task and is placed again once its content has a size: wait for both.
       await waitFor(renderer, popoverShownInside(`document.querySelector(${JSON.stringify(options + ' .task-launch-popover')})`), `${name}-options-reachable-${width}`);
