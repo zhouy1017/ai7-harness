@@ -1,5 +1,6 @@
 import type { TaskLaunchRequest } from './task-drawer.js';
 import { localDayLabel } from '../shared/report-wording.js';
+import { serviceWords } from './service-wording.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { filterChoices, menuPanel, stateTerm } from './components/controls.js';
 import { identityWords, technicalWords } from './technical-layer.js';
@@ -543,7 +544,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     preview.classList.add('text-link');
     start.disabled = preview.disabled = busy || !canStart;
     row.append(start, preview);
-    if (!canStart && !initial.prepare.allowed) section.append(el('p', 'evaluation-initial-reason', initial.prepare.reason));
+    if (!canStart && !initial.prepare.allowed) section.append(el('p', 'evaluation-initial-reason', serviceWords(initial.prepare.reason)));
     if (task !== null && task.state !== 'prepared') {
       const open = action(EVALUATION_AI7_OPEN_TASK, 'quiet', 'open-initial-task', () => options.openPlan(task.taskIntentId));
       open.disabled = busy;
@@ -800,7 +801,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         prepare.disabled = plan.disabled = busy;
         row.append(prepare, plan);
       } else {
-        heading.append(' · ', el('span', 'evaluation-rewrite-reason', rewrite.prepare.reason));
+        heading.append(' · ', el('span', 'evaluation-rewrite-reason', serviceWords(rewrite.prepare.reason)));
       }
       if (task !== null) {
         const open = action(EVALUATION_REWRITE_ACTIONS.openTask, 'quiet', 'open-rewrite-task', () => options.openRewritePlan(task.taskIntentId));

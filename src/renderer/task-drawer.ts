@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import { LEDGER_TASK_LAUNCH_KINDS } from '../shared/runtime-execution-config.js';
 import { mountLaunchBar, type LaunchBar, type TaskLaunchOperation, type TaskLaunchRequest } from './components/launch-bar.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
@@ -841,7 +842,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     pill.dataset['pillTone'] = tone.tone;
     pill.dataset['pillShape'] = tone.shape;
     pill.dataset['busy'] = String(['running', 'pausing', 'cancelling'].includes(next.state.key));
-    pill.textContent = next.runOutcome?.label ?? next.state.label;
+    pill.textContent = serviceWords(next.runOutcome?.label ?? next.state.label);
     const active = document.activeElement;
     const restore = active instanceof HTMLElement && (body.contains(active) || bar.contains(active)) ? active.dataset['taskDrawerControl'] ?? null : null;
     paintQuestions(next);
@@ -1480,7 +1481,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       status.tabIndex = -1;
       parts.push(status);
     } else if (technicalLayerVisible) {
-      const state = el('span', 'state-term task-bar-state', next.state.label);
+      const state = el('span', 'state-term task-bar-state', serviceWords(next.state.label));
       state.dataset['pillTone'] = TASK_PLAN_STATE_PILLS[next.state.key].tone;
       parts.push(state);
     }

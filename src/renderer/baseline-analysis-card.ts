@@ -904,7 +904,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       element('dt', undefined, '当前稿件摘要'), element('dd', 'technical-identity', controls.working.workingDigest),
     ));
     if (controls.blockedReason !== null) {
-      section.append(element('p', 'attention-note', controls.blockedReason));
+      section.append(element('p', 'attention-note', serviceWords(controls.blockedReason)));
       if (analysisUpdateBlockedDrawerAction(controls.blockedReason) === 'task-drawer') {
         const openDrawer = button(ANALYSIS_UPDATE_BLOCKED_DRAWER_LABEL, 'secondary', () => openTaskPlan(projection.bookId, 'baseline-analysis', projection.taskIntent?.taskIntentId ?? null));
         openDrawer.dataset['analysisUpdateBlockedLink'] = 'task-drawer';
@@ -934,7 +934,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       if (technicalLayerVisible) block.append(expected, technicalDetails('analysis-facts',
         element('dt', undefined, '预期单元血缘'), expectedExact,
         element('dt', undefined, technicalWords('固定任务目标')), element('dd', 'technical-identity', action.goal)));
-      if (action.unavailableReason !== null) block.append(element('p', 'attention-note', action.unavailableReason));
+      if (action.unavailableReason !== null) block.append(element('p', 'attention-note', serviceWords(action.unavailableReason)));
       let selectedRange: BaselineAnalysisSelectedRange | null = null;
       if (mode === 'reanalyze-range') {
         const fieldset = element('fieldset', 'analysis-range-options');

@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import { findTerms, maskSource, scanSource, scanTargets } from '../../tools/words-report.mjs';
 import { houseAnnotationDetail } from '../../src/shared/protocol/house-word-list.js';
 import { houseAnnotationWords, markDisplayNote } from '../../src/renderer/editorial-mark-labels.js';
-import { ordinaryServiceWords, serviceWords } from '../../src/renderer/service-wording.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 
 // Issue #1531 (plan #1516 §5): the vocabulary report of #1546 as a failing test. Every ordinary-mode sentence of the renderer
@@ -30,11 +29,10 @@ const DEVELOPER_LITERALS: ReadonlyArray<{ readonly file: string; readonly litera
   { file: 'src/renderer/manuscript-export.ts', literal: "replaceAll('修订建议'", why: 'the service word the restoration line is rewritten from, where it is displayed' },
 ];
 
-/** The service modules whose sentences the renderer shows: each literal is checked as `serviceWords` displays it. */
-const SERVICE_MODULES = [
-  'src/service/task-plan.ts', 'src/service/task-overview.ts', 'src/service/bounded-manuscript.ts', 'src/service/review/review-run-state.ts',
-  'src/service/book-delivery-packages.ts', 'src/service/background-analysis-enrollments.ts', 'src/service/book-findings.ts', 'src/service/analysis/run-state.ts',
-];
+// The service-authored sentences are checked rule by rule in tests/unit/service-wording.test.ts (review N3). Their module
+// holds the service's sentences as the service writes them — the text each rule rewords from — so the scan here reads
+// every renderer module but that one; the other test proves every rule's words hold no banned term.
+const SERVICE_SENTENCES_MODULE = 'src/renderer/service-wording.ts';
 
 const read = (file: string): string => readFileSync(file, 'utf8');
 
@@ -43,16 +41,12 @@ function bannedSpans(source: string): Span[] {
   return (findTerms(maskSource(source).text) as Span[]).filter((span) => span.kind === 'banned');
 }
 
-/** The literals of one source file as the scan sees them: runs of string text between code. */
-function literals(source: string): string[] {
-  return maskSource(source).text.split(/\s{3,}|\n/u).map((text: string) => text.trim()).filter((text: string) => /[㐀-鿿]/u.test(text));
-}
-
 /** One-argument technicalWords inside a template that leaves an empty bracket, a doubled or a dangling separator. */
 function holes(source: string): string[] {
   const found: string[] = [];
   for (const line of source.split(/\r?\n/u)) {
-    for (const match of line.matchAll(/\$\{technicalWords\(`([^`]*)`\)\}/gu)) {
+    // The argument in any quote (review N10): `${technicalWords('…')}` leaves the same hole as a template argument.
+    for (const match of line.matchAll(/\$\{technicalWords\((?:`[^`]*`|'[^']*'|"[^"]*")\)\}/gu)) {
       const before = line.slice(0, match.index); const after = line.slice(match.index + match[0].length);
       const open = before.lastIndexOf('`');
       if (open < 0) continue;
@@ -77,7 +71,7 @@ describe('ordinary-mode words follow the one table (plan #1516 §5)', () => {
 
   it('finds no banned term outside the technical argument of technicalWords, but in the named developer-only literals', () => {
     const used = new Set<string>();
-    const hits = results.flatMap(({ file }) => {
+    const hits = results.filter(({ file }) => file !== SERVICE_SENTENCES_MODULE).flatMap(({ file }) => {
       const source = read(file);
       const exempt = DEVELOPER_LITERALS.filter((entry) => entry.file === file).flatMap((entry) =>
         [...source.matchAll(new RegExp(entry.literal.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'gu'))].map((match) => ({ entry, start: match.index, end: match.index + entry.literal.length })));
@@ -97,20 +91,7 @@ describe('ordinary-mode words follow the one table (plan #1516 §5)', () => {
     expect(holes('const a = `《${t}》${technicalWords(`第 2 版`)} · 已启用`;')).toEqual([]);
     expect(holes('const a = `「${technicalWords(`r1`)}」 · 已启用`;')).toHaveLength(1);
     expect(holes('const a = `甲 · ${technicalWords(`r1`)} · 乙`;')).toHaveLength(1);
-  });
-
-  it('reads every service-authored sentence of the modules the renderer shows in the table\'s words, as serviceWords displays it', () => {
-    const hits = SERVICE_MODULES.flatMap((file) => literals(read(file)).flatMap((text) =>
-      (findTerms(ordinaryServiceWords(text)) as Span[]).filter((span) => span.kind === 'banned')
-        .map((span) => `${file}: ${span.found} in 「${text.slice(0, 40)}」`)));
-    expect(hits).toEqual([]);
-    try {
-      setTechnicalLayerVisible(true);
-      expect(serviceWords('已读完 3 / 8 个阅读范围；续行时从第 4 个接着读')).toBe('已读完 3 / 8 个阅读范围；续行时从第 4 个接着读');
-      setTechnicalLayerVisible(false);
-      expect(serviceWords('已读完 3 / 8 个阅读范围；续行时从第 4 个阅读范围接着读')).toBe('已读完 3 / 8 个部分；继续时从正文第 4 部分接着读');
-      expect(serviceWords('等待运行名额')).toBe('排队中');
-    } finally { setTechnicalLayerVisible(false); }
+    expect(holes("const a = `甲 · ${technicalWords('r1')} · 乙`;")).toHaveLength(1);
   });
 
   it('reads a review annotation from 本社词表 by that one name on every list, and leaves the record as it is', () => {

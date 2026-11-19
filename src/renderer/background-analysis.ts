@@ -1,5 +1,5 @@
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
-import { serviceWordsDeep } from './service-wording.js';
+import { serviceWords } from './service-wording.js';
 import type { BackgroundAnalysisEnrollmentProjection, BackgroundAnalysisScopeOffer, BackgroundAnalysisStartingPoint, RendererApi } from '../shared/protocol.js';
 import { BACKGROUND_ANALYSIS_CEILING_MAX } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
@@ -152,8 +152,21 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
   };
 
   const draw = (recorded: BackgroundAnalysisEnrollmentProjection): void => {
-    // The service's reasons and labels read in the table's words in ordinary mode (Issue #1531); the request fields carry no words.
-    const projection = serviceWordsDeep(recorded);
+    // The service's own sentences read in the table's words in ordinary mode (Issue #1531, review N1), field by field: the
+    // Book's title, the scope and Series labels, the binds the form checks by label and every id stay as they are.
+    const projection: BackgroundAnalysisEnrollmentProjection = { ...recorded, stateLabel: serviceWords(recorded.stateLabel), statement: serviceWords(recorded.statement),
+      next: { ...recorded.next, reason: serviceWords(recorded.next.reason) },
+      lastLook: recorded.lastLook === null ? null : { ...recorded.lastLook, reason: serviceWords(recorded.lastLook.reason) },
+      lastNotStarted: recorded.lastNotStarted === null ? null : { ...recorded.lastNotStarted, reason: serviceWords(recorded.lastNotStarted.reason) },
+      ...(recorded.kinds === undefined ? {} : { kinds: recorded.kinds.map((kind) => ({ ...kind, reason: serviceWords(kind.reason) })) }),
+      offer: { ...recorded.offer, reason: serviceWords(recorded.offer.reason), what: serviceWords(recorded.offer.what), when: serviceWords(recorded.offer.when),
+        notGranted: recorded.offer.notGranted.map((line) => serviceWords(line)),
+        binds: recorded.offer.binds.map((entry) => ({ ...entry, value: serviceWords(entry.value) })),
+        startingPoints: recorded.offer.startingPoints.map((point) => ({ ...point, label: serviceWords(point.label), note: serviceWords(point.note) })) },
+      enrollment: recorded.enrollment === null ? null : { ...recorded.enrollment, startingPointLabel: serviceWords(recorded.enrollment.startingPointLabel) },
+      history: recorded.history.map((entry) => ({ ...entry, stateLabel: serviceWords(entry.stateLabel) })),
+      startedRuns: recorded.startedRuns.map((run) => ({ ...run, modeLabel: serviceWords(run.modeLabel) })),
+      revoke: { ...recorded.revoke, consequences: recorded.revoke.consequences.map((line) => serviceWords(line)) } };
     const startedBefore = last?.startedRunCount ?? null;
     last = projection;
     if (startedBefore !== null && projection.startedRunCount > startedBefore) options.onRunStarted();

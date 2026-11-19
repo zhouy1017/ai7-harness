@@ -2429,7 +2429,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       tr.dataset['reviewCategory'] = row.categoryId;
       const name = el('th', undefined, row.label);
       name.scope = 'row';
-      const state = el('td', undefined, row.stateLabel);
+      const state = el('td', undefined, serviceWords(row.stateLabel));
       state.dataset['label'] = REVIEW_REPORT_OVERVIEW_COLUMNS[1];
       const counts = el('td', undefined, reviewCountsLine(row.counts));
       counts.dataset['label'] = REVIEW_REPORT_OVERVIEW_COLUMNS[2];

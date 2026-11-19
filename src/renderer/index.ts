@@ -443,7 +443,7 @@ async function prepareSelectionReview(
 /** What a quick start that started its Task says: a start the launch has no route for is recorded and blocked before dispatch. */
 function quickStartStartedLine(rule: DefaultExecutionRuleReference, projection: BaselineAnalysisProjection): string {
   return projection.state === 'authorized-blocked'
-    ? `已按默认执行规则「${rule.name}」记下这项任务；现在没有可用的模型服务，没有开始。`
+    ? `已按默认执行规则「${rule.name}」记下这项任务；${technicalWords('当前启动没有可执行的路由，派发前已阻止', '现在没有可用的模型服务，没有开始')}。`
     : `已按默认执行规则「${rule.name}」开始任务。`;
 }
 
