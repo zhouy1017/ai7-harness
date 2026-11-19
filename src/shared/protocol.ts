@@ -382,8 +382,9 @@ export * from './protocol/scoped-edit.js';
  * Schema 116 (PR #1503's in-place 115 -> 116 migration) and Data Version 1
  * remain separate compatibility identities; closure adds no migration.
  *
- * Protocol 205 (#1517 R4, 0.7.3): PR for #1506 adds generateReviewSynthesis (生成统合总结 for a settled Review
- * Run) and optional modelLabel, canGenerate and runChoice on ReviewSynthesisProjection.
+ * Protocol 205 (#1517 R4 closure, 0.7.3): PR #1595 (#1506) adds generateReviewSynthesis (生成统合总结 for a settled
+ * Review Run) and optional modelLabel, canGenerate and runChoice on ReviewSynthesisProjection. It is the round's one
+ * protocol change. Schema 116 and Data Version 1 are unchanged; closure adds no migration.
  *
  * Protocol 203 (#1472 R2 closure, 0.7.1): PR #1478 adds reasoning effort to role
  * selection inputs and settings projections. PR #1487 adds launchReviewRun, optional
