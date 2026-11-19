@@ -60,12 +60,16 @@ function workspace(rows: number, version = 1, state: 'partial' | 'running' = 'pa
 let restoreDom: () => void;
 let surfaces: ReviewWorkspaceSurface[];
 let frames: Array<() => void>;
+let windowListeners: Map<string, Array<() => void>>;
 const nextFrame = (): void => { const due = frames.splice(0); for (const frame of due) frame(); };
 beforeEach(() => {
   restoreDom = installMiniDom();
   surfaces = [];
   frames = [];
-  vi.stubGlobal('window', { setTimeout, clearTimeout, getSelection: () => null, requestAnimationFrame: (callback: () => void) => { frames.push(callback); return frames.length; } });
+  windowListeners = new Map();
+  vi.stubGlobal('window', { setTimeout, clearTimeout, getSelection: () => null, requestAnimationFrame: (callback: () => void) => { frames.push(callback); return frames.length; },
+    addEventListener: (type: string, listener: () => void) => { windowListeners.set(type, [...(windowListeners.get(type) ?? []), listener]); },
+    removeEventListener: (type: string, listener: () => void) => { windowListeners.set(type, (windowListeners.get(type) ?? []).filter((entry) => entry !== listener)); } });
   Object.defineProperty(MiniElement.prototype, 'options', { configurable: true, get(this: MiniElement) { return this.querySelectorAll('option'); } });
   vi.stubGlobal('Option', class extends MiniElement { constructor(text: string, value: string) { super('option'); this.textContent = text; this.value = value; } });
   Object.defineProperty(MiniElement.prototype, 'prepend', { configurable: true, value(this: MiniElement, ...nodes: MiniElement[]) {
@@ -92,13 +96,15 @@ const refusal = (code: string, message: string): Error & { code: string } => Obj
  * The service's own paging, at a budget that forces it: `inspectReviewWorkspace` answers `reviewWorkspaceWire(full)` and
  * `getTaskPlanPage` answers `reviewWorkspacePage(full, …)`, so a page of a list that changed meanwhile is refused by digest.
  */
-type Stub = { full: ReviewWorkspaceProjection; budget: number; refuse?: Error | null; gate?: Promise<void> | null };
+type Stub = { full: ReviewWorkspaceProjection; budget: number; refuse?: Error | null; gate?: Promise<void> | null;
+  read?: (input: Parameters<RendererApi['inspectReviewWorkspace']>[0]) => Promise<ReviewWorkspaceProjection>; focusFinding?: string; opened?: string[] };
 
 function mount(state: Stub, status: StatusSetter = Object.assign(vi.fn(), { settle: vi.fn() })) {
   const root = new MiniElement('main');
   miniDocument.body.append(root);
-  const inspectReviewWorkspace = vi.fn<RendererApi['inspectReviewWorkspace']>().mockImplementation(async () => {
+  const inspectReviewWorkspace = vi.fn<RendererApi['inspectReviewWorkspace']>().mockImplementation(async (input) => {
     if (state.refuse) throw state.refuse;
+    if (state.read) return state.read(input);
     return reviewWorkspaceWire(structuredClone(state.full), state.budget);
   });
   // A page is computed from the list as it stood when it was asked, and answered when the gate opens.
@@ -116,11 +122,11 @@ function mount(state: Stub, status: StatusSetter = Object.assign(vi.fn(), { sett
   const unexpected = vi.fn(async () => { throw new Error('unexpected API operation'); });
   const calls = { inspectReviewWorkspace, getTaskPlanPage, inspectFactualVerification };
   const api = new Proxy(calls, { get: (target, key) => Reflect.get(target, key) ?? unexpected }) as unknown as MountReviewWorkspaceOptions['api'];
-  const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: { reviewRunId: RUN, findingId: null }, api,
+  const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: { reviewRunId: RUN, findingId: state.focusFinding ?? null }, api,
     awaitServiceJob: async (initial) => initial,
     technicalDetails: (_className, ...rows) => { const node = new MiniElement('dl'); node.append(...rows as unknown as MiniElement[]); return technicalDisclosure(node as unknown as HTMLElement); },
     setStatus: status, errorMessage: (error, fallback) => (error as { message?: string })?.message || fallback, errorCode: (error) => (error as { code?: string })?.code ?? null,
-    openManuscript: async () => undefined, goToText: async () => undefined, openPlan: () => undefined, openSearchSettings: () => undefined, planChanged: () => undefined });
+    openManuscript: async () => undefined, goToText: async () => undefined, openPlan: (reviewRunId) => { state.opened?.push(reviewRunId); }, openSearchSettings: () => undefined, planChanged: () => undefined });
   surfaces.push(surface);
   surface.start();
   return { root, surface, api, status: status as StatusSetter & ReturnType<typeof vi.fn>, unexpected, ...calls };
@@ -434,49 +440,153 @@ describe('重新读取 after the bar was dismissed (#1592 re-check)', () => {
   });
 });
 
-describe('a press on the running card while a read arrives (#1592: 查看计划 lost under the pointer)', () => {
-  it('keeps the pressed control until its click, then draws the read that arrived meanwhile', async () => {
-    const state: Stub = { full: workspace(3, 1, 'running'), budget: 4 * 1024 * 1024 };
+describe('a press on the review card while a read arrives (#1592: 查看计划 lost under the pointer)', () => {
+  const MOVED = '正在审阅 · 已读完一半';
+  const running = (): Stub => ({ full: workspace(3, 1, 'running'), budget: 4 * 1024 * 1024, opened: [] });
+  const moved = (state: Stub, label = MOVED): void => { state.full = { ...state.full, run: { ...state.full.run!, stateLabel: label, findingsTotal: 2 } }; };
+  const viewPlan = (root: MiniElement): MiniElement => root.querySelector('[data-review-action="view-plan"]')!;
+  const pointer = (node: MiniElement, type: string, button = 0): void => { node.dispatchEvent(Object.assign({ type, bubbles: true }, { button })); };
+  const key = (node: MiniElement, type: string, name = ' '): void => { node.dispatchEvent(Object.assign({ type, bubbles: true }, { key: name })); };
+  const shown = (root: MiniElement): string => card(root).textContent;
+
+  it('keeps the pressed control until its click, then draws the read that arrived meanwhile, once', async () => {
+    const state = running();
     const view = mount(state); await flush();
-    const opened: string[] = [];
-    view.surface.destroy();
-    // The same surface, with a plan opener that records what it opened.
-    const root = new MiniElement('main');
-    miniDocument.body.append(root);
-    const status = Object.assign(vi.fn(), { settle: vi.fn() });
-    const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: { reviewRunId: RUN, findingId: null },
-      api: new Proxy({ inspectReviewWorkspace: view.inspectReviewWorkspace, getTaskPlanPage: view.getTaskPlanPage, inspectFactualVerification: view.inspectFactualVerification },
-        { get: (target, key) => Reflect.get(target, key) ?? view.unexpected }) as unknown as MountReviewWorkspaceOptions['api'],
-      awaitServiceJob: async (initial) => initial,
-      technicalDetails: (_className, ...rows) => { const node = new MiniElement('dl'); node.append(...rows as unknown as MiniElement[]); return technicalDisclosure(node as unknown as HTMLElement); },
-      setStatus: status, errorMessage: (_error, fallback) => fallback, errorCode: () => null, openManuscript: async () => undefined, goToText: async () => undefined,
-      openPlan: (reviewRunId) => { opened.push(reviewRunId); }, openSearchSettings: () => undefined, planChanged: () => undefined });
-    surfaces.push(surface);
-    surface.start(); await flush();
-    const pressed = root.querySelector('[data-review-action="view-plan"]')!;
-    pressed.dispatchEvent(Object.assign({ type: 'pointerdown', bubbles: true }, { button: 0 }));
-    // A poll answers while the button is down: the Run moved on (its label and counts changed), so the card would be drawn again.
-    state.full = { ...state.full, run: { ...state.full.run!, stateLabel: '正在审阅 · 已读完一半', findingsTotal: 2 } };
-    surface.refresh(); await flush();
-    expect(root.querySelector('[data-review-action="view-plan"]')).toBe(pressed);
-    expect(root.querySelector('.review-workspace-card')!.textContent).not.toContain('已读完一半');
-    pressed.dispatchEvent(Object.assign({ type: 'pointerup', bubbles: true }, { button: 0 }));
+    const pressed = viewPlan(view.root);
+    pointer(pressed, 'pointerdown');
+    // Two reads answer while the button is down: the Run moved on, so each would draw the card again.
+    moved(state, '正在审阅 · 第一次');
+    view.surface.refresh(); await flush();
+    moved(state);
+    view.surface.refresh(); await flush();
+    expect(viewPlan(view.root)).toBe(pressed);
+    expect(shown(view.root)).not.toContain('第一次');
+    expect(shown(view.root)).not.toContain(MOVED);
+    pointer(pressed, 'pointerup');
     pressed.click(); await flush();
-    expect(opened).toEqual([RUN]);
-    // The frame after the release draws the held read; the button is a new one and the press acted once.
-    expect(root.querySelector('[data-review-action="view-plan"]')).toBe(pressed);
+    expect(state.opened).toEqual([RUN]);
+    // Until the frame after the release the pressed button is still the one on screen; that frame draws the newest read, once.
+    expect(viewPlan(view.root)).toBe(pressed);
+    expect(frames).toHaveLength(1);
     nextFrame(); await flush();
-    expect(root.querySelector('.review-workspace-card')!.textContent).toContain('已读完一半');
-    expect(root.querySelector('[data-review-action="view-plan"]')).not.toBe(pressed);
-    expect(opened).toEqual([RUN]);
+    expect(shown(view.root)).toContain(MOVED);
+    expect(shown(view.root)).not.toContain('第一次');
+    expect(viewPlan(view.root)).not.toBe(pressed);
+    expect(state.opened).toEqual([RUN]);
   });
 
-  it('draws a read at once when no press is down', async () => {
-    const state: Stub = { full: workspace(3, 1, 'running'), budget: 4 * 1024 * 1024 };
+  it('holds through the unforced poll of a running Run as well', async () => {
+    const state = running();
     const view = mount(state); await flush();
-    state.full = { ...state.full, run: { ...state.full.run!, stateLabel: '正在审阅 · 已读完一半', findingsTotal: 2 } };
+    const pressed = viewPlan(view.root);
+    pointer(pressed, 'pointerdown');
+    moved(state);
+    const reads = view.inspectReviewWorkspace.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 300)); await flush();
+    expect(view.inspectReviewWorkspace.mock.calls.length).toBeGreaterThan(reads);
+    expect(viewPlan(view.root)).toBe(pressed);
+    pointer(pressed, 'pointerup'); nextFrame(); await flush();
+    expect(shown(view.root)).toContain(MOVED);
+  });
+
+  it('ends the hold on a release outside the card, a cancelled press and the window losing focus', async () => {
+    for (const end of ['outside', 'cancel', 'blur'] as const) {
+      const state = running();
+      const view = mount(state); await flush();
+      pointer(viewPlan(view.root), 'pointerdown');
+      moved(state);
+      view.surface.refresh(); await flush();
+      expect(shown(view.root), end).not.toContain(MOVED);
+      if (end === 'outside') pointer(miniDocument.body, 'pointerup');
+      else if (end === 'cancel') pointer(miniDocument.body, 'pointercancel');
+      else for (const listener of windowListeners.get('blur') ?? []) listener();
+      nextFrame(); await flush();
+      expect(shown(view.root), end).toContain(MOVED);
+      view.surface.destroy(); view.root.remove();
+    }
+  });
+
+  it('holds nothing for a press of another button, or with no press at all', async () => {
+    const state = running();
+    const view = mount(state); await flush();
+    pointer(viewPlan(view.root), 'pointerdown', 2);
+    moved(state);
     view.surface.refresh(); await flush();
-    expect(card(view.root).textContent).toContain('已读完一半');
+    expect(shown(view.root)).toContain(MOVED);
     expect(frames).toHaveLength(0);
+  });
+
+  it('holds a Space key on a control of the card from its keydown to its keyup', async () => {
+    const state = running();
+    const view = mount(state); await flush();
+    const pressed = viewPlan(view.root);
+    key(pressed, 'keydown');
+    moved(state);
+    view.surface.refresh(); await flush();
+    expect(viewPlan(view.root)).toBe(pressed);
+    key(pressed, 'keyup');
+    pressed.click(); await flush();
+    expect(state.opened).toEqual([RUN]);
+    nextFrame(); await flush();
+    expect(shown(view.root)).toContain(MOVED);
+  });
+
+  it('holds a page appended to a report list while 查看计划 is pressed, like any other whole-card draw', async () => {
+    const state: Stub = { full: workspace(360, 1, 'running'), budget: 120 * 1024, opened: [] };
+    const view = mount(state); await flush();
+    const rows = listed(view.root, MUST, 'li').length;
+    const open = gate(state);
+    more(view.root, MUST).click(); await flush();
+    const pressed = viewPlan(view.root);
+    pointer(pressed, 'pointerdown');
+    open(); await flush();
+    expect(viewPlan(view.root)).toBe(pressed);
+    expect(listed(view.root, MUST, 'li')).toHaveLength(rows);
+    pointer(pressed, 'pointerup'); nextFrame(); await flush();
+    expect(listed(view.root, MUST, 'li').length).toBeGreaterThan(rows);
+  });
+
+  it('brings 查看任务\'s finding into view after the held draw, not against the card under the press', async () => {
+    const category = { categoryId: 'typos-and-usage', label: '错别字与用法', position: 1, output: 'change-suggestion', riskPointsOnly: false, batchApply: true,
+      basis: { categoryId: 'typos-and-usage', executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '审阅', version: '1' } },
+      state: 'settled', stateLabel: '已完成', detail: null, taskIntentId: null, planEnvelopeDigest: DIGEST, modeLabel: null, plan: null, progress: null, findingsCount: 2, excludedCount: 0 };
+    const finding = (id: string, ordinal: number) => ({ findingId: id, categoryId: 'typos-and-usage', categoryLabel: '错别字与用法', ordinal, severity: 'must', severityLabel: '必须处理',
+      output: 'change-suggestion', riskPoint: false, status: 'pending', statusLabel: '待处理', statusDetail: '公开合成状态', blockId: 'blk_777777777777777777777777',
+      fromGrapheme: 0, toGrapheme: 2, blockPosition: 0, chapterBlockId: null, chapterTitle: null, quote: '公开', note: '公开合成问题',
+      replacement: '公开合成', clauseRefs: [], stateLine: null, markId: `m-${id}`, markStatus: 'open', anchorState: 'exact', ignoreReason: null, historicalMarker: null });
+    const base = workspace(3);
+    const page = (findings: ReturnType<typeof finding>[], truncated: boolean) =>
+      ({ ...base, run: { ...base.run!, categories: [category], findings, findingsTotal: 2, findingsTruncated: truncated } }) as ReviewWorkspaceProjection;
+    let release!: () => void;
+    const second = new Promise<void>((resolve) => { release = resolve; });
+    const state: Stub = { full: base, budget: 4 * 1024 * 1024, focusFinding: 'f-2',
+      read: async (input) => {
+        if (input?.findingsAfterOrdinal == null) return page([finding('f-1', 1)], true);
+        await second;
+        return page([finding('f-2', 2)], false);
+      } };
+    const view = mount(state); await flush();
+    // The first page holds f-1 only, so 审阅 reads the next page for f-2; that answer arrives while 查看计划 is pressed.
+    expect(view.root.querySelector('article[data-finding-id="f-2"]')).toBeNull();
+    const pressed = viewPlan(view.root);
+    pointer(pressed, 'pointerdown');
+    release(); await flush();
+    expect(view.root.querySelector('article[data-finding-id="f-2"]')).toBeNull();
+    pointer(pressed, 'pointerup'); nextFrame(); await flush();
+    const target = view.root.querySelector('article[data-finding-id="f-2"]');
+    expect(target).not.toBeNull();
+    expect(miniDocument.activeElement).toBe(target);
+  });
+
+  it('lets a press that is down when the page is left hold nothing afterwards', async () => {
+    const state = running();
+    const view = mount(state); await flush();
+    pointer(viewPlan(view.root), 'pointerdown');
+    moved(state);
+    view.surface.refresh(); await flush();
+    view.surface.destroy();
+    pointer(miniDocument.body, 'pointerup');
+    expect(() => nextFrame()).not.toThrow();
+    expect(view.unexpected).not.toHaveBeenCalled();
   });
 });

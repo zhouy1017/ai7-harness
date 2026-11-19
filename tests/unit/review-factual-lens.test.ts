@@ -78,7 +78,7 @@ let surfaces: ReviewWorkspaceSurface[];
 beforeEach(() => {
   restoreDom = installMiniDom();
   surfaces = [];
-  vi.stubGlobal('window', { setTimeout, clearTimeout, getSelection: () => null });
+  vi.stubGlobal('window', { setTimeout, clearTimeout, getSelection: () => null, addEventListener: () => undefined, removeEventListener: () => undefined });
   Object.defineProperty(MiniElement.prototype, 'options', { configurable: true, get(this: MiniElement) { return this.querySelectorAll('option'); } });
   vi.stubGlobal('Option', class extends MiniElement { constructor(text: string, value: string) { super('option'); this.textContent = text; this.value = value; } });
   Object.defineProperty(MiniElement.prototype, 'prepend', { configurable: true, value(this: MiniElement, ...nodes: MiniElement[]) {
