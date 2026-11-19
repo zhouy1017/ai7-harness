@@ -52,6 +52,9 @@ const RULES: ReadonlyArray<readonly [RegExp, string | ((...parts: string[]) => s
   [/证据保证级别/gu, '核查力度'],
   [/学习准入/gu, '是否可用于学习'],
   [/随书稿件|生产文档|工作文档/gu, '衍生稿件'],
+  // 文档 for a derivative, where the sentence means one (the export manifest keeps its words).
+  [/稿件与文档上的备注/gu, '稿件与衍生稿件上的备注'],
+  [/，文档只含交付过的版本/gu, '，衍生稿件只含交付过的版本'],
   [/AI7 初评|AI7 初稿|AI7 评估报告/gu, '评估报告'],
   [/修订建议|提议内容/gu, '修改建议'],
   [/出版社经验|全社|社级/gu, '本社'],

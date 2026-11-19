@@ -77,6 +77,7 @@ import {
 } from './manuscript-export-labels.js';
 import { renderExportFidelity } from './manuscript-export.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { serviceWords } from './service-wording.js';
 
 /** 含批注 and 含修改建议（作为修订）, in S64's order, both on until the editor turns one off (EXP-023). */
 const PACKAGE_EXPORT_OPTION_ORDER: ReadonlyArray<keyof BookDeliveryPackageExportOptions> = ['includeAnnotations', 'includeSuggestions'];
@@ -382,7 +383,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       item.dataset['itemKind'] = entry.kind;
       const label = el('span', 'package-item-label', entry.label);
       // The manifest's detail is recorded with the package; its raw times read as local times where it is shown (Issue #1531).
-      if (entry.detail !== null) label.append(' · ', el('span', 'package-item-detail', entry.detail.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu, (at) => localInstantLabel(at))));
+      if (entry.detail !== null) label.append(' · ', el('span', 'package-item-detail', serviceWords(entry.detail).replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu, (at) => localInstantLabel(at))));
       item.append(label);
       list.append(item);
     }
