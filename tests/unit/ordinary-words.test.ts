@@ -6,7 +6,6 @@ import { houseAnnotationDetail } from '../../src/shared/protocol/house-word-list
 import { houseAnnotationWords, markDisplayNote } from '../../src/renderer/editorial-mark-labels.js';
 import { ordinaryServiceWords, serviceWords } from '../../src/renderer/service-wording.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
-import { COUNT_UNIT } from '../../src/shared/report-wording.js';
 
 // Issue #1531 (plan #1516 §5): the vocabulary report of #1546 as a failing test. Every ordinary-mode sentence of the renderer
 // holds none of the table's banned terms — the developer layer's words live in the first argument of `technicalWords`,
@@ -28,7 +27,6 @@ const DEVELOPER_LITERALS: ReadonlyArray<{ readonly file: string; readonly litera
     "reincluding: '正在记录学习准入决定…'", "reincluded: '学习准入决定已记录。'"]
     .map((literal) => ({ file: 'src/renderer/learning-audit-labels.ts', literal,
       why: '学习回溯 is developer-only until 0.7.4 (#1539); the ordinary screens import only its heading and kind labels' })),
-  { file: 'src/shared/report-wording.ts', literal: "COUNT_UNIT = '词元'", why: 'the unit of a usage count, awaiting the Owner (#1531): the table gives none' },
 ];
 
 /** The service modules whose sentences the renderer shows: each literal is checked as `serviceWords` displays it. */
@@ -101,9 +99,8 @@ describe('ordinary-mode words follow the one table (plan #1516 §5)', () => {
   });
 
   it('reads every service-authored sentence of the modules the renderer shows in the table\'s words, as serviceWords displays it', () => {
-    // The unit of a usage count is the one word awaiting the Owner (COUNT_UNIT): it is allowed where serviceWords puts it.
     const hits = SERVICE_MODULES.flatMap((file) => literals(read(file)).flatMap((text) =>
-      (findTerms(ordinaryServiceWords(text)) as Span[]).filter((span) => span.kind === 'banned' && span.found !== COUNT_UNIT)
+      (findTerms(ordinaryServiceWords(text)) as Span[]).filter((span) => span.kind === 'banned')
         .map((span) => `${file}: ${span.found} in 「${text.slice(0, 40)}」`)));
     expect(hits).toEqual([]);
     try {

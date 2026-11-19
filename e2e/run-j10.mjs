@@ -88,7 +88,7 @@ const BUDGET_REDO_GOAL = '改计划重做：沿用已读完的 4 个阅读范围
 const SIXTH_BOOK = Object.freeze({ title: '账户限额旅程' });
 /** The sixth Book's launch (Issue #51, S16b): unit 4's first turn is refused on the account's limit, its second is served. */
 const ACCOUNT_LIMIT_FIXTURE_IDENTITY = 'sample1-baseline-account-limit';
-const ACCOUNT_LIMIT_NOTE = '模型服务按账户限额拒绝了第 4 部分。已读完 3 / 8 个部分，结果都已保存；处理好模型服务、限额解除后点「继续」从第 4 部分接着读';
+const ACCOUNT_LIMIT_NOTE = '模型服务按账户限额拒绝了第 4 个阅读范围。已读完 3 / 8 个阅读范围，结果都已保存；处理好模型服务、限额解除后点「续行」从第 4 个接着读';
 const SEVENTH_BOOK = Object.freeze({ title: '结果待确认旅程' });
 /** The seventh Book's launch (Issue #51, S16c): unit 4's first request is sent and its answer never comes back whole. */
 const OUTCOME_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-outcome-unknown';

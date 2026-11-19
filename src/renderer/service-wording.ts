@@ -1,5 +1,4 @@
 import { technicalWords } from './technical-layer.js';
-import { COUNT_UNIT } from '../shared/report-wording.js';
 
 /**
  * Service-authored sentences in the editor's words (Issue #1531, plan #1516 §5): the ONE place where a sentence the service
@@ -43,10 +42,15 @@ const RULES: ReadonlyArray<readonly [RegExp, string | ((...parts: string[]) => s
   [/修订建议|提议内容/gu, '修改建议'],
   [/出版社经验|全社|社级/gu, '本社'],
   [/当前更改尚未持久保存/gu, '还没有保存'],
-  // tokens / 词元 → 用量, the unit behind one constant (awaiting the Owner, #1531).
+  // tokens / 词元 → 用量: a count has no unit in ordinary mode, 用量 is its noun (Owner, 2026-11-19).
+  [/预算上限（tokens）/gu, '用量上限'],
+  [/(预算上限|登记上限|这次运行的上限) ([\d,]+) tokens/gu, (_all, _what: string, count: string) => `${_what === '这次运行的上限' ? '这次运行的用量上限' : '用量上限'} ${count}`],
   [/预算上限/gu, '用量上限'],
-  [/([\d,]+) tokens/gu, `$1 ${COUNT_UNIT}`],
-  [/tokens|词元/giu, COUNT_UNIT],
+  [/(达到|至多) ([\d,]+) tokens/gu, '用量$1 $2'],
+  [/用了 ([\d,]+) tokens/gu, '用量 $1'],
+  [/份额 ([\d,]+) tokens/gu, '用量份额 $1'],
+  [/([\d,]+) tokens/gu, '用量 $1'],
+  [/tokens|词元/giu, '用量'],
 ];
 
 /** The ordinary words of one service-authored sentence; developer mode reads it as the service wrote it. */

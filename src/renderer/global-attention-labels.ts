@@ -352,7 +352,7 @@ const IMPORT_RELATIONSHIP_LABELS = {
 export const GLOBAL_ATTENTION_TASK_KIND_LABELS = {
   'initial-evaluation': '评估报告',
   'readers-report': '审稿意见',
-  'evaluation-rewrite': '按我的评分重写评语',
+  'evaluation-rewrite': '按我的修改重新生成',
   writing: '写作任务',
 } as const;
 

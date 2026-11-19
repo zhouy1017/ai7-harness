@@ -1,6 +1,5 @@
 import { technicalWords, technicalLayerVisible } from './technical-layer.js';
 import { serviceWordsDeep } from './service-wording.js';
-import { COUNT_UNIT } from '../shared/report-wording.js';
 import type {
   BookTaskItemProjection,
   GlobalAttentionItemProjection,
@@ -154,8 +153,8 @@ export const TASK_PLAN_CEILING_NOTE = '上限，不是预测';
 /** What the Run Budget Ceiling the plan froze does, in one clause; `null` when the plan sets none (ADR 0096 §4.2 keeps it visible in ordinary mode). */
 export function taskPlanCeilingLine(plan: TaskPlanProjection): string | null {
   // The ceiling's figure, read in the service's words or as serviceWords shows them.
-  const ceiling = plan.service.usage.match(new RegExp(`([\\d,]+) (?:${['tokens', COUNT_UNIT].join('|')})`, 'u'))?.[1];
-  return ceiling === undefined ? null : technicalWords(`达到 ${ceiling} tokens 后不再发送`, `用量达到 ${ceiling} ${COUNT_UNIT}后不再发送`);
+  const ceiling = plan.service.usage.match(/(?:达到|至多) ([\d,]+)/u)?.[1];
+  return ceiling === undefined ? null : technicalWords(`达到 ${ceiling} tokens 后不再发送`, `用量达到 ${ceiling} 后不再发送`);
 }
 
 /**
@@ -404,18 +403,18 @@ export function taskBarResumeOutcome(reason: ResumableStopReason, repeated: bool
 }
 /** AUTH-006: a plan whose key content changed offers these two, and no start. */
 export const TASK_BAR_RECONFIRM = '重新确认计划';
-export const TASK_BAR_RECONFIRM_AND_START = '重新开始';
+export const TASK_BAR_RECONFIRM_AND_START = '确认新计划并开始';
 /**
  * 需要重新确认计划 after Connectivity Wait (Issue #536; OFF-008): the way on for a Run whose plan moved before it could
  * start — a new plan for the same goal and range, which starts only once the editor starts it.
  */
-export const TASK_BAR_REPREPARE = '重新开始';
-export const TASK_BAR_REPREPARE_FAILED = '无法重新开始这项任务。';
+export const TASK_BAR_REPREPARE = '另做一份计划';
+export const TASK_BAR_REPREPARE_FAILED = '无法另做一份计划。';
 export function taskBarReprepareNote(reason: string): string {
-  return `${reason}重新开始会按同样的目标和范围做一份新计划；看过之后再开始任务。`;
+  return `${reason}「另做一份计划」按同样的目标和范围做一份新计划；看过之后再开始任务。`;
 }
 /** Every place of the governor taken (S74a A2; Issue #49, S14): a Review Run's approval is refused with this reason. */
-export const TASK_BAR_SLOT_BUSY = '排队中：正在运行的任务结束后再开始';
+export const TASK_BAR_SLOT_BUSY = '现在不能开始：正在运行的任务结束后再开始';
 /** 等待运行名额 (Issue #49, S14; CONC-007): the plain reason a start waits on the governor, and that nothing has begun. */
 export const TASK_BAR_QUEUED_NOTE = '排队中：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
 /** The status line of a start that waits for a place (Issue #49, S14): the event — recorded — never that it began. */
@@ -510,9 +509,12 @@ export function taskBarBudgetStopNote(stop: NonNullable<TaskPlanProjection['budg
  */
 export const TASK_BAR_RESOLVE_MODEL_SERVICE = '处理模型服务';
 export function taskBarAccountLimitNote(unitOrdinal: number | null, unitsSettled: number, unitsTotal: number): string {
+  // Developer mode keeps the reading range it counts (review point 6, #1531).
   return unitOrdinal === null
-    ? `模型服务按账户限额拒绝了之后的归纳或抽样。全部 ${unitsTotal} 个部分都已读完，结果都已保存；处理好模型服务、限额解除后点「继续」接着做`
-    : `模型服务按账户限额拒绝了第 ${unitOrdinal} 部分。已读完 ${unitsSettled} / ${unitsTotal} 个部分，结果都已保存；处理好模型服务、限额解除后点「继续」从第 ${unitOrdinal} 部分接着读`;
+    ? technicalWords(`模型服务按账户限额拒绝了之后的归纳或抽样。全部 ${unitsTotal} 个阅读范围都已读完，结果都已保存；处理好模型服务、限额解除后点「续行」接着做`,
+      `模型服务按账户限额拒绝了之后的归纳或抽样。全部 ${unitsTotal} 个部分都已读完，结果都已保存；处理好模型服务、限额解除后点「继续」接着做`)
+    : technicalWords(`模型服务按账户限额拒绝了第 ${unitOrdinal} 个阅读范围。已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；处理好模型服务、限额解除后点「续行」从第 ${unitOrdinal} 个接着读`,
+      `模型服务按账户限额拒绝了第 ${unitOrdinal} 部分。已读完 ${unitsSettled} / ${unitsTotal} 个部分，结果都已保存；处理好模型服务、限额解除后点「继续」从第 ${unitOrdinal} 部分接着读`);
 }
 
 /**
@@ -539,12 +541,12 @@ export const UNCONFIRMED_TASK_KIND_LABELS: Readonly<Record<TaskPlanKind, string>
   'review-run': '审阅',
   'initial-evaluation': '评估报告',
   'readers-report': '审稿意见',
-  'evaluation-rewrite': '按我的评分重写评语',
+  'evaluation-rewrite': '按我的修改重新生成',
   writing: '写作任务',
 };
 /** The steps after the reading ranges, in the Run Report's own words. */
 export const UNCONFIRMED_STAGE_LABELS: Readonly<Record<UnconfirmedStageId, string>> = {
-  get 'cross-unit-reduction'() { return technicalWords('跨单元归纳', '全书归纳'); },
+  get 'cross-unit-reduction'() { return technicalWords('跨单元归纳', '前后比对'); },
   'assurance-sampling': '保证抽样',
   'run-report-reflection': '运行反思',
 };
@@ -638,13 +640,13 @@ export const TASK_BAR_WAITS_FOR_CONNECTIVITY: Readonly<Record<TaskPlanKind, bool
  * beside what moved. The baseline analysis's bar offers 重新准备 itself (Issue #536).
  */
 export const TASK_BAR_PLAN_MOVED_ELSEWHERE: Readonly<Record<TaskPlanKind, string>> = {
-  'fixed-task': '请重新开始这项任务，看过新计划后再开始。',
-  'baseline-analysis': '请在「分析」里重新开始，看过新计划后再开始。',
+  'fixed-task': '请为这项任务另做一份计划，看过之后再开始。',
+  'baseline-analysis': '请在「分析」里另做一份计划，看过之后再开始。',
   'review-run': '请在「审阅」里新建一次审阅，看过新计划后再开始。',
-  'initial-evaluation': '请在「评估」里重新生成评估报告，看过新计划后再开始。',
-  'readers-report': '请在「评估」里重新开始审稿意见，看过新计划后再开始。',
-  'evaluation-rewrite': '请在「评估」里按现在的评分重新生成，看过新计划后再开始。',
-  writing: '请在「交付物」的新建衍生稿件 · 写作任务里重新开始，看过新计划后再开始。',
+  'initial-evaluation': '请在「评估」里为评估报告另做一份计划，看过之后再开始。',
+  'readers-report': '请在「评估」里为审稿意见另做一份计划，看过之后再开始。',
+  'evaluation-rewrite': '请在「评估」里按现在的评分另做一份重新生成的计划，看过之后再开始。',
+  writing: '请在「交付物」的新建衍生稿件 · 写作任务里另做一份计划，看过之后再开始。',
 };
 
 /**
@@ -668,7 +670,7 @@ export const TASK_BAR_OUTCOMES: Readonly<Record<TaskPlanKind, string>> = {
   'review-run': '审阅发现与审阅报告',
   'initial-evaluation': '评估报告',
   'readers-report': '审稿意见草稿',
-  'evaluation-rewrite': '按你的评分重写的评语（待你采用）',
+  'evaluation-rewrite': '按你的修改重新生成的评语（等你采用）',
   writing: '衍生稿件草稿（打开后处于「起草」阶段）',
 };
 
@@ -1118,7 +1120,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
 
 export const TASK_PLAN_ACTIVITY_TITLE = '运行动态';
 /** A Run no execution of this service holds: AI7 closed while it ran, so nothing reports where it is. */
-export const TASK_PLAN_ACTIVITY_UNREPORTED = '任务在上次关闭时未结束，目前没有运行；可以取消并重新开始。';
+export const TASK_PLAN_ACTIVITY_UNREPORTED = '任务在上次关闭时未结束，目前没有运行；可以取消后另做一份计划。';
 /** LIVE-003's words, kept as they are (ADR 0077): over this Run's own bar, the step says so and claims nothing more. */
 export const TASK_PLAN_ACTIVITY_STALE = '本步骤用时已超过通常水平';
 

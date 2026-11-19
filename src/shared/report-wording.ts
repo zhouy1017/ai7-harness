@@ -26,12 +26,6 @@ export function localInstantLabel(iso: string): string {
   });
 }
 
-/**
- * The unit an ordinary-mode count of model usage is read in (Issue #1531). The table of plan #1516 §5 bans 「tokens」 and
- * 「词元」 and gives no unit word: this is the one place the answer goes, awaiting the Owner.
- */
-export const COUNT_UNIT = '词元';
-
 /** The day an editor tells one dated thing from another by (Issue #1531): `11 月 16 日`, in this computer's time zone. */
 export function localDayLabel(iso: string): string {
   const at = new Date(iso);
