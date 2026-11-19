@@ -1,5 +1,5 @@
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
-import { serviceWords } from './service-wording.js';
+import { backgroundSwitchWords, serviceWords } from './service-wording.js';
 import type { BackgroundAnalysisEnrollmentProjection, BackgroundAnalysisScopeOffer, BackgroundAnalysisStartingPoint, RendererApi } from '../shared/protocol.js';
 import { BACKGROUND_ANALYSIS_CEILING_MAX } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
@@ -118,27 +118,6 @@ function onEscape(root: HTMLElement, cancel: () => void): void {
   });
 }
 
-/**
- * Where one switch stands for 登记 (ordinary mode, one kind on offer), the block's own service sentences say 打开 and 关闭
- * as the switch does (review N5): the starting points, the states and what each waits for. Nothing else is touched.
- */
-const SWITCH_PHRASES: ReadonlyArray<readonly [RegExp, string]> = [
-  [/^未登记$/u, '未打开'], [/^已登记$/u, '已打开'], [/^已撤销$/u, '已关闭'], [/^登记记录无法读取$/u, '设置记录无法读取'],
-  [/请撤销后重新登记/gu, '请关闭后重新打开'], [/重新登记/gu, '重新打开'], [/登记之后/gu, '打开之后'], [/登记时/gu, '打开时'], [/登记后/gu, '打开后'],
-  [/这份登记/gu, '这项设置'], [/已撤销/gu, '已关闭'], [/撤销后/gu, '关闭后'],
-];
-function switchPhrased(words: string): string {
-  return SWITCH_PHRASES.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), words);
-}
-function switched(projection: BackgroundAnalysisEnrollmentProjection): BackgroundAnalysisEnrollmentProjection {
-  if (technicalLayerVisible || (projection.kinds ?? []).filter((kind) => kind.enabled).length > 1) return projection;
-  return { ...projection, stateLabel: switchPhrased(projection.stateLabel), next: { ...projection.next, reason: switchPhrased(projection.next.reason) },
-    offer: { ...projection.offer, ...(projection.offer.reason === null ? {} : { reason: switchPhrased(projection.offer.reason) }),
-      startingPoints: projection.offer.startingPoints.map((point) => ({ ...point, label: switchPhrased(point.label), note: switchPhrased(point.note) })) },
-    enrollment: projection.enrollment === null ? null : { ...projection.enrollment, startingPointLabel: switchPhrased(projection.enrollment.startingPointLabel) },
-    history: projection.history.map((entry) => ({ ...entry, stateLabel: switchPhrased(entry.stateLabel) })) };
-}
-
 export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions): { load(): Promise<void> } {
   const { root, api } = options;
   root.classList.add('source-card', 'background-analysis');
@@ -152,7 +131,14 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     const enrollment = projection.enrollment;
     if (enrollment === null || enrollment.enrollmentVersionId === choiceOf) return;
     choiceOf = enrollment.enrollmentVersionId;
-    const scope = projection.offer.scopes.findIndex((entry) => entry.kind === enrollment.scope.kind && entry.label === enrollment.scope.label);
+    // By kind, then by the Series (review S1): a label holds a count, which changes when a Book joins; the Series' title stands in
+    // 《》, and failing that the Series is the one holding the enrolled Books.
+    const enrolled = enrollment.scope;
+    const titleOf = (label: string): string | null => /《([^》]*)》/u.exec(label)?.[1] ?? null;
+    const same = (entry: BackgroundAnalysisScopeOffer): boolean => entry.kind === enrolled.kind && (entry.kind !== 'series' || titleOf(entry.label) === titleOf(enrolled.label));
+    const holds = (entry: BackgroundAnalysisScopeOffer): boolean => entry.kind === enrolled.kind && enrolled.books.some((book) => entry.books.some((offered) => offered.bookId === book.bookId));
+    const named = projection.offer.scopes.findIndex(same);
+    const scope = named >= 0 ? named : projection.offer.scopes.findIndex(holds);
     choice.scope = scope < 0 ? null : String(scope);
     choice.ceiling = enrollment.ceilingTokens === null ? BACKGROUND_CEILING_DEFAULT : String(enrollment.ceilingTokens);
     choice.startingPoint = enrollment.startingPoint;
@@ -186,20 +172,21 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
   const draw = (recorded: BackgroundAnalysisEnrollmentProjection): void => {
     // The service's own sentences read in the table's words in ordinary mode (Issue #1531, review N1), field by field: the
     // Book's title, the scope and Series labels, the binds the form checks by label and every id stay as they are.
-    const worded: BackgroundAnalysisEnrollmentProjection = { ...recorded, stateLabel: serviceWords(recorded.stateLabel), statement: serviceWords(recorded.statement),
-      next: { ...recorded.next, reason: serviceWords(recorded.next.reason) },
-      lastLook: recorded.lastLook === null ? null : { ...recorded.lastLook, reason: serviceWords(recorded.lastLook.reason) },
-      lastNotStarted: recorded.lastNotStarted === null ? null : { ...recorded.lastNotStarted, reason: serviceWords(recorded.lastNotStarted.reason) },
-      ...(recorded.kinds === undefined ? {} : { kinds: recorded.kinds.map((kind) => ({ ...kind, reason: serviceWords(kind.reason) })) }),
-      offer: { ...recorded.offer, reason: serviceWords(recorded.offer.reason), what: serviceWords(recorded.offer.what), when: serviceWords(recorded.offer.when),
-        notGranted: recorded.offer.notGranted.map((line) => serviceWords(line)),
-        binds: recorded.offer.binds.map((entry) => ({ ...entry, value: serviceWords(entry.value) })),
-        startingPoints: recorded.offer.startingPoints.map((point) => ({ ...point, label: serviceWords(point.label), note: serviceWords(point.note) })) },
-      enrollment: recorded.enrollment === null ? null : { ...recorded.enrollment, startingPointLabel: serviceWords(recorded.enrollment.startingPointLabel) },
-      history: recorded.history.map((entry) => ({ ...entry, stateLabel: serviceWords(entry.stateLabel) })),
-      startedRuns: recorded.startedRuns.map((run) => ({ ...run, modeLabel: serviceWords(run.modeLabel) })),
-      revoke: { ...recorded.revoke, consequences: recorded.revoke.consequences.map((line) => serviceWords(line)) } };
-    const projection = switched(worded);
+    // Under its one switch (ordinary mode, one kind on offer) the block's sentences say 打开 and 关闭 as the switch does (review N5, S3).
+    const words = (recorded.kinds ?? []).filter((kind) => kind.enabled).length > 1 ? serviceWords : backgroundSwitchWords;
+    const projection: BackgroundAnalysisEnrollmentProjection = { ...recorded, stateLabel: words(recorded.stateLabel), statement: words(recorded.statement),
+      next: { ...recorded.next, reason: words(recorded.next.reason) },
+      lastLook: recorded.lastLook === null ? null : { ...recorded.lastLook, reason: words(recorded.lastLook.reason) },
+      lastNotStarted: recorded.lastNotStarted === null ? null : { ...recorded.lastNotStarted, reason: words(recorded.lastNotStarted.reason) },
+      ...(recorded.kinds === undefined ? {} : { kinds: recorded.kinds.map((kind) => ({ ...kind, reason: words(kind.reason) })) }),
+      offer: { ...recorded.offer, reason: words(recorded.offer.reason), what: words(recorded.offer.what), when: words(recorded.offer.when),
+        notGranted: recorded.offer.notGranted.map((line) => words(line)),
+        binds: recorded.offer.binds.map((entry) => ({ ...entry, value: words(entry.value) })),
+        startingPoints: recorded.offer.startingPoints.map((point) => ({ ...point, label: words(point.label), note: words(point.note) })) },
+      enrollment: recorded.enrollment === null ? null : { ...recorded.enrollment, startingPointLabel: words(recorded.enrollment.startingPointLabel) },
+      history: recorded.history.map((entry) => ({ ...entry, stateLabel: words(entry.stateLabel) })),
+      startedRuns: recorded.startedRuns.map((run) => ({ ...run, modeLabel: words(run.modeLabel) })),
+      revoke: { ...recorded.revoke, consequences: recorded.revoke.consequences.map((line) => words(line)) } };
     const startedBefore = last?.startedRunCount ?? null;
     last = projection;
     if (startedBefore !== null && projection.startedRunCount > startedBefore) options.onRunStarted();

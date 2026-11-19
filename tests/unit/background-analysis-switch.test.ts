@@ -127,6 +127,21 @@ describe('the 空闲时自动更新分析 switch in ordinary mode', () => {
     expect(enroll).toHaveBeenCalledWith({ kind: 'baseline-analysis', disclosureDigest: 'd'.repeat(64), startingPoint: 'backfill', scope: { kind: 'series', seriesId: 'series' }, ceilingTokens: 200000 });
   });
 
+  it('finds the Series of a setting by the Series, not by a label that holds a count (review S1)', async () => {
+    const enroll = vi.fn(async (_input: unknown) => base('active'));
+    const grown = (projection: BackgroundAnalysisEnrollmentProjection): BackgroundAnalysisEnrollmentProjection => ({ ...projection, offer: { ...projection.offer,
+      scopes: [projection.offer.scopes[0]!, { kind: 'series', seriesId: 'series', label: '书系《乙》的 3 本书', books: [{ bookId: 'a', title: '甲' }, { bookId: 'b', title: '乙' }, { bookId: 'c', title: '丙' }] }] } });
+    const { root } = await mount({ inspectBackgroundAnalysisEnrollment: vi.fn(async () => grown(seriesWide(base('suspended')))), enrollBackgroundAnalysis: enroll });
+    (root.querySelector('[data-background-action="reopen"]') as unknown as { click(): void }).click();
+    await flush();
+    expect(enroll).toHaveBeenCalledWith({ kind: 'baseline-analysis', disclosureDigest: 'd'.repeat(64), startingPoint: 'backfill', scope: { kind: 'series', seriesId: 'series' }, ceilingTokens: 200000 });
+  });
+
+  it('draws the sentences of the service in the words of the switch (review S3)', async () => {
+    const { root } = await mount({ inspectBackgroundAnalysisEnrollment: vi.fn(async () => ({ ...base('active'), next: { kind: 'none', reason: '登记之后稿件还没有改动。' } })) });
+    expect(root.querySelector('.background-analysis-next')?.textContent).toContain('打开之后稿件还没有改动。');
+  });
+
   it('puts the switch back and says why when turning it on or off fails', async () => {
     const { root, status } = await mount({ inspectBackgroundAnalysisEnrollment: vi.fn(async () => base('none')), enrollBackgroundAnalysis: vi.fn(async () => { throw new Error('x'); }) });
     flip(toggle(root), true);
