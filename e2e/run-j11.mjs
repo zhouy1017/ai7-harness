@@ -70,6 +70,8 @@ const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const THIRD = Object.freeze({ title: '评估旅程丙' });
 /** Today as ordinary mode writes a day (`localDayLabel`): the records this Journey begins carry it (Issue #1531). */
 const todayLabel = () => { const now = new Date(); return `${now.getMonth() + 1} 月 ${now.getDate()} 日`; };
+/** A version row without its order within a minute: a version begun in the same minute adds it to its neighbours (#1531). */
+const untold = (row) => (row ?? '').replace(/ · 这一分钟的第 \d+ 份/u, '');
 
 /**
  * The J-04 model adapter's fixture: 按我的评分重写评语's authored units and words for 第 15 版 (Issue #429, S81b2), layered over
@@ -2295,7 +2297,7 @@ async function main() {
       'evaluation-rewrite-edit-offered', reportClosed);
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'evaluation-rewrite-begin');
     const fifteenth = await readEvaluation(renderer, (page) => page.record?.heading === todayLabel() && page.rewrite !== null, 'evaluation-rewrite-begun');
-    requireJourney(fifteenth.record.report === true && fifteenth.versions[0].startsWith(`评估报告 · ${todayLabel()} `) && fifteenth.versions[1] === reportClosed.versions[0] &&
+    requireJourney(fifteenth.record.report === true && fifteenth.versions[0].startsWith(`评估报告 · ${todayLabel()} `) && untold(fifteenth.versions[1]) === untold(reportClosed.versions[0]) &&
       fifteenth.rewrite.reason === '先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。' &&
       JSON.stringify(fifteenth.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)) && fifteenth.record.verdict === '' &&
       JSON.stringify(fifteenth.market.lists) === JSON.stringify(MARKET_LISTS), 'evaluation-rewrite-begun-words', fifteenth);
