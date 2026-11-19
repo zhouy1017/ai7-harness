@@ -130,6 +130,7 @@ import {
   evaluationFinalized,
   evaluationFinalizedLine,
   evaluationHeading,
+  evaluationReportDay,
   evaluationItemLegend,
   evaluationRevisionLine,
   evaluationUnreadableLine,
@@ -1072,7 +1073,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const dated = { ...record, ...(row === undefined ? {} : { createdAt: row.createdAt }), finalizedAt: record.finalized?.at ?? null };
     // The open record says what its row says (review N8): its time and order when the list needs them.
     const tell = evaluationDayTells(workspace?.records ?? []).get(record.recordId);
-    const heading = el('h3', undefined, record.initial === null ? evaluationHeading(dated, tell) : `${EVALUATION_REPORT_HEADING} · ${evaluationHeading(dated, tell)}`);
+    const heading = el('h3', undefined, record.initial === null ? evaluationHeading(dated, tell) : `${EVALUATION_REPORT_HEADING} · ${record.state === 'draft' ? evaluationReportDay(dated, tell) : evaluationHeading(dated, tell)}`);
     heading.tabIndex = -1;
     heading.append(' · ', el('span', 'evaluation-revision', evaluationRevisionLine(record)));
     node.append(heading);

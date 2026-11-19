@@ -72,6 +72,8 @@ const THIRD = Object.freeze({ title: '评估旅程丙' });
 const todayLabel = () => { const now = new Date(); return `${now.getMonth() + 1} 月 ${now.getDate()} 日`; };
 /** A version row without its order within a minute: a version begun in the same minute adds it to its neighbours (#1531). */
 const untold = (row) => (row ?? '').replace(/ · 这一分钟的第 \d+ 份/u, '');
+/** An open 评估报告's day: today, with its time when the list reads times (#1531 review S7). */
+const ofToday = (heading) => heading === todayLabel() || (heading ?? '').startsWith(`${todayLabel()} `);
 
 /**
  * The J-04 model adapter's fixture: 按我的评分重写评语's authored units and words for 第 15 版 (Issue #429, S81b2), layered over
@@ -2088,7 +2090,7 @@ async function main() {
     // 修改报告: the report becomes 第 14 版, begun from it past the unfinished 第 13 版, which stays as it was.
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'initial-evaluation-begin');
     // The record is begun in this run: its heading says today, as the app writes a day (Issue #1531, review S12).
-    const ordinaryDraft = await readEvaluation(renderer, (page) => page.view === 'record' && page.record?.heading === todayLabel(), 'initial-evaluation-begun-ordinary');
+    const ordinaryDraft = await readEvaluation(renderer, (page) => page.view === 'record' && ofToday(page.record?.heading), 'initial-evaluation-begun-ordinary');
     requireJourney(ordinaryDraft.record.report === true && ordinaryDraft.report === null && ordinaryDraft.record.reportConclusion === 'AI7 建议的结论：修改后再议' &&
       ordinaryDraft.record.nextStep === (nextStep === null ? null : `下一步建议：${nextStep}`) &&
       JSON.stringify(ordinaryDraft.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)) && ordinaryDraft.record.ai7Comments === 0 &&
@@ -2296,7 +2298,7 @@ async function main() {
     requireJourney(reportClosed.view === 'record' && reportClosed.record.heading.startsWith(`定稿 · ${todayLabel()} `) && reportClosed.editReport === '修改报告',
       'evaluation-rewrite-edit-offered', reportClosed);
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'evaluation-rewrite-begin');
-    const fifteenth = await readEvaluation(renderer, (page) => page.record?.heading === todayLabel() && page.rewrite !== null, 'evaluation-rewrite-begun');
+    const fifteenth = await readEvaluation(renderer, (page) => ofToday(page.record?.heading) && page.rewrite !== null, 'evaluation-rewrite-begun');
     requireJourney(fifteenth.record.report === true && fifteenth.versions[0].startsWith(`评估报告 · ${todayLabel()} `) && untold(fifteenth.versions[1]) === untold(reportClosed.versions[0]) &&
       fifteenth.rewrite.reason === '先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。' &&
       JSON.stringify(fifteenth.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)) && fifteenth.record.verdict === '' &&

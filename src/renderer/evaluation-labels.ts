@@ -167,6 +167,17 @@ export function evaluationHeading(record: Pick<EvaluationRecordSummaryProjection
 }
 
 /**
+ * An open 评估报告's day under 详细评估报告 (review S7): what its row in the list reads after 「评估报告」 — its time and order
+ * when the list reads them, its day when not.
+ */
+export function evaluationReportDay(record: Parameters<typeof evaluationHeading>[0], tell: EvaluationDayTell | undefined): string {
+  const at = record.finalizedAt ?? record.createdAt;
+  if (at === undefined) return evaluationHeading(record, tell);
+  const which = tell?.order == null ? '' : ` · 这一分钟的第 ${tell.order} 份`;
+  return technicalWords(evaluationHeading(record, tell), tell?.time === true ? `${localDayTimeLabel(at)}${which}` : localDayLabel(at));
+}
+
+/**
  * What tells each version of a list apart, in one form for the whole list (review S7): the time when any two share a day, and
  * the order when two share a minute.
  */

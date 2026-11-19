@@ -347,3 +347,20 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
     expect(evaluationStartingScore({ initial, calibration }, 'item-2')).toBeNull();
   });
 });
+
+describe('one day form for a list of versions (Issue #1531, review S7)', () => {
+  it('reads every row with its time once two share a day, and the open 评估报告 as its row does', async () => {
+    const { evaluationDayTells, evaluationReportDay } = await import('../../src/renderer/evaluation-labels.js');
+    const { localDayTimeLabel } = await import('../../src/shared/report-wording.js');
+    const records = [
+      { recordId: 'a', ordinal: 3, createdAt: '2026-11-16T11:05:00.000Z', finalizedAt: null },
+      { recordId: 'b', ordinal: 2, createdAt: '2026-11-16T12:00:00.000Z', finalizedAt: '2026-11-16T12:10:00.000Z' },
+      { recordId: 'c', ordinal: 1, createdAt: '2026-11-10T03:00:00.000Z', finalizedAt: '2026-11-10T03:10:00.000Z' },
+    ];
+    const tells = evaluationDayTells(records);
+    expect(records.map((record) => tells.get(record.recordId)?.time)).toEqual([true, true, true]);
+    setTechnicalLayerVisible(false);
+    expect(evaluationReportDay({ ordinal: 3, state: 'draft', createdAt: records[0]!.createdAt, finalizedAt: null }, tells.get('a'))).toBe(localDayTimeLabel(records[0]!.createdAt));
+    setTechnicalLayerVisible(true);
+  });
+});
