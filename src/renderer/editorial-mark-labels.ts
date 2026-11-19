@@ -7,6 +7,7 @@ import type {
 } from '../shared/protocol.js';
 import { SELECTION_SPAN_NOTE } from '../shared/selection-span.js';
 import { technicalWords } from './technical-layer.js';
+import { localDayLabel } from '../shared/report-wording.js';
 import { REVIEW_UNCHECKED_DISCLOSURE, REVIEW_GUESSED_ANCHOR_NOTE_PREFIX, REVIEW_PUNCTUATION_ALIGNED_NOTE, reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 
 /** The 批注栏's words for working through what is pending (Issue #1523). */
@@ -51,9 +52,21 @@ export function markIsHandled(mark: { status: string; disposition?: string | nul
   return mark.status === 'applied' || mark.status === 'resolved' || mark.disposition === 'rejected';
 }
 
+/**
+ * The H01 annotation a review that used 本社词表 leaves (`houseAnnotationDetail`) is recorded with its mark and covered by the
+ * list's digest, so its words change only where they are shown (Issue #1531): ordinary mode reads the one name 本社词表 with
+ * the day, and neither the version label nor the identities; the developer layer reads the record as it is.
+ */
+const HOUSE_ANNOTATION = /^本社敏感词表 第\d+版 · H01\/v1\n(词条：[^\n]*\n词条说明：[\s\S]*?\n命中本社词条，请编辑判断。)\n词条 \S+ · 词表 \S+ · 版本 \S+ · 摘要 [0-9a-f]{64}$/u;
+export function houseAnnotationWords(note: string, createdAt: string | null = null): string {
+  const found = HOUSE_ANNOTATION.exec(note);
+  if (found === null) return note;
+  return technicalWords(note, `本社词表${createdAt === null ? '' : ` · ${localDayLabel(createdAt)}`}\n${found[1]}`);
+}
+
 /** Display only: stored notes, bodies and exports retain their original bytes. */
-export function markDisplayNote(note: string): { text: string; unchecked: boolean; guessedAnchor: boolean } {
-  let text = note;
+export function markDisplayNote(note: string, createdAt: string | null = null): { text: string; unchecked: boolean; guessedAnchor: boolean } {
+  let text = houseAnnotationWords(note, createdAt);
   const unchecked = text.startsWith(REVIEW_UNCHECKED_DISCLOSURE);
   const guessedAnchor = reviewFindingHasGuessedAnchor(text);
   while (text.startsWith(REVIEW_UNCHECKED_DISCLOSURE)) text = text.slice(REVIEW_UNCHECKED_DISCLOSURE.length);

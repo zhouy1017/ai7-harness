@@ -631,7 +631,7 @@ describe('取消任务 over the real store', () => {
       // The held unit's turn had come back whole, so it settled and was kept; the Run then stopped without ending.
       const stopped = store.inspectBaselineAnalysis(bookId, () => null);
       expect(stopped.run?.state).toBe('resumable');
-      expect(stopped.stateLabel).toBe('任务已中断 · 可续行');
+      expect(stopped.stateLabel).toBe('任务已中断 · 可继续');
       expect(stopped.taskOutcome).toBeNull();
       expect(stopped.resultSetRevision).toBeNull();
       expect(store.baselineAnalysisLedger.unitCheckpoints(runRecordId).map((checkpoint) => checkpoint.unit.unitOrdinal)).toEqual([1, 2]);

@@ -2256,7 +2256,7 @@ async function main() {
       return v1.dataset.packageCurrent === 'true' && (line?.textContent ?? '').startsWith('v1 · 图书交付包已准备 · 暂无导出记录') &&
         line.querySelector('.package-current-mark')?.textContent === '当前' && document.activeElement === line &&
         (v1.querySelector('.package-version-meta')?.textContent ?? '').startsWith(${JSON.stringify(`用途：${PACKAGE_PURPOSE} · `)}) &&
-        v1.querySelector('.package-version-summary')?.textContent === ${JSON.stringify(`发稿版本「${FIRST.label}」 · r1 · 生产文档 1 份 · 本书不做 4 类 · 审阅报告 0 份 · 评估记录 1 份 · 审稿意见 0 份`)} &&
+        v1.querySelector('.package-version-summary')?.textContent === ${JSON.stringify(`发稿版本「${FIRST.label}」 · r1 · 衍生稿件 1 份 · 本书不做 4 类 · 审阅报告 0 份 · 评估记录 1 份 · 审稿意见 0 份`)} &&
         window.__j07.pkg().dataset.packageChanged === 'false';
     })()`, 'package-v1-listed');
     requireJourney(JSON.stringify((await readdir(exportsRoot)).sort()) === exportsBefore, 'package-writes-no-file');

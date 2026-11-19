@@ -207,7 +207,8 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     const title = el('h3', undefined, BACKGROUND_HEADING);
     title.id = 'background-analysis-heading';
     // Ordinary mode with a single kind on offer (Issue #1531, review #1541): the kind select and 登记 become one switch and one sentence.
-    const single = !technicalLayerVisible && (projection.kinds ?? []).length <= 1;
+    // The catalogue also lists the kinds the policy keeps closed, disabled: only the ones on offer count.
+    const single = !technicalLayerVisible && (projection.kinds ?? []).filter((offered) => offered.enabled).length <= 1;
     const on = projection.enrollment !== null && (projection.state === 'active' || projection.state === 'paused' || projection.state === 'suspended');
     if (single) {
       const toggle = el('input');

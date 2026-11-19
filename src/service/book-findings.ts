@@ -72,7 +72,7 @@ export function inspectBookFindings(host: BookFindingsHost, bookId: string, offs
   function* findings(): Generator<BookFindingProjection> {
     const revision = store.latestAnalysisRevision(bookId);
     if (revision !== null) for (const gap of revision.gaps) {
-      yield { id: `gap:${revision.revisionId}:${gap.unitOrdinal}`, category: 'analysis-gaps', categoryLabel: '分析未覆盖', severity: '注意', status: '未覆盖', summary: gap.reason,
+      yield { id: `gap:${revision.revisionId}:${gap.unitOrdinal}`, category: 'analysis-gaps', categoryLabel: '分析未完成的部分', severity: '提示', status: '待处理', summary: gap.reason,
         target: { kind: 'gap', revisionId: revision.revisionId, unitOrdinal: gap.unitOrdinal, blockId: gap.blockIds[0] ?? null } };
     }
     // The workspace's history is bounded; enumerate identities from its ledger, then page each Run through its owner.
@@ -99,7 +99,7 @@ export function inspectBookFindings(host: BookFindingsHost, bookId: string, offs
     const record = store.inspectEvaluation(bookId, null).record;
     if (record !== null) {
       for (const risk of record.content.risks) if (!risk.reviewed && (risk.level !== null || risk.statement !== null)) {
-        yield { id: `risk:${record.recordId}:${risk.riskId}`, category: 'evaluation-risks', categoryLabel: '评估风险', severity: risk.level === 'high' ? '高' : risk.level === 'medium' ? '中' : risk.level === 'low' ? '低' : '未评级', status: '待复核',
+        yield { id: `risk:${record.recordId}:${risk.riskId}`, category: 'evaluation-risks', categoryLabel: '评估风险', severity: risk.level === 'high' ? '高' : risk.level === 'medium' ? '中' : risk.level === 'low' ? '低' : '未评级', status: '待处理',
           summary: risk.statement ?? record.profile.risks.find((item) => item.riskId === risk.riskId)?.label ?? '评估风险',
           target: { kind: 'risk', recordId: record.recordId, riskId: risk.riskId, revisionId: record.revisionId } };
       }

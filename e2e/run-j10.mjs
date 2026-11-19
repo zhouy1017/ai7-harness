@@ -114,7 +114,7 @@ const RESUMED_HOLD = 5;
 const THIRD_HOLD = 1;
 // The drawer's own words (`src/renderer/task-drawer-labels.ts` and `src/service/task-plan.ts`), pinned there by
 // their unit suites.
-const REDO_REASON = '先暂停，再改计划重做';
+const REDO_REASON = '先暂停，再重新开始';
 const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步会被中止，此后不会再发送任何内容';
 const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存';
 const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
@@ -1134,10 +1134,10 @@ async function main() {
     const resumableAttention = await attentionNames(renderer, secondBookId, 'analysis-resumable');
     requireJourney(resumableAttention.named, 'resumable-in-attention', resumableAttention.groups);
     await openAnalysisOf(renderer, secondBookId, 'relaunched-analysis');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可续行'`, 'resumable-card-label', 30_000);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可继续'`, 'resumable-card-label', 30_000);
     const resumable = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const resumableAttempt = resumable?.run?.attempt;
-    requireJourney(resumable?.bookId === secondBookId && resumable.state === 'resumable' && resumable.stateLabel === '任务已中断 · 可续行' &&
+    requireJourney(resumable?.bookId === secondBookId && resumable.state === 'resumable' && resumable.stateLabel === '任务已中断 · 可继续' &&
       resumable.run?.state === 'resumable' && resumable.run.runRecordId === beforeClose.run.runRecordId &&
       JSON.stringify(resumable.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'resumable']) &&
       UUID_PATTERN.test(resumableAttempt?.attemptId ?? '') && JSON.stringify(resumableAttempt.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2]) &&
@@ -1145,7 +1145,7 @@ async function main() {
     'resumable-record', { state: resumable?.state, run: resumable?.run?.state, transitions: resumable?.run?.transitions?.map((transition) => transition.state), spans: resumableAttempt?.spans?.map((span) => span.unitOrdinal) });
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'resumable-open-plan');
     // This Run has never continued: explain shutdown without inventing a previous continuation time (#1309).
-    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行', statement: SHUTDOWN_STATEMENT, note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
+    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可继续', status: '任务已中断 · AI7 关闭时正在运行', statement: SHUTDOWN_STATEMENT, note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
     // Nothing was sent since AI7 opened again.
     await new Promise((settle) => setTimeout(settle, 1_000));
     const stillStopped = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1406,10 +1406,10 @@ async function main() {
       item.itemId === `analysis:${held.taskIntent.taskIntentId}` && item.book?.bookId === held.bookId && item.state === 'analysis-resumable') === true),
     'answered-restart-holders-stopped');
     await openAnalysisOf(renderer, fourthBookId, 'answered-restart');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可续行'`, 'answered-restart-card');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可继续'`, 'answered-restart-card');
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'answered-restart-plan');
     await waitForBar(renderer, {
-      state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行',
+      state: 'resumable', pill: '任务已中断 · 可继续', status: '任务已中断 · AI7 关闭时正在运行',
       statement: SHUTDOWN_STATEMENT,
       note: '已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分', actions: STOPPED_ACTIONS,
     }, 'answered-restart-bar');
@@ -1596,7 +1596,7 @@ async function main() {
 
     at('account-limit-stop');
     // 开始任务: ranges 1 to 3 are read, and the model service refuses the fourth on the account's limit. The Run stops at that
-    // boundary — 模型服务账户限额 in its own words, never 任务已中断 · 可续行's — keeping three ranges and holding nothing:
+    // boundary — 模型服务账户限额 in its own words, never 任务已中断 · 可继续's — keeping three ranges and holding nothing:
     // 处理模型服务 and 续行, beside 取消任务, 改计划重做 and 查看运行; ②A's card says the same, and 待我处理 holds it as an
     // exception whose next step is 处理模型服务.
     await openAnalysisOf(renderer, sixthBookId, 'sixth-analysis');

@@ -78,8 +78,8 @@ const BACKGROUND_REVOKED_LINE = '现在：已撤销：不会再开始新的后�
 /** Issue #864: the ceiling 登记 requires in this Journey, its words before and after, and 暂停's line. */
 const BACKGROUND_CEILING_TOKENS = 300000;
 const BACKGROUND_CEILING_REQUIRED = '登记时由你设定 · 必填；书系或全部图书按书平分';
-const BACKGROUND_CEILING_FIRST = '请先填写预算上限。';
-const BACKGROUND_PAUSED_LINE = '现在：已暂停：续行之前不会开始新的后台分析；已经开始的运行照常进行。';
+const BACKGROUND_CEILING_FIRST = '请先填写用量上限。';
+const BACKGROUND_PAUSED_LINE = '现在：已暂停：继续之前不会开始新的后台分析；已经开始的运行照常进行。';
 const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
 /**
  * The quiet period this Journey's launch sets for 后台处理登记 (`--j09-background-quiet-ms`, development-ci and J-09 only; #713
@@ -1076,7 +1076,7 @@ async function main() {
     requireJourney(exceptions.length === 1 && blockedItem?.itemId === `analysis:${blockedA.taskIntent.taskIntentId}` && blockedItem.state === 'analysis-blocked' &&
       blockedItem.blocked === 'true' && blockedItem.target === 'analysis' && blockedItem.bookId === bookA && blockedItem.book === `《${FIRST.title}》` &&
       blockedItem.object === '基线分析 · 首次基线分析' && blockedItem.openName === `查看运行 · 《${FIRST.title}》 · 基线分析 · 首次基线分析` &&
-      blockedItem.pill === '派发前已阻止' && blockedItem.shape === 'diamond' && blockedItem.reason === REASON_BLOCKED &&
+      blockedItem.pill === '没有开始' && blockedItem.shape === 'diamond' && blockedItem.reason === REASON_BLOCKED &&
       blockedItem.next === '查看运行' && (blockedItem.time ?? '').startsWith('记录于 ') && blockedItem.technical === false,
     'blocked-run-item', blockedItem);
     requireJourney(decisions.length === 0, 'no-preapproval-decision');
@@ -1569,7 +1569,7 @@ async function main() {
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='revoked'`, 'background-revoked', 30_000);
     // The result is announced where every success is (the polite toast; #persistence-status shows only busy and error lines).
     const revokeAnnounced = await renderer.evaluate(`({ toast: document.querySelector('[data-toast]')?.textContent ?? null, tone: document.querySelector('[data-toast]')?.dataset.tone ?? null, hidden: document.querySelector('[data-toast]')?.hidden ?? null, status: document.querySelector('#persistence-status')?.textContent ?? null })`);
-    requireJourney(revokeAnnounced?.toast === '已撤销后台处理登记：AI7 不再为这本书开始新的后台分析；已经开始的运行照常进行，可以在它的计划里暂停或取消；已有的结果、运行记录、已经发送的内容和这份登记的历史都保留，不会撤回或改写' &&
+    requireJourney(revokeAnnounced?.toast === '已关闭空闲时自动更新分析：AI7 不再为这本书开始新的后台分析；已经开始的运行照常进行，可以在它的计划里暂停或取消；已有的结果、运行记录、已经发送的内容和这份登记的历史都保留，不会撤回或改写' &&
       revokeAnnounced.tone === 'success' && revokeAnnounced.hidden === false, 'background-revoke-consequences', revokeAnnounced);
     const revokedBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(revokedBlock.pill === '已撤销' && revokedBlock.nextLine === BACKGROUND_REVOKED_LINE && revokedBlock.history.length === 4 &&

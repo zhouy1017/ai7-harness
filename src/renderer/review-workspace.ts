@@ -1,4 +1,5 @@
 import { triageKeyAction } from './triage-keys.js';
+import { houseAnnotationWords } from './editorial-mark-labels.js';
 import { clearReviewReturn } from './review-return.js';
 import { navigation, rendererApi } from './navigation-generation.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
@@ -2065,7 +2066,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const main = el('div', 'review-finding-main');
     main.append(heading, el('blockquote', 'review-finding-quote', reviewQuote(finding.quote)));
     if (finding.replacement !== null) main.append(el('p', 'review-finding-replacement', reviewReplacementLine(finding.replacement)));
-    main.append(el('p', 'review-finding-note', finding.note));
+    main.append(el('p', 'review-finding-note', houseAnnotationWords(finding.note)));
     const referencedRules = findingReferencedRules(finding);
     if (referencedRules !== null) main.append(referencedRules);
     if (finding.clauseRefs.length === 0) main.append(el('p', 'review-finding-basis', reviewBasisWords(category.basis)));

@@ -106,8 +106,8 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   const budget = el('input'); budget.inputMode = 'numeric'; budget.type = 'text'; styleInput(budget);
   budget.value = String(request.input.planEdits?.runBudgetCeiling?.maxTotalTokens ?? '');
   budget.dataset['taskLaunchOption'] = 'budget';
-  budget.setAttribute('aria-label', '本次预算上限 · 词元（不填为不设上限）');
-  const budgetLabel = el('label', undefined, '本次预算上限 · 词元（不填为不设上限）'); budgetLabel.append(budget); runOptions.append(budgetLabel);
+  budget.setAttribute('aria-label', '本次用量上限（不填为不设上限）');
+  const budgetLabel = el('label', undefined, '本次用量上限（不填为不设上限）'); budgetLabel.append(budget); runOptions.append(budgetLabel);
   usage.textContent = '计划预览按当前稿件和本次选项计算，不记录任务；开始时固定当前稿件。';
   runOptions.append(el('p', 'field-note', TASK_PLAN_BUDGET_HINT));
   const baselineOptions = request.operation === 'launchBaselineAnalysis';

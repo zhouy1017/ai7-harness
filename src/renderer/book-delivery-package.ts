@@ -381,7 +381,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       const item = el('li');
       item.dataset['itemKind'] = entry.kind;
       const label = el('span', 'package-item-label', entry.label);
-      if (entry.detail !== null) label.append(' · ', el('span', 'package-item-detail', entry.detail));
+      // The manifest's detail is recorded with the package; its raw times read as local times where it is shown (Issue #1531).
+      if (entry.detail !== null) label.append(' · ', el('span', 'package-item-detail', entry.detail.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu, (at) => localInstantLabel(at))));
       item.append(label);
       list.append(item);
     }

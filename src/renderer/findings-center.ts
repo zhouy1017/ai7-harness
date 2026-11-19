@@ -5,8 +5,8 @@ import { createButton } from './components/controls.js';
 import type { BookFindingProjection, BookFindingsProjection } from '../shared/protocol.js';
 import { FINDINGS_CENTER_WORDS } from './findings-center-labels.js';
 
+// One status vocabulary on the three finding lists (Issue #1531): the review page's, the 批注栏's and 待办汇总's.
 const STATUS_TONES: Readonly<Record<string, StateTone>> = {
-  '未覆盖': 'attention', '待复核': 'attention',
   '待处理': 'progress', '已处理': 'good', '已忽略': 'neutral',
 };
 

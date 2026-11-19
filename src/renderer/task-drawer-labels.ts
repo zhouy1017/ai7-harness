@@ -571,8 +571,8 @@ export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal:
   }
   if (pendingTotal > 0 && unitsSettled < unitsTotal) {
     // A list read only in part is counted, never named as though it were all of them (Issue #996).
-    const which = pendingTotal > pendingAnswerUnits.length ? ` ${pendingTotal} 个阅读范围` : `第 ${pendingAnswerUnits.join('、')} 个`;
-    return technicalWords(`已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时先按你的回答处理${which}，再继续未完成的部分，不重复已读完的部分`);
+    return technicalWords(`已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时先按你的回答处理${pendingTotal > pendingAnswerUnits.length
+      ? ` ${pendingTotal} 个阅读范围` : `第 ${pendingAnswerUnits.join('、')} 个`}，再继续未完成的部分，不重复已读完的部分`);
   }
   return technicalWords(unitsSettled >= unitsTotal
     ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时只处理尚未完成的步骤，已保存的步骤不会重做`

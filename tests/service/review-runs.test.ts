@@ -1823,14 +1823,14 @@ describe('a Review Run over the real store on exact sample1', () => {
       const waiting = workspace(session, book, prepared.reviewRunId).run!;
       expect(waiting.state).toBe('running');
       expect(waiting.categories.map((category) => [category.state, category.stateLabel, category.detail])).toEqual([
-        ['waiting', '等待运行名额', '运行名额已满：等待运行名额的任务先开始，有名额空出时这一类接着审；在此之前这一类什么都没有发送。'],
+        ['waiting', '排队中', '运行名额已满：等待运行名额的任务先开始，有名额空出时这一类接着审；在此之前这一类什么都没有发送。'],
         ['waiting', '等待审阅', null],
       ]);
       // 待我处理 names the same wait for the category the Run is at.
       const attention = session.store.inspectGlobalAttention(() => null, true);
       const item = attention.groups.flatMap((group) => group.items).find((entry) => entry.itemId === `review:${prepared.reviewRunId}`)!;
       expect(item.state).toBe('review-running');
-      expect(item.facts.categories.map((category) => category.stateLabel)).toEqual(['等待运行名额']);
+      expect(item.facts.categories.map((category) => category.stateLabel)).toEqual(['排队中']);
       taken!.free();
       await loop;
       const finished = workspace(session, book, prepared.reviewRunId).run!;

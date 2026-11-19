@@ -173,7 +173,7 @@ it('renders each finding status with its actual tone, defaulting unknown statuse
     createTextNode: (text: string) => { const node = new MiniElement('#text'); node.textContent = text; return node; },
   });
   try {
-    const statuses = ['未覆盖', '待复核', '待处理', '已处理', '已忽略', '已停用'];
+    const statuses = ['待处理', '已处理', '已忽略', '已停用'];
     const page: BookFindingsProjection = {
       bookId: 'synthetic-book', total: statuses.length, offset: 0, next: null, pageSize: 40,
       groups: [{ category: 'synthetic', label: '发现', count: statuses.length, bySeverity: {}, byStatus: {} }],
@@ -188,8 +188,7 @@ it('renders each finding status with its actual tone, defaulting unknown statuse
     await Promise.resolve();
     expect(root.dataset['findingsState']).toBe('ready');
     expect(root.querySelectorAll('.state-term').filter((pill) => statuses.includes(pill.textContent)).map((pill) => [pill.textContent, pill.dataset['pillTone']])).toEqual([
-      ['未覆盖', 'attention'], ['待复核', 'attention'], ['待处理', 'progress'],
-      ['已处理', 'good'], ['已忽略', 'neutral'], ['已停用', 'neutral'],
+      ['待处理', 'progress'], ['已处理', 'good'], ['已忽略', 'neutral'], ['已停用', 'neutral'],
     ]);
   } finally { vi.unstubAllGlobals(); restore(); }
 });

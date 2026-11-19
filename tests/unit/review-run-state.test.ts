@@ -156,7 +156,7 @@ describe('a Review Run started with 联网后开始任务 (Issue #760, S74c)', (
 
 describe('a category waiting for a place of the governor (Issue #632; CONC-007)', () => {
   it('reads 等待运行名额 only while it is the category waiting for one, and its state\'s words otherwise', () => {
-    expect(reviewRunCategoryStateLabel('waiting', true)).toBe('等待运行名额');
+    expect(reviewRunCategoryStateLabel('waiting', true)).toBe('排队中');
     expect(reviewRunCategoryStateLabel('waiting', false)).toBe('等待审阅');
     expect(reviewRunCategoryStateLabel('running', true)).toBe('正在审阅');
   });

@@ -320,7 +320,7 @@ export const OUTCOME_UNKNOWN_STATE = { key: 'outcome-unknown', label: '该单元
  * Why 结果待确认 offers no 改计划重做 (Issue #51, S16c; CONT-011 lists Redo among the blocked repeats): the editor settles the
  * uncertainty first with 取消任务, which keeps each such range as its own gap; a redo after that discloses the resend.
  */
-export const OUTCOME_UNKNOWN_NO_REDO = '结果待确认：先取消任务，确定这次运行到此为止；之后才能改计划重做。';
+export const OUTCOME_UNKNOWN_NO_REDO = '结果待确认：先取消任务，确定这次运行到此为止；之后才能重新开始。';
 /**
  * A Task that recomputes ranges whose earlier request's result could not be known (Issue #51, S16c; CONT-011): it names them,
  * says the earlier request may already have been processed and billed, and that this Task sends it again — under the fresh
@@ -814,7 +814,7 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
     // 需要重新确认计划 (Issue #536; OFF-008): a waiting Run whose plan moved before it could start; any other block keeps
     // 派发前已阻止.
     case 'authorized-blocked':
-      return projection.run?.blockedBy === 'plan-moved' ? { key: 'plan-moved', label: PLAN_MOVED_LABEL } : { key: 'blocked', label: '派发前已阻止' };
+      return projection.run?.blockedBy === 'plan-moved' ? { key: 'plan-moved', label: PLAN_MOVED_LABEL } : { key: 'blocked', label: '没有开始' };
     // Connectivity Wait (Issue #502): the label says what it waits for once the service has looked
     // (`withWaitingReason`); on its own the record says only that it waits for the network.
     case 'waiting':
@@ -840,7 +840,7 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
       return stopped?.accountLimit != null ? { ...ACCOUNT_LIMIT_STATE }
         // 结果待确认 (Issue #51, S16c): its own words too.
         : stopped?.outcomeUnknown?.stopped === true ? { ...OUTCOME_UNKNOWN_STATE }
-          : { key: 'resumable', label: '任务已中断 · 可续行' };
+          : { key: 'resumable', label: '任务已中断 · 可继续' };
     // 任务等待你的说明 (Issue #422, S76d; CLAR-004): every unit the Run could read is read; it waits for the answer.
     case 'awaiting-clarification':
       return { key: 'awaiting-clarification', label: '任务等待你的说明' };
@@ -2149,9 +2149,9 @@ export const RUN_CONTROL_PAUSE_REASON = '这项任务现在没有在运行，不
  * 改计划重做 is offered once the Run has stopped (editor-surfaces §6: 暂停后出现 续行 与 改计划重做; Issue #422, S76c); a
  * Run still under way says to pause it first.
  */
-export const RUN_CONTROL_REDO_REASON = '先暂停，再改计划重做';
+export const RUN_CONTROL_REDO_REASON = '先暂停，再重新开始';
 /** A stopped Run that never began reading has nothing to redo from: it is cancelled, and the Task prepared again. */
-export const RUN_CONTROL_REDO_NOT_BEGUN_REASON = '这项任务还没有开始阅读，没有可以重做的部分；可以取消它，再重新准备任务';
+export const RUN_CONTROL_REDO_NOT_BEGUN_REASON = '这项任务还没有开始阅读，没有可以重做的部分；可以取消它，再重新开始任务';
 /** Once the editor confirmed 取消任务 nothing more is offered: the Run is stopping. */
 export const RUN_CONTROL_CANCELLING_REASON = '已在取消：正在进行的这一步会被中止，此后不再发送任何内容';
 /** While the Run pauses, 取消任务 waits for it to have stopped. */
