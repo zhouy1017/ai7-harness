@@ -289,3 +289,147 @@ it('keeps a launch popover open while focus leaves the window, and closes it whe
   start.dispatchEvent({ type: 'focusin', bubbles: true } as never);
   expect(details.open).toBe(false);
 });
+
+it('places a launch popover above or below its whole bar, so a wrapped bar keeps 选项 reachable under an open plan (#1526 follow-up)', () => {
+  // J-04 at 1280×800 with the Task Drawer docked beside the page: the update controls' bar is 447.8 px wide and wraps — 模型 · 选项 ·
+  // 开始 on the first row from 382.3 px, 先看计划 alone on the second down to 470.6 px. The plan panel is 520 × 367.5 px.
+  vi.stubGlobal('innerWidth', 1280); vi.stubGlobal('innerHeight', 800);
+  Object.assign(window, { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  const shown = new Set<unknown>();
+  const proto = Object.getPrototypeOf(document.createElement('div')) as Record<string, unknown>;
+  const own = Object.getOwnPropertyDescriptor(proto, 'matches')!;
+  Object.defineProperty(proto, 'showPopover', { configurable: true, value(this: unknown) { shown.add(this); } });
+  Object.defineProperty(proto, 'hidePopover', { configurable: true, value(this: unknown) { shown.delete(this); } });
+  Object.defineProperty(proto, 'matches', { configurable: true, value(this: unknown, selector: string) {
+    return selector === ':popover-open' ? shown.has(this) : (own.value as (s: string) => boolean).call(this, selector); } });
+  try {
+    const bar = createLaunchBarPresentation(document.createElement('span'), document.createElement('button'),
+      { title: '选项', content: document.createElement('div') }, document.createElement('div'));
+    document.body.append(bar);
+    const box = (left: number, top: number, width: number, height: number) => ({ top, bottom: top + height, left, right: left + width, width, height });
+    const plan = bar.querySelector<HTMLDetailsElement>('.task-launch-estimate')!;
+    const panel = plan.querySelector<HTMLElement>('.task-launch-popover')!;
+    const options = box(470.2, 382.3, 58.8, 35.2);
+    Object.assign(bar, { getBoundingClientRect: () => box(270.6, 382.3, 447.8, 88.3) });
+    Object.assign(bar.querySelector('.task-launch-options summary')!, { getBoundingClientRect: () => options });
+    Object.assign(plan.querySelector('summary')!, { getBoundingClientRect: () => box(270.6, 423.9, 112.8, 46.8) });
+    Object.assign(panel, { getBoundingClientRect: () => {
+      const style = panel.style as unknown as Record<string, string>;
+      const height = Math.min(367.5, Number.parseFloat(style['maxHeight'] || '367.5'));
+      return box(Number.parseFloat(style['left'] || '0'), Number.parseFloat(style['top'] || '0'), 520, height);
+    } });
+    plan.open = true; plan.dispatchEvent({ type: 'toggle' } as never);
+    const placed = panel.getBoundingClientRect();
+    expect(shown.has(panel)).toBe(true);
+    // Above the whole bar (there is room for all of it there): neither row is under it, so 选项 stays pressable.
+    expect(placed.bottom).toBeLessThanOrEqual(382.3);
+    expect(placed.bottom <= options.top || placed.top >= options.bottom).toBe(true);
+    expect(placed.height).toBe(367.5);
+    expect(placed.left).toBe(270.6);
+  } finally {
+    Object.defineProperty(proto, 'matches', own);
+    Reflect.deleteProperty(proto, 'showPopover'); Reflect.deleteProperty(proto, 'hidePopover');
+  }
+});
+
+it('keeps an open launch popover by its summary when a transition of the page moves the summary (#1526 follow-up)', () => {
+  // Narrowing a window with the Task Drawer docked: the page's padding transition moves 选项 after the resize event, from 3713 px to
+  // 323 px; the open options panel follows it when that transition ends, instead of staying where it was placed mid-way.
+  vi.stubGlobal('innerWidth', 1008); vi.stubGlobal('innerHeight', 681);
+  Object.assign(window, { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  const shown = new Set<unknown>();
+  const proto = Object.getPrototypeOf(document.createElement('div')) as Record<string, unknown>;
+  const own = Object.getOwnPropertyDescriptor(proto, 'matches')!;
+  Object.defineProperty(proto, 'showPopover', { configurable: true, value(this: unknown) { shown.add(this); } });
+  Object.defineProperty(proto, 'hidePopover', { configurable: true, value(this: unknown) { shown.delete(this); } });
+  Object.defineProperty(proto, 'matches', { configurable: true, value(this: unknown, selector: string) {
+    return selector === ':popover-open' ? shown.has(this) : (own.value as (s: string) => boolean).call(this, selector); } });
+  try {
+    const bar = createLaunchBarPresentation(document.createElement('span'), document.createElement('button'),
+      { title: '选项', content: document.createElement('div') }, null);
+    document.body.append(bar);
+    const box = (left: number, top: number, width: number, height: number) => ({ top, bottom: top + height, left, right: left + width, width, height });
+    let barTop = 3713;
+    const options = bar.querySelector<HTMLDetailsElement>('.task-launch-options')!;
+    const panel = options.querySelector<HTMLElement>('.task-launch-popover')!;
+    Object.assign(bar, { getBoundingClientRect: () => box(270, barTop, 400, 35) });
+    Object.assign(options.querySelector('summary')!, { getBoundingClientRect: () => box(470, barTop, 59, 35) });
+    Object.assign(panel, { getBoundingClientRect: () => {
+      const style = panel.style as unknown as Record<string, string>;
+      return box(Number.parseFloat(style['left'] || '0'), Number.parseFloat(style['top'] || '0'), 320, Math.min(200, Number.parseFloat(style['maxHeight'] || '200')));
+    } });
+    options.open = true; options.dispatchEvent({ type: 'toggle' } as never);
+    expect(panel.getBoundingClientRect().top).toBeGreaterThan(681);
+    barTop = 323;
+    document.body.dispatchEvent({ type: 'transitionend', bubbles: true } as never);
+    const placed = panel.getBoundingClientRect();
+    expect(placed.top).toBe(323 + 35 + 4);
+    expect(placed.bottom).toBeLessThanOrEqual(681);
+  } finally {
+    Object.defineProperty(proto, 'matches', own);
+    Reflect.deleteProperty(proto, 'showPopover'); Reflect.deleteProperty(proto, 'hidePopover');
+  }
+});
+
+/** Native popovers and window events for one test, with a bar of one row at `barTop` and a panel 500 px tall. */
+function popoverBar(barTop: number) {
+  vi.stubGlobal('innerWidth', 1280); vi.stubGlobal('innerHeight', 800);
+  const listeners = new Map<string, () => void>();
+  Object.assign(window, { addEventListener: vi.fn((type: string, listener: () => void) => { listeners.set(type, listener); }),
+    removeEventListener: vi.fn((type: string, listener: () => void) => { if (listeners.get(type) === listener) listeners.delete(type); }) });
+  const shown = new Set<unknown>();
+  const proto = Object.getPrototypeOf(document.createElement('div')) as Record<string, unknown>;
+  const own = Object.getOwnPropertyDescriptor(proto, 'matches')!;
+  Object.defineProperty(proto, 'showPopover', { configurable: true, value(this: unknown) { shown.add(this); } });
+  Object.defineProperty(proto, 'hidePopover', { configurable: true, value(this: unknown) { shown.delete(this); } });
+  Object.defineProperty(proto, 'matches', { configurable: true, value(this: unknown, selector: string) {
+    return selector === ':popover-open' ? shown.has(this) : (own.value as (s: string) => boolean).call(this, selector); } });
+  const bar = createLaunchBarPresentation(document.createElement('span'), document.createElement('button'), null, document.createElement('div'));
+  document.body.append(bar);
+  const box = (left: number, top: number, width: number, height: number) => ({ top, bottom: top + height, left, right: left + width, width, height });
+  const plan = bar.querySelector<HTMLDetailsElement>('.task-launch-estimate')!;
+  const panel = plan.querySelector<HTMLElement>('.task-launch-popover')!;
+  const style = panel.style as unknown as Record<string, string>;
+  Object.assign(bar, { getBoundingClientRect: () => box(270, barTop, 400, 35) });
+  Object.assign(plan.querySelector('summary')!, { getBoundingClientRect: () => box(470, barTop, 112, 35) });
+  // As an engine lays it out: an unbounded panel shows all of itself, and reading its layout then puts its own scroll back to 0.
+  let scroll = 0;
+  Object.defineProperty(panel, 'scrollTop', { configurable: true, get: () => scroll, set: (value: number) => {
+    scroll = style['maxHeight'] ? Math.max(0, Math.min(value, 500 - Number.parseFloat(style['maxHeight']))) : 0; } });
+  Object.assign(panel, { getBoundingClientRect: () => {
+    if (!style['maxHeight']) scroll = 0;
+    return box(Number.parseFloat(style['left'] || '0'), Number.parseFloat(style['top'] || '0'), 520, Math.min(500, Number.parseFloat(style['maxHeight'] || '500')));
+  } });
+  const restore = (): void => { Object.defineProperty(proto, 'matches', own); Reflect.deleteProperty(proto, 'showPopover'); Reflect.deleteProperty(proto, 'hidePopover'); };
+  return { bar, plan, panel, listeners, restore };
+}
+
+it('keeps the editor\'s place in a bounded launch popover when it is placed again (#1526 follow-up)', () => {
+  const { plan, panel, listeners, restore } = popoverBar(382);
+  try {
+    plan.open = true; plan.dispatchEvent({ type: 'toggle' } as never);
+    // 371 px of room below the bar (370 above) for a 500 px plan: bounded, its content scrolls. The editor scrolls to its end (更新计划).
+    expect((panel.style as unknown as Record<string, string>)['maxHeight']).toBe('371px');
+    panel.scrollTop = 129;
+    expect(panel.scrollTop).toBe(129);
+    // Its own scroll reaches the page's captured scroll listener, then a transition of the page ends, then the window resizes.
+    document.body.dispatchEvent({ type: 'scroll', bubbles: true } as never);
+    expect(panel.scrollTop).toBe(129);
+    document.body.dispatchEvent({ type: 'transitionend', bubbles: true } as never);
+    expect(panel.scrollTop).toBe(129);
+    listeners.get('resize')!();
+    expect(panel.scrollTop).toBe(129);
+  } finally { restore(); }
+});
+
+it('lets go of the page once a launch popover is removed while it is open (#1526 follow-up)', () => {
+  const { bar, plan, listeners, restore } = popoverBar(382);
+  try {
+    plan.open = true; plan.dispatchEvent({ type: 'toggle' } as never);
+    expect(listeners.has('resize')).toBe(true);
+    // The bar is drawn anew or disposed with its panel open: no toggle event comes; the next page event finds it detached.
+    bar.remove();
+    document.body.dispatchEvent({ type: 'scroll', bubbles: true } as never);
+    expect(listeners.has('resize')).toBe(false);
+  } finally { restore(); }
+});

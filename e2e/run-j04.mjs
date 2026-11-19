@@ -430,6 +430,8 @@ async function startUpdate(renderer, mode, label, name, launch = true) {
   // Below 1120 px the Task Drawer overlays the page: when it covers the history tab, the editor closes it first.
   const tabCovered = `(() => { const tab=document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]'); if(!tab)return false; tab.scrollIntoView({block:'center',behavior:'instant'}); const r=tab.getBoundingClientRect(); return !tab.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)) && !!document.querySelector('#task-drawer:not([hidden])')?.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)); })()`;
   if (await renderer.evaluate(tabCovered)) {
+    // Only the overlay form is closed away: a docked drawer (the page made room for it) over the tab is a defect of the page.
+    requireJourney(await renderer.evaluate(`Number.parseFloat(getComputedStyle(document.body).paddingRight)===0`) === true, `${name}-docked-drawer-covers-tab`);
     await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close`);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `${name}-drawer-closed`);
   }
@@ -2429,6 +2431,10 @@ async function main() {
       for (const [width,height] of [[1280,800],[1008,681]]) {
         at(width===1280?'launch-options-wide':'launch-options-gate');
         await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        // With the Task Drawer docked the page makes room for it by a transition of its padding: once the new width has settled, the
+        // editor brings the bar back into view, and its open 选项 panel follows it.
+        await waitFor(renderer,`document.body.getAnimations().length===0`,`launch-options-settled-${width}`);
+        await renderer.evaluate(`document.querySelector('[data-task-launch-kind] .task-launch-options > summary')?.scrollIntoView({block:'center',behavior:'instant'})`);
         if (!(await renderer.evaluate(`document.querySelector('[data-task-launch-kind] .task-launch-options').open`))) await pointerClick(renderer,waitFor,'[data-task-launch-kind] .task-launch-options > summary','launch-options-open');
         await pointerClick(renderer,waitFor,'[data-task-launch-kind] [data-task-launch-option="sampling"]','launch-without-sampling');
         const retry='[data-task-launch-kind] [data-task-launch-option="retry"]';
