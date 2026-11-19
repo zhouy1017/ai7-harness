@@ -1,4 +1,6 @@
+import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -123,6 +125,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-09' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -1677,7 +1680,12 @@ async function main() {
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'overview-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'overview-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')?.disabled===false`, 'overview-ready');
-    await clickSelector(renderer, '[data-task-overview-start]', 'overview-sheet');
+    await pointerClick(renderer, waitFor, '[data-task-overview-start]', 'overview-sheet');
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('.task-overview-sheet'); return sheet?.open && sheet.contains(document.activeElement) && document.activeElement!==sheet; })()`, 'overview-sheet-focus');
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await waitFor(renderer, `!document.querySelector('.task-overview-sheet')?.open && document.activeElement?.matches('[data-task-overview-start]')`, 'overview-sheet-focus-return');
+    await pointerClick(renderer, waitFor, '[data-task-overview-start]', 'overview-sheet-reopen');
     const selectOverviewBooks = async (ids) => assertRenderer(renderer, `(() => { const ids=${JSON.stringify(ids)}; const sheet=document.querySelector('.task-overview-sheet'); for(const input of sheet.querySelectorAll('input[type="checkbox"][value]')) input.checked=ids.includes(input.value); return ids.every(id=>sheet.querySelector('input[value="'+id+'"]')?.checked); })()`, 'overview-sheet-books');
     await selectOverviewBooks(overviewBooks.slice(0, 2));
     await clickSelector(renderer, '[data-task-overview-enqueue]', 'overview-add-two');
@@ -1700,6 +1708,18 @@ async function main() {
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.filter(i=>${JSON.stringify(overviewBooks.slice(0,2))}.includes(i.bookId)).every(i=>i.progress?.done===1))()`, 'overview-two-held', 60000);
     // #1375: release two real reading units; both changed cards must keep More and summary focus in ordinary mode.
     const pollOverviewSelector=`.task-overview-card[data-task-item="${overviewIds[0]}"]`;
+    for (const [width, height] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      const summarySelector = `${pollOverviewSelector} .task-overview-more > summary`;
+      await pointerClick(renderer, waitFor, summarySelector, 'overview-ordinary-menu-open');
+      await assertRenderer(renderer, `(() => {
+        const panel = document.querySelector(${JSON.stringify(pollOverviewSelector)}).querySelector('.ui-menu-panel');
+        const box = panel.getBoundingClientRect(), minimum = parseFloat(getComputedStyle(panel).minWidth);
+        return innerWidth === ${width} && innerHeight === ${height} && minimum > 0 && box.width >= minimum && box.right <= innerWidth && box.left >= 0;
+      })()`, 'overview-ordinary-menu-geometry');
+      await pointerClick(renderer, waitFor, summarySelector, 'overview-ordinary-menu-close');
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
     await assertRenderer(renderer,`(() => {const card=document.querySelector(${JSON.stringify(pollOverviewSelector)}),more=card.querySelector('.task-overview-more');more.open=true;more.querySelector('summary').focus();return document.documentElement.dataset.technicalLayerVisible==='false';})()`,'overview-more-poll-open');
     for(const done of [2,3]) {
       await renderer.evaluate(`globalThis.__j09PollCard=document.querySelector(${JSON.stringify(pollOverviewSelector)})`);
@@ -1734,9 +1754,52 @@ async function main() {
     await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(fourth.itemId)}) && p.groups.find(g=>g.key==='queued').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])} && i.queuePosition===1); })()`, 'overview-fourth-before-third', 60000);
     await overviewAction(fourth.itemId, 'run');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"]') && document.querySelector('#task-drawer')?.hidden===false && Math.abs(document.querySelector('#task-drawer').getBoundingClientRect().width-500)<2`, 'overview-drawer-stays-on-page');
+    // 状态卡 (Issue #1527): the Run under way in ordinary mode is one card — its bar, stage and time, 暂停 and 取消任务 — at the wide window and at the Gate's.
+    at('task-status-running');
+    for (const [statusWidth, statusHeight] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width: statusWidth, height: statusHeight, deviceScaleFactor: 1, mobile: false });
+      await waitFor(renderer, statusCardExpression({ ended: false }), `task-status-running-${statusWidth}`, 30_000);
+      // The card's own controls, by pointer: 查看计划 opens the plan with the Run's activity, 运行 comes back, and 暂停 and 停止任务 are there to press.
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="full-link"]', `task-status-running-plan-${statusWidth}`);
+      await waitFor(renderer, planViewExpression({ running: true }), `task-status-running-plan-view-${statusWidth}`, 30_000);
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-mode="compact"]', `task-status-running-back-to-run-${statusWidth}`);
+      await waitFor(renderer, statusCardExpression({ ended: false }), `task-status-running-card-again-${statusWidth}`, 30_000);
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
     await press(renderer, 'Escape');
     await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.filter(g=>g.key==='running'||g.key==='queued').every(g=>g.items.every(i=>!${JSON.stringify(overviewBooks)}.includes(i.bookId))))()`, 'overview-released-completions', 120000);
+    // 状态卡 of a task that finished (Issue #1527): its result in one sentence, its 处理用时 from the Run Report, 查看结果 — opened from the
+    // overview card's 更多 menu by pointer, at the wide window and at the Gate's.
+    at('task-status-finished-overview');
+    // A finished task is listed under the id of its recorded outcome, not under the id it had while it ran: find it by its Book.
+    const findFinished = `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='recent').items.find(i=>i.bookId===${JSON.stringify(overviewBooks[3])} && i.state==='completed')?.itemId ?? null)()`;
+    await waitFor(renderer, findFinished, 'task-status-finished-recorded', 60000);
+    const finishedItemId = await renderer.evaluate(findFinished);
+    // The product opens the result of a task that just finished while its editor is on this page (a completion notice), one window for each finished
+    // task and a little after each; let those arrive and close them by pointer, so the stage starts from the page and not from a window the completions chose.
+    for (let quiet = 0; quiet < 6;) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 500));
+      if (await renderer.evaluate(`document.querySelector('.task-result-window') !== null`)) {
+        quiet = 0;
+        await pointerClick(renderer, waitFor, '.task-result-window [data-task-result-action="close"]', 'task-status-finished-auto-result-close');
+        await waitFor(renderer, `document.querySelector('.task-result-window') === null`, 'task-status-finished-auto-result-closed');
+      } else quiet += 1;
+    }
+    const finishedCard = `.task-overview-card[data-task-item="${finishedItemId}"]`;
+    for (const [statusWidth, statusHeight] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width: statusWidth, height: statusHeight, deviceScaleFactor: 1, mobile: false });
+      await pointerClick(renderer, waitFor, `${finishedCard} .task-overview-more > summary`, `task-status-finished-menu-${statusWidth}`);
+      await pointerClick(renderer, waitFor, `${finishedCard} [data-task-action="run"]`, `task-status-finished-open-${statusWidth}`);
+      await waitFor(renderer, statusCardExpression({ ended: true, processed: true }), `task-status-finished-card-${statusWidth}`, 30_000);
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="full-link"]', `task-status-finished-plan-${statusWidth}`);
+      await waitFor(renderer, planViewExpression({ running: false }), `task-status-finished-plan-view-${statusWidth}`, 30_000);
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-mode="compact"]', `task-status-finished-back-to-run-${statusWidth}`);
+      await waitFor(renderer, statusCardExpression({ ended: true, processed: true }), `task-status-finished-card-again-${statusWidth}`, 30_000);
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `task-status-finished-close-${statusWidth}`);
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `task-status-finished-closed-${statusWidth}`);
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-developer-settings');
     await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'overview-poll-developer-settings-ready');

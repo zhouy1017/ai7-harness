@@ -1,4 +1,5 @@
 import { identityWords } from './technical-layer.js';
+import { reportResult } from './notifications.js';
 import {
   draftText,
   hasNonConflictingChanges,
@@ -204,7 +205,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
       editingUnit = null;
       bulkSummary = null;
       render();
-      if (rebased || next.draftOnEarlierBasis) options.setStatus(CONFLICT_REBASED_NOTICE);
+      if (rebased || next.draftOnEarlierBasis) reportResult(options.setStatus, CONFLICT_REBASED_NOTICE);
       else options.setStatus(CONFLICT_STATUS_LINES.opened);
     } catch (error) {
       if (destroyed) return;

@@ -1,4 +1,4 @@
-import { chooseDispatch } from './dispatch-chooser.mjs';
+import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -8,7 +8,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, milestonePersisted, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, milestonePersisted, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass, statusBarClear, statusBarOverlaps } from './controller.mjs';
 import { CREDENTIAL_CLEANUP_SCHEMA_VERSION, assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
@@ -108,6 +108,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-12' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -207,12 +208,21 @@ async function createRendererManager(browser) {
   const renderers = new Map();
   const pending = new Map();
   const detachedSessions = new Set();
+  const isolatedContexts = new Map();
   let nextId = 1;
   const sendRoot = (method, params = {}, deadline = Date.now() + CDP_OPERATION_TIMEOUT_MS) =>
     awaitCdpOperation(withBrowserConnection(root.send(method, params)), deadline);
   root.on('Target.receivedMessageFromTarget', ({ sessionId, message }) => {
     let response;
     try { response = JSON.parse(message); } catch { return; }
+    // #1519: the page's other worlds (the preload's among them), for a fault armed there.
+    if (response.method === 'Runtime.executionContextCreated' && response.params?.context?.auxData?.isDefault === false) {
+      if (!isolatedContexts.has(sessionId)) isolatedContexts.set(sessionId, new Set());
+      isolatedContexts.get(sessionId).add(response.params.context.id);
+      return;
+    }
+    if (response.method === 'Runtime.executionContextDestroyed') { isolatedContexts.get(sessionId)?.delete(response.params?.executionContextId); return; }
+    if (response.method === 'Runtime.executionContextsCleared') { isolatedContexts.delete(sessionId); return; }
     if (typeof response.id !== 'number') return;
     const key = `${sessionId}:${response.id}`;
     const completion = pending.get(key);
@@ -270,6 +280,15 @@ async function createRendererManager(browser) {
           const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
           requireJourney(!response.exceptionDetails, `renderer-evaluate-${location}`);
           return response.result.value;
+        },
+        /** True when the expression is true in at least one of the page's other worlds. */
+        evaluateIsolated: async (expression) => {
+          let any = false;
+          for (const contextId of isolatedContexts.get(sessionId) ?? []) {
+            const response = await send('Runtime.evaluate', { expression, contextId, returnByValue: true }).catch(() => null);
+            if (response !== null && !response.exceptionDetails && response.result?.value === true) any = true;
+          }
+          return any;
         },
       };
       await send('Runtime.enable', {}, attachDeadline);
@@ -1017,7 +1036,7 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-settings-hub');
     await waitFor(primary, `document.querySelectorAll('[data-screen="settings"] [data-settings-entry]').length===6 && !document.querySelector('[data-settings-entry="usage"]') && !document.querySelector('[data-settings-entry="evaluation-calibration"]') && !document.querySelector('[data-settings-entry="diagnostics"]')`, 'ordinary-settings-six-rows');
     await click(primary, '键盘与无障碍', 'ordinary-keyboard-entry');
-    await waitFor(primary, `document.querySelectorAll('[data-keyboard-command]').length>0 && !document.querySelector('[data-keyboard-change]') && !document.querySelector('[data-keyboard-reset-all]') && document.querySelector('input[data-reduced-motion]')`, 'ordinary-keyboard-read-only');
+    await waitFor(primary, `document.querySelectorAll('[data-keyboard-command]').length>0 && !document.querySelector('[data-keyboard-change]') && !document.querySelector('[data-keyboard-reset-all]') && document.querySelector('input.ui-checkbox[data-reduced-motion]')`, 'ordinary-keyboard-read-only');
     await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'ordinary-reduced-motion');
     await waitFor(primary, `document.documentElement.dataset.reducedMotion==='true' && localStorage.getItem('ai7.reducedMotion')==='true'`, 'ordinary-reduced-motion-applied');
     await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'ordinary-reduced-motion-reset');
@@ -1057,13 +1076,9 @@ async function main() {
     await assertRenderer(primary, `(() => { const mode=document.querySelector('select[aria-label="网络代理方式"]'); mode.value='direct'; mode.dispatchEvent(new Event('change')); return true; })()`, 'ordinary-proxy-reset');
     await click(primary, '保存网络代理', 'ordinary-proxy-reset-save');
     await waitFor(primary, `document.querySelector('[data-model-service-proxy="direct"]')`, 'ordinary-proxy-reset-saved');
-    // The deliberately unused loopback proxy reports a persistent error. Dismiss it through the UI
-    // after restoring direct mode so the following page can expose its own ordinary status.
-    await assertRenderer(primary, `(() => {
-      const status=document.querySelector('#persistence-status'); const dismiss=status?.querySelector('button[aria-label="关闭错误提示"]');
-      if(!(status instanceof HTMLElement)||status.dataset.tone!=='error'||!status.textContent.includes('代理不可达')||!(dismiss instanceof HTMLButtonElement))return false;
-      dismiss.click(); return status.hidden;
-    })()`, 'ordinary-proxy-probe-error-dismissed');
+    // The deliberately unused loopback proxy reports a persistent error. The save that restores direct mode is the retry
+    // that worked (#1519): its success clears that error, so the following page exposes its own ordinary status.
+    await waitFor(primary, `document.querySelector('#persistence-status')?.hidden===true && !document.querySelector('#persistence-status')?.textContent.includes('代理不可达')`, 'ordinary-proxy-probe-error-cleared');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
     await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===4 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、审阅偏好、范例、资料库'`, 'ordinary-knowledge-four-categories');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
@@ -1662,11 +1677,99 @@ async function main() {
     await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); return reuse instanceof HTMLInputElement && reuse.checked; })()`, 'preflight-reuse-source');
     await click(primary, '查看导入详情', 'preflight-prepare-source');
     await waitFor(primary, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'preflight-source-review');
+    // #1519: from the instant the bar appears, a press on 导入来源材料到所选图书 reaches that button — never the bar's ×. Hit-tested
+    // at once (before any frame) and in the next three frames; a button outside the window counts as unknown (null).
+    const FIRST_FRAMES_PROBE = `(() => {
+      const bar = document.querySelector('#persistence-status'); const hits = []; window.__j12FirstFrames = hits;
+      // A bar already on screen (and placed) does not appear for this press: there is no first instant to test.
+      if (!bar.hidden) { window.__j12FirstFrames = 'already-shown'; return true; }
+      const hit = () => { const node = document.querySelector('[data-commit-source-import]'); if (!(node instanceof HTMLElement)) { hits.push(null); return; }
+        const r = node.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+        hits.push(x < 0 || y < 0 || x >= innerWidth || y >= innerHeight ? null : node.contains(document.elementFromPoint(x, y))); };
+      const observer = new MutationObserver(() => {
+        if (bar.hidden || hits.length > 0) return;
+        observer.disconnect(); hit();
+        let frames = 0; const next = () => requestAnimationFrame(() => { hit(); frames += 1; if (frames < 3) next(); }); next();
+      });
+      observer.observe(bar, { attributes: true, attributeFilter: ['hidden'] });
+      return true;
+    })()`;
+    // A first-frame check that fails says what each hit saw: the button's box, the bar's, and what lay under the button's centre.
+    const firstFrames = async (predicate, name, allowShown = false) => {
+      try { await waitFor(primary, `${allowShown ? "window.__j12FirstFrames === 'already-shown' || " : ''}(Array.isArray(window.__j12FirstFrames) && window.__j12FirstFrames.length === 4 && window.__j12FirstFrames.every(${predicate}))`, name, 20_000); }
+      catch { requireJourney(false, name, await primary.evaluate(`(() => { const node = document.querySelector('[data-commit-source-import]'), r = node?.getBoundingClientRect(); const under = r ? document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) : null;
+        return { hits: window.__j12FirstFrames ?? null, button: r ? [r.left, r.top, r.width, r.height].map(Math.round) : null, under: under ? [under.tagName, String(under.className), under.id] : null, hidden: document.hidden, bar: ${statusBarOverlaps(['.commit-bar'])} }; })()`)); }
+    };
+    await primary.evaluate(FIRST_FRAMES_PROBE);
     await click(primary, '导入来源材料到所选图书', 'preflight-commit-source');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('已显示这本图书现有的工作台') && document.querySelector('#persistence-status')?.textContent.includes('来源材料未提交') && !document.querySelector('[data-commit-source-import]')?.disabled`, 'preflight-duplicate-rejected');
     await waitFor(registeredBookA, `document.hasFocus() && document.visibilityState==='visible'`, 'preflight-existing-a-focused');
     const sourceRecordsAfter = await registeredBookA.evaluate(`(async()=>{ const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}); return overview.records.filter((record)=>record.kind==='source-import-record').length; })()`);
     requireJourney(sourceRecordsBefore === sourceRecordsAfter && (await manager.list()).length === 3, 'preflight-no-durable-commit-or-window');
+    // #1519: the refusal stands in the bar, an overlay above the page's sticky action bar: in view, over neither the sidebar nor
+    // the page's sticky actions nor the control just above them, with the sidebar open and folded to icons, at the top of the page
+    // and scrolled to its end — for the product's own line and for a long one. The long one is a fault armed apart from the press:
+    // in the preload's world, the next refusal of this commit carries a long sentence; 导入来源材料到所选图书 is pressed with the pointer.
+    const PREFLIGHT_CONTROLS = ['.commit-bar', '.workbench-actions'];
+    const LONG_REFUSAL = '已显示这本图书现有的工作台；来源材料未提交。这条说明故意写得很长，用来确认它在导入复核页里自行折行，既不超出窗口，也不压住贴底的操作栏、它上方的控件或侧栏。'.repeat(4);
+    // Scrolled as far as the page goes (a page that scrolls has really moved), the control just above the sticky bar is not under the bar.
+    const ABOVE_COMMIT_CLEAR = `(() => {
+      const bar = document.querySelector('#persistence-status'), commit = Array.from(document.querySelectorAll('#screen .commit-bar')).at(-1);
+      if (!(bar instanceof HTMLElement) || bar.hidden || !(commit instanceof HTMLElement)) return false;
+      const box = bar.getBoundingClientRect(), edge = commit.getBoundingClientRect();
+      const scrolls = document.documentElement.scrollHeight > innerHeight + 1;
+      if (scrolls && !(scrollY > 0 && scrollY + innerHeight >= document.documentElement.scrollHeight - 1)) return false;
+      const above = commit.previousElementSibling;
+      const aboveClear = !(above instanceof HTMLElement) || (() => { const r = above.getBoundingClientRect(); return r.height === 0 || r.bottom <= box.top + 0.5 || r.top >= box.bottom - 0.5; })();
+      const probe = document.elementFromPoint(edge.left + edge.width / 2, edge.top - 2);
+      return aboveClear && !(probe instanceof Element && bar.contains(probe)) && edge.top >= box.bottom - 0.5;
+    })()`;
+    const preflightWheel = async (deltaY) => primary.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(await primary.evaluate('innerWidth') * 0.6), y: 300, deltaX: 0, deltaY });
+    const bringPrimaryBack = async (name) => {
+      // 甲's window took the focus; the import review window is brought back in front, as the editor would, before it is measured.
+      await primary.send('Page.bringToFront');
+      await waitFor(primary, `document.visibilityState === 'visible'`, name);
+    };
+    await bringPrimaryBack('preflight-error-window-visible');
+    await firstFrames('(hit) => hit !== false', 'preflight-short-commit-hit-first-frame', true);
+    for (const kind of ['short', 'long']) {
+      if (kind === 'long') {
+        // At the Gate's window size, the bar appears anew for the long refusal: the standing one is dismissed first.
+        await primary.send('Emulation.setDeviceMetricsOverride', { width: 1008, height: 681, deviceScaleFactor: 1, mobile: false });
+        await pointerClick(primary, waitFor, '#persistence-status .status-dismiss', 'preflight-long-dismiss-short');
+        await waitFor(primary, `document.querySelector('#persistence-status').hidden === true && document.documentElement.dataset.statusBar === undefined`, 'preflight-long-short-dismissed');
+        await primary.evaluate(FIRST_FRAMES_PROBE);
+        requireJourney(await primary.evaluateIsolated(`(() => {
+          const freeze = Object.freeze;
+          Object.freeze = function (value) {
+            if (value !== null && typeof value === 'object' && value.code === 'BOOK_WORKBENCH_ALREADY_OPEN' && typeof value.message === 'string') { Object.freeze = freeze; value.message = ${JSON.stringify(LONG_REFUSAL)}; }
+            return freeze.call(this, value);
+          };
+          return true;
+        })()`) === true, 'preflight-long-arm');
+        await pointerClick(primary, waitFor, '[data-commit-source-import]', 'preflight-long-press');
+        await waitFor(primary, `(() => { const bar = document.querySelector('#persistence-status'); return bar.dataset.tone === 'error' && bar.textContent.includes('故意写得很长，用来确认它在导入复核页里') && document.documentElement.dataset.statusBar === 'shown'; })()`, 'preflight-long-shown');
+        await bringPrimaryBack('preflight-long-window-visible');
+        await firstFrames('(hit) => hit === true', 'preflight-long-commit-hit-first-frame');
+      }
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        for (const form of ['full', 'icons']) {
+          if (form === 'icons') {
+            await pointerClick(primary, waitFor, '#sidebar-toggle', `preflight-${kind}-fold-${width}`);
+            await waitFor(primary, `document.documentElement.dataset.sidebar === 'icons'`, `preflight-${kind}-folded-${width}`);
+          }
+          await waitFor(primary, `innerWidth === ${width} && innerHeight === ${height} && ${statusBarClear(PREFLIGHT_CONTROLS)}`, `preflight-${kind}-clear-${width}-${form}`);
+          await preflightWheel(100000);
+          await waitFor(primary, `${ABOVE_COMMIT_CLEAR} && ${statusBarClear(PREFLIGHT_CONTROLS)}${kind === 'long' ? " && document.querySelector('#persistence-status').getBoundingClientRect().height > 60" : ''}`, `preflight-${kind}-clear-at-end-${width}-${form}`);
+          await preflightWheel(-100000);
+          await waitFor(primary, `scrollY === 0`, `preflight-${kind}-back-${width}-${form}`);
+        }
+        await pointerClick(primary, waitFor, '#sidebar-toggle', `preflight-${kind}-unfold-${width}`);
+        await waitFor(primary, `document.documentElement.dataset.sidebar !== 'icons'`, `preflight-${kind}-unfolded-${width}`);
+      }
+      await primary.send('Emulation.clearDeviceMetricsOverride');
+    }
     await click(primary, '取消导入', 'preflight-abandon-source');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'preflight-abandoned');
 
@@ -1893,7 +1996,7 @@ async function main() {
     requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 204 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 205 &&
       diagnosticsSummary.policySetVersion === 'no-policy-lock' && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');

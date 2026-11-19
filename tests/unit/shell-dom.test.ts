@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountShell, ShellPreferences } from '../../src/renderer/shell.js';
+import { SHELL_LABELS } from '../../src/renderer/shell-labels.js';
 import { preferenceDefaults, PREFERENCES_NOTICES, type PreferenceValues, type PreferencesRendererApi } from '../../src/shared/preferences.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
@@ -37,13 +38,14 @@ function mounted(notice: string | null = null) {
   const openBook = vi.fn();
   const openDestination = vi.fn();
   miniDocument.body.append(sidebar as unknown as MiniElement);
+  const toggle = document.createElement('button');
   const surface = mountShell({
     sidebar, preferenceNotice, actions, preferences, title: document.createElement('h1'), position, pinLimit: 6,
-    attentionEntry: document.createElement('button'), toggle: document.createElement('button'),
+    attentionEntry: document.createElement('button'), toggle,
     setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback,
     openDestination, openSection: vi.fn(), openAgentWorkspace, openBook, openSettings: vi.fn(),
   });
-  return { sidebar, preferences, preferenceNotice, surface, actions, openAgentWorkspace, position, openBook, openDestination };
+  return { toggle, sidebar, preferences, preferenceNotice, surface, actions, openAgentWorkspace, position, openBook, openDestination };
 }
 
 describe('mounted shell preferences', () => {
@@ -194,4 +196,26 @@ describe('sidebar book entries', () => {
     expect(sidebar.querySelector<HTMLAnchorElement>('[data-nav-book="book-a"]')?.title).toContain('甲书');
     expect(sidebar.querySelector<HTMLAnchorElement>('[data-nav-destination="library"]')?.title).toBe('书库');
   });
+});
+
+it('automatically shows icons without saving collapse and holds the toggle, saying why, until the column closes', async () => {
+  let notify = () => {};
+  vi.stubGlobal('MutationObserver', class { constructor(callback: () => void) { notify = callback; } observe() {} });
+  const { toggle, preferences } = mounted();
+  await preferences.load();
+  document.documentElement.dataset['rightColumn'] = 'icons'; notify();
+  expect(document.documentElement.dataset['sidebar']).toBe('icons');
+  expect(preferences.current['shell.sidebarCollapsed']).toBe(false);
+  expect([toggle.disabled, toggle.title]).toEqual([true, SHELL_LABELS.column]);
+  toggle.click();
+  expect(preferences.current['shell.sidebarCollapsed']).toBe(false);
+  // The overlay form needs the width as much: the same automatic icons, the same held toggle.
+  document.documentElement.dataset['rightColumn'] = 'overlay'; notify();
+  expect([document.documentElement.dataset['sidebar'], toggle.disabled, toggle.title]).toEqual(['icons', true, SHELL_LABELS.column]);
+  document.documentElement.dataset['rightColumn'] = 'none'; notify();
+  expect([document.documentElement.dataset['sidebar'], toggle.disabled, toggle.title]).toEqual(['full', false, SHELL_LABELS.collapse]);
+  toggle.click();
+  await vi.waitFor(() => expect(preferences.current['shell.sidebarCollapsed']).toBe(true));
+  expect(document.documentElement.dataset['sidebar']).toBe('icons');
+  delete document.documentElement.dataset['rightColumn'];
 });

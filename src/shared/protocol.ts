@@ -382,6 +382,9 @@ export * from './protocol/scoped-edit.js';
  * Schema 116 (PR #1503's in-place 115 -> 116 migration) and Data Version 1
  * remain separate compatibility identities; closure adds no migration.
  *
+ * Protocol 205 (#1517 R4, 0.7.3): PR for #1506 adds generateReviewSynthesis (生成统合总结 for a settled Review
+ * Run) and optional modelLabel, canGenerate and runChoice on ReviewSynthesisProjection.
+ *
  * Protocol 203 (#1472 R2 closure, 0.7.1): PR #1478 adds reasoning effort to role
  * selection inputs and settings projections. PR #1487 adds launchReviewRun, optional
  * execution choice on scoped edit and review-workspace inspection, and frozen model
@@ -392,7 +395,7 @@ export * from './protocol/scoped-edit.js';
  * Protocol 202 (#1459 R1 closure, 0.7.0): PR #1462 (#1435) adds `guessed-anchor` to
  * ProposalDraftBatchProjection.excluded.reason. No other R1 change alters IPC.
  */
-export const SERVICE_PROTOCOL_VERSION = 204 as const;
+export const SERVICE_PROTOCOL_VERSION = 205 as const;
 
 export { BOOK_FINDINGS_PAGE_SIZE } from './protocol/review.js';
 export type { BookFindingProjection, BookFindingsProjection } from './protocol/review.js';
@@ -664,6 +667,7 @@ export const IPC_CHANNELS = {
   continueReviewRun: 'ai7:j04:continue-review-run',
   recordReviewFindingDisposition: 'ai7:j04:record-review-finding-disposition',
   generateReviewReport: 'ai7:j04:generate-review-report',
+  generateReviewSynthesis: 'ai7:j04:generate-review-synthesis',
   inspectReviewFindingOfMark: 'ai7:j04:inspect-review-finding-of-mark',
   listBooks: 'ai7:j01:list-books',
   updateBookPeople: 'ai7:j11:update-book-people',
@@ -4668,6 +4672,8 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   continueReviewRun: { input: ContinueReviewRunInput; output: ReviewWorkspaceProjection };
   recordReviewFindingDisposition: { input: RecordReviewFindingDispositionInput; output: ReviewWorkspaceProjection };
   generateReviewReport: { input: GenerateReviewReportInput; output: ReviewWorkspaceProjection };
+  /** 生成统合总结 (Issue #1506): the summary alone for a settled Run, under the dispatch choice made now; then driven like the Run. */
+  generateReviewSynthesis: { input: GenerateReviewReportInput & TaskExecutionLaunchInput; output: ReviewWorkspaceProjection };
   inspectReviewFindingOfMark: { input: InspectReviewFindingOfMarkInput; output: ReviewFindingOfMarkProjection | null };
   listBooks: {
     /** `filter` narrows the list to the Books whose 书名, 作者 or 责编 hold the words (Issue #431, S83). */
@@ -5383,6 +5389,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   /** 忽略并说明; every other decision on a finding is the mark and Apply operations' with its `markId`. */
   recordReviewFindingDisposition(input: Omit<RecordReviewFindingDispositionInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
   generateReviewReport(input: Omit<GenerateReviewReportInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
+  generateReviewSynthesis(input: Omit<ServiceOperationMap['generateReviewSynthesis']['input'], 'bookId'>): Promise<ServiceWireOutput<ReviewWorkspaceProjection>>;
   /** 查看任务 on a Mark Card: the Run a `review-category` mark came from, `null` for any other mark. */
   inspectReviewFindingOfMark(input: InspectReviewFindingOfMarkRendererInput): Promise<ReviewFindingOfMarkProjection | null>;
   listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;

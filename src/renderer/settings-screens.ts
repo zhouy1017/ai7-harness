@@ -1,5 +1,6 @@
 
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
+import { reportResult } from './notifications.js';
 import { technicalLayerVisible } from './technical-layer.js';
 import { APPEARANCE_BACK, APPEARANCE_CHOICES, APPEARANCE_LEDE, APPEARANCE_LEGEND, APPEARANCE_SAVED, APPEARANCE_SAVE_FAILED, APPEARANCE_SECTION, APPEARANCE_STATUS, APPEARANCE_TITLE } from './appearance-labels.js';
 import { mountLearningAskFrequency } from './learning-settings.js';
@@ -47,7 +48,7 @@ export function createSettingsScreens(state: Options) {
 async function renderEvaluationCalibration(focusBookId: string | null): Promise<void> {
   if (!technicalLayerVisible) {
     renderSettingsHub();
-    setStatus('该页在开发者模式下显示');
+    reportResult(setStatus, '该页在开发者模式下显示');
     return;
   }
   const content = panel();
@@ -100,9 +101,10 @@ async function renderNotificationSettings(): Promise<void> {
     }
   };
   for (const [key, label] of rows) {
-    const row = element('label', 'field');
+    const row = element('label', 'settings-row');
     const control = document.createElement('input');
     control.type = 'checkbox';
+    control.setAttribute('role', 'switch');
     control.dataset['notificationPreference'] = key;
     controls.set(key, control);
     control.addEventListener('change', () => {
@@ -116,7 +118,9 @@ async function renderNotificationSettings(): Promise<void> {
         paint();
       });
     });
-    row.append(control, document.createTextNode(label));
+    const toggle = element('span', 'settings-switch');
+    toggle.append(control);
+    row.append(element('span', 'settings-row-copy', label), toggle);
     content.append(row);
   }
   paint();
@@ -133,7 +137,7 @@ async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkPro
   const current = navigation.begin();
   if (!technicalLayerVisible) {
     renderSettingsHub();
-    setStatus('该页在开发者模式下显示');
+    reportResult(setStatus, '该页在开发者模式下显示');
     return;
   }
   const origin = screen.firstElementChild;
@@ -154,7 +158,7 @@ async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkPro
     }
     content.append(button(USAGE_RETURN, 'quiet', () => renderUsage()));
     replaceScreen('usage-run', content);
-    setStatus(USAGE_RUN_TITLE, 'success');
+    setStatus(USAGE_RUN_TITLE);
   } catch (error) {
     if (!navigation.errorIsCurrent(error, current)) return;
     setStatus(rendererErrorMessage(error, USAGE_RUN_REPORT_ABSENT), 'error');
@@ -165,7 +169,7 @@ async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkPro
 function renderUsage(): void {
   if (!technicalLayerVisible) {
     renderSettingsHub();
-    setStatus('该页在开发者模式下显示');
+    reportResult(setStatus, '该页在开发者模式下显示');
     return;
   }
   const content = panel();
@@ -180,7 +184,7 @@ function renderUsage(): void {
   actions.append(button(USAGE_RETURN, 'quiet', () => renderSettingsHub()));
   content.append(body, actions);
   replaceScreen('usage', content);
-  setStatus(USAGE_TITLE, 'success');
+  setStatus(USAGE_TITLE);
 }
 
 /** 设置 › 本机 › 键盘与无障碍 › 快捷键 (Issue #936, plan slice 11c; V2-UX-KEY-002, KEY-003, KEY-011). */
@@ -197,7 +201,7 @@ function renderKeyboardSettings(): void {
   content.append(body, actions);
   replaceScreen('keyboard', content);
   state.keyboardSettingsOff = unmount;
-  setStatus(KEYBOARD_TITLE, 'success');
+  setStatus(KEYBOARD_TITLE);
 }
 
 /**

@@ -1,5 +1,7 @@
+import { styleInput } from '../../src/renderer/components/controls.js';
+import { rendererErrorMessage } from '../../src/renderer/error-words.js';
 import { showOnboardingCard } from '../../src/shared/preferences.js';
-import { createNotificationObserver, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
+import { createNotificationObserver, createStatusSurface, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
 import { composeTaskOverview } from '../../src/service/task-overview.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection } from '../../src/shared/protocol.js';
 import { readFileSync } from 'node:fs';
@@ -76,7 +78,7 @@ function harness(api: object = {}) {
   const renderBookOverview = vi.fn((overview: { book: { bookId: string } }) => replaceScreen(overview.book.bookId, undefined));
   const renderBaselineAnalysis = vi.fn((host: HTMLElement) => host.append(element('p', '', '已读取分析')));
  const guardedApi = reconcileBookWorkbenchApi({acknowledgeImportCompletion:async()=>undefined,getPreferences:async()=>({values:{'onboarding.state':'skipped'}}),getProductDataLocation:async()=>({}),getModelServiceSettings:async()=>({roles:[]}),...api} as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:(error,retry)=>(context['reportReacquisitionFailure'] as (error:unknown,retry:()=>Promise<void>)=>void)(error,retry),recovered:()=>{(context['clearBookReacquisitionNotice'] as ()=>void)();}},navigation);
-  context = createContext({ showOnboardingCard, navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
+  context = createContext({ styleInput, showOnboardingCard, navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
     localStorage: { getItem: () => 'on' }, showQuietNotice: vi.fn(), openCurrentBookCompletion,
     mountTaskOverview: vi.fn(() => ({ focus: vi.fn(), destroy: vi.fn() })),
     mountReviewWorkspace: vi.fn(() => ({ start: vi.fn(), refresh: vi.fn(), destroy: vi.fn() })),
@@ -87,7 +89,7 @@ function harness(api: object = {}) {
     manuscriptOnScreen: null, taskResultWindow: null, authorityInterrupted: false, keyboardSettingsOff: undefined,
     reviewWorkspace: undefined, deliverablesSurface: undefined, derivativesSurface: undefined, proposalWorkspaceSurface: undefined,
     agentWorkspaceSurface: undefined, proposalConflictSurface: undefined, globalAttentionSurface: undefined, taskOverviewSurface: undefined,
-    leaveGuard: null, taskDrawer: {followScreen: vi.fn(), close: vi.fn(), view: () => null}, globalAttentionReader: {refresh: vi.fn()}, refreshCommandEntries: vi.fn(),
+    leaveGuard: null, taskDrawer: {followScreen: vi.fn(), close: vi.fn(), view: () => null}, globalAttentionReader: {refresh: vi.fn()}, refreshCommandEntries: vi.fn(), statusSurface: {clearError: vi.fn()},
     SHELL_LABELS: {openingBook:'正在打开图书',bookUnavailable:'无法打开图书'},
     renderBookReview: vi.fn((bookId:string) => {const node=element('section');node.dataset['bookId']=bookId;replaceScreen('book-review',node);}),
     element, panel: () => element('section'), agentWorkspaceReturns: new WeakMap(), taskSurfaceRefresh: {},
@@ -665,9 +667,7 @@ it('a failed-state Book read-click reports the same editorial notice at the clic
  const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
  await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
  const notice=page.screen.querySelector('[data-book-reacquire]')!.querySelector('p')!.textContent;
- const formatter=source.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='rendererErrorMessage')!;
- page.context['rendererErrorData']=()=>null;page.context['researchUnavailableLine']=(_code:unknown,message:string)=>message;
- runInContext(ts.transpileModule(formatter.getText(source),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,page.context);
+ page.context['rendererErrorMessage']=rendererErrorMessage;
  page.setStatus.mockClear();
  await page.run("jumpToManuscript('book-a',{manuscriptId:'manuscript',blockId:'block',markId:null})");
  expect(open).toHaveBeenCalledOnce();expect(page.setStatus).toHaveBeenLastCalledWith(notice,'error');
@@ -902,4 +902,17 @@ it('keeps another task in the same Book quiet (#1510 own task)',async()=>{
  await page.run("taskDrawer.view=()=>({kind:'plan',bookId:'completion-book',task:{kind:'baseline-analysis',ref:'different-task'}})");
  page.observe();await Promise.resolve();await Promise.resolve();
  expect(page.context['openOverviewResult']).not.toHaveBeenCalled();expect(page.inspect).not.toHaveBeenCalled();
+});
+
+it('an error stands through a repaint of the same destination and ends when another destination is rendered (#1519)', () => {
+ const page=harness();
+ const bar=miniDocument.createElement('div');miniDocument.body.append(bar);
+ const surface=createStatusSurface(bar as unknown as HTMLElement);page.context['statusSurface']=surface;
+ const book=()=>{const node=document.createElement('section');node.dataset['bookId']='book-a';return node;};
+ page.replaceScreen('book-review',book());
+ surface('无法应用修改建议。','error');
+ page.replaceScreen('book-review',book());
+ expect(bar.hidden).toBe(false);expect(bar.textContent).toContain('无法应用修改建议。');
+ page.replaceScreen('book-findings',book());
+ expect(bar.hidden).toBe(true);
 });

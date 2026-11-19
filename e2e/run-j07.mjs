@@ -1,3 +1,4 @@
+import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -315,6 +316,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-07' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -436,6 +438,7 @@ async function click(renderer, label, name) {
 }
 /** Press the enabled button or native disclosure a selector names. */
 async function clickSelector(renderer, selector, name) {
+  if (selector.includes('[data-export-') || selector.includes('export-menu') || selector.includes('deliverables-export-slot')) { await pointerClick(renderer, waitFor, selector, name); return; }
   await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLElement) || !button.matches('button, summary') || button.matches(':disabled')) return false; button.click(); return true; })()`, name);
 }
 async function fill(renderer, selector, value, name) {
@@ -639,6 +642,7 @@ async function reopenDeliverables(renderer, name) {
  * for DOCX. Returns the service's receipt of the export.
  */
 async function exportAs(renderer, format, destination, fileName, name) {
+  await clickSelector(renderer, `section.deliverables-publication [data-export-menu] > summary`, `${name}-menu`);
   await clickSelector(renderer, `[data-screen="book-deliverables"] section.deliverables-publication [data-export-format-action="${format}"]`, `${name}-open`);
   await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.exportCard()?.querySelector('.export-receipt')?.dataset.exportOutcome === 'created'`, `${name}-written`, 120_000);
   const records = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => deliverables.exports.map((record) => ({ outcome: record.outcome, format: record.format, fileName: record.fileName, destination: record.destination, revisionLabel: record.target.revisionLabel, byteLength: record.byteLength, fileSha256: record.technical.fileSha256 })))`);
@@ -1154,6 +1158,7 @@ async function main() {
       expected[0] += FIRST_EDIT;
       await openDeliverables(native, name);
       at('export-open-current');
+      await clickSelector(native, 'section.deliverables-publication [data-export-menu] > summary', `${name}-export-menu`);
       await clickSelector(native, '[data-screen="book-deliverables"] section.deliverables-publication [data-export-action="open"][data-export-target="current"]', `${name}-open-export`);
       await waitFor(native, `window.__j07.exportCard()?.dataset.exportPhase==='done' && window.__j07.exportCard().querySelector('section.export-fidelity')`, `${name}-export-reviewed`, 120_000);
       const review = await native.evaluate(`window.ai7.reviewManuscriptExport({target:{kind:'current'},options:{includeAnnotations:true,includeSuggestions:true,includeEditorNotes:false},format:'docx'})`);
@@ -1527,6 +1532,7 @@ async function main() {
     // Markdown 备用格式 since Issue #500), focus on it.
     await openDeliverables(renderer, 'export');
     await assertRenderer(renderer, `(() => { const menus = Array.from(document.querySelectorAll('[data-screen="book-deliverables"] [data-export-menu]')); return window.__j07.exportCard() === null && menus.length === 3 && menus.every(menu=>Array.from(menu.querySelectorAll('[data-export-format-action]')).map(node=>node.dataset.exportFormatAction).join(',')==='docx,pdf,markdown') && window.__j07.block().querySelector('section.export-records-section')?.dataset.exportRecords === '0'; })()`, 'export-openers-name-their-version');
+    await clickSelector(renderer, 'section.deliverables-publication [data-export-menu] > summary', 'export-current-menu');
     await clickSelector(renderer, '[data-screen="book-deliverables"] section.deliverables-publication [data-export-action="open"][data-export-target="current"]', 'export-open');
     await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.exportCard()?.querySelector('.export-receipt')?.dataset.exportOutcome === 'created'`, 'export-written', 120_000);
     at('export-receipt-recorded');
@@ -1611,16 +1617,29 @@ async function main() {
     await assertRenderer(renderer, `(() => { const prompt = window.__j07.block().querySelector('.publication-actuals-prompt'); return prompt?.textContent === ${JSON.stringify(ACTUALS_PROMPT)} && prompt.querySelectorAll('button, a, input, select, textarea, [tabindex]').length === 0 && prompt.closest('button, a') === null && prompt.nextElementSibling === window.__j07.action('actuals') && prompt.nextElementSibling?.textContent === '录入…'; })()`, 'actuals-prompt-pending-with-entry');
     await assertNoForbiddenWords(renderer, 'restart-without-forbidden-words');
     // The only controls that name 导出 are 导出… of each version (Issue #413); nothing publishes or sends.
-    await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [role="menuitem"]')); const actions = Array.from(window.__j07.block().querySelectorAll('[data-publication-action]')).map((node) => node.dataset.publicationAction); return !controls.some((node) => /发布|发送/.test(node.textContent ?? '')) && controls.filter((node) => /导出/.test(node.textContent ?? '')).every((node) => node.dataset.exportAction === 'open' && node.textContent === '导出…') && JSON.stringify(actions) === '["designate","actuals"]' && ${EXPORT_MEMBERS_ONLY}; })()`, 'no-publish-or-send-action');
+    await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [role="menuitem"]')); const actions = Array.from(window.__j07.block().querySelectorAll('[data-publication-action]')).map((node) => node.dataset.publicationAction); return !controls.some((node) => /发布|发送/.test(node.textContent ?? '')) && controls.filter((node) => /导出/.test(node.textContent ?? '')).every((node) => node.dataset.exportAction === 'open' || node.hasAttribute('data-export-clean')) && JSON.stringify(actions) === '["designate","actuals"]' && ${EXPORT_MEMBERS_ONLY}; })()`, 'no-publish-or-send-action');
 
     at('export-cancel-creates-nothing');
-    // This launch's Save dialog answers once more. 一审稿's 导出… reviews that milestone exactly as it was saved —
-    // nothing to save first — and takes the destination; 取消 then closes the card with focus back on its opener,
-    // and nothing is written or recorded.
+    // The Save dialog's launch answer is single-use, so each branch gets its own launch. This launch's cancellation goes to a lossy
+    // Markdown export: the card stays with its rows open, focuses 重新选择保存位置 and is dismissed by 完成, which returns focus to
+    // the 导出… that opened it. (Pressing 重新选择保存位置 would open the platform's own dialog; the unit tests cover that path.)
     await assertRenderer(renderer, `window.__j07.exportCard() === null`, 'cancel-no-card-after-restart');
-    await clickSelector(renderer, `[data-screen="book-deliverables"] ol.milestone-list > li[data-milestone-id="${first}"] [data-export-action="open"]`, 'cancel-open');
-    await waitFor(renderer, `window.__j07.exportCard() === null && window.__j07.status().includes('取消')`, 'cancel-native-dialog', 120_000);
+    await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-menu] > summary`, 'cancel-lossy-menu');
+    await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-format-action="markdown"]`, 'cancel-open');
+    // The open rows are already drawn while the dialog is up (phase 'choosing'); only the cancelled phase holds the retry and its focus.
+    await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'cancelled' && window.__j07.status().includes('取消') && window.__j07.exportCard().querySelector('.export-fidelity-details')?.open === true`, 'cancel-native-dialog', 120_000);
+    await assertRenderer(renderer, `document.activeElement === window.__j07.exportAction('retry')`, 'cancel-retry-focused');
     requireJourney(!existsSync(cancelledPath) && JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'cancel-wrote-nothing');
+    await exportAct(renderer, 'close', 'cancel-close');
+    await waitFor(renderer, `window.__j07.exportCard() === null && document.activeElement === window.__j07.exportOpener('milestone', ${JSON.stringify(first)})`, 'cancel-close-returns-focus', 10_000);
+    // A lossless DOCX, cancelled on a launch of its own, leaves no card at all.
+    await close();
+    renderer = await launch({ save: 'cancel' });
+    await reopenDeliverables(renderer, 'cancel-lossless');
+    await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-menu] > summary`, 'cancel-lossless-menu');
+    await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-format-action="docx"]`, 'cancel-lossless-open');
+    await waitFor(renderer, `window.__j07.exportCard() === null && window.__j07.status().includes('取消')`, 'cancel-lossless-card-gone', 120_000);
+    requireJourney(!existsSync(cancelledPath) && JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'cancel-lossless-wrote-nothing');
 
     at('j14-designate-keyboard');
     // The form without a pointer: Enter on 设为发稿版本… opens it on its first choice — the newest milestone, already chosen with
@@ -1678,7 +1697,17 @@ async function main() {
     await waitFor(renderer, `window.__j07.form() === null`, 'forced-colors-form-closed', 10_000);
 
     at('j14-export-keyboard');
-    await assertRenderer(renderer, `document.querySelectorAll('.deliverables-export-slot .export-preferences input').length === 6`, 'export-options-inline-without-a-dialog');
+    for (const [width, height] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await clickSelector(renderer, 'section.deliverables-publication [data-export-menu] > summary', 'export-keyboard-menu');
+      for (let index = 0; index < 5; index += 1) await press(renderer, 'ArrowDown');
+      await assertRenderer(renderer, `document.activeElement?.matches('input[data-export-option="includeAnnotations"]') === true`, 'export-options-inline-without-a-dialog');
+      await assertRenderer(renderer, `(() => { const rect = document.querySelector('section.deliverables-publication .export-menu-body').getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight; })()`, 'export-menu-within-window');
+      await press(renderer, 'ArrowDown');
+      await assertRenderer(renderer, `document.activeElement?.matches('input[data-export-option="includeSuggestions"]') === true`, 'export-next-switch-reachable');
+      await press(renderer, 'Escape');
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     at('export-pdf');
     // Issue #500 (S64b): a launch whose Save dialog answers with a PDF. The same revision, PDF chosen: AI7 prints the
@@ -1885,10 +1914,28 @@ async function main() {
     await clickSelector(renderer, '.editor-shell[data-manuscript-kind="derivative"] [data-document-action="start-task"]', 'document-task-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView==='composer' && document.querySelector('.task-composer-deliverable')?.textContent.includes('新闻稿')`, 'document-task-composer');
     await waitFor(renderer, `Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-document.querySelector('#task-drawer').getBoundingClientRect().width)<1`, 'document-toolbar-dock-settled');
-    const widerToolbarViewport = await renderer.evaluate(`Math.round(innerWidth + 620 - document.querySelector('.editor-shell[data-manuscript-kind="derivative"]').getBoundingClientRect().width)`);
     // Exercise the widest style label without changing the document version fixed for this task.
     await renderer.evaluate(`(() => { const style=document.querySelector('.editor-toolbar select[aria-label="段落样式"]'); style.value='heading-6'; })()`);
-    for (const width of [1280, widerToolbarViewport]) {
+    // #1542: beside a docked drawer the sidebar takes its icon form so the text keeps 28 characters, so the shell is never narrower than
+    // the rail and that measure (about 592 px at the reading size), and a fixed 1280 no longer gives a shell under 600. Reach each shell
+    // width the toolbar must hold by measurement in the form the layout really takes: set a width, re-measure, step until the drawer is
+    // docked and the shell lies in range (a width where the drawer overlays instead is too narrow, so step wider).
+    const shellAt = async (width) => {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      return renderer.evaluate(`(async () => { await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); await Promise.all(document.body.getAnimations().map(animation=>animation.finished.catch(()=>undefined))); const drawer=document.querySelector('#task-drawer').getBoundingClientRect().width; return { shell: document.querySelector('.editor-shell[data-manuscript-kind="derivative"]').getBoundingClientRect().width, docked: Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-drawer)<1 }; })()`);
+    };
+    const viewportForShell = async (low, high, name) => {
+      let width = 1280;
+      for (let step = 0; step < 12; step += 1) {
+        const { shell, docked } = await shellAt(width);
+        if (docked && shell > low && shell < high) return width;
+        width = docked ? Math.round(width + (low + high) / 2 - shell) : width + 4;
+      }
+      requireJourney(false, name);
+      return width;
+    };
+    const toolbarShells = [[await viewportForShell(584, 600, 'document-toolbar-narrow-shell-reached'), 0, 600], [await viewportForShell(600, 640, 'document-toolbar-wider-shell-reached'), 600, 640]];
+    for (const [width, low, high] of toolbarShells) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
       let geometry;
       const geometryDeadline = Date.now() + 5_000;
@@ -1902,7 +1949,7 @@ async function main() {
         const controls=Array.from(toolbar.querySelector('.editor-edit-actions').children).filter(el=>!el.hidden && !el.classList.contains('ui-select-native') && getComputedStyle(el).display!=='none');
         const shellWidth=shell.getBoundingClientRect().width;
         const bounds=controls.map(el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,scroll:el.scrollWidth,client:el.clientWidth};});
-        return {shellWidth,bounds,checks:{viewport:innerWidth===${width} && innerHeight===800,heading:document.querySelector('.editor-toolbar select[aria-label="段落样式"]').value==='heading-6',drawer:document.body.dataset.taskDrawer==='open',narrow:${width}===1280 ? shellWidth<600 : shellWidth>600 && shellWidth<640,count:controls.length>=7,
+        return {shellWidth,bounds,checks:{viewport:innerWidth===${width} && innerHeight===800,heading:document.querySelector('.editor-toolbar select[aria-label="段落样式"]').value==='heading-6',drawer:document.body.dataset.taskDrawer==='open' && Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-document.querySelector('#task-drawer').getBoundingClientRect().width)<1,narrow:shellWidth>${low} && shellWidth<${high},count:controls.length>=7,
           visible:bounds.every(r=>r.width>0 && r.height>0 && r.left>=Math.max(0,box.left) && r.right<=Math.min(box.right,innerWidth) && r.top>=box.top && r.bottom<=Math.min(box.bottom,innerHeight)),untruncated:bounds.every(r=>r.scroll<=r.client+1)}};
       })()`);
         if (Object.values(geometry.checks).every(value=>value===true)) break;
@@ -2019,7 +2066,7 @@ async function main() {
     at('document-delivery-export');
     // The export card is the delivered version's — 新闻稿 · 版本 2, DOCX chosen — and exports it under this launch's
     // Save-dialog answer; the Delivery Record then names the file, and the file reads as that version of the 新闻稿.
-    await assertRenderer(renderer, `(() => { const menu=document.querySelector('ol.production-document-deliveries > li [data-export-menu]'); menu.querySelector('summary').click(); return menu.open; })()`, 'delivery-export-menu');
+    await clickSelector(renderer, 'ol.production-document-deliveries > li [data-export-menu] > summary', 'delivery-export-menu');
     await clickSelector(renderer, 'ol.production-document-deliveries > li [data-export-format-action="docx"]', 'delivery-export-start');
     await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.status() === ${JSON.stringify(EXPORTED_LABEL)}`, 'delivery-export-written', 120_000);
     await waitFor(renderer, `window.__j07.deliveries('news-release')[0]?.dataset.deliveryExport === 'created'`, 'delivery-export-on-the-record', 30_000);

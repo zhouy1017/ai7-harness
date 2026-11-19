@@ -69,7 +69,7 @@ export const EXPORT_FALLBACK_FORMATS = '备用格式';
 export const EXPORT_OPTIONS_LEGEND = '随文件导出';
 export const EXPORT_OPTION_LABELS: Readonly<Record<keyof ManuscriptExportOptions, string>> = {
   includeAnnotations: '含批注',
-  includeSuggestions: '含修改建议（作为修订）',
+  includeSuggestions: '含修改建议',
   includeEditorNotes: '含备注',
 };
 export const EXPORT_OPTION_NOTES: Readonly<Record<keyof ManuscriptExportOptions, string>> = {

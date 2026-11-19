@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createGlobalAttentionReader } from '../../src/renderer/global-attention.js';
 import { createNotifier } from '../../src/main/notifications.js';
-import { createNotificationObserver, createStatusSurface, mountQuietNotice, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
+import { createNotificationObserver, createStatusSurface, mountQuietNotice, openCurrentBookCompletion, reportResult } from '../../src/renderer/notifications.js';
 import { composeTaskOverview } from '../../src/service/task-overview.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 import { completionLabel, NOTIFICATION_LABELS, notificationClass, systemNoticeText } from '../../src/renderer/notification-labels.js';
@@ -218,6 +218,24 @@ describe('renderer projection observer', () => {
 });
 
 describe('quiet notice lifetime', () => {
+  it('clears a saving status when protection has no separate cause to announce', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div'); miniDocument.body.append(surface);
+      const update = createStatusSurface(surface as unknown as HTMLElement);
+      update('正在保存…', 'busy'); update('', 'error');
+      expect(surface.hidden).toBe(true);
+      expect(surface.textContent).toBe('');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      update('确认结果与当前编辑不符', 'error');
+      expect(surface.textContent).toBe('确认结果与当前编辑不符');
+      expect(surface.dataset['tone']).toBe('error');
+      update('');
+      expect(surface.textContent).toBe('确认结果与当前编辑不符');
+      expect(surface.hidden).toBe(false);
+    } finally { restore(); }
+  });
+
   it.each(['error', 'busy'] as const)('keeps %s visible beyond the transient lifetime without a toast', (tone) => {
     const restore = installMiniDom();
     vi.useFakeTimers();
@@ -233,7 +251,7 @@ describe('quiet notice lifetime', () => {
     } finally { vi.useRealTimers(); restore(); }
   });
 
-  it('keeps an unacknowledged error when a later success notice expires', () => {
+  it('keeps an error through untoned and busy lines; the next success clears it and is said once', () => {
     const restore = installMiniDom();
     vi.useFakeTimers();
     try {
@@ -244,21 +262,167 @@ describe('quiet notice lifetime', () => {
       update('正在测试连接…', 'busy');
       expect(surface.textContent).toContain('凭据被拒');
       expect(surface.textContent).toContain('正在测试连接…');
-      update('其他设置已保存', 'success');
+      update('设置已打开');
       expect(surface.textContent).toBe('凭据被拒');
       expect(surface.dataset['tone']).toBe('error');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      update('其他设置已保存', 'success');
+      expect(surface.hidden).toBe(true);
+      expect(surface.textContent).toBe('其他设置已保存');
       const toast = miniDocument.body.querySelector('[data-toast]')!;
       expect(toast.textContent).toBe('其他设置已保存');
       vi.advanceTimersByTime(2_500);
       expect(toast.hidden).toBe(true);
-      expect(surface.textContent).toBe('凭据被拒');
-      expect(surface.hidden).toBe(false);
-      surface.querySelector('button')!.click();
-      expect(surface.hidden).toBe(true);
       update('正在测试连接…', 'busy');
       expect(surface.textContent).toBe('正在测试连接…');
       expect(surface.dataset['tone']).toBe('busy');
     } finally { vi.useRealTimers(); restore(); }
+  });
+
+  it('a status without a tone is the live region only, and an empty one shows nothing', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div');
+      miniDocument.body.append(surface);
+      const update = createStatusSurface(surface as unknown as HTMLElement);
+      update('设置已打开');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      expect(surface.hidden).toBe(true);
+      expect(surface.textContent).toBe('设置已打开');
+      expect(surface.dataset['tone']).toBeUndefined();
+      update('');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      expect(surface.textContent).toBe('');
+      update('', 'success');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      update('正在打开图书…', 'busy');
+      update('');
+      expect(surface.hidden).toBe(true);
+    } finally { restore(); }
+  });
+
+  it('says a line without a tone once, through the announcer only; a success is said by its toast alone', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div'); const announcer = miniDocument.createElement('div');
+      miniDocument.body.append(surface, announcer);
+      const update = createStatusSurface(surface as unknown as HTMLElement, announcer as unknown as HTMLElement);
+      update('设置已打开');
+      expect(announcer.textContent).toBe('设置已打开');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      update('设置已保存', 'success');
+      expect(announcer.textContent).toBe('');
+      expect(miniDocument.body.querySelector('[data-toast]')!.textContent).toBe('设置已保存');
+      update('无法保存', 'error');
+      expect(announcer.textContent).toBe('');
+      update('');
+      expect(announcer.textContent).toBe('');
+    } finally { restore(); }
+  });
+
+  it('a result that settles no error ends the busy line and says itself once in a toast', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div'); const announcer = miniDocument.createElement('div');
+      miniDocument.body.append(surface, announcer);
+      const update = createStatusSurface(surface as unknown as HTMLElement, announcer as unknown as HTMLElement);
+      update('无法打开图书', 'error');
+      update('正在选择文件…', 'busy');
+      reportResult(update, '已取消文件选择');
+      expect(surface.textContent).toBe('无法打开图书');
+      expect(surface.dataset['tone']).toBe('error');
+      expect(announcer.textContent).toBe('');
+      expect(miniDocument.body.querySelector('[data-toast]')!.textContent).toBe('已取消文件选择');
+    } finally { restore(); }
+  });
+
+  it('an update unrelated to a standing error leaves its text and × the same nodes; the announcer alone says it', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div'); const announcer = miniDocument.createElement('div');
+      miniDocument.body.append(surface, announcer);
+      const update = createStatusSurface(surface as unknown as HTMLElement, announcer as unknown as HTMLElement);
+      update('无法打开图书', 'error');
+      const [line, close] = surface.children;
+      const errorText = line!.children[0]!;
+      // Counts every write of the error's words: an unrelated update must not repaint them.
+      let rewrites = 0;
+      const words = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(errorText), 'textContent')!;
+      Object.defineProperty(errorText, 'textContent', { configurable: true, get() { return words.get!.call(this); }, set(value) { rewrites += 1; words.set!.call(this, value); } });
+      for (const next of [() => update('已保存'), () => reportResult(update, '已取消文件选择'), () => update('正在保存…', 'busy'), () => update('')]) {
+        next();
+        expect(surface.children[0]).toBe(line);
+        expect(surface.children[1]).toBe(close);
+        expect(line!.children[0]).toBe(errorText);
+        expect(rewrites).toBe(0);
+        expect(errorText.textContent).toBe('无法打开图书');
+      }
+      update('已保存');
+      expect(announcer.textContent).toBe('已保存');
+      expect(surface.textContent).toBe('无法打开图书');
+    } finally { restore(); }
+  });
+
+  it('settle ends the standing error its owner names, silently, and nothing else', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div'); const announcer = miniDocument.createElement('div');
+      miniDocument.body.append(surface, announcer);
+      const update = createStatusSurface(surface as unknown as HTMLElement, announcer as unknown as HTMLElement);
+      // No standing error: nothing happens.
+      update('已保存');
+      update.settle('无法读取审阅。');
+      expect(surface.hidden).toBe(true);
+      expect(surface.textContent).toBe('已保存');
+      expect(announcer.textContent).toBe('已保存');
+      // Another error stands: it is left untouched.
+      update('无法保存审阅偏好。', 'error');
+      update.settle('无法读取审阅。');
+      expect(surface.hidden).toBe(false);
+      expect(surface.textContent).toBe('无法保存审阅偏好。');
+      expect(surface.querySelector('.status-dismiss')).not.toBeNull();
+      // The named error: it ends, its × goes, no toast, the announcer says nothing.
+      update('无法读取审阅。', 'error');
+      update.settle('无法读取审阅。');
+      expect(surface.hidden).toBe(true);
+      expect(surface.textContent).toBe('');
+      expect(surface.querySelector('.status-dismiss')).toBeNull();
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      expect(announcer.textContent).toBe('');
+      // Raised again after a settle, it shows again.
+      update('无法读取审阅。', 'error');
+      expect(surface.hidden).toBe(false);
+      expect(surface.dataset['tone']).toBe('error');
+      expect(surface.textContent).toBe('无法读取审阅。');
+      // A busy line beside the error stays when the error settles.
+      update('正在读取…', 'busy');
+      update.settle('无法读取审阅。');
+      expect(surface.hidden).toBe(false);
+      expect(surface.dataset['tone']).toBe('busy');
+      expect(surface.textContent).toBe('正在读取…');
+    } finally { restore(); }
+  });
+
+  it('closing an error only dismisses it, and a new destination clears it', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div');
+      miniDocument.body.append(surface);
+      const update = createStatusSurface(surface as unknown as HTMLElement);
+      const reached = vi.fn();
+      surface.addEventListener('click', reached);
+      update('无法打开图书', 'error');
+      const close = surface.querySelector('button')!;
+      close.click();
+      expect(surface.hidden).toBe(true);
+      expect(reached).not.toHaveBeenCalled();
+      update('无法打开图书', 'error');
+      update.clearError();
+      expect(surface.hidden).toBe(true);
+      update('正在打开图书…', 'busy');
+      update.clearError();
+      expect(surface.textContent).toBe('正在打开图书…');
+    } finally { restore(); }
   });
 
   it('replaces the one notice, pauses its remaining reading time on hover and focus, and dismisses without touching the record', async () => {

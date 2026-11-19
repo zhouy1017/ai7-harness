@@ -1,3 +1,4 @@
+import { pointerClick } from './dispatch-chooser.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -93,6 +94,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-13' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -1390,7 +1392,8 @@ async function main() {
     at('exclusion-marker');
     // The first Run's result used the item: it is marked beside the Run, its report and each finding, and nothing is rewritten.
     // The Run history folds into the summary bar once a Run has findings (Issue #1413 cluster 6): open it first.
-    await assertRenderer(renderer, `(() => { const fold=document.querySelector('details.review-history-fold'); if (fold instanceof HTMLDetailsElement) fold.open = true; const open=document.querySelector('ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'exclusion-open-first');
+    if (await renderer.evaluate(`document.querySelector('details.review-history-fold')?.open === false`)) await pointerClick(renderer, waitFor, 'details.review-history-fold > summary', 'exclusion-open-first-history');
+    await pointerClick(renderer, waitFor, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'exclusion-open-first');
     await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelectorAll('article.review-finding').length===3`, 'exclusion-first-open');
     await assertRenderer(renderer, `document.querySelector('section.review-run .review-historical-marker .review-historical-marker-label')?.textContent?.startsWith(${JSON.stringify(`${MARKER} · `)}) === true && document.querySelector('.review-report-marker')?.textContent === ${JSON.stringify(MARKER)} && Array.from(document.querySelectorAll('article.review-finding .review-finding-marker')).every((line) => line.textContent === ${JSON.stringify(MARKER)}) && document.querySelectorAll('article.review-finding .review-finding-marker').length === 3 && document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-shown');
     await leaveMemberReview();
@@ -2003,7 +2006,8 @@ async function main() {
     // Book must have for it to run there: a Series, whose material is chosen apart at each run.
     await openBookReview(renderer, MEMBER, member, 'series-procedure-review');
     // The Run history folds into the summary bar once a Run has findings (Issue #1413 cluster 6): open it first.
-    await assertRenderer(renderer, `(() => { const fold=document.querySelector('details.review-history-fold'); if (fold instanceof HTMLDetailsElement) fold.open = true; const open=document.querySelector('ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'series-procedure-first-run');
+    if (await renderer.evaluate(`document.querySelector('details.review-history-fold')?.open === false`)) await pointerClick(renderer, waitFor, 'details.review-history-fold > summary', 'series-procedure-first-run-history');
+    await pointerClick(renderer, waitFor, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'series-procedure-first-run');
     await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelector('ol.review-runs li[data-review-run="1"]')?.getAttribute('aria-current')==='true'`, 'series-procedure-first-open', 60_000);
     await clickSelector(renderer, 'section.review-report [data-review-action="capture"]', 'series-procedure-capture');
     const seriesCapture = await readCapture(renderer, (read) => read.steps.length === 1 && read.focused, 'series-procedure-sheet');
@@ -2039,9 +2043,12 @@ async function main() {
       [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选`, 'all']]), 'series-sheet-offered', offeredHere);
     at('procedure-recommendation');
     await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure"]'); if(!(select instanceof HTMLSelectElement))return false;select.value=${JSON.stringify(seriesProcedureId)};select.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'series-procedure-choose');
+    // The sheet itself says what it ticked — nothing, here — in its own words (S31b review P3-5): version 1 chosen (the only
+    // version: its selector, when shown, names it), no category checked, and its procedure line saying the categories are the
+    // editor's to tick. A toast is transient (#1519).
     const seriesSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1', 'series-sheet-filled');
-    // The status says what the sheet ticked — nothing, here — in the sheet's own words (S31b review P3-5).
-    await waitFor(renderer, `${notice}===${JSON.stringify(`已读取《${SERIES_PROCEDURE_TITLE}》第 1 版：要运行的类别由你勾选。`)}`, 'series-sheet-status', 10_000);
+    await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1' && (read.chosen === null ? read.options.length === 0 : read.options[read.chosen]?.includes('第 1 版') === true) &&
+      read.checked.length === 0 && read.lines[0]?.includes('要运行的类别由你勾选') === true, 'series-sheet-status');
     at('procedure-series-step-optin');
     const seriesCeiling = await renderer.evaluate(`(async () => { const procedure=await window.ai7.inspectCapturedProcedure({procedureId:${JSON.stringify(seriesProcedureId)},before:null}); const preview=await window.ai7.previewCapturedProcedureValidation({versionId:procedure.versions[0].versionId}); return preview.ceiling.runSourceScope; })()`);
     requireJourney(seriesCeiling === 'series', 'procedure-v2-series-ceiling');

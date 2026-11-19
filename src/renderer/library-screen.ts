@@ -1,3 +1,5 @@
+import { reportResult } from './notifications.js';
+import { styleInput } from './components/controls.js';
 
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { technicalWords, technicalLayerVisible } from './technical-layer.js';
@@ -76,7 +78,7 @@ function renderBookFilter(
   const textLabel = element('label', undefined, BOOK_FILTER_TEXT_LABEL);
   const text = element('input');
   text.id = 'book-filter-text';
-  text.type = 'search';
+  text.type = 'search'; styleInput(text);
   // The service reads at most this many characters; a longer paste is cut here rather than refused as a bad request.
   text.maxLength = MAX_BOOK_SUMMARY_FILTER_CHARACTERS;
   text.value = filter?.text ?? '';
@@ -193,7 +195,7 @@ async function renderLanding(
       const result = await api.selectAndStageManuscript();
       if (result.status === 'cancelled') {
         importButton.disabled = false;
-        setStatus('已取消文件选择');
+        reportResult(setStatus, '已取消文件选择');
         return;
       }
       setStatus('DOCX 已完成本地暂存', 'success');
@@ -248,7 +250,7 @@ async function renderLanding(
       try {
         await api.savePreference({ key: 'onboarding.state', value: 'skipped' });
         onboarding.remove();
-        setStatus(labels.skipped);
+        reportResult(setStatus, labels.skipped);
       } catch (error) {
         skip.disabled = false;
         setStatus(rendererErrorMessage(error, labels.skipFailed), 'error');
