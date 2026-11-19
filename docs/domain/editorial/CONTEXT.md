@@ -531,12 +531,12 @@ _中文_: 审阅规范文件
 _Avoid_: Policy Document, prompt fragment, Editorial Profile, style sheet artifact of one Book
 
 **Standards Table**:
-A versioned, house-wide table in the Knowledge Base class 字表与词表, of one kind — 规范字 or 字形对照 (a 字表) or 词形 (a 词表) — whose entries each carry a recommended form, discouraged forms, a condition or note, a source and a strength (国家规范 / 辞书推荐 / 本社要求); it is imported by the editor from any file, or pre-installed for the public national standards, presented as one item together with its imported source, and deleted with it ([ADR 0106](../../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)).
+A versioned, house-wide table in the Knowledge Base class 字表与词表, of one kind — 规范字 or 字形对照 (a 字表), or 词形 or 常用词 (a 词表) — whose entries each carry a recommended form, discouraged forms (none for 规范字 and 常用词), a condition or note, a source and a strength (国家规范 / 辞书推荐 / 本社要求); it is imported by the editor from any file, or pre-installed for the public national standards and the default 常用词表 《现代汉语常用词表（第2版）》, presented as one item together with its imported source, and deleted with it ([ADR 0106](../../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)).
 _中文_: 字表 / 词表
-_Avoid_: 本社词表 (the house literal risk list, rule H01), Review Guideline Document, a program constant, a dictionary shipped with AI7
+_Avoid_: 本社词表 (the house literal risk list, rule H01), Review Guideline Document, a program constant
 
 **Standard Usage Check**:
-The deterministic part of the local text check that reads the enabled Standards Tables, pins each by table, version and digest, and presents every finding with its entry's strength and basis; it transmits nothing, and a place on which enabled tables disagree becomes an annotation listing them, never a suggestion ([ADR 0106](../../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)).
+The deterministic part of the local text check that reads the enabled Standards Tables, pins each by table, version and digest, and presents every finding with its entry's strength and basis; it transmits nothing, and a place on which enabled tables disagree becomes an annotation listing them, never a suggestion; a 常用词 table only adds 「请核对」 annotations and never outranks a national standard ([ADR 0106](../../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)).
 _中文_: 规范用语核查
 _Avoid_: the model review category 错别字与规范用语, 本社词表 matching (H01), proof of standard compliance
 
