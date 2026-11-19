@@ -891,24 +891,47 @@ describe('review triage in place (#1525)', () => {
     });
   });
 
-  it('keeps the control under the resting pointer in place over the card the editor moved on to (#1526)', async () => {
+  // The pointer rests on `control`: what lies under its last position, and the move that armed it (#1526).
+  const restOn = (control: () => MiniElement): void => {
+    Object.defineProperty(miniDocument, 'elementFromPoint', { configurable: true, value: () => control() });
+    control().dispatchEvent(Object.assign({ type: 'pointermove', bubbles: true }, { clientX: 10, clientY: 10 }));
+  };
+
+  it('keeps the control under the resting pointer in place rather than the card the editor is on (#1526)', async () => {
+    await withPlaces({ rvf_s1: 100, rvf_s2: 400, rvf_s3: 700 }, async (scroller) => {
+      const ask = deferred<unknown>();
+      const { root } = await view([suggestion(1), suggestion(2), suggestion(3)], {
+        recordChangeSuggestionDecision: vi.fn(async () => rejected('decision-2')), recordLearningReasonAsk: vi.fn(() => ask.promise) });
+      article(root, 'rvf_s1').focus();
+      inCard(root, 'rvf_s2', 'reject').click(); await flush();
+      // The card the editor is on is above the one that grows; the pointer rests on a control below it, which moves down.
+      const control = (): MiniElement => article(root, 'rvf_s3').querySelector('button')!;
+      try {
+        restOn(control);
+        const before = control().getBoundingClientRect().top;
+        ask.resolve(askFor('decision-2')); await flush();
+        expect(root.querySelector('article[data-finding-id="rvf_s2"] .learning-reason-ask')).not.toBeNull();
+        expect(control().getBoundingClientRect().top).toBe(before);
+        expect(scroller.scrollTop).toBe(60);
+      } finally { Reflect.deleteProperty(miniDocument, 'elementFromPoint'); }
+    });
+  });
+
+  it('gives the place back to the card the editor is on once they press a key (#1526)', async () => {
     await withPlaces({ rvf_s1: 100, rvf_s2: 400, rvf_s3: 700 }, async (scroller) => {
       const ask = deferred<unknown>();
       const { root } = await view([suggestion(1), suggestion(2), suggestion(3)], {
         recordChangeSuggestionDecision: vi.fn(async () => rejected('decision-1')), recordLearningReasonAsk: vi.fn(() => ask.promise) });
-      article(root, 'rvf_s1').focus();
-      article(root, 'rvf_s1').dispatchEvent({ type: 'keydown', key: 'r' }); await flush();
-      expect(miniDocument.activeElement).toBe(article(root, 'rvf_s2'));
-      // The pointer rests on a control of the decided card itself, which does not move when its own reason prompt arrives.
-      const control = (): MiniElement => article(root, 'rvf_s1').querySelector('button')!;
-      Object.defineProperty(miniDocument, 'elementFromPoint', { configurable: true, value: () => control() });
+      // The pointer parked on the decided card's own control, which does not move; then the editor triages by key.
       try {
-        control().dispatchEvent(Object.assign({ type: 'pointermove', bubbles: true }, { clientX: 10, clientY: 110 }));
-        const before = control().getBoundingClientRect().top;
+        restOn(() => article(root, 'rvf_s1').querySelector('button')!);
+        article(root, 'rvf_s1').focus();
+        article(root, 'rvf_s1').dispatchEvent({ type: 'keydown', key: 'r', bubbles: true }); await flush();
+        expect(miniDocument.activeElement).toBe(article(root, 'rvf_s2'));
+        const before = article(root, 'rvf_s2').getBoundingClientRect().top;
         ask.resolve(askFor('decision-1')); await flush();
-        expect(root.querySelector('article[data-finding-id="rvf_s1"] .learning-reason-ask')).not.toBeNull();
-        expect(control().getBoundingClientRect().top).toBe(before);
-        expect(scroller.scrollTop).toBe(0);
+        expect(article(root, 'rvf_s2').getBoundingClientRect().top).toBe(before);
+        expect(scroller.scrollTop).toBe(60);
       } finally { Reflect.deleteProperty(miniDocument, 'elementFromPoint'); }
     });
   });

@@ -977,8 +977,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     card.dataset['reviewRead'] = 'failed';
     const earlier = card.querySelector('.review-read-failed');
     if (earlier !== null && !changed) return;
+    const putBack = screenPlace();
     if (earlier !== null) earlier.replaceWith(readFailedNote(reason));
     else card.prepend(readFailedNote(reason));
+    putBack();
   }
 
   function show(next: ReviewWorkspaceProjection): void {
@@ -993,7 +995,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     rereadPressed = false;
     if (card !== undefined) {
       delete card.dataset['reviewRead'];
-      card.querySelector('.review-read-failed')?.remove();
+      const note = card.querySelector('.review-read-failed');
+      if (note !== null) { const putBack = screenPlace(); note.remove(); putBack(); }
     }
     // The drawer beside 审阅 states where the Run stands; it reads the plan again when that changes.
     if (previous?.run !== null && previous?.run !== undefined && previous.run.reviewRunId === next.run?.reviewRunId &&
@@ -1093,8 +1096,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /**
    * What stays where it stands on screen when the card is drawn again (Issues #1525, #1526): the control under the editor's
    * resting pointer inside the card — findings arriving above 查看计划 must not walk it out from under the pointer — otherwise
-   * the caller's own anchor. Measured before the draw, put back once after it by one relative scroll; nothing when it is off
-   * screen, gone, or ambiguous after the draw. The pointer's last position is read at the moment of the draw.
+   * the caller's own anchor (the focused card). Measured before the draw, put back once after it by one relative scroll; nothing
+   * when it is off screen, gone, hidden or not the only control of its kind. The last input wins: a pointer move over the card
+   * arms the pointer's place, and leaving the card, the window losing focus, a key or the wheel disarm it until the next move.
    */
   let pointerAt: { x: number; y: number } | null = null;
   const trackPointer = (event: PointerEvent): void => { pointerAt = { x: event.clientX, y: event.clientY }; };
@@ -1102,22 +1106,40 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   host.addEventListener('pointermove', trackPointer, true);
   host.addEventListener('pointerover', trackPointer, true);
   host.addEventListener('pointerleave', leavePointer);
+  document.addEventListener('keydown', leavePointer, true);
+  document.addEventListener('wheel', leavePointer, true);
+  window.addEventListener('blur', leavePointer);
   const PLACE_CONTROLS = 'button, select, textarea, input, summary, a';
+  const sameControls = (key: string): HTMLElement[] =>
+    Array.from(card?.querySelectorAll<HTMLElement>(PLACE_CONTROLS) ?? []).filter((candidate) => focusKeyOf(candidate) === key);
   function screenPlace(fallback: HTMLElement | null = null): () => void {
     const hit = pointerAt === null ? null : document.elementFromPoint(pointerAt.x, pointerAt.y);
-    const control = hit instanceof HTMLElement && card?.contains(hit) === true ? hit.closest<HTMLElement>(PLACE_CONTROLS) : null;
+    const under = hit instanceof HTMLElement && card?.contains(hit) === true ? hit.closest<HTMLElement>(PLACE_CONTROLS) : null;
+    const key = under === null ? null : focusKeyOf(under);
+    const control = key !== null && sameControls(key).length === 1 ? under : null;
     const held = control ?? fallback;
     const box = held?.getBoundingClientRect();
     if (held === null || box === undefined || box.bottom <= 0 || box.top >= window.innerHeight) return () => undefined;
-    const key = control === null ? null : focusKeyOf(control);
     return () => {
-      const matches = key === null ? (held.isConnected ? [held] : [])
-        : Array.from(card?.querySelectorAll<HTMLElement>(PLACE_CONTROLS) ?? []).filter((candidate) => focusKeyOf(candidate) === key);
+      const matches = control === null ? (held.isConnected ? [held] : []) : sameControls(key!);
       const page = scroller();
-      if (matches.length !== 1 || page === null) return;
+      if (matches.length !== 1 || !matches[0]!.checkVisibility() || page === null) return;
       const drift = matches[0]!.getBoundingClientRect().top - box.top;
       if (Math.abs(drift) >= 1) page.scrollTop += drift;
     };
+  }
+
+  /**
+   * While a Run is running, its progress never gets shorter under the editor (#1526): at the page's end a shorter list would pull
+   * the page down by the browser's clamp, which no scroll can put back. It keeps its tallest height until the Run stops running.
+   */
+  let progressFloor: { runId: string; height: number } | null = null;
+  function measureProgress(run: ReviewRunProjection | null): void {
+    if (run === null || run.state !== 'running') { progressFloor = null; return; }
+    const list = card?.dataset['reviewRunId'] === run.reviewRunId ? card.querySelector('ol.review-progress') : null;
+    const height = list?.getBoundingClientRect().height ?? 0;
+    const floor = progressFloor?.runId === run.reviewRunId ? progressFloor.height : 0;
+    progressFloor = { runId: run.reviewRunId, height: Math.max(floor, height) };
   }
 
   function renderUnavailable(error: unknown): void {
@@ -1213,6 +1235,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         }
       : null;
     const putBack = screenPlace();
+    measureProgress(next.run);
     const node = el('section', 'review-workspace-card');
     if (readFailure !== null) {
       node.dataset['reviewRead'] = 'failed';
@@ -1726,6 +1749,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   function progressList(run: ReviewRunProjection): HTMLElement {
     const list = el('ol', 'review-progress');
+    if (run.state === 'running' && progressFloor?.runId === run.reviewRunId && progressFloor.height > 0) list.setAttribute('style', `min-height: ${progressFloor.height}px`);
     const now = Date.now();
     for (const category of run.categories) {
       const item = el('li');
@@ -1752,9 +1776,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   function updateProgress(next: ReviewWorkspaceProjection): void {
     const current = card?.querySelector('ol.review-progress');
     if (!current || next.run === null) return;
-    const putBack = screenPlace();
+    measureProgress(next.run);
     current.replaceWith(progressList(next.run));
-    putBack();
   }
 
   // ---- results ----------------------------------------------------------------------------------------
@@ -3801,6 +3824,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       host.removeEventListener('pointermove', trackPointer, true);
       host.removeEventListener('pointerover', trackPointer, true);
       host.removeEventListener('pointerleave', leavePointer);
+      document.removeEventListener('keydown', leavePointer, true);
+      document.removeEventListener('wheel', leavePointer, true);
+      window.removeEventListener('blur', leavePointer);
       host.removeEventListener('keydown', keyCard, true);
       document.removeEventListener('pointerup', releaseCard, true);
       document.removeEventListener('pointercancel', releaseCard, true);

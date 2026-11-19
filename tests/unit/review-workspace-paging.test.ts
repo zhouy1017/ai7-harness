@@ -627,25 +627,42 @@ describe('the control under a resting pointer stays where it stands when the car
       findingCounts: { ...COUNTS, must: ids.length, pending: ids.length } } } as never;
   };
   const viewPlan = (root: MiniElement): MiniElement => root.querySelector('[data-review-action="view-plan"]')!;
+  const inFinding = (root: MiniElement, id: string): MiniElement => root.querySelector(`article[data-finding-id="${id}"] button`)!;
   const rest = (node: MiniElement): void => { node.dispatchEvent(Object.assign({ type: 'pointermove', bubbles: true }, { clientX: 300, clientY: 400 })); };
+  const poll = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 300)); await flush(); };
 
   /**
-   * No layout of its own: each finding above 查看计划 pushes it down by 300 px, and a progress list that shrinks at the page's
-   * end (the browser clamping the scroll) pushes it down by 46 px. `under` names what the resting pointer is on.
+   * A page that lays out like an engine, in one column: finding cards from 100 px, 200 px apart; 查看计划 300 px further down for
+   * each card above it; then the progress list (100 px tall while the Run reads, 54 px once its last part is read, never less than
+   * its own min-height) and 600 px more. The window is 800 px tall and the scroll is clamped to [0, page − window], also when the
+   * page gets shorter. `under` names what lies under the pointer's last position.
    */
   async function laidOut(body: (view: ReturnType<typeof mount>, state: Stub, scroller: { scrollTop: number }, under: (find: () => MiniElement | null) => void) => Promise<void>): Promise<void> {
-    const scroller = { scrollTop: 0 };
+    const root = miniDocument.body;
+    const progressHeight = (): number => {
+      const list = root.querySelector('ol.review-progress');
+      const natural = list?.querySelector('li')?.dataset['reviewProgress'] === '7/7' ? 54 : 100;
+      return Math.max(natural, Number(/min-height: (\d+)px/u.exec(list?.getAttribute('style') ?? '')?.[1] ?? 0));
+    };
+    const findings = (): MiniElement[] => root.querySelectorAll('article.review-finding');
+    // A failed read's note at the card's top pushes everything down by 46 px.
+    const noted = (): number => root.querySelector('.review-read-failed') === null ? 0 : 46;
+    const planTop = (): number => 400 + 300 * findings().length + noted();
+    const max = (): number => Math.max(0, planTop() + 34 + progressHeight() + 600 - 800);
+    let stored = 0;
+    const scroller = { get scrollTop() { return Math.min(stored, max()); }, set scrollTop(value: number) { stored = Math.max(0, Math.min(value, max())); } };
     const empty = Object.getOwnPropertyDescriptor(MiniElement.prototype, 'getBoundingClientRect')!;
     let pointed: () => MiniElement | null = () => null;
     Object.defineProperty(miniDocument, 'scrollingElement', { configurable: true, value: scroller });
     Object.defineProperty(miniDocument, 'elementFromPoint', { configurable: true, value: () => pointed() });
     Object.assign(window, { innerHeight: 800 });
     Object.defineProperty(MiniElement.prototype, 'getBoundingClientRect', { configurable: true, value(this: MiniElement) {
-      const root = miniDocument.body;
-      const settled = root.querySelector('ol.review-progress li')?.dataset['reviewProgress'] === '7/7';
-      const base = this.closest('article.review-finding') !== null ? 100 : 400 + 300 * root.querySelectorAll('article.review-finding').length + (settled ? 46 : 0);
-      const top = base - scroller.scrollTop;
-      return { top, bottom: top + 34, left: 0, right: 80, width: 80, height: 34 };
+      const article = this.closest('article.review-finding');
+      const list = this.tagName === 'OL' && this.className === 'review-progress';
+      const height = list ? progressHeight() : 34;
+      const place = article !== null ? 100 + noted() + 200 * findings().indexOf(article) : list ? planTop() + 34 : planTop();
+      const top = place - scroller.scrollTop;
+      return { top, bottom: top + height, left: 0, right: 80, width: 80, height };
     } });
     const state: Stub = { full: reading([]), budget: 4 * 1024 * 1024, opened: [] };
     try { await body(mount(state), state, scroller, (find) => { pointed = find; }); } finally {
@@ -655,35 +672,74 @@ describe('the control under a resting pointer stays where it stands when the car
     }
   }
 
-  it('keeps 查看计划 under the resting pointer while findings arrive above it', async () => {
+  it('keeps 查看计划 under the resting pointer while findings arrive above it, with the page at its end', async () => {
     await laidOut(async (view, state, scroller, under) => {
       await flush();
+      scroller.scrollTop = 1e6;
+      expect(scroller.scrollTop).toBe(334);
       under(() => viewPlan(view.root)); rest(viewPlan(view.root));
       const before = viewPlan(view.root).getBoundingClientRect().top;
       state.full = reading(['f-1', 'f-2']);
       view.surface.refresh(); await flush();
       expect(view.root.querySelectorAll('article.review-finding')).toHaveLength(2);
       expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
-      expect(scroller.scrollTop).toBe(600);
     });
   });
 
-  it('keeps it in place when the progress alone is drawn again', async () => {
+  it('never lets the running progress pull the page down at its end: alone, or with findings arriving above', async () => {
+    await laidOut(async (view, state, scroller, under) => {
+      await flush();
+      scroller.scrollTop = 1e6;
+      const before = viewPlan(view.root).getBoundingClientRect().top;
+      // The Run's own poll with only its progress moved on: the list is drawn again, shorter, and keeps its height.
+      state.full = reading([], 7);
+      await poll();
+      expect(view.root.querySelector('ol.review-progress li')!.dataset['reviewProgress']).toBe('7/7');
+      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+      // Then findings above it while the progress list is drawn anew: 查看计划 stays under the resting pointer.
+      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      state.full = reading(['f-1'], 7);
+      view.surface.refresh(); await flush();
+      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+    });
+  });
+
+  it('lets the last input win: a key or the wheel disarms the pointer\'s place until the pointer moves again', async () => {
     await laidOut(async (view, state, scroller, under) => {
       await flush();
       under(() => viewPlan(view.root)); rest(viewPlan(view.root));
-      const pressed = viewPlan(view.root);
-      const before = pressed.getBoundingClientRect().top;
-      state.full = reading([], 7);
-      // The running Run's own poll: progress only, so the card is not drawn again, its list is.
-      await new Promise((resolve) => setTimeout(resolve, 300)); await flush();
-      expect(viewPlan(view.root)).toBe(pressed);
-      expect(pressed.getBoundingClientRect().top).toBe(before);
-      expect(scroller.scrollTop).toBe(46);
+      miniDocument.body.dispatchEvent({ type: 'keydown', key: 'j' });
+      state.full = reading(['f-1']);
+      view.surface.refresh(); await flush();
+      expect(scroller.scrollTop).toBe(0);
+      rest(viewPlan(view.root));
+      state.full = reading(['f-1', 'f-2']);
+      view.surface.refresh(); await flush();
+      expect(scroller.scrollTop).toBe(300);
+      miniDocument.body.dispatchEvent({ type: 'wheel' });
+      state.full = reading(['f-1', 'f-2', 'f-3']);
+      view.surface.refresh(); await flush();
+      expect(scroller.scrollTop).toBe(300);
     });
   });
 
-  it('scrolls nothing when the pointer left the card, or rests on a control the draw removed', async () => {
+  it('keeps whatever control lies under the pointer\'s last position at the draw', async () => {
+    await laidOut(async (view, state, scroller, under) => {
+      await flush();
+      state.full = reading(['f-1']);
+      view.surface.refresh(); await flush();
+      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      // The pointer has not moved, but the page has: f-1's control is under it now.
+      under(() => inFinding(view.root, 'f-1'));
+      const before = inFinding(view.root, 'f-1').getBoundingClientRect().top;
+      state.full = reading(['f-0', 'f-1']);
+      view.surface.refresh(); await flush();
+      expect(inFinding(view.root, 'f-1').getBoundingClientRect().top).toBe(before);
+      expect(scroller.scrollTop).toBe(200);
+    });
+  });
+
+  it('scrolls nothing when the pointer left the card, rests on text, or on a control the draw removed, hid or made one of several', async () => {
     await laidOut(async (view, state, scroller, under) => {
       await flush();
       under(() => viewPlan(view.root)); rest(viewPlan(view.root));
@@ -691,12 +747,43 @@ describe('the control under a resting pointer stays where it stands when the car
       state.full = reading(['f-1']);
       view.surface.refresh(); await flush();
       expect(scroller.scrollTop).toBe(0);
-      // On f-1's own control, and the next read no longer has f-1: nothing to keep in place.
-      const control = (): MiniElement | null => view.root.querySelector('article[data-finding-id="f-1"] button');
-      under(control); rest(control()!);
+      // On f-1's words, not a control.
+      under(() => view.root.querySelector('article[data-finding-id="f-1"] blockquote, article[data-finding-id="f-1"] p'));
+      rest(view.root.querySelector('article[data-finding-id="f-1"]')!);
+      state.full = reading(['f-0', 'f-1']);
+      view.surface.refresh(); await flush();
+      expect(scroller.scrollTop).toBe(0);
+      // On f-1's own control, and the next read no longer has f-1.
+      under(() => inFinding(view.root, 'f-1')); rest(inFinding(view.root, 'f-1'));
       state.full = reading(['f-2', 'f-3']);
       view.surface.refresh(); await flush();
       expect(view.root.querySelector('article[data-finding-id="f-1"]')).toBeNull();
+      expect(scroller.scrollTop).toBe(0);
+      // On f-2's control, and after the draw two controls answer to it.
+      under(() => inFinding(view.root, 'f-2')); rest(inFinding(view.root, 'f-2'));
+      state.full = reading(['f-1', 'f-2', 'f-2']);
+      view.surface.refresh(); await flush();
+      expect(scroller.scrollTop).toBe(0);
+      // On 查看计划, on screen, which the draw leaves hidden.
+      scroller.scrollTop = 900;
+      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(400);
+      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      const shown = Object.getOwnPropertyDescriptor(MiniElement.prototype, 'checkVisibility')!;
+      Object.defineProperty(MiniElement.prototype, 'checkVisibility', { configurable: true, value(this: MiniElement) { return this.dataset['reviewAction'] !== 'view-plan'; } });
+      try {
+        state.full = reading(['f-0', 'f-1', 'f-2', 'f-3']);
+        view.surface.refresh(); await flush();
+        expect(view.root.querySelectorAll('article.review-finding')).toHaveLength(4);
+        expect(scroller.scrollTop).toBe(900);
+      } finally { Object.defineProperty(MiniElement.prototype, 'checkVisibility', shown); }
+      // On a control that is already one of several before the draw.
+      miniDocument.body.dispatchEvent({ type: 'wheel' });
+      state.full = reading(['f-1', 'f-1']);
+      view.surface.refresh(); await flush();
+      scroller.scrollTop = 0;
+      under(() => inFinding(view.root, 'f-1')); rest(inFinding(view.root, 'f-1'));
+      state.full = reading(['f-0', 'f-1', 'f-1']);
+      view.surface.refresh(); await flush();
       expect(scroller.scrollTop).toBe(0);
     });
   });
@@ -719,6 +806,24 @@ describe('the control under a resting pointer stays where it stands when the car
       expect(view.root.querySelectorAll('article.review-finding')).toHaveLength(1);
       expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
       expect(scroller.scrollTop).toBe(300);
+    });
+  });
+
+  it('keeps 查看计划 in place while the note of a failed read comes and goes at the top of the card', async () => {
+    await laidOut(async (view, state, scroller, under) => {
+      await flush();
+      scroller.scrollTop = 200;
+      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      const before = viewPlan(view.root).getBoundingClientRect().top;
+      state.refuse = refusal('SERVICE_UNAVAILABLE', '服务暂时无法回答。');
+      view.surface.refresh(); await flush();
+      expect(view.root.querySelector('.review-read-failed')).not.toBeNull();
+      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+      state.refuse = null;
+      view.surface.refresh(); await flush();
+      expect(view.root.querySelector('.review-read-failed')).toBeNull();
+      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+      expect(scroller.scrollTop).toBe(200);
     });
   });
 });
