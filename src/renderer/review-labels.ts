@@ -1,3 +1,4 @@
+import { localDayTimeLabel } from '../shared/report-wording.js';
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { serviceWords } from './service-wording.js';
 import { REVIEW_SYNTHESIS_PLAN_LINE } from '../shared/review-synthesis-wording.js';
@@ -539,12 +540,8 @@ export function reviewRunMetaLine(scopeLabel: string, revisionLabel: string): st
 
 /** 审阅页首的时间到分 (Issue #1524 6.4): the header dates read to the minute, never to the second. */
 export function reviewMinuteLabel(iso: string): string {
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return iso;
-  return at.toLocaleString('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  });
+  // The one day-and-time form of ordinary mode (Issue #1531, review S7).
+  return localDayTimeLabel(iso);
 }
 
 export function reviewCreatedLine(localInstant: string): string {

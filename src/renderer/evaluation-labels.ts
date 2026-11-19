@@ -1,5 +1,5 @@
 import { technicalWords } from './technical-layer.js';
-import { localDayLabel } from '../shared/report-wording.js';
+import { localDayLabel, localDayTimeLabel } from '../shared/report-wording.js';
 import type {
   EvaluationAdjustmentReasonId,
   EvaluationComparisonProjection,
@@ -148,10 +148,11 @@ export function evaluationItemLegend(item: { label: string; fullMarks: number })
 }
 
 /** `第 2 版 · 定稿`; ordinary mode tells one version from another by its day (Issue #1531): `11 月 16 日的定稿`. */
-export function evaluationHeading(record: Pick<EvaluationRecordSummaryProjection, 'ordinal' | 'state'> & { readonly createdAt?: string; readonly finalizedAt?: string | null }): string {
-  const day = record.finalizedAt ?? record.createdAt;
+export function evaluationHeading(record: Pick<EvaluationRecordSummaryProjection, 'ordinal' | 'state'> & { readonly createdAt?: string; readonly finalizedAt?: string | null }, withTime = false): string {
+  const at = record.finalizedAt ?? record.createdAt;
+  const day = at === undefined ? undefined : withTime ? localDayTimeLabel(at) : localDayLabel(at);
   const label = EVALUATION_STATE_LABELS[record.state];
-  const ordinary = day === undefined ? label : record.state === 'editing' ? `${label}（${localDayLabel(day)}开始）` : `${localDayLabel(day)}的${label}`;
+  const ordinary = day === undefined ? label : record.state === 'editing' ? `${label}（${day}开始）` : `${day}的${label}`;
   return technicalWords(`第 ${record.ordinal} 版 · ${label}`, ordinary);
 }
 
@@ -179,9 +180,9 @@ export function evaluationConclusionLabel(profile: Pick<EvaluationProfileProject
 }
 
 /** One version in the list: its number and state, the revision, the total and — once chosen — the conclusion. */
-export function evaluationVersionLine(profile: Pick<EvaluationProfileProjection, 'bands' | 'conclusions'>, summary: EvaluationRecordSummaryProjection): string {
+export function evaluationVersionLine(profile: Pick<EvaluationProfileProjection, 'bands' | 'conclusions'>, summary: EvaluationRecordSummaryProjection, withTime = false): string {
   const conclusion = summary.conclusion === null ? '' : ` · ${evaluationConclusionLabel(profile, summary.conclusion)}`;
-  return `${evaluationHeading(summary)}${technicalWords(` · 修订版 ${summary.revisionLabel}`)} · ${evaluationTotalLine(profile, summary.total)}${conclusion}`;
+  return `${evaluationHeading(summary, withTime)}${technicalWords(` · 修订版 ${summary.revisionLabel}`)} · ${evaluationTotalLine(profile, summary.total)}${conclusion}`;
 }
 
 /** The Book's 评估 on 工作概览, in one line. */

@@ -350,7 +350,8 @@ it('reports loaded group counts and the latest ordinal truthfully', () => {
   setTechnicalLayerVisible(true);
 });
 
-it('formats header timestamps to the minute', () => {
-  const at = new Date('2026-11-17T13:42:59Z');
-  expect(reviewMinuteLabel(at.toISOString())).toBe(at.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }));
+it('formats header timestamps to the minute, in the one day-and-time form (Issue #1531)', () => {
+  const at = new Date(new Date().getFullYear(), 10, 17, 13, 42, 59);
+  expect(reviewMinuteLabel(at.toISOString())).toBe('11 月 17 日 13:42');
+  expect(reviewMinuteLabel(new Date(2020, 0, 2, 3, 4).toISOString())).toBe('2020 年 1 月 2 日 03:04');
 });

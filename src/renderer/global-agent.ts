@@ -1,5 +1,5 @@
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
-import { localInstantLabel } from '../shared/report-wording.js';
+import { localInstantLabel } from './plan-preview-labels.js';
 import { type GlobalAgentDialogueProjection, type GlobalAgentProcedure, type GlobalAgentProjection, type GlobalAgentRendererApi, type GlobalAgentScopeInput, type GlobalMemoryItem, type GlobalAgentSourceCandidate, type PrepareGlobalAgentTurnInput, type RecordLearningSupervisionInput } from '../shared/protocol.js';
 import { globalAgentAnswerStatus, shellDestinationLabel } from './shell-labels.js';
 import { CONFIGURED_RUNTIME_MODEL_LABELS } from '../shared/provider-configuration.generated.js';

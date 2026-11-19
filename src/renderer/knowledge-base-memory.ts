@@ -1,5 +1,5 @@
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
-import { localInstantLabel } from '../shared/report-wording.js';
+import { localInstantLabel } from './plan-preview-labels.js';
 import type { EditorialLearningProjection, HouseReviewPreferenceProjection, LearningSignal, RendererApi } from '../shared/protocol.js';
 import { learningChoiceLabel, REVIEW_PREFERENCES_NOTE } from './quality-learning-labels.js';
 import { editorialPreferenceEditor, mountWordTrackedEditDetail } from './quality-learning.js';

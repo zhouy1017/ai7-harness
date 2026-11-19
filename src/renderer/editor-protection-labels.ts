@@ -1,3 +1,4 @@
+import { localDayTimeLabel } from '../shared/report-wording.js';
 import { technicalWords } from './technical-layer.js';
 /**
  * The words of Editing Protection Mode and its Protective Read-only State (Issue #951, wave 12 slice 12a; V2-UX-DUR-001 to
@@ -32,7 +33,7 @@ export type ProtectionReadOnlyReason = 'capacity' | 'service-stopped' | 'drift';
 
 export function lastDurableLine(sequence: number, durableAt: string): string {
   const at = new Date(durableAt).toLocaleString('zh-CN', { hour12: false });
-  return technicalWords(`最后确认写入：修订日志序号 ${sequence.toLocaleString('zh-CN')} · ${at}`, `最近保存时间：${at}`);
+  return technicalWords(`最后确认写入：修订日志序号 ${sequence.toLocaleString('zh-CN')} · ${at}`, `最近保存时间：${localDayTimeLabel(durableAt)}`);
 }
 
 /** The ordinary words of a copy and of a mismatched acknowledgement (Issue #1431 item 16). */

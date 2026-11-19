@@ -5,6 +5,7 @@ import type {
   PersonalHighlightColor,
   ProposalItemDisposition,
 } from '../shared/protocol.js';
+import { localDayTimeLabel } from '../shared/report-wording.js';
 import { SELECTION_SPAN_NOTE } from '../shared/selection-span.js';
 import { technicalWords } from './technical-layer.js';
 import { REVIEW_UNCHECKED_DISCLOSURE, REVIEW_GUESSED_ANCHOR_NOTE_PREFIX, REVIEW_PUNCTUATION_ALIGNED_NOTE, reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
@@ -236,8 +237,8 @@ export function markPointKind(mark: Pick<EditorialMarkAnchorProjection, 'deleted
 export function markTimeLabel(iso: string): string {
   const time = new Date(iso);
   if (Number.isNaN(time.getTime())) return '';
-  const minutes = String(time.getMinutes()).padStart(2, '0');
-  return `${time.getMonth() + 1}月${time.getDate()}日 ${String(time.getHours()).padStart(2, '0')}:${minutes}`;
+  // The one day-and-time form of ordinary mode (Issue #1531, review S7).
+  return localDayTimeLabel(iso);
 }
 
 /** Why the 编辑标记 entries cannot act on what is selected. */

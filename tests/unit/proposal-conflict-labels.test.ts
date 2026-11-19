@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RESOLVE_CONFLICT_LABEL, SAFE_MERGE_LINE, markSourceLine, markStateLabel } from '../../src/renderer/editorial-mark-labels.js';
 import type { EditorialMarkCardProjection } from '../../src/shared/protocol.js';
 import { fastRoleRouteRefusal } from '../../src/service/fast-role/fast-role-execution.js';
@@ -34,6 +34,10 @@ import {
   conflictSaveReason,
   conflictUnitHeading,
 } from '../../src/renderer/proposal-conflict-labels.js';
+
+// The day labels carry the year only when it is not this year (Issue #1531): the synthetic 2026 dates read in 2026.
+beforeAll(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-19T00:00:00.000Z')); });
+afterAll(() => { vi.useRealTimers(); });
 
 // Unit suite for the words of 稿件冲突 (Issue #57, plan slice S22; ADR 0085; V2-UX-CONFLICT-004 to 013).
 // J-06 reads these sentences on screen; they are pinned here byte for byte.
@@ -155,7 +159,7 @@ describe('the words of 稿件冲突', () => {
     expect(CONFLICT_DRAFT_STATUS).toEqual({ saving: '正在保存草稿…', saved: '草稿已保存', unsaved: '草稿尚未保存' });
     expect(conflictDraftUnsaved('稿件又有改动，请重新比较。')).toBe('草稿未保存：稿件又有改动，请重新比较。');
     expect(CONFLICT_COMPLETION.newVersion).toBe('已保存为新的修改建议 · 尚未应用');
-    expect(conflictDeferredLine(new Date(2026, 8, 22, 9, 5).toISOString())).toBe('已于 9月22日 09:05 暂不处理；这处冲突仍未解决。');
+    expect(conflictDeferredLine(new Date(2026, 8, 22, 9, 5).toISOString())).toBe('已于 9 月 22 日 09:05 暂不处理；这处冲突仍未解决。');
     expect(conflictKeyboardHint('win32')).toBe('Ctrl+Z 撤销 · Ctrl+Shift+Z 或 Ctrl+Y 重做（在解决草稿内）');
     expect(conflictKeyboardHint('darwin')).toBe('Command+Z 撤销 · Command+Shift+Z 或 Command+Y 重做（在解决草稿内）');
   });

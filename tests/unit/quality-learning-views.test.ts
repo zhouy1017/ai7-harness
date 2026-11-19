@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { localInstantLabel } from '../../src/shared/report-wording.js';
+import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 import { mountEditorialMemory } from '../../src/renderer/knowledge-base-memory.js';
 import { mountFeedbackHistory } from '../../src/renderer/feedback-history.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';

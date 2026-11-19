@@ -1,4 +1,5 @@
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
+import { localDayTimeLabel, localInstantLabel as fullInstantLabel } from '../shared/report-wording.js';
 import type {
   AnalysisAssuranceAxis,
   AnalysisCoverageAxis,
@@ -94,8 +95,13 @@ export function launchPolicyIntegritySentence(label: LaunchPolicyProjection['pro
   return `当前${label.slice(0, separator)}范围保持${label.slice(separator + 1)}。`;
 }
 
-/** The Decision Layer's form of an instant (V2-UX-LAYER-004), shared with the exported 审阅报告 (Issue #500, S64b). */
-export { localInstantLabel } from '../shared/report-wording.js';
+/**
+ * The Decision Layer's form of an instant (V2-UX-LAYER-004). The exported 审阅报告 keeps the shared full form (Issue #500,
+ * S64b); ordinary mode reads the one day-and-time form of every page (Issue #1531, review S7), developer mode the full one.
+ */
+export function localInstantLabel(iso: string): string {
+  return technicalWords(fullInstantLabel(iso), localDayTimeLabel(iso));
+}
 
 /** How long the step in flight has been running, as `mm:ss`; hours carry into the minutes place. */
 export function elapsedLabel(elapsedMs: number): string {

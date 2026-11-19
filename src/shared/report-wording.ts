@@ -26,11 +26,21 @@ export function localInstantLabel(iso: string): string {
   });
 }
 
-/** The day an editor tells one dated thing from another by (Issue #1531): `11 月 16 日`, in this computer's time zone. */
-export function localDayLabel(iso: string): string {
+/**
+ * The day an editor tells one dated thing from another by (Issue #1531): `11 月 16 日`, with the year only when it is not
+ * this year, in this computer's time zone.
+ */
+export function localDayLabel(iso: string, now: Date = new Date()): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return iso;
-  return `${at.getMonth() + 1} 月 ${at.getDate()} 日`;
+  return `${at.getFullYear() === now.getFullYear() ? '' : `${at.getFullYear()} 年 `}${at.getMonth() + 1} 月 ${at.getDate()} 日`;
+}
+
+/** The ordinary mode's one day-and-time form (Issue #1531, review S7): `11 月 16 日 09:05`. */
+export function localDayTimeLabel(iso: string, now: Date = new Date()): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  return `${localDayLabel(iso, now)} ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
 }
 
 /** Findings by severity and by status, each counted once in both. */

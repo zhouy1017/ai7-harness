@@ -1,7 +1,8 @@
 import type { TaskLaunchRequest } from './task-drawer.js';
+import { localDayLabel } from '../shared/report-wording.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { filterChoices, menuPanel, stateTerm } from './components/controls.js';
-import { identityWords } from './technical-layer.js';
+import { identityWords, technicalWords } from './technical-layer.js';
 import type {
   EvaluationAdjustment,
   EvaluationAdjustmentReasonId,
@@ -912,7 +913,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         const item = el('li');
         item.dataset['recordId'] = summary.recordId;
         item.dataset['evaluationState'] = summary.state;
-        const open = action(evaluationVersionLine(workspace.profile, summary), 'quiet', 'open-version', () => openVersion(summary));
+        // Two versions of one day read their time too (review S7).
+        const sameDay = workspace.records.some((other) => other !== summary && localDayLabel(other.finalizedAt ?? other.createdAt) === localDayLabel(summary.finalizedAt ?? summary.createdAt));
+        const open = action(evaluationVersionLine(workspace.profile, summary, sameDay), 'quiet', 'open-version', () => openVersion(summary));
         open.disabled = busy;
         open.setAttribute('aria-current', String(workspace.record?.recordId === summary.recordId));
         item.append(open);
@@ -1064,8 +1067,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     node.dataset['recordId'] = record.recordId;
     node.dataset['evaluationState'] = record.state;
     node.dataset['entries'] = String(record.entries);
-    const dated = { ...record, createdAt: record.savedAt, finalizedAt: record.finalized?.at ?? null };
-    const heading = el('h3', undefined, record.initial === null ? evaluationHeading(dated) : `${EVALUATION_REPORT_HEADING} · ${evaluationHeading(dated)}`);
+    // The record's day is its row's: the summary's createdAt, never the last save (review S7); a draft is the report itself.
+    const row = workspace?.records.find((summary) => summary.recordId === record.recordId);
+    const dated = { ...record, ...(row === undefined ? {} : { createdAt: row.createdAt }), finalizedAt: record.finalized?.at ?? null };
+    const reportDay = record.state === 'draft' ? technicalWords(evaluationHeading(dated), localDayLabel(dated.finalizedAt ?? dated.createdAt ?? record.savedAt)) : evaluationHeading(dated);
+    const heading = el('h3', undefined, record.initial === null ? evaluationHeading(dated) : `${EVALUATION_REPORT_HEADING} · ${reportDay}`);
     heading.tabIndex = -1;
     heading.append(' · ', el('span', 'evaluation-revision', evaluationRevisionLine(record)));
     node.append(heading);
