@@ -33,7 +33,8 @@ import { mountProposalWorkspace } from './proposal-workspace.js';
 import { preserveReadingReturn, type ReadingPlace } from './reading-return.js';
 import { hasErrorCode, rendererErrorCode, rendererErrorData, rendererErrorMessage } from './error-words.js';
 import type { AgentWorkspacePromotionProjection, BaselineAnalysisGoal, BaselineAnalysisWireProjection as BaselineAnalysisProjection, BookTaskItemProjection, DefaultExecutionRuleReference, QuickStartBaselineAnalysisWireResult as QuickStartBaselineAnalysisResult, BaselineAnalysisUpdateRequest, BookManuscriptAnchorProjection, BookRecordPresentation, BookSummaryPageProjection, BookWorkbenchRoute, BookWorkOverviewProjection, ContinueImportProjection, ForegroundExecutionBoundaryProjection, GlobalAttentionItemProjection, ImportCommitProjection, ManuscriptReimportCommitProjection, ImportDraftRecoveryProjection, ImportStartupProjection, HistoricalRevisionProjection, ManuscriptWindowProjection, PriorWorkItemProjection, RecoveryComparisonProjection, RecoveryRestorationProjection, RecoverySelection, RecoveryWindowProjection, ResolvedBookWorkbenchRoute, ReviewBeforeImportProjection, ReviewBeforeSourceImportProjection, ServiceWireJobProjection as ServiceJobProjection, StagedImportProjection, StartupProjection, TaskAuthorizationProjection, TaskPlanKind, TaskPlanProjection } from '../shared/protocol.js';
-import { createNotificationObserver, mountQuietNotice, openCurrentBookCompletion } from './notifications.js';
+import { mountTaskNotices } from './task-notices.js';
+import { finishedResultRoute } from './result-destination.js';
 
 import { J03_TASK_GOAL } from '../shared/protocol.js';
 
@@ -69,7 +70,7 @@ import { fidelityDetailText, fidelityDisclosureSummary, fidelityOutcomeLabel, WO
 import { mountProposalConflict, type ProposalConflictSurface } from './proposal-conflict.js';
 import { DELIVERABLES_STATUS_LINES } from './deliverables-labels.js';
 import { ViewPreferences, mountRegionSeparator } from './layout.js';
-import { createGlobalAttentionReader, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
+import { createGlobalAttentionReader, mountAttentionPill, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
 import { mountProcessingIndicator } from './processing-indicator.js';
 import { bookIdentityRows, recoveryIdentityRows } from './technical-layer-labels.js';
 
@@ -166,7 +167,11 @@ const taskDrawer = mountTaskDrawer({
   openRules: () => void renderKnowledgeBase(technicalLayerVisible ? 'rules' : 'guidelines'),
   // ① 任务面 (Issue #423, S77a): a card's own record, 查看结果's floating window and 发起全书任务.
   openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
-  openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel, overviewDrawerBookId === null ? api : overviewApi),
+  openTaskResult: (entry, backToPanel) => {
+    const route = finishedResultRoute({ result: entry.result, attention: entry.item }, 'panel');
+    if (route.via === 'page') void leaveThen(() => openGlobalAttentionTarget(route.target));
+    else openTaskResult(entry, backToPanel, overviewDrawerBookId === null ? api : overviewApi);
+  },
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
   // 跳到所选文字 on a selection Task's card (Issue #423, S77 deferred item d): every refusal is said on the status line.
   jumpToSelection: (bookId, selection) => void jumpToSelectionText(bookId, selection),
@@ -682,7 +687,7 @@ commandDispatcher.register({
 const commandPalette = createCommandPalette({
   api: api, execute: (id) => commandDispatcher.execute(id),
   openBook: (bookId) => leaveThen(() => requestBookWorkbenchRoute({ kind: 'book', bookId })),
-  openResult: (item) => void openOverviewResult(item),
+  openResult: (item) => void leaveThen(() => openResult(item, 'palette')),
   openStart: () => { void leaveThen(async () => { renderTaskOverview(); taskOverviewSurface?.showStart(); }); },
   openHelp: () => { if (!authorityInterrupted) void leaveThen(async () => renderHelp()); },
   beforeStart: settleScreen,
@@ -728,34 +733,14 @@ const globalAttentionEntry = ((): HTMLButtonElement => {
 })();
 mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
 mountProcessingIndicator(requiredElement('#processing-indicator'), globalAttentionReader);
-const showQuietNotice = mountQuietNotice((item) => void leaveThen(() => openTaskNotification(item.itemId, item.target)));
-/** Automatic results stay with the task being watched; an open review already shows its own result. */
-function canAutoOpenTaskResult(item: GlobalAttentionItemProjection): boolean {
-  const bookId = item.book.bookId;
-  if (bookId === null || document.querySelector('dialog[open]') !== null) return false;
-  const target = item.target;
-  const ref = 'taskIntentId' in target ? target.taskIntentId : 'reviewRunId' in target ? target.reviewRunId : 'ref' in target ? target.ref : null;
-  const review = target.kind === 'review' || target.kind === 'review-plan' || target.kind === 'task-plan' && target.taskKind === 'review-run';
-  if (review && screen.dataset['screen'] === 'book-review' && screen.querySelector<HTMLElement>('.review-run')?.dataset['reviewRunId'] === ref) return false;
-  const view = taskDrawer.view();
-  if (view !== null) return view.bookId === bookId && (view.kind === 'panel' || view.kind === 'plan' && ref !== null && view.task.ref === ref);
-  return screen.dataset['screen'] === 'task-overview';
-}
-const observeNotifications = createNotificationObserver({
-  api: api,
-  focused: () => document.hasFocus(),
-  completed: (item) => {
-    showQuietNotice(item);
-    void openCurrentBookCompletion(item, {
-      allowed: canAutoOpenTaskResult, navigation: navigation.route(),
-      enabled: () => localStorage.getItem('ai7.task-overview.auto-result') !== 'off',
-      read: () => api.inspectTaskOverview(), open: (entry) => void openOverviewResult(entry),
-    }).catch(() => undefined);
-  },
+mountTaskNotices({
+  api: api, reader: globalAttentionReader, screen, drawerView: () => taskDrawer.view(),
+  openResult: (item) => void leaveThen(() => openTaskNotification(item.itemId, item.target)),
+  openAttention: (item) => void leaveThen(() => openGlobalAttentionTarget(item.target)),
+  openList: (bookId) => void openGlobalAttention(bookId),
+  openWindow: (entry) => void openResultWindow(entry),
 });
-globalAttentionReader.subscribe((reading) => {
-  if (reading.kind === 'projection') observeNotifications(reading.projection);
-});
+mountAttentionPill({ button: requiredElement('#attention-pill'), reader: globalAttentionReader, open: () => void openGlobalAttention() });
 api.onNotificationNavigate((target) => {
   void leaveThen(async () => {
     if (target.eventId !== null && target.target !== undefined) {
@@ -3508,7 +3493,7 @@ const { renderModelServiceSettings } = createModelServiceSettings({
   element, button, setStatus, rendererErrorMessage, panel, initializeStartup, returnToOrigin, replaceScreen,
 });
 
-const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openOverviewResult, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
+const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
   technicalDetails,
   get authorityInterrupted() { return authorityInterrupted; },
   set authorityInterrupted(value) { authorityInterrupted = value; },

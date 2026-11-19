@@ -32,6 +32,7 @@ export class MiniElement {
   parentElement: MiniElement | null = null;
   #text = '';
   #listeners = new Map<string, Listener[]>();
+  getClientRects(): Array<object> { return this.hidden ? [] : [{}]; }
   open = false;
   show(): void { this.open = true; }
   close(): void { this.open = false; this.dispatchEvent({ type: 'close' }); }
