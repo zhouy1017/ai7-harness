@@ -370,3 +370,66 @@ it('keeps an open launch popover by its summary when a transition of the page mo
     Reflect.deleteProperty(proto, 'showPopover'); Reflect.deleteProperty(proto, 'hidePopover');
   }
 });
+
+/** Native popovers and window events for one test, with a bar of one row at `barTop` and a panel 500 px tall. */
+function popoverBar(barTop: number) {
+  vi.stubGlobal('innerWidth', 1280); vi.stubGlobal('innerHeight', 800);
+  const listeners = new Map<string, () => void>();
+  Object.assign(window, { addEventListener: vi.fn((type: string, listener: () => void) => { listeners.set(type, listener); }),
+    removeEventListener: vi.fn((type: string, listener: () => void) => { if (listeners.get(type) === listener) listeners.delete(type); }) });
+  const shown = new Set<unknown>();
+  const proto = Object.getPrototypeOf(document.createElement('div')) as Record<string, unknown>;
+  const own = Object.getOwnPropertyDescriptor(proto, 'matches')!;
+  Object.defineProperty(proto, 'showPopover', { configurable: true, value(this: unknown) { shown.add(this); } });
+  Object.defineProperty(proto, 'hidePopover', { configurable: true, value(this: unknown) { shown.delete(this); } });
+  Object.defineProperty(proto, 'matches', { configurable: true, value(this: unknown, selector: string) {
+    return selector === ':popover-open' ? shown.has(this) : (own.value as (s: string) => boolean).call(this, selector); } });
+  const bar = createLaunchBarPresentation(document.createElement('span'), document.createElement('button'), null, document.createElement('div'));
+  document.body.append(bar);
+  const box = (left: number, top: number, width: number, height: number) => ({ top, bottom: top + height, left, right: left + width, width, height });
+  const plan = bar.querySelector<HTMLDetailsElement>('.task-launch-estimate')!;
+  const panel = plan.querySelector<HTMLElement>('.task-launch-popover')!;
+  const style = panel.style as unknown as Record<string, string>;
+  Object.assign(bar, { getBoundingClientRect: () => box(270, barTop, 400, 35) });
+  Object.assign(plan.querySelector('summary')!, { getBoundingClientRect: () => box(470, barTop, 112, 35) });
+  // As an engine lays it out: an unbounded panel shows all of itself, and reading its layout then puts its own scroll back to 0.
+  let scroll = 0;
+  Object.defineProperty(panel, 'scrollTop', { configurable: true, get: () => scroll, set: (value: number) => {
+    scroll = style['maxHeight'] ? Math.max(0, Math.min(value, 500 - Number.parseFloat(style['maxHeight']))) : 0; } });
+  Object.assign(panel, { getBoundingClientRect: () => {
+    if (!style['maxHeight']) scroll = 0;
+    return box(Number.parseFloat(style['left'] || '0'), Number.parseFloat(style['top'] || '0'), 520, Math.min(500, Number.parseFloat(style['maxHeight'] || '500')));
+  } });
+  const restore = (): void => { Object.defineProperty(proto, 'matches', own); Reflect.deleteProperty(proto, 'showPopover'); Reflect.deleteProperty(proto, 'hidePopover'); };
+  return { bar, plan, panel, listeners, restore };
+}
+
+it('keeps the editor\'s place in a bounded launch popover when it is placed again (#1526 follow-up)', () => {
+  const { plan, panel, listeners, restore } = popoverBar(382);
+  try {
+    plan.open = true; plan.dispatchEvent({ type: 'toggle' } as never);
+    // 371 px of room below the bar (370 above) for a 500 px plan: bounded, its content scrolls. The editor scrolls to its end (更新计划).
+    expect((panel.style as unknown as Record<string, string>)['maxHeight']).toBe('371px');
+    panel.scrollTop = 129;
+    expect(panel.scrollTop).toBe(129);
+    // Its own scroll reaches the page's captured scroll listener, then a transition of the page ends, then the window resizes.
+    document.body.dispatchEvent({ type: 'scroll', bubbles: true } as never);
+    expect(panel.scrollTop).toBe(129);
+    document.body.dispatchEvent({ type: 'transitionend', bubbles: true } as never);
+    expect(panel.scrollTop).toBe(129);
+    listeners.get('resize')!();
+    expect(panel.scrollTop).toBe(129);
+  } finally { restore(); }
+});
+
+it('lets go of the page once a launch popover is removed while it is open (#1526 follow-up)', () => {
+  const { bar, plan, listeners, restore } = popoverBar(382);
+  try {
+    plan.open = true; plan.dispatchEvent({ type: 'toggle' } as never);
+    expect(listeners.has('resize')).toBe(true);
+    // The bar is drawn anew or disposed with its panel open: no toggle event comes; the next page event finds it detached.
+    bar.remove();
+    document.body.dispatchEvent({ type: 'scroll', bubbles: true } as never);
+    expect(listeners.has('resize')).toBe(false);
+  } finally { restore(); }
+});

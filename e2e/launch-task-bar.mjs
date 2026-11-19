@@ -68,12 +68,18 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
       // The page makes room for a docked Task Drawer by a transition of its padding: the new width settles before anything is pressed.
       await waitFor(renderer, `document.body.getAnimations().length===0`, `${name}-layout-settled-${width}`);
       const options = `${root} .task-launch-options`;
-      // Below 1120 px the Task Drawer overlays the page: a drawer left open beside it at a wider window now lies over a page bar's
-      // 选项, and the editor closes it first (as J-04's startUpdate does for the history tab).
-      const drawerCovers = `(() => { const summary=document.querySelector(${JSON.stringify(options + ' > summary')}); if(!summary||summary.closest('#task-drawer'))return false;
-        summary.scrollIntoView({block:'center',behavior:'instant'}); const r=summary.getBoundingClientRect(), hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
-        return !summary.contains(hit) && !!document.querySelector('#task-drawer:not([hidden])')?.contains(hit); })()`;
-      if (await renderer.evaluate(drawerCovers)) {
+      // Below 1120 px the Task Drawer overlays the page: a drawer left open beside it at a wider window now lies over the page bar, and the
+      // editor closes it before pressing 选项, 先看计划 or the start (as J-04's startUpdate does for the history tab). A DOCKED drawer
+      // (the page made room for it) over the bar is the product's defect, never closed away here.
+      const pressed = [`${options} > summary`, `${root} .task-launch-estimate > summary`, startSelector ?? `${root} [data-task-drawer-control="launch"]`];
+      const drawerOver = `(() => { const drawer=document.querySelector('#task-drawer:not([hidden])'); if(!drawer)return null;
+        for (const selector of ${JSON.stringify(pressed)}) { const node=document.querySelector(selector); if(!node||drawer.contains(node))continue;
+          node.scrollIntoView({block:'center',behavior:'instant'}); const r=node.getBoundingClientRect(), hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+          if(!node.contains(hit)&&drawer.contains(hit))return Number.parseFloat(getComputedStyle(document.body).paddingRight)===0?'overlay':'docked'; }
+        return null; })()`;
+      const over = await renderer.evaluate(drawerOver);
+      if (over === 'docked') await failCheck(renderer, waitFor, `${name}-docked-drawer-covers-${width}`);
+      if (over === 'overlay') {
         await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close-${width}`);
         await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `${name}-drawer-closed-${width}`);
       }

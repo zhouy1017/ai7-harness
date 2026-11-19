@@ -142,12 +142,15 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
       // content scrolls), so the summary that closes it stays reachable; across, it starts at its own summary.
       const place = (): void => {
         if (!panel.matches(':popover-open')) return;
+        // Measuring the natural height takes the bound away, which resets a bounded panel's own scroll: keep the editor's place in it.
+        const scrolled = panel.scrollTop;
         panel.style.maxHeight = '';
         const anchor = summary.getBoundingClientRect(), row = bar.getBoundingClientRect(), natural = panel.getBoundingClientRect();
         const above = row.top - 12, below = innerHeight - row.bottom - 12;
         const up = natural.height > below && above > below;
         const height = Math.min(natural.height, up ? above : below);
         if (height < natural.height) panel.style.maxHeight = `${Math.max(0, height)}px`;
+        panel.scrollTop = scrolled;
         const left = Math.max(8, Math.min(anchor.left, innerWidth - natural.width - 8)), top = up ? row.top - 4 - height : row.bottom + 4;
         panel.style.left = `${left}px`; panel.style.top = `${top}px`;
         // Inside a sheet the fixed offsets may resolve against the sheet rather than the window: correct by where it landed.
@@ -158,7 +161,11 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
       if (typeof ResizeObserver === 'function') new ResizeObserver(place).observe(panel);
       // A scroll, a resize or the page's own transition (the padding that makes room for a docked Task Drawer, the sidebar's width)
       // moves the summary under a fixed panel: the panel follows it while it is shown.
-      const follow = (): void => place();
+      const unfollow = (): void => {
+        document.removeEventListener('scroll', follow, { capture: true }); document.removeEventListener('transitionend', follow, true); window.removeEventListener('resize', follow);
+      };
+      // A panel removed from the page while open is hidden without a toggle event: it lets go of the page then.
+      const follow = (): void => { if (!details.isConnected) { unfollow(); return; } place(); };
       details.addEventListener('toggle', event => {
         if (event.target !== details) return;
         if (!details.open) { if (panel.matches(':popover-open')) panel.hidePopover(); return; }
@@ -168,7 +175,7 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
       });
       panel.addEventListener('toggle', () => {
         if (panel.matches(':popover-open')) return;
-        document.removeEventListener('scroll', follow, { capture: true }); document.removeEventListener('transitionend', follow, true); window.removeEventListener('resize', follow);
+        unfollow();
         details.open = false;
       });
     }
