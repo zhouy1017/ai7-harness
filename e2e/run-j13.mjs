@@ -836,7 +836,7 @@ async function main() {
     // #1377 / J-13: ordinary navigation reaches the same preferences owner from both destinations.
     for (const developer of ['false', 'true']) {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
-      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `quality-mode-${developer}-settings-ready`);
       await click(renderer, '帮助', `quality-mode-${developer}-help`);
       await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `quality-mode-${developer}-switch-ready`);
       await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
@@ -1216,8 +1216,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'consistency-overview');
     await backToLibrary(renderer, 'consistency-model');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'consistency-model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'consistency-model-open-settings-hub');
-    await click(renderer, '模型服务', 'consistency-model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'consistency-model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'consistency-model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -1246,17 +1245,13 @@ async function main() {
     await openSeries(renderer, seriesId, 'consistency-series');
     const offered = await readSeries(renderer, (read) => read.members.some(([id]) => id === member), 'consistency-member-row');
     requireJourney(offered.members.find(([id]) => id === member)?.[5] === '尚未审阅 · 可以审阅', 'consistency-member-offered', offered.members);
-    await leaveSeries(renderer, 'consistency-series-leave');
-    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'consistency-review-book');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'consistency-review-manuscript', 120_000);
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'consistency-review-entry');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'consistency-review-card');
+    // #1522: 去审阅 beside 可以审阅 opens that Book's 新建审阅 with 书系一致性 chosen and nothing else.
+    await pointerClick(renderer, waitFor, `.series-member-card[data-book-id=${JSON.stringify(member)}] [data-series-action="review-open"]`, 'consistency-review-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card') && document.querySelector('dialog.review-sheet')?.open===true`, 'consistency-sheet-open', 120_000);
     await assertRenderer(renderer, `!document.querySelector('.review-coverage') && document.querySelector('.review-workspace-card.surface-empty')`, 'consistency-coverage-empty');
-    await clickSelector(renderer, '[data-review-action="new-review"]', 'consistency-new-review');
-    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'consistency-sheet-open');
-    const sheet = await renderer.evaluate(`(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); const label=sheet.querySelector('[data-review-category-option="series-consistency"]'); return { enabled: box instanceof HTMLInputElement && !box.disabled && !box.checked, basis: label?.querySelector('.review-category-basis')?.textContent ?? null, checked: Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), (input) => input.value) }; })()`);
-    requireJourney(sheet?.enabled === true && sheet.basis === CONSISTENCY_BASIS && JSON.stringify(sheet.checked) === JSON.stringify(['typos-and-usage']), 'consistency-sheet-offered', sheet);
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'consistency-prepare');
+    const sheet = await renderer.evaluate(`(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); const label=sheet.querySelector('[data-review-category-option="series-consistency"]'); return { enabled: box instanceof HTMLInputElement && !box.disabled && box.checked, basis: label?.querySelector('.review-category-basis')?.textContent ?? null, checked: Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), (input) => input.value) }; })()`);
+    requireJourney(sheet?.enabled === true && sheet.basis === CONSISTENCY_BASIS && JSON.stringify(sheet.checked) === JSON.stringify(['series-consistency']), 'consistency-sheet-offered', sheet);
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'consistency-prepare');
     await launchReviewFromSheet(renderer, waitFor);
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState!=='prepared'`, 'consistency-prepared', 120_000);
     const prepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
@@ -2252,7 +2247,7 @@ async function main() {
     // Preload readiness precedes renderer startup; wait for its completed landing paint before navigating or switching mode.
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'exemplar-catalogue-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'catalogue-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'catalogue-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'catalogue-settings-ready');
     await click(renderer, '帮助', 'catalogue-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'catalogue-mode-ready');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'; })()`, 'catalogue-ordinary-mode');

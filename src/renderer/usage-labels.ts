@@ -17,7 +17,6 @@ import { UNBOUND_ROUTE_LABEL, type UsageCostEstimate } from '../shared/usage.js'
  */
 
 export const USAGE_TITLE = '用量';
-export const USAGE_SECTION_LABEL = '设置 · 服务 · 用量';
 export const USAGE_LEDE = '汇总各次运行报告记录的输入和输出词元，不另行记账。';
 export const USAGE_EMPTY = USAGE_EMPTY_LABEL;
 export const USAGE_RANGE_HEADING = '时间范围';

@@ -183,7 +183,6 @@ async function renderLanding(
   content.classList.add('library-home');
   const copy = element('div');
   copy.append(
-    element('p', 'section-label', SHELL_LABELS.library),
     element('h2', undefined, SHELL_LABELS.libraryTitle),
     element('p', 'lede', '新建一本空图书，或从本地 DOCX 导入稿件。也可将 DOCX 拖到这里。'),
   );

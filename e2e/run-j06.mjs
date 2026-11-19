@@ -1036,7 +1036,7 @@ async function main() {
     // 待我处理 (Issue #424; V2-UX-ATTN-002): the conflict put aside is 异常与结果待确认's — blocking, from the moment 暂不处理
     // was recorded — and its 解决冲突… opens 稿件冲突 of exactly that suggestion.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'attention-entry');
-    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host')?.dataset.attentionCount !== undefined && document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4`, 'attention-painted');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host')?.dataset.attentionCount !== undefined`, 'attention-painted');
     const conflictRow = await renderer.evaluate(`(() => {
       const item = document.querySelector('[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(`conflict:${secondId}`)}]');
       if (!(item instanceof HTMLElement)) return null;

@@ -5,7 +5,6 @@
  */
 
 export const KEYBOARD_TITLE = '键盘与无障碍';
-export const KEYBOARD_SECTION_LABEL = '设置 · 本机 · 键盘与无障碍 › 快捷键';
 export const KEYBOARD_ALWAYS_ON = '键盘操作、清晰的焦点、系统缩放和系统的无障碍外观始终有效，不需要另行开启。';
 export const KEYBOARD_SHORTCUTS_HEADING = '快捷键';
 export const KEYBOARD_LEDE = '仅导航、查找和视图命令可修改；输入、移动光标及系统和输入法占用的按键不能修改，开始任务、采纳、发稿和删除等决定性操作没有全局快捷键；快捷键只保存在本机，不随稿件、交付包或导出带走。';

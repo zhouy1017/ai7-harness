@@ -95,7 +95,7 @@ function harness(api: object = {}) {
   const renderBookOverview = vi.fn((overview: { book: { bookId: string } }) => replaceScreen(overview.book.bookId, undefined));
   const renderBaselineAnalysis = vi.fn((host: HTMLElement) => host.append(element('p', '', '已读取分析')));
  const guardedApi = reconcileBookWorkbenchApi({acknowledgeImportCompletion:async()=>undefined,getPreferences:async()=>({values:{'onboarding.state':'skipped'}}),getProductDataLocation:async()=>({}),getModelServiceSettings:async()=>({roles:[]}),...api} as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:(error,retry)=>(context['reportReacquisitionFailure'] as (error:unknown,retry:()=>Promise<void>)=>void)(error,retry),recovered:()=>{(context['clearBookReacquisitionNotice'] as ()=>void)();}},navigation);
-  context = createContext({ styleInput, showOnboardingCard, navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
+  context = createContext({ showOnboardingCard, styleInput, navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
     localStorage: { getItem: () => 'on' }, showQuietNotice: vi.fn(), openCurrentBookCompletion, AUTO_RESULT_KEY: 'ai7.task-overview.auto-result',
     notice: { raise: vi.fn(), settle: vi.fn(), summarize: vi.fn() }, finished: [], needing: [], standing: new Set(), returning: false,
     options: { get api() { return guardedApi; }, drawerView: () => (context['taskDrawer'] as { view(): unknown }).view(), openWindow: (entry: unknown) => (context['openOverviewResult'] as (entry: unknown) => void)(entry) },
@@ -103,7 +103,7 @@ function harness(api: object = {}) {
     mountReviewWorkspace: vi.fn(() => ({ start: vi.fn(), refresh: vi.fn(), destroy: vi.fn() })),
     REVIEW_STATUS_LINES: { opened: '审阅已打开' },
     mountGlobalAgent: vi.fn(() => element('section')), renderBookOverview, renderBaselineAnalysis,
-    HTMLElement, SETTINGS_HUB_GROUPS: [], settingsNavigation:()=>element('nav'), overviewDrawerBookId: null, screenReturns: {enter: vi.fn()},
+    HTMLElement, settingsLayout: (_state: string, content: unknown) => content, overviewDrawerBookId: null, screenReturns: {enter: vi.fn()},
     restoreCurrentScreen: vi.fn(), currentRecoveryReturn: () => undefined, recoveryReturnContexts: new WeakMap(),
     manuscriptOnScreen: null, taskResultWindow: null, authorityInterrupted: false, keyboardSettingsOff: undefined,
     reviewWorkspace: undefined, deliverablesSurface: undefined, derivativesSurface: undefined, proposalWorkspaceSurface: undefined,
@@ -117,7 +117,7 @@ function harness(api: object = {}) {
     AGENT_WORKSPACE_RETURN_SECTIONS: {},
     modelServiceChannel:null,modelChoices:new Map(),modelFilters:new Map(),favourites:[],
     paintModelServiceSettings:()=>replaceScreen('model-service'),focusSearchSettings:vi.fn(),
-    KEYBOARD_SECTION_LABEL:'键盘',KEYBOARD_TITLE:'键盘与无障碍',USAGE_RETURN:'返回',
+    KEYBOARD_TITLE:'键盘与无障碍',USAGE_RETURN:'返回',
     mountKeyboardSettings:()=>vi.fn(),applyKeyboardBindings:vi.fn(),
     button:(label:string,_class:string,run:()=>void)=>{const button=element('button','',label);button.addEventListener('click',run);actions.set(label,run);return button;},
     renderEditorWindow: vi.fn((window:{bookId:string}) => {const node=element('section');node.dataset['bookId']=window.bookId;replaceScreen('editor',node);}),

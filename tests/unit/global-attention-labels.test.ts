@@ -1,7 +1,7 @@
 import { majorityGapReason } from '../../src/shared/analysis-run-summary.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   GLOBAL_ATTENTION_EMPTY_LINES,
   GLOBAL_ATTENTION_ENTRY_LABEL,
@@ -99,6 +99,36 @@ function projection(groups: Partial<Record<GlobalAttentionGroupKey, ReadonlyArra
 }
 
 describe('the entry and the screen', () => {
+  it('draws only the groups that hold an item, and says one sentence with a way to start a task when none does (#1522)', () => {
+    const restore = installMiniDom();
+    setTechnicalLayerVisible(false);
+    try {
+      const mount = (data: GlobalAttentionProjection, startTask = vi.fn()) => {
+        const reader: GlobalAttentionReader = { refresh: () => undefined, interrupt: () => undefined,
+          subscribe: (listener) => { listener({ kind: 'projection', projection: data }); return () => undefined; } };
+        const root = document.createElement('main');
+        miniDocument.body.append(root as unknown as MiniElement);
+        const surface = mountGlobalAttention({ root, reader, technicalDetails: () => document.createElement('details'), setStatus: () => undefined,
+          errorMessage: (_error, fallback) => fallback, open: async () => undefined, openNetworkProxySettings: () => undefined, startTask });
+        surface.start();
+        return { root, surface, startTask };
+      };
+      const some = mount(projection({ exceptions: [item('analysis-failed')], recent: [item('analysis-completed', { group: 'recent' })] }));
+      expect(Array.from(some.root.querySelectorAll<HTMLElement>('section.global-attention-group'), (group) => group.dataset['attentionGroup'])).toEqual(['exceptions', 'recent']);
+      expect(some.root.querySelector('.global-attention-empty')).toBeNull();
+      some.surface.destroy();
+      const none = mount(projection({}));
+      expect(none.root.querySelectorAll('section.global-attention-group')).toHaveLength(0);
+      expect(none.root.querySelector('.global-attention-none p')!.textContent).toBe('现在没有需要你处理的事项。');
+      expect(none.root.querySelector<HTMLElement>('.lede')!.hidden).toBe(true);
+      expect(none.root.querySelector<HTMLElement>('[data-attention-read-all]')!.hidden).toBe(true);
+      expect(some.root.querySelector<HTMLElement>('.lede')!.hidden).toBe(false);
+      none.root.querySelector<HTMLElement>('[data-attention-start]')!.click();
+      expect(none.startTask).toHaveBeenCalledOnce();
+      none.surface.destroy();
+    } finally { setTechnicalLayerVisible(true); restore(); }
+  });
+
   it('filters shelved learning targets from both the ordinary attention badge and its items, restoring them in developer mode', () => {
     const restore = installMiniDom();
     setTechnicalLayerVisible(false);
@@ -143,7 +173,7 @@ describe('the entry and the screen', () => {
     expect(globalAttentionEntryView(0)).toEqual({ text: '待我处理', badge: null, accessibleName: '待我处理' });
     expect(globalAttentionEntryView(2)).toEqual({ text: '待我处理', badge: '2', accessibleName: '待我处理，2 项需要你处理' });
     expect(GLOBAL_ATTENTION_HEADING).toBe('待我处理');
-    expect(GLOBAL_ATTENTION_LEDE).toBe('所有图书里需要你处理的事项。点开一项回到它自己的记录，在那里决定；这里只列出，不替你做任何决定。');
+    expect(GLOBAL_ATTENTION_LEDE).toBe('所有图书里需要你处理的事项；点开一项回到它自己的记录，在那里决定。');
     expect(GLOBAL_ATTENTION_FINDINGS_NOTE).toBe('书内的发现在那本书的「待办汇总」里。');
   });
 

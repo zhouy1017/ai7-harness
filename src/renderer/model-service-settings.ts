@@ -31,7 +31,6 @@ export interface ModelServiceSettingsOptions {
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly rendererErrorMessage: (error: unknown, fallback: string) => string;
   readonly panel: () => HTMLElement;
-  readonly returnToOrigin: () => Promise<void>;
   readonly initializeStartup: () => Promise<void>;
   readonly replaceScreen: (state: string, content: HTMLElement, place?: ShellPlace | null) => void;
 }
@@ -39,7 +38,7 @@ export interface ModelServiceSettingsOptions {
 /** 模型服务, moved verbatim from the shell (Issue #1235). */
 export function createModelServiceSettings(options: ModelServiceSettingsOptions) {
   const {
-    element, button, setStatus, rendererErrorMessage, panel, initializeStartup, returnToOrigin, replaceScreen,
+    element, button, setStatus, rendererErrorMessage, panel, initializeStartup, replaceScreen,
   } = options;
 
   function renderModelServiceProxyBlock(projection: ModelServiceSettingsProjection): HTMLElement {
@@ -144,7 +143,6 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       projection.launchPolicy.providerProcessing.authorizedLiveTransmissionCount,
     );
     content.append(
-      element('p', 'section-label', '设置 · 模型服务'),
       element('h2', undefined, '模型服务'),
       element('p', 'lede', technicalLayerVisible ? '选择渠道，保存凭据并获取模型，再分别指定主编辑与快速交互模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
     );
@@ -222,15 +220,13 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       );
       technical.append(discovery);
     }
-    const actions = element('div', 'button-row');
-    actions.append(button('返回', 'quiet', () => void returnToOrigin()));
     content.append(renderSearchBackendSettings(projection, { api: rendererApi, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }),
       renderModelServiceProxyBlock(projection));
     // Ordinary mode says only what the connection state means for the editor (Issue #1431 item 99): a denial or that nothing is sent
     // yet. The policy-boundary sentence and the authority statement are the developer layer's.
     const label = projection.launchPolicy.providerProcessing.label;
     const ordinaryPolicy = projection.launchPolicy.integrityState !== 'verified' || label.endsWith('零次实时传输') || label.endsWith('当前不会传输');
-    content.append(...(technicalLayerVisible ? [] : [...(ordinaryPolicy ? [policyIntegrity] : []), ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]), technicalDisclosure(technical), actions);
+    content.append(...(technicalLayerVisible ? [] : [...(ordinaryPolicy ? [policyIntegrity] : []), ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]), technicalDisclosure(technical));
     replaceScreen('model-service', content);
     mounted = content;
     restoreInteraction(content);
@@ -273,8 +269,22 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     modelServiceChannel = null;
     modelChoices.clear();
     modelFilters.clear();
+    let read: [ModelServiceSettingsProjection, Awaited<ReturnType<typeof rendererApi.getPreferences>>];
     try {
-      const [projection, preferences] = await Promise.all([rendererApi.getModelServiceSettings(), rendererApi.getPreferences()]);
+      read = await Promise.all([rendererApi.getModelServiceSettings(), rendererApi.getPreferences()]);
+    } catch (error) {
+      if (!route.isCurrent()) return;
+      // 设置 opens here, so a failed read still draws the page with its navigation, the reason inside it and a way to try again.
+      const message = rendererErrorMessage(error, '无法读取模型服务设置。');
+      const frame = panel();
+      frame.classList.add('model-service-settings');
+      frame.append(element('h2', undefined, '模型服务'), element('p', 'attention-note', message), button('重试', 'secondary', () => void renderModelServiceSettings(focus)));
+      replaceScreen('model-service', frame);
+      setStatus(message, 'error');
+      return;
+    }
+    try {
+      const [projection, preferences] = read;
       if (!route.isCurrent()) return;
       favourites = preferences.values['model.favourites'];
       paintModelServiceSettings(projection);

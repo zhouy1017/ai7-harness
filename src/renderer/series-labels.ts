@@ -12,6 +12,8 @@ import type {
  */
 
 export const SERIES_TITLE = '书系';
+/** What a Series is for, in the editor's words: one sentence. */
+export const SERIES_PURPOSE = '把同一系列的图书归到一个书系里，就能审阅它们前后是否一致。';
 export const SERIES_LEDE = '书系归集相关图书，供以后任务明确选择范围；加入书系不会让一本书读到另一本书的原文，也不会自动授权任务。';
 export const SERIES_EMPTY = '还没有书系。';
 export const SERIES_CREATE_OPEN = '新建书系…';
@@ -25,6 +27,8 @@ export const SERIES_SCOPE_NOTE = '成员只表示以后的任务可以明确选�
 export const SERIES_MEMBERS_EMPTY = '书系里还没有图书。';
 export const SERIES_ADD_OPEN = '加入书系…';
 export const SERIES_REMOVE_OPEN = '移出书系';
+/** Beside 可以审阅: opens 新建审阅 with 书系一致性 chosen. */
+export const SERIES_REVIEW_OPEN = '去审阅';
 export const SERIES_ADD_NONE = '所有图书都已在这个书系中。';
 /** In place of that when the house holds no Book at all (Issue #63 review): a fresh install may create a 书系 first. */
 export const SERIES_ADD_NO_BOOKS = '书库里还没有图书；导入或新建图书后，才能加入书系。';

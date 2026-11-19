@@ -2,22 +2,22 @@
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { AUTO_RESULT_KEY, reportResult } from './notifications.js';
 import { technicalLayerVisible } from './technical-layer.js';
-import { APPEARANCE_BACK, APPEARANCE_CHOICES, APPEARANCE_LEDE, APPEARANCE_LEGEND, APPEARANCE_SAVED, APPEARANCE_SAVE_FAILED, APPEARANCE_SECTION, APPEARANCE_STATUS, APPEARANCE_TITLE } from './appearance-labels.js';
+import { APPEARANCE_CHOICES, APPEARANCE_LEDE, APPEARANCE_LEGEND, APPEARANCE_SAVED, APPEARANCE_SAVE_FAILED, APPEARANCE_STATUS, APPEARANCE_TITLE } from './appearance-labels.js';
 import { mountLearningAskFrequency } from './learning-settings.js';
 import { NOTIFICATION_SETTINGS_WORDS } from './notification-labels.js';
 import { mountEvaluationCalibration } from './evaluation-calibration.js';
 import { configureCommandLabels } from './commands.js';
 import { mountKeyboardSettings } from './keyboard-settings.js';
-import { KEYBOARD_SECTION_LABEL, KEYBOARD_TITLE } from './keyboard-labels.js';
+import { KEYBOARD_TITLE } from './keyboard-labels.js';
 import { mountUsage } from './usage.js';
-import { USAGE_RETURN, USAGE_SECTION_LABEL, USAGE_TITLE, USAGE_RUN_TITLE, USAGE_RUN_REPORT_ABSENT, usageRunIdentity } from './usage-labels.js';
-import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
+import { USAGE_RETURN, USAGE_TITLE, USAGE_RUN_TITLE, USAGE_RUN_REPORT_ABSENT, usageRunIdentity } from './usage-labels.js';
+import { CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
 import { ViewPreferences, renderViewSettings } from './layout.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { type ShellPlace } from './shell.js';
-import { developerModeRow, mountHelp } from './help.js';
+import { mountHelp } from './help.js';
 import { HELP_OPENED } from './help-labels.js';
-import { SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, type SettingsRoute } from './shell-labels.js';
+import { SETTINGS_HUB_GROUPS, type SettingsRoute } from './shell-labels.js';
 import type { RendererApi } from '../shared/protocol.js';
 
 interface Options {
@@ -25,7 +25,6 @@ interface Options {
   panel: () => HTMLElement;
   element: <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => HTMLElementTagNameMap[K];
   button: (label: string, className: "primary" | "secondary" | "quiet", action: () => void | Promise<void>) => HTMLButtonElement;
-  returnToOrigin: () => Promise<void>;
   replaceScreen: (state: string, content: HTMLElement, place?: ShellPlace | null) => void;
   api: RendererApi & import("../shared/preferences.js").PreferencesRendererApi & import("../shared/appearance.js").AppearanceRendererApi & import("../shared/preferences.js").NotificationsRendererApi;
   rendererErrorMessage: (error: unknown, fallback: string) => string;
@@ -37,31 +36,22 @@ interface Options {
   renderDataAndStorage: () => Promise<void>;
   renderDiagnostics: () => void;
   appearance: { ready: Promise<void>; readonly preference: import("../shared/appearance.js").ThemePreference; subscribe(listener: () => void): () => boolean; choose(value: import("../shared/appearance.js").ThemePreference): Promise<void>; };
-  initializeStartup: (navigationRoute?: NavigationCheckpoint) => Promise<void>;
   viewPreferences: ViewPreferences;
 }
 
 export function createSettingsScreens(state: Options) {
-  const { setStatus, panel, element, button, returnToOrigin, replaceScreen, api, rendererErrorMessage, screen, renderRunReport, applyKeyboardBindings, renderModelServiceSettings, renderDataAndStorage, renderDiagnostics, appearance, initializeStartup, viewPreferences } = state;
+  const { setStatus, panel, element, button, replaceScreen, api, rendererErrorMessage, screen, renderRunReport, applyKeyboardBindings, renderModelServiceSettings, renderDataAndStorage, renderDiagnostics, appearance, viewPreferences } = state;
 
 
 async function renderEvaluationCalibration(focusBookId: string | null): Promise<void> {
   if (!technicalLayerVisible) {
-    renderSettingsHub();
-    reportResult(setStatus, '该页在开发者模式下显示');
+    renderSettingsHome('该页在开发者模式下显示');
     return;
   }
   const content = panel();
   content.classList.add('evaluation-calibration-page');
   const host = element('div');
-  const back = element('div', 'button-row');
-  back.append(button('返回', 'quiet', () => void returnToOrigin()));
-  content.append(
-    element('p', 'section-label', `设置 · ${CALIBRATION_PAGE_GROUP}`),
-    element('h2', undefined, CALIBRATION_PAGE_TITLE),
-    host,
-    back,
-  );
+  content.append(element('h2', undefined, CALIBRATION_PAGE_TITLE), host);
   replaceScreen('evaluation-calibration', content);
   const page = navigation.read(content);
   setStatus(CALIBRATION_STATUS.loading, 'busy');
@@ -125,15 +115,19 @@ async function renderNotificationSettings(): Promise<void> {
   }
   paint();
   // 正在看本书时自动显示结果 (#1510, #1528): the editor's own switch on this device, on unless turned off; it opens no result by itself elsewhere.
-  const autoResult = element('label', 'field');
+  const autoResult = element('label', 'settings-row');
   const autoResultControl = document.createElement('input');
   autoResultControl.type = 'checkbox';
+  autoResultControl.setAttribute('role', 'switch');
   autoResultControl.dataset['taskOverviewAutoResult'] = '';
   autoResultControl.checked = localStorage.getItem(AUTO_RESULT_KEY) !== 'off';
   autoResultControl.addEventListener('change', () => localStorage.setItem(AUTO_RESULT_KEY, autoResultControl.checked ? 'on' : 'off'));
-  autoResult.append(autoResultControl, document.createTextNode(NOTIFICATION_SETTINGS_WORDS.autoResult));
+  const autoResultSwitch = element('span', 'settings-switch');
+  autoResultSwitch.append(autoResultControl);
+  autoResult.append(element('span', 'settings-row-copy', NOTIFICATION_SETTINGS_WORDS.autoResult), autoResultSwitch);
   content.append(autoResult);
-  content.append(button(NOTIFICATION_SETTINGS_WORDS.back, 'secondary', renderSettingsHub));
+  // The editor's own pace of being asked why, a developer-layer setting that sits with the other notification rows.
+  if (technicalLayerVisible) mountLearningAskFrequency(content, api);
   replaceScreen('notifications', content);
   setStatus(NOTIFICATION_SETTINGS_WORDS.opened);
 }
@@ -145,8 +139,7 @@ async function renderNotificationSettings(): Promise<void> {
 async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkProjection): Promise<void> {
   const current = navigation.begin();
   if (!technicalLayerVisible) {
-    renderSettingsHub();
-    reportResult(setStatus, '该页在开发者模式下显示');
+    renderSettingsHome('该页在开发者模式下显示');
     return;
   }
   const origin = screen.firstElementChild;
@@ -157,7 +150,7 @@ async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkPro
     run = usage.detail;
     const content = panel();
     content.dataset['usageRunDetail'] = run.runRecordId;
-    content.append(element('p', 'section-label', USAGE_SECTION_LABEL), element('h2', undefined, USAGE_RUN_TITLE),
+    content.append(element('h2', undefined, USAGE_RUN_TITLE),
       element('p', undefined, run.bookTitle), element('p', 'technical-identity', usageRunIdentity(run.runRecordId)));
     if (run.report === null) content.append(element('p', 'field-note', USAGE_RUN_REPORT_ABSENT));
     else {
@@ -177,21 +170,18 @@ async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkPro
 /** 设置 › 服务 › 用量 (Issue #936, plan slice 11c; V2-UX-MSET-010). */
 function renderUsage(): void {
   if (!technicalLayerVisible) {
-    renderSettingsHub();
-    reportResult(setStatus, '该页在开发者模式下显示');
+    renderSettingsHome('该页在开发者模式下显示');
     return;
   }
   const content = panel();
   content.classList.add('usage-screen');
-  content.append(element('p', 'section-label', USAGE_SECTION_LABEL), element('h2', undefined, USAGE_TITLE));
+  content.append(element('h2', undefined, USAGE_TITLE));
   const body = element('div');
   mountUsage({
     root: body, api: api, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel,
     openRun: (run) => void openUsageRun(run),
   });
-  const actions = element('div', 'button-row');
-  actions.append(button(USAGE_RETURN, 'quiet', () => renderSettingsHub()));
-  content.append(body, actions);
+  content.append(body);
   replaceScreen('usage', content);
   setStatus(USAGE_TITLE);
 }
@@ -200,14 +190,12 @@ function renderUsage(): void {
 function renderKeyboardSettings(): void {
   const content = panel();
   content.classList.add('keyboard-screen');
-  content.append(element('p', 'section-label', KEYBOARD_SECTION_LABEL), element('h2', undefined, KEYBOARD_TITLE));
+  content.append(element('h2', undefined, KEYBOARD_TITLE));
   const body = element('div');
   const unmount = mountKeyboardSettings({
     root: body, api: api, setStatus, errorMessage: rendererErrorMessage, onChanged: applyKeyboardBindings,
   });
-  const actions = element('div', 'button-row');
-  actions.append(button(USAGE_RETURN, 'quiet', () => renderSettingsHub()));
-  content.append(body, actions);
+  content.append(body);
   replaceScreen('keyboard', content);
   state.keyboardSettingsOff = unmount;
   setStatus(KEYBOARD_TITLE);
@@ -232,17 +220,24 @@ function settingsPages(): Partial<Record<SettingsRoute, () => void>> {
   };
 }
 
+/** A settings page with the navigation beside it; any other page is itself. */
+function settingsLayout(state: string, content: HTMLElement): HTMLElement {
+  if (!SETTINGS_HUB_GROUPS.some((group) => group.rows.some((row) => row.route === state))) return content;
+  const layout = element('div', 'settings-layout');
+  layout.append(settingsNavigation(state), content);
+  return layout;
+}
+
 function settingsNavigation(state: string): HTMLElement {
   const nav = element('nav', 'settings-navigation');
   nav.setAttribute('aria-label', '设置分类');
-  const hub = button('全部设置', 'quiet', renderSettingsHub);
-  if (state === 'settings') hub.setAttribute('aria-current', 'page');
-  nav.append(hub);
   const pages = settingsPages();
   for (const group of SETTINGS_HUB_GROUPS) {
+    const rows = group.rows.filter((row) => technicalLayerVisible || !row.developerOnly);
+    if (rows.length === 0) continue;
     const section = element('section');
     section.append(element('h3', undefined, group.label));
-    for (const row of group.rows.filter((row) => technicalLayerVisible || !row.developerOnly)) {
+    for (const row of rows) {
       const entry = button(row.label, 'quiet', () => pages[row.route]?.());
       entry.dataset['settingsNav'] = row.route;
       if (state === row.route) entry.setAttribute('aria-current', 'page');
@@ -250,7 +245,7 @@ function settingsNavigation(state: string): HTMLElement {
     }
     if (group.key === 'local') {
       const developer = button('开发者模式', 'quiet', () => {
-        renderSettingsHub();
+        renderHelp();
         screen.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
       });
       section.append(developer);
@@ -260,63 +255,9 @@ function settingsNavigation(state: string): HTMLElement {
   return nav;
 }
 
-function renderSettingsHub(): void {
-  const content = panel();
-  content.classList.add('settings-hub');
-  content.append(
-    element('p', 'section-label', SETTINGS_HUB_WORDS.section),
-    element('h2', undefined, SETTINGS_HUB_WORDS.title),
-    element('p', 'lede', SETTINGS_HUB_WORDS.lede),
-  );
-  const pages = settingsPages();
-  for (const group of SETTINGS_HUB_GROUPS) {
-    const rows = group.rows.filter((row) => technicalLayerVisible || row.developerOnly !== true);
-    if (rows.length === 0) continue;
-    const section = element('section', 'settings-group');
-    section.dataset['settingsGroup'] = group.key;
-    const heading = element('h3', undefined, group.label);
-    heading.id = `settings-group-${group.key}`;
-    section.setAttribute('aria-labelledby', heading.id);
-    const list = element('ul', 'settings-rows');
-    for (const row of rows) {
-      const item = element('li', 'settings-row');
-      item.dataset['settingsEntry'] = row.route;
-      const open = pages[row.route];
-      const entry = button('打开', 'secondary', () => open?.());
-      entry.classList.add('settings-hub-row');
-      entry.setAttribute('aria-label', row.label);
-      entry.dataset['settingsRoute'] = row.route;
-      if (technicalLayerVisible && row.developerOnly === true) entry.dataset['developerOnly'] = 'true';
-      const note = element('p', 'field-note', row.note);
-      note.id = `settings-note-${row.route}`;
-      entry.setAttribute('aria-describedby', note.id);
-      const copy = element('div', 'settings-row-copy');
-      copy.append(element('strong', undefined, row.label), note);
-      item.append(copy, entry);
-      if (open === undefined) {
-        entry.disabled = true;
-        item.dataset['settingsAvailability'] = 'coming-soon';
-        const soon = element('span', 'settings-coming-soon', SETTINGS_HUB_WORDS.comingSoon);
-        soon.id = `settings-soon-${row.route}`;
-        entry.setAttribute('aria-describedby', `${soon.id} ${note.id}`);
-        copy.append(soon);
-      }
-      list.append(item);
-    }
-    if (group.key === 'local') {
-      const item = element('li');
-      item.append(developerModeRow(() => {
-        renderSettingsHub();
-        screen.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
-      }));
-      list.append(item);
-    }
-    section.append(heading, list);
-    content.append(section);
-  }
-  if (technicalLayerVisible) mountLearningAskFrequency(content, api);
-  replaceScreen('settings', content);
-  setStatus(SETTINGS_HUB_WORDS.opened);
+/** 设置 opens on 模型服务; the other pages are one press away in the navigation beside every settings page (#1522). A page the editor's mode does not show comes here with its one sentence. */
+function renderSettingsHome(notice?: string): void {
+  void renderModelServiceSettings().then(() => { if (notice !== undefined) reportResult(setStatus, notice); });
 }
 
 /**
@@ -330,7 +271,6 @@ function renderHelp(): void {
   mountHelp({
     root: content,
     loadVersions: () => api.inspectDataVersion(),
-    back: renderSettingsHub,
     modeChanged: () => {
       renderHelp();
       screen.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
@@ -344,8 +284,7 @@ function renderHelp(): void {
 function renderAppearance(): void {
   const content = panel();
   content.classList.add('appearance-settings');
-  content.append(element('p', 'section-label', APPEARANCE_SECTION), element('h2', undefined, APPEARANCE_TITLE),
-    element('p', 'lede', APPEARANCE_LEDE));
+  content.append(element('h2', undefined, APPEARANCE_TITLE), element('p', 'lede', APPEARANCE_LEDE));
   const choices = element('fieldset', 'appearance-choices');
   choices.append(element('legend', undefined, APPEARANCE_LEGEND));
   const radios: HTMLInputElement[] = [];
@@ -370,16 +309,14 @@ function renderAppearance(): void {
   const unsubscribe = appearance.subscribe(() => { for (const radio of radios) radio.checked = radio.value === appearance.preference; });
   const observer = new MutationObserver(() => { if (!content.isConnected) { unsubscribe(); observer.disconnect(); } });
   observer.observe(screen, { childList: true });
-  const actions = element('div', 'button-row');
-  actions.append(button(APPEARANCE_BACK, 'quiet', () => void initializeStartup()));
   // 工作区密度, 稿件阅读预设, 稿件排版 and 区域宽度 (Issue #951, wave 12 slice 12a; VIEW-001 to VIEW-009) share this page.
   const viewSettings = renderViewSettings(viewPreferences, setStatus);
   const viewObserver = new MutationObserver(() => { if (!content.isConnected) { viewSettings.destroy(); viewObserver.disconnect(); } });
   viewObserver.observe(screen, { childList: true });
-  content.append(choices, viewSettings.element, actions);
+  content.append(choices, viewSettings.element);
   replaceScreen('appearance', content);
   setStatus(APPEARANCE_STATUS);
 }
 
-return { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsNavigation, renderSettingsHub, renderHelp, renderAppearance };
+return { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsNavigation, settingsLayout, renderSettingsHome, renderHelp, renderAppearance };
 }

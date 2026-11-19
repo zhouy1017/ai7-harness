@@ -1473,7 +1473,7 @@ async function main() {
         await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
         await renderer.evaluate(QUIET_PROBE);
         await pointerClick(renderer, waitFor, SIDEBAR.settings, 'settings-quiet-open');
-        await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'settings-quiet-hub');
+        await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'settings-quiet-hub');
         await click(renderer, '键盘与无障碍', 'settings-quiet-keyboard');
         await waitFor(renderer, `document.querySelector('[data-screen="keyboard"] [data-keyboard-command]')`, 'settings-quiet-keyboard-ready');
         await assertRenderer(renderer, `(() => {
@@ -1778,8 +1778,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'feedback-model-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'feedback-model-landing');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'feedback-model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'feedback-model-open-settings-hub');
-    await click(renderer, '模型服务', 'feedback-model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'feedback-model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'feedback-model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -1798,7 +1797,7 @@ async function main() {
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'feedback-model-removed');
     credentialRemoved = true;
-    await click(renderer, '返回', 'feedback-model-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'feedback-model-back');
 
     at('feedback-analysis-settled');
     // The Book's first baseline: prepared from ②A's card, started from its plan's bar, and run to its end on the J-04
@@ -2068,7 +2067,7 @@ async function main() {
     // The same report in ordinary mode (technicalLayerVisible=false): no technical identity, the revision named in words only.
     const evaluationMode = async (developer, name) => {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);
-      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `${name}-settings-ready`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `${name}-settings-ready`);
       await click(renderer, '帮助', `${name}-help`);
       await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `${name}-switch-ready`);
       await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `${name}-switch`);
@@ -2160,7 +2159,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'initial-evaluation-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'initial-evaluation-landing');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'initial-evaluation-calibration-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'initial-evaluation-calibration-open-settings-hub');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'initial-evaluation-calibration-open-settings-hub');
     await click(renderer, '评估校准与预测', 'initial-evaluation-calibration-open');
     // The gate reads 2 here: this launch lowers it with `--j11-calibration-min-books 2` (EVAL-011a); the product's own is ten.
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 1 / 2 本 · 满 2 本后生效'`, 'initial-evaluation-calibration-count');
@@ -2518,7 +2517,7 @@ async function main() {
     const learningItem = `learning-materials:${thirdId}`;
     const learningSelector = `[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(learningItem)}]`;
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'learning-attention-entry');
-    await waitFor(renderer, `document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4 && document.querySelector(${JSON.stringify(learningSelector)}) !== null`, 'learning-attention-listed', 30_000);
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(learningSelector)}) !== null`, 'learning-attention-listed', 30_000);
     const learningListed = await renderer.evaluate(readAttentionItem(learningSelector));
     requireJourney(learningListed?.group === 'decisions' && learningListed.state === 'learning-materials-pending' && learningListed.book === `《${THIRD.title}》` &&
       learningListed.object === '学习材料 · 2 条待定' && learningListed.pill === '学习准入待处理' && learningListed.next === '定学习准入…',
@@ -3355,7 +3354,7 @@ async function main() {
     };
     const runInitialEvaluation = async (name) => {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'poll-evaluation-ordinary-settings');
-      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'poll-evaluation-ordinary-settings-ready');
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'poll-evaluation-ordinary-settings-ready');
       await click(renderer, '帮助', 'poll-evaluation-ordinary-help');
       await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input?.checked||input.disabled)return false; input.click();return true;})()`, 'poll-evaluation-ordinary-mode');
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'poll-evaluation-return');
@@ -3394,7 +3393,7 @@ async function main() {
       `${name}-settled`, reportRead);
       await assertRenderer(renderer, `(() => { const close=document.querySelector('#task-drawer [data-task-drawer-control="close"]'); if (close instanceof HTMLButtonElement && !close.disabled) close.click(); return true; })()`, 'poll-evaluation-resume-close');
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'poll-evaluation-developer-settings');
-      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'poll-evaluation-developer-settings-ready');
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'poll-evaluation-developer-settings-ready');
       await click(renderer,'帮助','poll-evaluation-developer-help');
       await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`, 'poll-evaluation-developer-mode');
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'poll-evaluation-developer-return');
@@ -3455,7 +3454,7 @@ async function main() {
     // and the next version from AI7's 初评 starts raw; on again — recorded too — the offset applies again, computed all along.
     await toLanding('calibration-disclosed');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'calibration-disclosed-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'calibration-disclosed-open-settings-hub');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'calibration-disclosed-open-settings-hub');
     await click(renderer, '评估校准与预测', 'calibration-disclosed-open');
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已生效'`, 'calibration-disclosed-active');
     const disclosed = await renderer.evaluate(`JSON.stringify((() => { const root = document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration'); return [root.querySelector('.calibration-offset')?.dataset.calibrationOffset ?? null, root.querySelector('.calibration-offset-basis')?.textContent ?? null, Array.from(root.querySelectorAll('.calibration-offset-list li'), (line) => [line.dataset.itemId, line.dataset.offset, line.textContent]), root.querySelector('.calibration-off-effect')?.textContent ?? null, root.querySelector('.calibration-offset-without-basis')?.textContent ?? null]; })())`);
@@ -3550,7 +3549,9 @@ async function main() {
     // The 关闭 proof above changed the persisted setting; the default it read there is restored so the control reads it again.
     await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'occasionally'})`);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'learning-frequency-settings');
-    await waitFor(renderer, `document.querySelector('[data-settings-group="editorial"] [data-learning-ask-frequency]')?.disabled === false`, 'learning-frequency-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'learning-frequency-navigation');
+    await click(renderer, '通知', 'learning-frequency-notifications');
+    await waitFor(renderer, `document.querySelector('[data-screen="notifications"] [data-learning-ask-frequency]')?.disabled === false`, 'learning-frequency-ready');
     await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-learning-ask-frequency]'); return select.value==='occasionally' && Array.from(select.options,option=>option.textContent).join('/')==='经常/偶尔/关闭'; })()`, 'learning-frequency-default');
     await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-learning-ask-frequency]');select.value='off';select.dispatchEvent(new Event('change',{bubbles:true}));return true; })()`, 'learning-frequency-off');
     await waitFor(renderer, `document.querySelector('[data-learning-settings] [role="status"]')?.textContent === '学习询问设置已保存。'`, 'learning-frequency-saved');
@@ -3559,7 +3560,9 @@ async function main() {
     await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'learning-memory-restart');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'learning-frequency-restart-settings');
-    await waitFor(renderer, `document.querySelector('[data-learning-ask-frequency]')?.disabled === false && document.querySelector('[data-learning-ask-frequency]')?.value === 'off'`, 'learning-frequency-persisted');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'learning-frequency-restart-navigation');
+    await click(renderer, '通知', 'learning-frequency-restart-notifications');
+    await waitFor(renderer, `document.querySelector('[data-screen="notifications"] [data-learning-ask-frequency]')?.disabled === false && document.querySelector('[data-learning-ask-frequency]')?.value === 'off'`, 'learning-frequency-persisted');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'editorial-memory-restart-knowledge');
     await click(renderer, '社级编辑记忆', 'editorial-memory-restart-tab');
     await waitFor(renderer, `document.querySelector('[data-memory-item]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.checked === false`, 'editorial-memory-restart-state');
@@ -3596,7 +3599,7 @@ async function main() {
     // #1377 / J-11: use the real mode switch and saved candidates; no provider calls or synthetic UI state.
     const qualityMode = async (developer, name) => {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);
-      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `${name}-settings-ready`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `${name}-settings-ready`);
       await click(renderer, '帮助', `${name}-help`);
       await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `${name}-switch-ready`);
       await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `${name}-switch`);

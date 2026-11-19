@@ -777,7 +777,8 @@ async function main() {
 
     at('notification-settings');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'notification-settings-hub');
-    await clickSelector(renderer, '[data-settings-route="notifications"]', 'notification-settings-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'notification-settings-landed');
+    await clickSelector(renderer, '.settings-navigation [data-settings-nav="notifications"]', 'notification-settings-open');
     await waitFor(renderer, `document.querySelector('[data-screen="notifications"] [data-notification-settings]')`, 'notification-settings-shown');
     await assertRenderer(renderer, `document.querySelector('#context-title')?.textContent==='设置' && document.querySelector('#context-position')?.textContent==='本机 · 通知'`, 'notification-settings-place');
     await assertRenderer(renderer, `(() => { const switches = [...document.querySelectorAll('[data-notification-preference]')]; return switches.length === 4 && switches.every((control) => !control.checked) && document.querySelector('[data-notification-preference="notifications.completions"]').disabled && document.querySelector('[data-nav-settings="hub"]')?.getAttribute('aria-current') === 'page'; })()`, 'notification-settings-defaults');
@@ -805,8 +806,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
-    await click(renderer, '模型服务', 'model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -825,7 +825,7 @@ async function main() {
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     credentialRemoved = true;
-    await click(renderer, '返回', 'model-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-back');
 
     at('run-under-way');
     // 开始任务 from the drawer: the drawer follows the Run, two ranges settle, and the third stays in flight.
@@ -1627,7 +1627,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.model-service-settings')!==null`, 'account-limit-settings', 30_000);
     const whileAway = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(whileAway?.run?.state === 'resumable' && JSON.stringify(whileAway.run.transitions) === JSON.stringify(limited.run.transitions), 'account-limit-unmoved');
-    await click(renderer, '返回', 'account-limit-settings-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'account-limit-settings-back');
     await openAnalysisOf(renderer, sixthBookId, 'account-limit-return');
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'account-limit-open-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='account-limit' && document.querySelector('#task-drawer [data-task-drawer-control="resume"]')?.disabled===false`, 'account-limit-plan-again', 30_000);

@@ -19,6 +19,7 @@ import { mountGlobalAgent } from './global-agent.js';
 import { createAppearance, initializeReducedMotion } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { createCommandPalette } from './command-palette.js';
+import { goBack } from './command-usable.js';
 import { applyFindingBatches } from './manuscript-apply.js';
 
 import { mountAgentWorkspace } from './agent-workspace.js';
@@ -48,7 +49,7 @@ import type { LearningMaterialTarget } from '../shared/protocol.js';
 import { mountWordTrackedEditDetail } from './quality-learning.js';
 import type { FeedbackHistoryTarget } from '../shared/protocol.js';
 
-import { mountSeries, mountSeriesList } from './series.js';
+import { mountSeries, mountSeriesList, seriesListHead } from './series.js';
 import { mountBackgroundAnalysis } from './background-analysis.js';
 import { activeCommandBindings, BOOK_SECTION_COMMANDS, configureCommandLabels, createCommandDispatcher, refreshShortcutLabels, type CommandPlatform } from './commands.js';
 import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
@@ -56,7 +57,7 @@ import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
 
 
 
-import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
+import { SERIES_BACK_TO_LIST, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 
 import { EVALUATION_STATUS } from './evaluation-labels.js';
 import { openTaskResultWindow, type TaskResultWindow } from './task-result-window.js';
@@ -89,7 +90,7 @@ import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
 
 
 
-import { SETTINGS_HUB_GROUPS, SHELL_LABELS } from './shell-labels.js';
+import { SHELL_LABELS } from './shell-labels.js';
 import { createBaselineAnalysisCard, analysisTabChoice, type AnalysisTabId } from './baseline-analysis-card.js';
 import { createImportReview, type RecoveryReturnContext } from './import-review.js';
 import { type TaskOverviewSurface } from './tasks-overview.js';
@@ -672,11 +673,7 @@ commandDispatcher.register({
   ...Object.fromEntries(BOOK_SECTION_COMMANDS.map(([id, , section]) =>
     [id, () => clickCommandEntry(`[data-nav-book-section="${section}"]`)])),
   'nav.settings': () => clickCommandEntry('[data-nav-settings]'),
-  'nav.back': () => {
-    const back = screen.querySelector<HTMLElement>('[data-shortcut-command="nav.back"]');
-    if (back !== null) clickCommandEntry('[data-shortcut-command="nav.back"]');
-    else clickCommandEntry('[data-nav-destination="library"]');
-  },
+  'nav.back': () => goBack({ screen, press: clickCommandEntry, returnToOrigin: () => void returnToOrigin() }),
   'view.toggleSidebar': () => clickCommandEntry('#sidebar-toggle'),
   'view.openTasks': () => {
     const bookId = (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'];
@@ -686,6 +683,7 @@ commandDispatcher.register({
 
 const commandPalette = createCommandPalette({
   api: api, execute: (id) => commandDispatcher.execute(id),
+  screen: { has: (command) => commandDispatcher.has(command), currentBookId: () => shell.currentBook()?.bookId ?? null, bookPage: () => (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] !== undefined },
   openBook: (bookId) => leaveThen(() => requestBookWorkbenchRoute({ kind: 'book', bookId })),
   openResult: (item) => void leaveThen(() => openResult(item, 'palette')),
   openStart: () => { void leaveThen(async () => { renderTaskOverview(); taskOverviewSurface?.showStart(); }); },
@@ -830,7 +828,7 @@ const shell = mountShell({
   },
   openSettings: () => {
     if (authorityInterrupted) return;
-    void leaveThen(async () => renderSettingsHub());
+    void leaveThen(() => renderModelServiceSettings());
   },
 });
 
@@ -982,7 +980,6 @@ function restoreCurrentScreen(): () => void | Promise<void> {
   const restore = content instanceof HTMLElement ? agentWorkspaceReturns.get(content) : undefined;
   if (restore !== undefined) return restore;
   const state = screen.dataset['screen'];
-  if (state === 'settings') return renderSettingsHub;
   if (state === 'help') return renderHelp;
   if (state === 'data-storage') return renderDataAndStorage;
   if (state === 'quality-learning') return () => renderQualityLearning();
@@ -1037,11 +1034,7 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   leaveGuard = null;
   taskSurfaceRefresh = {};
   screen.dataset['screen'] = state;
-  if (state === 'settings' || SETTINGS_HUB_GROUPS.some((group) => group.rows.some((row) => row.route === state))) {
-    const layout = element('div', 'settings-layout');
-    layout.append(settingsNavigation(state), content);
-    screen.replaceChildren(layout);
-  } else screen.replaceChildren(content);
+  screen.replaceChildren(settingsLayout(state, content));
   if (authorityInterrupted) {
     for (const control of screen.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
       control.disabled = true;
@@ -2535,7 +2528,7 @@ function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
  * `review-workspace.ts`; the sidebar provides the destination routes. `focus` opens a named Review Run with one finding in
  * view, which is how a Mark Card's 查看任务 arrives here.
  */
-function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null, procedureId: string | null = null): void {
+function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null, procedureId: string | null = null, categories: ReadonlyArray<string> | null = null): void {
   const content = panel();
   content.classList.add('book-review');
   content.dataset['bookId'] = bookId;
@@ -2549,6 +2542,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     focus,
     // 运行此工序… from 知识库 (Issue #65, S30): the 新建审阅 sheet opens filled from the procedure.
     procedureId,
+    categories,
     registerCommands: (handlers) => commandDispatcher.register(handlers),
     api: api,
     awaitServiceJob,
@@ -3103,12 +3097,11 @@ function renderBookCreationForm(): void {
 
 function renderDiagnostics(): void {
   if (!technicalLayerVisible) {
-    renderSettingsHub();
-    reportResult(setStatus, '该页在开发者模式下显示');
+    renderSettingsHome('该页在开发者模式下显示');
     return;
   }
   const content = panel();
-  mountDiagnostics(content, api, () => void returnToLibrary());
+  mountDiagnostics(content, api);
   replaceScreen('diagnostics', content);
   setStatus(DIAGNOSTICS_OPENED);
 }
@@ -3127,7 +3120,7 @@ async function renderSeriesList(focusSeriesId: string | null): Promise<void> {
   const host = element('div');
   const back = element('div', 'button-row');
   back.append(button('返回', 'quiet', () => void returnToOrigin()));
-  content.append(element('h2', undefined, SERIES_TITLE), element('p', 'field-note series-lede', technicalWords(SERIES_LEDE, '将相关图书归入同一书系。')), host, back);
+  content.append(...seriesListHead(), host, back);
   replaceScreen('series-list', content);
   const page = navigation.read(content);
   setStatus(SERIES_STATUS.loading, 'busy');
@@ -3164,7 +3157,7 @@ async function renderSeries(seriesId: string): Promise<void> {
   replaceScreen('series', content);
   const page = navigation.read(content);
   setStatus(SERIES_STATUS.loading, 'busy');
-  const surface = mountSeries({ root: host, seriesId, api: api, setStatus, errorMessage: rendererErrorMessage });
+  const surface = mountSeries({ root: host, seriesId, api: api, setStatus, errorMessage: rendererErrorMessage, reviewMember: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => renderBookReview(bookId, route.bookTitle, null, null, ['series-consistency'])).catch((error: unknown) => setStatus(rendererErrorMessage(error, '暂时无法打开审阅。'), 'error')) });
   try {
     const series = await surface.load();
     if (!page.isCurrent()) return;
@@ -3479,7 +3472,7 @@ const appearance = createAppearance(api);
 
 
 const { renderDataAndStorage } = createDataStorage({
-  setStatus, panel, element, button, rendererErrorMessage, initializeStartup, returnToOrigin, technicalDetails, replaceScreen,
+  setStatus, panel, element, button, rendererErrorMessage, initializeStartup, technicalDetails, replaceScreen,
 });
 
 
@@ -3490,7 +3483,7 @@ const { renderKnowledgeBase, renderQualityLearning } = createKnowledgeBase({
 
 
 const { renderModelServiceSettings } = createModelServiceSettings({
-  element, button, setStatus, rendererErrorMessage, panel, initializeStartup, returnToOrigin, replaceScreen,
+  element, button, setStatus, rendererErrorMessage, panel, initializeStartup, replaceScreen,
 });
 
 const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
@@ -3540,12 +3533,11 @@ const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNo
 });
 
 
-const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsNavigation, renderSettingsHub, renderHelp, renderAppearance } = createSettingsScreens({
+const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsLayout, renderSettingsHome, renderHelp, renderAppearance } = createSettingsScreens({
   setStatus: (...args) => setStatus(...args),
   panel: (...args) => panel(...args),
   element: (...args) => element(...args),
   button: (...args) => button(...args),
-  returnToOrigin: (...args) => returnToOrigin(...args),
   replaceScreen: (...args) => replaceScreen(...args),
   api,
   rendererErrorMessage: (...args) => rendererErrorMessage(...args),
@@ -3558,7 +3550,6 @@ const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, r
   renderDataAndStorage: (...args) => renderDataAndStorage(...args),
   renderDiagnostics: (...args) => renderDiagnostics(...args),
   appearance,
-  initializeStartup: (...args) => initializeStartup(...args),
   viewPreferences,
 });
 

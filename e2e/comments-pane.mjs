@@ -9,8 +9,8 @@ const commentsRailBeside = `(() => { const edge=document.querySelector('.editor-
 
 async function commentsReadingSize(renderer, check, waitFor, size) {
   await pointerClick(renderer,waitFor,SIDEBAR.settings,'comments-reading-settings');
-  await waitFor(renderer, `document.querySelector('[data-settings-route="appearance"]')`, 'comments-reading-settings-ready');
-  await pointerClick(renderer,waitFor,'[data-settings-route="appearance"]','comments-reading-appearance');
+  await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation [data-settings-nav="appearance"]')`, 'comments-reading-settings-ready');
+  await pointerClick(renderer,waitFor,'.settings-navigation [data-settings-nav="appearance"]','comments-reading-appearance');
   await waitFor(renderer, `document.querySelector('[data-view-typography="fontSize"]')`, 'comments-reading-size-ready');
   const bounds=await renderer.evaluate(`(() => {const input=document.querySelector('[data-view-typography="fontSize"]');return {min:Number(input.min),max:Number(input.max),step:Number(input.step)};})()`);
   await pointerClick(renderer,waitFor,'[data-view-typography="fontSize"]','comments-reading-size-focus');
@@ -108,8 +108,8 @@ async function commentsSeedConnectorCases(renderer, check, waitFor) {
 export async function commentsOrdinaryMode(renderer, check, waitFor) {
   await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'comments-startup-landing');
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.settings)), 'comments-settings');
-  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'comments-settings-ready');
-  check(await renderer.evaluate(`(() => { const help=document.querySelector('.settings-hub-row[data-settings-route="help"]') ?? Array.from(document.querySelectorAll('[data-screen="settings"] button')).find((button)=>button.textContent==='帮助'); if(!help||help.disabled)return false; help.click(); return true; })()`), 'comments-settings-help');
+  await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'comments-settings-ready');
+  check(await renderer.evaluate(`(() => { const help=document.querySelector('.settings-navigation [data-settings-nav="help"]'); if(!help||help.disabled)return false; help.click(); return true; })()`), 'comments-settings-help');
   await waitFor(renderer, `document.querySelector('.help-developer-mode input[aria-label="开发者模式"]')?.disabled===false`, 'comments-enabled-mode-toggle');
   check(await renderer.evaluate(`(() => { const input=document.querySelector('.help-developer-mode input[aria-label="开发者模式"]'); if(input.checked)input.click(); return true; })()`), 'comments-mode-off');
   await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'comments-ordinary-mode');

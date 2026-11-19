@@ -1173,8 +1173,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
-    await click(renderer, '模型服务', 'model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     at('model-settings-ready');
     cancellation.throwIfRequested();
@@ -2745,7 +2744,7 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'review-ready');
     // #1374: use the real persisted mode switch so this configuration regression exercises the ordinary UI branch.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-memory-ordinary-mode-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-memory-ordinary-mode-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'review-memory-ordinary-mode-settings-ready');
     await click(renderer, '帮助', 'review-memory-ordinary-mode-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true && document.querySelector('.help-developer-mode input')?.disabled===false`, 'review-memory-ordinary-mode-toggle-ready');
     await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'review-memory-ordinary-mode-toggle');
@@ -2787,7 +2786,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=(id)=>sheet.querySelector('input[name="review-category"][value="'+id+'"]'); box('style-and-format').click(); const before=sheet.querySelector('[data-consequence="cost"]').textContent; const scope=(kind)=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]').click(); scope('changed'); if(!box('style-and-format').disabled||box('style-and-format').checked||sheet.querySelector('[data-consequence="cost"]').textContent===before)return false; scope('whole'); if(!box('typos-and-usage').checked||!box('style-and-format').checked)return false; box('local-text-check').click(); if(!box('style-and-format').disabled||box('style-and-format').checked)return false; box('local-text-check').click(); const kept=box('typos-and-usage').checked&&box('style-and-format').checked; box('style-and-format').click(); return kept; })()`, 'review-category-selection-round-trip');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const page=document.querySelector('#screen'); const scroll=document.querySelector('.content') ?? page; const before=scroll?.scrollTop; if(scroll)scroll.scrollTop=scroll.scrollHeight; const scrollable=!scroll || scroll.scrollHeight<=scroll.clientHeight || scroll.scrollTop!==before || before>0; sheet.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); return !sheet.open && scrollable && !page?.inert; })()`, 'review-sheet-escape-and-page');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-memory-development-restored-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-memory-development-restored-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'review-memory-development-restored-settings-ready');
     await click(renderer, '帮助', 'review-memory-development-restored-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && document.querySelector('.help-developer-mode input')?.disabled===false`, 'review-memory-development-restored-toggle-ready');
     await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'review-memory-development-restored-toggle');
@@ -2891,6 +2890,8 @@ async function main() {
     if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`))
       await pointerClick(renderer, waitFor, '[data-task-drawer-control="close"]', 'review-synthesis-close-drawer');
     await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'review-synthesis-settings-ready');
+    await pointerClick(renderer, waitFor, '.settings-navigation [data-settings-nav="help"]', 'review-synthesis-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-mode-ready');
     await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-ordinary');
     await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'review-synthesis-ordinary-ready');
@@ -2969,7 +2970,8 @@ async function main() {
     }
     requireJourney(synthesisLayouts.every(layout => layout.oneLine && layout.headerCost > 0 && layout.headerCost <= 48), 'review-synthesis-base-layout-geometry', synthesisLayouts);
     await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-restore-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')!==null`, 'review-synthesis-restore-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')!==null`, 'review-synthesis-restore-settings-ready');
+    await pointerClick(renderer, waitFor, '.settings-navigation [data-settings-nav="help"]', 'review-synthesis-restore-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-restore-mode-ready');
     await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-restore-mode');
     await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'review-synthesis-restored-ready');
@@ -3068,7 +3070,7 @@ async function main() {
     }
     requireJourney(!remainingFindings.some((item) => item.id === ignorable.findingId) && remainingFindings.some((item) => item.target.kind === 'review'), 'book-findings-disposition-reflected');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'findings-poll-ordinary-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'findings-poll-ordinary-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'findings-poll-ordinary-settings-ready');
     await click(renderer, '帮助', 'findings-poll-ordinary-help');
     await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`, 'findings-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-reopen');
@@ -3084,7 +3086,7 @@ async function main() {
       await waitFor(renderer, `document.querySelector('.findings-filters')!==globalThis.__j04PollFindings && Number(document.querySelector('.findings-center').dataset.findingsTotal)===globalThis.__j04PollTotal-1 && document.activeElement===document.querySelector('[data-findings-filter="category"] [data-filter-value=""]')`, 'findings-filter-changed-poll-survival');
     }
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'findings-poll-developer-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'findings-poll-developer-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'findings-poll-developer-settings-ready');
     await click(renderer,'帮助','findings-poll-developer-help');
     await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`, 'findings-poll-developer-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'book-findings-return-review');
@@ -3498,7 +3500,7 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'factual-range-launch-ready');
     const rangeBook = await importSample1(renderer, cancellation, true);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'factual-range-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'factual-range-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'factual-range-settings-ready');
     await click(renderer, '帮助', 'factual-range-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'factual-range-toggle-ready');
     await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement))return false; if(toggle.checked)toggle.click(); return true; })()`, 'factual-range-ordinary');
@@ -3549,7 +3551,7 @@ async function main() {
     cancellation.throwIfRequested();
 
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'factual-range-restore-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'factual-range-restore-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'factual-range-restore-ready');
     await click(renderer, '帮助', 'factual-range-restore-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'factual-range-restore-toggle');
     await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement))return false; if(!toggle.checked)toggle.click(); return true; })()`, 'factual-range-restore-development');
@@ -3957,8 +3959,7 @@ async function main() {
     at('dispatch-model-choice');
     // The fixture remains local. Chosen binding → actual card attribution is proved by captured ordinary L2 transport.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'dispatch-choice-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'dispatch-choice-settings-ready');
-    await click(renderer, '模型服务', 'dispatch-choice-models');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'dispatch-choice-settings-ready');
     await waitFor(renderer, `document.querySelector('#main-editorial-credential')`, 'dispatch-choice-credential');
     await renderer.evaluate(`document.querySelector('[data-model-channel="${readyConnection.binding.providerId}"] input').click()`);
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -4015,7 +4016,7 @@ async function main() {
         if(width===1008) {
           await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','dispatch-plan-close');
           await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'dispatch-plan-settings');
-          await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'dispatch-plan-settings-ready');
+          await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'dispatch-plan-settings-ready');
           await click(renderer,'帮助','dispatch-plan-help');
           await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input||input.disabled)return false;if(input.checked)input.click();return document.documentElement.dataset.technicalLayerVisible==='false';})()`,'dispatch-plan-ordinary');
           await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('library')),'dispatch-plan-library');

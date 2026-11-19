@@ -2830,8 +2830,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'writing-model-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'writing-model-landing');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'writing-model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'writing-model-open-settings-hub');
-    await click(renderer, '模型服务', 'writing-model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'writing-model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'writing-model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -3119,7 +3118,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}] [data-testid="manuscript-editor"] > [data-block-id]')`, 'multi-book-ready', 120_000);
     at('multi-documents-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'multi-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'multi-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'multi-settings-ready');
     await click(renderer, '帮助', 'multi-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'multi-mode-ready');
     await assertRenderer(renderer, `(() => { const box=document.querySelector('.help-developer-mode input'); if(!box||box.disabled)return false; if(box.checked)box.click(); return document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'multi-mode-off');

@@ -947,7 +947,7 @@ async function main() {
     // ordinary rule editor (one to add a rule, 编辑偏好 on an active one).
     for (const developer of ['false', 'true']) {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
-      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `quality-mode-${developer}-settings-ready`);
       await click(renderer, '帮助', `quality-mode-${developer}-help`);
       await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `quality-mode-${developer}-switch-ready`);
       await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
@@ -983,8 +983,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
-    await click(renderer, '模型服务', 'model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -1003,7 +1002,7 @@ async function main() {
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     credentialRemoved = true;
-    await click(renderer, '返回', 'model-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-back');
 
     const writeHold = (settled) => writeFile(holdPath, String(settled), 'utf8');
 
@@ -1017,8 +1016,8 @@ async function main() {
     // Opt out of the automatic result window in 设置 › 通知 (#1528: the switch moved there from 发起任务), so the explicit
     // result-window steps below own their focus; the manuscript is then reopened through the sidebar.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'panel-result-popup-settings');
-    await waitFor(renderer, `document.querySelector('#screen[data-screen="settings"] [data-settings-route="notifications"]')`, 'panel-result-popup-hub');
-    await clickSelector(renderer, '[data-settings-route="notifications"]', 'panel-result-popup-open');
+    await waitFor(renderer, `document.querySelector('#screen .settings-navigation [data-settings-nav="notifications"]')`, 'panel-result-popup-hub');
+    await clickSelector(renderer, '.settings-navigation [data-settings-nav="notifications"]', 'panel-result-popup-open');
     await waitFor(renderer, `document.querySelector('[data-screen="notifications"] [data-task-overview-auto-result]')`, 'panel-result-popup-preference');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-screen="notifications"] [data-task-overview-auto-result]'); if (!(input instanceof HTMLInputElement) || !input.checked) return false; input.click(); return !input.checked && localStorage.getItem('ai7.task-overview.auto-result') === 'off'; })()`, 'panel-result-popup-off');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'panel-result-popup-return');
@@ -1073,7 +1072,7 @@ async function main() {
     const pollTaskId=await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then(page=>page.taskIntent.taskIntentId)`);
     await clickSelector(renderer,'#task-drawer [data-task-drawer-control="close"]','poll-attention-close-pane');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-ordinary-settings');
-    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-ordinary-settings-ready');
+    await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'poll-attention-ordinary-settings-ready');
     await click(renderer,'帮助','poll-attention-ordinary-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'poll-attention-ordinary-mode');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('attention')),'poll-attention-open');
@@ -1089,7 +1088,7 @@ async function main() {
       requireJourney(await renderer.evaluate(`window.ai7.inspectGlobalAttention().then(page=>page.groups.flatMap(group=>group.items).find(item=>item.itemId===${JSON.stringify(pollAttentionId)})?.facts.progress?.unitsSettled===${done})`),'attention-changed-unit-record');
     }
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-developer-settings');
-    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-developer-settings-ready');
+    await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'poll-attention-developer-settings-ready');
     await click(renderer,'帮助','poll-attention-developer-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`,'poll-attention-developer-mode');
     await openManuscriptOf(renderer,bookId,'poll-attention-return-book');
