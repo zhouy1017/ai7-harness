@@ -1,20 +1,37 @@
-import { windowStep } from './components/controls.js';
-import { technicalWords, technicalDisclosure } from './technical-layer.js';
+import { styleInput } from './components/controls.js';
+import { technicalDisclosure } from './technical-layer.js';
+import {
+  HOUSE_ADD, HOUSE_CHANGED, HOUSE_COLUMNS, HOUSE_CREATE, HOUSE_DISCARD, HOUSE_DRAFT_FAILED, HOUSE_DRAFT_NOTE, HOUSE_EDIT, HOUSE_EMPTY,
+  HOUSE_HISTORY_SUMMARY, HOUSE_LATEST, HOUSE_NEXT, HOUSE_NOTE_LABEL, HOUSE_PASTE_ADD, HOUSE_PASTE_FAILED, HOUSE_PASTE_LABEL,
+  HOUSE_PASTE_NOTHING, HOUSE_PASTE_REFUSED, HOUSE_PASTE_SAVE, HOUSE_PREVIOUS, HOUSE_READ_FAILED, HOUSE_REMOVE, HOUSE_RETRY_READ, HOUSE_SAVE,
+  HOUSE_SAVED_READING, HOUSE_SAVED_READ_PENDING, HOUSE_TOO_MANY,
+  houseCountLine, houseCurrentLine, houseEarlierLine, houseHistoryLabel, houseRowLabel, houseSavedStatus, houseSavedUnreadStatus,
+} from './house-word-list-labels.js';
 import {
   HOUSE_DISCLOSURE, HOUSE_PAGE_SIZE, MAX_HOUSE_ENTRIES, HouseWordListError, previewHousePaste, validateSaveHouseWordListInput,
   type HousePastePreview, type HouseWordListApi, type HouseWordListDraftEntry, type HouseWordListPage,
   type HouseWordListSourceKind, type InspectHouseWordListInput, type SaveHouseWordListInput, type SaveHouseWordListResult,
 } from '../shared/protocol/house-word-list.js';
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (tag === 'button') node.className = `${node.className} btn`.trim(); return node;
+type Tone = 'primary' | 'secondary' | 'quiet';
+
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (className !== undefined) node.className = className;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
+  return node;
 }
-/** The shared editor for the House list, also mounted from deterministic-check setup. */
+
+/**
+ * The shared editor for the 本社词表 (Issue #1543): a page of 知识库, also mounted in the review sheet and from deterministic-check
+ * setup. The caller names it; the editor holds no title of its own.
+ */
 export function mountHouseWordList(options: {
   readonly root: HTMLElement; readonly api: HouseWordListApi;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly onSaved?: () => void;
-}): { load(): Promise<void>; destroy(): void } {
+}): { load(): Promise<void>; destroy(): void; failed(): boolean } {
   const { root, api, setStatus } = options;
   let page: HouseWordListPage | null = null; let draft: HouseWordListDraftEntry[] | null = null;
   let expectedCurrent: SaveHouseWordListInput['expectedCurrent'] = null; let sourceKind: HouseWordListSourceKind = 'editor-entry';
@@ -22,19 +39,23 @@ export function mountHouseWordList(options: {
   let preview: HousePastePreview | null = null; let pastedText = ''; let draftOffset = 0;
   /** A successful save is durable even when the following read fails; retrying this state never saves again. */
   let committedRead: SaveHouseWordListResult | null = null;
-  let busy = false; let destroyed = false;
-  const button = (label: string, name: string, run: () => void, disabled = false): HTMLButtonElement => {
-    const node = el('button', label); node.type = 'button'; node.className = 'btn ' + ('button secondary'); node.dataset['houseAction'] = name;
+  let busy = false; let destroyed = false; let failed = false;
+  const button = (label: string, name: string, run: () => void, disabled = false, tone: Tone = 'secondary'): HTMLButtonElement => {
+    const node = el('button', label); node.type = 'button'; node.className = `btn button ${tone}`; node.dataset['houseAction'] = name;
     node.disabled = busy || disabled; node.addEventListener('click', run); return node;
   };
+  const buttons = (...nodes: HTMLElement[]): HTMLElement => { const row = el('div', undefined, 'button-row'); row.append(...nodes); return row; };
+  /** Two text buttons side by side: the page before and the page after. */
+  const pager = (name: string, before: () => void, after: () => void, atStart: boolean, atEnd: boolean): HTMLElement =>
+    buttons(button(HOUSE_PREVIOUS, `${name}-previous`, before, atStart), button(HOUSE_NEXT, `${name}-next`, after, atEnd));
   const run = async (work: () => Promise<void>): Promise<void> => {
     if (busy || destroyed) return;
-    busy = true; paint();
+    busy = true; failed = false; paint();
     try { await work(); }
     catch (error) {
-      if (!destroyed) setStatus(committedRead !== null
-        ? `${committedRead.created ? '已保存本社敏感词表' : '词条未变，仍为'} ${technicalWords(`第${committedRead.ordinal}版`, '版本')}；读取未完成，请重试读取。`
-        : error instanceof HouseWordListError ? error.message : draft === null ? '词表读取未完成，请重试。' : '词表操作未完成；草稿已保留，请重试。', 'error');
+      failed = true;
+      if (!destroyed) setStatus(committedRead !== null ? houseSavedUnreadStatus(committedRead.created)
+        : error instanceof HouseWordListError ? error.message : draft === null ? HOUSE_READ_FAILED : HOUSE_DRAFT_FAILED, 'error');
     } finally { if (!destroyed) { busy = false; paint(); } }
   };
   const inspect = async (next: InspectHouseWordListInput): Promise<void> => {
@@ -44,10 +65,7 @@ export function mountHouseWordList(options: {
   const readCommitted = async (): Promise<void> => {
     const saved = committedRead; if (saved === null) return;
     await inspect({ versionId: saved.pin.versionId, entryOffset: 0, historyOffset: 0 });
-    if (!destroyed) {
-      committedRead = null;
-      setStatus(saved.created ? `已保存本社敏感词表 ${technicalWords(`第${saved.ordinal}版`, '版本')}。` : `词条未变，仍为${technicalWords(`第${saved.ordinal}版`, '版本')}。`, 'success');
-    }
+    if (!destroyed) { committedRead = null; setStatus(houseSavedStatus(saved.created, saved.ordinal), 'success'); }
   };
   const beginDraft = (): Promise<void> => run(async () => {
     const first = await api.inspectHouseWordList({ versionId: null, entryOffset: 0, historyOffset: 0 });
@@ -55,10 +73,10 @@ export function mountHouseWordList(options: {
     while (next !== null && pin !== null) {
       const part = await api.inspectHouseWordList({ versionId: pin.versionId, entryOffset: next, historyOffset: 0 });
       if (JSON.stringify(part.current) !== JSON.stringify(pin) || part.selected?.pin.versionId !== pin.versionId || part.nextEntryOffset !== null && part.nextEntryOffset <= next) {
-        throw new HouseWordListError('HOUSE_CURRENT_CHANGED', '词表已有新版本，请重新打开编辑。');
+        throw new HouseWordListError('HOUSE_CURRENT_CHANGED', HOUSE_CHANGED);
       }
       entries.push(...part.entries);
-      if (entries.length > MAX_HOUSE_ENTRIES) throw new HouseWordListError('HOUSE_ENTRIES_INVALID', '词表条数无效。');
+      if (entries.length > MAX_HOUSE_ENTRIES) throw new HouseWordListError('HOUSE_ENTRIES_INVALID', HOUSE_TOO_MANY);
       next = part.nextEntryOffset;
     }
     if (destroyed) return;
@@ -76,83 +94,116 @@ export function mountHouseWordList(options: {
     committedRead = saved; page = null;
     await readCommitted();
   });
+
+  /** One draft row: the word, its note, and 启用 with the row's own 移除, under the three column headings. */
+  const draftRow = (entry: HouseWordListDraftEntry, index: number): HTMLElement => {
+    const row = el('li', undefined, 'house-row'); row.dataset['houseEntryRow'] = String(index + 1);
+    const literal = styleInput(el('input')); literal.value = entry.literal; literal.disabled = busy;
+    literal.dataset['houseField'] = 'literal'; literal.setAttribute('aria-label', houseRowLabel(index + 1, HOUSE_COLUMNS[0]));
+    literal.addEventListener('input', () => { if (draft !== null) draft[index] = { ...draft[index]!, literal: literal.value }; });
+    const note = el('textarea', undefined, 'ui-input'); note.value = entry.note; note.disabled = busy; note.rows = 1;
+    note.dataset['houseField'] = 'note'; note.setAttribute('aria-label', houseRowLabel(index + 1, HOUSE_COLUMNS[1]));
+    note.addEventListener('input', () => { if (draft !== null) draft[index] = { ...draft[index]!, note: note.value }; });
+    const enabled = el('input'); enabled.type = 'checkbox'; styleInput(enabled); enabled.checked = entry.enabled; enabled.disabled = busy;
+    enabled.dataset['houseField'] = 'enabled'; enabled.setAttribute('aria-label', houseRowLabel(index + 1, HOUSE_COLUMNS[2]));
+    enabled.addEventListener('change', () => { if (draft !== null) draft[index] = { ...draft[index]!, enabled: enabled.checked }; });
+    const remove = button(HOUSE_REMOVE, `remove-${index}`, () => {
+      draft?.splice(index, 1); if (draftOffset >= (draft?.length ?? 0)) draftOffset = Math.max(0, draftOffset - HOUSE_PAGE_SIZE); paint();
+    }, false, 'quiet');
+    remove.setAttribute('aria-label', houseRowLabel(index + 1, HOUSE_REMOVE));
+    const tail = el('span', undefined, 'house-row-tail'); tail.append(enabled, remove);
+    row.append(literal, note, tail);
+    return row;
+  };
+
+  const paintDraft = (panel: HTMLElement, current: HouseWordListDraftEntry[]): void => {
+    panel.append(el('p', HOUSE_DRAFT_NOTE, 'field-note'));
+    const head = el('div', undefined, 'house-row house-row-head');
+    for (const column of HOUSE_COLUMNS) head.append(el('span', column));
+    const list = el('ul', undefined, 'house-rows');
+    const last = Math.min(current.length, draftOffset + HOUSE_PAGE_SIZE);
+    for (let index = draftOffset; index < last; index++) list.append(draftRow(current[index]!, index));
+    if (current.length > 0) panel.append(head);
+    panel.append(list, el('p', current.length === 0 ? '' : houseCountLine(current.length, draftOffset + 1, last), 'field-note'));
+    if (current.length > HOUSE_PAGE_SIZE) {
+      panel.append(pager('draft', () => { draftOffset -= HOUSE_PAGE_SIZE; paint(); }, () => { draftOffset += HOUSE_PAGE_SIZE; paint(); },
+        draftOffset === 0, draftOffset + HOUSE_PAGE_SIZE >= current.length));
+    }
+    panel.append(buttons(button(HOUSE_ADD, 'add', () => {
+      current.push({ entryId: null, literal: '', note: '', enabled: true }); draftOffset = Math.floor((current.length - 1) / HOUSE_PAGE_SIZE) * HOUSE_PAGE_SIZE; paint();
+    }, current.length >= MAX_HOUSE_ENTRIES)));
+    const pasteLabel = el('label', HOUSE_PASTE_LABEL, 'house-paste'); const paste = el('textarea', undefined, 'ui-input'); paste.value = pastedText; paste.disabled = busy; paste.dataset['houseField'] = 'paste';
+    paste.addEventListener('input', () => { pastedText = paste.value; preview = null; }); pasteLabel.append(paste);
+    // The pasted lines are parsed and joined to the draft in one step (Issue #1410 item 26); 加入并保存 also saves the list.
+    // A line that cannot be kept stops the whole paste with its reason, and nothing is joined.
+    const acceptPaste = (): boolean => {
+      if (draft === null) return false;
+      preview = previewHousePaste(pastedText);
+      if (preview.errors.length > 0 || preview.entries.length === 0) { paint(); return false; }
+      try {
+        const combined = [...draft, ...preview.entries]; validateSaveHouseWordListInput({ expectedCurrent, sourceKind: 'editor-paste', entries: combined });
+        draft = combined; sourceKind = 'editor-paste'; preview = null; pastedText = ''; paint(); return true;
+      } catch (error) { setStatus(error instanceof HouseWordListError ? error.message : HOUSE_PASTE_FAILED, 'error'); return false; }
+    };
+    panel.append(pasteLabel, buttons(button(HOUSE_PASTE_ADD, 'accept-paste', () => { acceptPaste(); }),
+      button(HOUSE_PASTE_SAVE, 'paste-save', () => { if (acceptPaste()) void save(); })));
+    if (preview !== null && (preview.errors.length > 0 || preview.entries.length === 0)) {
+      const result = el('div'); result.dataset['housePastePreview'] = 'true'; result.setAttribute('role', 'alert');
+      result.append(el('p', preview.errors.length > 0 ? HOUSE_PASTE_REFUSED : HOUSE_PASTE_NOTHING));
+      for (const error of preview.errors) result.append(el('p', error.message));
+      panel.append(result);
+    }
+    panel.append(buttons(button(HOUSE_SAVE, 'save', () => void save(), false, 'primary'), button(HOUSE_DISCARD, 'discard', () => void run(async () => {
+      await inspect({ versionId: null, entryOffset: 0, historyOffset: 0 }); draft = null; preview = null;
+    }), false, 'quiet')));
+  };
+
+  const paintRead = (panel: HTMLElement): void => {
+    const selected = page?.selected ?? null;
+    if (page === null || selected === null) {
+      panel.append(el('p', HOUSE_EMPTY), buttons(button(HOUSE_CREATE, 'edit', () => void beginDraft(), false, 'primary')));
+      return;
+    }
+    const isCurrent = page.current !== null && page.current.versionId === selected.pin.versionId;
+    panel.append(el('p', isCurrent ? houseCurrentLine(selected) : houseEarlierLine(selected)));
+    const entries = el('ul', undefined, 'house-entries');
+    for (const entry of page.entries) {
+      const row = el('li'); row.dataset['houseEntry'] = '';
+      row.append(el('span', `${entry.literal} · ${entry.enabled ? '启用' : '停用'}`), el('p', `说明：${entry.note || '（无）'}`, 'field-note'));
+      entries.append(row);
+    }
+    panel.append(entries);
+    if (request.entryOffset > 0 || page.nextEntryOffset !== null) {
+      panel.append(pager('entries', () => void run(() => inspect({ ...request, entryOffset: Math.max(0, request.entryOffset - HOUSE_PAGE_SIZE) })),
+        () => void run(() => inspect({ ...request, entryOffset: page!.nextEntryOffset! })), request.entryOffset === 0, page.nextEntryOffset === null));
+    }
+    const details = el('details'); details.append(el('summary', '查看技术详情'), el('p', `词表 ${selected.pin.listId} · 版本 ${selected.pin.versionId} · 摘要 ${selected.pin.digest}`));
+    panel.append(technicalDisclosure(details));
+    panel.append(isCurrent
+      ? buttons(button(HOUSE_EDIT, 'edit', () => void beginDraft(), false, 'primary'))
+      : buttons(button(HOUSE_LATEST, 'current', () => void run(() => inspect({ versionId: null, entryOffset: 0, historyOffset: 0 })), false, 'primary')));
+    // Earlier lists are named by when they were saved; with only one saved there is nothing to look back at.
+    if (page.history.length > 1 || request.historyOffset > 0 || page.nextHistoryOffset !== null) {
+      const history = el('details', undefined, 'house-history'); history.append(el('summary', HOUSE_HISTORY_SUMMARY));
+      for (const version of page.history) {
+        history.append(button(houseHistoryLabel(version), `history-${version.ordinal}`, () => void run(() => inspect({ ...request, versionId: version.pin.versionId, entryOffset: 0 })), false, 'quiet'));
+      }
+      history.append(pager('history', () => void run(() => inspect({ ...request, historyOffset: Math.max(0, request.historyOffset - HOUSE_PAGE_SIZE) })),
+        () => void run(() => inspect({ ...request, historyOffset: page!.nextHistoryOffset! })), request.historyOffset === 0, page.nextHistoryOffset === null));
+      panel.append(history);
+    }
+  };
+
   const paint = (): void => {
     if (destroyed) return;
-    const panel = el('section'); panel.className = 'guideline-card'; panel.dataset['houseWordList'] = 'panel';
-    panel.append(el('h3', '本社敏感词表'), el('p', HOUSE_DISCLOSURE));
+    const panel = el('section', undefined, 'guideline-card house-word-list'); panel.dataset['houseWordList'] = 'panel';
+    panel.append(el('p', HOUSE_DISCLOSURE, 'field-note'));
     if (committedRead !== null) {
-      panel.append(el('p', `${technicalWords(`第${committedRead.ordinal}版`, '版本')}已保存；${busy ? '正在读取词条。' : '读取未完成，请重试读取。'}`),
-        button('重新读取已保存版本', 'retry-read', () => void run(readCommitted)));
-      root.replaceChildren(panel); return;
-    }
-    if (draft !== null) {
-      panel.append(el('p', '编辑草稿；保存后成为新版本。打开、编辑和保存词表都不会开始检查。'));
-      const list = el('ol');
-      for (let index = draftOffset; index < Math.min(draft.length, draftOffset + HOUSE_PAGE_SIZE); index++) {
-        const entry = draft[index]!; const row = el('li'); row.dataset['houseEntryRow'] = String(index + 1); row.value = index + 1;
-        const literalLabel = el('label', '字面词条'); const literal = el('input'); literal.value = entry.literal; literal.disabled = busy;
-        literal.dataset['houseField'] = 'literal'; literal.setAttribute('aria-label', `第${index + 1}行字面词条`);
-        literal.addEventListener('input', () => { if (draft !== null) draft[index] = { ...draft[index]!, literal: literal.value }; }); literalLabel.append(literal);
-        const noteLabel = el('label', '词条说明（会随批注显示）'); const note = el('textarea'); note.value = entry.note; note.disabled = busy;
-        note.dataset['houseField'] = 'note'; note.setAttribute('aria-label', `第${index + 1}行词条说明`);
-        note.addEventListener('input', () => { if (draft !== null) draft[index] = { ...draft[index]!, note: note.value }; }); noteLabel.append(note);
-        const enabledLabel = el('label', '启用'); const enabled = el('input'); enabled.type = 'checkbox'; enabled.checked = entry.enabled; enabled.disabled = busy;
-        enabled.dataset['houseField'] = 'enabled'; enabled.setAttribute('aria-label', `第${index + 1}行启用`);
-        enabled.addEventListener('change', () => { if (draft !== null) draft[index] = { ...draft[index]!, enabled: enabled.checked }; }); enabledLabel.append(enabled);
-        row.append(literalLabel, noteLabel, enabledLabel, button('移除词条', `remove-${index}`, () => {
-          draft?.splice(index, 1); if (draftOffset >= (draft?.length ?? 0)) draftOffset = Math.max(0, draftOffset - HOUSE_PAGE_SIZE); paint();
-        })); list.append(row);
-      }
-      panel.append(list, el('p', `共${draft.length}条；每页最多50条。`),
-        windowStep(button('上一页词条', 'draft-previous', () => { draftOffset -= HOUSE_PAGE_SIZE; paint(); }, draftOffset === 0), 'before', "向前浏览词条"),
-        windowStep(button('下一页词条', 'draft-next', () => { draftOffset += HOUSE_PAGE_SIZE; paint(); }, draftOffset + HOUSE_PAGE_SIZE >= draft.length), 'after', "向后浏览词条"),
-        button('添加词条', 'add', () => { draft?.push({ entryId: null, literal: '', note: '', enabled: true }); draftOffset = Math.floor(((draft?.length ?? 1) - 1) / HOUSE_PAGE_SIZE) * HOUSE_PAGE_SIZE; paint(); }, draft.length >= MAX_HOUSE_ENTRIES));
-      const pasteLabel = el('label', '粘贴词条（一行一条，空行忽略）'); const paste = el('textarea'); paste.value = pastedText; paste.disabled = busy; paste.dataset['houseField'] = 'paste';
-      paste.addEventListener('input', () => { pastedText = paste.value; preview = null; }); pasteLabel.append(paste);
-      // The pasted lines are parsed and joined to the draft in one step (Issue #1410 item 26); 加入并保存 also saves the version.
-      // A line that cannot be kept stops the whole paste with its reason, and nothing is joined.
-      const acceptPaste = (): boolean => {
-        if (draft === null) return false;
-        preview = previewHousePaste(pastedText);
-        if (preview.errors.length > 0 || preview.entries.length === 0) { paint(); return false; }
-        try {
-          const combined = [...draft, ...preview.entries]; validateSaveHouseWordListInput({ expectedCurrent, sourceKind: 'editor-paste', entries: combined });
-          draft = combined; sourceKind = 'editor-paste'; preview = null; pastedText = ''; paint(); return true;
-        } catch (error) { setStatus(error instanceof HouseWordListError ? error.message : '粘贴未完成。', 'error'); return false; }
-      };
-      panel.append(pasteLabel, button('加入草稿', 'accept-paste', () => { acceptPaste(); }),
-        button('加入并保存词表版本', 'paste-save', () => { if (acceptPaste()) void save(); }));
-      if (preview !== null && (preview.errors.length > 0 || preview.entries.length === 0)) {
-        const result = el('div'); result.dataset['housePastePreview'] = 'true'; result.setAttribute('role', 'alert');
-        result.append(el('p', preview.errors.length > 0 ? '粘贴的词条没有加入草稿：' : '没有可加入的词条。'));
-        for (const error of preview.errors) result.append(el('p', error.message));
-        panel.append(result);
-      }
-      panel.append(button('保存词表版本', 'save', () => void save()), button('放弃草稿并重新载入', 'discard', () => void run(async () => {
-        await inspect({ versionId: null, entryOffset: 0, historyOffset: 0 }); draft = null; preview = null;
-      })));
-    } else {
-      const selected = page?.selected;
-      panel.append(el('p', selected === undefined || selected === null ? '尚未保存词表；AI7不提供预置词条。' : `${technicalWords(`第${selected.ordinal}版`, '版本')} · ${selected.entryCount}条 · 启用${selected.enabledCount}条`));
-      if (selected !== undefined && selected !== null) {
-        const entries = el('ol');
-        for (let index = 0; index < (page?.entries.length ?? 0); index++) {
-          const entry = page!.entries[index]!; const row = el('li'); row.value = request.entryOffset + index + 1;
-          row.append(el('span', `${entry.literal} · ${entry.enabled ? '启用' : '停用'}`), el('p', `词条说明：${entry.note || '（无）'}`)); entries.append(row);
-        }
-        panel.append(entries, windowStep(button('上一页词条', 'entries-previous', () => void run(() => inspect({ ...request, entryOffset: Math.max(0, request.entryOffset - HOUSE_PAGE_SIZE) })), request.entryOffset === 0), 'before', "向前浏览词条"),
-          windowStep(button('下一页词条', 'entries-next', () => void run(() => inspect({ ...request, entryOffset: page!.nextEntryOffset! })), page?.nextEntryOffset === null), 'after', "向后浏览词条"));
-        const details = el('details'); details.append(el('summary', '查看技术详情'), el('p', `词表 ${selected.pin.listId} · 版本 ${selected.pin.versionId} · 摘要 ${selected.pin.digest}`)); panel.append(technicalDisclosure(details));
-      }
-      panel.append(button(page?.current === null ? '创建词表' : '编辑当前版本', 'edit', () => void beginDraft()));
-      const history = el('details'); history.append(el('summary', '版本历史（只读）'));
-      for (const version of page?.history ?? []) history.append(button(`查看${technicalWords(`第${version.ordinal}版`, '版本')}`, `history-${version.ordinal}`, () => void run(() => inspect({ ...request, versionId: version.pin.versionId, entryOffset: 0 }))));
-      history.append(button('最新历史', 'history-first', () => void run(() => inspect({ ...request, historyOffset: 0 })), request.historyOffset === 0),
-        button('更早历史', 'history-next', () => void run(() => inspect({ ...request, historyOffset: page!.nextHistoryOffset! })), page?.nextHistoryOffset === null || page === null)); panel.append(history);
-      panel.append(button('查看当前版本', 'current', () => void run(() => inspect({ versionId: null, entryOffset: 0, historyOffset: 0 }))));
-    }
+      panel.append(el('p', busy ? HOUSE_SAVED_READING : HOUSE_SAVED_READ_PENDING), buttons(button(HOUSE_RETRY_READ, 'retry-read', () => void run(readCommitted), false, 'primary')));
+    } else if (draft !== null) paintDraft(panel, draft);
+    else paintRead(panel);
     root.replaceChildren(panel);
   };
   paint();
-  return { load: () => run(() => committedRead === null ? inspect({ versionId: null, entryOffset: 0, historyOffset: 0 }) : readCommitted()), destroy: () => { destroyed = true; root.replaceChildren(); } };
+  return { load: () => run(() => committedRead === null ? inspect({ versionId: null, entryOffset: 0, historyOffset: 0 }) : readCommitted()), destroy: () => { destroyed = true; root.replaceChildren(); }, failed: () => failed };
 }

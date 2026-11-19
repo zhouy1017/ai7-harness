@@ -9,38 +9,42 @@ import { formatCalibrationOffset, formatPriceFen } from '../shared/evaluation-ca
 
 export const CALIBRATION_PAGE_TITLE = '评估校准与预测';
 /** True with the prediction switch on as off (Issue #430 review): AI7 predicts nothing unless the editor turns it on. */
-export const CALIBRATION_PAGE_LEDE = '这里的两个开关只影响 AI7 的初评与预测，不改你的评分；定价与首印由你录入，AI7 默认不预测。';
+export const CALIBRATION_PAGE_LEDE = '这里的两个开关只影响 AI7 的初始评分与预测，不改你的评分；定价与首印由你录入，AI7 默认不预测。';
 export const CALIBRATION_HEADING = '校准';
+/** The fold that holds each section's method sentences. */
+export const CALIBRATION_HOW = '怎么算的';
+export const CALIBRATION_PREVIOUS = '上一页';
+export const CALIBRATION_NEXT = '下一页';
 /** What calibration touches, and what it never does (EVAL-011). */
-export const CALIBRATION_SCOPE = '仅调整 AI7 初评分数，不改你的评分和风险项。';
-/** Why there is nothing to count, for a service that gives no AI7 初评 scores to adjust (`initialScoresConnected` false). */
-export const CALIBRATION_WAITING = 'AI7 初评尚未接通：你改过 AI7 的初评分数后，调分记录才开始累积。';
+export const CALIBRATION_SCOPE = '仅调整 AI 初始评分，不改你的评分和风险项。';
+/** Why there is nothing to count, for a service that gives no initial scores to adjust (`initialScoresConnected` false). */
+export const CALIBRATION_WAITING = 'AI 初始评分尚未接通：你改过 AI 给出的评分后，调分记录才开始累积。';
 export const CALIBRATION_SWITCH = '启用校准';
 /** How the house offset is computed (EVAL-011; EVAL-011a), said in the editor's words. */
-export const CALIBRATION_METHOD = '校准偏移 = 各本书最新一次从 AI7 初评开始并定稿的评估里，你的定稿分数减去 AI7 初评分数的平均值，取到半分；每次读取时重新计算，不另存。';
+export const CALIBRATION_METHOD = '校准偏移 = 各本书最新一次从 AI 初始评分开始并定稿的评估里，你的定稿分数减去 AI 初始评分的平均值，取到半分；每次读取时重新计算，不另存。';
 /**
  * Below the gate: what the offset waits for, naming the gate the service answers (`calibration.threshold`) — ten in the
  * product, lower only under J-11's Journey-only control — so it never disagrees with the progress line above it.
  */
 export function calibrationOffsetWaiting(threshold: number): string {
-  return `校准偏移尚未计算：满 ${threshold} 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。`;
+  return `校准偏移尚未计算：满 ${threshold} 本调分记录后，按校准方法得出；之后新生成的评估会按偏移调整 AI 初始评分。`;
 }
 /** With the switch off: what a new version does instead, and that the switch can be turned on again. */
-export const CALIBRATION_OFF_EFFECT = '新版本从 AI7 初评开始时直接用原始分数；随时可打开，开关都有记录。';
+export const CALIBRATION_OFF_EFFECT = '之后新生成的评估直接用 AI 初始评分，不按偏移调整；随时可打开，开关都有记录。';
 /** The heading of the per-item offsets, with the Books they rest on. */
 export function calibrationBasisLine(offset: Pick<NonNullable<EvaluationCalibrationProjection['calibration']['offset']>, 'basisBooks'>): string {
-  return `校准依据：${offset.basisBooks} 本书的定稿评估；正数表示你的定稿分数通常高于 AI7 初评。`;
+  return `校准依据：${offset.basisBooks} 本书的定稿评估；正数表示你的定稿分数通常高于 AI 初始评分。`;
 }
 /**
  * Why the basis may hold fewer Books than 调分记录 counts: a Book with a from-初评 version that cannot be read counts toward the
  * gate but gives the basis nothing; `null` when every counted Book is in the basis.
  */
 export function calibrationWithoutBasisLine(offset: Pick<NonNullable<EvaluationCalibrationProjection['calibration']['offset']>, 'booksWithoutBasis'>): string | null {
-  return offset.booksWithoutBasis === 0 ? null : `其中 ${offset.booksWithoutBasis} 本书有从 AI7 初评开始的版本已损坏，不计入校准依据。`;
+  return offset.booksWithoutBasis === 0 ? null : `其中 ${offset.booksWithoutBasis} 本书从 AI 初始评分开始的评估已损坏，不计入校准依据。`;
 }
 /** One item's offset: `+1.5`, `−0.5`, `0`, or that no Book gives it a value, with the Books it rests on. */
 export function calibrationOffsetLine(item: NonNullable<EvaluationCalibrationProjection['calibration']['offset']>['items'][number]): string {
-  if (item.offset === null) return `${item.label}：暂无同时含定稿和初评分数的图书`;
+  if (item.offset === null) return `${item.label}：暂无同时有定稿和 AI 初始评分的图书`;
   return `${item.label}：${formatCalibrationOffset(item.offset)} · 依据 ${item.books} 本书 · 满分 ${item.fullMarks} · 调整范围 0–${item.fullMarks}`;
 }
 

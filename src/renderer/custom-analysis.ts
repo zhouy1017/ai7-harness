@@ -1,6 +1,7 @@
 import type { TaskLaunchRequest } from './task-drawer.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
+import { styleInput } from './components/controls.js';
 import { oneActionStart, startPreparedTask } from './one-action-start.js';
 import type {
   BaselineAnalysisUpdateRequest,
@@ -12,6 +13,7 @@ import type {
 import {
   CUSTOM_TAB_EMPTY,
   CUSTOM_TAB_FEEDBACK_NOTE,
+  CUSTOM_TAB_NEW,
   CUSTOM_TAB_NOT_RUN,
   CUSTOM_TAB_PREPARED,
   CUSTOM_TAB_STARTED,
@@ -31,11 +33,14 @@ import {
   CUSTOM_DIMENSION_CANCEL,
   CUSTOM_DIMENSION_ENABLE,
   CUSTOM_DIMENSION_FIXED_LINES,
+  CUSTOM_DIMENSION_FIXED_SUMMARY,
   CUSTOM_DIMENSION_NEW,
   CUSTOM_DIMENSION_REVISE,
   CUSTOM_DIMENSION_SAVE,
   CUSTOM_DIMENSION_STOP,
   CUSTOM_DIMENSION_TEMPLATE_LABEL,
+  CUSTOM_DIMENSION_TEMPLATE_PLACEHOLDER,
+  CUSTOM_TAB_NEW_HEADING,
   CUSTOM_DIMENSION_TITLE_LABEL,
   customDimensionEnabledLine,
   customDimensionSavedLine,
@@ -59,6 +64,12 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   return node;
 }
 
+function buttonRow(...nodes: HTMLElement[]): HTMLElement {
+  const row = el('div', 'button-row');
+  row.append(...nodes);
+  return row;
+}
+
 function actionButton(label: string, tone: 'primary' | 'secondary' | 'quiet', action: string, run: () => Promise<void> | void): HTMLButtonElement {
   const node = el('button', tone, label);
   node.type = 'button';
@@ -79,6 +90,8 @@ export interface MountCustomAnalysisTabOptions {
   openLaunch(request: TaskLaunchRequest): void;
   /** One answer's quotation in the manuscript, where its block stands now. */
   jump(blockId: string): void;
+  /** Where a new dimension is written, in place; absent, the tab only lists and runs (the house's own page, 知识库, can write too). */
+  readonly author?: { readonly api: Pick<RendererApi, 'inspectCustomAnalysisDimensions' | 'saveCustomAnalysisDimension' | 'enableCustomAnalysisDimension' | 'stopCustomAnalysisDimension'> };
 }
 
 /**
@@ -98,6 +111,43 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
   panel.dataset['customAnalysis'] = 'reading';
   let busy = false;
   let deferred: CustomAnalysisDimensionsProjection | null = null;
+  // The tab's three parts stay in place while the answers below are drawn again: the offer to write a dimension, the form once it is
+  // open, and the dimensions with their results. A reading never takes the form the editor is typing in.
+  const { author } = options;
+  const head = el('div', 'custom-head');
+  const formHost = el('div', 'custom-create');
+  const body = el('div', 'custom-body');
+  panel.append(head, formHost, body);
+  let kind: 'reading' | 'empty' | 'list' | 'error' = 'reading';
+  let creating = false;
+
+  const drawHead = (): void => {
+    const offer = author === undefined || creating ? null
+      : actionButton(CUSTOM_TAB_NEW, kind === 'empty' ? 'primary' : 'secondary', 'create', () => openForm());
+    const nodes: HTMLElement[] = [];
+    if (kind === 'empty') {
+      const empty = el('section', 'custom-empty');
+      empty.dataset['customEmpty'] = 'no-dimension';
+      empty.append(el('p', undefined, CUSTOM_TAB_EMPTY));
+      if (offer !== null) empty.append(buttonRow(offer));
+      nodes.push(empty);
+    } else if (kind === 'list' && offer !== null) nodes.push(buttonRow(offer));
+    head.replaceChildren(...nodes);
+  };
+  const closeForm = (saved: boolean): void => {
+    creating = false;
+    formHost.replaceChildren();
+    drawHead();
+    if (saved) void load();
+    else head.querySelector<HTMLElement>('[data-custom-action="create"]')?.focus();
+  };
+  const openForm = (): void => {
+    if (creating || author === undefined) return;
+    creating = true;
+    drawHead();
+    mountCustomAnalysisDimensions({ root: formHost, api: author.api, setStatus: options.setStatus, errorMessage: options.errorMessage, createInPlace: { done: closeForm } });
+    formHost.querySelector<HTMLElement>('input[name="title"]')?.focus();
+  };
 
   const updateFor = (dimension: CustomAnalysisDimensionProjection): BaselineAnalysisUpdateRequest | null => {
     const latest = dimension.book?.latest ?? null;
@@ -168,12 +218,13 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     panel.dataset['customAnalysis'] = 'ready';
     panel.dataset['dimensionCount'] = String(projection.dimensions.length);
     if (projection.dimensions.length === 0) {
-      const empty = el('section', 'custom-empty');
-      empty.dataset['customEmpty'] = 'no-dimension';
-      empty.append(el('p', undefined, CUSTOM_TAB_EMPTY));
-      panel.replaceChildren(empty);
+      kind = 'empty';
+      drawHead();
+      body.replaceChildren();
       return;
     }
+    kind = 'list';
+    drawHead();
     const firstAnswer = projection.dimensions.find((dimension) => dimension.book?.latest != null);
     const cards = projection.dimensions.map((dimension) => {
       const card = el('article', 'custom-dimension-card');
@@ -216,7 +267,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       }
       return card;
     });
-    panel.replaceChildren(...cards);
+    body.replaceChildren(...cards);
     restoreInteraction();
   };
 
@@ -242,7 +293,9 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     } catch (error) {
       if (!panel.isConnected) return;
       panel.dataset['customAnalysis'] = 'unavailable';
-      panel.replaceChildren(el('p', 'attention-note', options.errorMessage(error, '无法读取自定义分析维度。')));
+      kind = 'error';
+      drawHead();
+      body.replaceChildren(el('p', 'attention-note', options.errorMessage(error, '无法读取自定义分析维度。')));
     } finally {
       loading = false;
     }
@@ -252,7 +305,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     if (deferred !== null && panel.isConnected && !pollControlEngaged(panel, false)) render(deferred);
   });
   const cached = readings.get(bookId);
-  if (cached === undefined) panel.replaceChildren(el('p', 'field-note', CUSTOM_TAB_READING));
+  if (cached === undefined) body.replaceChildren(el('p', 'field-note', CUSTOM_TAB_READING));
   else render(cached.projection);
   void load();
   panel.addEventListener(ANALYSIS_TAB_SHOWN_EVENT, () => void load());
@@ -265,8 +318,11 @@ export interface MountCustomAnalysisDimensionsOptions {
   readonly api: Pick<RendererApi, 'inspectCustomAnalysisDimensions' | 'saveCustomAnalysisDimension' | 'enableCustomAnalysisDimension' | 'stopCustomAnalysisDimension'>;
   setStatus: Status;
   errorMessage(error: unknown, fallback: string): string;
-  technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
-  localInstantLabel(instant: string): string;
+  /** The house's page lists every dimension with its versions and their facts; the form alone needs neither. */
+  technicalDetails?(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
+  localInstantLabel?(instant: string): string;
+  /** 分析 › 自定义 writes a new dimension in place: only the form opens, and `done` closes it once saved or cancelled. */
+  readonly createInPlace?: { done(saved: boolean): void };
 }
 
 export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimensionsOptions): { load(): Promise<void> } {
@@ -277,6 +333,8 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
   let editing: string | null | undefined;
   let projection: CustomAnalysisDimensionsProjection | null = null;
   let busy = false;
+  /** A version saved whose enabling was refused: the next try writes onto it, not a second dimension. */
+  let savedNotEnabled: string | null = null;
 
   const act = async (pending: string, body: () => Promise<CustomAnalysisDimensionsProjection>, done: (next: CustomAnalysisDimensionsProjection) => string): Promise<void> => {
     if (busy) return;
@@ -286,7 +344,9 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
       const next = await body();
       projection = next;
       editing = undefined;
-      render();
+      savedNotEnabled = null;
+      if (options.createInPlace === undefined) render();
+      else options.createInPlace.done(true);
       options.setStatus(done(next), 'success');
     } catch (error) {
       options.setStatus(options.errorMessage(error, '无法完成这项操作。'), 'error');
@@ -300,16 +360,16 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
     node.dataset['customForm'] = dimension === null ? 'new' : dimension.dimensionId;
     const latest = dimension?.versions[0] ?? null;
     const titleLabel = el('label', undefined, CUSTOM_DIMENSION_TITLE_LABEL);
-    const title = el('input');
+    const title = styleInput(el('input'));
     title.name = 'title';
     title.maxLength = 160;
     title.value = latest?.title ?? '';
     titleLabel.append(title);
     const templateLabel = el('label', undefined, `${CUSTOM_DIMENSION_TEMPLATE_LABEL} · 最多 400 字，勿粘贴稿件原文`);
-    const template = el('textarea');
+    const template = el('textarea', 'ui-input');
     template.name = 'questionTemplate';
     template.rows = 4;
-    template.placeholder = '可用 {本单元} 标出位置';
+    template.placeholder = CUSTOM_DIMENSION_TEMPLATE_PLACEHOLDER;
     template.maxLength = 1600;
     template.value = latest?.questionTemplate ?? '';
     templateLabel.append(template);
@@ -319,7 +379,8 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
     save.dataset['customAction'] = 'save';
     actions.append(save, actionButton(CUSTOM_DIMENSION_CANCEL, 'quiet', 'cancel', () => {
       editing = undefined;
-      render();
+      if (options.createInPlace === undefined) render();
+      else options.createInPlace.done(false);
     }));
     node.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -328,11 +389,12 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
       // leaves it 待验证 with the service's reason, and its 启用 stays beside it.
       void act('正在保存并启用自定义分析维度…', async () => {
         const saved = await api.saveCustomAnalysisDimension({
-          dimensionId: dimension?.dimensionId ?? null, title: titleText, questionTemplate: template.value.trim(),
+          dimensionId: dimension?.dimensionId ?? savedNotEnabled, title: titleText, questionTemplate: template.value.trim(),
         });
         const owner = saved.dimensions.find((entry) => dimension === null
           ? entry.versions[0]?.title === titleText && entry.versions[0]?.state === 'pending-validation'
           : entry.dimensionId === dimension.dimensionId);
+        savedNotEnabled = dimension === null ? owner?.dimensionId ?? null : null;
         const fresh = owner?.versions[0];
         return fresh?.state === 'pending-validation' ? api.enableCustomAnalysisDimension({ versionId: fresh.versionId }) : saved;
       }, () => customDimensionSavedLine(titleText));
@@ -342,6 +404,13 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
   };
 
   const render = (): void => {
+    if (options.createInPlace !== undefined) {
+      // Written where the editor is: the name, the question, and what AI7 fixes folded — no list of the house's other dimensions.
+      const fixed = el('details', 'custom-dimension-fixed-fold');
+      fixed.append(el('summary', undefined, CUSTOM_DIMENSION_FIXED_SUMMARY), ...CUSTOM_DIMENSION_FIXED_LINES.map((line) => el('p', 'field-note', line)));
+      section.replaceChildren(el('h3', undefined, CUSTOM_TAB_NEW_HEADING), el('p', 'field-note', CUSTOM_DIMENSIONS_NOTE), fixed, form(null));
+      return;
+    }
     section.replaceChildren(el('h3', undefined, CUSTOM_DIMENSIONS_HEADING), el('p', 'field-note', CUSTOM_DIMENSIONS_NOTE));
     const fixed = el('ul', 'custom-dimension-fixed');
     for (const line of CUSTOM_DIMENSION_FIXED_LINES) fixed.append(el('li', 'field-note', line));
@@ -388,12 +457,15 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
         editing = dimension.dimensionId;
         render();
       }));
-      card.append(options.technicalDetails('custom-dimension-facts',
-        el('dt', undefined, '维度'), el('dd', 'technical-identity', `${dimension.dimensionId} · ${dimension.kind}`),
-        ...dimension.versions.flatMap((version) => [
-          el('dt', undefined, `${technicalWords(`第 ${version.version} 版`, '版本')}`),
-          el('dd', 'technical-identity', `${version.versionId} · ${version.documentDigest} · ${options.localInstantLabel(version.createdAt)}`),
-        ])));
+      const { technicalDetails, localInstantLabel } = options;
+      if (technicalDetails !== undefined && localInstantLabel !== undefined) {
+        card.append(technicalDetails('custom-dimension-facts',
+          el('dt', undefined, '维度'), el('dd', 'technical-identity', `${dimension.dimensionId} · ${dimension.kind}`),
+          ...dimension.versions.flatMap((version) => [
+            el('dt', undefined, `${technicalWords(`第 ${version.version} 版`, '版本')}`),
+            el('dd', 'technical-identity', `${version.versionId} · ${version.documentDigest} · ${localInstantLabel(version.createdAt)}`),
+          ])));
+      }
       section.append(card);
     }
   };

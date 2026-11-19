@@ -1242,6 +1242,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     mountCustomAnalysisTab(panels.custom, {
       bookId: projection.bookId,
       api: rendererApi,
+      author: { api: rendererApi },
       setStatus,
       errorMessage: rendererErrorMessage,
       openPlan: (taskIntentId) => openTaskPlan(projection.bookId, 'baseline-analysis', taskIntentId),

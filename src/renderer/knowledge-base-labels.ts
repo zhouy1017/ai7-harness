@@ -1,4 +1,5 @@
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
+import { HOUSE_CATEGORY_HOLDS, HOUSE_NAME } from './house-word-list-labels.js';
 import type {
   LearningEligibilityChoice,
   LibraryMaterialDecisionProjection,
@@ -26,7 +27,7 @@ import { MAINTENANCE_WITHDRAWN } from '../shared/maintenance-wording.js';
  * versions they used; nothing here is edited in place.
  */
 
-export type KnowledgeBaseTab = 'guidelines' | 'evaluation' | 'rules' | 'memory' | 'exemplars' | 'library' | 'external';
+export type KnowledgeBaseTab = 'guidelines' | 'evaluation' | 'rules' | 'memory' | 'exemplars' | 'library' | 'house-words' | 'external';
 
 export interface KnowledgeBaseTabView {
   readonly tab: KnowledgeBaseTab;
@@ -74,6 +75,7 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
     holds: '收集图书、论文与网页，供任务参考。',
     pending: null,
   },
+  { tab: 'house-words', label: HOUSE_NAME, holds: HOUSE_CATEGORY_HOLDS, pending: null },
   {
     tab: 'external',
     label: '外部来源留存',
@@ -641,7 +643,7 @@ export function materialIndexCompletedReason(outcome: 'complete' | 'unsupported'
 
 export const CUSTOM_DIMENSIONS_HEADING = '自定义分析维度';
 export const CUSTOM_DIMENSIONS_NOTE =
-  '为每个阅读单元写一个提问，AI7 在「分析 › 自定义」里逐单元回答并定位所依据的原文；名称只在本机显示，不会发送；提问模板不能包含稿件正文。';
+  '写一个提问，AI7 会在「分析 › 自定义」里对书的每个部分作答，并标出所依据的原文；名称只在本机显示，不会发送；提问里不要放稿件原文。';
 export const CUSTOM_DIMENSIONS_EMPTY = '还没有自定义分析维度。';
 export const CUSTOM_DIMENSION_NEW = '新建维度…';
 export const CUSTOM_DIMENSION_REVISE = '修改为新版本…';
@@ -650,12 +652,15 @@ export const CUSTOM_DIMENSION_CANCEL = '取消';
 export const CUSTOM_DIMENSION_ENABLE = '启用';
 export const CUSTOM_DIMENSION_STOP = '停用';
 export const CUSTOM_DIMENSION_TITLE_LABEL = '维度名称';
-export const CUSTOM_DIMENSION_TEMPLATE_LABEL = '每个单元的提问';
-export const CUSTOM_DIMENSION_TEMPLATE_HINT = '用中文写一段，最多 400 字；可以用 {本单元} 标出本单元所在的位置，不要粘贴稿件原文。';
+export const CUSTOM_DIMENSION_TEMPLATE_LABEL = '对每个部分的提问';
+export const CUSTOM_DIMENSION_TEMPLATE_PLACEHOLDER = '可用 {本单元} 代指正在回答的那一部分';
+export const CUSTOM_DIMENSION_FIXED_SUMMARY = 'AI7 固定的部分';
+export const CUSTOM_TAB_NEW_HEADING = '新建自定义分析维度';
+export const CUSTOM_DIMENSION_TEMPLATE_HINT = '用中文写一段，最多 400 字；可以用 {本单元} 代指正在回答的那一部分，不要粘贴稿件原文。';
 /** What AI7 fixes for every dimension, in the editor's words, beside the template they write. */
 export const CUSTOM_DIMENSION_FIXED_LINES = [
   '回答格式由 AI7 固定：每条回答不超过 300 字，附一段不超过 80 字的原文引文与所在段落，以及不超过 120 字的把握说明；不打分。',
-  '权限上限由 AI7 固定：只读当前这本书的稿件，不改动稿件，不使用联网或本机工具，不跨单元归纳。',
+  '权限上限由 AI7 固定：只读当前这本书的稿件，不改动稿件，不使用联网或本机工具，不跨部分归纳。',
 ] as const;
 export const CUSTOM_DIMENSION_STOP_NOTE = '停用后这个版本不能再运行；已经用它完成的分析仍然保留，并一直标明所用的版本。';
 
@@ -664,7 +669,7 @@ export function customDimensionVersionLine(version: { version: number; stateLabe
 }
 
 export function customDimensionSavedLine(title: string): string {
-  return `已保存「${title}」的新版本，已启用，可在分析中运行。`;
+  return `已保存并启用「${title}」，可在分析中运行。`;
 }
 
 export function customDimensionEnabledLine(title: string, version: number): string {
