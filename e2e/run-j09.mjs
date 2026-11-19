@@ -69,7 +69,8 @@ const GROUP_LABELS = Object.freeze(['异常与结果待确认', '等待你的决
 const REASON_BLOCKED = '模型服务当前不可用，任务尚未开始。';
 // A start waiting on the instance's concurrency governor (Issue #49, S14; CONC-007), in 待我处理's words and the bar's
 // (`src/renderer/task-drawer-labels.ts`), pinned there by their unit suites.
-const REASON_WAITING_CAPACITY = '排队中，轮到后自动开始。';
+// Read in developer mode (the service's words, #1531 last look S8); ordinary mode reads 「排队中，轮到后自动开始。」.
+const REASON_WAITING_CAPACITY = '正在等运行名额，轮到后自动开始。';
 const QUEUED_NOTE = '排队中：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
 // 后台处理登记's words (`src/service/background-analysis-enrollments.ts`, `src/renderer/background-analysis-labels.ts`), pinned
 // there by `tests/unit/background-analysis.test.ts`.
