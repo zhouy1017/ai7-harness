@@ -2240,17 +2240,24 @@ async function main() {
         const top = pane.getBoundingClientRect().top, bottomInContent = last.getBoundingClientRect().bottom - top + pane.scrollTop;
         return top + bottomInContent - (pane.scrollHeight - pane.clientHeight) <= bar.top + 0.5;
       })()`;
-      // The Task Drawer is open beside the page — docked at the wide size, over it at 1008×681 — and the bar stays clear of it.
-      if (await renderer.evaluate(`document.querySelector('#task-drawer')?.hidden !== false`)) await clickVisibleControl(renderer, '[data-edge-entry="tasks"]', 'status-bar-drawer-open');
-      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === false`, 'status-bar-drawer-ready');
-      // The docked drawer eases the body's padding: the page is measured once that movement has ended, or a toolbar that wraps
-      // after it would read as the bar's doing.
+      // The page is measured only once its columns have settled: the docked drawer and the right column (#1542) ease the body's
+      // padding and may switch the sidebar to icons, and a toolbar that wraps after that would read as the bar's doing.
       const SETTLED = `(async () => {
-        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        await Promise.all(document.body.getAnimations().map((animation) => animation.finished));
-        await new Promise((resolve) => requestAnimationFrame(resolve));
+        for (let round = 0; round < 3; round += 1) {
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          await Promise.all(document.body.getAnimations().map((animation) => animation.finished));
+        }
         return true;
       })()`;
+      // Two layouts, each with its own baseline taken before the bar shows: the page as it is (the 批注栏 docked), and with the Task
+      // Drawer open beside it — docked at the wide size, over it at 1008×681 — which also puts the sidebar in its icon form.
+      const drawerOpen = () => renderer.evaluate(`document.querySelector('#task-drawer')?.hidden === false`);
+      if (await drawerOpen()) await clickVisibleControl(renderer, '#task-drawer [data-task-drawer-control="close"]', 'status-bar-drawer-reset');
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden !== false`, 'status-bar-drawer-reset-closed');
+      requireJourney(await renderer.evaluate(SETTLED) === true, 'status-bar-page-settled');
+      const quietPage = await renderer.evaluate(barLayout);
+      await clickVisibleControl(renderer, '[data-edge-entry="tasks"]', 'status-bar-drawer-open');
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === false`, 'status-bar-drawer-ready');
       requireJourney(await renderer.evaluate(SETTLED) === true, 'status-bar-drawer-settled');
       const quiet = await renderer.evaluate(barLayout);
       await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').focus({ preventScroll: true })`);
@@ -2261,19 +2268,10 @@ async function main() {
       const clear = await renderer.evaluate(statusBarClear(MANUSCRIPT_CONTROLS));
       await renderer.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0, replacementStart: 0, replacementEnd: 1 });
       requireJourney(busy?.shown === true && busy.fixed === true && busy.inView === true && busy.shell === quiet?.shell && busy.surface === quiet?.surface && busy.page === quiet?.page && clear === true, 'status-bar-busy-layout', { quiet, busy, clear });
-      // A long error on the manuscript, with the sidebar open and folded to icons: the bar wraps (a long one scrolls inside it), stays
-      // clear of every control and of the drawer, the manuscript keeps its height, and the last line can be scrolled clear of it.
-      // The fault is armed apart from the press: the next 发起全书任务… has its reading rejected through the one-shot promise hook.
+      // A long error on the manuscript, with the drawer open and then closed: the bar wraps (a long one scrolls inside it), stays
+      // clear of every control, the sidebar and the drawer, the manuscript keeps its height, and the last line can be scrolled
+      // clear of it. The fault is armed apart from the press: the next 发起全书任务… has its reading rejected (one-shot hook).
       const LONG_FAILURE = '任务撰写没有打开：本机业务服务暂时没有回答，请稍后再试；这条说明故意写得很长，用来确认它在稿件页里自行折行，既不超出窗口，也不压住稿件的控件、侧栏或任务栏。'.repeat(5);
-      // Folding the sidebar widens the page, and the toolbar may wrap differently: the icons form has its own baseline, taken
-      // before the error is raised.
-      await clickVisibleControl(renderer, '#sidebar-toggle', 'status-bar-baseline-fold');
-      await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons'`, 'status-bar-baseline-folded');
-      requireJourney(await renderer.evaluate(SETTLED) === true, 'status-bar-baseline-folded-settled');
-      const quietIcons = await renderer.evaluate(barLayout);
-      await clickVisibleControl(renderer, '#sidebar-toggle', 'status-bar-baseline-open');
-      await waitFor(renderer, `document.documentElement.dataset.sidebar !== 'icons'`, 'status-bar-baseline-opened');
-      requireJourney(await renderer.evaluate(SETTLED) === true, 'status-bar-baseline-opened-settled');
       await waitFor(renderer, `document.querySelector('#task-drawer .task-panel [data-task-compose-action="compose"]')?.disabled === false`, 'status-bar-compose-ready');
       await assertRenderer(renderer, `(() => {
         const arm = (event) => {
@@ -2287,28 +2285,25 @@ async function main() {
       })()`, 'status-bar-long-arm');
       await clickVisibleControl(renderer, '#task-drawer .task-panel [data-task-compose-action="compose"]', 'status-bar-long-press');
       await waitFor(renderer, `(() => { const bar = document.querySelector('#persistence-status'); return !bar.hidden && bar.dataset.tone === 'error' && bar.textContent.startsWith('任务撰写没有打开') && document.documentElement.dataset.statusBar === 'shown'; })()`, 'status-bar-long-shown');
-      for (const form of ['full', 'icons']) {
-        if (form === 'icons') {
-          await clickVisibleControl(renderer, '#sidebar-toggle', 'status-bar-long-fold-sidebar');
-          await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons'`, 'status-bar-long-folded');
+      for (const form of ['drawer', 'page']) {
+        if (form === 'page') {
+          await clickVisibleControl(renderer, '#task-drawer [data-task-drawer-control="close"]', 'status-bar-long-drawer-close');
+          await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden !== false`, 'status-bar-long-drawer-closed');
         }
+        requireJourney(await renderer.evaluate(SETTLED) === true, `status-bar-long-settled-${form}`);
         const longClear = `${statusBarClear(MANUSCRIPT_CONTROLS)} && ${LAST_LINE_CLEAR} && (() => { const line = document.querySelector('#persistence-status .status-line'); return line.scrollHeight > line.clientHeight && document.querySelector('#persistence-status').getBoundingClientRect().height <= innerHeight / 4; })()`;
         try {
           await waitFor(renderer, longClear, `status-bar-long-clear-${form}`, 30_000);
         } catch {
           requireJourney(false, `status-bar-long-clear-${form}`, { overlaps: await renderer.evaluate(statusBarOverlaps(MANUSCRIPT_CONTROLS)), lastLine: await renderer.evaluate(LAST_LINE_CLEAR) });
         }
-        requireJourney(await renderer.evaluate(SETTLED) === true, `status-bar-long-settled-${form}`);
         const long = await renderer.evaluate(barLayout);
-        const before = form === 'full' ? quiet : quietIcons;
+        const before = form === 'drawer' ? quiet : quietPage;
         requireJourney(long?.inView === true && long.shell === before?.shell && long.surface === before?.surface, `status-bar-long-layout-${form}`, { before, long });
       }
-      await clickVisibleControl(renderer, '#sidebar-toggle', 'status-bar-long-open-sidebar');
-      await waitFor(renderer, `document.documentElement.dataset.sidebar !== 'icons'`, 'status-bar-long-opened');
       await clickVisibleControl(renderer, '#persistence-status .status-dismiss', 'status-bar-long-dismiss');
       await waitFor(renderer, `document.querySelector('#persistence-status').hidden === true && document.documentElement.dataset.statusBar === undefined`, 'status-bar-long-dismissed');
-      if (await renderer.evaluate(`document.querySelector('#task-drawer')?.hidden === false`)) await clickVisibleControl(renderer, '#task-drawer [data-task-drawer-control="close"]', 'status-bar-drawer-close');
-      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'status-bar-drawer-closed');
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden !== false`, 'status-bar-drawer-closed');
     }
     await renderer.send('Emulation.clearDeviceMetricsOverride');
     // The close and what follows it are their own stages: left under the last j14 step, a failure to

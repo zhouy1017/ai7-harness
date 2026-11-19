@@ -806,6 +806,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   'J-08': Object.freeze([
     'comments-inline-reply-column',
     'comments-inline-reply-overlay',
+    'comments-connector-reply-overlay',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
@@ -1121,6 +1122,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'book-findings-disposition',
     'review-report',
     'review-report-export',
+    'review-report-export-wide',
+    'review-report-export-gate',
     'review-coverage-moves',
     // Issue #425 (S70): 资料与记录 › 来源与证据 reads this Book's provider-free answer — nothing retained, nothing to save.
     'research-evidence-source-view',
@@ -1129,6 +1132,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Issue #1022: the authorized overlap/Unicode mark, Apply and reversal variation.
     'review-overlap-relaunch',
     'review-overlap-synthetic-edits',
+    // Issue #1506: 生成统合总结 on the overlap Book's 暂缺 summary, at both window sizes.
+    'review-synthesis-only',
+    'review-synthesis-only-wide',
+    'review-synthesis-only-gate',
     // Issue #1430: 导出审阅报告（DOCX） in one click on the overlap Book, its published DOCX read back.
     'review-report-docx-one-step',
     // Issue #901: 事实核查 at its levels on a fresh sample1 Book — the selector, the Evidence Workspace, a review decision, a
@@ -1149,6 +1156,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   'J-05': Object.freeze([
     'comments-inline-apply-column',
     'comments-inline-apply-overlay',
+    'comments-connector-apply-overlay',
+    // Issue #1523: 下一条待处理 across pages, keyboard triage and the Book's count, docked and as the overlay.
+    'comments-triage-column',
+    'comments-triage-overlay',
     'editor-revision',
     'ai-locks',
     'scoped-dispatch-wide',

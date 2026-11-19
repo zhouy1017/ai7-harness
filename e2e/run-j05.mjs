@@ -1,5 +1,5 @@
 import { chooseDispatch } from './dispatch-chooser.mjs';
-import { commentsPaneForms, commentsSelectMark } from './comments-pane.mjs';
+import { commentsPaneForms, commentsSelectMark, commentsTriageForms } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { existsSync } from 'node:fs';
@@ -82,6 +82,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-05' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -570,6 +571,8 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'dispatch-chooser-back-to-text');
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'dispatch-chooser-back-ready');
     await renderer.evaluate(`window.ai7.removeModelServiceCredential()`);
+    fastCredentialSaved = false;
+    fastCredentialReference = undefined;
     at('selection-menu-empty');
 
     // Two paragraphs long enough to mark, whose first 80 code units are 80 graphemes.
@@ -1160,6 +1163,7 @@ async function main() {
     await settled(renderer, 'local-workflow-settled');
 
     await commentsPaneForms(renderer, requireJourney, waitFor, at, 'apply');
+    await commentsTriageForms(renderer, requireJourney, waitFor, at);
 
     at('editor-revision');
     // Inline revision editing (#1428): ordinary input creates cards after settle, with automatic application or pending redlines.
@@ -1216,6 +1220,7 @@ async function main() {
     at('ai-locks');
     // Earlier missing-connection checks removed the placeholder. Restore it before opening the chooser; locked text
     // is still refused before execution, so this stage sends no model request.
+    fastCredentialSaved = true;
     fastCredentialReference = await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}}).then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.connection?.credentialReference)`);
     requireJourney(typeof fastCredentialReference==='string','scoped-placeholder-reference');
     // 🔒 锁定 (Issue #1412) in ordinary mode: the selection's paragraph is locked from the menu and drawn with its badge; the menu then
@@ -1234,7 +1239,14 @@ async function main() {
       for (const [width, height] of [[1280, 800], [1008, 681]]) {
         at(width===1280 ? 'scoped-dispatch-wide' : 'scoped-dispatch-gate');
         await renderer.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
-        await assertRenderer(renderer, `(async () => {const form=document.querySelector('[data-scoped-ai-edit="composer"]');form.scrollIntoView({block:'nearest'});await new Promise(resolve=>requestAnimationFrame(resolve));const summary=form.querySelector('.dispatch-chooser summary');summary.focus();const button=form.querySelector('[data-scoped-ai-edit="submit"]'),box=button.getBoundingClientRect();return document.activeElement===summary && summary.textContent.startsWith('模型 ') && box.left>=0 && box.top>=0 && box.right<=innerWidth && box.bottom<=innerHeight && form.scrollWidth<=form.clientWidth;})()`, 'scoped-launch-controls-reachable');
+        // #1542: the reading measure decides the sidebar's form after the resize has laid out, so the composer settles a frame or two
+        // later (at 1008 the full sidebar first stands beside the docked 批注栏). Wait for that form and two still frames, then check.
+        const resized = `(() => { const root=document.documentElement, form=document.querySelector('[data-scoped-ai-edit="composer"]'); return {rightColumn:root.dataset.rightColumn??null,sidebar:root.dataset.sidebar??null,fits:form?form.scrollWidth<=form.clientWidth:null}; })()`;
+        if (localDebugEnabled()) recordDebugDetail('J-05', `scoped composer right after ${width}x${height}: ${JSON.stringify(await renderer.evaluate(resized))}`);
+        await waitFor(renderer, `innerWidth===${width} && innerHeight===${height} && (!['icons','overlay'].includes(document.documentElement.dataset.rightColumn) || document.documentElement.dataset.sidebar==='icons') && new Promise(resolve=>{const box=()=>JSON.stringify(document.querySelector('[data-scoped-ai-edit="composer"]')?.getBoundingClientRect());const first=box();requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(first!==undefined&&box()===first)));})`, 'scoped-dispatch-settled');
+        // The same conjunction as before, returned with its parts so a failure says which one held.
+        const reachable = await renderer.evaluate(`(async () => {const form=document.querySelector('[data-scoped-ai-edit="composer"]');if(!form)return {pass:false,form:false,rightColumn:document.documentElement.dataset.rightColumn??null};form.scrollIntoView({block:'nearest'});await new Promise(resolve=>requestAnimationFrame(resolve));const summary=form.querySelector('.dispatch-chooser summary');summary.focus();const button=form.querySelector('[data-scoped-ai-edit="submit"]'),box=button.getBoundingClientRect();const focused=document.activeElement===summary,label=summary.textContent,inView=box.left>=0 && box.top>=0 && box.right<=innerWidth && box.bottom<=innerHeight,fits=form.scrollWidth<=form.clientWidth;return {pass:focused && label.startsWith('模型 ') && inView && fits,focused,active:document.activeElement?.className??null,label,inView,box:[box.left,box.top,box.right,box.bottom],viewport:[innerWidth,innerHeight],fits,scrollWidth:form.scrollWidth,clientWidth:form.clientWidth,rightColumn:document.documentElement.dataset.rightColumn??null,sidebar:document.documentElement.dataset.sidebar??null};})()`);
+        requireJourney(reachable?.pass === true, 'scoped-launch-controls-reachable', reachable);
         await chooseDispatch(renderer, waitFor, '[data-scoped-ai-edit="composer"] .dispatch-chooser', 'scoped-dispatch-pointer');
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }

@@ -52,8 +52,9 @@ export const SIDEBAR_ICONS_ONLY_BELOW_PX = 760;
 
 export type SidebarMode = 'full' | 'icons';
 
-export function sidebarMode(collapsed: boolean, narrow: boolean): SidebarMode {
-  return collapsed || narrow ? 'icons' : 'full';
+/** The sidebar's automatic icon form: a right-hand column needs the width, without writing the editor's own preference. */
+export function sidebarMode(collapsed: boolean, narrow: boolean, autoIcons = false): SidebarMode {
+  return collapsed || narrow || autoIcons ? 'icons' : 'full';
 }
 
 /** The screen states that are global destinations or 设置 pages; a Book screen says its own place instead. */
@@ -518,13 +519,18 @@ export function mountShell(options: MountShellOptions): ShellSurface {
 
   const applyMode = (): void => {
     const narrow = narrowQuery.matches;
-    const mode = sidebarMode(preferences.current['shell.sidebarCollapsed'], narrow);
+    // The manuscript screen's measure observer states the automatic icon form on `:root` (never a preference):
+    // a right-hand column is open and needs the full width, so the sidebar shows icons for as long as it stays open.
+    const column = document.documentElement.dataset['rightColumn'];
+    const autoIcons = column === 'icons' || column === 'overlay';
+    const mode = sidebarMode(preferences.current['shell.sidebarCollapsed'], narrow, autoIcons);
     const root = document.documentElement;
     root.dataset['sidebar'] = mode;
     root.dataset['sidebarCollapsed'] = String(preferences.current['shell.sidebarCollapsed']);
-    options.toggle.disabled = narrow;
+    // Under the automatic icon form a click could change nothing visible, so the toggle says why it waits; the preference stays as it was.
+    options.toggle.disabled = narrow || autoIcons;
     options.toggle.setAttribute('aria-expanded', String(mode === 'full'));
-    options.toggle.setAttribute('aria-label', narrow ? SHELL_LABELS.narrow : mode === 'full' ? SHELL_LABELS.collapse : SHELL_LABELS.expand);
+    options.toggle.setAttribute('aria-label', narrow ? SHELL_LABELS.narrow : autoIcons ? SHELL_LABELS.column : mode === 'full' ? SHELL_LABELS.collapse : SHELL_LABELS.expand);
     options.toggle.title = options.toggle.getAttribute('aria-label') ?? '';
     // A collapsed row says its name on hover too; a full row shows it already.
     for (const link of sidebar.querySelectorAll<HTMLElement>('.sidebar-link')) {
@@ -579,6 +585,10 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     });
   });
   narrowQuery.addEventListener('change', applyMode);
+  // The automatic icon form changes with the manuscript screen's measure state, never with a preference write.
+  const rightColumnObserver = typeof MutationObserver === 'undefined' ? undefined
+    : new MutationObserver(() => applyMode());
+  rightColumnObserver?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-right-column'] });
   preferences.subscribe((values) => paintBooks(values));
   paintBooks(preferences.current);
   paintActive();

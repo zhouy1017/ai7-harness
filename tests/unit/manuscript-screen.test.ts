@@ -8,6 +8,8 @@ import { mountManuscriptScreen, type ManuscriptScreen } from '../../src/renderer
 import { NavigationGeneration, reconcileBookWorkbenchApi } from '../../src/renderer/navigation-generation.js';
 import type { mountBoundedEditor } from '../../src/renderer/editor.js';
 import { readReturnPlace } from '../../src/renderer/reading-return.js';
+import { mountTaskDrawer, type MountTaskDrawerOptions } from '../../src/renderer/task-drawer.js';
+import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import type { ManuscriptRailProjection, ManuscriptWindowProjection, RendererApi } from '../../src/shared/protocol.js';
 
@@ -21,10 +23,11 @@ type EditorState = Parameters<EditorOptions['onStateChange']>[0];
 
 const children = vi.hoisted(() => ({
   failAt: null as 'modes' | 'editor' | null,
+  realParagraphAnalysis: false,
   destroyed: [] as string[],
   editors: [] as unknown[],
   editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn> }>,
-  marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn> }>,
+  marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn>; bookPendingChanged: ReturnType<typeof vi.fn>; refreshComments: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
   writingStates: [] as Array<(state: { underWay: boolean; drafted: number }) => void>,
   rails: [] as Array<{ onRead?: (rail: ManuscriptRailProjection) => void }>,
@@ -53,10 +56,14 @@ vi.mock('../../src/renderer/save-menu.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/save-menu.js')>(),
   createSaveMenu: () => ({ element: document.createElement('details'), update: vi.fn(), destroy: () => children.destroyed.push('save-menu') }),
 }));
-vi.mock('../../src/renderer/paragraph-analysis.js', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../src/renderer/paragraph-analysis.js')>(),
-  mountParagraphAnalysis: () => ({ refresh: vi.fn(), close: vi.fn(), toggle: vi.fn(), destroy: () => children.destroyed.push('paragraph-analysis') }),
-}));
+vi.mock('../../src/renderer/paragraph-analysis.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/renderer/paragraph-analysis.js')>();
+  return {
+    ...original,
+    mountParagraphAnalysis: (options: Parameters<typeof original.mountParagraphAnalysis>[0]) => children.realParagraphAnalysis ? original.mountParagraphAnalysis(options)
+      : { refresh: vi.fn(), close: vi.fn(), toggle: vi.fn(), destroy: () => children.destroyed.push('paragraph-analysis') },
+  };
+});
 vi.mock('../../src/renderer/position-rail.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/position-rail.js')>(),
   mountPositionRail: (options: { onRead?: (rail: ManuscriptRailProjection) => void }) => {
@@ -71,6 +78,7 @@ vi.mock('../../src/renderer/editorial-marks.js', async (importOriginal) => ({
       selectionSpan: vi.fn(), composeProcedures: vi.fn(), openMark: vi.fn(async () => undefined), holdsFloating: () => false,
       ownsScroll: () => false, refreshComments: vi.fn(), reanchor: vi.fn(), destroy: () => children.destroyed.push('marks'),
       quickRevise: vi.fn(() => false), revealRevision: vi.fn(async () => undefined), recordAndApplyEditorRevision: vi.fn(async () => 'mark-applied'),
+      stepPending: vi.fn(async () => undefined), bookPendingChanged: vi.fn(),
     };
     children.marks.push(surface);
     return surface;
@@ -163,7 +171,7 @@ function shell(rendererApi = api) {
     viewPreferences: {} as ScreenOptions['viewPreferences'],
     preferences: { current: { 'analysis.lastViewedRevision': {} }, viewAnalysis: vi.fn() } as unknown as ScreenOptions['preferences'],
     commandDispatcher: { register: () => () => children.destroyed.push('commands') } as unknown as ScreenOptions['commandDispatcher'],
-    taskDrawer: { close: vi.fn(), openPanel: vi.fn(), openDialogue: vi.fn(), openComposer: vi.fn() } as unknown as ScreenOptions['taskDrawer'],
+    taskDrawer: { isOpen: () => false, setColumnVisible: vi.fn(), close: vi.fn(), openPanel: vi.fn(), openDialogue: vi.fn(), openComposer: vi.fn() } as unknown as ScreenOptions['taskDrawer'],
     interrupted: () => false,
     attach: (content, surface) => { replace(content); showing = surface; },
     setContextActions: (...nodes) => contextView.replaceChildren(...nodes), setStatus, setCloseRisk: (risk) => { closeRisk = risk; },
@@ -195,6 +203,7 @@ beforeEach(() => {
     createTextNode: (text: string) => { const node = new MiniElement('#text'); node.textContent = text; return node; },
   }));
   children.failAt = null;
+  children.realParagraphAnalysis = false;
   children.destroyed.length = 0;
   children.editors.length = 0;
   children.editorSurfaces.length = 0;
@@ -485,6 +494,25 @@ describe('the Manuscript screen lifecycle', () => {
     app.showing?.destroy();
   });
 
+  it('badges 批注 with the Book\'s pending marks from the rail, 2000+ once the list stops there, and never before it was read (#1523)', async () => {
+    const app = shell();
+    app.open(windowOf('book-one'));
+    const badge = app.screen.querySelector<HTMLElement>('[data-edge-entry="comments"] .edge-badge')!;
+    expect(badge.hidden).toBe(true);
+    const rail = (count: number, marksTruncated: boolean): ManuscriptRailProjection => ({ manuscriptId: 'm', branchId: 'b', revisionId: 'r', journalSequence: 1,
+      totalCharacters: 100, chapters: [], chaptersTruncated: false, uncovered: null, marksTruncated,
+      marks: Array.from({ length: count }, (_, index) => ({ kind: 'annotation' as const, blockId: `blk_${index}`, proportion: index / 100 })) });
+    children.rails.at(-1)!.onRead!(rail(3, false));
+    expect([badge.hidden, badge.dataset['count']]).toEqual([false, '3']);
+    expect(children.marks.at(-1)!.bookPendingChanged).toHaveBeenCalled();
+    children.rails.at(-1)!.onRead!(rail(2000, true));
+    expect(badge.dataset['count']).toBe('2000+');
+    expect(app.screen.querySelector('[data-edge-entry="comments"]')!.getAttribute('aria-label')).toBe('批注 · 2000+');
+    children.rails.at(-1)!.onRead!(rail(0, false));
+    expect(badge.hidden).toBe(true);
+    app.showing?.destroy();
+  });
+
   it('counts a chapter\'s marks only where it has some, and the outline\'s own headings in its footer', async () => {
     Object.defineProperty(MiniElement.prototype, 'style', { configurable: true, value: { setProperty: vi.fn() } });
     try {
@@ -652,5 +680,150 @@ describe('a derivative document on 稿件 (Issues #1403–#1405)', () => {
     expect(app.screen.querySelector('.document-title-heading')?.textContent).toBe('首发通稿');
     expect(app.screen.querySelector('.document-title-input')).toBeNull();
     app.showing?.destroy();
+  });
+});
+
+vi.mock('../../src/renderer/right-column.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../src/renderer/right-column.js')>(),
+  mountColumnMeasure: () => ({ destroy: vi.fn() }),
+}));
+
+/** The shell around the screen with the real drawer, wired as `index.ts` wires them, and in `replaceScreen`'s order. */
+function columnShell() {
+  vi.stubGlobal('window', { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout, setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval, getSelection: () => null });
+  const app = shell();
+  let showing: ManuscriptScreen | null = null;
+  const drawerRoot = document.createElement('aside');
+  document.body.append(drawerRoot);
+  const drawer = mountTaskDrawer({
+    root: drawerRoot, shell: document.body, api, technicalDetails: () => document.createElement('div'),
+    errorMessage: (_error: unknown, fallback: string) => fallback, errorCode: () => null, setStatus: vi.fn(), settle: async () => true,
+    resumeDraft: (_bookId: string, resume: () => void) => resume(), onRecorded: vi.fn(),
+    onOpen: () => showing?.closeSupportingPanel(), onClose: () => showing?.restoreSupportingPanel(),
+  } as unknown as MountTaskDrawerOptions);
+  const open = (initialWindow: ManuscriptWindowProjection, extra: Partial<ScreenOptions> = {}): void => app.open(initialWindow, {
+    taskDrawer: drawer,
+    // replaceScreen: the departing screen is destroyed and the handle cleared, the drawer follows, then the handle is installed.
+    attach: (content, surface) => {
+      showing?.destroy(); showing = null;
+      app.screen.replaceChildren(content);
+      drawer.followScreen('editor', content.dataset['bookId'] ?? null);
+      showing = surface;
+    },
+    ...extra,
+  });
+  const pane = (): HTMLElement => app.screen.querySelector<HTMLElement>('.manuscript-comments-pane')!;
+  const entry = (name: string): HTMLButtonElement => app.screen.querySelector<HTMLButtonElement>(`[data-edge-entry="${name}"]`)!;
+  return { ...app, open, drawer, drawerRoot, pane, entry, get showing(): ManuscriptScreen | null { return showing; } };
+}
+
+describe('the one right-hand column (#1542)', () => {
+  let setItem: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    setItem = vi.fn();
+    vi.stubGlobal('localStorage', { getItem: () => 'true', setItem });
+  });
+
+  it('lets 分析, the 任务 panel and every drawer view replace the 批注栏 and give it back, without a preference write', () => {
+    children.realParagraphAnalysis = true;
+    let commands: Record<string, () => void> = {};
+    const app = columnShell();
+    app.open(windowOf('book-one'), {
+      commandDispatcher: { register: (handlers: typeof commands) => { commands = handlers; return () => {}; } } as unknown as ScreenOptions['commandDispatcher'],
+    });
+    const analysis = app.screen.querySelector<HTMLElement>('.paragraph-analysis-panel')!;
+    const marks = children.marks.at(-1)!;
+    const shows = (): unknown[] => [app.pane().hidden, analysis.hidden, app.drawerRoot.hidden];
+    expect(shows()).toEqual([false, true, true]);
+    app.entry('analysis').click();
+    expect(shows()).toEqual([true, false, true]);
+    // The pane is replaced, so its edge entry does not say it is open.
+    expect(app.entry('comments').getAttribute('aria-expanded')).toBe('false');
+    marks.refreshComments.mockClear();
+    analysis.dispatchEvent({ type: 'keydown', key: 'Escape' } as never);
+    expect(shows()).toEqual([false, true, true]);
+    expect(marks.refreshComments).toHaveBeenCalled();
+    app.entry('analysis').click(); app.entry('analysis').click();
+    expect(shows()).toEqual([false, true, true]);
+
+    app.entry('tasks').click();
+    expect(shows()).toEqual([true, true, false]);
+    app.entry('tasks').click();
+    expect(shows()).toEqual([false, true, true]);
+    const views: Array<[string, () => void]> = [
+      ['plan', () => app.drawer.open({ bookId: 'book-one', kind: 'baseline-analysis', ref: 'plan' }, () => null)],
+      ['run', () => app.drawer.open({ bookId: 'book-one', kind: 'baseline-analysis', ref: 'plan' }, () => null, undefined, { view: 'run' })],
+      ['dialogue', () => app.drawer.openDialogue('book-one', 'dialogue-1', () => null)],
+      ['composer', () => app.drawer.openComposer({ bookId: 'book-one', bookTitle: '合成书', origin: 'composer-book', manuscript: null, ranges: [] }, () => null)],
+      ['launch', () => app.drawer.openLaunch({ operation: 'launchBaselineAnalysis', bookId: 'book-one', title: '分析', input: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } }, () => null)],
+    ];
+    for (const [view, openView] of views) {
+      openView();
+      expect([view, ...shows()]).toEqual([view, true, true, false]);
+      app.drawer.close(false);
+      expect([view, ...shows()]).toEqual([view, false, true, true]);
+    }
+
+    // Nested: 导航 over the drawer suspends it, closing 导航 brings the drawer back, closing that brings the pane back.
+    app.entry('tasks').click();
+    app.entry('navigation').click();
+    const outline = app.screen.querySelector<HTMLElement>('.manuscript-navigator:not(.paragraph-analysis-panel)')!;
+    expect([app.pane().hidden, app.drawerRoot.hidden, outline.hidden]).toEqual([true, true, false]);
+    app.entry('navigation').click();
+    expect(shows()).toEqual([true, true, false]);
+    app.drawer.close(false);
+    for (const key of ['search.find', 'edit.replace']) {
+      commands[key]!(); expect(app.pane().hidden).toBe(true);
+      app.entry('navigation').click(); expect(app.pane().hidden).toBe(false);
+    }
+    expect(setItem).not.toHaveBeenCalled();
+    app.screen.querySelector<HTMLButtonElement>('[aria-label="关闭批注栏"]')!.click();
+    expect(setItem).toHaveBeenCalledWith('ai7.comments-pane.book-one', 'false');
+    app.showing!.destroy();
+  });
+
+  it('reads the cards again when the pane comes back: after arriving with the drawer open, and after a marks change while replaced', () => {
+    const app = columnShell();
+    app.open(windowOf('book-one'));
+    app.drawer.openPanel('book-one', () => null);
+    app.open(windowOf('book-one'));
+    expect([app.pane().hidden, app.drawerRoot.hidden]).toEqual([true, false]);
+    const arrived = children.marks.at(-1)!;
+    arrived.refreshComments.mockClear();
+    app.drawer.close(false);
+    expect(app.pane().hidden).toBe(false);
+    expect(arrived.refreshComments).toHaveBeenCalled();
+
+    app.entry('navigation').click();
+    app.showing!.refreshMarks();
+    arrived.refreshComments.mockClear();
+    app.entry('navigation').click();
+    expect(app.pane().hidden).toBe(false);
+    expect(arrived.refreshComments).toHaveBeenCalled();
+    app.showing!.destroy();
+  });
+
+  it('shows the next Book its own pane when the drawer closes for it', () => {
+    const app = columnShell();
+    app.open(windowOf('book-a'));
+    app.drawer.openPanel('book-a', () => null);
+    expect(app.pane().hidden).toBe(true);
+    app.open(windowOf('book-b'));
+    expect([app.pane().hidden, app.drawerRoot.hidden]).toEqual([false, true]);
+    app.showing!.destroy();
+  });
+
+  it('never shows the pane beside the drawer when the same Book mounts again under a suspended drawer', () => {
+    const app = columnShell();
+    app.open(windowOf('book-a'));
+    app.drawer.openPanel('book-a', () => null);
+    app.entry('navigation').click();
+    expect(app.drawerRoot.hidden).toBe(true);
+    app.open(windowOf('book-a'));
+    expect([app.pane().hidden, app.drawerRoot.hidden]).toEqual([true, false]);
+    app.drawer.close(false);
+    expect([app.pane().hidden, app.drawerRoot.hidden]).toEqual([false, true]);
+    expect(setItem).not.toHaveBeenCalled();
+    app.showing!.destroy();
   });
 });

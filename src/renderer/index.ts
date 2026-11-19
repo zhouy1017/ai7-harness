@@ -150,7 +150,7 @@ const taskDrawer = mountTaskDrawer({
   onOpen: () => {
     manuscriptOnScreen?.closeSupportingPanel();
     if (taskDrawer.view()?.kind === 'launch') taskResultWindow?.close(false);
-  },
+  }, onClose: () => manuscriptOnScreen?.restoreSupportingPanel(),
   onRecorded: (kind, bookId, ref) => {
     taskSurfaceRefresh[kind]?.();
     taskOverviewSurface?.refresh();
@@ -948,6 +948,8 @@ function setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void {
   statusRevision += 1;
   statusSurface(message, tone);
 }
+/** `StatusSetter.settle`: no new status is said, so the status revision stays as it is. */
+setStatus.settle = (message: string): void => statusSurface.settle(message);
 
 /**
  * The button or link the editor activated last, for a refusal said beside it (Issue #951; DUR-005). Read at activation, before

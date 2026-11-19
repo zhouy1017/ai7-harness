@@ -57,6 +57,7 @@ import { focusMode, mountEditorModes, type EditorModes } from './editor-modes.js
 import { mountProtectionSurface, type ProtectionSurface } from './editor-protection.js';
 import { PROTECTION_CLOSE_BLOCKED } from './editor-protection-labels.js';
 import { type ViewPreferences, mountRegionSeparator } from './layout.js';
+import { createRightColumn, mountColumnMeasure, type RightColumnReplacer } from './right-column.js';
 import { type SelectionProcedureEntry, type SelectionTaskChoice, type SelectionTaskChoices, SELECTION_TASK_PICK_RANGE } from './selection-task-labels.js';
 import { marksRefreshStep } from './marks-refresh.js';
 import { mountEditorialMarks, type EditorialMarksSurface, type SelectionSpanReading } from './editorial-marks.js';
@@ -91,6 +92,8 @@ export interface ManuscriptScreen {
   settle(): Promise<boolean>;
   isComposing(): boolean;
   closeSupportingPanel(): void;
+  /** The drawer closed: bring back the 批注栏 it temporarily replaced (no preference write). */
+  restoreSupportingPanel(): void;
   followReviewMarks(bookId: string, reviewRunId: string | undefined): void;
   interrupt(): void;
   blockedClose(): boolean;
@@ -215,6 +218,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   let taskBadgeReading = false;
 
   let destroyed = false;
+  let columnMeasure: { destroy(): void } | undefined;
   let currentWindow = initialWindow;
   let editor: BoundedEditor | undefined;
   let editorialMarks: EditorialMarksSurface | undefined;
@@ -812,8 +816,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   analysisEntry.dataset['edgeEntry'] = 'analysis';
   analysisEntry.title = PARAGRAPH_ANALYSIS_WORDS.entry;
   // 任务 (Issue #423, S77a; TASK-044): the Book's 任务 panel in the side slot, and closed again from here.
+  // Opening the panel temporarily replaces the 批注栏 through the drawer's onOpen → closeSupportingPanel; closing it restores it.
   const tasksEntry = button('任务', 'quiet', () => {
-    setCommentsOpen(false);
     const showing = taskDrawer.view();
     if (showing?.kind === 'panel' && showing.bookId === initialWindow.bookId) {
       taskDrawer.close(true);
@@ -830,15 +834,26 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   commentsPane.id = 'manuscript-comments-pane';
   commentsPane.setAttribute('aria-label', '批注栏');
   const commentsKey = `ai7.comments-pane.${initialWindow.bookId}`;
-  let commentsOpen = globalThis.localStorage?.getItem(commentsKey) === 'true';
-  commentsPane.hidden = !commentsOpen;
-  const commentsEntry = button('批注', 'quiet', () => setCommentsOpen(!commentsOpen));
+  const rightColumn = createRightColumn(globalThis.localStorage?.getItem(commentsKey) === 'true');
+  const applyCommentsState = (): void => {
+    const open = rightColumn.commentsVisible();
+    commentsPane.hidden = !open;
+    const active = rightColumn.state().commentsReplacedBy;
+    navigator.hidden = active !== 'navigation';
+    analysisPanel.hidden = active !== 'analysis';
+    navigationEntry.setAttribute('aria-expanded', String(active === 'navigation'));
+    analysisEntry.setAttribute('aria-expanded', String(active === 'analysis'));
+    workspace.dataset['navigation'] = active === 'navigation' ? 'open' : 'closed';
+    taskDrawer.setColumnVisible(!rightColumn.suspended('drawer'));
+    commentsEntry.setAttribute('aria-expanded', String(open));
+    options.contextView.querySelector('[data-view-command="toggle-comments"]')?.setAttribute('aria-pressed', String(open));
+  };
+  const commentsEntry = button('批注', 'quiet', () => setCommentsOpen(!rightColumn.commentsVisible()));
   commentsEntry.dataset['edgeEntry'] = 'comments';
   commentsEntry.dataset['shortcutCommand'] = 'view.comments';
   commentsEntry.dataset['shortcutBase'] = '批注栏';
   commentsEntry.title = `批注栏（${shortcutHint('view.comments') ?? ''}）`;
   commentsEntry.setAttribute('aria-controls', commentsPane.id);
-  commentsEntry.setAttribute('aria-expanded', String(commentsOpen));
   const commentsFocusOff = focusMode.subscribe(() => editorialMarks?.refreshComments());
   const commentsHeading = element('header', 'manuscript-comments-heading');
   const commentsClose = button('×', 'quiet', () => { setCommentsOpen(false); commentsEntry.focus(); });
@@ -846,15 +861,25 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   commentsClose.title = '关闭批注栏';
   commentsHeading.append(element('strong', undefined, '批注'), commentsClose);
   commentsPane.append(commentsHeading);
-  function setCommentsOpen(open: boolean): void {
-    commentsOpen = open;
-    commentsPane.hidden = !open;
-    commentsEntry.setAttribute('aria-expanded', String(open));
-    options.contextView.querySelector('[data-view-command="toggle-comments"]')?.setAttribute('aria-pressed', String(open));
-    globalThis.localStorage?.setItem(commentsKey, String(open));
-    if (open) { setNavigationOpen(false); localParagraphPanel?.close(); taskDrawer.close(false); }
+  applyCommentsState();
+  // The explicit path (the pane's ×, its edge entry, the 视图 command): writes the stored preference, and, on opening,
+  // closes the other surfaces. The temporary replace/restore below never writes it.
+  function setCommentsOpen(open: boolean, savePreference = true): void {
+    rightColumn.setCommentsOpen(open);
+    if (savePreference) globalThis.localStorage?.setItem(commentsKey, String(open));
+    if (open) { taskDrawer.close(false); localParagraphPanel?.close(); setNavigationOpen(false); }
+    applyCommentsState();
     editorialMarks?.refreshComments(open);
   }
+  // A pane that comes back reads its cards again: they were not read, or were cleared by a marks change, while it was replaced.
+  function switchColumn(change: () => void): void {
+    const visible = rightColumn.commentsVisible();
+    change();
+    applyCommentsState();
+    if (rightColumn.commentsVisible() !== visible) editorialMarks?.refreshComments();
+  }
+  function replaceComments(replacer: RightColumnReplacer): void { switchColumn(() => rightColumn.replaceComments(replacer)); }
+  function restoreComments(replacer: RightColumnReplacer): void { switchColumn(() => rightColumn.restoreComments(replacer)); }
   const edgeEntries = element('div', 'edge-entries');
   for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-analysis'], [tasksEntry, 'i-task'], [commentsEntry, 'i-comment']] as const) {
     const label = element('span', 'edge-label', entry.textContent ?? '');
@@ -891,11 +916,10 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   workspace.append(manuscript, ...(documentLens === undefined ? [] : [documentLens.element]), navigator, ...(isDocument ? [commentsPane] : [analysisPanel, commentsPane]), edge);
 
   const setNavigationOpen = (open: boolean): void => {
-    // One supporting side surface at a time (IA): 导航 opening closes the Task Drawer beside the manuscript.
-    if (open) { taskDrawer.close(false); localParagraphPanel?.close(); setCommentsOpen(false); }
-    navigator.hidden = !open;
-    navigationEntry.setAttribute('aria-expanded', open ? 'true' : 'false');
-    workspace.dataset['navigation'] = open ? 'open' : 'closed';
+    // Keep the previous supporting column in memory so closing navigation restores it.
+    if (open) replaceComments('navigation');
+    else restoreComments('navigation');
+
     if (open && navigationMode === 'outline') { paintOutline(); revealCurrentChapter(); }
   };
   navigator.addEventListener('keydown', (event) => {
@@ -969,9 +993,10 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     settle: () => (editor === undefined ? Promise.resolve(!destroyed) : settle()),
     isComposing: () => editor?.isComposing() === true,
     closeSupportingPanel: () => {
-      if (!navigator.hidden) setNavigationOpen(false);
-      if (commentsOpen) setCommentsOpen(false);
-      localParagraphPanel?.close();
+      replaceComments('drawer');
+    },
+    restoreSupportingPanel: () => {
+      restoreComments('drawer');
     },
     followReviewMarks,
     interrupt: () => editor?.interrupt(),
@@ -986,6 +1011,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   };
   // The shell captures/destroys the departing screen and installs this handle before DOM-dependent mounting and focus.
   options.attach(content, surface);
+  // Only now has the shell decided whether the drawer stays beside this screen (it closes for another Book).
+  if (taskDrawer.isOpen()) replaceComments('drawer'); else restoreComments('drawer');
   // 专注 and 视图 in the context header, and the protection surface first beside them (Issue #951; ED-004, DUR-003, VIEW-012).
   editorModes = mountEditorModes({
     host: options.contextView,
@@ -993,8 +1020,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     focus: focusMode,
     rail: true,
     openNavigation: () => setNavigationOpen(true),
-    ...(isDocument ? { toggleComments: () => { focusMode.leave(); setCommentsOpen(!commentsOpen); }, commentsOpen: () => commentsOpen }
-      : { openTasks: () => { setCommentsOpen(false); taskDrawer.openPanel(initialWindow.bookId, () => tasksEntry); }, toggleComments: () => { focusMode.leave(); setCommentsOpen(!commentsOpen); }, commentsOpen: () => commentsOpen }),
+    ...(isDocument ? { toggleComments: () => { focusMode.leave(); setCommentsOpen(!rightColumn.commentsVisible()); }, commentsOpen: () => rightColumn.commentsVisible() }
+      : { openTasks: () => { taskDrawer.openPanel(initialWindow.bookId, () => tasksEntry); }, toggleComments: () => { focusMode.leave(); setCommentsOpen(!rightColumn.commentsVisible()); }, commentsOpen: () => rightColumn.commentsVisible() }),
     appliedMarks: {
       shown: () => appliedMarksShown,
       toggle: () => {
@@ -1055,7 +1082,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       lastViewed: () => preferences.current['analysis.lastViewedRevision'][initialWindow.bookId]?.ordinal ?? 0,
       viewed: (revision) => preferences.viewAnalysis(initialWindow.bookId, revision),
       notice: () => showTransientNotice(PARAGRAPH_ANALYSIS_WORDS.hint),
-      beforeOpen: () => { setNavigationOpen(false); setCommentsOpen(false); taskDrawer.close(false); },
+      beforeOpen: () => replaceComments('analysis'),
+      onClose: () => restoreComments('analysis'),
       openItem: (item: ParagraphAnalysisProjection['items'][number], revisionId: string) => {
         void (async () => {
           if (authoritativeMutationBusy()) return;
@@ -1771,7 +1799,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     currentWindow = next;
     updateWindowChrome();
     editorialMarks?.refreshComments();
-    updateCommentsBadge();
     manuscriptRail?.refresh();
     await invalidateSearchIfStale('稿件已由 AI 局部修改；先前搜索结果和返回位置已失效。');
     await loadOutline();
@@ -2298,7 +2325,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         return;
       }
       editorialMarks?.refreshComments();
-      updateCommentsBadge();
       manuscriptRail?.refresh();
       setStatus(written.completionLabel, 'success');
     } catch (error) {
@@ -2438,7 +2464,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       // The text is the text on screen: only the marks are new, so nothing open over the text is touched (review P2-7).
       editor.setMarks(next.marks, next.marksTruncated);
       editorialMarks?.refreshComments();
-      updateCommentsBadge();
       manuscriptRail?.refresh();
       const refreshed = [...(editorHost.dataset['marksRefreshed'] ?? '').split(',').filter((entry) => entry.length > 0), 'review-settled'].slice(-12);
       editorHost.dataset['marksRefreshed'] = refreshed.join(',');
@@ -2530,7 +2555,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         if (bindingChanged) {
           currentWindow = editorWindowProjection;
           editorialMarks?.refreshComments();
-          updateCommentsBadge();
           updateWindowChrome();
           void loadOutline();
           scheduleRailRefresh();
@@ -2558,7 +2582,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       analysisPositionSource = 'caret';
       localParagraphPanel?.refresh();
       editorialMarks?.reanchor();
-      updateCommentsBadge();
       const loads = [...(editorHost.dataset['windowLoads'] ?? '').split(',').filter((entry) => entry.length > 0), windowLoadCause].slice(-12);
       editorHost.dataset['windowLoads'] = loads.join(',');
     },
@@ -2582,7 +2605,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     'view.focusManuscript': () => editor?.focus(),
     // 专注模式 (Issue #951; ED-004): the same toggle as the header's 专注.
     'view.focusMode': () => focusMode.toggle(),
-    'view.comments': () => { focusMode.leave(); setCommentsOpen(!commentsOpen); },
+    'view.comments': () => { focusMode.leave(); setCommentsOpen(!rightColumn.commentsVisible()); },
+    'view.previousPending': () => editorialMarks?.stepPending('previous'),
+    'view.nextPending': () => editorialMarks?.stepPending('next'),
   });
   // Typing moves every place behind the caret a little; the rail is read again once the typing rests,
   // never per keystroke, and its cost follows the chapters and marks, not the manuscript's length.
@@ -2603,6 +2628,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     onRead: (rail) => {
       railProjection = rail;
       paintOutline();
+      // The 批注 entry's badge and the 批注栏 header count the Book's pending marks (Issue #1523).
+      updateCommentsBadge();
+      editorialMarks?.bookPendingChanged();
       // The 导航 badge is the active search's hit count alone (Issue #1409); the marks are the 批注 entry's.
       updateNavigationBadge();
       const analysisBadge = analysisEntry.querySelector<HTMLElement>('.edge-badge')!;
@@ -2654,17 +2682,16 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     document.addEventListener('visibilitychange', taskBadgeVisibility);
     void readTaskBadge();
   }
+  /** The Book's pending marks as the rail last read them (Issue #1523); nothing is shown before that first read. */
   function updateCommentsBadge(): void {
-    if (!editor) return;
-    const count = editor.currentWindow().marks.filter((mark) => mark.kind !== 'personal-highlight').length;
+    const count = railProjection?.marks.length ?? 0;
     const badge = commentsEntry.querySelector<HTMLElement>('.edge-badge')!;
-    badge.dataset['count'] = String(count);
+    badge.dataset['count'] = `${count}${railProjection?.marksTruncated === true ? '+' : ''}`;
     badge.hidden = count === 0;
     updateEdgeName(commentsEntry);
   }
-  updateCommentsBadge();
   editorialMarks = mountEditorialMarks({
-    comments: { host: commentsPane, enabled: () => commentsOpen && !focusMode.active },
+    comments: { host: commentsPane, enabled: () => rightColumn.commentsVisible() && !focusMode.active },
     scroll: editorWindow,
     host: editorHost,
     editor,
@@ -2672,7 +2699,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     busy: () => authoritativeMutationBusy() || serviceJobBusy(),
     // A mark changes what a Production Document's workflow waits on (N 条修改建议待处理), which its lens reads again.
     marksChanged: () => {
-      updateCommentsBadge();
       manuscriptRail?.refresh();
       documentLens?.refresh();
     },
@@ -2757,11 +2783,17 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       return { ...result, revisionId: result.window.revisionId, journalSequence: result.window.journalSequence,
         workingDigest: result.window.workingDigest, completionLabel: '已更新编辑修订。' };
     }, async () => { await loadOutline(true); }),
-    scopedAiEdit: { host: scopedAiEditHost, sectionOf },
+    scopedAiEdit: { host: scopedAiEditHost, sectionOf, entry: scopedAiEditEntry },
+    // 上一条 / 下一条待处理 beyond the page (Issue #1523): the rail's list of the Book's pending marks, a page read where one stands, and the move.
+    bookPending: {
+      read: () => railProjection === undefined ? undefined : { places: railProjection.marks, truncated: railProjection.marksTruncated },
+      windowAt: (blockId) => api.getManuscriptWindowAt({ manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId, target: { kind: 'block', blockId } }),
+      go: (blockId) => navigate({ kind: 'block', blockId }),
+    },
     // ✎ 已改 (Issue #1411): the 批注栏 opens on the revision's card, unless 专注模式 keeps it closed.
     revealComments: () => {
       if (focusMode.active) return false;
-      if (!commentsOpen) setCommentsOpen(true);
+      if (!rightColumn.commentsVisible()) setCommentsOpen(true, false);
       return true;
     },
   });
@@ -2778,9 +2810,13 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   // 审阅's 回到原文 arrives at a finding's mark: its card opens as a click on it would.
   if (openMarkId !== undefined) void editorialMarks.openMark(openMarkId);
 
+  columnMeasure = mountColumnMeasure(workspace, editorWindow);
+
   function destroy(): void {
     if (destroyed) return;
     destroyed = true;
+    columnMeasure?.destroy();
+    taskDrawer.setColumnVisible(true);
     reviewMarksFollower += 1;
     if (reviewMarksTimer !== undefined) window.clearTimeout(reviewMarksTimer);
     viewportObserver?.disconnect();

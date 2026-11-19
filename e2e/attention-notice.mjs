@@ -21,7 +21,10 @@ export async function attentionNoticeHolds(renderer, waitFor, requireJourney, na
         const notice = document.querySelector('[data-attention-toast]');
         if (!(notice instanceof HTMLElement) || notice.hidden || innerWidth !== ${width} || innerHeight !== ${height}) return false;
         const box = notice.getBoundingClientRect();
-        return box.width > 0 && box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight &&
+        const drawer = document.querySelector('#task-drawer');
+        // An open drawer is never over the notice: the notice stands to its left.
+        const clear = !(drawer instanceof HTMLElement) || drawer.hidden || box.right <= drawer.getBoundingClientRect().left + 0.5;
+        return clear && box.width > 0 && box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight &&
           notice.children[0]?.textContent === ${JSON.stringify(words)} && notice.children[1]?.textContent === '去处理' && !notice.querySelector('[data-toast]');
       })()`, `${name}-shown-${width}`);
       requireJourney(JSON.stringify(await renderer.evaluate(READ_CARET)) === JSON.stringify(caret), `${name}-caret-${width}`);
@@ -68,10 +71,7 @@ export async function attentionNoticeClearsMenu(renderer, waitFor, requireJourne
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1008, height: 681, deviceScaleFactor: 1, mobile: false });
     await waitFor(renderer, `innerWidth === 1008 && document.querySelector('[data-attention-toast]')?.hidden === false`, `${name}-size`);
     // A Task Drawer left open (500 px wide) covers the header's save menu at this width: it is closed first, as the editor would.
-    if (await renderer.evaluate(`document.querySelector('#task-drawer')?.hidden === false`)) {
-      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close`);
-      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden !== false`, `${name}-drawer-closed`);
-    }
+    await closeTaskDrawer(renderer, waitFor, name);
     await pointerClick(renderer, waitFor, summary, `${name}-open`);
     const covered = await renderer.evaluate(`(() => {
       const body = document.querySelector('#context-actions details[data-save-menu="manuscript"][open] .editor-save-menu-body');
@@ -89,5 +89,17 @@ export async function attentionNoticeClearsMenu(renderer, waitFor, requireJourne
     await waitFor(renderer, `document.querySelector('#context-actions details[data-save-menu="manuscript"]')?.open === false`, `${name}-closed`);
   } finally {
     await renderer.send('Emulation.clearDeviceMetricsOverride');
+  }
+}
+
+/**
+ * A Task Drawer left open by starting a Run is 500 px wide: at 1008 px it overlays the text and the header's menus instead of
+ * docking beside them. An editor who goes on to type closes it first, so the stages that put a caret in the manuscript do the same,
+ * by pointer, and check that the paragraph they will click is then the topmost thing at its own centre.
+ */
+export async function closeTaskDrawer(renderer, waitFor, name) {
+  if (await renderer.evaluate(`document.querySelector('#task-drawer')?.hidden === false`)) {
+    await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close`);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden !== false`, `${name}-drawer-closed`);
   }
 }

@@ -23,7 +23,15 @@ export interface StatusSurface {
   (message: string, tone?: StatusTone): void;
   /** A different destination was rendered: an error from the one before it no longer applies. */
   clearError(): void;
+  /**
+   * The owner of an error says it is over — a page whose later read succeeded (a poll, which raises no success): the standing
+   * error ends only while it is still exactly `message`. No toast, nothing announced; another error, or none, is left alone.
+   */
+  settle(message: string): void;
 }
+
+/** The `setStatus` a page receives: a status line, plus `settle` for an error that page raised and has seen recover. */
+export type StatusSetter = ((message: string, tone?: StatusTone) => void) & { settle(message: string): void };
 
 /**
  * The one status line. An error and a busy line stand in the bar until replaced, dismissed or (for an error) cleared by the
@@ -74,7 +82,10 @@ export function createStatusSurface(surface: HTMLElement, announcer?: HTMLElemen
     // Said once: a success by its toast, an error or busy line by the bar, any other line by the announcer.
     if (announcer !== undefined) announcer.textContent = tone === undefined ? message : '';
   };
-  return Object.assign(update, { clearError: (): void => { if (error !== null) { error = null; paint(''); } } });
+  return Object.assign(update, {
+    clearError: (): void => { if (error !== null) { error = null; paint(''); } },
+    settle: (message: string): void => { if (error !== null && error === message) { error = null; paint(''); } },
+  });
 }
 
 /**
@@ -131,8 +142,9 @@ export function followBottomControls(bar: HTMLElement): void {
   // The body's padding eases when the drawer docks or the sidebar folds: the text column's edge is final only when that ends.
   document.body.addEventListener('transitionend', (event) => { if (event.target === document.body) schedule(); });
   document.addEventListener('scroll', schedule, { capture: true, passive: true });
-  // A page change, the sidebar folding or the Task Drawer opening moves the controls without a scroll or a resize.
-  new MutationObserver(schedule).observe(root, { attributes: true, attributeFilter: ['data-sidebar', 'data-focus-mode'] });
+  // A page change, the sidebar folding, the right column changing form (#1542) or the Task Drawer opening moves the controls
+  // without a scroll or a resize.
+  new MutationObserver(schedule).observe(root, { attributes: true, attributeFilter: ['data-sidebar', 'data-focus-mode', 'data-right-column'] });
   new MutationObserver(schedule).observe(document.body, { attributes: true, attributeFilter: ['data-task-drawer'], childList: true, subtree: true });
 }
 

@@ -1,3 +1,4 @@
+import { rightColumnGeometry } from './comments-pane.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -101,6 +102,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-16' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -1167,6 +1169,7 @@ async function main() {
     })()`);
 
     at('chip-persists');
+    await rightColumnGeometry(renderer, requireJourney, waitFor);
     // Until it is used the chip stays: across 导航, and across leaving the manuscript and coming back.
     await clickSelector(renderer, '[data-edge-entry="navigation"]', 'chip-navigation-open');
     await waitFor(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === false && ${CHIP} !== null`, 'chip-navigation');

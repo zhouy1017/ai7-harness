@@ -75,6 +75,7 @@ export const SHELL_LABELS = Object.freeze({
   collapse: '收起侧栏',
   expand: '展开侧栏',
   narrow: '窗口较窄，侧栏只显示图标',
+  column: '右侧栏打开时侧栏只显示图标，以保持正文行宽；关闭右侧栏后恢复',
   pin: (title: string) => `置顶《${title}》`,
   unpin: (title: string) => `取消置顶《${title}》`,
   pinned: '已置顶',
