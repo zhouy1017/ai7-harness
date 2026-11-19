@@ -3613,8 +3613,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (destroyed || sheetState !== state || state.choiceTicket !== ticket) return;
       const focused = state.chooser?.element.contains(document.activeElement) ? document.activeElement : null;
       state.choicePending = false;
-      projection = next;
-      renderSheet(next, state);
+      // Chapters and report pages the editor already read stay read after a model choice.
+      projection = retainTaskPlanPages(next, projection);
+      renderSheet(projection, state);
       if (focused instanceof HTMLElement) queueMicrotask(() => {
         // renderSheet reopens the native chooser popover in its preceding microtask.
         if (document.activeElement === document.body || state.chooser?.element.contains(document.activeElement)) focused.focus({ preventScroll: true });

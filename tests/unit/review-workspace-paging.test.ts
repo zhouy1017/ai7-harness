@@ -590,3 +590,24 @@ describe('a press on the review card while a read arrives (#1592: 查看计划 l
     expect(view.unexpected).not.toHaveBeenCalled();
   });
 });
+
+describe('the new-review sheet over a paged workspace (#1526)', () => {
+  it('keeps the chapters already read after a model choice in the sheet', async () => {
+    const available = { available: true, unavailableReason: null };
+    const full = workspace(1);
+    full.newReview = available; full.scopeOptions.whole = available;
+    full.scopeOptions.chapters = { ...available, basis: 'outline', chapters: Array.from({ length: 600 }, (_, position) => ({
+      blockId: `chapter-${position}`, title: filler(position), position, endPosition: position, level: 1 })) };
+    const view = mount({ full, budget: 120 * 1024 }); await flush();
+    view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
+    const choices = (): number => view.root.querySelector('[data-review-chapter="from"]')!.querySelectorAll('option').length;
+    const first = choices();
+    view.root.querySelector('[data-review-chapter-page]')!.click(); await flush();
+    const read = choices();
+    expect(read).toBeGreaterThan(first);
+    view.inspectReviewWorkspace.mockClear();
+    view.root.querySelector('dialog .dispatch-chooser button')!.click(); await flush();
+    expect(view.inspectReviewWorkspace).toHaveBeenCalledWith(expect.objectContaining({ executionConfig: {} }));
+    expect(choices()).toBe(read);
+  });
+});
