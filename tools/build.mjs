@@ -10,6 +10,11 @@ import { electronLicenseCarriers } from './electron-runtime.mjs';
 import { readBuildIdentity } from './build-identity.mjs';
 import { IDENTITY_BOUND_OUTPUTS } from '../src/shared/build-identity.ts';
 
+// The whole-project type check needs about 2.4 GB of heap; Node's default limit on a machine with 4 GB of memory (the test
+// guests) is about 2 GB, where it aborts with exit 134. A limit, not a reservation; passed as an argument because the doctor
+// refuses NODE_OPTIONS.
+const TYPE_CHECK_HEAP = '--max-old-space-size=4096';
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = resolve(ROOT, 'dist');
 const MAX_TYPESCRIPT_DIAGNOSTICS = 64;
@@ -69,7 +74,7 @@ function reportTypeScriptDiagnostics(stdout, stderr) {
 function typecheck() {
   const compiler = resolve(ROOT, 'node_modules', 'typescript', 'bin', 'tsc');
   requireBuild(existsSync(compiler), 'TypeScript is absent; run the frozen bootstrap first.');
-  const result = spawnSync(process.execPath, [compiler, '--noEmit', '--pretty', 'false'], {
+  const result = spawnSync(process.execPath, [TYPE_CHECK_HEAP, compiler, '--noEmit', '--pretty', 'false'], {
     cwd: ROOT,
     env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR },
     encoding: 'utf8',
