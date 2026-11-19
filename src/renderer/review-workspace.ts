@@ -12,6 +12,7 @@ import { technicalWords, identityWords, technicalLayerVisible } from './technica
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { hideToast, showToast } from './components/toast.js';
+import { reportResult } from './notifications.js';
 import { filterChoices, menuPanel, enhanceSelect } from './components/controls.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
 import { reviewExcludedHeading, estimateReviewCalls, reviewConsequenceEstimate } from './review-labels.js';
@@ -2654,7 +2655,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         capability: false,
         unknown: false,
       };
-      options.setStatus(listed.length === 0 ? REVIEW_BATCH_NOTHING : reviewBatchReadyLine(listed.length));
+      options.setStatus(listed.length === 0 ? REVIEW_BATCH_NOTHING : reviewBatchReadyLine(listed.length), 'success');
       pendingFocus = { findingId: null, field: 'batch' };
     });
     // 接受并应用全部 applies in the same step (Issue #1410 item 5): what was left out is counted in the result, and
@@ -2862,7 +2863,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // line, and the status bar never repeats it (Issue #691).
     const settled = settleProcedureChoice(state, ticket, outcome, versionId !== null);
     if (state.procedure !== null && state.procedure.resolved?.runSourceScope !== 'series') state.seriesId = null;
-    if (settled.status !== null) options.setStatus(settled.status);
+    // An informational line that settles no error, arriving after a read (#1519): a plain notice, so a newer error stays.
+    if (settled.status !== null) reportResult(options.setStatus, settled.status);
     renderSheet(projection, state);
     // Back on the selector the editor used, while the sheet still shows it.
     sheet.querySelector<HTMLElement>(`[data-review-field="${settled.focus}"]`)?.focus();

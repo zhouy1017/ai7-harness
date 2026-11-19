@@ -1,4 +1,5 @@
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { reportResult } from './notifications.js';
 import type {
   BookSummaryCursor, BookSummaryProjection, ImportedSkillAcquisitionProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection,
   ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCheckProjection, RendererApi,
@@ -47,7 +48,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
   async function act(run: () => Promise<string | null | void>): Promise<void> {
     if (busy) return;
     busy = true; render();
-    try { const done = await run(); if (typeof done === 'string') setStatus(done); }
+    try { const done = await run(); if (typeof done === 'string') reportResult(setStatus, done); }
     catch (error) { setStatus(errorMessage(error, '无法处理这个 Skill。'), 'error'); }
     finally {
       busy = false;

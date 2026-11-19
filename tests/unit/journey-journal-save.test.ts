@@ -115,16 +115,17 @@ it('awaits the authoritative read and rejects unpersisted content', async () => 
   expect(await reading).toBe(false);
 });
 
-it('retains an earlier error while a successful journal save remains authoritative', async () => {
+it('retains an earlier error while an autosave line stays out of the bar, and the journal stays authoritative', async () => {
   const test = await setup();
   const status = miniDocument.createElement('div'); status.id = 'persistence-status'; miniDocument.body.append(status);
   const setStatus = createStatusSurface(status as unknown as HTMLElement);
   setStatus('较早的操作失败', 'error');
-  setStatus('已写入修订日志', 'success');
+  setStatus('已写入修订日志');
   expect(status.dataset['tone']).toBe('error');
   expect(status.hidden).toBe(false);
   expect(await test.read()).toBe(true);
   setStatus('另一个操作已完成', 'success');
+  expect(status.hidden).toBe(true);
   expect(await test.read()).toBe(true);
 });
 

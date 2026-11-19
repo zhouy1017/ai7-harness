@@ -1,4 +1,5 @@
 import type { DatabaseExportActivityProjection, DatabaseExportPreparationProjection, RendererApi } from '../shared/protocol.js';
+import { reportResult } from './notifications.js';
 import {
   DATABASE_EXPORT_ACTIONS,
   DATABASE_EXPORT_HEADING,
@@ -158,7 +159,7 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
       prepared.hidden = true;
       prepared.replaceChildren();
       delete prepared.dataset['preparationId'];
-      setStatus(DATABASE_EXPORT_STATUS_LINES.closed);
+      reportResult(setStatus, DATABASE_EXPORT_STATUS_LINES.closed);
       choose.focus();
     });
     const buttons = el('div', 'button-row');
@@ -180,7 +181,7 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
       setStatus(DATABASE_EXPORT_STATUS_LINES.prepared, 'success');
       return ended.preparation.preparationId;
     } else if (ended.state === 'cancelled') {
-      setStatus(DATABASE_EXPORT_STATUS_LINES.closed);
+      reportResult(setStatus, DATABASE_EXPORT_STATUS_LINES.closed);
       choose.focus();
     } else {
       setStatus(ended.failure?.message ?? DATABASE_EXPORT_STATUS_LINES.prepareFailed, 'error');
@@ -210,7 +211,7 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
     } else if (ended.state === 'cancelled') {
       // Stopped before the approval was recorded: the prepared file is as it was, and 按上述方式导出 may take it again.
       setBusy(false);
-      setStatus(DATABASE_EXPORT_STATUS_LINES.writingStopped);
+      reportResult(setStatus, DATABASE_EXPORT_STATUS_LINES.writingStopped);
       prepared.querySelector<HTMLButtonElement>('[data-database-export-action="approve"]')?.focus();
     } else {
       setBusy(false);
@@ -226,7 +227,7 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
       const result = await api.chooseDatabaseExportDestination();
       if (!root.isConnected) return;
       if (result.outcome === 'cancelled') {
-        setStatus(DATABASE_EXPORT_STATUS_LINES.cancelled);
+        reportResult(setStatus, DATABASE_EXPORT_STATUS_LINES.cancelled);
         return;
       }
       setStatus(DATABASE_EXPORT_STATUS_LINES.packing, 'busy');
