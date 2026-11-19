@@ -14,7 +14,6 @@ import {
   CUSTOM_TAB_EMPTY,
   CUSTOM_TAB_FEEDBACK_NOTE,
   CUSTOM_TAB_NEW,
-  CUSTOM_TAB_NOT_ENABLED,
   CUSTOM_TAB_STOPPED,
   CUSTOM_TAB_NOT_RUN,
   CUSTOM_TAB_PREPARED,
@@ -46,6 +45,7 @@ import {
   CUSTOM_DIMENSION_TITLE_LABEL,
   customDimensionEnabledLine,
   customDimensionSavedLine,
+  customDimensionStopAsk,
   customDimensionStoppedLine,
   customDimensionVersionLine,
 } from './knowledge-base-labels.js';
@@ -105,10 +105,9 @@ const readings = new Map<string, { projection: CustomAnalysisDimensionsProjectio
 const RUN_REFRESH_MS = 1_000;
 const RUN_UNDER_WAY: ReadonlySet<string> = new Set(['authorized-blocked', 'queued', 'waiting', 'admitted', 'executing', 'cancelling', 'pausing']);
 
-/** Whether the form for a new dimension is open under `root`: the card holds its redraws while it is, so what was typed stays. */
-export function customDimensionFormOpen(root: ParentNode): boolean {
-  return root.querySelector('[data-custom-form]') !== null;
-}
+/** What the editor has typed into the form for a new dimension, kept per Book so a redraw of the card reopens it as it was. */
+export interface CustomDimensionDraft { title: string; questionTemplate: string; field: 'title' | 'questionTemplate' | null }
+const drafts = new Map<string, CustomDimensionDraft>();
 
 /** The event ②A's tab strip raises on a panel as it is shown, so the tab reads again when the editor comes to it. */
 export const ANALYSIS_TAB_SHOWN_EVENT = 'analysis-tab-shown';
@@ -146,6 +145,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
   let focusCardOf: string | null = null;
   const closeForm = (saved: boolean, title?: string): void => {
     creating = false;
+    drafts.delete(bookId);
     formHost.replaceChildren();
     drawHead();
     if (saved) { focusCardOf = title ?? null; void load(); }
@@ -166,12 +166,17 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       options.setStatus(options.errorMessage(error, '无法完成这项操作。'), 'error');
     }
   };
-  const openForm = (): void => {
+  const openForm = (restoring = false): void => {
     if (creating || author === undefined) return;
     creating = true;
     drawHead();
-    mountCustomAnalysisDimensions({ root: formHost, api: author.api, setStatus: options.setStatus, errorMessage: options.errorMessage, createInPlace: { done: closeForm } });
-    formHost.querySelector<HTMLElement>('input[name="title"]')?.focus();
+    const draft = drafts.get(bookId) ?? { title: '', questionTemplate: '', field: null };
+    drafts.set(bookId, draft);
+    mountCustomAnalysisDimensions({ root: formHost, api: author.api, setStatus: options.setStatus, errorMessage: options.errorMessage, createInPlace: { done: closeForm, draft } });
+    // A form reopened by a redraw gives focus back only where the redraw took it from.
+    const field = restoring ? draft.field : 'title';
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    if (field !== null && (!restoring || lost)) formHost.querySelector<HTMLElement>(field === 'title' ? 'input[name="title"]' : 'textarea[name="questionTemplate"]')?.focus();
   };
 
   const updateFor = (dimension: CustomAnalysisDimensionProjection): BaselineAnalysisUpdateRequest | null => {
@@ -277,23 +282,20 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
         actions.append(open);
       }
       if (book?.unavailableReason != null) {
-        // A dimension with no enabled version is told to be enabled in 知识库 › 工序与规则, a developer page: an ordinary editor reads the card's own 启用.
-        const reason = el('span', 'custom-unavailable', !technicalLayerVisible && dimension.enabledVersion === null ? (dimension.versions[0]?.state === 'stopped' ? CUSTOM_TAB_STOPPED : CUSTOM_TAB_NOT_ENABLED) : book.unavailableReason);
+        // A stopped dimension that ran on this Book is told to be enabled in 知识库 › 工序与规则, a developer page: an ordinary editor reads what to do here.
+        const reason = el('span', 'custom-unavailable', !technicalLayerVisible && dimension.enabledVersion === null ? CUSTOM_TAB_STOPPED : book.unavailableReason);
         reason.id = `custom-unavailable-${dimension.dimensionId}`;
         start.setAttribute('aria-describedby', reason.id);
         actions.append(reason);
       }
-      const latestVersion = dimension.versions[0];
-      if (author !== undefined && latestVersion?.state === 'pending-validation') {
-        const { versionId, title, version } = latestVersion;
-        const enable = actionButton(CUSTOM_DIMENSION_ENABLE, 'primary', 'enable', () => change('正在验证并启用…', () => author.api.enableCustomAnalysisDimension({ versionId }), customDimensionEnabledLine(title, version)));
-        enable.dataset['analysisAction'] = 'custom-enable';
-        actions.append(enable);
-      }
       const enabledVersion = dimension.versions.find((version) => version.versionId === dimension.enabledVersion?.versionId);
       if (author !== undefined && enabledVersion !== undefined) {
         const { versionId, title, version } = enabledVersion;
-        const stop = actionButton(`${CUSTOM_DIMENSION_STOP} · 已有分析保留`, 'quiet', 'stop', () => change('正在停用…', () => author.api.stopCustomAnalysisDimension({ versionId }), customDimensionStoppedLine(title, version)));
+        // 停用 is final for the version and holds for every Book: asked once, with the app's own confirm.
+        const stop = actionButton(`${CUSTOM_DIMENSION_STOP} · 已有分析保留`, 'quiet', 'stop', () => {
+          if (!confirm(customDimensionStopAsk(dimension.title))) return Promise.resolve();
+          return change('正在停用…', () => author.api.stopCustomAnalysisDimension({ versionId }), customDimensionStoppedLine(title, version));
+        });
         stop.dataset['analysisAction'] = 'custom-stop';
         actions.append(stop);
       }
@@ -355,6 +357,8 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
   else render(cached.projection);
   void load();
   panel.addEventListener(ANALYSIS_TAB_SHOWN_EVENT, () => void load());
+  // The card was drawn again with the form open: the form is back, with its text.
+  if (drafts.has(bookId)) openForm(true);
 }
 
 // ---- 知识库 › 工序与规则 › 自定义分析维度 ----------------------------------------------------------------------------------
@@ -368,7 +372,7 @@ export interface MountCustomAnalysisDimensionsOptions {
   technicalDetails?(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   localInstantLabel?(instant: string): string;
   /** 分析 › 自定义 writes a new dimension in place: only the form opens, and `done` closes it once saved (with the title) or cancelled. */
-  readonly createInPlace?: { done(saved: boolean, title?: string): void };
+  readonly createInPlace?: { done(saved: boolean, title?: string): void; readonly draft?: CustomDimensionDraft };
 }
 
 export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimensionsOptions): { load(): Promise<void> } {
@@ -379,8 +383,6 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
   let editing: string | null | undefined;
   let projection: CustomAnalysisDimensionsProjection | null = null;
   let busy = false;
-  /** A version saved whose enabling was refused: the next try writes onto it, not a second dimension. */
-  let savedNotEnabled: string | null = null;
 
   const act = async (pending: string, body: () => Promise<CustomAnalysisDimensionsProjection>, done: (next: CustomAnalysisDimensionsProjection) => string, savedTitle?: string): Promise<void> => {
     if (busy) return;
@@ -390,7 +392,6 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
       const next = await body();
       projection = next;
       editing = undefined;
-      savedNotEnabled = null;
       if (options.createInPlace === undefined) render();
       else options.createInPlace.done(true, savedTitle);
       options.setStatus(done(next), 'success');
@@ -407,17 +408,25 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
     const latest = dimension?.versions[0] ?? null;
     const titleLabel = el('label', undefined, CUSTOM_DIMENSION_TITLE_LABEL);
     const title = styleInput(el('input'));
-    title.name = 'title';
+    title.setAttribute('name', 'title');
     title.maxLength = 160;
     title.value = latest?.title ?? '';
     titleLabel.append(title);
     const templateLabel = el('label', undefined, `${CUSTOM_DIMENSION_TEMPLATE_LABEL} · 最多 400 字，勿粘贴稿件原文`);
     const template = styleInput(el('textarea'));
-    template.name = 'questionTemplate';
+    template.setAttribute('name', 'questionTemplate');
     template.rows = 4;
     template.placeholder = CUSTOM_DIMENSION_TEMPLATE_PLACEHOLDER;
     template.maxLength = 1600;
     template.value = latest?.questionTemplate ?? '';
+    const draft = options.createInPlace?.draft;
+    if (draft !== undefined) {
+      title.value = draft.title; template.value = draft.questionTemplate;
+      title.addEventListener('input', () => { draft.title = title.value; });
+      template.addEventListener('input', () => { draft.questionTemplate = template.value; });
+      title.addEventListener('focus', () => { draft.field = 'title'; });
+      template.addEventListener('focus', () => { draft.field = 'questionTemplate'; });
+    }
     templateLabel.append(template);
     const actions = el('div', 'button-row');
     const save = el('button', 'primary', CUSTOM_DIMENSION_SAVE);
@@ -435,12 +444,11 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
       // leaves it 待验证 with the service's reason, and its 启用 stays beside it.
       void act('正在保存并启用自定义分析维度…', async () => {
         const saved = await api.saveCustomAnalysisDimension({
-          dimensionId: dimension?.dimensionId ?? savedNotEnabled, title: titleText, questionTemplate: template.value.trim(),
+          dimensionId: dimension?.dimensionId ?? null, title: titleText, questionTemplate: template.value.trim(),
         });
         const owner = saved.dimensions.find((entry) => dimension === null
           ? entry.versions[0]?.title === titleText && entry.versions[0]?.state === 'pending-validation'
           : entry.dimensionId === dimension.dimensionId);
-        savedNotEnabled = dimension === null ? owner?.dimensionId ?? null : null;
         const fresh = owner?.versions[0];
         return fresh?.state === 'pending-validation' ? api.enableCustomAnalysisDimension({ versionId: fresh.versionId }) : saved;
       }, () => customDimensionSavedLine(titleText), titleText);

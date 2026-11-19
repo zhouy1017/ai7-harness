@@ -108,3 +108,43 @@ it.each([false, true])('keeps baseline focus across two changed follower cycles 
   }
   expect(tick).toBeGreaterThanOrEqual(3);
 });
+
+it('keeps the form for a new 自定义 dimension, with its text, field and tab, across follower draws, another tab and a direct draw (#1543)', async () => {
+  vi.stubGlobal('Event', class { constructor(readonly type: string) {} });
+  const root = rootNode(); root.dataset['analysisBookId'] = 'book-draft'; let tick = 0;
+  const reading = () => ({ bookId: 'book-draft', state: 'executing', stateLabel: `运行中 ${++tick}`, resultSetRevision: null, inspectedRevision: null, taskIntent: null, planEnvelope: null,
+    planVersion: null, coverageManifest: null, run: null, taskOutcome: null, checkpoint: null, history: null, actions: { canPrepare: false }, updateControls: null, listPages: {}, namedNonEffects: [],
+  }) as unknown as Parameters<ReturnType<typeof createBaselineAnalysisCard>['renderBaselineAnalysis']>[1];
+  Object.assign(window, { ai7: { inspectBaselineAnalysis: async () => reading(), inspectCustomAnalysisDimensions: async () => ({ dimensions: [] }),
+    saveCustomAnalysisDimension: vi.fn(), enableCustomAnalysisDimension: vi.fn(), stopCustomAnalysisDimension: vi.fn() } });
+  const card = createBaselineAnalysisCard({ screen: root as unknown as HTMLElement, technicalDetails: details, taskDrawer: { refresh: vi.fn() }, setStatus: vi.fn(), rendererErrorMessage: () => '' } as unknown as Parameters<typeof createBaselineAnalysisCard>[0]);
+  card.renderBaselineAnalysis(root as unknown as HTMLElement, reading(), '公开合成书');
+  await vi.advanceTimersByTimeAsync(0);
+  root.querySelector('button[data-analysis-tab="custom"]')!.click();
+  root.querySelector('[data-custom-action="create"]')!.click();
+  const title = root.querySelector('input[name="title"]')!; title.value = '人物出场'; title.dispatchEvent({ type: 'input' });
+  const template = root.querySelector('textarea[name="questionTemplate"]')!; template.value = '本部分有哪些人物？'; template.dispatchEvent({ type: 'input' });
+  template.focus(); template.dispatchEvent({ type: 'focus' });
+  const kept = (): void => {
+    expect(root.querySelector('[data-custom-form="new"] input[name="title"]')!.value).toBe('人物出场');
+    expect(root.querySelector('[data-custom-form="new"] textarea[name="questionTemplate"]')!.value).toBe('本部分有哪些人物？');
+  };
+  // The card follows the Run: it is drawn again (a new card node, a newer reading), and the form is back as it was, on its tab, in its field.
+  let drawn = root.querySelector('.baseline-analysis-card'); const before = tick;
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(tick).toBeGreaterThan(before); expect(root.querySelector('.baseline-analysis-card')).not.toBe(drawn);
+  kept(); expect(root.querySelector('.baseline-analysis-card')!.dataset['analysisTab']).toBe('custom');
+  expect(document.activeElement).toBe(root.querySelector('textarea[name="questionTemplate"]'));
+  // Another tab shown: the card keeps following the Run, and the form is there when the editor comes back.
+  root.querySelector('button[data-analysis-tab="history"]')!.click();
+  drawn = root.querySelector('.baseline-analysis-card'); const second = tick;
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(tick).toBeGreaterThan(second); expect(root.querySelector('.baseline-analysis-card')).not.toBe(drawn);
+  expect(root.querySelector('.baseline-analysis-card')!.dataset['analysisTab']).toBe('history');
+  root.querySelector('button[data-analysis-tab="custom"]')!.click(); kept();
+  // A direct draw, with no follower, brings it back too.
+  card.renderBaselineAnalysis(root as unknown as HTMLElement, reading(), '公开合成书');
+  kept();
+  root.querySelector('[data-custom-form="new"] [data-custom-action="cancel"]')!.click();
+  expect(root.querySelector('[data-custom-form="new"]')).toBeNull();
+});

@@ -48,7 +48,9 @@ export function mountHouseWordList(options: {
   const rowField = (row: number): string => `[data-house-entry-row="${row}"] [data-house-field="literal"]`;
   const button = (label: string, name: string, run: () => void, disabled = false, tone: Tone = 'secondary'): HTMLButtonElement => {
     const node = el('button', label); node.type = 'button'; node.className = `btn button ${tone}`; node.dataset['houseAction'] = name;
-    node.disabled = busy || disabled; node.addEventListener('click', run); return node;
+    node.disabled = busy || disabled;
+    // The editor's place is the control they pressed, unless the step says where it goes next.
+    node.addEventListener('click', () => { pendingFocus = `[data-house-action="${name}"]`; run(); }); return node;
   };
   const buttons = (...nodes: HTMLElement[]): HTMLElement => { const row = el('div', undefined, 'button-row'); row.append(...nodes); return row; };
   /** Two text buttons side by side: the page before and the page after. */
@@ -198,13 +200,13 @@ export function mountHouseWordList(options: {
     panel.append(technicalDisclosure(details));
     panel.append(isCurrent
       ? buttons(button(HOUSE_EDIT, 'edit', () => void beginDraft(), false, 'primary'))
-      : buttons(button(HOUSE_LATEST, 'current', () => void run(() => inspect({ versionId: null, entryOffset: 0, historyOffset: 0 })), false, 'primary')));
+      : buttons(button(HOUSE_LATEST, 'current', () => { pendingFocus = EDIT; void run(() => inspect({ versionId: null, entryOffset: 0, historyOffset: 0 })); }, false, 'primary')));
     // Earlier lists are named by when they were saved; with only one saved there is nothing to look back at.
     const currentId = page.current?.versionId; const earlier = page.history.filter((version) => version.pin.versionId !== currentId);
     if (earlier.length > 0 || request.historyOffset > 0 || page.nextHistoryOffset !== null) {
       const history = el('details', undefined, 'house-history'); history.append(el('summary', HOUSE_HISTORY_SUMMARY));
       for (const version of earlier) {
-        history.append(button(houseHistoryLabel(version), `history-${version.ordinal}`, () => void run(() => inspect({ ...request, versionId: version.pin.versionId, entryOffset: 0 })), false, 'quiet'));
+        history.append(button(houseHistoryLabel(version), `history-${version.ordinal}`, () => { pendingFocus = '[data-house-action="current"]'; void run(() => inspect({ ...request, versionId: version.pin.versionId, entryOffset: 0 })); }, false, 'quiet'));
       }
       if (request.historyOffset > 0 || page.nextHistoryOffset !== null) {
         history.append(pager('history', () => void run(() => inspect({ ...request, historyOffset: Math.max(0, request.historyOffset - HOUSE_PAGE_SIZE) })),
@@ -224,7 +226,14 @@ export function mountHouseWordList(options: {
     } else if (draft !== null) paintDraft(panel, draft);
     else paintRead(panel);
     root.replaceChildren(panel);
-    if (pendingFocus !== null && !busy) { root.querySelector<HTMLElement>(pendingFocus)?.focus(); pendingFocus = null; }
+    if (pendingFocus !== null && !busy) {
+      // Where the step said, if that control is there and can be used; else the page's primary action, else its first control.
+      const usable = (node: HTMLElement | null): node is HTMLButtonElement => node !== null && (node as HTMLButtonElement).disabled !== true;
+      const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('button')).filter((node) => !node.disabled);
+      const target = root.querySelector<HTMLElement>(pendingFocus);
+      (usable(target) || target?.tagName !== 'BUTTON' && target !== null ? target : buttons.find((node) => node.className.includes('primary')) ?? buttons[0])?.focus();
+      pendingFocus = null;
+    }
   };
   paint();
   return { load: () => run(() => committedRead === null ? inspect({ versionId: null, entryOffset: 0, historyOffset: 0 }) : readCommitted()), destroy: () => { destroyed = true; root.replaceChildren(); }, failed: () => failed };

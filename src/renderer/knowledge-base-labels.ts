@@ -676,6 +676,11 @@ export function customDimensionEnabledLine(title: string, version: number): stri
   return `已启用「${title}」${technicalWords(`（第 ${version} 版）`)}；可以在书的「分析 › 自定义」中运行。`;
 }
 
+/** The one question before 停用 in place: it is final for the version and holds for every Book. */
+export function customDimensionStopAsk(title: string): string {
+  return `停用「${title}」后，它在所有图书里都不能再运行，且不能撤销；已有的分析仍保留。要停用吗？`;
+}
+
 export function customDimensionStoppedLine(title: string, version: number): string {
   return `已停用「${title}」${technicalWords(`（第 ${version} 版）`)}；已完成的分析仍保留。`;
 }

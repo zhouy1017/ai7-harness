@@ -1,9 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { setImmediate } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { customDimensionFormOpen, mountCustomAnalysisTab } from '../../src/renderer/custom-analysis.js';
-import { CUSTOM_TAB_NOT_ENABLED } from '../../src/renderer/custom-analysis-labels.js';
-import { AnalysisFollower } from '../../src/renderer/analysis-follow.js';
+import { mountCustomAnalysisTab } from '../../src/renderer/custom-analysis.js';
+import { CUSTOM_TAB_STOPPED } from '../../src/renderer/custom-analysis-labels.js';
 import { mountHouseWordList } from '../../src/renderer/house-word-list.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { styleInput } from '../../src/renderer/components/controls.js';
@@ -81,11 +80,9 @@ describe('本社词表: reading, failed and nothing saved are three states', () 
       expect(state(root)).toBe('saved'); expect(active()).toBe(q(root, '[data-house-action="edit"]'));
       // A save that changes nothing, and a refused paste, are said in the same words.
       await press('[data-house-action="edit"]'); await press('[data-house-action="save"]');
-      const paste = q(root, '[data-house-field="paste"]') as MiniElement;
       await press('[data-house-action="edit"]');
       const pasteBox = q(root, '[data-house-field="paste"]') as MiniElement; pasteBox.value = ' 甲'; pasteBox.dispatchEvent({ type: 'input' });
       await press('[data-house-action="accept-paste"]'); expect(active()).toBe(q(root, '[data-house-field="paste"]'));
-      void paste;
       const messages = setStatus.mock.calls.map(([message]) => String(message));
       expect(messages).toEqual(expect.arrayContaining(['已保存本社词表。', '词条没有变化，本社词表保持原样。']));
       for (const message of messages) plain(message);
@@ -136,21 +133,24 @@ describe('本社词表: reading, failed and nothing saved are three states', () 
   });
 });
 
-describe('分析 › 自定义 in ordinary words, with a form that stays and a card that can be enabled', () => {
+describe('分析 › 自定义 in ordinary words, with a form that is kept and a card that can be stopped', () => {
   const BOOK = '11111111-1111-4111-8111-111111111111';
   const FIXED = { answerSchema: {} as never, authorityCeiling: {} as never };
-  const version = (state: 'enabled' | 'pending-validation', title = '人物出场'): CustomAnalysisDimensionProjection['versions'][number] => ({
-    versionId: 'v1', version: 1, title, questionTemplate: '问？', documentDigest: 'd'.repeat(64), supersedes: null, state,
-    stateLabel: state === 'enabled' ? '已启用' : '待验证', createdAt: '2026-11-01T00:00:00.000Z', stateRecordedAt: '2026-11-01T00:00:00.000Z', taskCount: 0 });
-  const dimension = (state: 'enabled' | 'pending-validation', reason: string | null = null): CustomAnalysisDimensionProjection => ({
+  const version = (state: 'enabled' | 'stopped'): CustomAnalysisDimensionProjection['versions'][number] => ({
+    versionId: 'v1', version: 1, title: '人物出场', questionTemplate: '问？', documentDigest: 'd'.repeat(64), supersedes: null, state,
+    stateLabel: state === 'enabled' ? '已启用' : '已停用', createdAt: '2026-11-01T00:00:00.000Z', stateRecordedAt: '2026-11-01T00:00:00.000Z', taskCount: 1 });
+  /** What the service lists: a dimension with an enabled version, or a stopped one only because it ran on the Book. */
+  const dimension = (state: 'enabled' | 'stopped'): CustomAnalysisDimensionProjection => ({
     dimensionId: '22222222-2222-4222-8222-222222222222', kind: 'custom-analysis/x', title: '人物出场',
     enabledVersion: state === 'enabled' ? { versionId: 'v1', version: 1 } : null, versions: [version(state)], versionsTruncated: false,
-    book: { taskState: null, latest: null, unavailableReason: reason } });
+    book: { taskState: { taskIntentId: 't1', state: 'settled', stateLabel: '已完成' }, latest: null,
+      unavailableReason: state === 'enabled' ? null : '这个维度没有已启用的版本；在「知识库 › 工序与规则 › 自定义分析维度」中启用一个版本后才能运行。' } });
   const list = (...dimensions: CustomAnalysisDimensionProjection[]): CustomAnalysisDimensionsProjection => ({ bookId: BOOK, dimensions, truncated: false, fixed: FIXED });
-  const mount = (reading: () => CustomAnalysisDimensionsProjection) => {
+  const mount = (reading: () => CustomAnalysisDimensionsProjection, saved?: () => CustomAnalysisDimensionsProjection) => {
     const api = {
-      inspectCustomAnalysisDimensions: vi.fn(async () => reading()), saveCustomAnalysisDimension: vi.fn(),
-      enableCustomAnalysisDimension: vi.fn(async () => list(dimension('enabled'))), stopCustomAnalysisDimension: vi.fn(async () => list()),
+      inspectCustomAnalysisDimensions: vi.fn(async () => reading()),
+      saveCustomAnalysisDimension: vi.fn(async () => saved!()),
+      enableCustomAnalysisDimension: vi.fn(), stopCustomAnalysisDimension: vi.fn(async () => list(dimension('stopped'))),
     };
     const panel = miniDocument.createElement('section'); miniDocument.body.append(panel);
     const setStatus = vi.fn();
@@ -158,27 +158,12 @@ describe('分析 › 自定义 in ordinary words, with a form that stays and a c
     return { panel, api, setStatus };
   };
 
-  it('says nothing technical with the form open or a card drawn, and holds the card\'s redraws while the form is open', async () => {
+  it('says nothing technical with the form open or a card drawn', async () => {
     const { panel } = mount(() => list());
     await settle();
     (q(panel, '[data-custom-action="create"]') as MiniElement).click();
     plain(panel.textContent);
-    const form = q(panel, '[data-custom-form="new"]')!;
-    (form.querySelector('input') as MiniElement).value = '人物出场';
-    expect(customDimensionFormOpen(panel as unknown as ParentNode)).toBe(true);
-    // The card's follow-up read answers with a changed projection while the form is open and filled: it is not drawn over it.
-    const host = {}; const follower = new AnalysisFollower<object>({ setTimeout: (callback, ms) => setTimeout(callback, ms) as unknown as number, clearTimeout: (h) => clearTimeout(h) });
-    vi.useFakeTimers();
-    try {
-      const drawn: number[] = [];
-      follower.later(host, follower.drawn(host), 10, { belongs: () => true, read: async () => ({}), unchanged: () => false, again: () => 50,
-        held: () => customDimensionFormOpen(panel as unknown as ParentNode), draw: () => { drawn.push(1); }, failed: () => undefined });
-      await vi.advanceTimersByTimeAsync(200);
-      expect(drawn).toEqual([]);
-      (q(panel, '[data-custom-action="cancel"]') as MiniElement).click();
-      await vi.advanceTimersByTimeAsync(200);
-      expect(drawn).toEqual([1]);
-    } finally { vi.useRealTimers(); }
+    (q(panel, '[data-custom-action="cancel"]') as MiniElement).click();
     const { panel: listed } = mount(() => list(dimension('enabled')));
     await settle();
     plain(listed.textContent);
@@ -186,13 +171,7 @@ describe('分析 › 自定义 in ordinary words, with a form that stays and a c
 
   it('puts focus on the new card once a dimension is saved and enabled', async () => {
     let reading = list();
-    const api = {
-      inspectCustomAnalysisDimensions: vi.fn(async () => reading),
-      saveCustomAnalysisDimension: vi.fn(async () => ({ ...list(), bookId: null, dimensions: [dimension('pending-validation')] })),
-      enableCustomAnalysisDimension: vi.fn(async () => { reading = list(dimension('enabled')); return reading; }), stopCustomAnalysisDimension: vi.fn(),
-    };
-    const panel = miniDocument.createElement('section'); miniDocument.body.append(panel);
-    mountCustomAnalysisTab(panel as unknown as HTMLElement, { bookId: BOOK, api, author: { api }, setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback, openLaunch: vi.fn(), openPlan: vi.fn(), jump: vi.fn() });
+    const { panel } = mount(() => reading, () => { reading = list(dimension('enabled')); return reading; });
     await settle();
     (q(panel, '[data-custom-action="create"]') as MiniElement).click();
     expect(active()).toBe(q(panel, 'input[name="title"]'));
@@ -202,20 +181,44 @@ describe('分析 › 自定义 in ordinary words, with a form that stays and a c
     expect(active()).toBe(q(panel, '.custom-dimension-card'));
   });
 
-  it('offers 启用 on a saved dimension that is not enabled, with a sentence of its own, and 停用 on an enabled one', async () => {
-    const pending = dimension('pending-validation', '这个维度没有已启用的版本。在「知识库 › 工序与规则 › 自定义分析维度」中启用一个版本后才能运行。');
-    const { panel, api } = mount(() => list(pending));
+  it('keeps the form with its text and its field when the tab is drawn again, and drops it once saved or cancelled', async () => {
+    const { panel } = mount(() => list());
     await settle();
-    expect(q(panel, '.custom-unavailable')!.textContent).toBe(CUSTOM_TAB_NOT_ENABLED);
-    expect(panel.textContent).not.toContain('知识库'); expect(panel.textContent).not.toContain('工序与规则');
-    expect(q(panel, '[data-custom-action="stop"]')).toBeNull();
-    (q(panel, '[data-custom-action="enable"]') as MiniElement).click(); await settle();
-    expect(api.enableCustomAnalysisDimension).toHaveBeenCalledWith({ versionId: 'v1' });
-    const { panel: running, api: second } = mount(() => list(dimension('enabled')));
+    (q(panel, '[data-custom-action="create"]') as MiniElement).click();
+    const title = q(panel, 'input[name="title"]') as MiniElement; title.value = '人物出场'; title.dispatchEvent({ type: 'input' });
+    const template = q(panel, 'textarea[name="questionTemplate"]') as MiniElement; template.focus(); template.value = '本部分有哪些人物？'; template.dispatchEvent({ type: 'input' });
+    (template as unknown as { dispatchEvent(event: { type: string }): void }).dispatchEvent({ type: 'focus' });
+    // The card is drawn again (its follower or a direct draw): a new tab over the same Book finds the form as it was.
+    panel.remove(); miniDocument.activeElement = null;
+    const { panel: again } = mount(() => list());
     await settle();
-    expect(q(running, '[data-custom-action="enable"]')).toBeNull();
-    (q(running, '[data-custom-action="stop"]') as MiniElement).click(); await settle();
-    expect(second.stopCustomAnalysisDimension).toHaveBeenCalledWith({ versionId: 'v1' });
+    expect(q(again, '[data-custom-form="new"] input[name="title"]')!.value).toBe('人物出场');
+    expect(q(again, '[data-custom-form="new"] textarea[name="questionTemplate"]')!.value).toBe('本部分有哪些人物？');
+    expect(active()).toBe(q(again, 'textarea[name="questionTemplate"]'));
+    (q(again, '[data-custom-action="cancel"]') as MiniElement).click();
+    const { panel: last } = mount(() => list());
+    await settle();
+    expect(q(last, '[data-custom-form="new"]')).toBeNull();
+  });
+
+  it('says what to do next for a stopped dimension, and asks once before stopping one for every Book', async () => {
+    const stopped = mount(() => list(dimension('stopped')));
+    await settle();
+    expect(q(stopped.panel, '.custom-unavailable')!.textContent).toBe(CUSTOM_TAB_STOPPED);
+    expect(stopped.panel.textContent).not.toContain('知识库'); expect(stopped.panel.textContent).not.toContain('工序与规则');
+    expect(q(stopped.panel, '[data-custom-action="stop"]')).toBeNull(); expect(q(stopped.panel, '[data-custom-action="enable"]')).toBeNull();
+    const ask = vi.fn((_question: string) => false);
+    vi.stubGlobal('confirm', ask);
+    try {
+      const running = mount(() => list(dimension('enabled')));
+      await settle();
+      (q(running.panel, '[data-custom-action="stop"]') as MiniElement).click(); await settle();
+      expect(ask).toHaveBeenCalledOnce(); expect(ask.mock.calls[0]![0]).toContain('所有图书'); expect(ask.mock.calls[0]![0]).toContain('不能撤销');
+      expect(running.api.stopCustomAnalysisDimension).not.toHaveBeenCalled();
+      ask.mockReturnValue(true);
+      (q(running.panel, '[data-custom-action="stop"]') as MiniElement).click(); await settle();
+      expect(running.api.stopCustomAnalysisDimension).toHaveBeenCalledWith({ versionId: 'v1' });
+    } finally { vi.unstubAllGlobals(); }
   });
 });
 
