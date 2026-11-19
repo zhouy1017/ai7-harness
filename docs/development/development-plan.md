@@ -55,7 +55,7 @@ The Owner's 2026-11-16 / 17 decisions moved the programme to this order and put 
 | --- | --- | --- | --- |
 | R4 | 0.7.3 Alpha | The service-layer domain split and faster service tests; in parallel, the interface lane (39 review items plus the review's additions); the #1504 remainder, #1506 and a bounded #1152 check; the networking session (re-recording and the #1074 re-measurement) | [#1517](https://github.com/zhouy1017/ai7-harness/issues/1517) |
 | Interface and pages round | 0.7.4 Alpha | Interface lane two (9 items) and the rarely used pages (17 items); 学习回溯 cleaned up and opened; the review's additions; the styled icon set | [#1539](https://github.com/zhouy1017/ai7-harness/issues/1539) |
-| R5 | 0.8.0 Alpha | The storage rearrangement and the in-app upgrade tool; trustworthy undo (3 items); the real version list; the #1027 decision point. Design accepted in [ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md) (#1555; the Owner’s 「R5按照推荐」, 2026-11-18); no code started. Slices R5-1 … R5-7 below start after 0.7.3 is delivered | [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540) |
+| R5 | 0.8.0 Alpha | The storage rearrangement and the in-app upgrade tool; trustworthy undo (3 items); the real version list; the #1027 decision point. Design accepted in [ADR 0105](../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md) (#1555; the Owner’s 「R5按照推荐」, 2026-11-18); no code started. Slices R5-1 … R5-7 below start after 0.7.3 is delivered. The 字表与词表 library ([ADR 0106](../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md), #1152; the Owner, 2026-11-19) joins R5 as R5-L1 … R5-L5 | [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540) |
 | One human test | — | Arranged by the Owner after 0.8.0 is delivered; the real-editor evaluation (the second half of #1074) happens here too | — |
 
 The three rounds overlap in development and keep this delivery order. The [wave Issue #1517](https://github.com/zhouy1017/ai7-harness/issues/1517) owns the R4 batches, file ownership and merge order; [PROGRESS](../../PROGRESS.md) owns what is delivered.
@@ -75,12 +75,24 @@ R5 builds on `codex/integration-0.8.0`. R5-2 through R5-6 travel as one train, s
 | R5-3 + R5-4 | Structural edits on a 46,000-paragraph manuscript stop rewriting every later paragraph; Ctrl+Z undoes accepted suggestions, replace-all and AI edits as one step each, says where, survives a restart and never gets stuck | After R5-2 and R5-1, one train |
 | R5-5 | A real version list in 工作概览: view, export as DOCX, restore (undoable once) | After R5-3 + R5-4 |
 | R5-6 | One-click upgrade to 0.8.0 with a before/after comparison, the old data kept, and 「回到升级前的数据」; `.ai7db` from 0.7.2 on imports directly | After R5-5 and #1556; lands the train |
-| R5-7 | Acceptance on real 0.7.x stores built from `SampleBooks/`, interrupted at every phase, with rollback drills, DOCX round trip, 15 Journeys, the full guest ladder and the hosted Full Gate; 0.8.0 | After the train and 0.7.4 |
+| R5-7 | Acceptance on real 0.7.x stores built from `SampleBooks/`, interrupted at every phase, with rollback drills, DOCX round trip, 15 Journeys, the full guest ladder and the hosted Full Gate; 0.8.0 | After the train, R5-L2 … R5-L5 and 0.7.4 |
 
 Measured targets, against the [#1557](https://github.com/zhouy1017/ai7-harness/issues/1557) baseline:
 - a split or join at 46,000 paragraphs writes under 1 % of today's write-ahead bytes;
 - reads stay within 10 % of the baseline;
 - undoing a 2,000-place replace-all holds the write lock at most 2 s.
+
+### The 字表与词表 library (#1152, ADR 0106)
+
+The Owner's three directions of 2026-11-19 replace the hard-coded standards tables with a library in 知识库 › 字表与词表. An editor imports, updates, disables or deletes 字表 and 词表 there, and 规范用语核查 reads the enabled ones, pinned by version. A corrected or newer standard needs no program release. Only 《通用规范汉字表》, its 附表1 and GF 1001-2001 are pre-installed. Dictionary tables are imported by the house.
+
+| Slice | What the editor can newly do | Order |
+| --- | --- | --- |
+| R5-L1 | (internal) The library's relations in the revision-117 baseline; the three pre-installed tables in every new and every upgraded store, with content equal to today's; inventory and merge class | On the train with R5-2; R5-6 calls its install function |
+| R5-L2 | Import any table file: the AI7 format and regular tables convert directly; anything else with text is formatted by the editor's own model service after a usage estimate and confirmation, every entry traced to the file and doubtful rows held for confirmation; a new version shows what changed; delete removes the source and its data together | After the train lands |
+| R5-L3 | 规范用语核查 checks against the enabled tables, says each suggestion's strength (国家规范 / 辞书推荐 / 本社要求) and basis, shows disagreeing tables instead of choosing, and keeps past results readable with 「依据的字表已删除」 | After the train lands; beside R5-L2 |
+| R5-L4 | 知识库 › 字表与词表: one item per imported table with its conversion and application status, open to view, confirm and edit rows, 导入新版本, 删除, 恢复预装字表 | After R5-L2 and R5-L3 |
+| R5-L5 | (internal) The tables leave the program code; the pre-installed seed is their only copy | After R5-L3; before R5-7 |
 
 ## Delivered #1444 (0.6.5 Beta)
 

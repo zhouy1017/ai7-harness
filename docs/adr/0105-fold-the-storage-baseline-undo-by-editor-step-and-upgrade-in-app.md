@@ -8,6 +8,8 @@ decides: the R5 details left open by the Owner's D3 and D7 of #1458
 
 # 0105 · Fold the storage baseline, undo by editor step, and upgrade in the app
 
+> Amended by [ADR 0106 §9–§10](./0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md#9--storage-in-the-revision-117-baseline): revision 117 (§4) also holds the 字表与词表 library; the upgrade (§5) installs the three pre-installed tables in the converted store, an expected difference for R5-6; slices R5-L1 … R5-L5 join §7, R5-L1 on the train with R5-2, the rest after the train and before R5-7.
+
 ## Context
 
 The Owner's decision D3 ([#1458](https://github.com/zhouy1017/ai7-harness/issues/1458#issuecomment-6818574586), 2026-11-12) allows the store to be folded when a database upgrade tool is provided: 「延续约定不是强制，可以在提供数据库升级工具的前提下升级」. D7 ([#1458](https://github.com/zhouy1017/ai7-harness/issues/1458), 2026-11-14) decides that per-step undo of edits made before the upgrade is not carried: 「不保留」. Round [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540) (R5 → 0.8.0 Alpha) asks for:
