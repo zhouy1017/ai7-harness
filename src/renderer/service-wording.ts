@@ -36,6 +36,12 @@ const RULES: ReadonlyArray<readonly [RegExp, string | ((...parts: string[]) => s
   [/应用结果待确认|应用凭据/gu, '修改是否生效待确认'],
   [/(API )?凭据/gu, '密钥'],
   [/后台处理登记/gu, '空闲时自动更新分析'],
+  // The 后台分析 block's own states, where one switch stands for 登记 (review S6).
+  [/登记之后/gu, '打开之后'],
+  [/重新登记/gu, '重新打开'],
+  [/这份登记/gu, '这项设置'],
+  [/^未登记$/gu, '未打开'],
+  [/^已登记$/gu, '已打开'],
   [/本社审阅偏好/gu, '审阅偏好'],
   [/证据保证级别/gu, '核查力度'],
   [/学习准入/gu, '是否可用于学习'],

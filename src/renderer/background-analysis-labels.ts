@@ -1,6 +1,18 @@
 export const BACKGROUND_SUMMARY = '登记后，仅在稿件有已确认改动且空闲时处理，每次不超过用量上限；暂停或撤销不开始新任务，未接入的工序不会运行。';
 /** The one sentence beside the ordinary mode's switch (Issue #1531): when the block offers a single kind, the select and 登记 become it. */
-export const BACKGROUND_SWITCH_NOTE = '打开后，稿件有已确认的改动且 AI7 空闲时自动更新分析，每次不超过标准用量；关闭后不再开始新的分析。';
+export const BACKGROUND_SWITCH_NOTE = '打开后，稿件有已确认的改动且 AI7 空闲时自动更新分析，每次不超过所选用量；关闭后不再开始新的分析。';
+/** The one sentence beside the switch while it is on (Issue #1531): where the setting stands. */
+export const BACKGROUND_SWITCH_STATE: Readonly<Record<'active' | 'paused' | 'suspended', string>> = {
+  active: '已打开：稿件有已确认的改动且 AI7 空闲时会自动更新分析。',
+  paused: '已暂停：继续之前不会开始新的分析；已经开始的照常进行。',
+  suspended: '待你确认：重新打开之前不会开始新的分析。',
+};
+/** What the switch cannot do when no kind is on offer, when the service names no reason. */
+export const BACKGROUND_SWITCH_NONE = '现在没有可以空闲时自动更新的分析。';
+/** The switch's choices, folded away with the form's defaults (Issue #1531, review S6). */
+export const BACKGROUND_SWITCH_OPTIONS = '选项';
+export const BACKGROUND_SWITCH_OPTIONS_LOCKED = '关闭后可以改这些选项。';
+export const BACKGROUND_SWITCH_REOPEN = '重新打开';
 export const BACKGROUND_SWITCH_ON_STATUS = '已打开空闲时自动更新分析';
 export const BACKGROUND_SWITCH_BUSY = '正在打开空闲时自动更新分析…';
 import { technicalWords } from './technical-layer.js';
@@ -30,7 +42,7 @@ export const BACKGROUND_REVOKE_CONFIRM = '撤销登记';
 export const BACKGROUND_CANCEL = '取消';
 export const BACKGROUND_CHOOSE_FIRST = '请先选从哪里开始。';
 export const BACKGROUND_STARTED_HEADING = '按登记开始的分析';
-export const BACKGROUND_HISTORY_SUMMARY = '登记记录';
+export const backgroundHistorySummary = (): string => technicalWords('登记记录', '记录');
 export const BACKGROUND_BINDS_SUMMARY = '这份登记定下的内容';
 export const BACKGROUND_LOADING = '正在读取…';
 export const BACKGROUND_UNAVAILABLE = '无法读取这本书的自动更新分析设置。';
