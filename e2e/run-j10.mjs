@@ -1887,14 +1887,14 @@ async function main() {
       pausedWorkspace.run?.categories?.[1]?.state==='waiting', 'review-controls-checkpoint');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'review-controls-resume');
     await waitFor(renderer, `window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}}).then((plan)=>plan.runControl?.activity?.currentUnitOrdinal===2 && plan.runControl.runRecordId===${JSON.stringify(reviewStarted.runControl.runRecordId)})`, 'review-controls-same-run');
-    // The drawer's bar fills by the parts read (its width set through the style object, as the page's policy requires).
-    await waitFor(renderer, `(() => { const fill=document.querySelector('#task-drawer .task-plan-progress-fill'); return !!fill && Number.parseFloat(getComputedStyle(fill).width) > 0; })()`, 'review-controls-progress-fill', 30_000);
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='review-run'||drawer.dataset.taskPlanRef!==${JSON.stringify(reviewRef)})return false; const button=drawer.querySelector('[data-task-drawer-control="cancel-run"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'review-controls-cancel-ready');
 
     at('review-controls-cancel-impact');
     await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.textContent==='停止任务'`, 'review-controls-stop-wording');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="cancel-run"]', 'review-controls-impact');
     await waitFor(renderer, `document.querySelector('#task-drawer-cancel-impact') && document.querySelector('#task-drawer [data-task-drawer-control="confirm-cancel-run"]')?.textContent==='确认取消任务'`, 'review-controls-confirm-wording');
+    // The Run still runs with one part read: the drawer's bar fills by the parts read (its width set through the style object, as the page's policy requires).
+    await waitFor(renderer, `(() => { const fill=document.querySelector('#task-drawer .task-plan-progress-fill'); return !!fill && Number.parseFloat(getComputedStyle(fill).width) > 0; })()`, 'review-controls-progress-fill', 30_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="confirm-cancel-run"]', 'review-controls-cancel');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='cancelling'`, 'review-controls-cancelling');
     await writeFile(holdPath, '2', 'utf8');

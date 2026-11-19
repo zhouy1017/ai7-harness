@@ -26,8 +26,7 @@ let created = 0;
 const surfaces: Array<ReturnType<typeof mountPositionRail>> = [];
 beforeEach(() => {
   uninstall = installMiniDom();
-  // The rail draws positions and inserts in order: the two things the minimal DOM leaves out, here and nowhere else.
-  Object.defineProperty(MiniElement.prototype, 'style', { configurable: true, get(this: { _style?: Record<string, string> }) { return (this._style ??= {}); } });
+  // The rail inserts in order: what the minimal DOM leaves out, here and nowhere else.
   Object.defineProperty(MiniElement.prototype, 'insertBefore', { configurable: true, value(this: MiniElement, node: MiniElement, before: MiniElement | null) {
     node.remove();
     const at = before === null ? this.children.length : this.children.indexOf(before);
@@ -43,7 +42,6 @@ afterEach(() => {
   vi.useRealTimers();
   for (const surface of surfaces.splice(0)) surface.destroy();
   vi.restoreAllMocks();
-  delete (MiniElement.prototype as unknown as Record<string, unknown>)['style'];
   delete (MiniElement.prototype as unknown as Record<string, unknown>)['insertBefore'];
   uninstall();
 });

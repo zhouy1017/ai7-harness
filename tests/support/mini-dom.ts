@@ -238,8 +238,9 @@ export class MiniElement {
   }
   focus(): void { miniDocument.activeElement = this; }
   scrollIntoView(): void { /* nothing lays out */ }
+  #style: Record<string, string> | undefined;
   /** The style object a renderer writes (the page's policy refuses style attributes); nothing reads it but tests. */
-  style: Record<string, string> = {};
+  get style(): Record<string, string> { return (this.#style ??= {}); }
   /** Nothing is styled: every element counts as rendered unless a test says otherwise. */
   checkVisibility(): boolean { return true; }
   /** Nothing lays out: every box is empty at the origin unless a test gives it a place. */
