@@ -1,4 +1,5 @@
 import { pointerClick } from './dispatch-chooser.mjs';
+import { attentionNoticeClearsMenu, attentionNoticeHolds, closeTaskDrawer, pressQuietResult, READ_CARET } from './attention-notice.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1647,6 +1648,31 @@ async function main() {
       await openAnalysisOf(renderer, foregroundBook, 'idle-foreground-cancel');
       await renderer.evaluate(`window.ai7.cancelBaselineAnalysisRun({taskIntentId:${JSON.stringify(foregroundTask)}})`);
     }
+    // #1528: the editor is on another page of Book B when its Run finishes: the completion's 查看结果 opens the result there,
+    // in place, by way of no global page.
+    at('idle-result-in-place');
+    await toLibrary(renderer, 'idle-result-library');
+    await openManuscriptOf(renderer, bookB, 'idle-result-manuscript');
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    try {
+      await renderer.evaluate(`(() => { window.__j09Screens = []; const screen = document.querySelector('#screen'); new MutationObserver(() => { const now = screen.dataset.screen; if (now !== window.__j09Screens.at(-1)) window.__j09Screens.push(now); }).observe(screen, { attributes: true, attributeFilter: ['data-screen'] }); return true; })()`);
+      await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
+      try {
+        await pressQuietResult(renderer, waitFor, 'idle-result-notice');
+      } catch (error) {
+        // Say whether the Run finished: a missing toast is then the notice's, not the Run's.
+        if (!String(error?.message ?? error).includes('idle-result-notice-raised')) throw error;
+        const finished = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((reading)=>reading.run?.runRecordId===${JSON.stringify(idleRunId)} && reading.state==='settled')`).catch(() => false);
+        requireJourney(false, finished ? 'idle-result-run-finished-without-toast' : 'idle-result-run-not-finished');
+      }
+      await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')`, 'idle-result-opened', 60_000);
+      const visited = await renderer.evaluate('window.__j09Screens');
+      requireJourney(Array.isArray(visited) && !visited.includes('task-overview') && !visited.includes('global-attention') && visited.at(-1) === 'book-analysis', 'idle-result-in-place', visited);
+      const route = await renderer.evaluate('window.ai7.getBookWorkbenchRoute()');
+      requireJourney((route?.bookId ?? null) === bookB, 'idle-result-same-book', route);
+    } finally {
+      await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+    }
     await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
     await toLibrary(renderer, 'idle-resume-b');
     await openAnalysisOf(renderer, bookB, 'idle-resume-b');
@@ -1818,7 +1844,42 @@ async function main() {
     await openAnalysisOf(renderer, questionBook, 'model-question-analysis');
     const beforeQuestion = await readSettledAttention(renderer);
     const recentBeforeQuestion = beforeQuestion.groups.find((group) => group.key === 'recent').items.map((item) => item.itemId);
+    // #1528: the Run is held at its first range while the editor goes to the manuscript and puts the caret in its text; the
+    // question then comes, and its notice stands at both window sizes without moving the caret or the focus.
+    at('model-question-notice');
+    await writeFile(holdPath, '0', 'utf8');
     await startFirstBaseline(renderer, 'ready', 'model-question-baseline');
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    try {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'model-question-manuscript-entry');
+      await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]')`, 'model-question-manuscript');
+      // At 1008 px the drawer the start left open overlays the text: closed by pointer, as an editor going on to type would.
+      await closeTaskDrawer(renderer, waitFor, 'model-question');
+      // The editor returned to the window: a summary of what the earlier stages left may be showing. It is closed first, so that
+      // the next notice is the question's, and so that the caret below is read after everything that could move it.
+      if (await renderer.evaluate(`document.querySelector('[data-attention-toast]')?.hidden === false`)) {
+        await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'model-question-summary-close');
+        await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'model-question-summary-closed');
+      }
+      await pointerClick(renderer, waitFor, '[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]', 'model-question-caret');
+      const caret = await renderer.evaluate(READ_CARET);
+      requireJourney(caret.focused === true && caret.block !== null, 'model-question-caret-placed', caret);
+      await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
+      await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='awaiting-clarification')`, 'model-question-asked', 120_000);
+      const asked = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.flatMap((group) => group.items).find((entry) => entry.book.bookId === ${JSON.stringify(questionBook)} && entry.state === 'analysis-clarification')?.book.title ?? null)`);
+      requireJourney(typeof asked === 'string', 'model-question-asked-item');
+      await attentionNoticeHolds(renderer, waitFor, requireJourney, 'model-question-notice', `《${asked}》分析在等你回答`, caret);
+      // Over an open menu at 1008 px the notice covers none of its controls (it stands below menus and sheets).
+      await attentionNoticeClearsMenu(renderer, waitFor, requireJourney, 'model-question-notice-menu');
+      // 去处理, pressed with the pointer, opens the question where it is answered — this Book's 分析 with the drawer on the Run — and the notice goes.
+      await pointerClick(renderer, waitFor, '[data-attention-toast-action]', 'model-question-notice-go');
+      await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true && document.querySelector('#screen')?.dataset.screen === 'book-analysis' && document.querySelector('#task-drawer')?.dataset.taskDrawer === 'open' && document.querySelector('.task-plan-clarification-question')`, 'model-question-notice-opened', 30_000);
+      const route = await renderer.evaluate('window.ai7.getBookWorkbenchRoute()');
+      requireJourney((route?.bookId ?? null) === questionBook, 'model-question-notice-same-book', route);
+    } finally {
+      await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+    }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), 'model-question-analysis-return');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='awaiting-clarification'`, 'model-question-waits', 120_000);
     const questionRun = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
     const questionTask = questionRun.taskIntent.taskIntentId;
@@ -1850,6 +1911,42 @@ async function main() {
     await openAttention(renderer, 'model-question-answered-attention');
     const answeredAttention = await readSettledAttention(renderer);
     requireJourney(!answeredAttention.groups.find((group) => group.key === 'decisions').items.some((item) => item.itemId === questionItem.itemId), 'model-question-item-removed');
+
+    at('model-question-second-notice');
+    // #1528: a second raise — another Book's question while the editor types in its manuscript — is closed with × by the real
+    // pointer: the notice goes and the caret and the focus stay in the manuscript.
+    await closeOwnedBrowser();
+    await writeFile(holdPath, '0', 'utf8');
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'second-question-ready');
+    const secondQuestionBook = await importSample1(renderer, '模型提问旅程乙', true, 'second-question-import');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'second-question-library');
+    await openAnalysisOf(renderer, secondQuestionBook, 'second-question-analysis');
+    await startFirstBaseline(renderer, 'ready', 'second-question-baseline');
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    try {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'second-question-manuscript-entry');
+      await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]')`, 'second-question-manuscript');
+      // At 1008 px the drawer the start left open overlays the text: closed by pointer, as an editor going on to type would.
+      await closeTaskDrawer(renderer, waitFor, 'second-question');
+      if (await renderer.evaluate(`document.querySelector('[data-attention-toast]')?.hidden === false`)) {
+        await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'second-question-summary-close');
+        await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'second-question-summary-closed');
+      }
+      await pointerClick(renderer, waitFor, '[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]', 'second-question-caret');
+      const secondCaret = await renderer.evaluate(READ_CARET);
+      requireJourney(secondCaret.focused === true && secondCaret.block !== null, 'second-question-caret-placed', secondCaret);
+      await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
+      await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='awaiting-clarification')`, 'second-question-asked', 120_000);
+      const secondAsked = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.flatMap((group) => group.items).find((entry) => entry.book.bookId === ${JSON.stringify(secondQuestionBook)} && entry.state === 'analysis-clarification')?.book.title ?? null)`);
+      requireJourney(typeof secondAsked === 'string', 'second-question-asked-item');
+      await attentionNoticeHolds(renderer, waitFor, requireJourney, 'second-question-notice', `《${secondAsked}》分析在等你回答`, secondCaret);
+      await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'second-question-notice-close');
+      await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'second-question-notice-closed');
+      requireJourney(JSON.stringify(await renderer.evaluate(READ_CARET)) === JSON.stringify(secondCaret), 'second-question-close-keeps-caret', secondCaret);
+    } finally {
+      await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+    }
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

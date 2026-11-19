@@ -2,9 +2,11 @@ import type { NavigationCheckpoint } from './navigation-generation.js';
 import { showToast } from './components/toast.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection, TaskOverviewItemProjection } from '../shared/protocol.js';
 import type { NotificationsRendererApi } from '../shared/preferences.js';
-import { completionLabel, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notification-labels.js';
+import { ATTENTION_NOTICE_WORDS, attentionKind, attentionLabel, attentionManyLabel, awaySummaryLabel, completionLabel, isCompletion, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notification-labels.js';
 
 export const QUIET_NOTICE_MS = 2_500;
+/** The key of 设置 › 通知's 「正在看本书时自动显示结果」: the editor's own switch on this device, on unless turned off. */
+export const AUTO_RESULT_KEY = 'ai7.task-overview.auto-result';
 export function showTransientNotice(message: string): void { showToast(message); }
 
 /**
@@ -146,18 +148,27 @@ export function followBottomControls(bar: HTMLElement): void {
   new MutationObserver(schedule).observe(document.body, { attributes: true, attributeFilter: ['data-task-drawer'], childList: true, subtree: true });
 }
 
-/** Observe the existing attention projection; history and its count remain owned by that projection. */
+/**
+ * Observe the existing attention projection; history and its count remain owned by that projection. A new ordinary completion and
+ * a new task that stops for the editor (`attentionKind`) each say so while the window is focused (`completed`, `attention`) and
+ * are collected for the return summary while it is not (`away`). `standing` is every task that needs the editor, at each reading.
+ */
 export function createNotificationObserver(options: {
   api: Pick<NotificationsRendererApi, 'notify'>;
   focused(): boolean;
   completed(item: GlobalAttentionItemProjection): void;
+  attention?(item: GlobalAttentionItemProjection): void;
+  away?(item: GlobalAttentionItemProjection, kind: 'completed' | 'attention'): void;
+  standing?(items: ReadonlyArray<GlobalAttentionItemProjection>): void;
   startedAt?: number;
 }) {
   const startedAt = options.startedAt ?? Date.now();
   const seen = new Set<string>();
   return (projection: GlobalAttentionProjection): void => {
+    const standing: GlobalAttentionItemProjection[] = [];
     for (const group of projection.groups) for (const item of group.items) {
       if (!['exceptions', 'decisions', 'recent'].includes(item.group)) continue;
+      if (attentionKind(item) !== null) standing.push(item);
       const key = `${item.itemId}:${item.state}:${item.at}`;
       const at = Date.parse(item.at);
       if (!Number.isFinite(at) || at <= startedAt || seen.has(key)) continue;
@@ -166,8 +177,93 @@ export function createNotificationObserver(options: {
       void options.api.notify({ bookId: item.book.bookId, eventId: item.itemId }).catch(() => {
         // Notifications are optional; durable attention and the authoritative record remain available.
       });
-      if (item.group === 'recent' && options.focused()) options.completed(item);
+      // A failed dialogue stays among the tasks that need the editor; a cancelled task is no completion to say.
+      const kind = attentionKind(item) !== null ? 'attention' : isCompletion(item) ? 'completed' : null;
+      if (kind === null) continue;
+      if (!options.focused()) options.away?.(item, kind);
+      else if (kind === 'completed') options.completed(item);
+      else options.attention?.(item);
     }
+    options.standing?.(standing);
+  };
+}
+
+export interface AttentionNotice {
+  /** A task stopped for the editor while the window is focused. */
+  raise(item: GlobalAttentionItemProjection): void;
+  /** On returning to the window: what finished and what needs the editor meanwhile, said as one line. */
+  summarize(finished: ReadonlyArray<GlobalAttentionItemProjection>, needing: ReadonlyArray<GlobalAttentionItemProjection>): void;
+  /** The tasks that still need the editor; a task that no longer does leaves the notice. */
+  settle(standing: ReadonlySet<string>): void;
+}
+
+/**
+ * The notice for a task that needs the editor (#1528): it names the Book and the task, stays until it is closed or acted on,
+ * and takes no focus. Several collapse into one line; `open` receives what the line stands for. It is its own element, never the
+ * transient capsule, so no later toast replaces it. An update that changes no words leaves the line alone, so it is said once.
+ */
+export function mountAttentionNotice(open: (items: ReadonlyArray<GlobalAttentionItemProjection>) => void): AttentionNotice {
+  const needing = new Map<string, GlobalAttentionItemProjection>();
+  let finished: ReadonlyArray<GlobalAttentionItemProjection> = [];
+  let summary = false;
+  /** What the return summary counts: only the tasks that stopped while the window was away. */
+  let summaryIds = new Set<string>();
+  const host = document.createElement('aside');
+  host.className = 'attention-toast';
+  host.dataset['attentionToast'] = '';
+  host.setAttribute('role', 'status');
+  host.setAttribute('aria-live', 'polite');
+  host.hidden = true;
+  const text = document.createElement('span');
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = 'btn small quiet';
+  go.dataset['attentionToastAction'] = '';
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn small quiet attention-toast-close';
+  close.dataset['attentionToastClose'] = '';
+  close.setAttribute('aria-label', ATTENTION_NOTICE_WORDS.close);
+  close.title = ATTENTION_NOTICE_WORDS.close;
+  close.textContent = '×';
+  host.append(text, go, close);
+  // A press on its buttons must not take the focus from the page: the caret stays where the editor left it.
+  host.addEventListener('mousedown', (event) => event.preventDefault());
+  const write = (node: HTMLElement, value: string): void => { if (node.textContent !== value) node.textContent = value; };
+  const entries = (): GlobalAttentionItemProjection[] => [...finished, ...needing.values()];
+  const clear = (): void => { needing.clear(); finished = []; summary = false; paint(); };
+  const paint = (): void => {
+    const waiting = [...needing.values()];
+    if (waiting.length + finished.length === 0) { host.hidden = true; return; }
+    if (!host.isConnected) document.body.append(host);
+    const counted = waiting.filter((item) => summaryIds.has(item.itemId)).length;
+    // With nothing left to wait for, what finished is all the line can still say.
+    if ((summary || waiting.length === 0) && finished.length + counted > 0) {
+      write(text, awaySummaryLabel(finished.length, counted));
+      write(go, waiting.length > 0 ? ATTENTION_NOTICE_WORDS.go : finished.length === 1 ? QUIET_NOTICE_WORDS.view : ATTENTION_NOTICE_WORDS.view);
+    } else {
+      write(text, waiting.length === 1 ? attentionLabel(waiting[0]!) : attentionManyLabel(waiting.length));
+      write(go, ATTENTION_NOTICE_WORDS.go);
+    }
+    host.dataset['attentionCount'] = String(waiting.length);
+    host.hidden = false;
+  };
+  go.addEventListener('click', () => { const items = entries(); clear(); open(items); });
+  close.addEventListener('click', clear);
+  return {
+    raise(item) { needing.set(item.itemId, item); summary = false; paint(); },
+    summarize(done, waiting) {
+      summaryIds = new Set(waiting.map((item) => item.itemId));
+      for (const item of waiting) needing.set(item.itemId, item);
+      finished = [...finished, ...done];
+      summary = true;
+      paint();
+    },
+    settle(standing) {
+      let changed = false;
+      for (const id of [...needing.keys()]) if (!standing.has(id)) { needing.delete(id); changed = true; }
+      if (changed) { if (needing.size === 0 && finished.length === 0) summary = false; paint(); }
+    },
   };
 }
 

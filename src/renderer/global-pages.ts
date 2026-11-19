@@ -21,6 +21,7 @@ import { type AnalysisTabId } from './baseline-analysis-card.js';
 import { type RecoveryReturnContext } from './import-review.js';
 import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
 import { taskOverviewApi } from './task-overview-api.js';
+import { finishedResultRoute, type ResultEntrance } from './result-destination.js';
 import type { RendererApi, TaskOverviewItemProjection } from '../shared/protocol.js';
 
 interface Options {
@@ -142,7 +143,10 @@ function openOverviewTask(item: TaskOverviewItemProjection, view: 'plan' | 'run'
   else if (item.target.kind === 'dialogue') taskDrawer.openDialogue(item.target.bookId, item.target.dialogueId, finder);
   else if (item.bookId && item.plan) taskDrawer.open({ bookId: item.bookId, ...item.plan }, finder, undefined, { view: view === 'redo' ? 'plan' : view, redo: view === 'redo', row: item });
 }
-/** Task notices use the overview; other attention notices retain their existing destination. */
+/**
+ * A task's notice. A finished task opens its result where the editor is (查看结果, #1528), without the global 任务 page; any other
+ * task notice uses the overview; other attention notices retain their existing destination.
+ */
 async function openTaskNotification(itemId: string, target: GlobalAttentionTarget): Promise<void> {
   const navigationRoute = navigation.begin();
   if (!['analysis', 'analysis-plan', 'review', 'review-plan', 'task-plan', 'dialogue', 'task-intent-draft'].includes(target.kind)) {
@@ -152,15 +156,25 @@ async function openTaskNotification(itemId: string, target: GlobalAttentionTarge
   if (!navigationRoute.isCurrent()) return;
   const task = overview.groups.flatMap((group) => group.items).find((item) => item.itemId === itemId);
   if (!task) { await openGlobalAttentionTarget(target); return; }
+  if (['completed', 'cancelled', 'stopped'].includes(task.state)) { await openResult(task); return; }
   renderTaskOverview(itemId);
-  if (['completed', 'cancelled', 'stopped'].includes(task.state)) await openOverviewResult(task);
-  else openOverviewTask(task);
+  openOverviewTask(task);
 }
-async function openOverviewResult(item: TaskOverviewItemProjection): Promise<void> {
+/** The result in the floating window over the page on screen: the automatic window of #1510, and the fallback of 查看结果. */
+async function openResultWindow(item: TaskOverviewItemProjection): Promise<void> {
   if (!item.bookId) return;
   const resultApi = taskOverviewApi(api, () => item.bookId);
   if (item.result || item.attention.object.kind === 'task') openTaskResult({ item: item.attention, result: item.result }, () => state.taskOverviewSurface?.focus(item.itemId), resultApi);
   else openOverviewTask(item, 'run');
+}
+/**
+ * 查看结果 (#1528, plan #1516 §5): the result itself, in its Book, never by way of the global 任务 page, and in place while the
+ * editor is already in that Book. Which page, and when the result window still stands in for it, is `finishedResultRoute`'s.
+ */
+async function openResult(item: TaskOverviewItemProjection, from: ResultEntrance = 'toast'): Promise<void> {
+  const route = finishedResultRoute(item, from);
+  if (route.via === 'page') await openGlobalAttentionTarget(route.target, route.analysisRevisionId);
+  else if (route.via === 'window') await openResultWindow(item);
 }
 function renderTaskOverview(focusItemId?: string): void {
   taskDrawer.close(false);
@@ -171,7 +185,7 @@ function renderTaskOverview(focusItemId?: string): void {
     openTarget: openOverviewTask,
     openBook: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }),
     jumpToSelection: (item) => { if (item.bookId && item.selection) void jumpToSelectionText(item.bookId, item.selection); },
-    openResult: (item) => void openOverviewResult(item), closeDrawer: () => taskDrawer.close(true),
+    openResult: (item) => void openResult(item, 'overview'), closeDrawer: () => taskDrawer.close(true),
     configure: (bookId, kind) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
       const current = navigation.route();
       if (kind === 'review') renderBookReview(bookId, route.bookTitle);
@@ -200,7 +214,7 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
     const tasks = await api.inspectTaskOverview();
     if (!navigationRoute.isCurrent()) return;
     const task = tasks.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId);
-    if (task) { if (task.state === 'completed') await openOverviewResult(task); else openOverviewTask(task); return; }
+    if (task) { if (task.state === 'completed') await openResult(task, 'attention'); else openOverviewTask(task); return; }
   }
   await openGlobalAttentionTarget(item.target);
 }
@@ -340,5 +354,5 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
   }
 }
 
-return { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openOverviewResult, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget };
+return { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget };
 }

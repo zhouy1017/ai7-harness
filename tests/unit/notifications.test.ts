@@ -4,10 +4,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createGlobalAttentionReader } from '../../src/renderer/global-attention.js';
 import { createNotifier } from '../../src/main/notifications.js';
-import { createNotificationObserver, createStatusSurface, mountQuietNotice, openCurrentBookCompletion, reportResult } from '../../src/renderer/notifications.js';
+import { createNotificationObserver, createStatusSurface, mountAttentionNotice, mountQuietNotice, openCurrentBookCompletion, reportResult } from '../../src/renderer/notifications.js';
+import { mountAttentionPill } from '../../src/renderer/global-attention.js';
+import { mountTaskNotices } from '../../src/renderer/task-notices.js';
 import { composeTaskOverview } from '../../src/service/task-overview.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
-import { completionLabel, NOTIFICATION_LABELS, notificationClass, systemNoticeText } from '../../src/renderer/notification-labels.js';
+import { attentionKind, attentionLabel, completionLabel, NOTIFICATION_LABELS, notificationClass, systemNoticeText } from '../../src/renderer/notification-labels.js';
 import { preferenceDefaults } from '../../src/shared/preferences.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection } from '../../src/shared/protocol.js';
 
@@ -510,5 +512,321 @@ describe('a Run started from the Task Drawer reaches the observer', () => {
     const renderer = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts', import.meta.url)), 'utf8');
     const recorded = renderer.slice(renderer.indexOf('  onRecorded: (kind, bookId, ref) => {'), renderer.indexOf('  openRunSurface: (plan) =>'));
     expect(recorded).toContain('globalAttentionReader.refresh();');
+  });
+});
+
+describe('a task that needs the editor (#1528)', () => {
+  const KINDS = [
+    { state: 'analysis-failed', group: 'exceptions', words: '《Synthetic private title》分析没有完成' },
+    { state: 'review-failed', group: 'exceptions', words: '《Synthetic private title》审阅没有完成' },
+    { state: 'analysis-budget-reached', group: 'exceptions', words: '《Synthetic private title》分析用量已到上限' },
+    { state: 'analysis-account-limit', group: 'exceptions', words: '《Synthetic private title》分析被模型服务拒绝：账户限额已用完' },
+    { state: 'analysis-clarification', group: 'decisions', words: '《Synthetic private title》分析在等你回答' },
+    { state: 'analysis-outcome-unconfirmed', group: 'exceptions', words: '《Synthetic private title》分析结果待确认' },
+  ] as const;
+
+  it.each(KINDS)('raises its notice for $state in the foreground, naming the Book and the task', ({ state, group, words }) => {
+    const attention = vi.fn(); const completed = vi.fn(); const notify = vi.fn(async () => {});
+    const observe = createNotificationObserver({ api: { notify }, focused: () => true, completed, attention, startedAt: START });
+    const object = state.startsWith('review') ? { kind: 'review' as const, ordinal: 1 } : { kind: 'analysis' as const, mode: 'first-baseline' as const };
+    const event = item({ state, group, object });
+    observe(projection([event])); observe(projection([event]));
+    expect(attention).toHaveBeenCalledExactlyOnceWith(event);
+    expect(completed).not.toHaveBeenCalled();
+    expect(attentionLabel(event)).toBe(words);
+  });
+
+  it('raises none for a state that is not a task stopped for the editor', () => {
+    const attention = vi.fn();
+    const observe = createNotificationObserver({ api: { notify: vi.fn(async () => {}) }, focused: () => true, completed: vi.fn(), attention, startedAt: START });
+    observe(projection([
+      item({ itemId: 'plan', state: 'analysis-plan-revision' }), item({ itemId: 'recovery', state: 'recovery-pending', group: 'exceptions' }),
+    ]));
+    expect(attention).not.toHaveBeenCalled();
+    expect(attentionKind(item({ state: 'analysis-failed', group: 'exceptions' }))).toBe('failed');
+  });
+
+  it('collects what happens in the background, and lists the tasks that need the editor at every reading', () => {
+    const away = vi.fn(); const attention = vi.fn(); const completed = vi.fn(); const standing = vi.fn();
+    const observe = createNotificationObserver({ api: { notify: vi.fn(async () => {}) }, focused: () => false, completed, attention, away, standing, startedAt: START });
+    const failed = item({ itemId: 'failed', state: 'analysis-failed', group: 'exceptions' });
+    const done = item({ itemId: 'done', group: 'recent', state: 'analysis-completed', target: { kind: 'analysis', bookId: 'synthetic-book', taskIntentId: 'another-task' } });
+    observe(projection([failed, done]));
+    expect(away.mock.calls).toEqual([[failed, 'attention'], [done, 'completed']]);
+    expect(attention).not.toHaveBeenCalled(); expect(completed).not.toHaveBeenCalled();
+    expect(standing).toHaveBeenLastCalledWith([failed]);
+    observe(projection([]));
+    expect(standing).toHaveBeenLastCalledWith([]);
+  });
+
+  function mount() {
+    const restore = installMiniDom();
+    vi.useFakeTimers();
+    const editor = miniDocument.createElement('div'); editor.dataset['testid'] = 'manuscript-editor';
+    miniDocument.body.append(editor); editor.focus();
+    const open = vi.fn();
+    const notice = mountAttentionNotice(open);
+    const host = () => miniDocument.body.querySelector('[data-attention-toast]')!;
+    return { notice, open, host, editor, done: () => { vi.useRealTimers(); restore(); } };
+  }
+
+  it('stays until closed, is not the transient toast, and does not take the focus', () => {
+    const page = mount();
+    try {
+      page.notice.raise(item());
+      vi.advanceTimersByTime(60_000);
+      expect(page.host().hidden).toBe(false);
+      expect(page.host().children[0]?.textContent).toBe('《Synthetic private title》分析在等你回答');
+      expect(page.host().children[1]?.textContent).toBe('去处理');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      expect(miniDocument.activeElement).toBe(page.editor);
+      page.host().children[2]!.click();
+      expect(page.host().hidden).toBe(true);
+      expect(page.open).not.toHaveBeenCalled();
+    } finally { page.done(); }
+  });
+
+  it('collapses several into one line, opens them together and drops the one that is settled', () => {
+    const page = mount();
+    try {
+      const first = item({ itemId: 'one' }); const second = item({ itemId: 'two', group: 'exceptions', state: 'analysis-failed' });
+      page.notice.raise(first); page.notice.raise(second);
+      expect(page.host().children[0]?.textContent).toBe('有 2 项任务需要你处理');
+      expect(miniDocument.body.querySelectorAll('[data-attention-toast]')).toHaveLength(1);
+      page.notice.settle(new Set(['two']));
+      expect(page.host().children[0]?.textContent).toBe('《Synthetic private title》分析没有完成');
+      page.notice.raise(first);
+      page.host().children[1]!.click();
+      expect(page.open).toHaveBeenCalledExactlyOnceWith([second, first]);
+      expect(page.host().hidden).toBe(true);
+      page.notice.settle(new Set());
+      expect(page.host().hidden).toBe(true);
+    } finally { page.done(); }
+  });
+
+  it('says what happened in the background once, on return: finished and needing the editor', () => {
+    const page = mount();
+    try {
+      const failed = item({ itemId: 'failed', state: 'analysis-failed', group: 'exceptions' });
+      const done = [item({ itemId: 'a', group: 'recent', state: 'analysis-completed' }), item({ itemId: 'b', group: 'recent', state: 'review-completed', object: { kind: 'review', ordinal: 1 } })];
+      page.notice.summarize(done, [failed]);
+      expect(miniDocument.body.querySelectorAll('[data-attention-toast]')).toHaveLength(1);
+      expect(page.host().children[0]?.textContent).toBe('你不在时，2 项任务已完成，1 项需要你处理');
+      expect(page.host().children[1]?.textContent).toBe('去处理');
+      page.notice.settle(new Set());
+      expect(page.host().children[0]?.textContent).toBe('你不在时，2 项任务已完成');
+      expect(page.host().children[1]?.textContent).toBe('查看');
+      page.host().children[1]!.click();
+      expect(page.open).toHaveBeenCalledExactlyOnceWith(done);
+    } finally { page.done(); }
+  });
+
+  it('repaints no words that did not change, so the line is said once', () => {
+    const page = mount();
+    try {
+      const event = item();
+      page.notice.raise(event);
+      const text = page.host().children[0]!;
+      let writes = 0;
+      const words = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(text), 'textContent')!;
+      Object.defineProperty(text, 'textContent', { configurable: true, get() { return words.get!.call(this); }, set(value) { writes += 1; words.set!.call(this, value); } });
+      page.notice.raise(event); page.notice.settle(new Set([event.itemId]));
+      expect(writes).toBe(0);
+    } finally { page.done(); }
+  });
+
+  it('the header pill shows the same count as the entry on every page, and only while it is above nothing', () => {
+    const restore = installMiniDom();
+    try {
+      const button = miniDocument.createElement('button'); miniDocument.body.append(button);
+      type Reading = { kind: 'projection'; projection: GlobalAttentionProjection } | { kind: 'unavailable' };
+      let listener: (reading: Reading) => void = () => {};
+      const open = vi.fn();
+      mountAttentionPill({ button: button as unknown as HTMLElement, reader: { subscribe: (next: typeof listener) => { listener = next; return () => {}; } } as never, open });
+      listener({ kind: 'projection', projection: projection([item(), item({ itemId: 'two', group: 'exceptions', state: 'analysis-failed' })]) });
+      expect(button.hidden).toBe(false);
+      expect(button.textContent).toBe('待处理 2');
+      listener({ kind: 'projection', projection: projection([]) });
+      expect(button.hidden).toBe(true);
+      listener({ kind: 'projection', projection: projection([item()]) });
+      button.click();
+      expect(open).toHaveBeenCalledOnce();
+    } finally { restore(); }
+  });
+});
+
+describe('the notices of tasks as the window leaves and returns (#1528)', () => {
+  function mountNotices(options: Partial<Parameters<typeof mountTaskNotices>[0]> = {}) {
+    const restore = installMiniDom();
+    let focused = true;
+    const listeners = new Map<string, () => void>();
+    vi.stubGlobal('window', { addEventListener: (name: string, run: () => void) => { listeners.set(name, run); } });
+    vi.stubGlobal('localStorage', { getItem: () => null });
+    Object.assign(miniDocument, { hasFocus: () => focused });
+    let reading: (value: { kind: 'projection'; projection: GlobalAttentionProjection }) => void = () => {};
+    const calls = { openResult: vi.fn(), openAttention: vi.fn(), openList: vi.fn(), openWindow: vi.fn() };
+    mountTaskNotices({
+      api: { notify: vi.fn(async () => {}), inspectTaskOverview: vi.fn(async () => composeTaskOverview(projection([]), 2, () => null)) },
+      reader: { subscribe: (next: typeof reading) => { reading = next; return () => {}; } } as never,
+      screen: miniDocument.createElement('main') as unknown as HTMLElement, drawerView: () => null, ...calls, ...options,
+    });
+    const later = (change: Partial<GlobalAttentionItemProjection>) => item({ at: new Date(Date.now() + 60_000).toISOString(), ...change });
+    return {
+      calls, later, toast: () => miniDocument.body.querySelector('[data-attention-toast]'),
+      read: (items: GlobalAttentionItemProjection[]) => reading({ kind: 'projection', projection: projection(items) }),
+      focus: (value: boolean) => { focused = value; if (value) listeners.get('focus')?.(); },
+      done: () => { vi.unstubAllGlobals(); delete (miniDocument as unknown as Record<string, unknown>)['hasFocus']; restore(); },
+    };
+  }
+
+  it('says a task that stops for a question once while focused, and says nothing of it in the background', () => {
+    const page = mountNotices();
+    try {
+      const question = page.later({ itemId: 'question' });
+      page.read([question]);
+      expect(page.toast()?.children[0]?.textContent).toBe('《Synthetic private title》分析在等你回答');
+      page.toast()!.children[1]!.click();
+      expect(page.calls.openAttention).toHaveBeenCalledExactlyOnceWith(question);
+      expect(page.calls.openResult).not.toHaveBeenCalled();
+      page.focus(false);
+      page.read([page.later({ itemId: 'another', group: 'exceptions', state: 'analysis-failed', target: { kind: 'analysis', bookId: 'synthetic-book', taskIntentId: 'another-task' } })]);
+      expect(page.toast()?.hidden).toBe(true);
+    } finally { page.done(); }
+  });
+
+  it('on return, one summary for everything that finished or needs the editor meanwhile, opened as the 待我处理 list of the one Book', () => {
+    const page = mountNotices();
+    try {
+      page.focus(false);
+      const failed = page.later({ itemId: 'failed', state: 'analysis-failed', group: 'exceptions' });
+      const done = page.later({ itemId: 'done', group: 'recent', state: 'analysis-completed', target: { kind: 'analysis', bookId: 'synthetic-book', taskIntentId: 'another-task' } });
+      page.read([failed, done]);
+      expect(page.toast()?.hidden ?? true).toBe(true);
+      page.focus(true);
+      expect(page.toast()?.hidden ?? true).toBe(true);
+      page.read([failed, done]);
+      expect(page.toast()?.children[0]?.textContent).toBe('你不在时，1 项任务已完成，1 项需要你处理');
+      page.read([failed, done]);
+      expect(page.toast()?.children[0]?.textContent).toBe('你不在时，1 项任务已完成，1 项需要你处理');
+      page.toast()!.children[1]!.click();
+      expect(page.calls.openList).toHaveBeenCalledExactlyOnceWith('synthetic-book');
+    } finally { page.done(); }
+  });
+
+  it('the summary of one completion opens its result, not an attention record; one that needs the editor opens that record', () => {
+    const page = mountNotices();
+    try {
+      const done = page.later({ itemId: 'done', group: 'recent', state: 'analysis-completed' });
+      page.focus(false); page.read([done]); page.focus(true); page.read([done]);
+      expect(page.toast()?.children[0]?.textContent).toBe('你不在时，1 项任务已完成');
+      expect(page.toast()?.children[1]?.textContent).toBe('查看结果');
+      page.toast()!.children[1]!.click();
+      expect(page.calls.openResult).toHaveBeenCalledExactlyOnceWith(done);
+      expect(page.calls.openAttention).not.toHaveBeenCalled();
+    } finally { page.done(); }
+  });
+
+  it('a dialogue the editor cancelled just before the window lost focus is not counted on return', () => {
+    const page = mountNotices();
+    try {
+      page.focus(false);
+      page.read([page.later({ itemId: 'cancelled', group: 'recent', state: 'dialogue-interrupted', object: { kind: 'dialogue', question: null },
+        facts: { progress: null, categories: [], revisionOrdinal: null, dialogueCancelled: true } })]);
+      page.focus(true); page.read([]);
+      expect(page.toast()?.hidden ?? true).toBe(true);
+    } finally { page.done(); }
+  });
+
+  it('a task that was settled before the editor returned is not in the summary', () => {
+    const page = mountNotices();
+    try {
+      page.focus(false);
+      page.read([page.later({ itemId: 'failed', state: 'analysis-failed', group: 'exceptions' })]);
+      page.focus(true);
+      page.read([]);
+      expect(page.toast()?.hidden ?? true).toBe(true);
+    } finally { page.done(); }
+  });
+});
+
+describe('review round 1 of #1528', () => {
+  it('a failed or interrupted dialogue is a task that needs the editor, never a completion; what the editor cancelled is quiet or silent', () => {
+    const completed = vi.fn(); const attention = vi.fn();
+    const observe = createNotificationObserver({ api: { notify: vi.fn(async () => {}) }, focused: () => true, completed, attention, startedAt: START });
+    const dialogue = (state: GlobalAttentionItemProjection['state'], itemId: string, change: Partial<GlobalAttentionItemProjection> = {}) => item({ itemId, group: 'recent', state, object: { kind: 'dialogue', question: null },
+      target: { kind: 'dialogue', bookId: 'synthetic-book', dialogueId: itemId }, ...change });
+    const failed = dialogue('dialogue-failed', 'd1'); const interrupted = dialogue('dialogue-interrupted', 'd2');
+    // The editor's cancellation of a Book dialogue is `dialogue-interrupted` with `dialogueCancelled` (dialogue-execution.ts).
+    const cancelled = dialogue('dialogue-interrupted', 'd3', { facts: { progress: null, categories: [], revisionOrdinal: null, dialogueCancelled: true } });
+    const globalFailed = dialogue('dialogue-failed', 'd4', { book: { bookId: null, title: null }, target: { kind: 'global-agent-dialogue', dialogueId: 'd4' } });
+    const cancelledTask = item({ itemId: 'cancelled', group: 'recent', state: 'analysis-cancelled', object: { kind: 'task', taskKind: 'initial-evaluation' },
+      target: { kind: 'task-plan', bookId: 'synthetic-book', taskKind: 'initial-evaluation', ref: 'cancelled' } });
+    observe(projection([failed, interrupted, cancelled, globalFailed, cancelledTask]));
+    expect(attention.mock.calls.map(([entry]) => entry.itemId)).toEqual(['d1', 'd2', 'd4']);
+    expect(completed.mock.calls.map(([entry]) => entry.itemId)).toEqual(['d3']);
+    expect(attentionLabel(failed)).toBe('《Synthetic private title》对话没有完成');
+    expect(attentionLabel(globalFailed)).toBe('对话没有完成');
+    expect(completionLabel(cancelled)).toBe('《Synthetic private title》对话已取消');
+  });
+
+  it('a press on the notice takes no focus from the page', () => {
+    const restore = installMiniDom();
+    try {
+      const notice = mountAttentionNotice(vi.fn());
+      notice.raise(item());
+      const press = { type: 'mousedown', defaultPrevented: false };
+      miniDocument.body.querySelector('[data-attention-toast]')!.dispatchEvent(press);
+      expect(press.defaultPrevented).toBe(true);
+    } finally { restore(); }
+  });
+
+  it('the return summary counts only the tasks that stopped while the window was away', () => {
+    const restore = installMiniDom();
+    try {
+      const notice = mountAttentionNotice(vi.fn());
+      notice.raise(item({ itemId: 'before' }));
+      notice.summarize([], [item({ itemId: 'away', group: 'exceptions', state: 'analysis-failed' })]);
+      const host = miniDocument.body.querySelector('[data-attention-toast]')!;
+      expect(host.children[0]?.textContent).toBe('你不在时，有 1 项任务需要你处理');
+      notice.raise(item({ itemId: 'after' }));
+      expect(host.children[0]?.textContent).toBe('有 3 项任务需要你处理');
+      // What finished is all it can still say once nothing is waiting: never 「有 0 项」.
+      const done = item({ itemId: 'done', group: 'recent', state: 'analysis-completed' });
+      const again = mountAttentionNotice(vi.fn());
+      again.summarize([done], []);
+      again.raise(item({ itemId: 'late' }));
+      again.settle(new Set());
+      expect(miniDocument.body.querySelectorAll('[data-attention-toast]')[1]?.children[0]?.textContent).toBe('你不在时，1 项任务已完成');
+    } finally { restore(); }
+  });
+});
+
+describe('the first reading after the window returns (#1528)', () => {
+  it('says a completion that arrives in it in the one summary, not as a second notice or an automatic window', () => {
+    const restore = installMiniDom();
+    let focused = false;
+    const listeners = new Map<string, () => void>();
+    vi.stubGlobal('window', { addEventListener: (name: string, run: () => void) => { listeners.set(name, run); } });
+    vi.stubGlobal('localStorage', { getItem: () => null });
+    Object.assign(miniDocument, { hasFocus: () => focused });
+    let reading: (value: { kind: 'projection'; projection: GlobalAttentionProjection }) => void = () => {};
+    const openWindow = vi.fn();
+    try {
+      mountTaskNotices({
+        api: { notify: vi.fn(async () => {}), inspectTaskOverview: vi.fn(async () => composeTaskOverview(projection([]), 2, () => null)) },
+        reader: { subscribe: (next: typeof reading) => { reading = next; return () => {}; } } as never,
+        screen: miniDocument.createElement('main') as unknown as HTMLElement, drawerView: () => null,
+        openResult: vi.fn(), openAttention: vi.fn(), openList: vi.fn(), openWindow,
+      });
+      const later = (change: Partial<GlobalAttentionItemProjection>) => item({ at: new Date(Date.now() + 60_000).toISOString(), ...change });
+      const failed = later({ itemId: 'failed', state: 'analysis-failed', group: 'exceptions' });
+      reading({ kind: 'projection', projection: projection([failed]) });
+      focused = true; listeners.get('focus')?.();
+      const done = later({ itemId: 'done', group: 'recent', state: 'analysis-completed', target: { kind: 'analysis', bookId: 'synthetic-book', taskIntentId: 'another-task' } });
+      reading({ kind: 'projection', projection: projection([failed, done]) });
+      expect(miniDocument.body.querySelector('[data-attention-toast]')?.children[0]?.textContent).toBe('你不在时，1 项任务已完成，1 项需要你处理');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      expect(openWindow).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); delete (miniDocument as unknown as Record<string, unknown>)['hasFocus']; restore(); }
   });
 });

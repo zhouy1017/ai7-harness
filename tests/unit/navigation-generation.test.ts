@@ -1,5 +1,6 @@
 import { styleInput } from '../../src/renderer/components/controls.js';
 import { rendererErrorMessage } from '../../src/renderer/error-words.js';
+import { finishedResultRoute } from '../../src/renderer/result-destination.js';
 import { showOnboardingCard } from '../../src/shared/preferences.js';
 import { createNotificationObserver, createStatusSurface, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
 import { composeTaskOverview } from '../../src/service/task-overview.js';
@@ -7,7 +8,7 @@ import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOver
 import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import ts from 'typescript';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { navigation, reconcileBookWorkbenchApi, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad } from '../../src/renderer/navigation-generation.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { mountTaskDrawer } from '../../src/renderer/task-drawer.js';
@@ -15,7 +16,7 @@ import { mountTaskDrawer } from '../../src/renderer/task-drawer.js';
 // Execute the private shell loaders, as the existing renderer composition tests do,
 // without starting the application or replacing the production navigation code.
 const source = ts.createSourceFile('index.ts', readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
-const names = ['canAutoOpenTaskResult', 'renderTaskOverview', 'renderBookReview', 'renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue', 'renderBookCreationForm', 'initializeStartup', 'renderApplicationStartup', 'renderError', 'reportBookReacquisitionFailure', 'clearBookReacquisitionNotice', 'withConflictCompletion', 'renderBookFilter', 'jumpToManuscript'];
+const names = ['openResult', 'openResultWindow', 'openGlobalAttentionItem', 'renderTaskOverview', 'renderBookReview', 'renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue', 'renderBookCreationForm', 'initializeStartup', 'renderApplicationStartup', 'renderError', 'reportBookReacquisitionFailure', 'clearBookReacquisitionNotice', 'withConflictCompletion', 'renderBookFilter', 'jumpToManuscript'];
 const declarations: string[] = [];
 let libraryLanding = '';
 for (const module of [source, ...['global-pages', 'settings-screens', 'library-screen'].map((name) => ts.createSourceFile(name + '.ts', readFileSync(new URL('../../src/renderer/' + name + '.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true))]) {
@@ -38,12 +39,28 @@ let failureCallback='';
 function findFailureCallback(node:ts.Node):void {if(ts.isCallExpression(node)&&node.expression.getText(source)==='reconcileBookWorkbenchApi'&&node.arguments[1]&&ts.isObjectLiteralExpression(node.arguments[1])){const property=node.arguments[1].properties.find((entry)=>entry.name?.getText(source)==='failed');if(property&&ts.isPropertyAssignment(property))failureCallback=property.initializer.getText(source);}ts.forEachChild(node,findFailureCallback);}
 findFailureCallback(source);
 let completionObserverOptions = '';
+// The notices of finished tasks live in task-notices.ts (#1528): its watching rule and its observer, run as they are written.
+const noticeSource = ts.createSourceFile('task-notices.ts', readFileSync(new URL('../../src/renderer/task-notices.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+let watchingRule = '';
 function findCompletionObserver(node: ts.Node): void {
- if (ts.isCallExpression(node) && node.expression.getText(source) === 'createNotificationObserver') completionObserverOptions = node.arguments[0]!.getText(source);
+ if (ts.isCallExpression(node) && node.expression.getText(noticeSource) === 'createNotificationObserver') completionObserverOptions = node.arguments[0]!.getText(noticeSource);
+ if (ts.isFunctionDeclaration(node) && node.name?.text === 'canAutoOpenTaskResult') watchingRule = node.getText(noticeSource);
  ts.forEachChild(node, findCompletionObserver);
 }
-findCompletionObserver(source);
-const program = ts.transpileModule(declarations.join('\n')+'\n'+settingsLoader+'\n'+importLoaders.join('\n')+'\nvar reportReacquisitionFailure='+failureCallback+'; var completionObserverOptions='+completionObserverOptions+';', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+findCompletionObserver(noticeSource);
+// The entrances of 查看结果 that are written inside index.ts's wiring, run as they are written (#1528).
+const sites: Record<string, string> = {};
+function findSites(node: ts.Node): void {
+ if (ts.isPropertyAssignment(node)) {
+  const name = node.name.getText(source), text = node.initializer.getText(source);
+  if (name === 'openTaskResult' && text.includes('finishedResultRoute')) sites['panel'] = text;
+  if (name === 'openResult' && text.includes("'palette'")) sites['palette'] = text;
+  if (name === 'openResult' && text.includes('openTaskNotification')) sites['toast'] = text;
+ }
+ ts.forEachChild(node, findSites);
+}
+findSites(source);
+const program = ts.transpileModule(declarations.join('\n')+'\n'+watchingRule+'\n'+settingsLoader+'\n'+importLoaders.join('\n')+'\nvar reportReacquisitionFailure='+failureCallback+'; var completionObserverOptions='+completionObserverOptions+'; var panelSite='+sites['panel']+'; var paletteSite='+sites['palette']+'; var toastSite='+sites['toast']+';', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const manuscriptSource = ts.createSourceFile('manuscript-screen.ts', readFileSync(new URL('../../src/renderer/manuscript-screen.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 let journalSender='';
 function findJournalSender(node:ts.Node):void { if(ts.isPropertyAssignment(node)&&node.name.getText(manuscriptSource)==='flushJournalEdit')journalSender=node.initializer.getText(manuscriptSource);ts.forEachChild(node,findJournalSender); }
@@ -79,7 +96,9 @@ function harness(api: object = {}) {
   const renderBaselineAnalysis = vi.fn((host: HTMLElement) => host.append(element('p', '', '已读取分析')));
  const guardedApi = reconcileBookWorkbenchApi({acknowledgeImportCompletion:async()=>undefined,getPreferences:async()=>({values:{'onboarding.state':'skipped'}}),getProductDataLocation:async()=>({}),getModelServiceSettings:async()=>({roles:[]}),...api} as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:(error,retry)=>(context['reportReacquisitionFailure'] as (error:unknown,retry:()=>Promise<void>)=>void)(error,retry),recovered:()=>{(context['clearBookReacquisitionNotice'] as ()=>void)();}},navigation);
   context = createContext({ styleInput, showOnboardingCard, navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
-    localStorage: { getItem: () => 'on' }, showQuietNotice: vi.fn(), openCurrentBookCompletion,
+    localStorage: { getItem: () => 'on' }, showQuietNotice: vi.fn(), openCurrentBookCompletion, AUTO_RESULT_KEY: 'ai7.task-overview.auto-result',
+    notice: { raise: vi.fn(), settle: vi.fn(), summarize: vi.fn() }, finished: [], needing: [], standing: new Set(), returning: false,
+    options: { get api() { return guardedApi; }, drawerView: () => (context['taskDrawer'] as { view(): unknown }).view(), openWindow: (entry: unknown) => (context['openOverviewResult'] as (entry: unknown) => void)(entry) },
     mountTaskOverview: vi.fn(() => ({ focus: vi.fn(), destroy: vi.fn() })),
     mountReviewWorkspace: vi.fn(() => ({ start: vi.fn(), refresh: vi.fn(), destroy: vi.fn() })),
     REVIEW_STATUS_LINES: { opened: '审阅已打开' },
@@ -107,7 +126,7 @@ function harness(api: object = {}) {
     mountEvaluation: vi.fn((options) => {context['evaluationOptions']=options;return {load:async()=>undefined,refresh:vi.fn()};}),
     technicalDetails: vi.fn(), awaitServiceJob: vi.fn(), openTaskPlan: vi.fn(),
     EVALUATION_STATUS: {loading:'正在读取评估',opened:'评估已打开',unavailable:'无法读取评估'},
-    renderTaskOverview: vi.fn(), openOverviewTask: vi.fn(), openOverviewResult: vi.fn(),
+    renderTaskOverview: vi.fn(), openOverviewTask: vi.fn(), openOverviewResult: vi.fn(), openTaskResult: vi.fn(), finishedResultRoute,
     renderLanding:vi.fn(),renderError:vi.fn(),leaveReturnChip:async()=>undefined,
     BOOK_FILTER_LEGEND:'筛选',BOOK_FILTER_FIELD_LABEL:'字段',BOOK_FILTER_FIELDS:{all:'全部',title:'书名'},BOOK_FILTER_TEXT_LABEL:'词语',MAX_BOOK_SUMMARY_FILTER_CHARACTERS:100,
     BOOK_FILTER_ACTIONS:{find:'查找',clear:'显示全部图书'},BOOK_FILTER_STATUS_LINES:{finding:'查找中',found:'查找完成'},BOOK_FILTER_NONE:'没有匹配的图书',
@@ -185,6 +204,96 @@ it('drops a notification lookup superseded by another navigation intent', async 
   expect(page.context['renderTaskOverview']).not.toHaveBeenCalled();
   expect(page.context['openOverviewTask']).not.toHaveBeenCalled();
   expect(page.focus).not.toHaveBeenCalled();
+});
+
+// A finished task as the 任务总览 reads it, in Book B while the window shows Book A (#1528).
+type Shape = 'analysis' | 'review' | 'dialogue' | 'evaluation' | 'writing' | 'analysis-bare' | 'dialogue-bare';
+const SHAPES: Record<Shape, { object: object; target: object; result: object | null; plan: object | null }> = {
+  analysis: { object: { kind: 'analysis', mode: 'first-baseline' }, target: { kind: 'analysis', bookId: 'book-b', taskIntentId: 'intent' }, result: { kind: 'analysis-revision', revisionId: 'rev' }, plan: { kind: 'baseline-analysis', ref: 'intent' } },
+  review: { object: { kind: 'review', ordinal: 1 }, target: { kind: 'review', bookId: 'book-b', reviewRunId: 'run' }, result: { kind: 'review-run', reviewRunId: 'run' }, plan: { kind: 'review-run', ref: 'run' } },
+  dialogue: { object: { kind: 'dialogue', question: null }, target: { kind: 'dialogue', bookId: 'book-b', dialogueId: 'dlg' }, result: { kind: 'dialogue', dialogueId: 'dlg' }, plan: null },
+  evaluation: { object: { kind: 'task', taskKind: 'initial-evaluation' }, target: { kind: 'task-plan', bookId: 'book-b', taskKind: 'initial-evaluation', ref: 'old' }, result: null, plan: { kind: 'initial-evaluation', ref: 'finished' } },
+  writing: { object: { kind: 'task', taskKind: 'writing' }, target: { kind: 'task-plan', bookId: 'book-b', taskKind: 'writing', ref: 'old' }, result: null, plan: { kind: 'writing', ref: 'finished' } },
+  'analysis-bare': { object: { kind: 'analysis', mode: 'first-baseline' }, target: { kind: 'analysis', bookId: 'book-b', taskIntentId: 'intent' }, result: null, plan: { kind: 'baseline-analysis', ref: 'intent' } },
+  'dialogue-bare': { object: { kind: 'dialogue', question: null }, target: { kind: 'dialogue', bookId: 'book-b', dialogueId: 'dlg' }, result: null, plan: null },
+};
+function finishedTask(shape: Shape) {
+  const { object, target, result, plan } = SHAPES[shape];
+  const attention = { itemId: 'task', group: 'recent', state: 'analysis-completed', book: { bookId: 'book-b', title: 'B' }, object, target, facts: {} };
+  return { itemId: 'task', bookId: 'book-b', state: 'completed', result, plan, attention, target };
+}
+const OWN_PAGE = { evaluation: { kind: 'task-plan', bookId: 'book-b', taskKind: 'initial-evaluation', ref: 'finished' }, writing: { kind: 'task-plan', bookId: 'book-b', taskKind: 'writing', ref: 'finished' } };
+type Entrance = 'toast' | 'palette' | 'overview' | 'panel' | 'attention';
+
+async function entrances(shape: Shape) {
+  const task = finishedTask(shape);
+  const page = harness({ inspectTaskOverview: async () => ({ groups: [{ items: [task] }] }) });
+  await page.run("renderBookReview('book-a','甲书')");
+  const opened = vi.fn(), windowed = vi.fn(), drawer = vi.fn();
+  page.context['openGlobalAttentionTarget'] = opened; page.context['openResultWindow'] = windowed; page.context['openTaskResult'] = drawer;
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  return { task, page, opened, windowed, drawer, flush };
+}
+
+describe.each(['analysis', 'review', 'dialogue', 'evaluation', 'writing', 'analysis-bare', 'dialogue-bare'] as const)('查看结果 of a finished %s, with Book A on screen (#1528)', (shape) => {
+  const route = (from: Entrance) => finishedResultRoute(finishedTask(shape) as never, from);
+
+  it.each(['toast', 'palette'] as const)('the %s opens its page in its own Book, never the result window or the drawer of another Book', async (site) => {
+    const { task, page, opened, windowed, flush } = await entrances(shape);
+    const expected = route(site) as { target: unknown; analysisRevisionId?: string };
+    await page.run(site === 'toast' ? `toastSite({ itemId: 'task', target: ${JSON.stringify(task.target)} })` : `paletteSite(${JSON.stringify(task)})`);
+    await flush(); await flush();
+    expect(windowed).not.toHaveBeenCalled();
+    expect(page.context['overviewDrawerBookId']).toBeNull();
+    expect(opened).toHaveBeenCalledExactlyOnceWith(expected.target, expected.analysisRevisionId);
+    if (shape === 'evaluation' || shape === 'writing') expect(opened.mock.calls[0]![0]).toEqual(OWN_PAGE[shape]);
+  });
+
+  it('the 任务总览 card follows the table: a page, or the result window on the overview only', async () => {
+    const { task, page, opened, windowed, flush } = await entrances(shape);
+    await page.run('renderTaskOverview()');
+    const options = (page.context['mountTaskOverview'] as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as { openResult(item: unknown): void };
+    options.openResult(task); await flush();
+    const expected = route('overview');
+    expect(opened.mock.calls.length + windowed.mock.calls.length).toBe(1);
+    if (expected.via === 'page') expect(opened).toHaveBeenCalledWith(expected.target, expected.analysisRevisionId);
+    else expect(windowed).toHaveBeenCalledWith(task);
+  });
+
+  it('a 待我处理 row keeps the result window for a result to read, and sends a result-less 评估 or 写作 to its page', async () => {
+    const { task, page, opened, windowed, flush } = await entrances(shape);
+    await page.run(`openGlobalAttentionItem(${JSON.stringify(task.attention)})`);
+    await flush();
+    const expected = route('attention');
+    expect(opened.mock.calls.length + windowed.mock.calls.length).toBe(1);
+    if (expected.via === 'page') expect(opened).toHaveBeenCalledWith(expected.target, undefined);
+    else expect(windowed).toHaveBeenCalledWith(task);
+  });
+
+  it("the Book's 任务 panel card follows the same table", async () => {
+    const { task, page, opened, drawer, flush } = await entrances(shape);
+    await page.run(`panelSite(${JSON.stringify({ item: task.attention, result: task.result })}, () => undefined)`);
+    await flush();
+    // The panel's card carries the item and its result only, so its page is the item's own target.
+    const expected = finishedResultRoute({ result: task.result, attention: task.attention } as never, 'panel');
+    expect(opened.mock.calls.length + drawer.mock.calls.length).toBe(1);
+    if (expected.via === 'page') expect(opened).toHaveBeenCalledWith(expected.target);
+    else expect(drawer).toHaveBeenCalledOnce();
+  });
+});
+
+it.each([{ late: true }, { late: false }])('a finished task opens its page without the global 任务 page, and not when the answer is late (late=$late, #1528)', async ({ late }) => {
+  const answer = Promise.withResolvers<object>();
+  const page = harness({ inspectTaskOverview: () => answer.promise });
+  const opened = vi.fn(); page.context['openGlobalAttentionTarget'] = opened;
+  const task = finishedTask('evaluation');
+  const pending = page.run(`openTaskNotification('task', ${JSON.stringify(task.target)})`);
+  if (late) navigation.begin();
+  answer.resolve({ groups: [{ items: [task] }] }); await pending;
+  expect(page.context['renderTaskOverview']).not.toHaveBeenCalled();
+  expect(page.context['openOverviewTask']).not.toHaveBeenCalled();
+  if (late) expect(opened).not.toHaveBeenCalled();
+  else expect(opened).toHaveBeenCalledExactlyOnceWith(OWN_PAGE.evaluation, undefined);
 });
 
 it('renders the global entry normally when the editor stays', async () => {

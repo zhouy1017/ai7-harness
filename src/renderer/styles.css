@@ -2700,6 +2700,15 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .toast { position: fixed; z-index: 100; left: 50%; top: 3.4rem; transform: translateX(-50%); display: flex; align-items: center; gap: .65rem; max-width: min(42rem, calc(100vw - 2rem)); padding: .6rem 1rem; border: 1px solid var(--boundary-strong); border-radius: 999px; box-shadow: 0 4px 20px var(--shadow); color: var(--shell); background: var(--text); font-size: .82rem; }
 .toast .btn { color: inherit; }
 .toast[hidden], .status-bar[hidden] { display: none; }
+/* A task that needs the editor (#1528): its own notice, not the transient capsule; it stays until closed and never takes focus. */
+/* Below the drawer, the menus and the sheets, so none of their controls is covered; one line below the quiet toast, which shares the top edge. */
+.attention-toast { position: fixed; z-index: 20; right: 1rem; top: 6.8rem; display: flex; align-items: center; gap: .5rem; max-width: min(26rem, calc(100vw - 2rem)); padding: .5rem .6rem .5rem 1rem; border: 1px solid var(--boundary-strong); border-radius: 12px; box-shadow: 0 4px 20px var(--shadow); color: var(--shell); background: var(--text); font-size: .82rem; }
+body[data-task-drawer="open"] .attention-toast { right: calc(min(var(--task-drawer-width), 100vw - 1rem) + 1rem); }
+.attention-toast { pointer-events: none; }
+.attention-toast .btn { color: inherit; flex: none; pointer-events: auto; }
+.attention-toast[hidden] { display: none; }
+.attention-pill { flex: none; border-radius: 999px; font-weight: 800; border: 1px solid var(--boundary-strong); background: var(--surface); color: var(--action-text); }
+.attention-pill[hidden] { display: none; }
 .status-dismiss::before { content: '×'; font-size: 1rem; }
 @media (max-width: 760px) { .edge-entries .edge-label { display: none; } .edge-entries .btn { width: 36px; min-height: 36px; } .sheet { width: calc(100vw - 1rem); } }
 @media (prefers-reduced-motion: reduce) { :root { --motion-fast: 0ms; --motion-base: 0ms; --motion-slow: 0ms; } }
