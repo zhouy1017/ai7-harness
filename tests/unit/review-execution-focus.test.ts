@@ -21,7 +21,7 @@ it('restores review choice focus after its native popover has reopened', async (
   const state = { chooser: { element: { contains: (node: object) => node === control } } };
   const context = createContext({ sheetState: state, destroyed: false, HTMLElement: Control, queueMicrotask,
     document: { body, get activeElement() { return active; } }, api: { inspectReviewWorkspace: async () => ({}) },
-    query: {}, sheetUpdate: () => {}, projection: null,
+    query: {}, sheetUpdate: () => {}, projection: null, retainTaskPlanPages: (next: unknown) => next,
     renderSheet: () => {
       // Reattaching the chooser hides its popover; renderSheet queues refreshPanel before focus can be restored.
       popoverOpen = false; active = body;

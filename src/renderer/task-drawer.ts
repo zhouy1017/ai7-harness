@@ -1,5 +1,5 @@
 import { LEDGER_TASK_LAUNCH_KINDS } from '../shared/runtime-execution-config.js';
-import { mountLaunchBar, type LaunchBar, type TaskLaunchOperation, type TaskLaunchRequest } from './components/launch-bar.js';
+import { createLaunchBarPresentation, launchBudgetControl, mountLaunchBar, type LaunchBar, type TaskLaunchOperation, type TaskLaunchRequest } from './components/launch-bar.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { reviewPlanReferenceField } from './task-material-selection.js';
 import { evaluationPlanReferenceField } from './evaluation.js';
@@ -78,6 +78,7 @@ import {
   TASK_BAR_START_FAILED,
   TASK_BAR_START_WHEN_LABEL,
   TASK_BAR_START_WHEN_OPTIONS,
+  TASK_BAR_START_WHEN_ONLINE,
   TASK_BAR_IDLE_RECORDED,
   TASK_BAR_IDLE_RECORDING,
   TASK_BAR_SAVED,
@@ -480,6 +481,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * for 调整预算并重做 (Issue #51, S16a), on 设置上限….
    */
   let editOnOpen: 'first' | 'budget' | null = null;
+  let preparedRedoRef: string | null = null;
   /** Said beside the bar's actions once the plan the drawer was opened on is painted (`open`'s `note`). */
   let pendingNote: string | null = null;
   let pollTimer: number | undefined;
@@ -541,6 +543,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   const body = el('div', 'task-drawer-body');
   /** The launch bar the drawer currently shows, so a new view or a re-open disposes the one it replaces (Issue #1545). */
   let launchBar: LaunchBar | null = null;
+  const launchLifetimes = new WeakMap<object, string>();
+  const inlineLaunches = new Map<string, { request: TaskLaunchRequest; bar: LaunchBar }>();
   function disposeLaunchBar(): void {
     if (launchBar !== null) { launchBar.dispose(); launchBar = null; }
   }
@@ -906,10 +910,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     focusBar = false;
     // The Task a redo prepared opens in its editing (Issue #422, S76c), as 返回修改 would open it.
     if (editOnOpen !== null && next.edit.editable) {
-      const target = editOnOpen === 'budget' ? '[data-task-plan-edit="budget"]:not(:disabled)' : '[data-task-plan-edit]:not(:disabled)';
+      // 调整预算并重做 lands on the redo bar's 本次用量; 改计划重做 on the plan's first edit, as before the bar (Issue #422, S76c).
+      const budgetRedo = preparedRedoRef === next.ref && editOnOpen === 'budget';
+      const target = budgetRedo ? '[data-task-launch-option="budget"]:not(:disabled)' : editOnOpen === 'budget' ? '[data-task-plan-edit="budget"]:not(:disabled)' : '[data-task-plan-edit]:not(:disabled)';
       editOnOpen = null;
       if (mode !== 'full') setMode('full', false);
-      (body.querySelector<HTMLElement>(target) ?? body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)'))?.focus();
+      const focusTarget = (): void => (root.querySelector<HTMLElement>(target) ?? (budgetRedo ? bar.querySelector<HTMLElement>('[data-task-drawer-control^="start"]:not(:disabled)') : body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)')) ?? title).focus();
+      // The redo's 本次用量 sits in its options popover: focus it once the popover is shown, not before.
+      const optionsPanel = budgetRedo ? bar.querySelector<HTMLDetailsElement>('.task-launch-options') : null;
+      if (optionsPanel !== null && !optionsPanel.open) { optionsPanel.addEventListener('toggle', focusTarget, { once: true }); optionsPanel.open = true; }
+      else focusTarget();
     }
     // The Run the editor redoes has stopped and reads 已取消: the new Task is prepared now.
     if (redoPending !== null && redoPending.ref === next.ref && next.state.key === 'cancelled-after-start' && next.redo !== null &&
@@ -1502,20 +1512,48 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const actions = el('div', 'task-bar-actions');
     for (const action of view.actions) actions.append(barAction(action, noteId));
     const startAction = view.actions.find((action) => action.name === 'start' || action.name === 'start-when-online');
+    let timing: HTMLSelectElement | null = null;
     // J-03's fixed Task only records its authorization and never dispatches: it has nothing to start when idle.
     if (startAction !== undefined && startAction.disabledReason === null && next.kind !== 'fixed-task' &&
         (next.start.readiness === 'ready' || next.start.readiness === 'offline')) {
-      const timing = el('select');
+      timing = el('select');
       timing.setAttribute('aria-label', TASK_BAR_START_WHEN_LABEL);
       timing.dataset['taskStartWhen'] = '';
       for (const [value, label] of TASK_BAR_START_WHEN_OPTIONS) {
         const option = el('option', undefined, label); option.value = value; option.selected = value === startWhen;
         timing.append(option);
       }
-      timing.addEventListener('change', () => { startWhen = timing.value === 'idle' ? 'idle' : 'now'; });
+      const chosen = timing;
+      timing.addEventListener('change', () => { startWhen = chosen.value === 'idle' ? 'idle' : 'now'; });
       actions.prepend(timing);
     }
-    parts.push(actions);
+    if (next.ref === preparedRedoRef && next.edit.editable && next.edit.budget !== null) {
+      const ceiling = budgetBuffers.get(editKey(next)) ?? next.edit.budget.ceiling;
+      const budget = launchBudgetControl(ceiling === 'unset' ? null : ceiling.maxTotalTokens);
+      budget.disabled = !next.edit.budget.settable || working || interrupted;
+      budget.addEventListener('change', () => {
+        const value: RunBudgetCeilingState = budget.value === '' ? 'unset' : { kind: 'tokens', maxTotalTokens: Number(budget.value) };
+        if (sameCeiling(value, next.edit.budget!.ceiling)) budgetBuffers.delete(editKey(next));
+        else budgetBuffers.set(editKey(next), value);
+      });
+      const row = el('label', undefined, '本次用量'); row.append(budget, el('small', undefined, '达到上限后暂停，可调整后重新开始。'));
+      if (!next.edit.budget.settable && next.edit.budget.reason !== null) row.append(el('p', 'task-launch-budget-reason', technicalWords(next.edit.budget.reason, next.edit.budget.reason.replace('开发者实时启动参数', '启动设置').replaceAll('预算上限', '用量上限'))));
+      const optionRows = el('div', 'task-launch-option-rows'); optionRows.append(row);
+      // The plain bar's start-time choice, the same select, among the redo's options.
+      if (timing !== null) { const timingRow = el('label', undefined, TASK_BAR_START_WHEN_LABEL); timingRow.append(timing); optionRows.append(timingRow); }
+      // Offline, the redo records its start to wait for the connection, as the plain bar's 联网后开始任务 does.
+      const offline = next.start.readiness === 'offline';
+      const begin = control(offline ? TASK_BAR_START_WHEN_ONLINE : '开始任务', 'primary', offline ? 'start-when-online' : 'start');
+      begin.disabled = working || interrupted || !['ready', 'offline', 'record-only', 'no-route'].includes(next.start.readiness);
+      begin.addEventListener('click', () => { if (pendingEdits(next) > 0) void updatePlan(true, true); else if (offline) void startWhenOnline(); else void start(); });
+      const model = el('span', 'task-launch-retained-model', next.service.send);
+      model.setAttribute('aria-label', '沿用本次计划的模型与思考强度');
+      const preview = el('div'); preview.append(el('p', undefined, next.scope.process), el('p', undefined, next.scope.send), listOf(next.steps.map(step => step.label), 'task-plan-list'));
+      parts.push(createLaunchBarPresentation(model, begin, { title: '选项', content: optionRows }, preview));
+      // 更新计划 stays beside the start, which itself revises then starts (保存并开始): the edited plan can be saved without starting.
+      for (const action of view.actions.filter(action => !['start', 'start-when-online', 'update-and-start'].includes(action.name))) parts.push(barAction(action, noteId));
+    } else parts.push(actions);
+
     const run = next.runControl;
     if (run !== null && run.outcomeUnknown !== null && unconfirmedShown) parts.push(unconfirmedBlock(run.outcomeUnknown.units));
     if (run !== null && run.cancel.reason === null && cancelConfirmShown) parts.push(cancelImpactBlock(run));
@@ -2005,9 +2043,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   }
 
   /** 更新计划 (PLAN-009, PLAN-011): the plan as the editor left it becomes the next version; a refusal is said beside the bar. */
-  async function updatePlan(andStart = false): Promise<void> {
+  async function updatePlan(andStart = false, offlineWaits = false): Promise<void> {
     const current = plan;
-    let startNext = false;
+    let startNext: 'now' | 'when-online' | null = null;
     const asked = request;
     // The edit's own version: 模型未连接 or 离线 withholds 开始任务's digest, and the edit sends nothing.
     const planEnvelopeDigest = current?.edit.planEnvelopeDigest ?? null;
@@ -2049,8 +2087,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (andStart) {
         const fresh = await api.inspectTaskPlan({ kind: current.kind, ref: current.ref });
         if (request !== null && request.ref === fresh.ref && request.kind === fresh.kind) {
-          paint(retainTaskPlanPages(fresh, plan), false);
-          startNext = fresh.start.readiness === 'ready';
+          // This explicit revision must replace the old authorization digest even while its options are open.
+          paint(retainTaskPlanPages(fresh, plan), true);
+          // The redo bar's start offline: the revised plan waits for the connection, as 联网后开始任务 records it. 保存并开始 starts only when ready.
+          startNext = fresh.start.readiness === 'ready' ? 'now' : offlineWaits && fresh.start.readiness === 'offline' ? 'when-online' : null;
         }
       }
     } catch (error) {
@@ -2059,7 +2099,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     } finally {
       endWork(asked);
     }
-    if (startNext) await start();
+    if (startNext === 'now') await start();
+    else if (startNext === 'when-online') await startWhenOnline();
   }
 
   /** Every bar action waits while one is under way; the bar is painted again when it ends. */
@@ -2301,6 +2342,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       endWork(asked);
     }
     if (prepared !== null && !root.hidden) {
+      preparedRedoRef = prepared;
       editOnOpen = current.state.key === 'budget-reached' ? 'budget' : 'first';
       surface.open({ bookId: current.bookId, kind: current.kind, ref: prepared }, returnFocus);
     }
@@ -2449,7 +2491,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     progress.setAttribute('aria-valuemax', String(activity.unitsTotal));
     progress.setAttribute('aria-valuenow', String(activity.unitsSettled));
-    progress.firstElementChild!.setAttribute('style', `width: ${activity.unitsTotal === 0 ? 0 : activity.unitsSettled / activity.unitsTotal * 100}%`);
+    (progress.firstElementChild as HTMLElement).style.width = `${activity.unitsTotal === 0 ? 0 : activity.unitsSettled / activity.unitsTotal * 100}%`;
     for (const node of section.querySelectorAll<HTMLElement>('[data-stage]')) {
       if (node.dataset['stage'] === activity.stage) node.setAttribute('aria-current', 'step');
       else node.removeAttribute('aria-current');
@@ -2946,6 +2988,32 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       title.focus();
     },
     openLaunch(next, finder) {
+      if (next.mount !== undefined) {
+        const discriminator = 'dimensionId' in next.input ? next.input.dimensionId : 'recordId' in next.input ? next.input.recordId : '';
+        let lifetime = '';
+        if (next.lifetime !== undefined) { lifetime = launchLifetimes.get(next.lifetime) ?? crypto.randomUUID(); launchLifetimes.set(next.lifetime, lifetime); }
+        const key = `${next.bookId}:${next.operation}:${discriminator}:${lifetime}`;
+        let entry = inlineLaunches.get(key);
+        if (entry === undefined) {
+          const mounted = mountLaunchBar({ api, request: next,
+            errorMessage: options.errorMessage, setStatus: options.setStatus, settle: options.settle,
+            onRecorded: (kind, bookId, ref) => { inlineLaunches.delete(key); options.onRecorded(kind, bookId, ref); },
+            openRun: (bookId, kind, ref, notice) => { surface.open({ bookId, kind, ref }, finder, notice, { view: 'run' }); mounted.dispose(); },
+            interrupted, ...(next.startLabel === undefined ? {} : { startLabel: next.startLabel }), openSettings: options.openConnectionSettings });
+          entry = { request: next, bar: mounted }; inlineLaunches.set(key, entry);
+        } else {
+          const previous = entry.request.input;
+          const input = { ...next.input, ...('materialIds' in previous ? { materialIds: previous.materialIds } : {}), ...('seriesId' in previous ? { seriesId: previous.seriesId } : {}) };
+          for (const name of ['onStarted', 'beforeLaunch', 'readInput', 'inputEvents', 'startLabel', 'startDisabled'] as const) if (!(name in next)) delete entry.request[name];
+          Object.assign(entry.request, next, { input });
+          entry.bar.sync();
+        }
+        next.mount.id ||= `launch-bar-${crypto.randomUUID()}`;
+        next.mount.dataset['taskLaunchKind'] = LEDGER_TASK_LAUNCH_KINDS[next.operation];
+        next.mount.replaceChildren(...entry.bar.bar);
+        queueMicrotask(() => { for (const [otherKey, other] of inlineLaunches) if (!other.request.mount?.isConnected) { other.bar.dispose(); inlineLaunches.delete(otherKey); } });
+        return;
+      }
       disposeLaunchBar();
       ticket += 1;
       clearPoll(); panel.stop(); dialogueSurface.stop();
@@ -2959,7 +3027,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         api, request: next,
         errorMessage: options.errorMessage, setStatus: options.setStatus, settle: options.settle, onRecorded: options.onRecorded,
         openRun: (bookId, kind, ref, launchNotice) => surface.open({ bookId, kind, ref }, finder, launchNotice, { view: 'run' }),
-        interrupted,
+        interrupted, openSettings: options.openConnectionSettings,
       });
       body.replaceChildren(...launchBar.body);
       bar.hidden = false; bar.replaceChildren(...launchBar.bar);
@@ -3133,6 +3201,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       return !root.hidden;
     },
     followScreen(state, bookId) {
+      for (const [key, entry] of inlineLaunches) {
+        if (entry.request.bookId !== bookId || !entry.request.mount?.isConnected) { entry.bar.dispose(); inlineLaunches.delete(key); }
+      }
       if (root.hidden) return;
       const book = view === 'plan' ? request?.bookId ?? null : panelBookId;
       const kept = state === 'task-overview' || bookId !== null && bookId === book && COPILOT_SCREENS.includes(state);
@@ -3157,6 +3228,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       read();
     },
     interrupt() {
+      for (const entry of inlineLaunches.values()) entry.bar.interrupt();
       interrupted = true;
       launchBar?.interrupt();
       ticket += 1;

@@ -1,5 +1,5 @@
-import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
+import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
 import { attentionNoticeClearsMenu, attentionNoticeHolds, closeTaskDrawer, pressQuietResult, READ_CARET } from './attention-notice.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -492,10 +492,10 @@ async function startFirstBaseline(renderer, readiness, name, from = 'available')
  * ways to begin, and 先看计划 prepares the Task (the quick start waits for a Default Execution Rule).
  */
 async function prepareRange(renderer, unitOrdinal, name) {
-  await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const tab=card?.querySelector('[role="tab"][data-analysis-tab="history"]'); if(!(tab instanceof HTMLButtonElement))return false; tab.click(); return tab.getAttribute('aria-selected')==='true'; })()`, `${name}-history-tab`);
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-${unitOrdinal}'); if(!(radio instanceof HTMLInputElement)||radio.disabled)return false; if(!radio.checked)radio.click(); return radio.checked; })()`, `${name}-range`);
-  // 查看计划 stands on the mode's block at once (Issue #1410 item 15): no button only unfolds it.
-  await assertRenderer(renderer, `(() => { const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]'); const plan=block?.querySelector('.analysis-actions [data-analysis-action="reanalyze-range"]'); if(!(plan instanceof HTMLButtonElement)||plan.disabled||plan.textContent!=='查看计划')return false; plan.click(); return true; })()`, `${name}-plan-first`);
+  await pointerClick(renderer, waitFor, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab`);
+  await pointerClick(renderer, waitFor, `.baseline-analysis-card #analysis-range-${unitOrdinal}`, `${name}-range`);
+  await pointerClick(renderer, waitFor, '.baseline-analysis-card [data-analysis-action="reanalyze-range"]', `${name}-mode`);
+  await pointerClick(renderer, waitFor, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan-first`);
 }
 
 /** 书库 from wherever the window is: the header's 待我处理, then its 返回图书列表. */
@@ -1600,7 +1600,7 @@ async function main() {
     at('idle-start-choice');
     await writeFile(holdPath, '0', 'utf8');
     await prepareRange(renderer, 1, 'idle-range');
-    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, 'idle-plan-ready');
+    await waitFor(renderer, `document.querySelector('[data-task-launch-kind] [data-task-drawer-control="launch"]')?.disabled===false`, 'idle-plan-ready');
     // An edit on another Book is saved before this launch; this Book's current manuscript is pinned only at start.
     await toLibrary(renderer, 'idle-cross-book-edit');
     await openManuscriptOf(renderer, bookC, 'idle-cross-book-edit');
@@ -1608,8 +1608,9 @@ async function main() {
     await toLibrary(renderer, 'idle-start-return');
     await openAnalysisOf(renderer, bookB, 'idle-start-return');
     await prepareRange(renderer, 1, 'idle-return-range');
-    await waitFor(renderer, `document.querySelector('#task-drawer select[data-task-start-when]')`, 'idle-choice-visible');
-    await assertRenderer(renderer, `(() => { const options=document.querySelector('#task-drawer .task-launch-options');options.open=true;const budget=options.querySelector('[data-task-launch-option="budget"]');budget.value='100000';budget.dispatchEvent(new Event('input',{bubbles:true}));const timing=options.querySelector('[data-task-start-when]');timing.value='idle';timing.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'idle-choice-explicit');
+    await waitFor(renderer, `document.querySelector('[data-task-launch-kind] select[data-task-start-when]')`, 'idle-choice-visible');
+    await setLaunchBudget(renderer, waitFor, '[data-task-launch-kind]', '100000', 'idle-budget');
+    await chooseLaunchOption(renderer, waitFor, '[data-task-launch-kind] [data-task-start-when]', 'idle', 'idle-choice-explicit');
     await launchTaskFromBar(renderer, waitFor, 'idle-authorize');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-bar-status')?.textContent==='等待空闲'`, 'idle-waits');
     const idleWaiting = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');

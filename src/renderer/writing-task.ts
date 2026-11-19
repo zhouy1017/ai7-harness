@@ -143,6 +143,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   // The types whose draft this surface opens by itself once written (Issue #1403): the editor began their AI 写作 here. Each
   // remembers the draft already waiting when it began, so only the new one opens.
   const autoOpen = new Map<string, string | null>();
+  /** Sheets whose 先看计划 was opened: their start leaves 打开草稿 to the editor, as 0.7.2's plan-first start did. */
+  const planShown = new WeakSet<object>();
   const awaitDraft = (typeId: string): void => {
     autoOpen.set(typeId, projection?.types.find((type) => type.typeId === typeId)?.drafted?.revisionId ?? null);
   };
@@ -375,17 +377,28 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       form.append(problem);
     }
     const row = el('div', 'button-row');
-    const plan = action('查看计划', 'secondary', 'plan', () => void prepare(null));
-    const start = action('开始写作', 'primary', 'start', () => void prepare(null, true));
-    plan.disabled = busy || page.unavailable !== null;
-    start.disabled = plan.disabled;
-    plan.setAttribute('aria-controls', 'task-drawer');
     const cancel = action(WRITING_ACTIONS.cancel, 'quiet', 'cancel', () => {
       sheet = null;
       paint('[data-writing-action="new"]');
     });
     cancel.disabled = busy;
-    row.append(start, plan, cancel);
+    options.openLaunch({ bookId: page.bookId, operation: 'launchWritingTask', title: '写作', mount: row, inputEvents: form, lifetime: state,
+      startDisabled: busy || page.unavailable !== null,
+      input: { typeId: state.typeId ?? '', audience: state.audience, channel: state.channel,
+        requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds] },
+      readInput: () => ({ typeId: state.typeId ?? '', audience: state.audience, channel: state.channel,
+        requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds] }),
+      beforeLaunch: async () => await prepare(null, true, true) === true,
+      onStarted: () => { const typeId = state.typeId; if (sheet === state) { sheet = null; paint(null); } if (typeId !== null && !planShown.has(state)) awaitDraft(typeId); }
+    });
+    const estimate = row.querySelector<HTMLDetailsElement>('.task-launch-estimate');
+    if (estimate !== null && estimate.dataset['writingPlanWatched'] === undefined) {
+      estimate.dataset['writingPlanWatched'] = '';
+      estimate.addEventListener('toggle', () => { if (estimate.open) planShown.add(state); });
+    }
+    row.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-writing-action', 'start');
+    row.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-writing-action', 'plan');
+    row.append(cancel);
     form.append(row);
     const surface = existing ?? createSheet('writing-task-sheet');
     const title = el('h3', undefined, '写作任务');
@@ -474,7 +487,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
    * would start it; whatever would make the start differ from the rule leaves the Task at its plan, open in the drawer with the
    * reason beside the bar, and nothing recorded.
    */
-  async function prepare(rule: DefaultExecutionRuleReference | null, openDraftOnStart = false): Promise<void> {
+  async function prepare(rule: DefaultExecutionRuleReference | null, openDraftOnStart = false, validationOnly = false): Promise<boolean | void> {
     if (busy || sheet === null || projection === null) return;
     const state = sheet;
     if (state.typeId === null) {
@@ -492,6 +505,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     const title = state.title.trim();
     if (title !== '') rememberedTitles.set(titleKey(projection.bookId, state.typeId), title);
     else rememberedTitles.delete(titleKey(projection.bookId, state.typeId));
+    if (validationOnly) return true;
     if (rule === null) {
       const typeId = state.typeId;
       options.openLaunch({ bookId: projection.bookId, operation: 'launchWritingTask', title: '写作', input: {

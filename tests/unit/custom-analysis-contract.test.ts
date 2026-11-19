@@ -229,7 +229,7 @@ describe('the custom analysis kind family (custom-analysis/<dimension-id>)', () 
     const opened: unknown[] = [];
     for (const name of ['redoNow', 'reprepareNow', 'reconfirm']) {
       const state = createContext({
-        plan: local, request: null, redoPending: null, editOnOpen: null, focusBar: false, refusal: null, returnFocus: () => null, root: { hidden: false },
+        plan: local, request: null, redoPending: null, editOnOpen: null, preparedRedoRef: null, focusBar: false, refusal: null, returnFocus: () => null, root: { hidden: false },
         api: { prepareBaselineAnalysis, prepareCustomAnalysis }, beginWork: () => true, endWork: () => undefined,
         options: { setStatus: () => undefined, onRecorded: () => undefined, errorMessage: (_error: unknown, fallback: string) => fallback },
         surface: { open: (request: unknown) => opened.push(request) },

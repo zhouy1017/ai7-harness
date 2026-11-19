@@ -48,8 +48,8 @@ it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('k
   const retry=miniDocument.querySelector('[data-task-launch-option="retry"]')!;
   expect(Array.from(retry.querySelectorAll('option'),option=>option.value)).toEqual(operation==='launchBaselineAnalysis'?['auto','ask-first','never']:['auto','never']);
   retry.value='never';
-  miniDocument.querySelector('[data-task-launch-option="budget"]')!.value='12345';
-  miniDocument.body.dispatchEvent({type:'input'});
+  miniDocument.querySelector('[data-task-launch-option="budget"]')!.value='50000';
+  miniDocument.querySelector('[data-task-launch-option="budget"]')!.dispatchEvent({type:'change',bubbles:true});
   expect(miniDocument.querySelector('.task-launch-preview-stale')?.textContent).toBe('选项已变化，请更新计划。');
   expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).not.toContain('勾选的资料');
   miniDocument.querySelector('[data-task-drawer-control="launch"]')!.click();
@@ -78,4 +78,24 @@ it('keeps marking the shown plan stale after the service is interrupted, while t
   budget.dispatchEvent({ type: 'input', bubbles: true });
   expect(miniDocument.querySelector('.task-launch-preview-stale')?.textContent).toBe('选项已变化，请更新计划。');
   expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).not.toContain('勾选的资料');
+});
+
+it('disposes the page bars of another Book when the screen follows a Book, and keeps that Book\'s own', async () => {
+  const launchWritingTask = vi.fn(async (_input: unknown) => ({ taskIntentId: 'task', runRecordId: 'run' }));
+  const api = { launchWritingTask, getPreferences: async () => ({ version: 1, values: preferenceDefaults(), notice: null }),
+    getModelServiceSettings: async () => ({ channels: [], roles: [], routeChoice: { routes: [] } }) };
+  const root = document.createElement('aside'); document.body.append(root);
+  const drawer = mountTaskDrawer({ root, shell: document.body, api, setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback,
+    onOpen: vi.fn(), onRecorded: vi.fn(), settle: async () => true } as unknown as Parameters<typeof mountTaskDrawer>[0]);
+  drawer.open = vi.fn();
+  const hosts = ['a', 'b'].map(bookId => { const mount = document.createElement('div'); mount.dataset['host'] = bookId; document.body.append(mount);
+    drawer.openLaunch({ operation: 'launchWritingTask', bookId, title: '写作', mount, input: WRITING_REQUEST } as TaskLaunchRequest, () => null); return mount; });
+  const start = (bookId: string) => miniDocument.querySelector(`[data-host="${bookId}"] [data-task-drawer-control="launch"]`)!;
+  await vi.waitFor(() => expect(hosts.map((_, index) => start(['a', 'b'][index]!).disabled)).toEqual([false, false]));
+  drawer.followScreen('book-writing', 'b');
+  start('a').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(launchWritingTask).not.toHaveBeenCalled();
+  start('b').click();
+  await vi.waitFor(() => expect(launchWritingTask).toHaveBeenCalledOnce());
 });

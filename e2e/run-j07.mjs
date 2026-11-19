@@ -3001,14 +3001,16 @@ async function main() {
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'writing-drawer-closed');
 
     at('writing-quick-start');
-    // The ordinary primary action opens the model/start bar; starting there opens the completed draft automatically.
+    // The sheet's own start, pressed without opening 先看计划 first, opens the completed draft automatically (a start after the
+    // plan was looked at leaves 打开草稿 to the editor, as the plan-first stages above and below read).
     await openDerivativePanel(renderer, { title: '宣传文章', typeId: WRITING_REQUEST.typeId, mode: 'writing' }, 'writing-direct-new');
     await readWriting((page) => page.open, 'writing-direct-sheet');
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_REQUEST.typeId)}]'); if(!(radio instanceof HTMLInputElement))return false;radio.click();return radio.checked;})()`, 'writing-direct-type');
     await fill(renderer, '.writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-direct-audience');
     await fill(renderer, '.writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'writing-direct-channel');
-    await clickSelector(renderer, '.writing-task [data-writing-action="start"]', 'writing-direct-start');
-    await launchTaskFromBar(renderer, waitFor, 'writing-direct-start');
+    await waitFor(renderer, `document.querySelector('.writing-task [data-writing-action="start"]')?.disabled===false`, 'writing-direct-start-ready');
+    await pointerClick(renderer, waitFor, '.writing-task [data-writing-action="start"]', 'writing-direct-start');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && !!document.querySelector('#task-drawer')?.dataset.taskPlanRef`, 'writing-direct-launched', 120_000);
 
     at('writing-draft');
     // 开始写作 begun on 稿件 opens its draft by itself once written (Issue #1403): the Book's 宣传文章 under the title written first —

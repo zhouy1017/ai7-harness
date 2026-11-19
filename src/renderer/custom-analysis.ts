@@ -302,7 +302,13 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       const start = actionButton(CUSTOM_TAB_RUN, 'primary', 'run', () => run(dimension));
       start.dataset['analysisAction'] = 'custom-run';
       start.disabled = book?.unavailableReason != null;
-      actions.append(start);
+      if (book?.unavailableReason == null) {
+        options.openLaunch({ bookId, operation: 'launchCustomAnalysis', title: '自定义分析', mount: actions,
+          input: { dimensionId: dimension.dimensionId, update: updateFor(dimension) } });
+        actions.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-analysis-action', 'custom-run');
+        actions.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-custom-action', 'run');
+        actions.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-analysis-action', 'custom-preview');
+      } else actions.append(start);
       if (book?.taskState != null) {
         const { taskIntentId } = book.taskState;
         const open = actionButton('查看计划', 'secondary', 'open-plan', () => options.openPlan(taskIntentId));
