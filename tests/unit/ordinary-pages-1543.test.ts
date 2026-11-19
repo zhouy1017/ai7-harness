@@ -41,9 +41,9 @@ function calibration(overrides: Partial<EvaluationCalibrationProjection['calibra
 
 describe('评估校准与预测 for an ordinary editor', () => {
   it('opens on the editors\' sentence, one sentence of state per section, and keeps the formula inside 怎么算的', async () => {
-    const root = document.createElement('div'); document.body.append(root);
+    const root = miniDocument.createElement('div'); miniDocument.body.append(root);
     const read = vi.fn(async () => calibration());
-    const surface = mountEvaluationCalibration({ root, focusBookId: null, api: { inspectEvaluationCalibration: read, recordPublicationActuals: vi.fn(), setEvaluationPreferences: vi.fn() },
+    const surface = mountEvaluationCalibration({ root: root as unknown as HTMLElement, focusBookId: null, api: { inspectEvaluationCalibration: read, recordPublicationActuals: vi.fn(), setEvaluationPreferences: vi.fn() },
       setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback });
     await surface.load();
     expect(root.querySelector('.calibration-lede')?.textContent).toBe(CALIBRATION_PAGE_LEDE);
@@ -63,10 +63,10 @@ describe('评估校准与预测 for an ordinary editor', () => {
   });
 
   it('pages the Books as two text buttons, the page before and the page after', async () => {
-    const root = document.createElement('div'); document.body.append(root);
+    const root = miniDocument.createElement('div'); miniDocument.body.append(root);
     const first = calibration(); const second = { ...calibration(), nextCursor: null, books: [{ ...calibration().books[0]!, bookId: 'b2', title: '合成书二' }] };
     const read = vi.fn(async (input?: { after: unknown }) => input?.after === null || input === undefined ? first : second);
-    const surface = mountEvaluationCalibration({ root, focusBookId: null, api: { inspectEvaluationCalibration: read as never, recordPublicationActuals: vi.fn(), setEvaluationPreferences: vi.fn() },
+    const surface = mountEvaluationCalibration({ root: root as unknown as HTMLElement, focusBookId: null, api: { inspectEvaluationCalibration: read as never, recordPublicationActuals: vi.fn(), setEvaluationPreferences: vi.fn() },
       setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback });
     await surface.load();
     const button = (name: string): MiniElement => root.querySelector(`[data-calibration-action="${name}"]`) as MiniElement;
@@ -91,8 +91,8 @@ describe('评估校准与预测 for an ordinary editor', () => {
 describe('本社词表 for an ordinary editor', () => {
   const entry = (literal: string, note = '') => ({ entryId: null, literal, note, enabled: true });
   const mount = (api: HouseWordListApi) => {
-    const root = document.createElement('div'); document.body.append(root);
-    return { root, panel: mountHouseWordList({ root, api, setStatus: vi.fn() }) };
+    const root = miniDocument.createElement('div'); miniDocument.body.append(root);
+    return { root, panel: mountHouseWordList({ root: root as unknown as HTMLElement, api, setStatus: vi.fn() }) };
   };
   const click = async (name: string): Promise<void> => { (miniDocument.body.querySelector(`[data-house-action="${name}"]`) as MiniElement).click(); await settle(); };
 
