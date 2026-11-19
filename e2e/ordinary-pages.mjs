@@ -1,5 +1,5 @@
 import { pointerClick } from './dispatch-chooser.mjs';
-import { SIDEBAR, sidebarNavigate } from './controller.mjs';
+import { SIDEBAR } from './controller.mjs';
 
 // Issue #1543: shared steps of the Journeys that read 本社词表, 分析 › 自定义 and 评估校准与预测 as ordinary pages. Each press and each
 // typed letter goes through the browser's own input events, the way the editor makes them.
@@ -57,7 +57,7 @@ export function buttonRowsAtOneEdge(scope) {
  * editor's pages are read in ordinary mode, and the Journeys that run in development mode switch back after.
  */
 export async function setDeveloperMode(renderer, waitFor, developer, name) {
-  await renderer.evaluate(sidebarNavigate(SIDEBAR.settings));
+  await pointerClick(renderer, waitFor, SIDEBAR.settings, `${name}-settings-open`);
   await waitFor(renderer, `document.querySelector('[data-settings-nav="help"]')`, `${name}-settings`);
   await pointerClick(renderer, waitFor, '[data-settings-nav="help"]', `${name}-help`);
   await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `${name}-switch`);

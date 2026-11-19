@@ -3605,10 +3605,14 @@ async function main() {
       await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${customPanel} .custom-head [data-custom-action="create"]`)})?.classList.contains('secondary')===true && !/(?<!发稿)版本|AI7 初评/u.test(document.querySelector(${JSON.stringify(customPanel)}).textContent)`, `custom-offer-above-list-${size}`);
       await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-card-row-${size}`);
       if (!first) {
-        // 停用 on the card, pressed: the dimension can no longer run, and the card says so in its own words.
-        await renderer.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(`${customPanel} .custom-dimension-card`)})).find((node) => node.querySelector('h3')?.textContent===${JSON.stringify(secondTitle)})?.querySelector('[data-custom-action="stop"]')?.setAttribute('data-j04-stop', 'true')`);
-        await pointerClick(renderer, waitFor, '[data-j04-stop="true"]', `custom-stop-${size}`);
-        await waitFor(renderer, `Array.from(document.querySelectorAll(${JSON.stringify(`${customPanel} .custom-dimension-card`)})).some((node) => node.querySelector('h3')?.textContent===${JSON.stringify(secondTitle)} && !node.querySelector('[data-custom-action="stop"]') && node.querySelector('.custom-unavailable')?.textContent.includes('停用'))`, `custom-stopped-${size}`);
+        // 停用 on the card the editor is on, pressed, after the one question: the dimension never ran on this Book, so its card goes.
+        // The question is the app's own confirm; the Journey answers it yes and gives the window its own back.
+        await renderer.evaluate('window.confirm = () => true');
+        await pointerClick(renderer, waitFor, `${customPanel} .custom-dimension-card:focus-within [data-custom-action="stop"]`, `custom-stop-${size}`);
+        await waitFor(renderer, `!Array.from(document.querySelectorAll(${JSON.stringify(`${customPanel} .custom-dimension-card`)})).some((node) => node.querySelector('h3')?.textContent===${JSON.stringify(secondTitle)})`, `custom-stopped-${size}`);
+        await renderer.evaluate('delete window.confirm');
+        const stoppedService = await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: false }).then((page) => JSON.stringify(page.dimensions.filter((entry) => entry.title === ${JSON.stringify(secondTitle)}).map((entry) => [entry.enabledVersion, entry.versions[0].state])))`);
+        requireJourney(stoppedService === JSON.stringify([[null, 'stopped']]), `custom-stopped-service-${size}`, stoppedService);
       }
     });
     await setDeveloperMode(renderer, waitFor, true, 'custom-developer');

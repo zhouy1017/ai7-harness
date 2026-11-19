@@ -2797,7 +2797,7 @@ async function main() {
     for (let repetition = 0; repetition < 2; repetition += 1) {
       await clickSelector(renderer, '[data-calibration-action="next"]', 'actuals-next-page');
       await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 1 && document.querySelector('[data-calibration-field="price"]')?.value === '55' && document.querySelector('[data-calibration-field="print"]')?.value === '4000' && document.activeElement?.hasAttribute('data-calibration-page-heading')`, 'actuals-last-page-form-kept');
-      await clickSelector(renderer, '[data-calibration-action="previous"]', 'actuals-previous-page');
+      await pointerClick(renderer, waitFor, '[data-calibration-action="previous"]', 'actuals-previous-page');
       await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 21 && document.querySelector('[data-calibration-field="price"]')?.value === '55' && document.querySelector('[data-calibration-field="print"]')?.value === '4000'`, 'actuals-first-page-form-kept');
     }
     await clickSelector(renderer, '[data-calibration-action="save"]', 'actuals-stale-save');

@@ -1208,7 +1208,7 @@ async function main() {
     // sheet offers the list as a choice and its own editor, opened by pointer, keeps one top edge per row of buttons.
     const houseWords = ['合成词甲', '合成词乙', '合成词丙'];
     await setDeveloperMode(renderer, waitFor, false, 'house-words-ordinary');
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'house-words-book-review');
+    await pointerClick(renderer, waitFor, SIDEBAR.section('review'), 'house-words-book-review');
     await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'house-words-review-ready');
     await atBothSizes(renderer, waitFor, 'house-words', async (viewport) => {
       const first = viewport === ORDINARY_VIEWPORTS[0];
@@ -1218,7 +1218,7 @@ async function main() {
         const measured = await renderer.evaluate(HOUSE_DRAFT_MEASURE);
         requireJourney(measured.ok === true, name, measured);
       };
-      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), `house-words-open-${size}`);
+      await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), `house-words-open-${size}`);
       await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelector('[data-knowledge-category="house-words"]')`, `house-words-home-${size}`);
       await pointerClick(renderer, waitFor, '[data-knowledge-category="house-words"]', `house-words-card-${size}`);
       await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='house-words' && document.querySelector(${JSON.stringify(`${panel}[data-house-state="${first ? 'empty' : 'saved'}"]`)})`, `house-words-page-${size}`);
@@ -1252,8 +1252,7 @@ async function main() {
       const houseSaved = await renderer.evaluate(`window.ai7.inspectHouseWordList({ versionId: null, entryOffset: 0, historyOffset: 0 }).then((page) => JSON.stringify([page.selected?.entryCount, page.selected?.enabledCount, page.entries.map((entry) => entry.literal)]))`);
       requireJourney(houseSaved === JSON.stringify([count, count, houseWords.slice(0, count)]), `house-words-saved-service-${size}`, houseSaved);
       // Back to the review the editor came from: the sheet offers the saved list, and the editor inside it is the same component.
-      await renderer.evaluate(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回')?.setAttribute('data-j15-back', 'true')`);
-      await pointerClick(renderer, waitFor, '[data-j15-back="true"]', `house-words-back-${size}`);
+      await pointerClick(renderer, waitFor, '.knowledge-base > .button-row > button:last-child', `house-words-back-${size}`);
       await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, `house-words-review-again-${size}`);
       await pointerClick(renderer, waitFor, '[data-review-action="new-local-check"]', `house-words-sheet-${size}`);
       await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('dialog.review-sheet [data-local-house-word-list]')?.disabled===false`, `house-words-selectable-${size}`);
@@ -1263,8 +1262,7 @@ async function main() {
       await pointerClick(renderer, waitFor, 'dialog.review-sheet [data-local-house-word-list]', `house-words-unchoose-${size}`);
       await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-local-house-word-list]')?.checked===false`, `house-words-unchosen-${size}`);
       // The editor in the sheet is opened by pointer, reads the list, and its buttons keep one top edge there too.
-      await renderer.evaluate(`Array.from(document.querySelectorAll('dialog.review-sheet summary')).find((summary) => summary.textContent === '编辑本社词表')?.setAttribute('data-j15-house-summary', 'true')`);
-      await pointerClick(renderer, waitFor, '[data-j15-house-summary="true"]', `house-words-sheet-editor-${size}`);
+      await pointerClick(renderer, waitFor, `dialog.review-sheet details:has(${panel}) > summary`, `house-words-sheet-editor-${size}`);
       await waitFor(renderer, `document.querySelector('dialog.review-sheet ${panel}[data-house-state="saved"]')?.textContent.includes('${count} 条，启用 ${count} 条')`, `house-words-sheet-editor-read-${size}`);
       await assertRenderer(renderer, buttonRowsAtOneEdge(`dialog.review-sheet ${panel}`), `house-words-sheet-row-${size}`);
       await pointerClick(renderer, waitFor, `dialog.review-sheet ${panel} [data-house-action="edit"]`, `house-words-sheet-edit-${size}`);
