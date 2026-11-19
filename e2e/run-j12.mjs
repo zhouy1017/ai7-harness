@@ -504,8 +504,10 @@ async function assertModelEffortDefaults(renderer) {
       await waitFor(renderer, `innerWidth===${width} && innerHeight===${height}`, 'model-effort-viewport');
       await save('main', 'high');
       await save('fast', 'low');
+      // 设置 opens on 模型服务, which this page already is: the old page is marked so the wait is for the page painted afresh.
+      await assertRenderer(renderer, `(() => { const page = document.querySelector('[data-screen="model-service"] .model-service-settings'); if (!page) return false; page.dataset.stale = ''; return true; })()`, 'model-effort-mark-old-page');
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-effort-leave');
-      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-effort-settings-ready');
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation') && document.querySelector('[data-screen="model-service"] .model-service-settings:not([data-stale])')`, 'model-effort-settings-ready');
       await waitFor(renderer, `document.querySelector('input[aria-label="主编辑思考强度"]')?.value==='high' && document.querySelector('input[aria-label="快速交互思考强度"]')?.value==='low' && document.querySelector('[data-model-role="main-editorial"]')?.textContent.includes('@high') && document.querySelector('[data-model-role="fast-interaction"]')?.textContent.includes('@low')`, 'model-effort-reopened-defaults');
       await save('fast', 'low');
       await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => settings.roles.find(role=>role.roleId==='main-editorial')?.binding?.reasoningEffort==='high')`, 'model-effort-other-role-kept');
