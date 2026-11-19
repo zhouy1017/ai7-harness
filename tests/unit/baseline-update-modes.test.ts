@@ -76,7 +76,7 @@ it.each([['prepared', 1], ['settled', 0]] as const)('a %s card prepares again fr
     expect(prepareBaselineAnalysis).toHaveBeenCalledWith(expect.objectContaining({ update: { mode: 'reanalyze-book', selectedRange: null }, reconfirm: false }));
     // While it prepares, every start on the card waits, the bar's own included (0.7.2 held them all).
     expect(barButtons().length).toBeGreaterThan(0);
-    expect(barButtons().every(button => button.disabled)).toBe(true);
+    expect(root.querySelector('[data-task-launch-kind="baseline-analysis"] [data-task-drawer-control="launch"]')!.disabled).toBe(true);
   } else {
     // An ordinary card only chooses the mode: nothing is prepared and no drawer opens.
     expect(drawer.isOpen()).toBe(false);
@@ -103,4 +103,57 @@ it("keeps a prepared Task's own mode pressed and named on the card after it re-r
   await vi.waitFor(() => expect(root.querySelector('[data-task-launch-kind="baseline-analysis"] [data-task-drawer-control="launch"]')).not.toBeNull());
   expect(root.querySelectorAll('.analysis-update-action [aria-pressed="true"]').map(node => node.dataset['analysisAction'])).toEqual(['reanalyze-book']);
   expect(root.querySelector('[data-task-launch-kind="baseline-analysis"] [data-task-drawer-control="launch"]')!.textContent).toBe('开始全部重来');
+});
+
+/** A prepared card on the real drawer bar, whose re-preparation the test settles. */
+async function preparedCard(update: { mode: 'reanalyze-book' | 'reanalyze-range'; selectedRange?: { startPosition: number; endPosition: number } | null },
+  ai7: Record<string, unknown>, awaitServiceJob: (initial: unknown) => Promise<unknown>) {
+  const projection = baselineAnalysisWire(longSettledAnalysis(longPreparedAnalysis(3), 2, false));
+  Object.assign(projection, { state: 'prepared', update: { mode: update.mode, modeLabel: '', meaning: '', selectedRange: update.selectedRange ?? null } });
+  for (const mode of ['sync-current', 'reanalyze-range', 'reanalyze-book'] as const) Object.assign(projection.updateControls!.actions[mode], { available: true, unavailableReason: null });
+  vi.stubGlobal('window', { setTimeout, clearTimeout, localStorage: { getItem: () => 'full', setItem: vi.fn() }, ai7: {
+    inspectCustomAnalysisDimensions: vi.fn(async () => { throw new Error('unused custom dimensions'); }),
+    inspectAnalysisFeedback: vi.fn(async () => { throw new Error('unused feedback'); }), ...ai7,
+  } });
+  const drawerRoot = document.createElement('aside'); document.body.append(drawerRoot);
+  const drawer = mountTaskDrawer({ root: drawerRoot, shell: document.body, onOpen: vi.fn(), onRecorded: vi.fn(), setStatus: vi.fn(), errorCode: () => null,
+    errorMessage: (_error: unknown, fallback: string) => fallback, technicalDetails: () => document.createElement('details'),
+    api: { getModelServiceSettings: async () => ({ channels: [], roles: [], routeChoice: { routes: [] } }), getPreferences: async () => ({ values: preferenceDefaults() }) } } as never);
+  const root = miniDocument.createElement('main'); miniDocument.body.append(root);
+  const card = createBaselineAnalysisCard({ screen: root as unknown as HTMLElement, technicalDetails: () => document.createElement('details'), rendererErrorMessage: (_error: unknown, fallback: string) => fallback,
+    setStatus: vi.fn(), taskDrawer: drawer, taskPlanOpenButton: () => document.createElement('button'), awaitServiceJob, jumpToManuscript: vi.fn(),
+    leaveReturnChip: vi.fn(), openEditorWindow: vi.fn(), openTaskPlan: vi.fn(), quickStartStartedLine: () => '', renderBookReview: vi.fn() } as never);
+  card.renderBaselineAnalysis(root as unknown as HTMLElement, projection, '公开样书');
+  const launch = () => root.querySelector('[data-task-launch-kind="baseline-analysis"] [data-task-drawer-control="launch"]')!;
+  await vi.waitFor(() => expect(launch()?.disabled).toBe(false));
+  return { root, projection, launch };
+}
+
+it.each(['prepared', 'cancelled', 'refused'] as const)('gives the card bar back after a re-preparation that ends %s', async exit => {
+  let settle!: () => void;
+  const prepareBaselineAnalysis = vi.fn(() => exit === 'refused' ? new Promise((_resolve, reject) => { settle = () => reject(new Error('refused')); }) : new Promise(resolve => { settle = () => resolve({ jobId: 'job' }); }));
+  let view!: Awaited<ReturnType<typeof preparedCard>>;
+  const awaitServiceJob = vi.fn(async () => exit === 'cancelled' ? { state: 'cancelled' } : { state: 'completed', kind: 'baseline-analysis-preparation', result: view.projection });
+  view = await preparedCard({ mode: 'reanalyze-book' }, { prepareBaselineAnalysis }, awaitServiceJob);
+  view.root.querySelector('.analysis-update-action [data-analysis-action="reanalyze-book"]')!.click();
+  await vi.waitFor(() => expect(prepareBaselineAnalysis).toHaveBeenCalledOnce());
+  expect(view.launch().disabled).toBe(true);
+  // A range pick while it prepares chooses the mode but does not give the start back.
+  const radio = view.root.querySelector('.analysis-range-option input')!;
+  radio.checked = true; radio.dispatchEvent({ type: 'change', bubbles: true });
+  expect(view.launch().disabled).toBe(true);
+  settle();
+  await vi.waitFor(() => expect(view.launch().disabled).toBe(false));
+  const bar = view.root.querySelector('[data-task-launch-kind="baseline-analysis"]')!;
+  expect(bar.querySelectorAll('button').filter(button => button.disabled && !button.hidden)).toEqual([]);
+});
+
+it('restores a prepared 重新分析所选范围 Task’s range with its mode', async () => {
+  const projection = baselineAnalysisWire(longSettledAnalysis(longPreparedAnalysis(3), 2, false));
+  const option = projection.updateControls!.actions['reanalyze-range'].options[0]!;
+  const view = await preparedCard({ mode: 'reanalyze-range', selectedRange: { startPosition: option.startPosition, endPosition: option.endPosition } }, {}, vi.fn());
+  expect(view.launch().textContent).toBe('开始重新分析');
+  const checked = view.root.querySelectorAll('.analysis-range-option input').filter(radio => radio.checked);
+  expect(checked.map(radio => radio.value)).toEqual([`${option.startPosition}-${option.endPosition}`]);
+  expect(view.root.querySelector('.analysis-update-action [data-analysis-action="reanalyze-range"]')!.disabled).toBe(false);
 });
