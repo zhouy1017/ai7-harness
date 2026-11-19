@@ -1,4 +1,5 @@
 import { technicalLayerVisible } from './technical-layer.js';
+import { serviceWordsDeep } from './service-wording.js';
 import type { BackgroundAnalysisEnrollmentProjection, BackgroundAnalysisScopeOffer, BackgroundAnalysisStartingPoint, RendererApi } from '../shared/protocol.js';
 import { BACKGROUND_ANALYSIS_CEILING_MAX } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
@@ -141,7 +142,9 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     }, FOLLOW_MS);
   };
 
-  const draw = (projection: BackgroundAnalysisEnrollmentProjection): void => {
+  const draw = (recorded: BackgroundAnalysisEnrollmentProjection): void => {
+    // The service's reasons and labels read in the table's words in ordinary mode (Issue #1531); the request fields carry no words.
+    const projection = serviceWordsDeep(recorded);
     const startedBefore = last?.startedRunCount ?? null;
     last = projection;
     if (startedBefore !== null && projection.startedRunCount > startedBefore) options.onRunStarted();

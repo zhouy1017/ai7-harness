@@ -72,7 +72,7 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
   } else header.append(author);
   panel.append(header);
   const expandedContent = options.pane ? node('div', 'editorial-mark-expanded-content') : panel;
-  const displayNote = markDisplayNote(card.suggestion?.rationale ?? card.body, card.createdAt);
+  const displayNote = markDisplayNote(card.suggestion?.rationale ?? card.body);
   if (options.pane) {
     const preview = node('p', 'editorial-mark-compact-preview', card.suggestion
       ? `${card.suggestion.currentText || '插入位置'} → ${(card.suggestion.decision?.editedText ?? card.suggestion.proposedText) || '（删去这段文字）'}`

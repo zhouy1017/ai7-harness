@@ -1,4 +1,6 @@
 import { technicalWords, technicalLayerVisible } from './technical-layer.js';
+import { serviceWordsDeep } from './service-wording.js';
+import { COUNT_UNIT } from '../shared/report-wording.js';
 import type {
   BookTaskItemProjection,
   GlobalAttentionItemProjection,
@@ -151,8 +153,9 @@ export const TASK_PLAN_CEILING_NOTE = '上限，不是预测';
 
 /** What the Run Budget Ceiling the plan froze does, in one clause; `null` when the plan sets none (ADR 0096 §4.2 keeps it visible in ordinary mode). */
 export function taskPlanCeilingLine(plan: TaskPlanProjection): string | null {
-  const ceiling = plan.service.usage.match(/[\d,]+(?= tokens)/u)?.[0];
-  return ceiling === undefined ? null : technicalWords(`达到 ${ceiling} tokens 后不再发送`, `用量达到 ${ceiling} 后不再发送`);
+  // The ceiling's figure, read in the service's words or as serviceWords shows them.
+  const ceiling = plan.service.usage.match(new RegExp(`([\\d,]+) (?:${['tokens', COUNT_UNIT].join('|')})`, 'u'))?.[1];
+  return ceiling === undefined ? null : technicalWords(`达到 ${ceiling} tokens 后不再发送`, `用量达到 ${ceiling} ${COUNT_UNIT}后不再发送`);
 }
 
 /**
@@ -191,12 +194,26 @@ export function taskPlanWording(plan: TaskPlanProjection): TaskPlanProjection {
   if (technicalLayerVisible) return plan;
   const words = (parts: ReadonlyArray<string | { technical: string }> | undefined, fallback: string): string =>
     parts === undefined ? fallback : parts.map((part) => typeof part === 'string' ? part : technicalWords(part.technical)).join('');
-  return { ...plan, goal: { ...plan.goal, sentence: words(plan.wording?.goal, plan.goal.sentence),
+  // The service's own sentences of the plan read in the table's words where they are shown (Issue #1531): some are bound to
+  // the plan envelope or recorded with the Run, so their source never changes. A model's question is its own words.
+  const service = serviceWordsDeep;
+  return { ...plan, goal: { ...plan.goal, sentence: service(words(plan.wording?.goal, plan.goal.sentence)),
     chips: { ...plan.goal.chips, procedure: words(plan.wording?.procedure, plan.goal.chips.procedure) } },
-    scope: { ...plan.scope, reference: plan.wording?.reference?.map((parts) => words(parts, '')) ?? plan.scope.reference,
-      send: words(plan.wording?.scopeSend, plan.scope.send) },
-    service: { ...plan.service, send: words(plan.wording?.serviceSend, plan.service.send) },
-    outcomes: plan.wording?.outcomes?.map((parts) => words(parts, '')) ?? plan.outcomes };
+    state: service(plan.state), ...(plan.runOutcome === undefined ? {} : { runOutcome: service(plan.runOutcome) }),
+    scope: service({ ...plan.scope, reference: plan.wording?.reference?.map((parts) => words(parts, '')) ?? plan.scope.reference,
+      send: words(plan.wording?.scopeSend, plan.scope.send) }),
+    steps: service(plan.steps), participation: service(plan.participation),
+    service: service({ ...plan.service, send: words(plan.wording?.serviceSend, plan.service.send) }),
+    outcomes: service(plan.wording?.outcomes?.map((parts) => words(parts, '')) ?? plan.outcomes),
+    notDo: service(plan.notDo), boundary: service(plan.boundary), drift: service(plan.drift),
+    runControl: plan.runControl === null ? null : { ...plan.runControl, cancel: service(plan.runControl.cancel), pause: service(plan.runControl.pause),
+      resume: service(plan.runControl.resume), redo: service(plan.runControl.redo) },
+    redo: service(plan.redo), resend: service(plan.resend), reprepare: service(plan.reprepare),
+    ...(plan.planMovedReason === undefined ? {} : { planMovedReason: service(plan.planMovedReason) }),
+    // The editor's note and a model's question and options are their authors' words, never reworded.
+    clarifications: plan.clarifications.map((asked) => ({ ...service(asked), question: asked.origin === 'model' ? asked.question : service(asked.question),
+      options: asked.options.map((option) => option.id.startsWith('model-option') ? option : service(option)),
+      answer: asked.answer === null ? null : { ...service(asked.answer), note: asked.answer.note } })) };
 }
 
 // ---- 完整 (PLAN-002): the six sections, the two columns, the technical layer ---------------------------------

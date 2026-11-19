@@ -2,6 +2,7 @@ import { rendererApi } from './navigation-generation.js';
 import { reportResult } from './notifications.js';
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { technicalWords, identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { serviceWords } from './service-wording.js';
 import { analysisRunSummary, completedWithGapsLabel } from '../shared/analysis-run-summary.js';
 import { startPreparedTask } from './one-action-start.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
@@ -296,7 +297,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const failures = element('ul', 'analysis-list analysis-run-report-failures');
     if (report.failures.length === 0) failures.append(element('li', undefined, '无'));
     for (const failure of report.failures) {
-      const item = element('li', undefined, `${RUN_REPORT_STAGE_LABELS[failure.stage]}：${failure.reason}`);
+      const item = element('li', undefined, `${RUN_REPORT_STAGE_LABELS[failure.stage]}：${serviceWords(failure.reason)}`);
       item.dataset['runReportFailureCode'] = failure.code;
       failures.append(item);
     }
@@ -318,7 +319,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       if (report.ifRedone.items.length === 0) redone.append(element('li', undefined, '模型没有提出不同的做法。'));
       for (const suggestion of report.ifRedone.items) redone.append(element('li', undefined, `${suggestion.suggestion}（依据：${suggestion.basis}）`));
     } else {
-      redone.append(element('li', undefined, report.ifRedone.reason));
+      redone.append(element('li', undefined, serviceWords(report.ifRedone.reason)));
     }
     const findings = report.findingCounts.length === 0
       ? '这次运行没有记录发现。'
@@ -537,7 +538,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
           const firstRange = unit.entities.flatMap((entity) => entity.sourceRanges)[0] ?? unit.events.flatMap((event) => event.sourceRanges)[0];
           if (firstRange !== undefined) item.append(returnButton(firstRange.blockId));
         } else {
-          item.append(element('p', 'attention-note', `尚未分析：${unit.gap.reason}`));
+          item.append(element('p', 'attention-note', `尚未分析：${serviceWords(unit.gap.reason)}`));
           if (unit.gap.firstBlockId !== null) item.append(returnButton(unit.gap.firstBlockId));
         }
         item.append(technicalDetails(
@@ -571,7 +572,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const item = element('li');
       item.dataset['analysisGapUnit'] = String(gap.unitOrdinal);
       item.dataset['analysisGapCode'] = gap.code;
-      item.append(element('span', undefined, `${technicalWords(`第 ${gap.unitOrdinal} 个阅读范围 · `)}段落 ${gap.startPosition}–${gap.endPosition} · ${gap.reason} `));
+      item.append(element('span', undefined, `${technicalWords(`第 ${gap.unitOrdinal} 个阅读范围 · `)}段落 ${gap.startPosition}–${gap.endPosition} · ${serviceWords(gap.reason)} `));
       if (gap.firstBlockId !== null) item.append(returnButton(gap.firstBlockId));
       gaps.append(item);
     }
@@ -1191,7 +1192,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const heading = element('div', 'baseline-analysis-heading');
     heading.append(
       element('h3', undefined, technicalWords('基线稿件分析 · 不修改稿件', '稿件分析')),
-      element('span', `state-term status-pill analysis-state analysis-state-${projection.state}`, projection.stateLabel),
+      element('span', `state-term status-pill analysis-state analysis-state-${projection.state}`, serviceWords(projection.stateLabel)),
     );
     // The binding clause reads the launch this Book actually bound: the frozen plan's pin first, then the
     // pin the latest Revision recorded, and before either exists there is no launch to state.
@@ -1200,8 +1201,8 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     if (projection.taskOutcome?.report && ['failed', 'completed-with-gaps'].includes(projection.taskOutcome.classification)) {
       const report = projection.taskOutcome.report;
       const reason = report.classification === 'failed'
-        ? report.failures.find((failure) => failure.code === 'NO_CLOSED_UNITS')?.reason ?? analysisRunSummary(report).reason
-        : analysisRunSummary(report).reason;
+        ? serviceWords(report.failures.find((failure) => failure.code === 'NO_CLOSED_UNITS')?.reason ?? analysisRunSummary(report).reason)
+        : serviceWords(analysisRunSummary(report).reason);
       card.append(element('p', 'attention-note', `${projection.taskOutcome.label}${reason === null ? '' : ` · ${reason}`}`));
     }
 
@@ -1428,7 +1429,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     if (run) {
       const runSection = element('section', 'analysis-run');
       runSection.dataset['runState'] = run.state;
-      runSection.append(element('h4', undefined, `${technicalWords('任务运行记录', '任务')} · ${run.stateLabel}`));
+      runSection.append(element('h4', undefined, `${technicalWords('任务运行记录', '任务')} · ${serviceWords(run.stateLabel)}`));
       const runFacts = element('dl', 'analysis-facts');
       // Ordinary mode keeps the state, progress, result and readable failure; authorization, the transition enum, adaptations,
       // credential readiness and Harness spans are the developer layer's facts (Issue #1431 item 65).
@@ -1477,7 +1478,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       if (run.blockedReasons) {
         const reasons = element('ul', 'analysis-list attention-note');
         reasons.dataset['analysisBlocked'] = 'blocked-before-dispatch';
-        for (const reason of run.blockedReasons) reasons.append(element('li', undefined, reason));
+        for (const reason of run.blockedReasons) reasons.append(element('li', undefined, serviceWords(reason)));
         runSection.append(reasons);
       }
       if (run.progress) {

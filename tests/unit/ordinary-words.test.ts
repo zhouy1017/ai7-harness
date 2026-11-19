@@ -1,85 +1,127 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Plain build tooling intentionally has no TypeScript declarations.
-import { findTerms, scanSource, scanTargets } from '../../tools/words-report.mjs';
-import { RUN_QUEUED_LABEL, RUN_STATE_LABELS } from '../../src/service/analysis/run-state.js';
-import { BACKGROUND_OUTCOME_UNKNOWN, BACKGROUND_PAUSED, BACKGROUND_PLACE_BUSY } from '../../src/service/background-analysis-enrollments.js';
-import { OUTCOME_UNKNOWN_NO_REDO, RUN_CONTROL_REDO_NOT_BEGUN_REASON, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
-import { BOOK_DELIVERY_PACKAGE_WORDS } from '../../src/service/book-delivery-packages.js';
+import { findTerms, maskSource, scanSource, scanTargets } from '../../tools/words-report.mjs';
 import { houseAnnotationDetail } from '../../src/shared/protocol/house-word-list.js';
-import { localDayLabel } from '../../src/shared/report-wording.js';
 import { houseAnnotationWords, markDisplayNote } from '../../src/renderer/editorial-mark-labels.js';
+import { ordinaryServiceWords, serviceWords } from '../../src/renderer/service-wording.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { COUNT_UNIT } from '../../src/shared/report-wording.js';
 
-// Issue #1531 (plan #1516 §5): the vocabulary report of #1546 as a failing test. Every ordinary-mode sentence of the renderer,
-// and the service-authored sentences the editor reads as they are, holds none of the table's banned terms; the developer
-// layer's words live in the first argument of `technicalWords`, which the scan skips. The table is the one of
-// `tools/words-table.mjs`: no second list here.
+// Issue #1531 (plan #1516 §5): the vocabulary report of #1546 as a failing test. Every ordinary-mode sentence of the renderer
+// holds none of the table's banned terms — the developer layer's words live in the first argument of `technicalWords`,
+// which the scan skips — and every sentence the service hands to the renderer reads none of them AS DISPLAYED, through
+// `serviceWords`, the one place the page rewords them. The table is the one of `tools/words-table.mjs`: no second list here.
 
-type Banned = { line: number; term: string; use: string };
-type Result = { file: string; banned: Banned[]; lostSync: boolean };
+type Span = { kind: string; found: string; start: number; end: number };
 
-/** Whole screens that are the developer layer's: their words wait for the slice that opens them. */
-const DEVELOPER_SCREENS: Readonly<Record<string, string>> = {
-  'src/renderer/learning-audit-labels.ts': '学习回溯 stays developer-only until 0.7.4 (#1539)',
-};
-
-/** Developer-only sentences in a module whose other words are ordinary: each names the literal it allows on its line. */
-const DEVELOPER_SENTENCES: ReadonlyArray<{ readonly file: string; readonly text: string; readonly why: string }> = [
+/**
+ * Developer-only literals, exempt one by one (never a whole file or a whole line): each is the exact literal with its quote.
+ * `why` says where it is shown; a literal that is no longer there fails the test.
+ */
+const DEVELOPER_LITERALS: ReadonlyArray<{ readonly file: string; readonly literal: string; readonly why: string }> = [
   ...['学习准入', '记录学习准入决定', '正在读取学习准入…', '学习准入已打开', '无法读取学习准入。', '正在记录学习准入决定…', '学习准入决定已记录。']
-    .map((text) => ({ file: 'src/renderer/quality-learning-labels.ts', text: `'${text}'`, why: 'the 学习准入 tab is developer-only (editor-surfaces §10.3); the module stays import-free for its DST test' })),
+    .map((text) => ({ file: 'src/renderer/quality-learning-labels.ts', literal: `'${text}'`,
+      why: 'the 学习准入 tab is developer-only (editor-surfaces §10.3); the module stays import-free for its DST test' })),
+  ...['学习信号来自这条材料参与生成的本社审阅偏好版本', '`本社审阅偏好 v${signal.ordinal}', '`本社审阅偏好 v${version.currentVersion}',
+    '`${groups.running} 个已授权或正在运行的审阅任务参考了含有它们的本社审阅偏好版本', '`${groups.prepared} 个已准备、尚未授权的审阅任务不能再授权，需要重新准备。`',
+    "reincluding: '正在记录学习准入决定…'", "reincluded: '学习准入决定已记录。'"]
+    .map((literal) => ({ file: 'src/renderer/learning-audit-labels.ts', literal,
+      why: '学习回溯 is developer-only until 0.7.4 (#1539); the ordinary screens import only its heading and kind labels' })),
+  { file: 'src/shared/report-wording.ts', literal: "COUNT_UNIT = '词元'", why: 'the unit of a usage count, awaiting the Owner (#1531): the table gives none' },
 ];
 
-/** Service-authored sentences shown as they are, projected on every read: none is stored in a record, digested or sent to a model. */
-const SERVICE_SENTENCES: Readonly<Record<string, string>> = {
-  ...Object.fromEntries(Object.entries(RUN_STATE_LABELS).map(([state, label]) => [`RUN_STATE_LABELS.${state}`, label])),
-  RUN_QUEUED_LABEL, BACKGROUND_PAUSED, BACKGROUND_OUTCOME_UNKNOWN, BACKGROUND_PLACE_BUSY,
-  OUTCOME_UNKNOWN_NO_REDO, RUN_CONTROL_REDO_REASON, RUN_CONTROL_REDO_NOT_BEGUN_REASON,
-  ...Object.fromEntries(Object.entries(BOOK_DELIVERY_PACKAGE_WORDS).map(([key, words]) => [`BOOK_DELIVERY_PACKAGE_WORDS.${key}`, String(words)])),
-};
+/** The service modules whose sentences the renderer shows: each literal is checked as `serviceWords` displays it. */
+const SERVICE_MODULES = [
+  'src/service/task-plan.ts', 'src/service/task-overview.ts', 'src/service/bounded-manuscript.ts', 'src/service/review/review-run-state.ts',
+  'src/service/book-delivery-packages.ts', 'src/service/background-analysis-enrollments.ts', 'src/service/book-findings.ts', 'src/service/analysis/run-state.ts',
+];
 
-/** Service files whose every literal is a projection the editor reads (findings are aggregated on each read). */
-const SERVICE_FILES = ['src/service/book-findings.ts'];
+const read = (file: string): string => readFileSync(file, 'utf8');
 
-const lineOf = (file: string, line: number): string => readFileSync(file, 'utf8').split(/\r?\n/u)[line - 1] ?? '';
+/** The banned spans of one source file, each with its offset, outside the technical argument of technicalWords. */
+function bannedSpans(source: string): Span[] {
+  return (findTerms(maskSource(source).text) as Span[]).filter((span) => span.kind === 'banned');
+}
+
+/** The literals of one source file as the scan sees them: runs of string text between code. */
+function literals(source: string): string[] {
+  return maskSource(source).text.split(/\s{3,}|\n/u).map((text: string) => text.trim()).filter((text: string) => /[㐀-鿿]/u.test(text));
+}
+
+/** One-argument technicalWords inside a template that leaves an empty bracket, a doubled or a dangling separator. */
+function holes(source: string): string[] {
+  const found: string[] = [];
+  for (const line of source.split(/\r?\n/u)) {
+    for (const match of line.matchAll(/\$\{technicalWords\(`([^`]*)`\)\}/gu)) {
+      const before = line.slice(0, match.index); const after = line.slice(match.index + match[0].length);
+      const open = before.lastIndexOf('`');
+      if (open < 0) continue;
+      const head = before.slice(open + 1); const tail = after.slice(0, Math.max(0, after.indexOf('`')));
+      const joined = `${head}${tail}`.replace(/\$\{[^}]*\}/gu, '甲');
+      // A separator left dangling counts only where the call stood at the very start or end of the sentence.
+      const dangling = (head === '' && /^ ?· /u.test(tail)) || (tail === '' && / ·$/u.test(head));
+      if (dangling || /(（）|「」|《》|\(\)| · +· |，，|；；)/u.test(joined)) found.push(line.trim());
+    }
+  }
+  return found;
+}
 
 describe('ordinary-mode words follow the one table (plan #1516 §5)', () => {
-  const { results, missing, unreadable } = scanTargets([...(scanTargets().results as Result[]).map((result) => result.file), ...SERVICE_FILES]) as
-    { results: Result[]; missing: string[]; unreadable: string[] };
+  const { results, missing, unreadable } = scanTargets() as { results: Array<{ file: string; lostSync: boolean }>; missing: string[]; unreadable: string[] };
 
-  it('scans every renderer module and the service projections, and loses its place in none', () => {
+  it('scans every renderer module and the shared report words, and loses its place in none', () => {
     expect([missing, unreadable]).toEqual([[], []]);
     expect(results.filter((result) => result.lostSync).map((result) => result.file)).toEqual([]);
     expect(results.some((result) => result.file === 'src/renderer/task-drawer-labels.ts')).toBe(true);
   });
 
-  it('finds no banned term outside the technical argument of technicalWords', () => {
-    const allowed = new Set<string>();
-    const hits = results.flatMap((result) => DEVELOPER_SCREENS[result.file] !== undefined ? [] : result.banned.flatMap((hit) => {
-      const text = lineOf(result.file, hit.line);
-      const sentence = DEVELOPER_SENTENCES.find((entry) => entry.file === result.file && text.includes(entry.text));
-      if (sentence !== undefined) { allowed.add(sentence.text); return []; }
-      return [`${result.file}:${hit.line} ${hit.term} -> ${hit.use}`];
-    }));
+  it('finds no banned term outside the technical argument of technicalWords, but in the named developer-only literals', () => {
+    const used = new Set<string>();
+    const hits = results.flatMap(({ file }) => {
+      const source = read(file);
+      const exempt = DEVELOPER_LITERALS.filter((entry) => entry.file === file).flatMap((entry) =>
+        [...source.matchAll(new RegExp(entry.literal.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'gu'))].map((match) => ({ entry, start: match.index, end: match.index + entry.literal.length })));
+      return bannedSpans(source).flatMap((span) => {
+        const allowed = exempt.find((range) => span.start >= range.start && span.end <= range.end);
+        if (allowed !== undefined) { used.add(`${allowed.entry.file} ${allowed.entry.literal}`); return []; }
+        return [`${file}:${source.slice(0, span.start).split('\n').length} ${span.found}`];
+      });
+    });
     expect(hits).toEqual([]);
-    // Every exception still names a sentence that is there: none outlives the words it was written for.
-    expect(DEVELOPER_SENTENCES.filter((entry) => !allowed.has(entry.text)).map((entry) => entry.text)).toEqual([]);
-    for (const file of Object.keys(DEVELOPER_SCREENS)) expect(results.some((result) => result.file === file)).toBe(true);
+    // Every exception still holds a banned term it was written for: none outlives its words.
+    expect(DEVELOPER_LITERALS.filter((entry) => !used.has(`${entry.file} ${entry.literal}`)).map((entry) => entry.literal)).toEqual([]);
   });
 
-  it('finds none in the service-authored sentences the editor reads as they are', () => {
-    const hits = Object.entries(SERVICE_SENTENCES).flatMap(([name, words]) =>
-      (findTerms(words) as Array<{ kind: string; found: string }>).filter((span) => span.kind === 'banned').map((span) => `${name}: ${span.found}`));
-    expect(hits).toEqual([]);
+  it('leaves no hole where a one-argument technicalWords sits inside a sentence', () => {
+    expect(results.flatMap(({ file }) => holes(read(file)).map((line) => `${file}: ${line}`))).toEqual([]);
+    expect(holes('const a = `《${t}》${technicalWords(`第 2 版`)} · 已启用`;')).toEqual([]);
+    expect(holes('const a = `「${technicalWords(`r1`)}」 · 已启用`;')).toHaveLength(1);
+    expect(holes('const a = `甲 · ${technicalWords(`r1`)} · 乙`;')).toHaveLength(1);
   });
 
-  it('reads a review annotation from 本社词表 by that one name and its day, and leaves the record as it is', () => {
+  it('reads every service-authored sentence of the modules the renderer shows in the table\'s words, as serviceWords displays it', () => {
+    // The unit of a usage count is the one word awaiting the Owner (COUNT_UNIT): it is allowed where serviceWords puts it.
+    const hits = SERVICE_MODULES.flatMap((file) => literals(read(file)).flatMap((text) =>
+      (findTerms(ordinaryServiceWords(text)) as Span[]).filter((span) => span.kind === 'banned' && span.found !== COUNT_UNIT)
+        .map((span) => `${file}: ${span.found} in 「${text.slice(0, 40)}」`)));
+    expect(hits).toEqual([]);
+    try {
+      setTechnicalLayerVisible(true);
+      expect(serviceWords('已读完 3 / 8 个阅读范围；续行时从第 4 个接着读')).toBe('已读完 3 / 8 个阅读范围；续行时从第 4 个接着读');
+      setTechnicalLayerVisible(false);
+      expect(serviceWords('已读完 3 / 8 个阅读范围；续行时从第 4 个阅读范围接着读')).toBe('已读完 3 / 8 个部分；继续时从正文第 4 部分接着读');
+      expect(serviceWords('等待运行名额')).toBe('排队中');
+    } finally { setTechnicalLayerVisible(false); }
+  });
+
+  it('reads a review annotation from 本社词表 by that one name on every list, and leaves the record as it is', () => {
     const pin = { listId: '00000000-0000-4000-8000-000000000001', versionId: '00000000-0000-4000-8000-000000000002', digest: 'a'.repeat(64) };
     const note = houseAnnotationDetail({ entryId: '00000000-0000-4000-8000-000000000003', literal: '甲词', note: '合成说明', enabled: true }, { pin, ordinal: 3 });
     try {
       setTechnicalLayerVisible(false);
-      const day = localDayLabel('2026-11-16T04:00:00.000Z');
-      expect(markDisplayNote(note, '2026-11-16T04:00:00.000Z').text).toBe(`本社词表 · ${day}\n词条：甲词\n词条说明：合成说明\n命中本社词条，请编辑判断。`);
+      expect(markDisplayNote(note).text).toBe('本社词表\n词条：甲词\n词条说明：合成说明\n命中本社词条，请编辑判断。');
+      expect(houseAnnotationWords(note)).toBe(markDisplayNote(note).text);
       expect(houseAnnotationWords('另一条批注')).toBe('另一条批注');
       setTechnicalLayerVisible(true);
       expect(houseAnnotationWords(note)).toBe(note);
@@ -87,7 +129,7 @@ describe('ordinary-mode words follow the one table (plan #1516 §5)', () => {
   });
 
   it('fails on a banned term the moment one comes back, and not on its developer-layer twin', () => {
-    expect(scanSource("export const A = '任务已中断 · 可续行';").banned.map((hit: Banned) => hit.term)).toEqual(['续行']);
+    expect(scanSource("export const A = '任务已中断 · 可续行';").banned.map((hit: { term: string }) => hit.term)).toEqual(['续行']);
     expect(scanSource("export const a = (): string => technicalWords('任务已中断 · 可续行', '任务已中断 · 可继续');").banned).toEqual([]);
   });
 });

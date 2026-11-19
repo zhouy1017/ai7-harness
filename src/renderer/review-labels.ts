@@ -1,4 +1,5 @@
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
+import { serviceWords } from './service-wording.js';
 import { REVIEW_SYNTHESIS_PLAN_LINE } from '../shared/review-synthesis-wording.js';
 import {
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
@@ -359,6 +360,11 @@ export const REVIEW_STAGE_LABELS: Readonly<Record<'units' | 'cross-unit-reductio
  * settled, what it found; otherwise its state's own detail. `now` is the reader's clock, for the elapsed time.
  */
 export function reviewCategoryProgressLine(category: Pick<ReviewRunCategoryProjection, 'state' | 'stateLabel' | 'detail' | 'progress' | 'findingsCount' | 'excludedCount'>, now: number): string {
+  // The category's state and detail are the service's, recorded with the Run; they read in the table's words here (Issue #1531).
+  return serviceWords(reviewCategoryProgressWords(category, now));
+}
+
+function reviewCategoryProgressWords(category: Pick<ReviewRunCategoryProjection, 'state' | 'stateLabel' | 'detail' | 'progress' | 'findingsCount' | 'excludedCount'>, now: number): string {
   const facts = category.progress;
   if (category.state === 'running' && facts !== null) {
     const elapsedMs = facts.currentUnitStartedAt === null ? null : now - Date.parse(facts.currentUnitStartedAt);
@@ -401,7 +407,7 @@ export function reviewLiveLine(runLabel: string, category: Pick<ReviewRunCategor
   if (category === null) return `${runLabel}审阅`;
   const facts = category.progress;
   return facts === null
-    ? `${runLabel}审阅 · ${category.label} · ${category.stateLabel}`
+    ? `${runLabel}审阅 · ${category.label} · ${serviceWords(category.stateLabel)}`
     : `${runLabel}审阅 · ${category.label} · ${technicalWords(technicalWords(`已读完 ${facts.unitsSettled} / ${facts.unitsTotal} 个阅读范围`),
       `已完成约 ${facts.unitsTotal === 0 ? 0 : Math.floor((facts.unitsSettled / facts.unitsTotal) * 100)}%`)}`;
 }

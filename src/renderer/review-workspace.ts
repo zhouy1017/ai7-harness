@@ -1,5 +1,6 @@
 import { triageKeyAction } from './triage-keys.js';
 import { houseAnnotationWords } from './editorial-mark-labels.js';
+import { serviceWords } from './service-wording.js';
 import { clearReviewReturn } from './review-return.js';
 import { navigation, rendererApi } from './navigation-generation.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
@@ -1572,7 +1573,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     );
     // A category that cannot go ahead says so here too: it is what the one approval would be refused for.
     for (const category of run.categories) {
-      if (category.detail !== null) section.append(el('p', 'attention-note', `${category.label}：${category.detail}`));
+      if (category.detail !== null) section.append(el('p', 'attention-note', `${category.label}：${serviceWords(category.detail)}`));
     }
     const actions = el('div', 'button-row review-plan-actions');
     const open = actionButton('view-plan', 'primary', () => options.openPlan(run.reviewRunId), TASK_PLAN_OPEN_START);
@@ -1701,7 +1702,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (category.progress !== null) item.dataset['reviewProgress'] = `${category.progress.unitsSettled}/${category.progress.unitsTotal}`;
       item.append(
         el('span', 'review-progress-label', category.label),
-        pillElement(category.stateLabel, REVIEW_CATEGORY_STATE_PILLS[category.state]),
+        pillElement(serviceWords(category.stateLabel), REVIEW_CATEGORY_STATE_PILLS[category.state]),
         el('span', 'review-progress-detail', reviewCategoryProgressLine(category, now)),
       );
       list.append(item);

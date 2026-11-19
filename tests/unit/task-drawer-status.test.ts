@@ -100,7 +100,7 @@ describe('the status card of a started Task in ordinary mode', () => {
 
   it('keeps the Run Budget Ceiling on the card of a task that has one, in the plan\'s own words (ADR 0096 §4.2)', async () => {
     const bounded = { service: { ...taskPlanFixture().service, usage: '达到 20,000 tokens 后不再发送新的请求（8 个阅读范围）', usageIsCeiling: true } };
-    expect(text((await openDrawer(runningPlan(bounded))).root, '.task-status-ceiling')).toBe('用量达到 20,000 后不再发送');
+    expect(text((await openDrawer(runningPlan(bounded))).root, '.task-status-ceiling')).toBe('用量达到 20,000 词元后不再发送');
     expect(text((await openDrawer(runningPlan())).root, '.task-status-ceiling')).toBeUndefined();
   });
 
