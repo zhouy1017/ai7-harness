@@ -193,6 +193,8 @@ This maintained bilingual reference routes readers to target-qualified definitio
 | Personal Highlight | 自选高亮 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Review Run | 审阅记录 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Review Guideline Document | 审阅规范文件 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Standards Table | 字表 / 词表 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Standard Usage Check | 规范用语核查 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Finding Disposition | 发现处置 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Evaluation Record | 评估记录 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Evaluation Profile | 评估方案 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
@@ -362,6 +364,8 @@ The inheritance audit resolved the definition owners for these terms. They remai
 | Editor Note | Annotation / exported comment / Learning Material by default |
 | Review Run | Baseline Manuscript Analysis / one Task alone / Review Decision / Report alone |
 | Review Guideline Document | Policy Document / prompt fragment / Editorial Profile / one Book's style sheet |
+| Standards Table | 本社词表 (house literal risk list, H01) / Review Guideline Document / program constant / shipped dictionary |
+| Standard Usage Check | model review category 错别字与规范用语 / 本社词表 matching (H01) / compliance proof |
 | Finding Disposition | Proposal Decision / Review Decision / Effect Approval / dismissal of a projection |
 | Evaluation Record | Delivery Quality Metric / Review Decision / factual truth / Editorial Review findings |
 | Evaluation Profile | Editorial Profile / universal rubric / exposed weights |
