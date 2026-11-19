@@ -1002,7 +1002,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   const prepareInitial = async (preview = false): Promise<void> => {
     if (busy || workspace === null) return;
     if (!preview) pickedOver = null;
-    options.openLaunch({ bookId: workspace.bookId, operation: 'launchInitialEvaluation', title: '初评', input: {} });
+    options.openLaunch({ bookId: workspace.bookId, operation: 'launchInitialEvaluation', title: '评估报告', input: {} });
   };
 
   const turn = async (recordsBefore: number | null): Promise<void> => {
@@ -1069,7 +1069,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     heading.tabIndex = -1;
     heading.append(' · ', el('span', 'evaluation-revision', evaluationRevisionLine(record)));
     node.append(heading);
-    if (record.initial?.modelLabel) node.append(el('p', 'evaluation-report-model', `初评模型 ${record.initial.modelLabel}`));
+    if (record.initial?.modelLabel) node.append(el('p', 'evaluation-report-model', `评估报告模型 ${record.initial.modelLabel}`));
     // Preserve the notices about attribution and damaged versions with the record they qualify.
     const skipped = evaluationSkippedRecordsLine(record);
     if (record.ai7WordsNotice !== null || skipped !== null) {

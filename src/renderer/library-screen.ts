@@ -337,7 +337,7 @@ async function renderLanding(
     recent.append(element('h3', undefined, '最近稿件'));
     const list = element('div', 'recent-work-list');
     for (const item of priorWork) {
-      const state = item.recoveryAttention ? '恢复待确认状态' : `当前稿件 ${item.revisionLabel}`;
+      const state = item.recoveryAttention ? '恢复待确认状态' : `当前稿件${technicalWords(` ${item.revisionLabel}`)}`;
       const context = `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''}`;
       const open = bookCardOpen(item.bookTitle, state, async () => {
         const current = navigation.begin();

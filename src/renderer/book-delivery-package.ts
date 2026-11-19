@@ -490,7 +490,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       const actions = el('div', 'button-row compact-actions');
       actions.append(direct, open);
       line.append(' · ', el('span', 'package-version-meta', packageVersionMeta(version.purpose, localInstantLabel(version.preparedAt))));
-      item.append(line, el('p', 'package-version-summary', version.summary));
+      // The summary names the 发稿版本 with its revision label (the service's words); ordinary mode reads it without (Issue #1531).
+      item.append(line, el('p', 'package-version-summary', technicalWords(version.summary, version.summary.replace(/ · r\d+(?= · )/u, ''))));
       if (version.exports.length > 0) item.append(renderHistory(version));
       item.append(actions);
       if (exporting !== null && exporting.packageVersionId === version.packageVersionId) item.append(renderExport(exporting));

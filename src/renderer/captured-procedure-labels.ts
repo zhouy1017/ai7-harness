@@ -214,7 +214,7 @@ export const PROCEDURE_LATEST_ELIGIBLE_NOTE = '新建审阅按这个工序运行
 
 // ---- 停用… (Issue #66, plan slice S31; REUSE-038, REUSE-040, REUSE-041; ADR 0087 §5) -------------------------------------
 
-export const PROCEDURE_STOP_PREPARED_HEADING = '停用后不能再开始，需要重新开始一次审阅' as const;
+export const PROCEDURE_STOP_PREPARED_HEADING = '停用后不能再开始，需要另做一份审阅计划' as const;
 export const PROCEDURE_STOP_ACTIVE_HEADING = '已开始的审阅不受影响，按授权时的这一版继续' as const;
 export const PROCEDURE_STOP_KEPT = '不会删除任何东西：这一版的内容、摘要与来源记录都保留为历史版本，按它运行过的审阅仍然记着它。' as const;
 

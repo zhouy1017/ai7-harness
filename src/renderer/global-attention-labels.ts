@@ -149,15 +149,15 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-plan-moved': '需要重新确认计划',
   // A Clarification Request (Issue #422, S76d): the bar's own words for it.
   'analysis-clarification': '等你回答',
-  'analysis-queued': '正在排队',
+  'analysis-queued': '排队中',
   'analysis-running': '运行中',
   // A Run in Connectivity Wait (Issue #502), in the drawer's words for what it waits for: never 运行中, never 已暂停.
   'analysis-waiting-network': '等待网络',
   'analysis-waiting-connection': '需要处理模型连接',
-  // Not in the capacity queue (Issue #632): the drawer's own words for it, never 等待运行名额.
-  'analysis-waiting-slot': '已联网 · 名额已满',
+  // Not in the capacity queue (Issue #632): online and waiting for a place to start, never 排队中 (#1531: one word per wait).
+  'analysis-waiting-slot': '已联网 · 等待开始',
   // The drawer's own word for it (Issue #539): nothing runs yet.
-  'analysis-waiting-admission': '正在排队',
+  'analysis-waiting-admission': '等待开始前检查',
   // A start waiting on the governor for a place (Issue #49, S14; CONC-007), in the drawer's words for it.
   'analysis-waiting-capacity': '排队中',
   'analysis-waiting-idle': '等待空闲',

@@ -64,7 +64,7 @@ it('shows the newest report past an unfinished empty version, and 修改报告 o
   expect(startEvaluation).toHaveBeenCalledWith({ fromInitial: true, skipDamaged: false });
   expect(root.querySelector('.evaluation-report')).toBeNull();
   expect(root.querySelector('.evaluation-record h3')!.textContent).toContain('详细评估报告');
-  expect(root.querySelector('.evaluation-record .evaluation-report-model')!.textContent).toBe('初评模型 chosen-model@high');
+  expect(root.querySelector('.evaluation-record .evaluation-report-model')!.textContent).toBe('评估报告模型 chosen-model@high');
   expect(root.querySelector('.evaluation-record .evaluation-report-next-step')!.textContent).toBe('下一步建议：压缩中段。');
   // The 评语 field holds AI7's words until the editor changes them; they are not repeated beside it.
   expect(root.querySelectorAll('.evaluation-record .evaluation-item-ai7-comment')).toHaveLength(0);

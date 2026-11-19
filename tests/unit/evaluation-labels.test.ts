@@ -327,9 +327,9 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
     expect(evaluationAi7ItemLine({ ...item, score: null }, 20, { adjusted: 1 })).toBe('评估报告 没有给出分数 · 依据充分度 不足（没有引用段落）');
     expect(evaluationAi7CalibrationLine(null)).toBeNull();
     expect(evaluationAi7CalibrationLine({ basisBooks: 10, items: [{ itemId: 'readers-and-market', raw: 12, offset: -2, adjusted: 10 }] }))
-      .toBe('AI7 的初评分数已按本社校准（依据 10 本书的定稿评估）：调整了 1 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分。');
+      .toBe('评估报告的分数已按本社校准（依据 10 本书的定稿评估）：调整了 1 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分。');
     expect(evaluationAi7CalibrationLine({ basisBooks: 12, items: [] }))
-      .toBe('AI7 的初评分数已按本社校准（依据 12 本书的定稿评估）：各项偏移为 0，起始分数未变；校准只调 AI7 的分数，不调风险项，也不改你的评分。');
+      .toBe('评估报告的分数已按本社校准（依据 12 本书的定稿评估）：各项偏移为 0，起始分数未变；校准只调 AI7 的分数，不调风险项，也不改你的评分。');
   });
 
   it('reads an item\'s starting score as the service does: the calibrated start where it moved the item, else AI7\'s raw score (EVAL-011a)', () => {

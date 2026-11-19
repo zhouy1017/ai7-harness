@@ -294,7 +294,7 @@ export function mountGlobalAgent(options: {
       const prepared = await options.api.prepareGlobalAgentTurn(askInput());
       if (!root.isConnected || generation !== previewGeneration) return;
       disclosure.replaceChildren(el('h3', '将发送的内容'), el('p', providerLabel(prepared.provider)), el('p', prepared.question),
-        el('p', prepared.textProcessing === 'qualified-original-fields' ? '发送问题和已选审阅偏好的正文；不读取备注或审阅偏好的原文例证。' : '已过滤本社人员姓名；不发送备注、内部记录或记忆的原文例证。'));
+        el('p', prepared.textProcessing === 'qualified-original-fields' ? '发送问题和已选审阅偏好的正文；不读取备注或审阅偏好的原文例证。' : '已过滤本社人员姓名；不发送备注、内部记录或审阅偏好的原文例证。'));
       if (prepared.scope !== undefined) disclosure.append(
         el('p', `可用工具：${prepared.scope.tools.map((tool) => TOOL_LABELS[tool] ?? '本机工具').join('、')}`),
         el('p', `图书：${prepared.scope.books.map((entry) => entry.title).join('、') || '未选'}`),

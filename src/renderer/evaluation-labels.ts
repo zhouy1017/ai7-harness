@@ -52,7 +52,7 @@ export function evaluationSkipDamagedLine(skipDamaged: NonNullable<Extract<Evalu
 /** What a version says of the damaged versions it skipped when it began (Issue #726); `null` for one that skipped none. */
 export function evaluationSkippedRecordsLine(record: Pick<EvaluationRecordProjection, 'skippedRecords' | 'seededFrom'>): string | null {
   if (record.skippedRecords.length === 0) return null;
-  const skipped = `这一版跳过了已损坏的第 ${record.skippedRecords.join('、')} 版`;
+  const skipped = technicalWords(`这一版跳过了已损坏的第 ${record.skippedRecords.join('、')} 版`, `这一版跳过了已损坏的评估记录（${record.skippedRecords.length} 份）`);
   return record.seededFrom === null ? `${skipped}，从头开始评估。` : `${skipped}，从${technicalWords(`第 ${record.seededFrom} 版`, '之前的一份')}定稿重新评估。`;
 }
 export const EVALUATION_SAVE = '保存修改';
@@ -292,7 +292,7 @@ export function evaluationAi7TaskLine(task: NonNullable<EvaluationInitialProject
 export function evaluationAi7LatestLine(profile: Pick<EvaluationProfileProjection, 'bands'>, latest: NonNullable<EvaluationInitialProjection['latest']>): string {
   const total = latest.complete ? evaluationTotalLine(profile, latest.total) : '全书综合没有给出分数';
   const moved = latest.current ? '' : '（稿件此后改过：重新生成后才能在报告上修改）';
-  return `第 ${latest.ordinal} 次初评${technicalWords(` · 读的是修订版 ${latest.revisionLabel}`)} · ${total}${moved}`;
+  return `${technicalWords(`第 ${latest.ordinal} 次初评`, '最近一份评估报告')}${technicalWords(` · 读的是修订版 ${latest.revisionLabel}`)} · ${total}${moved}`;
 }
 
 /** 依据充分度 of one item (EVAL-005), with what it rests on. */
@@ -322,7 +322,7 @@ export function evaluationAi7ItemLine(
 export function evaluationAi7CalibrationLine(calibration: EvaluationInitialCalibrationProjection | null): string | null {
   if (calibration === null) return null;
   const moved = calibration.items.length === 0 ? '各项偏移为 0，起始分数未变' : `调整了 ${calibration.items.length} 项的起始分数，原始分数仍列在每一项旁边`;
-  return `AI7 的初评分数已按本社校准（依据 ${calibration.basisBooks} 本书的定稿评估）：${moved}；校准只调 AI7 的分数，不调风险项，也不改你的评分。`;
+  return `评估报告的分数已按本社校准（依据 ${calibration.basisBooks} 本书的定稿评估）：${moved}；校准只调 AI7 的分数，不调风险项，也不改你的评分。`;
 }
 
 /**

@@ -2078,7 +2078,7 @@ async function main() {
     const ordinaryReport = await evaluationMode(false, 'initial-evaluation-ordinary');
     // Ordinary mode cites paragraphs without the reading ranges they fall in (#1431 item 71).
     const ordinaryItems = AI7_ITEM_LINES.map(([itemId, sufficiency, line]) => [itemId, sufficiency, line.replace(/，分布在 \d+ 个阅读范围/u, '')]);
-    requireJourney(readReportView(ordinaryReport, ordinaryItems) && ordinaryReport.report.line === '第 1 次初评 · 总分 73 / 100 · 优秀' && ordinaryReport.report.technical === 0,
+    requireJourney(readReportView(ordinaryReport, ordinaryItems) && ordinaryReport.report.line === '最近一份评估报告 · 总分 73 / 100 · 优秀' && ordinaryReport.report.technical === 0,
       'initial-evaluation-ordinary-report', ordinaryReport);
     // 修改报告: the report becomes 第 14 版, begun from it past the unfinished 第 13 版, which stays as it was.
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'initial-evaluation-begin');
@@ -3436,7 +3436,7 @@ async function main() {
     const calibratedLine = (index, after) => ai7Line(index).replace(' · 依据充分度', ` · 校准后 ${after} / 20 · 依据充分度`);
     requireJourney(JSON.stringify(calibratedDraft.record.items.map(([, , score]) => score)) === JSON.stringify(['17', '15', '15.5', '14', '10']) &&
       calibratedDraft.record.total === '总分 71.5 / 100 · 优秀' &&
-      calibratedDraft.record.calibration === 'AI7 的初评分数已按本社校准（依据 1 本书的定稿评估）：调整了 2 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分' &&
+      calibratedDraft.record.calibration === '评估报告的分数已按本社校准（依据 1 本书的定稿评估）：调整了 2 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分' &&
       calibratedDraft.record.ai7Items[0][1] === calibratedLine(0, '17') && calibratedDraft.record.ai7Items[4][1] === calibratedLine(4, '10') &&
       calibratedDraft.record.ai7Items[1][1] === ai7Line(1) && calibratedDraft.record.ai7Items[3][1] === ai7Line(3) &&
       JSON.stringify(calibratedDraft.record.ai7Items.map(([, , offered]) => offered)) === JSON.stringify([false, false, false, false, false]) &&

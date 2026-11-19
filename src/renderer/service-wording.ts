@@ -28,7 +28,9 @@ const RULES: ReadonlyArray<readonly [RegExp, string | ((...parts: string[]) => s
   [/停止任务/gu, '取消任务'],
   // 名额 and 派发.
   [/等待运行名额/gu, '排队中'],
-  [/运行名额已满/gu, '正在排队'],
+  [/运行名额已满/gu, '现在没有空位'],
+  [/已联网 · 名额已满/gu, '已联网 · 等待开始'],
+  [/正在排队/gu, '排队中'],
   [/派发前已阻止/gu, '没有开始'],
   // One name per thing.
   [/应用结果待确认|应用凭据/gu, '修改是否生效待确认'],

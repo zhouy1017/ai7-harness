@@ -107,7 +107,7 @@ export const REVIEW_ACTION_LABELS = {
   'batch-prepare': '接受并应用全部',
   'batch-confirm': '确认应用',
   'batch-cancel': '取消',
-  'batch-reprepare': '重新开始应用',
+  'batch-reprepare': '另做一份预览',
   'batch-undo': '撤销本批应用',
   'all-categories': '全部类别',
   'export-version': '导出报告',
@@ -500,7 +500,7 @@ export function reviewIgnoreReasonCount(reason: string): string {
 
 export const REVIEW_BATCH_ALL_OR_NONE = '确认后一次写入稿件：全部写入，或一条也不写。';
 export const REVIEW_BATCH_NOTHING = '没有可以一起应用的修改建议：本类待处理、原文未变的修改建议已经都处理过了。';
-export const REVIEW_BATCH_REFUSED = '稿件没有改动。请重新开始应用：原文已变的修改建议不会再列入。';
+export const REVIEW_BATCH_REFUSED = '稿件没有改动。请另做一份预览：原文已变的修改建议不会再列入。';
 
 /** The write scope stated before 确认应用, exactly as the strip will send it. */
 export function reviewBatchScopeLine(count: number): string {
