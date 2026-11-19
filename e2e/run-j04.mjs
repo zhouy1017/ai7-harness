@@ -75,7 +75,7 @@ const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 
   // Synchronized delta with Issue #922 (slice 7f): the 自定义 tab's 运行, 查看计划 and each answer's quotation link.
   'custom-run', 'custom-open-plan', 'custom-jump',
   // #1543: 分析 › 自定义 offers writing a dimension in place.
-  'custom-create', 'custom-enable', 'custom-stop'];
+  'custom-create', 'custom-stop'];
 /** Every button on screen and in the drawer whose words name 授权: AUTH-002 keeps the word off every start (ADR 0077). */
 const AUTHORIZE_LABELED_BUTTONS = `Array.from(document.querySelectorAll('#screen button, #task-drawer button')).filter((button)=>/授权/u.test(button.textContent??'')).length`;
 /** The words the authorization bar says before every start (AUTH-003 as ADR 0077 revised it). */
@@ -3581,7 +3581,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'custom-library');
     await pointerClick(renderer, waitFor, `button[data-book-id=${JSON.stringify(customBook.bookId)}]`, 'custom-open-book-first');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(customBook.bookId)}]')`, 'custom-manuscript-first', 120_000);
-    await openAnalysisDestination(renderer, 'custom-analysis-first');
+    await pointerClick(renderer, waitFor, SIDEBAR.section('analysis'), 'custom-analysis-first');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis .baseline-analysis-card')`, 'custom-analysis-first-destination');
     await pointerClick(renderer, waitFor, '.baseline-analysis-card [role="tab"][data-analysis-tab="custom"]', 'custom-tab-first');
     const customPanel = '.baseline-analysis-card [data-analysis-panel="custom"]';
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${customPanel} [data-custom-empty="no-dimension"]`)})`, 'custom-tab-empty');
@@ -3607,10 +3608,12 @@ async function main() {
       if (!first) {
         // 停用 on the card the editor is on, pressed, after the one question: the dimension never ran on this Book, so its card goes.
         // The question is the app's own confirm; the Journey answers it yes and gives the window its own back.
-        await renderer.evaluate('window.confirm = () => true');
+        await renderer.evaluate("window.__j04Confirm = window.confirm; window.__j04Asked = []; window.confirm = (question) => { window.__j04Asked.push(String(question)); return true; }");
         await pointerClick(renderer, waitFor, `${customPanel} .custom-dimension-card:focus-within [data-custom-action="stop"]`, `custom-stop-${size}`);
         await waitFor(renderer, `!Array.from(document.querySelectorAll(${JSON.stringify(`${customPanel} .custom-dimension-card`)})).some((node) => node.querySelector('h3')?.textContent===${JSON.stringify(secondTitle)})`, `custom-stopped-${size}`);
-        await renderer.evaluate('delete window.confirm');
+        await waitFor(renderer, `(document.querySelector('[data-toast]')?.textContent ?? '').includes('已停用「${secondTitle}」')`, `custom-stopped-status-${size}`);
+        const asked = JSON.parse(await renderer.evaluate("(() => { const asked = window.__j04Asked; window.confirm = window.__j04Confirm; delete window.__j04Asked; delete window.__j04Confirm; return JSON.stringify(asked); })()"));
+        requireJourney(asked.length === 1 && asked[0].includes(secondTitle) && asked[0].includes('所有图书') && asked[0].includes('不能撤销'), `custom-stop-asked-${size}`, asked);
         const stoppedService = await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: false }).then((page) => JSON.stringify(page.dimensions.filter((entry) => entry.title === ${JSON.stringify(secondTitle)}).map((entry) => [entry.enabledVersion, entry.versions[0].state])))`);
         requireJourney(stoppedService === JSON.stringify([[null, 'stopped']]), `custom-stopped-service-${size}`, stoppedService);
       }

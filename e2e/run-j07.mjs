@@ -2763,7 +2763,8 @@ async function main() {
     // #1543: the same entry as an ordinary editor — 修改… on 交付物 opens 设置 › 评估校准与预测 as an ordinary page with this Book's entry
     // open at 定价, its formula folded; then development mode is restored for the stages that follow.
     await setDeveloperMode(renderer, waitFor, false, 'actuals-ordinary-off');
-    await openDeliverables(renderer, 'actuals-ordinary-deliverables');
+    await pointerClick(renderer, waitFor, SIDEBAR.section('deliverables'), 'actuals-ordinary-deliverables-entry');
+    await waitForDeliverables(renderer, 'actuals-ordinary-deliverables');
     await pointerClick(renderer, waitFor, '[data-screen="book-deliverables"] [data-publication-action="actuals"]', 'actuals-ordinary-enter');
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-lede') && document.activeElement?.dataset.calibrationField === 'price'`, 'actuals-ordinary-page');
     await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="evaluation-calibration"] .evaluation-calibration'); const input = document.querySelector('[data-calibration-field="price"]'); return document.documentElement.dataset.technicalLayerVisible === 'false' && root.querySelectorAll('.calibration-how').length === 2 && input.value === '45.00' && input.classList.contains('ui-input') && document.querySelector('.settings-navigation [data-settings-nav="evaluation-calibration"]')?.getAttribute('aria-current') === 'page'; })()`, 'actuals-ordinary-words');

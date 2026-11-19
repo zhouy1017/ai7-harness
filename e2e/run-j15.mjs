@@ -1254,6 +1254,8 @@ async function main() {
       // Back to the review the editor came from: the sheet offers the saved list, and the editor inside it is the same component.
       await pointerClick(renderer, waitFor, '.knowledge-base > .button-row > button:last-child', `house-words-back-${size}`);
       await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, `house-words-review-again-${size}`);
+      // 本地文字检查 sits under 更多: opened by pointer, as the editor does.
+      await pointerClick(renderer, waitFor, '.review-new-actions .review-more > summary', `house-words-more-${size}`);
       await pointerClick(renderer, waitFor, '[data-review-action="new-local-check"]', `house-words-sheet-${size}`);
       await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('dialog.review-sheet [data-local-house-word-list]')?.disabled===false`, `house-words-selectable-${size}`);
       await assertRenderer(renderer, `(() => { const sheet = document.querySelector('dialog.review-sheet'); const text = sheet.textContent; return text.includes('本社词表') && text.includes('${count} 条启用') && !text.includes('本社自用词表') && !text.includes('本社敏感词表') && Array.from(sheet.querySelectorAll('summary')).some((summary) => summary.textContent === '编辑本社词表'); })()`, `house-words-sheet-words-${size}`);
