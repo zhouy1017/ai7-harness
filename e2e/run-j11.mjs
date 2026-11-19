@@ -3643,7 +3643,7 @@ async function main() {
         await choose(renderer, '#feedback-filter-origin', 'analysis-feedback', 'ordinary-history-filter-source');
         await waitFor(renderer, `document.querySelector('#feedback-filter-origin')?.disabled===false && Array.from(document.querySelectorAll('[data-entry-id]')).every(row=>row.dataset.feedbackOrigin==='analysis-feedback')`, 'ordinary-history-filtered');
         await clickSelector(renderer, '#quality-tab-preferences', 'ordinary-preference-remount');
-        await waitFor(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]');const history=row?.querySelector('details');return row?.textContent.includes('已停用') && history?.textContent.includes('来自《') && /[0-9]{4}-[0-9]{2}-[0-9]{2}T/u.test(history.textContent); })()`, 'ordinary-preference-retained-source-history');
+        await waitFor(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]');const history=row?.querySelector('details');return row?.textContent.includes('已停用') && history?.textContent.includes('来自《') && /[0-9]+ 月 [0-9]+ 日 [0-9]{2}:[0-9]{2}/u.test(history.textContent) && !/[0-9]{4}-[0-9]{2}-[0-9]{2}T/u.test(history.textContent); })()`, 'ordinary-preference-retained-source-history');
         await qualityMode(true, 'ordinary-memory-restore'); await openMemory('ordinary-memory-developer');
       }
       return itemId;
