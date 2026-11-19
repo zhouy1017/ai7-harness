@@ -6,7 +6,7 @@ import type {
 
 export const IMPORTED_SKILLS_HEADING = '外部 Skill';
 export const IMPORTED_SKILLS_NO_EXECUTOR = '外部 Skill 在此版本没有执行器，不参与工序推荐。';
-export const IMPORTED_SKILL_NO_AUTHORITY = '安装或启用不会发起任务，也不授予稿件访问、模型调用、凭据、联网、外部操作、后台分析或应用修改的权限。';
+export const IMPORTED_SKILL_NO_AUTHORITY = '安装或启用不会发起任务，也不授予稿件访问、模型调用、密钥、联网、外部操作、后台分析或应用修改的权限。';
 export function importedSkillIdentityLine(skill: Pick<ImportedSkillRevisionProjection, 'name' | 'sourceRevision' | 'ordinal' | 'stateLabel'>): string {
   return `${skill.name} · DSH Skill${technicalWords(` · 来源 ${skill.sourceRevision} · 本地修订 ${skill.ordinal}`)} · ${skill.stateLabel}`;
 }
@@ -14,7 +14,7 @@ export function importedSkillCeilingLines(ceiling: ImportedSkillCeiling): string
   return [
     `请求的能力：${ceiling.requestedCapabilities.length === 0 ? '未声明' : ceiling.requestedCapabilities.join('；')}`,
     '此版本不提供执行器；Run 可读范围：无；模型服务：无；外部操作：无',
-    '凭据：无；联网：无；后台分析：无；应用修改：无',
+    '密钥：无；联网：无；后台分析：无；应用修改：无',
     IMPORTED_SKILL_NO_AUTHORITY,
   ];
 }
@@ -26,7 +26,7 @@ export const IMPORTED_SKILL_UPDATE_BOUNDARY = '检查更新只读取你选的本
 export const IMPORTED_SKILL_UPDATE_NOT_ENABLED = '采纳只生成一个待验证的新修订，不会安装或启用；启用仍要另行逐本图书确认。';
 export const IMPORTED_SKILL_UPDATE_NONE = '还没有检查过更新。';
 export function importedSkillUpdateRelationLine(relation: ImportedSkillUpdateCheckProjection['relation']): string {
-  return relation === 'newer' ? '这是一个新的版本：保留后生成一个更新，待你处理。'
+  return relation === 'newer' ? '这是一个新的版本：保留后生成一个更新，待处理。'
     : relation === 'same-as-current' ? '这就是已保留的文件，没有新的更新。'
       : '这个版本已经在此 Skill 的版本历史里；请用「回到此版本」，不会再生成更新。';
 }

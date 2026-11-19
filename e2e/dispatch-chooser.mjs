@@ -52,7 +52,7 @@ async function capturePointerFailure(renderer, selector) {
 }
 
 /** Real pointer interaction: wait for layout motion, then require a visible, topmost target. */
-export async function pointerClick(renderer, waitFor, selector, name) {
+export async function pointerClick(renderer, waitFor, selector, name, { rest = false } = {}) {
   try {
     const query = JSON.stringify(selector);
     await renderer.evaluate(`document.querySelector(${query})?.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})`);
@@ -66,7 +66,23 @@ export async function pointerClick(renderer, waitFor, selector, name) {
     await waitFor(renderer, stableExpression, `${name}-pointer-target`);
     const ready = await renderer.evaluate(pointExpression);
     if (ready === null) throw new Error(`${name}-target-moved-before-press`);
-    const point = { x: ready.x, y: ready.y };
+    let point = { x: ready.x, y: ready.y };
+    if (rest) {
+      // As an editor's pointer does, it comes to rest on the control first, following it while the page still moves it; the page
+      // keeps a control under a resting pointer in place. Once it has stayed under the pointer for two frames, it is pressed once.
+      const resting = (at) => `new Promise(resolve=>requestAnimationFrame(()=>{const under=()=>document.querySelector(${query})?.contains(document.elementFromPoint(${at.x},${at.y}))===true;
+        const before=under();requestAnimationFrame(()=>resolve(before&&under()));}))`;
+      let rested = false;
+      for (let moves = 0; moves < 20 && !rested; moves += 1) {
+        await renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, button: 'none', buttons: 0 });
+        rested = (await renderer.evaluate(resting(point))) === true;
+        if (!rested) {
+          const moved = await renderer.evaluate(pointExpression);
+          if (moved !== null) point = { x: moved.x, y: moved.y };
+        }
+      }
+      if (!rested) throw new Error(`${name}-pointer-rest`);
+    }
     await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', buttons: 1, clickCount: 1 });
     if (!(await renderer.evaluate(`document.querySelector(${query})?.contains(document.elementFromPoint(${point.x},${point.y}))===true`))) throw new Error(`${name}-target-moved-after-press`);
     await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', buttons: 0, clickCount: 1 });

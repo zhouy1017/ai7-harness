@@ -88,6 +88,7 @@ This maintained bilingual reference routes readers to target-qualified definitio
 | Manuscript Branch | 稿件分支 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Edit Journal | 修订日志 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Editor Revision | 编辑修订 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Editor Step | 编辑步骤 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | AI Edit Lock | AI 锁定 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Scoped AI Edit | 局部 AI 修改 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Manuscript Checkpoint | 稿件修订检查点 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
@@ -151,10 +152,10 @@ This maintained bilingual reference routes readers to target-qualified definitio
 | Implementation Assumption | 实现假设 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Run Source Scope | 任务运行来源范围 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Model Role | 模型角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Fast Interaction Role | 快速交互角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Main Editorial Role | 主编辑角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Difficult Escalation Role | 疑难升级角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Frontier Model Role | 前沿模型角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Foreground Pro Role | 前台 Pro 角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Foreground Flash Role | 前台 Flash 角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Underlying Pro Role | 底层 Pro 角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Underlying Flash Role | 底层 Flash 角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Model-role Requirement | 模型角色硬性要求 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Model-role Preference | 模型角色偏好 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Model Provider | 模型服务提供方 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
@@ -192,6 +193,8 @@ This maintained bilingual reference routes readers to target-qualified definitio
 | Personal Highlight | 自选高亮 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Review Run | 审阅记录 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Review Guideline Document | 审阅规范文件 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Standards Table | 字表 / 词表 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Standard Usage Check | 规范用语核查 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Finding Disposition | 发现处置 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Evaluation Record | 评估记录 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Evaluation Profile | 评估方案 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
@@ -361,6 +364,8 @@ The inheritance audit resolved the definition owners for these terms. They remai
 | Editor Note | Annotation / exported comment / Learning Material by default |
 | Review Run | Baseline Manuscript Analysis / one Task alone / Review Decision / Report alone |
 | Review Guideline Document | Policy Document / prompt fragment / Editorial Profile / one Book's style sheet |
+| Standards Table | 本社词表 (house literal risk list, H01) / Review Guideline Document / program constant |
+| Standard Usage Check | model review category 错别字与规范用语 / 本社词表 matching (H01) / compliance proof |
 | Finding Disposition | Proposal Decision / Review Decision / Effect Approval / dismissal of a projection |
 | Evaluation Record | Delivery Quality Metric / Review Decision / factual truth / Editorial Review findings |
 | Evaluation Profile | Editorial Profile / universal rubric / exposed weights |
@@ -378,6 +383,7 @@ The inheritance audit resolved the definition owners for these terms. They remai
 | Book People | account / permission / Series member / Learning Eligibility Decision |
 | Writing Task | delivery / publication / Exemplar copy / Reader's Report task |
 | Data Version | software version / migration script / Manuscript Revision / Product Data Location |
+| Editor Step | Edit Journal entry / command group / Apply Effect |
 | Review Decision | Proposal Decision / Effect Approval / a Repository Development Dispatch reviewer report |
 
 `Task Skill`, `Task Skill Manifest/Package/Candidate`, `Installed Task Skill Version`, `Task Skill Enablement/Activation`, `Harness Skill Projection`, `Third-Party DSH Plugin`, `Plugin Admission Snapshot`, and `Local Plugin Pin` are legacy-only language preserved in superseded ADRs 0010/0042 and historical target commits. Do not use them as current AI7 object names. Their responsibilities now route to native DSH artifact identities plus separate AI7-owned provenance, compatibility, scope, authority, audit, rollback, update, enablement, per-Run activation, and Apply seams; exact implementation-facing sidecar and activation record names remain deliberately unresolved.

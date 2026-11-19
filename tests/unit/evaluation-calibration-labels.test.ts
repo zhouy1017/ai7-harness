@@ -177,19 +177,19 @@ describe('评估校准与预测 words', () => {
   });
 
   it('discloses the house offset\'s method, its basis and each item\'s offset, or what it waits for, and what off does (EVAL-011a)', () => {
-    expect(CALIBRATION_METHOD).toContain('你的定稿分数减去 AI7 初评分数的平均值');
+    expect(CALIBRATION_METHOD).toContain('你的定稿分数减去 AI 初始评分的平均值');
     expect(CALIBRATION_METHOD).toContain('取到半分');
     expect(CALIBRATION_METHOD).toContain('不另存');
     // The waiting line names the gate the service answers, so it agrees with the progress line: ten in the product, two under
     // J-11's Journey-only control (#741 review P1).
-    expect(calibrationOffsetWaiting(10)).toBe('校准偏移尚未计算：满 10 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。');
-    expect(calibrationOffsetWaiting(2)).toBe('校准偏移尚未计算：满 2 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。');
-    expect(CALIBRATION_OFF_EFFECT).toBe('新版本从 AI7 初评开始时直接用原始分数；随时可打开，开关都有记录。');
-    expect(calibrationBasisLine({ basisBooks: 10 })).toBe('校准依据：10 本书的定稿评估；正数表示你的定稿分数通常高于 AI7 初评。');
+    expect(calibrationOffsetWaiting(10)).toBe('校准偏移尚未计算：满 10 本调分记录后，按校准方法得出；之后新生成的评估会按偏移调整 AI 初始评分。');
+    expect(calibrationOffsetWaiting(2)).toBe('校准偏移尚未计算：满 2 本调分记录后，按校准方法得出；之后新生成的评估会按偏移调整 AI 初始评分。');
+    expect(CALIBRATION_OFF_EFFECT).toBe('之后新生成的评估直接用 AI 初始评分，不按偏移调整；随时可打开，开关都有记录。');
+    expect(calibrationBasisLine({ basisBooks: 10 })).toBe('校准依据：10 本书的定稿评估；正数表示你的定稿分数通常高于 AI 初始评分。');
     // Why the basis can be fewer Books than 调分记录 counts (P3-1): said only when it is.
     expect(calibrationWithoutBasisLine({ booksWithoutBasis: 0 })).toBeNull();
-    expect(calibrationWithoutBasisLine({ booksWithoutBasis: 1 })).toBe('其中 1 本书有从 AI7 初评开始的版本已损坏，不计入校准依据。');
-    expect(calibrationWithoutBasisLine({ booksWithoutBasis: 3 })).toBe('其中 3 本书有从 AI7 初评开始的版本已损坏，不计入校准依据。');
+    expect(calibrationWithoutBasisLine({ booksWithoutBasis: 1 })).toBe('其中 1 本书从 AI 初始评分开始的评估已损坏，不计入校准依据。');
+    expect(calibrationWithoutBasisLine({ booksWithoutBasis: 3 })).toBe('其中 3 本书从 AI 初始评分开始的评估已损坏，不计入校准依据。');
     expect(calibrationOffsetLine({ itemId: 'readers-and-market', label: '读者与市场潜力', fullMarks: 20, offset: -2, books: 10 }))
       .toBe('读者与市场潜力：−2 · 依据 10 本书 · 满分 20 · 调整范围 0–20');
     expect(calibrationOffsetLine({ itemId: 'literary-quality', label: '文学品质与作者声音', fullMarks: 20, offset: 0.5, books: 10 }))
@@ -197,7 +197,7 @@ describe('评估校准与预测 words', () => {
     expect(calibrationOffsetLine({ itemId: 'chinese-language', label: '中文语言与表达', fullMarks: 20, offset: 0, books: 9 }))
       .toBe('中文语言与表达：0 · 依据 9 本书 · 满分 20 · 调整范围 0–20');
     expect(calibrationOffsetLine({ itemId: 'theme-and-context', label: '主题、价值与社会文化语境', fullMarks: 20, offset: null, books: 0 }))
-      .toBe('主题、价值与社会文化语境：暂无同时含定稿和初评分数的图书');
+      .toBe('主题、价值与社会文化语境：暂无同时有定稿和 AI 初始评分的图书');
   });
 
   it('states what the prediction switch waits for until it may be turned on, then whether it is on', () => {
@@ -228,7 +228,7 @@ describe('评估校准与预测 words', () => {
     // 默认: with the prediction switch on, AI7 does predict (Issue #430 review).
     expect(CALIBRATION_PAGE_LEDE).toContain('AI7 默认不预测');
     expect(PREDICTION_ADDS).toContain('预测 · 低确定性');
-    expect(CALIBRATION_WAITING).toContain('AI7 初评尚未接通');
+    expect(CALIBRATION_WAITING).toContain('AI 初始评分尚未接通');
     expect(ACTUALS_EMPTY).toContain('设为发稿版本');
   });
 });

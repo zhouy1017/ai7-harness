@@ -23,10 +23,78 @@ export interface ReviewObservation {
   readonly effort: EditingEffort;
   /** Measurement of open #879, never a successful localization claim. */
   readonly defect879: { issue: number; quoteNotFound: number; verbatimInBook: number; ownBlockOrdinalMatches: number };
+  /**
+   * Score-only cases (#1074): the four ADR 0091 books are reviewed on their unedited pinned original, so every located finding
+   * proposes to change (a 修改建议) or flags (a 批注) the original text — the reprint-fidelity count, an upper bound of false
+   * positives that is stricter than a modern manuscript's editor would be. `null` for every other case.
+   */
+  readonly changesToOriginal: null | ChangesToOriginal;
 }
 
-function scopeOf(store: EditorialStore, book: ImportedBook, scope: unknown) {
+export interface ChangesToOriginal {
+  /** Every located finding of the case's categories: `suggestions + annotations === counted`. */
+  counted: number;
+  suggestions: number;
+  annotations: number;
+  /**
+   * Suggestions whose replacement is exactly their quotation with every 著 turned into 着 — the zh-hans conversion's residue in
+   * the pinned text, plausibly useful, counted apart (and still inside `suggestions`). Only for a case that declares the residue;
+   * a 著→着 suggestion that changes anything else is an ordinary change to the original.
+   */
+  variantResidue: number;
+  /** Findings that fired a false-positive trap; they are inside `suggestions` and `annotations` too. */
+  trapHits: number;
+  byCategory: Readonly<Record<string, { suggestions: number; annotations: number; variantResidue: number; trapHits: number }>>;
+}
+
+/**
+ * The reprint-fidelity count (#1074), a pure function of the Run's located findings: on an unedited original every located finding
+ * proposes to change (修改建议) or flags (批注) it.
+ */
+export function countChangesToOriginal(
+  findings: ReadonlyArray<{ key: string; categoryId: string; quote: string; replacement: string | null }>,
+  categories: ReadonlyArray<string>,
+  residue: { from: string; to: string } | null,
+  trapFindingKeys: ReadonlySet<string>,
+): ChangesToOriginal {
+  const byCategory: Record<string, { suggestions: number; annotations: number; variantResidue: number; trapHits: number }> = {};
+  for (const categoryId of categories) byCategory[categoryId] = { suggestions: 0, annotations: 0, variantResidue: 0, trapHits: 0 };
+  let counted = 0;
+  for (const finding of findings) {
+    const bucket = byCategory[finding.categoryId];
+    if (bucket === undefined) continue;
+    counted += 1;
+    if (trapFindingKeys.has(finding.key)) bucket.trapHits += 1;
+    if (finding.replacement === null) { bucket.annotations += 1; continue; }
+    bucket.suggestions += 1;
+    if (residue !== null && finding.quote.includes(residue.from) && finding.replacement === finding.quote.replaceAll(residue.from, residue.to)) bucket.variantResidue += 1;
+  }
+  const total = (key: 'suggestions' | 'annotations' | 'variantResidue' | 'trapHits') => Object.values(byCategory).reduce((sum, bucket) => sum + bucket[key], 0);
+  return { counted, suggestions: total('suggestions'), annotations: total('annotations'), variantResidue: total('variantResidue'), trapHits: total('trapHits'), byCategory };
+}
+
+/**
+ * 选章 by the case's rule (#1074): `{ chapters: { from, to } }` names 1-based ordinals among the Book's level-1 chapter options,
+ * and the case's `chapterTitles` must be exactly those chapters' titles, so a changed importer or outline refuses rather than
+ * reviewing other chapters. Returns the review scope and the range's paragraph positions.
+ */
+export function chapterScope(store: EditorialStore, book: ImportedBook, testCase: EditorialCase): {
+  scope: { kind: 'chapters'; fromChapterBlockId: string; toChapterBlockId: string }; startPosition: number; endPosition: number;
+} {
+  const { from, to } = (testCase.input.scope as { chapters: { from: number; to: number } }).chapters;
+  const options = store.inspectReviewWorkspace(book.bookId, null).scopeOptions.chapters;
+  const chapters = options.basis === 'outline' ? options.chapters.filter((chapter) => chapter.level === 1) : [];
+  const chosen = chapters.slice(from - 1, to);
+  const titles = testCase.input.chapterTitles as ReadonlyArray<string>;
+  if (chosen.length !== titles.length || chosen.some((chapter, index) => chapter.title !== titles[index])) throw new Error(`EDITORIAL_CASE/chapters-drifted: ${testCase.id}`);
+  return { scope: { kind: 'chapters', fromChapterBlockId: chosen[0]!.blockId, toChapterBlockId: chosen.at(-1)!.blockId },
+    startPosition: chosen[0]!.position, endPosition: chosen.at(-1)!.endPosition };
+}
+
+function scopeOf(store: EditorialStore, book: ImportedBook, testCase: EditorialCase) {
+  const scope = testCase.input.scope;
   if (scope === 'whole') return { kind: 'whole' as const, fromChapterBlockId: null, toChapterBlockId: null };
+  if (typeof scope === 'object' && scope !== null && 'chapters' in scope) return chapterScope(store, book, testCase).scope;
   const paragraph = (scope as { paragraph: number }).paragraph;
   const block = workingBlocks(store, book).find((candidate) => candidate.position === paragraph);
   if (block === undefined) throw new Error('EDITORIAL_CASE/scope-paragraph-absent');
@@ -54,7 +122,7 @@ export async function runReviewCase(
   materialIds: ReadonlyArray<string> = [],
 ): Promise<ReviewObservation> {
   const categories = testCase.input.categories as ReadonlyArray<string>;
-  let work = store.createReviewRunPreparationWork(book.bookId, categories, scopeOf(store, book, testCase.input.scope), policy, null, materialIds);
+  let work = store.createReviewRunPreparationWork(book.bookId, categories, scopeOf(store, book, testCase), policy, null, materialIds);
   while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
   const prepared = work.projection!.run!;
   if (prepared.state !== 'prepared') throw new Error(`EDITORIAL_CASE/review-not-prepared: ${prepared.state}`);
@@ -68,7 +136,25 @@ export async function runReviewCase(
     const stopped = driver.dispose();
     await stopped;
   }
-  const run = store.inspectReviewWorkspace(book.bookId, prepared.reviewRunId).run!;
+  return observeReviewRun(store, book, prepared.reviewRunId, testCase, resolution, dataRoot);
+}
+
+/**
+ * Score one settled Review Run: its findings read back with the marks the product made of them, scored against the case, then
+ * edited, applied and reversed. A replayed case scores the Run it just drove; a score-only case (#1074) scores the Run held in a
+ * copy of the developer-live data root it was made in.
+ */
+export async function observeReviewRun(
+  store: EditorialStore,
+  book: ImportedBook,
+  reviewRunId: string,
+  testCase: EditorialCase,
+  resolution: TextResolution,
+  dataRoot: string,
+): Promise<ReviewObservation> {
+  const categories = testCase.input.categories as ReadonlyArray<string>;
+  const historical = (testCase.fixture ?? '').startsWith('sample1-recorded-');
+  const run = store.inspectReviewWorkspace(book.bookId, reviewRunId).run!;
   let unitsClosed = 0;
   let unitsTotal = 0;
   const gaps: string[] = [];
@@ -83,14 +169,14 @@ export async function runReviewCase(
   // A Book-dependent category (跨交付物一致性) reads its entry for this Book, as the store froze it.
   const database = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
   for (const categoryId of categories) {
-    const builtIn = testCase.fixture.startsWith('sample1-recorded-')
+    const builtIn = historical
       ? HISTORICAL_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.categoryId === categoryId) : reviewCategoryEntry(categoryId);
     if (builtIn === null || builtIn === undefined) continue;
     const entry = reviewCategoryEntryForBook(builtIn, database, book.bookId);
     let revision: ReviewCategoryResultSetRevisionProjection | null = null;
     let manifest: { units: ReadonlyArray<{ ordinal: number; blockIds: ReadonlyArray<string> }> } | null = null;
     try {
-      const category = store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(entry), testCase.fixture.startsWith('sample1-recorded-') ? 1 : 2));
+      const category = store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(entry), historical ? 1 : 2));
       revision = category.resultSetRevision as ReviewCategoryResultSetRevisionProjection | null;
       manifest = category.coverageManifest;
     } catch { revision = null; }
@@ -132,6 +218,10 @@ export async function runReviewCase(
     },
     ignoreAnnotation: (finding) => { store.recordReviewFindingDisposition(book.bookId, run.reviewRunId, finding.key, '编辑价值证据：误报'); },
   });
+  const changesToOriginal = testCase.manuscript.source !== 'public-samplebook' ? null : countChangesToOriginal(
+    findings.map((finding) => ({ key: finding.findingId, categoryId: finding.categoryId, quote: finding.quote, replacement: finding.replacement })),
+    categories, (testCase.input.conversionResidue as { from: string; to: string } | undefined) ?? null,
+    new Set(scored.scored.filter(({ verdict }) => verdict.kind === 'false-positive').map(({ finding }) => finding.key)));
   return {
     outcome: { state: run.state, categories: run.categories.map((category) => ({ categoryId: category.categoryId, state: category.state })), unitsClosed, unitsTotal, gaps },
     findings: { listed, located, excluded, ...scored.counts },
@@ -139,5 +229,6 @@ export async function runReviewCase(
     checks: scored.checks,
     effort,
     defect879,
+    changesToOriginal,
   };
 }

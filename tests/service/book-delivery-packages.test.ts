@@ -151,7 +151,7 @@ describe('图书交付包 (S67a)', () => {
       const v1 = prepare(' 交出版社存档 ', bundle.content.digest);
       expect([v1.outcome, v1.version, v1.package.ready, v1.package.changedSinceLatest]).toEqual(['prepared', 1, true, false]);
       expect(v1.package.versions.map((version) => [version.label, version.purpose, version.current, version.exportHistoryLabel, version.summary, version.technical.priorVersionId]))
-        .toEqual([['v1', '交出版社存档', true, '暂无导出记录', '发稿版本「一审稿」 · r1 · 生产文档 1 份 · 本书不做 4 类 · 审阅报告 0 份 · 评估记录 0 份 · 审稿意见 0 份', null]]);
+        .toEqual([['v1', '交出版社存档', true, '暂无导出记录', '发稿版本「一审稿」 · r1 · 衍生稿件 1 份 · 本书不做 4 类 · 审阅报告 0 份 · 评估记录 0 份 · 审稿意见 0 份', null]]);
       // Preparing again with the same content and purpose is v1, unchanged; a new purpose is v2, naming v1.
       expect(prepare('交出版社存档', bundle.content.digest)).toMatchObject({ outcome: 'unchanged', version: 1 });
       const v2 = prepare('交印厂', bundle.content.digest);
@@ -248,7 +248,7 @@ describe('图书交付包 (S67a)', () => {
         .toBe('BOOK_DELIVERY_PACKAGE_CHANGED');
       const prepared = store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交营销', expectedContentDigest: chosen.content.digest, documents });
       expect([prepared.outcome, prepared.version, prepared.package.changedSinceLatest]).toEqual(['prepared', 1, false]);
-      expect(prepared.package.versions[0]!.summary).toContain('生产文档 1 份');
+      expect(prepared.package.versions[0]!.summary).toContain('衍生稿件 1 份');
       // Only this Book's documents at versions they saved.
       expect(code(() => store.inspectBookDeliveryPackage(book.bookId, [{ documentId: first.documentId, revisionId: second.versions[0]!.revisionId }])))
         .toBe('BOOK_DELIVERY_PACKAGE_SELECTION_INVALID');

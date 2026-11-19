@@ -121,7 +121,7 @@ export const BOOK_DELIVERY_PACKAGE_WORDS = {
   /** A derivative document the editor did not tick (Issue #1405). */
   documentUnchosen: '未选入本包',
   documentNotice: '交付后有修改：可以再交付，也可以按交付过的版本打包。',
-  documentCreateRoute: '前往生产文档',
+  documentCreateRoute: '前往衍生稿件',
   documentDeliverRoute: '交付…',
   documentRedeliverRoute: '再交付…',
   noReviews: '暂无审阅记录',
@@ -783,7 +783,7 @@ export class BookDeliveryPackages {
       current,
       summary: [
         publication === null ? BOOK_DELIVERY_PACKAGE_WORDS.publicationMissing : publicationLabel(publication.milestoneLabel, publication.revisionLabel),
-        `生产文档 ${includedDocuments} 份`,
+        `衍生稿件 ${includedDocuments} 份`,
         `本书不做 ${notForThisBook} 类`,
         `审阅报告 ${record.content.reviewReports.length} 份`,
         `评估记录 ${record.content.evaluation == null ? 0 : 1} 份`,

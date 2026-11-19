@@ -35,7 +35,7 @@ it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('k
   const root = document.createElement('aside'); document.body.append(root);
   const setStatus = vi.fn();
   const options = { root, shell: document.body, api, setStatus, errorMessage: (_error: unknown, fallback: string) => fallback,
-    onOpen: vi.fn(), onRecorded: vi.fn(), settle: async () => true } as unknown as Parameters<typeof mountTaskDrawer>[0];
+    onOpen: vi.fn(), onClose: vi.fn(), onRecorded: vi.fn(), settle: async () => true } as unknown as Parameters<typeof mountTaskDrawer>[0];
   const drawer = mountTaskDrawer(options); drawer.open = vi.fn();
   const input = operation === 'launchBaselineAnalysis' ? { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }
     : operation === 'launchCustomAnalysis' ? { dimensionId: 'dimension', update: null } : operation === 'launchWritingTask' ? WRITING_REQUEST
@@ -48,8 +48,8 @@ it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('k
   const retry=miniDocument.querySelector('[data-task-launch-option="retry"]')!;
   expect(Array.from(retry.querySelectorAll('option'),option=>option.value)).toEqual(operation==='launchBaselineAnalysis'?['auto','ask-first','never']:['auto','never']);
   retry.value='never';
-  miniDocument.querySelector('[data-task-launch-option="budget"]')!.value='12345';
-  miniDocument.body.dispatchEvent({type:'input'});
+  miniDocument.querySelector('[data-task-launch-option="budget"]')!.value='50000';
+  miniDocument.querySelector('[data-task-launch-option="budget"]')!.dispatchEvent({type:'change',bubbles:true});
   expect(miniDocument.querySelector('.task-launch-preview-stale')?.textContent).toBe('选项已变化，请更新计划。');
   expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).not.toContain('勾选的资料');
   miniDocument.querySelector('[data-task-drawer-control="launch"]')!.click();
@@ -57,4 +57,45 @@ it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('k
   await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith(notice, 'success'));
   expect(launch.mock.calls[0]![0]).toMatchObject({ rememberedChoice: true, executionConfig: remembered, planEdits: { disallowedAdaptations: ['safe-retry'] } });
   expect(JSON.stringify({ values, roles: settings.roles })).toBe(before);
+});
+
+it('keeps marking the shown plan stale after the service is interrupted, while the launch view is still on screen', async () => {
+  const previewTaskLaunch = vi.fn(async () => ({ steps: ['逐章读取'], scope: '全书 · 1 个阅读范围', units: 1, reference: ['勾选的资料'], send: '所选资料发往模型服务', usage: '暂无可靠估计', adaptations: [] }));
+  const api = { previewTaskLaunch, launchBaselineAnalysis: vi.fn(), getPreferences: async () => ({ version: 1, values: preferenceDefaults(), notice: null }),
+    getModelServiceSettings: async () => ({ channels: [], roles: [], routeChoice: { routes: [] } }), inspectEvaluation: async () => ({ bookId: 'book', materials: { items: [] }, market: { series: [] } }) };
+  const root = document.createElement('aside'); document.body.append(root);
+  const drawer = mountTaskDrawer({ root, shell: document.body, api, setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback,
+    onOpen: vi.fn(), onRecorded: vi.fn(), settle: async () => true } as unknown as Parameters<typeof mountTaskDrawer>[0]);
+  drawer.openLaunch({ operation: 'launchBaselineAnalysis', bookId: 'book', title: '分析', input: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } }, () => null);
+  await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')?.disabled).toBe(false));
+  miniDocument.querySelector('[data-task-drawer-control="preview-launch"]')!.click();
+  await vi.waitFor(() => expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).toContain('勾选的资料'));
+  // Interrupting disables the buttons only: the options stay editable, and the plan shown no longer fits a changed option.
+  drawer.interrupt();
+  const budget = miniDocument.querySelector('[data-task-launch-option="budget"]')!;
+  expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')?.disabled).toBe(true);
+  budget.value = '500';
+  budget.dispatchEvent({ type: 'input', bubbles: true });
+  expect(miniDocument.querySelector('.task-launch-preview-stale')?.textContent).toBe('选项已变化，请更新计划。');
+  expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).not.toContain('勾选的资料');
+});
+
+it('disposes the page bars of another Book when the screen follows a Book, and keeps that Book\'s own', async () => {
+  const launchWritingTask = vi.fn(async (_input: unknown) => ({ taskIntentId: 'task', runRecordId: 'run' }));
+  const api = { launchWritingTask, getPreferences: async () => ({ version: 1, values: preferenceDefaults(), notice: null }),
+    getModelServiceSettings: async () => ({ channels: [], roles: [], routeChoice: { routes: [] } }) };
+  const root = document.createElement('aside'); document.body.append(root);
+  const drawer = mountTaskDrawer({ root, shell: document.body, api, setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback,
+    onOpen: vi.fn(), onRecorded: vi.fn(), settle: async () => true } as unknown as Parameters<typeof mountTaskDrawer>[0]);
+  drawer.open = vi.fn();
+  const hosts = ['a', 'b'].map(bookId => { const mount = document.createElement('div'); mount.dataset['host'] = bookId; document.body.append(mount);
+    drawer.openLaunch({ operation: 'launchWritingTask', bookId, title: '写作', mount, input: WRITING_REQUEST } as TaskLaunchRequest, () => null); return mount; });
+  const start = (bookId: string) => miniDocument.querySelector(`[data-host="${bookId}"] [data-task-drawer-control="launch"]`)!;
+  await vi.waitFor(() => expect(hosts.map((_, index) => start(['a', 'b'][index]!).disabled)).toEqual([false, false]));
+  drawer.followScreen('book-writing', 'b');
+  start('a').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(launchWritingTask).not.toHaveBeenCalled();
+  start('b').click();
+  await vi.waitFor(() => expect(launchWritingTask).toHaveBeenCalledOnce());
 });

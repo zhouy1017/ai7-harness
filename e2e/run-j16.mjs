@@ -1,4 +1,6 @@
-import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { rightColumnGeometry } from './comments-pane.mjs';
+import { pointerClick } from './dispatch-chooser.mjs';
+import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -100,6 +102,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-16' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -327,7 +330,7 @@ async function startFirstBaseline(renderer, readiness, name) {
 async function prepareFirstBaseline(renderer, readiness, name) {
   await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='available'`, `${name}-available`);
   await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-open`);
-  await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-bar-ready`);
+  await waitFor(renderer, `document.querySelector('[data-task-launch-kind] [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-bar-ready`);
 }
 
 // ---- J-16's own: the Book, the hold, and the 任务 panel as the editor reads it ------------------------------------
@@ -592,7 +595,7 @@ const READ_DIALOGUE = `(() => {
     title: text(drawer.querySelector('#task-drawer-title')),
     selection: text(dialogue.querySelector('.dialogue-selection')),
     question: text(dialogue.querySelector('.dialogue-question')),
-    attempts: Array.from(dialogue.querySelectorAll('section.dialogue-attempt')).map((attempt) => ({
+    attempts: Array.from(dialogue.querySelectorAll('.dialogue-attempt')).map((attempt) => ({
       kind: attempt.dataset.dialogueKind ?? null,
       state: attempt.dataset.dialogueState ?? null,
       heading: text(attempt.querySelector('.dialogue-attempt-heading')),
@@ -602,7 +605,7 @@ const READ_DIALOGUE = `(() => {
       incomplete: text(attempt.querySelector('.dialogue-incomplete')),
       converted: text(attempt.querySelector('.dialogue-converted')),
     })),
-    actions: Array.from(dialogue.querySelectorAll('.dialogue-actions [data-dialogue-action]')).map((button) => [button.dataset.dialogueAction, button.textContent, button.disabled ? 'disabled' : 'enabled']),
+    actions: Array.from(dialogue.querySelectorAll('.dialogue-actions [data-dialogue-action]')).filter(button => !button.hidden).map((button) => [button.dataset.dialogueAction, button.textContent, button.disabled ? 'disabled' : 'enabled']),
     note: text(dialogue.querySelector('.dialogue-authority')),
   };
 })()`;
@@ -668,7 +671,10 @@ async function composerAction(renderer, action, name) {
 }
 
 async function dialogueAction(renderer, action, name) {
-  await clickSelector(renderer, `#task-drawer .dialogue [data-dialogue-action=${JSON.stringify(action)}]`, name);
+  const menu = action === 'continue' ? '.dialogue-more' : action === 'convert' || action === 'convert-edit' ? '.dialogue-convert-menu' : null;
+  if (menu && !await renderer.evaluate(`document.querySelector('#task-drawer ${menu}')?.open === true`)) await pointerClick(renderer, waitFor, `#task-drawer ${menu} > summary`, name);
+
+  await pointerClick(renderer, waitFor, `#task-drawer .dialogue [data-dialogue-action=${JSON.stringify(action)}]`, name);
 }
 
 async function main() {
@@ -941,7 +947,7 @@ async function main() {
     // ordinary rule editor (one to add a rule, 编辑偏好 on an active one).
     for (const developer of ['false', 'true']) {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
-      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `quality-mode-${developer}-settings-ready`);
       await click(renderer, '帮助', `quality-mode-${developer}-help`);
       await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `quality-mode-${developer}-switch-ready`);
       await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
@@ -977,8 +983,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
-    await click(renderer, '模型服务', 'model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -993,11 +998,11 @@ async function main() {
     const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference) && readyConnection?.credentialOperationState === 'ready', 'model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除凭据', 'model-remove');
+    await click(renderer, '移除密钥', 'model-remove');
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     credentialRemoved = true;
-    await click(renderer, '返回', 'model-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-back');
 
     const writeHold = (settled) => writeFile(holdPath, String(settled), 'utf8');
 
@@ -1008,6 +1013,15 @@ async function main() {
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
     await runJ14DarkPass({ renderer, journey: 'J-16', at, representative: '#screen[data-screen="editor"] .editor-window', returnTo: SIDEBAR.section('manuscript') });
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]')`, 'panel-manuscript-after-dark-pass', 120_000);
+    // Opt out of the automatic result window in 设置 › 通知 (#1528: the switch moved there from 发起任务), so the explicit
+    // result-window steps below own their focus; the manuscript is then reopened through the sidebar.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'panel-result-popup-settings');
+    await waitFor(renderer, `document.querySelector('#screen .settings-navigation [data-settings-nav="notifications"]')`, 'panel-result-popup-hub');
+    await clickSelector(renderer, '.settings-navigation [data-settings-nav="notifications"]', 'panel-result-popup-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="notifications"] [data-task-overview-auto-result]')`, 'panel-result-popup-preference');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-screen="notifications"] [data-task-overview-auto-result]'); if (!(input instanceof HTMLInputElement) || !input.checked) return false; input.click(); return !input.checked && localStorage.getItem('ai7.task-overview.auto-result') === 'off'; })()`, 'panel-result-popup-off');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'panel-result-popup-return');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]')`, 'panel-manuscript-after-popup-off', 120_000);
     const opened = await openPanel(renderer, 'panel-open');
     requireJourney(opened.title === '任务' && opened.scope === '这本书 · 0 项' && opened.compose.heading === '发起全书任务' &&
       JSON.stringify(opened.compose.modes) === JSON.stringify([['first-baseline', true, false]]) && opened.compose.prepare === 'enabled' &&
@@ -1016,10 +1030,11 @@ async function main() {
         JSON.stringify([['等你处理', '0', '这里暂时没有任务。', 0], ['进行中', '0', '这里暂时没有任务。', 0], ['最近完成', '0', '这里暂时没有任务。', 0]]),
     'panel-empty', opened);
     await assertRenderer(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === true && document.body.dataset.taskDrawer === 'open'`, 'panel-one-slot');
-    // Opt out through the shared sheet so the explicit result-window steps below own their focus.
+
+    // The in-Book 发起任务 sheet still opens and closes; it no longer carries the result-window switch (#1528: it is in 设置 › 通知).
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-overview-start]')?.disabled===false`, 'panel-sheet-ready');
-    await clickSelector(renderer, '#task-drawer [data-task-overview-start]', 'panel-result-popup-preference');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('#task-drawer [data-task-overview-auto-result]'); if (!(input instanceof HTMLInputElement) || !input.checked) return false; input.click(); return !input.checked; })()`, 'panel-result-popup-off');
+    await clickSelector(renderer, '#task-drawer [data-task-overview-start]', 'panel-sheet-open');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('#task-drawer .task-overview-sheet'); return sheet instanceof HTMLDialogElement && sheet.open && sheet.querySelector('[data-task-overview-auto-result]') === null; })()`, 'panel-sheet-without-result-switch');
     await clickSelector(renderer, '#task-drawer .task-overview-sheet .sheet-foot button:last-child', 'panel-sheet-close');
 
     at('panel-prepare');
@@ -1046,7 +1061,7 @@ async function main() {
     await writeHold(FIRST_HOLD + 1);
     const paused = await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-paused', 'panel-paused', 120_000);
     requireJourney(cardsOf(paused, 'running')[0].pill === '已暂停' &&
-      JSON.stringify(cardsOf(paused, 'running')[0].actions) === JSON.stringify([['resume', '续行', 'enabled'], ['redo', '改计划重做', 'enabled']]),
+      JSON.stringify(cardsOf(paused, 'running')[0].actions) === JSON.stringify([['resume', '继续', 'enabled'], ['redo', '重新开始', 'enabled']]),
     'panel-paused-card', paused);
 
     at('panel-resume');
@@ -1057,7 +1072,7 @@ async function main() {
     const pollTaskId=await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then(page=>page.taskIntent.taskIntentId)`);
     await clickSelector(renderer,'#task-drawer [data-task-drawer-control="close"]','poll-attention-close-pane');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-ordinary-settings');
-    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-ordinary-settings-ready');
+    await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'poll-attention-ordinary-settings-ready');
     await click(renderer,'帮助','poll-attention-ordinary-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'poll-attention-ordinary-mode');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('attention')),'poll-attention-open');
@@ -1073,7 +1088,7 @@ async function main() {
       requireJourney(await renderer.evaluate(`window.ai7.inspectGlobalAttention().then(page=>page.groups.flatMap(group=>group.items).find(item=>item.itemId===${JSON.stringify(pollAttentionId)})?.facts.progress?.unitsSettled===${done})`),'attention-changed-unit-record');
     }
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-developer-settings');
-    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-developer-settings-ready');
+    await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'poll-attention-developer-settings-ready');
     await click(renderer,'帮助','poll-attention-developer-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`,'poll-attention-developer-mode');
     await openManuscriptOf(renderer,bookId,'poll-attention-return-book');
@@ -1081,7 +1096,7 @@ async function main() {
     await writeHold(SAMPLE1_UNITS);
     const done = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-completed' && statesOf(panel, 'running').length === 0, 'panel-completed', 180_000);
     const doneCard = cardsOf(done, 'recent')[0];
-    requireJourney(doneCard.pill === '已完成' && doneCard.reason.startsWith('已有结果 · 用时 ') && JSON.stringify(doneCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '再做一次', 'enabled']]),
+    requireJourney(doneCard.pill === '已完成' && doneCard.reason.startsWith('已有结果 · 用时 ') && JSON.stringify(doneCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新开始', 'enabled']]),
     'panel-completed-card', done);
 
     at('panel-compose-update');
@@ -1108,7 +1123,7 @@ async function main() {
     const cancelled = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-cancelled,analysis-completed' && statesOf(panel, 'running').length === 0, 'panel-cancelled-card', 60_000);
     const cancelledCard = cardsOf(cancelled, 'recent')[0];
     requireJourney(cancelledCard.pill === '已取消' && cancelledCard.reason.startsWith('已取消 · 保留已有结果') &&
-      JSON.stringify(cancelledCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '再做一次', 'enabled']]) && cancelled.scope === '这本书 · 2 项',
+      JSON.stringify(cancelledCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新开始', 'enabled']]) && cancelled.scope === '这本书 · 2 项',
     'panel-cancelled-card-words', cancelled);
 
     at('result-window');
@@ -1154,6 +1169,7 @@ async function main() {
     })()`);
 
     at('chip-persists');
+    await rightColumnGeometry(renderer, requireJourney, waitFor);
     // Until it is used the chip stays: across 导航, and across leaving the manuscript and coming back.
     await clickSelector(renderer, '[data-edge-entry="navigation"]', 'chip-navigation-open');
     await waitFor(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === false && ${CHIP} !== null`, 'chip-navigation');
@@ -1214,6 +1230,8 @@ async function main() {
     await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '').startsWith('无法保存或读取返回位置')`, 'mark-rail-storage-refused');
     await assertRenderer(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'mark-rail-storage-keeps-position');
     await clickSelector(renderer, '#persistence-status .status-dismiss', 'mark-rail-storage-error-dismiss');
+    // × only dismisses: the bar is also the manuscript page's save menu trigger, and the click must not open that menu (#1519).
+    await assertRenderer(renderer, `document.querySelector('#persistence-status')?.hidden===true && document.querySelector('#manuscript-save-menu') instanceof HTMLDetailsElement && document.querySelector('#manuscript-save-menu').open===false`, 'mark-rail-storage-error-dismiss-only');
     await renderer.evaluate(`(() => { IDBDatabase.prototype.transaction = globalThis.__j16Transaction; delete globalThis.__j16Transaction; })()`);
     // Hold the real committed storage completion, replace the editor, then release the old click.
     await renderer.evaluate(`(() => {
@@ -1385,8 +1403,9 @@ async function main() {
     const stopped = await waitForDialogue(renderer, (dialogue) => dialogue.attempts[0]?.state === 'stopped', 'dialogue-stopped');
     requireJourney(stopped.attempts[0].label === '回答已停止 · 内容不完整' && stopped.attempts[0].incomplete === '你停止了回答；只保留了完整的句子。' &&
       JSON.stringify(stopped.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) &&
-      JSON.stringify(stopped.actions) === JSON.stringify([['continue', '继续回答', 'enabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'disabled'], ['convert-edit', '编辑后转为修改建议…', 'disabled']]), 'dialogue-stopped-words', stopped);
-    await assertRenderer(renderer, `document.querySelector('#task-drawer .dialogue [data-dialogue-action="convert"]')?.title === '内容不完整的回答不能转为修改建议。'`, 'dialogue-stopped-convert-why');
+      JSON.stringify(stopped.actions) === JSON.stringify([['regenerate', '重新回答', 'enabled'], ['continue', '继续回答', 'enabled']]), 'dialogue-stopped-words', stopped);
+    at('dialogue-stopped-convert-hidden');
+    await assertRenderer(renderer, `document.querySelector('#task-drawer .dialogue [data-dialogue-action="convert"]') === null`, 'dialogue-stopped-convert-hidden');
 
     at('dialogue-continue-after-mid-stream-stop');
     // Issue #833 synchronized J-16 delta: the held answer is stopped with complete fragments and an
@@ -1409,15 +1428,21 @@ async function main() {
     requireJourney(regenerated.attempts[0].state === 'stopped' && JSON.stringify(regenerated.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) &&
       regenerated.attempts[2].kind === 'regenerate' && regenerated.attempts[2].heading === '第 3 次 · 重新回答' && regenerated.attempts[2].label === '回答完成' &&
       JSON.stringify(regenerated.attempts[2].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND, ANSWER_TAIL]) && regenerated.attempts[2].incomplete === null &&
-      JSON.stringify(regenerated.actions) === JSON.stringify([['continue', '继续回答', 'disabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'enabled'], ['convert-edit', '编辑后转为修改建议…', 'enabled']]), 'dialogue-regenerated-words', regenerated);
+      JSON.stringify(regenerated.actions) === JSON.stringify([['convert', '直接', 'enabled'], ['convert-edit', '编辑后', 'enabled'], ['regenerate', '重新回答', 'enabled']]), 'dialogue-regenerated-words', regenerated);
     const attempts = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => dialogue.attempts.map((attempt) => [attempt.ordinal, attempt.kind, attempt.state, attempt.source]))`);
     requireJourney(JSON.stringify(attempts) === JSON.stringify([[1, 'ask', 'stopped', 'ledger'], [2, 'continue', 'completed', 'ledger'], [3, 'regenerate', 'completed', 'ledger']]), 'dialogue-attempts-linked', attempts);
+
+    for (const [width, height] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await assertRenderer(renderer, `(() => { const attempts = [...document.querySelectorAll('#task-drawer .dialogue-attempt')]; const latest = attempts.at(-1); const form = document.querySelector('#task-drawer .dialogue-follow-up'); return attempts.slice(0,-1).every(attempt => !attempt.open) && latest.open && form.getBoundingClientRect().top >= latest.getBoundingClientRect().bottom && getComputedStyle(form).position === 'static'; })()`, 'dialogue-follow-up-after-latest');
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     at('dialogue-panel-answer');
     // In 最近完成 the card says 已回答 and offers 回答 and 打开对话 (TASK-044); 回答 shows the latest answer in the window.
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'dialogue-to-panel');
     const answeredPanel = await waitForPanel(renderer, (panel) => cardsOf(panel, 'recent')[0]?.state === 'dialogue-answered', 'dialogue-answered-card');
-    requireJourney(JSON.stringify(cardsOf(answeredPanel, 'recent')[0].actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '再做一次', 'enabled']]) &&
+    requireJourney(JSON.stringify(cardsOf(answeredPanel, 'recent')[0].actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新开始', 'enabled']]) &&
       cardsOf(answeredPanel, 'recent')[0].pill === '已完成', 'dialogue-answered-card-words', answeredPanel);
     await cardAction(renderer, 'dialogue-answered', 'answer', 'dialogue-answer-open');
     await waitFor(renderer, `(() => { const win = document.querySelector('.task-result-window'); return win?.dataset.taskResult === 'ready' && win.dataset.taskResultKind === 'dialogue' && win.querySelector('.task-result-dialogue-answer')?.textContent === ${JSON.stringify(ANSWER_FIRST + ANSWER_SECOND + ANSWER_TAIL)} && win.querySelector('[data-dialogue-state]')?.textContent === '回答完成'; })()`, 'dialogue-answer-window', 30_000);
@@ -1431,11 +1456,13 @@ async function main() {
     await pressEnter(renderer);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'dialogue' && document.activeElement === document.querySelector('#task-drawer-title') && document.querySelector('#task-drawer .dialogue')?.dataset.dialogue === 'ready'`, 'dialogue-keyboard-open', 10_000);
     let reached = false;
-    for (let presses = 0; presses < 12 && !reached; presses += 1) {
+    for (let presses = 0; presses < 24 && !reached; presses += 1) {
       await pressTab(renderer);
+      if (await renderer.evaluate(`document.activeElement?.matches('#task-drawer .dialogue-convert-menu > summary') === true`)) await pressEnter(renderer);
       reached = await renderer.evaluate(`document.activeElement?.matches('#task-drawer .dialogue-actions [data-dialogue-action]:focus-visible') === true`);
     }
     requireJourney(reached, 'dialogue-keyboard-actions');
+    await pressEscape(renderer);
     await pressEscape(renderer);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'dialogue-keyboard-closed', 10_000);
 
@@ -1453,7 +1480,7 @@ async function main() {
     at('j14-dialogue-forced-colors');
     // Without colour each answer keeps its left rule — heavier once incomplete — and its state in words.
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
-    await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const [first, second] = document.querySelectorAll('#task-drawer section.dialogue-attempt'); if (!(first instanceof HTMLElement) || !(second instanceof HTMLElement)) return false; const width = (node) => parseFloat(getComputedStyle(node).borderLeftWidth); return getComputedStyle(first).borderLeftStyle === 'solid' && width(first) > width(second) && width(second) >= 2 && first.querySelector('[data-dialogue-state-label]')?.textContent === '回答已停止 · 内容不完整'; })()`, 'dialogue-without-colour');
+    await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const [first, second] = document.querySelectorAll('#task-drawer .dialogue-attempt'); if (!(first instanceof HTMLElement) || !(second instanceof HTMLElement)) return false; const width = (node) => parseFloat(getComputedStyle(node).borderLeftWidth); return getComputedStyle(first).borderLeftStyle === 'solid' && width(first) > width(second) && width(second) >= 2 && first.querySelector('[data-dialogue-state-label]')?.textContent === '回答已停止 · 内容不完整'; })()`, 'dialogue-without-colour');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     const dialogueBefore = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => JSON.stringify(dialogue))`);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'dialogue-before-restart-close');
@@ -1542,8 +1569,11 @@ async function main() {
       retrievalDialogue.anchors[0].sourceKind === 'manuscript' && retrievalDialogue.anchors[0].anchor.blockId === askBlock &&
       retrievalDialogue.anchors[0].anchor.end > retrievalDialogue.anchors[0].anchor.start && retrievalDialogue.retrievalWarning === null,
       'dialogue-retrieval-exact-anchor');
-    await clickSelector(renderer, '#task-drawer .dialogue [data-dialogue-retrieval-anchor]', 'dialogue-retrieval-jump');
-    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${askBlock}"]') !== null`, 'dialogue-retrieval-jumped');
+    at('dialogue-numbered-citation');
+    await waitFor(renderer, `document.querySelector('#task-drawer .dialogue-citation')?.textContent === '〔1〕'`, 'dialogue-numbered-citation-visible');
+    await pointerClick(renderer, waitFor, '#task-drawer .dialogue-citation', 'dialogue-numbered-citation-jump');
+    // The jump lands the caret at the start of the cited paragraph and gives the editor focus; the pressed citation held focus until then.
+    await waitFor(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${askBlock}"]'); const selection = getSelection(); return block !== null && document.activeElement?.closest('[data-testid="manuscript-editor"]') !== null && selection?.anchorNode != null && block.contains(selection.anchorNode) && selection.isCollapsed; })()`, 'dialogue-retrieval-jumped');
 
     // ---- 就这段发起任务… (Issue #423, plan slice S77b; TASK-001 to 004, TASK-044, TASK-046) -------------------------------
     at('selection-task-menu');
@@ -1603,7 +1633,7 @@ async function main() {
       offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' &&
       // #1401: a first 事实核查 may read just this selection, so it is offered beside the other range reviews.
       offered.get('review:factual-review') === '审阅这段 · 「事实核查」' && composer.submit === '开始任务' &&
-      composer.note === '任务只针对所选段落，按包含它的阅读范围读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。',
+      composer.note === '任务只针对所选段落，按包含它的部分读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。',
     'selection-task-composer-words', composer);
 
     at('selection-task-review-prepare');
@@ -1640,7 +1670,7 @@ async function main() {
     at('selection-task-review-run');
     const reviewedPanel = await waitForPanel(renderer, (panel) => cardsOf(panel, 'recent')[0]?.state === 'review-completed', 'selection-task-review-completed', 60_000);
     const reviewedCard = cardsOf(reviewedPanel, 'recent')[0];
-    requireJourney(reviewedCard.title === '审阅 · 第 1 次 · 所选段落' && JSON.stringify(reviewedCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '再做一次', 'enabled'], ['jump', '跳到所选文字', 'enabled']]), 'selection-task-review-completed-words', reviewedCard);
+    requireJourney(reviewedCard.title === '审阅 · 第 1 次 · 所选段落' && JSON.stringify(reviewedCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新开始', 'enabled'], ['jump', '跳到所选文字', 'enabled']]), 'selection-task-review-completed-words', reviewedCard);
     const reviewedFindings = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: ${JSON.stringify(selectionRun.reviewRunId)} }).then((workspace) => workspace.run.findings.map((finding) => [finding.blockId, finding.markId !== null]))`);
     requireJourney(Array.isArray(reviewedFindings) && reviewedFindings.length > 0 && reviewedFindings.every(([blockId, marked]) => blockId === taskBlock && marked), 'selection-task-review-in-paragraph', reviewedFindings);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-review-close');
@@ -1695,7 +1725,7 @@ async function main() {
     at('selection-task-reanalyze');
     // 重新分析这段 starts the exact paragraph update and closes the composer; the recorded outcome retains any fixture gaps.
     await assertRenderer(renderer, `(() => { const select = window.__j16.composer()?.querySelector('select[data-mark-field="procedure"]'); if (!(select instanceof HTMLSelectElement)) return false; select.value = 'reanalyze-range'; select.dispatchEvent(new Event('change', { bubbles: true })); return window.__j16.act('submit'); })()`, 'selection-task-reanalyze-submit');
-    await waitFor(renderer, `window.__j16.composer() === null && document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, 'selection-task-reanalyze-bar');
+    await waitFor(renderer, `window.__j16.composer() === null && document.querySelector('[data-task-launch-kind] [data-task-drawer-control="launch"]')?.disabled===false`, 'selection-task-reanalyze-bar');
     await launchTaskFromBar(renderer, waitFor, 'selection-task-reanalyze-start');
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis.state==='settled')`, 'selection-task-reanalyze-direct', 120_000);
     const rangeTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => ({ mode: analysis.taskIntent?.mode ?? null, run: analysis.run, outcome: analysis.taskOutcome, resultRevisionId: analysis.resultSetRevision?.revisionId, update: analysis.update === null ? null : { mode: analysis.update.mode, selectedRange: analysis.update.selectedRange } }))`);
@@ -1786,7 +1816,8 @@ async function main() {
     const promoting = await waitForDialogue(renderer, (dialogue) => dialogue.state === 'ready' && dialogue.attempts.at(-1)?.state === 'completed', 'dialogue-promote-ready');
     const promotingId = promoting.dialogueId;
     const promotingRead = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(promotingId)}, afterFragment: 0 }).then((dialogue) => ({ attemptId: dialogue.attempts.at(-1).attemptId, selection: dialogue.selection, attempts: dialogue.attempts.length }))`);
-    await clickSelector(renderer, '#task-drawer .dialogue [data-dialogue-promote]', 'dialogue-promote-click');
+    await pointerClick(renderer, waitFor, '#task-drawer .dialogue-more > summary', 'dialogue-promote-more');
+    await pointerClick(renderer, waitFor, '#task-drawer .dialogue [data-dialogue-promote]', 'dialogue-promote-click');
     const answerDraft = await waitForComposer(renderer, (composer) => composer.state === 'draft' && composer.answer !== null, 'dialogue-promote-composer', 30_000);
     const answerRecord = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({ draftId: ${JSON.stringify(answerDraft.draftId)} }).then((read) => { const draft = read.drafts[0]; return { origin: draft.origin, answer: draft.version.answer, ranges: draft.version.ranges.map((range) => range.text), promotion: draft.promotion }; })`);
     requireJourney(answerDraft.answer === promotingRead.attemptId && answerRecord.origin === 'dialogue-answer' && answerRecord.answer?.dialogueId === promotingId &&

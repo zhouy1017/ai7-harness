@@ -946,7 +946,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       item.append(context);
     }
     if (type.notForThisBook) {
-      item.append(el('p', 'document-not-for-this-book', type.document === null ? DOCUMENT_STATE_NOT_FOR_THIS_BOOK : `${DOCUMENT_STATE_NOT_FOR_THIS_BOOK} · 文档与版本保留`));
+      item.append(el('p', 'document-not-for-this-book', type.document === null ? DOCUMENT_STATE_NOT_FOR_THIS_BOOK : `${DOCUMENT_STATE_NOT_FOR_THIS_BOOK} · 衍生稿件与版本保留`));
       const restore = documentButton('restore', type, 'secondary');
       restore.addEventListener('click', () => void decide(type, false));
       actions.append(restore);

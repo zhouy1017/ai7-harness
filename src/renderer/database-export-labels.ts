@@ -15,7 +15,7 @@ import { exportBytesLabel } from './manuscript-export-labels.js';
 
 export const DATABASE_EXPORT_HEADING = '导出数据库';
 /** What the one file holds, and what it does not (DSTO-017; ADR 0079 §1.6: not encrypted, no credential). */
-export const DATABASE_EXPORT_LEDE = '全部图书、稿件与历史、知识库和设置打包为未加密文件，不含模型服务凭据。';
+export const DATABASE_EXPORT_LEDE = '全部图书、稿件与历史、知识库和设置打包为未加密文件，不含模型服务密钥。';
 export const DATABASE_EXPORT_ACTIONS = {
   choose: '导出数据库…',
   approve: '按上述方式导出',

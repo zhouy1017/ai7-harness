@@ -1,10 +1,10 @@
 import { MAX_BLOCK_GRAPHEMES } from '../shared/protocol.js';
+import { showTransientNotice } from './notifications.js';
 import {
   PROTECTION_CLOSE_OPTIONS,
   PROTECTION_COPY_ACTION,
   PROTECTION_COPY_FAILED,
   PROTECTION_HEADLINE,
-  PROTECTION_MARKER,
   PROTECTION_OPTIONS_ACTION,
   PROTECTION_OPTIONS_TITLE,
   PROTECTION_READ_ONLY_HEADLINE,
@@ -144,7 +144,7 @@ export interface ProtectionSurfaceOptions {
 
 export interface ProtectionSurface {
   update(view: ProtectionView | null): void;
-  /** Open 查看保护选项, with a line saying why when a guarded action or a close request opened it (DUR-005, DUR-010). */
+  /** Open 处理…, with a line saying why when a guarded action or a close request opened it (DUR-005, DUR-010). */
   openOptions(reason?: string): void;
   /** Say beside an attempted action why it was refused (DUR-005). */
   blockAction(action: HTMLElement | null): void;
@@ -167,8 +167,8 @@ function actionName(action: HTMLElement | null): string | null {
 }
 
 /**
- * The protection surface: a banner in the context header while protection is in force — headline, Last Durable Edit
- * Boundary, At-risk Edit Extent, automatic retry state and one 查看保护选项 (DUR-003) — and the options it opens, which
+ * The protection surface: a compact state pill, sentence and 处理… action in the context header (DUR-003).
+ * Last Durable Edit Boundary, At-risk Edit Extent and retry state live in the options dialog, which
  * always offer 重试写入 and 复制受影响内容 (DUR-009). It stays visible in 专注模式 (ED-058) and cannot be hidden from `视图`.
  */
 export function mountProtectionSurface(options: ProtectionSurfaceOptions): ProtectionSurface {
@@ -182,8 +182,8 @@ export function mountProtectionSurface(options: ProtectionSurfaceOptions): Prote
   // The buffer's declared limits, stated where a Journey or an assistive reading can find them.
   banner.dataset['bufferSoftLimit'] = String(SAFETY_BUFFER_SOFT_LIMIT);
   banner.dataset['bufferCapacity'] = String(SAFETY_BUFFER_CAPACITY);
-  const marker = el('span', 'editing-protection-marker', PROTECTION_MARKER);
-  marker.setAttribute('aria-hidden', 'true');
+  const marker = el('span', 'editing-protection-marker state-term', '保存中断');
+  marker.dataset['pillTone'] = 'blocked';
   const headline = el('strong', 'editing-protection-headline', PROTECTION_HEADLINE);
   const facts = el('dl', 'editing-protection-facts');
   const boundary = el('dd');
@@ -196,7 +196,7 @@ export function mountProtectionSurface(options: ProtectionSurfaceOptions): Prote
   const openButton = el('button', 'secondary', PROTECTION_OPTIONS_ACTION);
   openButton.type = 'button';
   openButton.dataset['protectionAction'] = 'options';
-  banner.append(marker, headline, facts, openButton);
+  banner.append(marker, headline, openButton);
   options.host.append(banner);
 
   const dialog = el('section', 'editing-protection-options');
@@ -211,7 +211,6 @@ export function mountProtectionSurface(options: ProtectionSurfaceOptions): Prote
   const dialogReason = el('p', 'editing-protection-reason');
   dialogReason.setAttribute('role', 'status');
   dialogReason.hidden = true;
-  const dialogState = el('p', 'editing-protection-state');
   const dialogReadOnly = el('p', 'editing-protection-read-only');
   const dialogSalvage = el('span', undefined, PROTECTION_SALVAGE_UNAVAILABLE.replace(/。$/u, '；'));
   const dialogPromise = el('p', 'field-note');
@@ -227,7 +226,7 @@ export function mountProtectionSurface(options: ProtectionSurfaceOptions): Prote
   closeButton.dataset['protectionAction'] = 'close';
   const actions = el('div', 'button-row');
   actions.append(retryButton, copyButton, closeButton);
-  dialog.append(dialogTitle, dialogReason, dialogState, dialogReadOnly, actions, dialogPromise);
+  dialog.append(dialogTitle, dialogReason, facts, dialogReadOnly, actions, dialogPromise);
   options.host.append(dialog);
 
   const blockNotes = new Set<HTMLElement>();
@@ -258,7 +257,6 @@ export function mountProtectionSurface(options: ProtectionSurfaceOptions): Prote
     const seconds = current.nextRetryAt === null ? null : Math.max(0, Math.ceil((current.nextRetryAt - Date.now()) / 1_000));
     retryState.textContent = retryLine(current.cause, current.retrying, current.attempts, seconds);
     retryState.dataset['retryAttempts'] = String(current.attempts);
-    dialogState.textContent = `${boundary.textContent}；${extent.textContent}。`;
     dialogReadOnly.hidden = current.readOnly === null;
     dialogReadOnly.textContent = current.readOnly === null ? '' : readOnlyLine(current.readOnly);
     dialogSalvage.hidden = current.salvageExport === 'available';
@@ -276,7 +274,8 @@ export function mountProtectionSurface(options: ProtectionSurfaceOptions): Prote
   copyButton.addEventListener('click', () => {
     const text = options.affectedContent();
     void options.writeClipboard(text).then(
-      () => { options.setStatus(protectionCopiedLine()); },
+      // A toast, not a status: copying the unsaved text does not settle the write error the bar is standing for.
+      () => { showTransientNotice(protectionCopiedLine()); },
       () => { options.setStatus(PROTECTION_COPY_FAILED, 'error'); },
     );
   });

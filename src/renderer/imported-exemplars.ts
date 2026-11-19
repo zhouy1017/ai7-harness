@@ -1,3 +1,4 @@
+import { styleInput } from './components/controls.js';
 import type { ExemplarBookProjection, ExemplarProjection, RendererApi, ImportedExemplarPreview } from '../shared/protocol.js';
 import { technicalWords } from './technical-layer.js';
 
@@ -18,7 +19,7 @@ function node<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTM
 export function exemplarImportButton(surface: Surface, book: ExemplarBookProjection | null = null): HTMLElement {
   const root = node('div');
   root.className = 'exemplar-import';
-  const open = node('button', book === null ? '导入以前图书的范例' : '导入新版本 / 添一种文档');
+  const open = node('button', book === null ? '导入以前图书的范例' : '导入新版本 / 添一种衍生稿件');
   open.type = 'button';
   open.dataset['exemplarAction'] = 'import';
   root.append(open);
@@ -28,7 +29,7 @@ export function exemplarImportButton(surface: Surface, book: ExemplarBookProject
     form.className = 'exemplar-import-form';
     const fields = (caption: string, value: string, maximum: number): HTMLInputElement => {
       const label = node('label', caption);
-      const input = node('input');
+      const input = styleInput(node('input'));
       input.value = value;
       input.maxLength = maximum;
       input.required = true;
@@ -40,13 +41,13 @@ export function exemplarImportButton(surface: Surface, book: ExemplarBookProject
     const title = fields('图书名称', book?.bookTitle ?? '', 180);
     const authors = fields('作者（多人用顿号分开）', book?.authors.join('、') ?? '', 1000);
     const editors = fields('责编（多人用顿号分开）', book?.editors.join('、') ?? '', 1000);
-    const typeLabel = node('label', '文档类型');
+    const typeLabel = node('label', '衍生稿件类型');
     const type = node('select');
     type.required = true;
     type.disabled = true;
     // No deliverable type is preselected (Issue #778): until the editor chooses one, the prompt is the only option and
     // 导入范例 stays disabled.
-    const unchosen = node('option', '请选择文档类型');
+    const unchosen = node('option', '请选择衍生稿件类型');
     unchosen.value = '';
     type.replaceChildren(unchosen);
     type.addEventListener('change', () => { submit.disabled = preview === null || type.value === ''; });
@@ -82,7 +83,7 @@ export function exemplarImportButton(surface: Surface, book: ExemplarBookProject
         previewLine.textContent = `${preview.displayName} · ${preview.format}`;
         excerpt.textContent = preview.excerpt;
         submit.disabled = true;
-        surface.status('范例文件已读取，请填写图书信息、选择文档类型后导入');
+        surface.status('范例文件已读取，请填写图书信息、选择衍生稿件类型后导入');
       } catch (error) { surface.status(surface.error(error, '无法读取范例文件。'), 'error'); }
       finally { choose.disabled = false; }
     });

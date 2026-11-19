@@ -1,7 +1,7 @@
 import { hydrateAnalysisRevision } from './analysis-paging.js';
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { stateTerm } from './components/controls.js';
-import { ANALYSIS_MORE_RANGES } from './analysis-paging-labels.js';
+import { analysisMoreRanges } from './analysis-paging-labels.js';
 import type {
   HydratedAnalysisRevisionProjection as BaselineAnalysisResultSetRevisionProjection,
   BookTaskItemProjection,
@@ -235,7 +235,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
     list.append(...rows);
     body.replaceChildren(meta(analysisResultReadLine(revision), ANALYSIS_RESULT_NOT_DONE), list);
     if (revision.unitPage.nextOrdinal !== null) {
-      const more = el('button', 'secondary', technicalWords(ANALYSIS_MORE_RANGES, '显示更多'));
+      const more = el('button', 'secondary', analysisMoreRanges());
       more.type = 'button';
       more.addEventListener('click', async () => {
         more.disabled = true;

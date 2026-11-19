@@ -1,6 +1,7 @@
 import type { RendererApi } from '../shared/protocol.js';
 import { createButton } from './components/controls.js';
 import { visibleKnowledgeBaseTabs, type KnowledgeBaseTab } from './knowledge-base-labels.js';
+import { houseSavedAt } from './house-word-list-labels.js';
 
 interface Summary {
   count: string;
@@ -31,7 +32,7 @@ export function mountKnowledgeBaseHome(root: HTMLElement, api: RendererApi, deve
       const page = await api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
       const changes = page.items.map(({ current }) => ({ title: current.title, at: current.recordedAt }))
         .sort((a, b) => b.at.localeCompare(a.at));
-      return { count: `${page.items.length}${page.nextItemOffset === null ? '' : '+'} 条`, latest: changes[0]?.title ?? '暂无记忆', changes };
+      return { count: `${page.items.length}${page.nextItemOffset === null ? '' : '+'} 条`, latest: changes[0]?.title ?? '暂无审阅偏好', changes };
     },
     exemplars: async () => {
       const page = await api.inspectExemplars();
@@ -44,6 +45,11 @@ export function mountKnowledgeBaseHome(root: HTMLElement, api: RendererApi, deve
       return { count: `${page.materials.length}${page.nextCursor === null ? '' : '+'} 份`,
         latest: page.materials[0]?.title ?? '暂无资料',
         changes: page.materials.map((material) => ({ title: material.title, at: material.recordedAt })) };
+    },
+    'house-words': async () => {
+      const { selected } = await api.inspectHouseWordList({ versionId: null, entryOffset: 0, historyOffset: 0 });
+      return selected === null ? { count: '尚未创建', latest: '暂无词表' }
+        : { count: `${selected.entryCount} 条`, latest: houseSavedAt(selected.createdAt), changes: [{ title: `${selected.entryCount} 条词条`, at: selected.createdAt }] };
     },
     external: async () => ({ count: '未提供', latest: '在各书的来源与证据中查看' }),
   };

@@ -24,7 +24,7 @@ import { WRITING_TASK_SCHEMA_SQL } from '../../src/service/writing-tasks.js';
 import { DIALOGUE_SCHEMA_SQL } from '../../src/service/dialogue/dialogue-ledger.js';
 import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL } from '../../src/service/series-exclusions.js';
 import type { ReadersReportContractInput } from '../../src/service/evaluation/readers-report-contract.js';
-import { EditorialStore, REVIEW_CATEGORY_CACHE_CAPACITY, StoreError, boundedGraphemes } from '../../src/service/store.js';
+import { EditorialStore, REVIEW_CATEGORY_CACHE_CAPACITY, StoreError } from '../../src/service/store.js';
 import {
   ANALYSIS_LEDGER_REVISION_29_SQL,
   ANALYSIS_LEDGER_REVISION_30_SQL,
@@ -434,7 +434,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
       expect(bundle.content.limitations).toEqual(['审稿意见 · 给作者的修改意见：设为发稿版本后又有修改，本包按设为发稿版本时的最新一版（版本 2）。']);
       const prepared = book.store.prepareBookDeliveryPackage({ bookId, purpose: '交出版社存档', expectedContentDigest: bundle.content.digest });
       const version = prepared.package.versions[0]!;
-      expect(version.summary).toBe(`${bundle.content.included[0]!.label} · 生产文档 0 份 · 本书不做 5 类 · 审阅报告 0 份 · 评估记录 1 份 · 审稿意见 1 份`);
+      expect(version.summary).toBe(`${bundle.content.included[0]!.label} · 衍生稿件 0 份 · 本书不做 5 类 · 审阅报告 0 份 · 评估记录 1 份 · 审稿意见 1 份`);
       // A later save moves nothing: the member is pinned, and the package reads as it did.
       await save('（再改）');
       expect(book.store.inspectBookDeliveryPackage(bookId)).toMatchObject({ changedSinceLatest: false, content: { digest: bundle.content.digest } });
@@ -705,7 +705,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('seeds a draft with at most two admitted 审稿意见, by Book title, each its opening past the contract\'s bound (Issue #429)', async () => {
+  it('freezes the reader\'s report contract of a draft seeded with the two admitted 审稿意见 by Book title, byte for byte as before the move (Issue #1534)', async () => {
     await withBook(async (book) => {
       // Three Books drafted first — before any admission, so each contract asks the fixture the same question — then each
       // designated and admitted; the fourth reads exactly two 范例 in `b.title COLLATE BINARY` order: 丙 (U+4E19), 乙 (U+4E59), never 审 (U+5BA1).
@@ -731,6 +731,18 @@ describe('审稿意见 over the real store on exact sample1', () => {
           .readersReports[0]!.admission.state).toBe('admitted');
       }
       const fourth = await importSample1Book(book.store, roots.codeRoot, '丁书');
+      await pinEditorialWorkspaceProfileRevision2(book.store, fourth.bookId);
+      await runInitialEvaluationToEnd(book.store, book.owner, fourth.bookId, launchPolicy);
+      finalizeAsJ11(book.store, fourth.bookId);
+      let progress = book.store.createReadersReportPreparationWork(fourth.bookId, 'author', launchPolicy);
+      while (!progress.done) progress = book.store.advanceReadersReportPreparationWork(progress.workId!);
+      // The contract frozen over the two 范例 — their titles and their opening words — as the code before the move froze it: a
+      // digest produced at the base commit, so a changed exemplar (or one framed differently) changes the request and fails here.
+      const database = exemplarDb();
+      try {
+        const frozen = database.prepare('SELECT prompt_contract_sha256 FROM readers_report_tasks WHERE book_id = ?').all(fourth.bookId) as Array<{ prompt_contract_sha256: string }>;
+        expect(frozen.map((row) => row.prompt_contract_sha256)).toEqual(['e0cefa24df0578575bf81a7f847ca0286f6a4db72f78cbfd62f8ae71f07dd3ae']);
+      } finally { database.close(); }
       expect(book.store.inspectEvaluation(fourth.bookId, null).readersReport.exemplars).toEqual({
         count: 2, statement: '参考本社 2 份审稿意见范例：《丙书 · 审稿意见 · 给作者的修改意见》、《乙书 · 审稿意见 · 给作者的修改意见》',
       });
@@ -738,9 +750,6 @@ describe('审稿意见 over the real store on exact sample1', () => {
       expect(book.store.inspectEvaluation(book.bookId, null).readersReport.exemplars).toEqual({
         count: 2, statement: '参考本社 2 份审稿意见范例：《丙书 · 审稿意见 · 给作者的修改意见》、《乙书 · 审稿意见 · 给作者的修改意见》',
       });
-      // The opening a 范例 hands the contract: whole graphemes, never a split combining mark, cut at the bound.
-      expect(boundedGraphemes(`${'a\u0301'.repeat(3)}bcd`, 4)).toBe(`${'a\u0301'.repeat(3)}b`);
-      expect(boundedGraphemes('短', 4_000)).toBe('短');
     });
   }, 300_000);
 

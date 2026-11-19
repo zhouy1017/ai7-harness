@@ -125,7 +125,7 @@ it('keeps the review digest byte-identical while consuming a single-pass conflic
 describe('书系知识 words', () => {
   it('says what a candidate is not, and what taking it in does not do', () => {
     expect(KNOWLEDGE_NOTE).toContain('候选项不会被任何任务读取');
-    expect(KNOWLEDGE_PROMOTE_NOTE).toContain('不授权读取、不发送给模型服务、不改稿件，也不决定学习准入');
+    expect(KNOWLEDGE_PROMOTE_NOTE).toContain('不授权读取、不发送给模型服务、不改稿件，也不决定是否可用于学习');
     expect(knowledgeMenuLabel('星河三部曲')).toBe('提议为书系「星河三部曲」的知识…');
   });
 

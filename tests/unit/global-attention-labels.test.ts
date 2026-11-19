@@ -1,7 +1,7 @@
 import { majorityGapReason } from '../../src/shared/analysis-run-summary.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   GLOBAL_ATTENTION_EMPTY_LINES,
   GLOBAL_ATTENTION_ENTRY_LABEL,
@@ -99,6 +99,36 @@ function projection(groups: Partial<Record<GlobalAttentionGroupKey, ReadonlyArra
 }
 
 describe('the entry and the screen', () => {
+  it('draws only the groups that hold an item, and says one sentence with a way to start a task when none does (#1522)', () => {
+    const restore = installMiniDom();
+    setTechnicalLayerVisible(false);
+    try {
+      const mount = (data: GlobalAttentionProjection, startTask = vi.fn()) => {
+        const reader: GlobalAttentionReader = { refresh: () => undefined, interrupt: () => undefined,
+          subscribe: (listener) => { listener({ kind: 'projection', projection: data }); return () => undefined; } };
+        const root = document.createElement('main');
+        miniDocument.body.append(root as unknown as MiniElement);
+        const surface = mountGlobalAttention({ root, reader, technicalDetails: () => document.createElement('details'), setStatus: () => undefined,
+          errorMessage: (_error, fallback) => fallback, open: async () => undefined, openNetworkProxySettings: () => undefined, startTask });
+        surface.start();
+        return { root, surface, startTask };
+      };
+      const some = mount(projection({ exceptions: [item('analysis-failed')], recent: [item('analysis-completed', { group: 'recent' })] }));
+      expect(Array.from(some.root.querySelectorAll<HTMLElement>('section.global-attention-group'), (group) => group.dataset['attentionGroup'])).toEqual(['exceptions', 'recent']);
+      expect(some.root.querySelector('.global-attention-empty')).toBeNull();
+      some.surface.destroy();
+      const none = mount(projection({}));
+      expect(none.root.querySelectorAll('section.global-attention-group')).toHaveLength(0);
+      expect(none.root.querySelector('.global-attention-none p')!.textContent).toBe('现在没有需要你处理的事项。');
+      expect(none.root.querySelector<HTMLElement>('.lede')!.hidden).toBe(true);
+      expect(none.root.querySelector<HTMLElement>('[data-attention-read-all]')!.hidden).toBe(true);
+      expect(some.root.querySelector<HTMLElement>('.lede')!.hidden).toBe(false);
+      none.root.querySelector<HTMLElement>('[data-attention-start]')!.click();
+      expect(none.startTask).toHaveBeenCalledOnce();
+      none.surface.destroy();
+    } finally { setTechnicalLayerVisible(true); restore(); }
+  });
+
   it('filters shelved learning targets from both the ordinary attention badge and its items, restoring them in developer mode', () => {
     const restore = installMiniDom();
     setTechnicalLayerVisible(false);
@@ -143,8 +173,8 @@ describe('the entry and the screen', () => {
     expect(globalAttentionEntryView(0)).toEqual({ text: '待我处理', badge: null, accessibleName: '待我处理' });
     expect(globalAttentionEntryView(2)).toEqual({ text: '待我处理', badge: '2', accessibleName: '待我处理，2 项需要你处理' });
     expect(GLOBAL_ATTENTION_HEADING).toBe('待我处理');
-    expect(GLOBAL_ATTENTION_LEDE).toBe('所有图书里需要你处理的事项。点开一项回到它自己的记录，在那里决定；这里只列出，不替你做任何决定。');
-    expect(GLOBAL_ATTENTION_FINDINGS_NOTE).toBe('书内的发现在那本书的「发现」里。');
+    expect(GLOBAL_ATTENTION_LEDE).toBe('所有图书里需要你处理的事项；点开一项回到它自己的记录，在那里决定。');
+    expect(GLOBAL_ATTENTION_FINDINGS_NOTE).toBe('书内的发现在那本书的「待办汇总」里。');
   });
 
   it('keeps the four groups in their one fixed order, each with a quiet line when empty', () => {
@@ -194,7 +224,7 @@ describe('each item', () => {
   it('names every state in its record\'s own words, with a shape as well as a tone', () => {
     expect(Object.keys(GLOBAL_ATTENTION_STATE_LABELS).sort()).toEqual([...STATES].sort());
     expect(GLOBAL_ATTENTION_STATE_LABELS).toEqual({
-      'apply-outcome-unresolved': '应用结果待确认',
+      'apply-outcome-unresolved': '修改是否生效待确认',
       'import-outcome-uncertain': '导入提交结果待确认',
       'import-cleanup-pending': '放弃清理尚未完成',
       'recovery-pending': '恢复待确认状态',
@@ -207,31 +237,31 @@ describe('each item', () => {
       'analysis-account-limit': '模型服务账户限额',
       'analysis-outcome-unknown': '该单元结果未知',
       'analysis-outcome-unconfirmed': '结果待确认',
-      'analysis-blocked': '派发前已阻止',
+      'analysis-blocked': '没有开始',
       'analysis-orphaned': '已中断',
       'review-failed': '运行失败',
       'review-stopped': '中途停止',
       'analysis-plan-revision': '计划修订',
       'analysis-plan-moved': '需要重新确认计划',
       'analysis-clarification': '等你回答',
-      'analysis-queued': '正在排队',
+      'analysis-queued': '排队中',
       'analysis-running': '运行中',
       'analysis-waiting-network': '等待网络',
       'analysis-waiting-connection': '需要处理模型连接',
-      // Issue #632: a Connectivity-Wait Run holds no place in the capacity queue, so it never reads 等待运行名额.
-      'analysis-waiting-slot': '已联网 · 名额已满',
-      'analysis-waiting-admission': '正在排队',
-      'analysis-waiting-capacity': '等待运行名额',
+      // Issue #632: a Connectivity-Wait Run holds no place in the capacity queue, so it never reads 排队中.
+      'analysis-waiting-slot': '已联网 · 等待开始',
+      'analysis-waiting-admission': '等待开始前检查',
+      'analysis-waiting-capacity': '排队中',
       'analysis-waiting-idle': '等待空闲',
       'analysis-yielded': '让位给你的任务',
       'analysis-cancelling': '正在取消',
       'analysis-pausing': '正在暂停',
       'analysis-paused': '已暂停',
-      'analysis-resumable': '任务已中断 · 可续行',
+      'analysis-resumable': '任务已中断 · 可继续',
       'review-running': '运行中',
       'review-continuable': '中途停止 · 可继续审阅',
       'analysis-completed': '已完成',
-      'analysis-completed-with-gaps': '已完成 · 保留缺口',
+      'analysis-completed-with-gaps': '已完成 · 有未完成的部分',
       'review-completed': '已完成',
       // The 任务 panel's own three (Issue #423, S77a).
       'analysis-prepared': '计划已准备 · 等你开始',
@@ -276,7 +306,7 @@ describe('each item', () => {
   it('states a safe next step from a closed map of words each record already uses', () => {
     expect(Object.keys(GLOBAL_ATTENTION_NEXT_STEP_LABELS).sort()).toEqual([...GLOBAL_ATTENTION_NEXT_STEPS].sort());
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS).toEqual({
-      'view-apply-receipt': '查看应用凭据',
+      'view-apply-receipt': '查看修改结果',
       'view-run': '查看运行',
       'view-review': '查看审阅',
       'reconfirm-plan': '重新确认计划',
@@ -291,8 +321,8 @@ describe('each item', () => {
       'open-network-proxy': '去设置 › 模型服务 › 网络代理',
       // 结果待确认's first step (Issue #51, S16c): which ranges are unconfirmed, never a repeat-shaped action.
       'view-unconfirmed': '查看未确认的部分',
-      reprepare: '重新准备',
-      redo: '改计划重做',
+      reprepare: '另做一份计划',
+      redo: '重新开始',
       // A prepared plan nobody started (Issue #423, S77a): the drawer's own entry to it.
       'view-plan': '查看计划并开始',
       'maintenance-link-proposal': '关联修改建议',
@@ -300,8 +330,8 @@ describe('each item', () => {
       'maintenance-write-errata': '编写勘误',
       'maintenance-conclude': '记录维护事项结论',
       // A 资料库 item's own two decisions (Issue #427, S79c): its card's buttons.
-      'set-library-attribution': '定归属…',
-      'set-learning-eligibility': '定学习准入…',
+      'set-library-attribution': '定给谁用…',
+      'set-learning-eligibility': '定是否可用于学习…',
       'decide-learning-materials': '定学习准入…',
       // A dialogue Task's own way to its dialogue (Issue #52, S17a; TASK-044).
       'open-dialogue': '打开对话',
@@ -356,12 +386,12 @@ describe('each item', () => {
     expect(globalAttentionObjectLabel({ kind: 'review', ordinal: 3 })).toBe('审阅 · 第 3 次');
     // A ledger Task of another kind waiting to start once online, as its own surface names it (Issue #760, S74c).
     expect((['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const).map((taskKind) => globalAttentionObjectLabel({ kind: 'task', taskKind })))
-      .toEqual(['AI7 初评', '审稿意见', '按我的评分重写评语', '写作任务']);
+      .toEqual(['评估报告', '审稿意见', '按我的修改重新生成', '写作任务']);
     // A 审阅 on the selection 就这段发起任务… handed over says so (Issue #423, S77b).
     expect(globalAttentionObjectLabel({ kind: 'review', ordinal: 4, onSelection: true })).toBe('审阅 · 第 4 次 · 所选段落');
     expect(globalAttentionObjectLabel({ kind: 'recovery', branchName: '主分支' })).toBe('稿件 · 主分支');
     expect(globalAttentionObjectLabel({ kind: 'manuscript-conflict', conflictKind: 'suggestion' })).toBe('修改建议 · 稿件冲突');
-    expect(globalAttentionObjectLabel({ kind: 'manuscript-conflict', conflictKind: 'reversal' })).toBe('已应用的修改建议 · 稿件冲突');
+    expect(globalAttentionObjectLabel({ kind: 'manuscript-conflict', conflictKind: 'reversal' })).toBe('已接受的修改建议 · 稿件冲突');
     expect(globalAttentionObjectLabel({ kind: 'import', sourceDisplayName: 'sample1.docx', relationship: 'first-manuscript' })).toBe('导入 · sample1.docx · 作为首份稿件导入');
     expect(globalAttentionObjectLabel({ kind: 'import', sourceDisplayName: 'sample1.docx', relationship: null })).toBe('导入 · sample1.docx');
     // Issue #426 (S68b): the case, its classification and the 发稿版本 it is bound to.
@@ -412,7 +442,7 @@ describe('each item', () => {
       state: 'analysis-blocked',
       book: '《待我处理旅程甲》',
       object: '基线分析 · 首次基线分析',
-      stateLabel: '派发前已阻止',
+      stateLabel: '没有开始',
       pill: { tone: 'blocked', shape: 'diamond' },
       reason: '模型服务当前不可用，任务尚未开始。',
       nextStep: '查看运行',
@@ -448,7 +478,7 @@ describe('material and knowledge-base items (V2-UX-ATTN-009)', () => {
     // An item of 资料库 names where it belongs in the Book's place: a Book, the house, or not yet.
     const library = (scope: 'none' | 'book' | 'house', title: string | null) =>
       globalAttentionItemBookLabel({ book: { bookId: title === null ? null : '00000000-0000-4000-8000-000000000000', title }, object: { kind: 'library-material', title: '样书一', materialKind: 'book', scope } });
-    expect([library('none', null), library('house', null), library('book', '甲书')]).toEqual(['尚未定归属', '社级', '《甲书》']);
+    expect([library('none', null), library('house', null), library('book', '甲书')]).toEqual(['尚未定给谁用', '本社', '《甲书》']);
   });
 });
 

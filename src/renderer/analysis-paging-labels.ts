@@ -1,6 +1,7 @@
 import { technicalWords } from './technical-layer.js';
 
-export const ANALYSIS_MORE_RANGES = '显示更多阅读范围';
+/** 显示更多 beneath the per-part list; the developer layer names the unit it pages (Issue #1531). */
+export const analysisMoreRanges = (): string => technicalWords('显示更多阅读范围', '显示更多');
 export const ANALYSIS_READ_FAILED = '无法读取完整的分析结果，请重新打开分析。';
 export const ANALYSIS_READING = '正在读取分析结果…';
 export const ANALYSIS_MORE_REPORT_ROWS = '显示更多逐范围账目';
@@ -21,7 +22,7 @@ export const TASK_PAGE_FAILED = '无法继续读取，请重新打开计划。';
 export const TASK_PAGE_NAMES: Readonly<Record<string, string>> = {
   'drift.entries': '计划变化', 'edit.lastEdit.entries': '修改记录', 'resend.units': '再次发送的范围',
   'resend.statement': '再次发送说明', get 'unconfirmed.ranges'() { return technicalWords('结果待确认的阅读范围', '结果待确认的部分'); },
-  get 'runControl.outcomeUnknown.units'() { return technicalWords('结果待确认的阅读范围', '结果待确认的部分'); }, 'runControl.continuation.pendingAnswerUnits': '待续行的范围',
+  get 'runControl.outcomeUnknown.units'() { return technicalWords('结果待确认的阅读范围', '结果待确认的部分'); }, 'runControl.continuation.pendingAnswerUnits': '待继续的部分',
   'runControl.cancel.impact': '取消影响说明',
   clarifications: '问题与回答', 'scopeOptions.chapters.chapters': '章节',
 };

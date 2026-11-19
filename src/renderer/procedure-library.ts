@@ -1,5 +1,4 @@
 import { navigation } from './navigation-generation.js';
-import { technicalWords } from './technical-layer.js';
 import { PROCEDURE_STAGE_LABELS, procedureStageUsesModel } from '../shared/protocol/procedures.js';
 import type { EditableProcedureProjection, ProcedureDefinitionPin, SaveProcedureDefinitionInput } from '../shared/protocol/procedures.js';
 import type { RendererApi, BookSummaryProjection, BookSummaryCursor } from '../shared/protocol.js';
@@ -137,12 +136,12 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
     for (const entry of projection.procedures) {
       const card = node('li'); card.dataset['procedureId'] = entry.procedureId; card.dataset['procedureVersion'] = String(entry.version);
       const versions = node('select');
-      for (const version of entry.versions) versions.append(new Option(`${technicalWords(`第 ${version.version} 版`, '版本')}`, String(version.version)));
+      for (const version of entry.versions) versions.append(new Option(`第 ${version.version} 版`, String(version.version))); // 工序与规则 is the developer layer's page
       card.dataset['procedureState'] = entry.stopped ? 'stopped' : 'enabled'; card.dataset['procedureRuns'] = String(entry.uses);
       const pill = node('span', entry.stopped ? '已停用' : '已启用'); pill.className = `state-term status-pill procedure-state-${entry.stopped ? 'stopped' : 'enabled'}`;
       const stages = node('span', entry.document.stages.map((stage) => PROCEDURE_STAGE_LABELS[stage.stageType]).join(' → ')); stages.className = 'procedure-stages';
       const context = node('p', `${entry.preInstalled ? '预装' : '本社工序'} · 已使用 ${entry.uses} 次 · `); context.append(stages);
-      card.append(pill, node('h4', `${entry.document.title} · ${technicalWords(`第 ${entry.version} 版`, '版本')}`), context,
+      card.append(pill, node('h4', `${entry.document.title} · 第 ${entry.version} 版`), context,
         action('改写为新版本', () => edit(entry, false)), label('运行版本', versions),
         action('运行此工序…', () => chooseBook(entry, entry.versions.find((version) => version.version === Number(versions.value))!)),
         action('停用所选版本', async () => { await api.procedureLibrary({ action: 'stop', procedure: entry.versions.find((version) => version.version === Number(versions.value))! }); await load(); }));

@@ -1,3 +1,4 @@
+import { pointerClick } from './dispatch-chooser.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -93,6 +94,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-13' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -834,7 +836,7 @@ async function main() {
     // #1377 / J-13: ordinary navigation reaches the same preferences owner from both destinations.
     for (const developer of ['false', 'true']) {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
-      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `quality-mode-${developer}-settings-ready`);
       await click(renderer, '帮助', `quality-mode-${developer}-help`);
       await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `quality-mode-${developer}-switch-ready`);
       await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
@@ -850,6 +852,8 @@ async function main() {
       await clickSelector(renderer, '[data-knowledge-category="memory"]', 'ordinary-house-entry');
       // #1408: the ordinary rule editor is the one form here; no engineering form joins it.
       await waitFor(renderer, `document.querySelector('[data-editorial-memory] [data-learning-enabled]') && Array.from(document.querySelectorAll('form')).every(form=>form.matches('[data-editorial-memory] form.preference-editor[data-preference-editor]')) && document.querySelectorAll('[data-editorial-memory] form[data-preference-editor="new"]').length===1`, 'ordinary-house-same-owner');
+      // #1521: the 知识库 category and 质量与学习's first tab are one component under one name.
+      await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] h2')?.textContent==='审阅偏好' && document.querySelector('#persistence-status')?.textContent==='审阅偏好已打开'`, 'ordinary-house-same-name');
     }
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'ordinary-quality-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'ordinary-quality-library-ready');
@@ -1212,8 +1216,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'consistency-overview');
     await backToLibrary(renderer, 'consistency-model');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'consistency-model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'consistency-model-open-settings-hub');
-    await click(renderer, '模型服务', 'consistency-model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'consistency-model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'consistency-model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -1229,7 +1232,7 @@ async function main() {
     const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference ?? '') && readyConnection?.credentialOperationState === 'ready', 'consistency-model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除凭据', 'consistency-model-remove');
+    await click(renderer, '移除密钥', 'consistency-model-remove');
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'consistency-model-removed');
     credentialRemoved = true;
@@ -1242,17 +1245,13 @@ async function main() {
     await openSeries(renderer, seriesId, 'consistency-series');
     const offered = await readSeries(renderer, (read) => read.members.some(([id]) => id === member), 'consistency-member-row');
     requireJourney(offered.members.find(([id]) => id === member)?.[5] === '尚未审阅 · 可以审阅', 'consistency-member-offered', offered.members);
-    await leaveSeries(renderer, 'consistency-series-leave');
-    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'consistency-review-book');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'consistency-review-manuscript', 120_000);
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'consistency-review-entry');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'consistency-review-card');
+    // #1522: 去审阅 beside 可以审阅 opens that Book's 新建审阅 with 书系一致性 chosen and nothing else.
+    await pointerClick(renderer, waitFor, `.series-member-card[data-book-id=${JSON.stringify(member)}] [data-series-action="review-open"]`, 'consistency-review-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card') && document.querySelector('dialog.review-sheet')?.open===true`, 'consistency-sheet-open', 120_000);
     await assertRenderer(renderer, `!document.querySelector('.review-coverage') && document.querySelector('.review-workspace-card.surface-empty')`, 'consistency-coverage-empty');
-    await clickSelector(renderer, '[data-review-action="new-review"]', 'consistency-new-review');
-    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'consistency-sheet-open');
-    const sheet = await renderer.evaluate(`(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); const label=sheet.querySelector('[data-review-category-option="series-consistency"]'); return { enabled: box instanceof HTMLInputElement && !box.disabled && !box.checked, basis: label?.querySelector('.review-category-basis')?.textContent ?? null, checked: Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), (input) => input.value) }; })()`);
-    requireJourney(sheet?.enabled === true && sheet.basis === CONSISTENCY_BASIS && JSON.stringify(sheet.checked) === JSON.stringify(['typos-and-usage']), 'consistency-sheet-offered', sheet);
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'consistency-prepare');
+    const sheet = await renderer.evaluate(`(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); const label=sheet.querySelector('[data-review-category-option="series-consistency"]'); return { enabled: box instanceof HTMLInputElement && !box.disabled && box.checked, basis: label?.querySelector('.review-category-basis')?.textContent ?? null, checked: Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), (input) => input.value) }; })()`);
+    requireJourney(sheet?.enabled === true && sheet.basis === CONSISTENCY_BASIS && JSON.stringify(sheet.checked) === JSON.stringify(['series-consistency']), 'consistency-sheet-offered', sheet);
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'consistency-prepare');
     await launchReviewFromSheet(renderer, waitFor);
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState!=='prepared'`, 'consistency-prepared', 120_000);
     const prepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
@@ -1388,7 +1387,8 @@ async function main() {
     at('exclusion-marker');
     // The first Run's result used the item: it is marked beside the Run, its report and each finding, and nothing is rewritten.
     // The Run history folds into the summary bar once a Run has findings (Issue #1413 cluster 6): open it first.
-    await assertRenderer(renderer, `(() => { const fold=document.querySelector('details.review-history-fold'); if (fold instanceof HTMLDetailsElement) fold.open = true; const open=document.querySelector('ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'exclusion-open-first');
+    if (await renderer.evaluate(`document.querySelector('details.review-history-fold')?.open === false`)) await pointerClick(renderer, waitFor, 'details.review-history-fold > summary', 'exclusion-open-first-history');
+    await pointerClick(renderer, waitFor, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'exclusion-open-first');
     await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelectorAll('article.review-finding').length===3`, 'exclusion-first-open');
     await assertRenderer(renderer, `document.querySelector('section.review-run .review-historical-marker .review-historical-marker-label')?.textContent?.startsWith(${JSON.stringify(`${MARKER} · `)}) === true && document.querySelector('.review-report-marker')?.textContent === ${JSON.stringify(MARKER)} && Array.from(document.querySelectorAll('article.review-finding .review-finding-marker')).every((line) => line.textContent === ${JSON.stringify(MARKER)}) && document.querySelectorAll('article.review-finding .review-finding-marker').length === 3 && document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-shown');
     await leaveMemberReview();
@@ -1437,6 +1437,13 @@ async function main() {
     requireJourney(endedRow.members.some(([id]) => id === member), 'exclusion-member-row-again');
     await leaveSeries(renderer, 'exclusion-ended-leave');
     await openMemberReview();
+    // 审阅 comes back where the editor left it for this Book (Issue #1525): the first Run, opened at `exclusion-marker`. The stopped
+    // Run is opened again from 历史, by pointer, and is still stopped.
+    await waitFor(renderer, `['settled','scope-changed'].includes(document.querySelector('.review-workspace-card')?.dataset.reviewState)`, 'exclusion-review-kept');
+    if (await renderer.evaluate(`document.querySelector('.review-workspace-card')?.dataset.reviewState !== 'scope-changed'`)) {
+      if (await renderer.evaluate(`document.querySelector('details.review-history-fold')?.open === false`)) await pointerClick(renderer, waitFor, 'details.review-history-fold > summary', 'exclusion-open-stopped-history');
+      await pointerClick(renderer, waitFor, 'ol.review-runs li[data-review-run="2"] [data-review-action="open-run"]', 'exclusion-open-stopped');
+    }
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='scope-changed'`, 'exclusion-still-stopped');
 
     at('j14-scope-stop-keyboard-reflow-forced-colors');
@@ -2001,7 +2008,8 @@ async function main() {
     // Book must have for it to run there: a Series, whose material is chosen apart at each run.
     await openBookReview(renderer, MEMBER, member, 'series-procedure-review');
     // The Run history folds into the summary bar once a Run has findings (Issue #1413 cluster 6): open it first.
-    await assertRenderer(renderer, `(() => { const fold=document.querySelector('details.review-history-fold'); if (fold instanceof HTMLDetailsElement) fold.open = true; const open=document.querySelector('ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'series-procedure-first-run');
+    if (await renderer.evaluate(`document.querySelector('details.review-history-fold')?.open === false`)) await pointerClick(renderer, waitFor, 'details.review-history-fold > summary', 'series-procedure-first-run-history');
+    await pointerClick(renderer, waitFor, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'series-procedure-first-run');
     await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelector('ol.review-runs li[data-review-run="1"]')?.getAttribute('aria-current')==='true'`, 'series-procedure-first-open', 60_000);
     await clickSelector(renderer, 'section.review-report [data-review-action="capture"]', 'series-procedure-capture');
     const seriesCapture = await readCapture(renderer, (read) => read.steps.length === 1 && read.focused, 'series-procedure-sheet');
@@ -2037,9 +2045,12 @@ async function main() {
       [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选`, 'all']]), 'series-sheet-offered', offeredHere);
     at('procedure-recommendation');
     await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure"]'); if(!(select instanceof HTMLSelectElement))return false;select.value=${JSON.stringify(seriesProcedureId)};select.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'series-procedure-choose');
+    // The sheet itself says what it ticked — nothing, here — in its own words (S31b review P3-5): version 1 chosen (the only
+    // version: its selector, when shown, names it), no category checked, and its procedure line saying the categories are the
+    // editor's to tick. A toast is transient (#1519).
     const seriesSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1', 'series-sheet-filled');
-    // The status says what the sheet ticked — nothing, here — in the sheet's own words (S31b review P3-5).
-    await waitFor(renderer, `${notice}===${JSON.stringify(`已读取《${SERIES_PROCEDURE_TITLE}》第 1 版：要运行的类别由你勾选。`)}`, 'series-sheet-status', 10_000);
+    await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1' && (read.chosen === null ? read.options.length === 0 : read.options[read.chosen]?.includes('第 1 版') === true) &&
+      read.checked.length === 0 && read.lines[0]?.includes('要运行的类别由你勾选') === true, 'series-sheet-status');
     at('procedure-series-step-optin');
     const seriesCeiling = await renderer.evaluate(`(async () => { const procedure=await window.ai7.inspectCapturedProcedure({procedureId:${JSON.stringify(seriesProcedureId)},before:null}); const preview=await window.ai7.previewCapturedProcedureValidation({versionId:procedure.versions[0].versionId}); return preview.ceiling.runSourceScope; })()`);
     requireJourney(seriesCeiling === 'series', 'procedure-v2-series-ceiling');
@@ -2236,7 +2247,7 @@ async function main() {
     // Preload readiness precedes renderer startup; wait for its completed landing paint before navigating or switching mode.
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'exemplar-catalogue-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'catalogue-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'catalogue-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'catalogue-settings-ready');
     await click(renderer, '帮助', 'catalogue-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'catalogue-mode-ready');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'; })()`, 'catalogue-ordinary-mode');
@@ -2244,7 +2255,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.knowledge-category[data-knowledge-category="exemplars"]')?.textContent.includes('不含图书原稿')`, 'catalogue-category-copy');
     await click(renderer, '范例', 'catalogue-open');
     await waitFor(renderer, `document.querySelector('[data-exemplar-action="import"]')`, 'catalogue-empty-ready');
-    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===0 && document.querySelector('.exemplars-empty')?.textContent==='暂无范例，已发稿并交付的本社文档会自动加入。'`, 'catalogue-no-manuscripts');
+    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===0 && document.querySelector('.exemplars-empty')?.textContent==='暂无范例，已发稿并交付的本社衍生稿件会自动加入。'`, 'catalogue-no-manuscripts');
     // assertRenderer wraps Boolean(expression); await this async fixture command directly before refreshing the catalogue.
     requireJourney(await renderer.evaluate(`(async () => { const preview=await window.ai7.previewImportedExemplar(); const book=await window.ai7.importEarlierExemplar({previewId:preview.previewId,bookId:null,bookTitle:'书系工作文档来源',authors:['测试作者'],editors:['测试责编'],typeId:'news-release',expectedVersion:0}); return book.bookTitle==='书系工作文档来源' && book.exemplars.length===1 && book.exemplars[0].typeId==='news-release'; })()`), 'catalogue-import-work-document');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'catalogue-refresh-home');
@@ -2254,7 +2265,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.exemplar-title')?.textContent==='《书系工作文档来源》新闻稿'`, 'catalogue-title');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'catalogue-kind-filter');
     await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'catalogue-book-filter');
-    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('.exemplar-kind-badge')?.textContent==='工作文档 · 新闻稿' && document.querySelector('.exemplar-context')?.textContent.startsWith('来自《书系工作文档来源》') && !document.querySelector('.exemplar-book .knowledge-file-more')`, 'catalogue-flat-typed-entry');
+    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('.exemplar-kind-badge')?.textContent==='衍生稿件 · 新闻稿' && document.querySelector('.exemplar-context')?.textContent.startsWith('来自《书系工作文档来源》') && !document.querySelector('.exemplar-book .knowledge-file-more')`, 'catalogue-flat-typed-entry');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 import { mountEditorialMemory } from '../../src/renderer/knowledge-base-memory.js';
 import { mountFeedbackHistory } from '../../src/renderer/feedback-history.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
@@ -53,7 +54,9 @@ it('puts candidates first, accepts and excludes them, disables memory and keeps 
   expect(root.querySelector('[data-preference-editor="new"]') !== null).toBe(true);
   expect(root.querySelector('[data-memory-candidate-form]')).toBeNull();
   expect(root.textContent).not.toMatch(/token|1–10|SHA|日志|candidate-version|active-version/iu);
-  expect(root.querySelector('details')!.textContent).toContain(AT);
+  // Issue #1531: no raw time in ordinary mode; the history reads the local time.
+  expect(root.querySelector('details')!.textContent).toContain(localInstantLabel(AT));
+  expect(root.querySelector('details')!.textContent).not.toContain(AT);
   click(root.querySelector('[data-memory-item="candidate"]')!, '接受记忆'); await settle();
   expect(api.acceptEditorialMemory).toHaveBeenCalledWith(expect.objectContaining({ itemId: 'candidate', expectedVersionId: 'candidate-version' }));
   click(root.querySelector('[data-memory-item="candidate"]')!, '停用'); await settle();

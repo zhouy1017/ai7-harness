@@ -34,6 +34,10 @@ All four implemented protocol families support text, streaming and function tool
 | reasoningContinuation | supported | supported | supported | supported |
 | providerTools | unsupported | unsupported | unsupported | unsupported |
 
+### Transport bounds (#1599)
+
+A model request is bounded by what it is waiting for, never by how long its answer is. The three bounds are the `transport` record of [`config/runtime-execution-defaults.json`](../../config/runtime-execution-defaults.json), the same for every route and model: `firstByteSeconds` (600) from the send to the first byte of the answer body, `idleSeconds` (90) of silence between received bytes after that, and `totalCeilingSeconds` (3600) as a far larger safety net; `connectionTestSeconds` (60) is the one bound of a model connection test. A streamed answer (the dialogue stream) keeps its request alive for as long as bytes keep arriving, reasoning frames and keep-alive comments included. A whole-answer request (every Review, analysis and writing unit) is not streamed and has no byte before its answer is finished: `firstByteSeconds` is the longest generation tolerated, and a unit whose answer takes minutes, such as a dense chapter at a high reasoning effort, settles inside it. A request that reaches a bound after it was sent is an unknown outcome and is never resent on its own.
+
 ## 阿里云百炼 Qwen
 
 | | |
@@ -1043,6 +1047,20 @@ The evidence no page can supply — the live test items the ADR 0067 Provider Te
 | `S17c/editorial-dialogue/15` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-19 | #990 |
 | `S17c/editorial-dialogue/16` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-19 | #990 |
 | `S17c/editorial-dialogue/17` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-19 | #990 |
+| `S40/first-baseline/461` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/462` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/463` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/464` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/465` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/466` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/467` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/first-baseline/468` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/reanalyze-book/9` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/reanalyze-book/10` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/reanalyze-book/11` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/reanalyze-book/12` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/reanalyze-book/13` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
+| `S40/reanalyze-book/14` | `opencode-go` | `deepseek-v4.1-flash` | 2026-11-18 | #1538 |
 
 | Baseline | Route | Models | Stated on |
 | --- | --- | --- | --- |

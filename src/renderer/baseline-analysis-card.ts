@@ -1,13 +1,15 @@
 import { rendererApi } from './navigation-generation.js';
+import { reportResult } from './notifications.js';
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { technicalWords, identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { serviceWords } from './service-wording.js';
 import { analysisRunSummary, completedWithGapsLabel } from '../shared/analysis-run-summary.js';
 import { startPreparedTask } from './one-action-start.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
 import {
   ANALYSIS_MORE_REPORT_ROWS,
   ANALYSIS_READ_FAILED,
-  ANALYSIS_MORE_RANGES,
+  analysisMoreRanges,
   ANALYSIS_READING,
   ANALYSIS_MORE_CHOICES,
   ANALYSIS_EARLIER_HISTORY,
@@ -35,7 +37,7 @@ import { mountAnalysisFeedback, analysisFeedbackEngaged } from './analysis-feedb
 import { BACKGROUND_REPORT_HEADING, BACKGROUND_PREPARED_PLAN_NOTE } from './background-analysis-labels.js';
 import { AnalysisFollower } from './analysis-follow.js';
 import type { ReviewFocus } from './review-workspace.js';
-import { ANALYSIS_TAB_SHOWN_EVENT, mountCustomAnalysisTab } from './custom-analysis.js';
+import { ANALYSIS_TAB_SHOWN_EVENT, customDimensionFormEngaged, mountCustomAnalysisTab } from './custom-analysis.js';
 import { CUSTOM_TAB_LABEL } from './custom-analysis-labels.js';
 import { taskPlanQuickStartFellBack, TASK_DRAWER_TITLE, taskPlanSummaryLine, TASK_PLAN_DRIFT_HEADING } from './task-drawer-labels.js';
 
@@ -61,6 +63,11 @@ import {
   attemptStateLabel,
 } from './plan-preview-labels.js';
 import type { mountTaskDrawer } from './task-drawer.js';
+
+/** What starting each 更新这份分析 mode does, as its start says it. */
+const ANALYSIS_UPDATE_START_LABELS: Readonly<Record<BaselineAnalysisUpdateMode, string>> = {
+  'sync-current': '开始同步', 'reanalyze-range': '开始重新分析', 'reanalyze-book': '开始全部重来',
+};
 
 /**
  * ②A's seven tabs (editor-surfaces §3). The first six are what the baseline is for; the last holds
@@ -124,6 +131,10 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       awaitServiceJob, jumpToManuscript, leaveReturnChip, openEditorWindow, openTaskPlan, quickStartStartedLine, renderBookReview,
       rendererErrorMessage, screen, setStatus, taskDrawer, taskPlanOpenButton, technicalDetails
   } = options;
+  /** A prepared Task is being prepared again from its mode button: the 更新这份分析 bar on screen waits (Issue #1526). */
+  let updatePreparing = false;
+  /** Show the bar now on screen with the current wait; a bar of an earlier paint that left the screen is not touched. */
+  let syncUpdateBar: (() => void) | null = null;
 
   /**
    * The Technical Identity Layer's form of one item's provenance (V2-UX-LAYER-006): every source range
@@ -169,7 +180,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
   /** What an update keeps and what it reads again, in the editor's words; `null` is a plan nobody can state yet. */
   function updateReuseReading(expected: AnalysisReusePlanCounts | null, mode: BaselineAnalysisUpdateMode): string {
     if (expected === null) return mode === 'reanalyze-range' ? '选好范围后，这里会说明沿用多少、重新分析多少。' : '现在无法说明会沿用多少、重新分析多少。';
-    return `会沿用上一份里 ${expected.reused} 个阅读范围的结果，重新分析 ${expected.recomputed} 个。`;
+    return `会沿用上一份里 ${expected.reused} 个部分的结果，重新分析 ${expected.recomputed} 个。`;
   }
 
   function rangeText(range: BaselineAnalysisSelectedRange | null): string {
@@ -295,14 +306,14 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const failures = element('ul', 'analysis-list analysis-run-report-failures');
     if (report.failures.length === 0) failures.append(element('li', undefined, '无'));
     for (const failure of report.failures) {
-      const item = element('li', undefined, `${RUN_REPORT_STAGE_LABELS[failure.stage]}：${failure.reason}`);
+      const item = element('li', undefined, `${RUN_REPORT_STAGE_LABELS[failure.stage]}：${serviceWords(failure.reason)}`);
       item.dataset['runReportFailureCode'] = failure.code;
       failures.append(item);
     }
     const adaptations = element('ul', 'analysis-list analysis-run-report-adaptations');
     if (report.adaptations.length === 0) adaptations.append(element('li', undefined, '无'));
     for (const adaptation of report.adaptations) {
-      adaptations.append(element('li', undefined, `第 ${adaptation.unitOrdinal} 个阅读范围安全重试一次 · ${localInstantLabel(adaptation.recordedAt)}`));
+      adaptations.append(element('li', undefined, `${technicalWords(`第 ${adaptation.unitOrdinal} 个阅读范围`, `正文第 ${adaptation.unitOrdinal} 部分`)}安全重试一次 · ${localInstantLabel(adaptation.recordedAt)}`));
     }
     for (const clarification of report.modelClarifications ?? []) {
       adaptations.append(element('li', 'analysis-run-report-clarification', clarification.line));
@@ -317,7 +328,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       if (report.ifRedone.items.length === 0) redone.append(element('li', undefined, '模型没有提出不同的做法。'));
       for (const suggestion of report.ifRedone.items) redone.append(element('li', undefined, `${suggestion.suggestion}（依据：${suggestion.basis}）`));
     } else {
-      redone.append(element('li', undefined, report.ifRedone.reason));
+      redone.append(element('li', undefined, serviceWords(report.ifRedone.reason)));
     }
     const findings = report.findingCounts.length === 0
       ? '这次运行没有记录发现。'
@@ -338,7 +349,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     disclosure.append(
       element('h5', undefined, '各阶段'), stages,
       // Chunk reuse and run adaptations are execution metrics: the developer layer's (Issue #1431 item 69).
-      ...(technicalLayerVisible ? [element('h5', undefined, '阅读范围'), element('p', 'analysis-run-report-units', runReportUnitsSentence(report.units))] : []),
+      ...(technicalLayerVisible ? [element('h5', undefined, technicalWords('阅读范围')), element('p', 'analysis-run-report-units', runReportUnitsSentence(report.units))] : []),
       element('h5', undefined, '发现与抽样复核'), element('p', undefined, findings), element('p', 'analysis-run-report-sample', sampleReading),
       element('h5', undefined, '失败'), failures,
       ...(technicalLayerVisible ? [element('h5', undefined, '运行中的调整'), adaptations] : []),
@@ -384,7 +395,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
   /** The Run Report's lines for a Run a 后台分析登记 started (Issue #864): counts and words only. */
   function backgroundReportList(lines: ReadonlyArray<string>): HTMLElement {
     const list = element('ul', 'analysis-list analysis-run-report-background');
-    for (const line of lines) list.append(element('li', undefined, line));
+    for (const line of lines) list.append(element('li', undefined, serviceWords(line)));
     return list;
   }
 
@@ -536,14 +547,14 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
           const firstRange = unit.entities.flatMap((entity) => entity.sourceRanges)[0] ?? unit.events.flatMap((event) => event.sourceRanges)[0];
           if (firstRange !== undefined) item.append(returnButton(firstRange.blockId));
         } else {
-          item.append(element('p', 'attention-note', `尚未分析：${unit.gap.reason}`));
+          item.append(element('p', 'attention-note', `尚未分析：${serviceWords(unit.gap.reason)}`));
           if (unit.gap.firstBlockId !== null) item.append(returnButton(unit.gap.firstBlockId));
         }
         item.append(technicalDetails(
           'analysis-facts',
-          element('dt', undefined, '分析单元'), element('dd', 'technical-identity', unit.state === 'closed'
+          element('dt', undefined, '分析单元'), element('dd', 'technical-identity', technicalWords(unit.state === 'closed'
             ? `单元 ${unit.unitOrdinal} · 已闭合 · 置信 ${unit.confidence} · ${lineage}`
-            : `单元 ${unit.unitOrdinal} · 缺口 · ${unit.gap.code} · ${lineage}`),
+            : `单元 ${unit.unitOrdinal} · 缺口 · ${unit.gap.code} · ${lineage}`)),
           ...(unit.state === 'gap' && unit.originalTextChanged ? [element('dt', undefined, '原请求'), element('dd', undefined, '原文已修改，原请求无法再核对')] : []),
           ...(unit.state !== 'gap' || unit.gap.parseFailure === undefined ? [] : [
             element('dt', undefined, '解析诊断'), element('dd', 'technical-identity', `${unit.gap.parseFailure.code} · ${unit.gap.parseFailure.detail}`),
@@ -570,7 +581,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const item = element('li');
       item.dataset['analysisGapUnit'] = String(gap.unitOrdinal);
       item.dataset['analysisGapCode'] = gap.code;
-      item.append(element('span', undefined, `${technicalWords(`第 ${gap.unitOrdinal} 个阅读范围 · `)}段落 ${gap.startPosition}–${gap.endPosition} · ${gap.reason} `));
+      item.append(element('span', undefined, `${technicalWords(`第 ${gap.unitOrdinal} 个阅读范围 · `)}段落 ${gap.startPosition}–${gap.endPosition} · ${serviceWords(gap.reason)} `));
       if (gap.firstBlockId !== null) item.append(returnButton(gap.firstBlockId));
       gaps.append(item);
     }
@@ -581,7 +592,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
 
     let afterOrdinal = revision.unitPage.nextOrdinal;
     if (afterOrdinal !== null) {
-      const more = button(technicalWords(ANALYSIS_MORE_RANGES, '显示更多'), 'secondary', async () => {
+      const more = button(analysisMoreRanges(), 'secondary', async () => {
         if (afterOrdinal === null) return;
         more.disabled = true;
         try {
@@ -646,7 +657,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         ? `${revision.update.modeLabel} · 无前一修订版`
         : `${revision.update.modeLabel} · 后继于 Revision ${revision.update.predecessor.ordinal} · ${rangeText(revision.update.selectedRange)}`),
       element('dt', undefined, '单元血缘'), element('dd', 'technical-identity', reuseCountsText(revision.update.counts)),
-      element('dt', undefined, '覆盖'), element('dd', 'technical-identity', `${revision.coverage.unitsClosed}/${revision.coverage.unitsTotal} 个分析单元闭合 · ${revision.coverage.unitsReused} 个按血缘复用 · ${revision.coverage.gapCount} 处缺口 · ${revision.coverage.label}`),
+      element('dt', undefined, '覆盖'), element('dd', 'technical-identity', technicalWords(`${revision.coverage.unitsClosed}/${revision.coverage.unitsTotal} 个分析单元闭合 · ${revision.coverage.unitsReused} 个按血缘复用 · ${revision.coverage.gapCount} 处缺口 · ${revision.coverage.label}`)),
       element('dt', undefined, '归约/综合闭合'), element('dd', 'technical-identity', `${revision.reducerClosure.label} · ${revision.reducerClosure.stages.map((stage) => `${stage.stage}：${stage.state}（${stage.inputCount} 项输入）`).join('；')}`),
       element('dt', undefined, '精确修订版新鲜度'), element('dd', 'technical-identity', `${revision.freshness.label} · 绑定修订版 ${revision.freshness.boundRevisionId} · 当前修订版 ${revision.freshness.currentRevisionId} · 修订日志序号 ${revision.freshness.currentJournalSequence} · 仅通过本地确定性比较判定；不调用 Provider`),
       element('dt', undefined, '语义/证据保证'), element('dd', 'technical-identity', `${revision.assurance.label} · ${revision.assurance.unresolvedConflictCount} 处未解决冲突 · ${revision.assurance.unresolvedItemCount} 项未解决事项 · ${revision.assurance.lowConfidenceUnitCount} 个低置信单元 · ${revision.assurance.crossUnitFindingCount} 条跨单元发现`),
@@ -844,7 +855,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       return;
     }
     const note = taskPlanQuickStartFellBack(result.reasons);
-    setStatus(note);
+    reportResult(setStatus, note);
     openTaskPlan(result.projection.bookId, 'baseline-analysis', taskIntentId, note);
   }
 
@@ -902,7 +913,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       element('dt', undefined, '当前稿件摘要'), element('dd', 'technical-identity', controls.working.workingDigest),
     ));
     if (controls.blockedReason !== null) {
-      section.append(element('p', 'attention-note', controls.blockedReason));
+      section.append(element('p', 'attention-note', serviceWords(controls.blockedReason)));
       if (analysisUpdateBlockedDrawerAction(controls.blockedReason) === 'task-drawer') {
         const openDrawer = button(ANALYSIS_UPDATE_BLOCKED_DRAWER_LABEL, 'secondary', () => openTaskPlan(projection.bookId, 'baseline-analysis', projection.taskIntent?.taskIntentId ?? null));
         openDrawer.dataset['analysisUpdateBlockedLink'] = 'task-drawer';
@@ -912,6 +923,30 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const actionButtons: HTMLButtonElement[] = [];
     const cancel = analysisCancelButton();
     const modes: BaselineAnalysisUpdateMode[] = ['sync-current', 'reanalyze-range', 'reanalyze-book'];
+    // A Task prepared and not yet started keeps its own mode on the card; otherwise the first mode that can run.
+    const preparedMode = projection.state === 'prepared' ? projection.update?.mode : undefined;
+    let activeMode: BaselineAnalysisUpdateMode = preparedMode !== undefined && controls.actions[preparedMode].available ? preparedMode
+      : modes.find(mode => controls.actions[mode].available) ?? 'sync-current';
+    // …and its range, when that mode is 重新分析所选范围.
+    let activeRange: BaselineAnalysisSelectedRange | null = activeMode === 'reanalyze-range' && preparedMode === 'reanalyze-range' ? projection.update?.selectedRange ?? null : null;
+    const launchHost = element('div', 'analysis-actions');
+    const modeButtons = new Map<BaselineAnalysisUpdateMode, HTMLButtonElement>();
+    // The bar's start names the mode it runs, as 0.7.2's per-mode starts did; the pressed mode button shows the same choice.
+    const openUpdateLaunch = (): void => taskDrawer.openLaunch({ bookId: host.dataset['analysisBookId']!, operation: 'launchBaselineAnalysis', title: '分析', mount: launchHost,
+      startLabel: ANALYSIS_UPDATE_START_LABELS[activeMode], startDisabled: updatePreparing,
+      input: { goal: controls.actions[activeMode].goal as Parameters<typeof rendererApi.launchBaselineAnalysis>[0]['goal'], update: { mode: activeMode, selectedRange: null } },
+      readInput: () => ({ goal: controls.actions[activeMode].goal as Parameters<typeof rendererApi.launchBaselineAnalysis>[0]['goal'], update: { mode: activeMode, selectedRange: activeMode === 'reanalyze-range' ? activeRange : null } }),
+      beforeLaunch: async () => {
+        if (!controls.actions[activeMode].available || activeMode === 'reanalyze-range' && activeRange === null) { setStatus('请先选择可用的分析范围。', 'error'); return false; }
+        return true;
+      }, inputEvents: section
+    }, () => launchHost.querySelector('button'));
+    syncUpdateBar = () => { if (launchHost.isConnected) openUpdateLaunch(); };
+    const selectMode = (mode: BaselineAnalysisUpdateMode): void => {
+      activeMode = mode;
+      for (const [entry, choice] of modeButtons) choice.setAttribute('aria-pressed', String(entry === mode));
+      openUpdateLaunch();
+    };
     for (const mode of modes) {
       const action = controls.actions[mode];
       const block = element('section', 'analysis-update-action');
@@ -931,9 +966,9 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const expectedExact = element('dd', 'technical-identity', action.expected === null ? '由所选范围决定' : reuseCountsText(action.expected));
       if (technicalLayerVisible) block.append(expected, technicalDetails('analysis-facts',
         element('dt', undefined, '预期单元血缘'), expectedExact,
-        element('dt', undefined, '固定任务目标'), element('dd', 'technical-identity', action.goal)));
-      if (action.unavailableReason !== null) block.append(element('p', 'attention-note', action.unavailableReason));
-      let selectedRange: BaselineAnalysisSelectedRange | null = null;
+        element('dt', undefined, technicalWords('固定任务目标')), element('dd', 'technical-identity', action.goal)));
+      if (action.unavailableReason !== null) block.append(element('p', 'attention-note', serviceWords(action.unavailableReason)));
+      let selectedRange: BaselineAnalysisSelectedRange | null = mode === 'reanalyze-range' ? activeRange : null;
       if (mode === 'reanalyze-range') {
         const fieldset = element('fieldset', 'analysis-range-options');
         fieldset.append(element('legend', undefined, '选择要重新分析的连续范围'));
@@ -949,10 +984,14 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
             radio.id = `analysis-range-${option.unitOrdinal}`;
             radio.value = `${option.startPosition}-${option.endPosition}`;
             radio.disabled = !action.available;
+            if (selectedRange !== null && selectedRange.startPosition === option.startPosition && selectedRange.endPosition === option.endPosition) {
+              radio.checked = true; block.dataset['selectedRange'] = radio.value;
+            }
             radio.addEventListener('change', async () => {
               if (!radio.checked) return;
               // The pick is the range at once, as before; only its expected counts are derived for it (#988), so they follow.
               selectedRange = { startPosition: option.startPosition, endPosition: option.endPosition };
+              activeRange = selectedRange; selectMode('reanalyze-range');
               block.dataset['selectedRange'] = radio.value;
               for (const key of ['expectedReused', 'expectedRecomputed', 'expectedInvalidated', 'expectedBypassed']) delete block.dataset[key];
               expected.textContent = `所选段落 ${option.startPosition}–${option.endPosition}：${ANALYSIS_READING}`;
@@ -971,7 +1010,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
               } catch {
                 if (!radio.checked || !block.isConnected) return;
                 // A range the current manuscript no longer derives, or whose counts cannot be read, is not started.
-                selectedRange = null;
+                selectedRange = null; activeRange = null;
                 delete block.dataset['selectedRange'];
                 start.disabled = true;
                 setStatus(ANALYSIS_READ_FAILED, 'error');
@@ -1004,20 +1043,24 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         }
         block.append(fieldset);
       }
-      const start = button('查看计划', 'secondary', async () => {
-        const update: BaselineAnalysisUpdateRequest = { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null };
-        if (mode === 'reanalyze-range' && update.selectedRange === null) {
-          setStatus('请先选择要重新分析的范围。', 'error');
-          return;
-        }
-        await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update, reconfirm: false }, {
-          start,
-          cancel,
-          others: actionButtons.filter((other) => other !== start),
-        }, null, true);
+      // A Task prepared and not yet started (a quick start held offline, say) keeps 0.7.2's path: the mode's button prepares it again
+      // with the mode and range chosen and opens its plan, where a changed plan is reconfirmed; otherwise it only chooses the mode.
+      const start = button(action.label, 'secondary', async () => {
+        selectMode(mode);
+        if (projection.state !== 'prepared') return;
+        if (mode === 'reanalyze-range' && selectedRange === null) { setStatus('请先选择要重新分析的范围。', 'error'); return; }
+        // The card bar waits through its own start state while this prepares, so a range pick or a settings read cannot re-enable
+        // it, and every exit (prepared, cancelled, refused) gives it back as its own state says.
+        updatePreparing = true; syncUpdateBar?.();
+        try {
+          await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update: { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null }, reconfirm: false },
+            { start, cancel, others: actionButtons.filter((other) => other !== start) }, null, true);
+        } finally { updatePreparing = false; syncUpdateBar?.(); }
       });
+      start.setAttribute('aria-pressed', String(activeMode === mode));
+      modeButtons.set(mode, start);
       start.dataset['analysisAction'] = mode;
-      start.disabled = !action.available || mode === 'reanalyze-range';
+      start.disabled = !action.available || mode === 'reanalyze-range' && selectedRange === null;
       actionButtons.push(start);
       // The mode's own button opens the two ways to begin (editor-surfaces §3). 先看计划 prepares the Task
       // and shows its plan in the drawer, whose bar starts it. The quick start is the Book's 默认执行规则's to give
@@ -1026,7 +1069,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       // Run never starts behind a plan the editor has not seen and no rule has spoken for.
       const quickStart = action.quickStart ?? null;
       const quickRule = quickStart !== null && quickStart.available ? quickStart.rule : null;
-      const quick = button(mode === 'sync-current' ? '开始同步' : mode === 'reanalyze-range' ? '开始重新分析' : '开始全部重来', mode === 'sync-current' ? 'primary' : 'secondary', async () => {
+      const quick = button(ANALYSIS_UPDATE_START_LABELS[mode], mode === 'sync-current' ? 'primary' : 'secondary', async () => {
         if (mode === 'reanalyze-range' && selectedRange === null) { setStatus('请先选择要重新分析的范围。', 'error'); return; }
         await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update: { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null }, reconfirm: false }, {
           start: quick,
@@ -1041,11 +1084,13 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       actionButtons.push(quick);
       // The mode's start and 查看计划 stand on the card at once (Issue #1410 item 15): no button only unfolds them.
       const actions = element('div', 'button-row analysis-actions');
-      actions.append(quick, start);
+      actions.append(start);
+      if (quickRule !== null) actions.append(quick);
       block.append(actions);
       section.append(block);
     }
-    section.append(cancel);
+    openUpdateLaunch();
+    section.append(launchHost, cancel);
     card.append(section);
   }
 
@@ -1072,7 +1117,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         const next = await rendererApi.inspectBaselineAnalysis({ revisionId });
         if (host.isConnected && next.bookId === host.dataset['analysisBookId']) {
           renderBaselineAnalysis(host, next, bookTitle);
-          setStatus(revisionId === null ? technicalWords('已返回最新修订版。', '已返回最新分析。') : technicalWords('历史修订版已只读打开。', '已打开历史分析。'), 'success');
+          setStatus(revisionId === null ? technicalWords('已返回最新修订版。', '已返回最新分析。') : technicalWords('历史修订版已只读打开。', '已打开历史分析。'));
         }
       } catch (error) {
         setStatus(rendererErrorMessage(error, '无法打开该分析结果。'), 'error');
@@ -1099,7 +1144,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
             element('dt', undefined, '修订版'),
             element('dd', 'technical-identity', `Revision ${entry.ordinal} · ${entry.freshnessLabel} · 前一修订版 ${entry.predecessor === null ? '无' : `Revision ${entry.predecessor.ordinal}`} · 创建于 ${entry.createdAt}`),
             element('dt', undefined, '单元血缘与计数'),
-            element('dd', 'technical-identity', `${reuseCountsText(entry.counts)} · 缺口 ${entry.gapCount} · 冲突 ${entry.conflictCount} · 覆盖 ${entry.unitsClosed}/${entry.unitsTotal}`),
+            element('dd', 'technical-identity', technicalWords(`${reuseCountsText(entry.counts)} · 缺口 ${entry.gapCount} · 冲突 ${entry.conflictCount} · 覆盖 ${entry.unitsClosed}/${entry.unitsTotal}`)),
             element('dt', undefined, '修订版身份'),
             element('dd', 'technical-identity', `${entry.revisionId} · 摘要 ${entry.digest} · 稿件 pin ${entry.manuscriptPin.revisionId} · ${entry.manuscriptPin.revisionDigest}`),
             element('dt', undefined, '产出 Run 与用量'),
@@ -1190,7 +1235,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const heading = element('div', 'baseline-analysis-heading');
     heading.append(
       element('h3', undefined, technicalWords('基线稿件分析 · 不修改稿件', '稿件分析')),
-      element('span', `state-term status-pill analysis-state analysis-state-${projection.state}`, projection.stateLabel),
+      element('span', `state-term status-pill analysis-state analysis-state-${projection.state}`, serviceWords(projection.stateLabel)),
     );
     // The binding clause reads the launch this Book actually bound: the frozen plan's pin first, then the
     // pin the latest Revision recorded, and before either exists there is no launch to state.
@@ -1199,8 +1244,8 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     if (projection.taskOutcome?.report && ['failed', 'completed-with-gaps'].includes(projection.taskOutcome.classification)) {
       const report = projection.taskOutcome.report;
       const reason = report.classification === 'failed'
-        ? report.failures.find((failure) => failure.code === 'NO_CLOSED_UNITS')?.reason ?? analysisRunSummary(report).reason
-        : analysisRunSummary(report).reason;
+        ? serviceWords(report.failures.find((failure) => failure.code === 'NO_CLOSED_UNITS')?.reason ?? analysisRunSummary(report).reason)
+        : serviceWords(analysisRunSummary(report).reason);
       card.append(element('p', 'attention-note', `${projection.taskOutcome.label}${reason === null ? '' : ` · ${reason}`}`));
     }
 
@@ -1216,7 +1261,8 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       unchanged: (next) => JSON.stringify(next) === JSON.stringify(projection),
       again: () => analysisFollowDelayMs(projection.state),
       // An open 分析反馈 card the editor is in stays as it is: the Run's progress is drawn once they leave it (Issue #94 review).
-      held: () => analysisFeedbackEngaged(host) || pollControlEngaged(host, false),
+      // The editor in the form for a new 自定义 dimension, or its save out, is not drawn over either (the same rule as 分析反馈).
+      held: () => analysisFeedbackEngaged(host) || pollControlEngaged(host, false) || customDimensionFormEngaged(host),
       draw: (next) => { const restore = retainPollInteraction(host); renderBaselineAnalysis(host, next, bookTitle); restore(); },
       failed: (error) => setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error'),
     });
@@ -1241,6 +1287,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     mountCustomAnalysisTab(panels.custom, {
       bookId: projection.bookId,
       api: rendererApi,
+      author: { api: rendererApi },
       setStatus,
       errorMessage: rendererErrorMessage,
       openPlan: (taskIntentId) => openTaskPlan(projection.bookId, 'baseline-analysis', taskIntentId),
@@ -1253,7 +1300,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     // it waited to start leaves no revision either, so the form is offered again (Issue #502, OFF-010).
     if ((projection.state === 'available' || (projection.state === 'cancelled' && projection.actions.canPrepare)) && projection.history === null) {
       const form = element('section', 'form-row analysis-form');
-      const label = element('label', undefined, '固定任务目标');
+      const label = element('label', undefined, '任务目标');
       label.htmlFor = 'j04-analysis-goal';
       const goal = element('input');
       goal.id = 'j04-analysis-goal';
@@ -1261,12 +1308,11 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       goal.readOnly = true;
       const actions = element('div', 'button-row analysis-actions');
       const cancel = analysisCancelButton();
-      const start = button('开始分析', 'primary', () =>
-        startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start, cancel, others: [] }));
-      start.dataset['analysisAction'] = 'start';
-      const preview = button('查看计划', 'secondary', () => startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: preview, cancel, others: [start] }, null, true));
-      preview.dataset['analysisAction'] = 'prepare';
-      actions.append(start, preview, cancel);
+      taskDrawer.openLaunch({ bookId: host.dataset['analysisBookId']!, operation: 'launchBaselineAnalysis', title: '分析', mount: actions,
+        input: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } }, () => actions.querySelector('button'));
+      actions.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-analysis-action', 'start');
+      actions.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-analysis-action', 'prepare');
+      actions.append(cancel);
       form.append(label, goal, actions);
       records.append(form);
       host.replaceChildren(card);
@@ -1299,13 +1345,11 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const restart = element('section', 'form-row analysis-form analysis-restart');
       const restartActions = element('div', 'button-row analysis-actions');
       const restartCancel = analysisCancelButton();
-      const restartStart = button('重新开始分析', 'primary', () =>
-        startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartStart, cancel: restartCancel, others: [restartPreview] }));
-      restartStart.dataset['analysisAction'] = 'start';
-      const restartPreview = button('查看计划', 'secondary', () =>
-        startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartPreview, cancel: restartCancel, others: [restartStart] }, null, true));
-      restartPreview.dataset['analysisAction'] = 'prepare';
-      restartActions.append(restartStart, restartPreview, restartCancel);
+      taskDrawer.openLaunch({ bookId: host.dataset['analysisBookId']!, operation: 'launchBaselineAnalysis', title: '分析', mount: restartActions,
+        input: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } }, () => restartActions.querySelector('button'));
+      restartActions.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-analysis-action', 'start');
+      restartActions.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-analysis-action', 'prepare');
+      restartActions.append(restartCancel);
       restart.append(restartActions);
       records.append(restart);
     }
@@ -1410,8 +1454,8 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     if (revision !== null) {
       const note = element('p', 'attention-note analysis-plan-drift-note', projection.actions.canReconfirmPlan
         ? technicalWords(`${TASK_PLAN_DRIFT_HEADING}：原计划不能再开始；在任务计划里查看计划修订并重新确认计划后，新的计划版本才能开始。`,
-          `${TASK_PLAN_DRIFT_HEADING}：请在任务计划里查看变化，按新计划开始。`)
-        : `${TASK_PLAN_DRIFT_HEADING}：要更新的那一份分析已不是最新的一份；请基于最新的一份重新准备。`);
+          `${TASK_PLAN_DRIFT_HEADING}：请在任务计划里查看变化后重新开始。`)
+        : `${TASK_PLAN_DRIFT_HEADING}：要更新的那一份分析已不是最新的一份；请基于最新的一份另做一份计划。`);
       note.dataset['planRevisionState'] = revision.planRevisionId === null ? 'live' : 'pending';
       note.dataset['planRevisionPrior'] = String(revision.priorOrdinal);
       note.dataset['planRevisionFields'] = revision.changedFields.join(',');
@@ -1425,7 +1469,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     if (run) {
       const runSection = element('section', 'analysis-run');
       runSection.dataset['runState'] = run.state;
-      runSection.append(element('h4', undefined, `${technicalWords('任务运行记录', '任务')} · ${run.stateLabel}`));
+      runSection.append(element('h4', undefined, `${technicalWords('任务运行记录', '任务')} · ${serviceWords(run.stateLabel)}`));
       const runFacts = element('dl', 'analysis-facts');
       // Ordinary mode keeps the state, progress, result and readable failure; authorization, the transition enum, adaptations,
       // credential readiness and Harness spans are the developer layer's facts (Issue #1431 item 65).
@@ -1458,7 +1502,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         // That the credential readiness check released no value is a Provider decision the editor is owed
         // at full rank; the attempt's identity and binding digest are the technical half of the same fact.
         runFacts.append(
-          element('dt', undefined, '凭据就绪检查'), element('dd', undefined, `${run.attempt.credentialReadinessCheck.readiness} · 未释放任何值`),
+          element('dt', undefined, technicalWords('凭据就绪检查')), element('dd', undefined, `${run.attempt.credentialReadinessCheck.readiness} · 未释放任何值`),
           element('dt', undefined, 'Harness 执行区段'), element('dd', undefined, `${run.attempt.spanCount} 个区段（按标识引用，不复制内容）`),
         );
       }
@@ -1474,7 +1518,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       if (run.blockedReasons) {
         const reasons = element('ul', 'analysis-list attention-note');
         reasons.dataset['analysisBlocked'] = 'blocked-before-dispatch';
-        for (const reason of run.blockedReasons) reasons.append(element('li', undefined, reason));
+        for (const reason of run.blockedReasons) reasons.append(element('li', undefined, serviceWords(reason)));
         runSection.append(reasons);
       }
       if (run.progress) {
@@ -1500,7 +1544,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
           ...(elapsedMs === null ? [] : [`本步已用时 ${elapsedLabel(elapsedMs)}`]),
         ].join(' · ') : [
           RUN_LIVENESS_STAGE_LABELS[facts.stage],
-          `已读完 ${facts.unitsSettled} / ${facts.unitsTotal} 个阅读范围${projection.update === null ? '' : '（只算要重新分析的）'}`,
+          technicalWords(`已读完 ${facts.unitsSettled} / ${facts.unitsTotal} 个阅读范围${projection.update === null ? '' : '（只算要重新分析的）'}`),
           ...(facts.currentUnitOrdinal === null ? [] : [`正在读第 ${facts.currentUnitOrdinal} 个`]),
           ...(elapsedMs === null ? [] : [`本步已用时 ${elapsedLabel(elapsedMs)}`]),
           ...(facts.attemptState === null ? [] : [attemptStateLabel(facts.attemptState)]),

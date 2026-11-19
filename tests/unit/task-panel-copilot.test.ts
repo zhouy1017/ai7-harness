@@ -39,7 +39,7 @@ function harness() {
   const drawer: TaskDrawerSurface = mountTaskDrawer({
     resumeDraft: (bookId: string, resume: () => void) => { selectedBook = bookId; resume(); },
     root, shell: miniDocument.body, api, technicalDetails: () => miniDocument.createElement('div'),
-    errorMessage: (_error: unknown, fallback: string) => fallback, errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onRecorded: vi.fn(),
+    errorMessage: (_error: unknown, fallback: string) => fallback, errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onClose: vi.fn(), onRecorded: vi.fn(),
   } as unknown as MountTaskDrawerOptions);
   const find = (selector: string): MiniElement | null => root.querySelector(selector);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -63,7 +63,7 @@ describe('the 任务 panel as the right co-pilot', () => {
     expect(reads.tasks).toBe(9);
   });
 
-  it('closes on 全域智能体, releases its column and stops book reads', async () => {
+  it('closes on AI 助手, releases its column and stops book reads', async () => {
     const { root, drawer, reads, settle } = harness();
     drawer.openPanel(BOOK, () => null);
     await settle();
@@ -127,4 +127,19 @@ it.each(['plan','run'] as const)('exposes the watched task identity in the real 
  drawer.open({bookId:BOOK,kind:'baseline-analysis',ref:'watched-task'},()=>null,undefined,{view});
  await settle();
  expect(drawer.view()).toEqual({kind:'plan',bookId:BOOK,task:{kind:'baseline-analysis',ref:'watched-task'}});
+});
+
+it.each(['tasks', 'plans'] as const)('reads the restored %s column again after temporary suspension', async (kind) => {
+  const { drawer, root, reads, settle } = harness();
+  if (kind === 'tasks') drawer.openPanel(BOOK, () => null);
+  else drawer.open({ bookId: BOOK, kind: 'baseline-analysis', ref: 'plan' }, () => null);
+  await settle();
+  const before = reads[kind];
+  drawer.setColumnVisible(false);
+  expect(root.hidden).toBe(true);
+  drawer.setColumnVisible(true);
+  await settle();
+  expect(root.hidden).toBe(false);
+  expect(reads[kind]).toBeGreaterThan(before);
+  drawer.close(false);
 });

@@ -1,10 +1,12 @@
+import { rightColumnGeometry } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { lstat, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
+import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, statusBarClear } from './controller.mjs';
+import { pointerClick } from './dispatch-chooser.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -78,6 +80,97 @@ async function assertCardFrames(renderer) {
   })()`, 'shell-card-frames-survive');
 }
 
+// #1521: 设置 stays inside the window with a Book open, whatever the window's height. At the sizes the guests (1280×800) and the hosted
+// Gate (1008×681) use, in the expanded and in the icon form of the sidebar, 设置 lies wholly inside innerWidth × innerHeight without any
+// scripted scrolling, is the element a hit test at its centre returns, and a real pointer press on it opens the settings page.
+const settingsInView = (width, height, form) => `(() => {
+  const bar=document.querySelector('#app-sidebar'), link=bar?.querySelector('[data-nav-settings]');
+  if(!(bar instanceof HTMLElement)||!(link instanceof HTMLElement)||innerWidth!==${width}||innerHeight!==${height}||document.documentElement.dataset.sidebar!==${JSON.stringify(form)}||bar.querySelector('.sidebar-book')?.hidden!==false) return false;
+  const box=link.getBoundingClientRect(), hit=document.elementFromPoint(box.left+box.width/2, box.top+box.height/2);
+  return box.width>0 && box.height>0 && box.top>=0 && box.left>=0 && box.bottom<=innerHeight && box.right<=innerWidth && hit instanceof Node && link.contains(hit);
+})()`;
+
+async function checkSettingsPinned(renderer) {
+  for (const [width, height] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    for (const form of ['full', 'icons']) {
+      const name = `${width}x${height}-${form}`;
+      if (form === 'icons') {
+        await pointerClick(renderer, waitFor, '#sidebar-toggle', `sidebar-settings-collapse-${width}`);
+        await waitFor(renderer, `document.documentElement.dataset.sidebar==='icons'`, `sidebar-settings-icons-${width}`);
+      }
+      await waitFor(renderer, settingsInView(width, height, form), `sidebar-settings-in-view-${name}`);
+      await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-settings]', `sidebar-settings-press-${name}`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `sidebar-settings-opened-${name}`);
+      await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-book-section="manuscript"]', `sidebar-settings-return-${name}`);
+      await waitFor(renderer, `document.querySelector('.editor-window')`, `sidebar-settings-returned-${name}`);
+      if (form === 'icons') {
+        await pointerClick(renderer, waitFor, '#sidebar-toggle', `sidebar-settings-expand-${width}`);
+        await waitFor(renderer, `document.documentElement.dataset.sidebar==='full' && document.documentElement.dataset.sidebarCollapsed==='false'`, `sidebar-settings-full-${width}`);
+      }
+    }
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
+}
+
+/** Real wheel input at a point until the scroller is at its end or stops moving. */
+async function wheelToEnd(renderer, scroller, pointExpression) {
+  const read = () => renderer.evaluate(`(() => { const node=document.querySelector(${JSON.stringify(scroller)}); const point=(${pointExpression})(); return { top: node.scrollTop, end: node.scrollHeight-node.clientHeight, point }; })()`);
+  for (let step = 0; step < 80; step += 1) {
+    const before = await read();
+    if (before.end <= 1 || before.top >= before.end - 1) return;
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: before.point.x, y: before.point.y, deltaX: 0, deltaY: 240 });
+    const deadline = Date.now() + 400;
+    while (Date.now() < deadline && (await read()).top === before.top) await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    if ((await read()).top === before.top) return;
+  }
+}
+
+// #1521: a long Book list, at the same two sizes with the rows present (synthesized rows, as checkSidebarPrototype does): the list
+// scrolls under real wheel input, its last row ends above the pinned foot and is the element a hit test there returns, and 设置 stays
+// inside the viewport. The sidebar's own scroll is reached by wheeling over its left margin, never by a script.
+async function checkLongBookList(renderer) {
+  for (const [width, height] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await waitFor(renderer, `innerWidth===${width} && innerHeight===${height} && document.documentElement.dataset.sidebar==='full'`, `sidebar-long-list-size-${width}`);
+    await assertRenderer(renderer, `(() => { const books=document.querySelector('#app-sidebar .sidebar-books > div'); const row=books?.querySelector('.sidebar-book-row'); if(!row) return false; for(let i=0;i<28;i++){ const copy=row.cloneNode(true); copy.dataset.syntheticRow='true'; books.append(copy); } return books.scrollHeight>books.clientHeight+1; })()`, `sidebar-long-list-rows-${width}`);
+    try {
+      await wheelToEnd(renderer, '#app-sidebar', `() => ({ x: 3, y: innerHeight / 2 })`);
+      await wheelToEnd(renderer, '#app-sidebar .sidebar-books > div', `() => { const r=document.querySelector('#app-sidebar .sidebar-books > div').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }`);
+      await assertRenderer(renderer, `(() => {
+        const bar=document.querySelector('#app-sidebar'), books=bar.querySelector('.sidebar-books > div'), foot=bar.querySelector('.sidebar-foot'), settings=foot.querySelector('[data-nav-settings]');
+        const last=[...books.querySelectorAll('.sidebar-book-row')].at(-1)?.querySelector('a.sidebar-link');
+        if(!(last instanceof HTMLElement)||innerWidth!==${width}||innerHeight!==${height}) return false;
+        const list=books.getBoundingClientRect(), box=last.getBoundingClientRect(), footBox=foot.getBoundingClientRect(), hit=document.elementFromPoint(box.left+box.width/2, box.top+box.height/2);
+        const settingsBox=settings.getBoundingClientRect(), settingsHit=document.elementFromPoint(settingsBox.left+settingsBox.width/2, settingsBox.top+settingsBox.height/2);
+        return books.scrollTop>0 && books.scrollTop>=books.scrollHeight-books.clientHeight-1 && box.top>=Math.max(0,list.top-1) && box.bottom<=list.bottom+1 && box.bottom<=footBox.top+1 && last.contains(hit)
+          && settingsBox.top>=0 && settingsBox.bottom<=innerHeight && settingsBox.right<=innerWidth && settings.contains(settingsHit);
+      })()`, `sidebar-long-list-reachable-${width}`);
+    } finally {
+      await renderer.evaluate(`(() => { document.querySelectorAll('#app-sidebar [data-synthetic-row]').forEach((row) => row.remove()); document.querySelector('#app-sidebar').scrollTop = 0; return true; })()`).catch(() => undefined);
+    }
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
+}
+
+// #1521: the open Book has no row in the list, so its star lives on its heading: shown on hover, pressed with the pointer, then pressed
+// again from the keyboard (which restores its state); the Book stays out of the list, and the star keeps the focus through both writes.
+async function checkCurrentBookPin(renderer) {
+  const row = '#app-sidebar .sidebar-current-book-row', pin = `${row} [data-nav-current-pin]`;
+  const state = (pressed) => `(() => { const star=document.querySelector(${JSON.stringify(pin)}); const id=document.querySelector('#app-sidebar .sidebar-book')?.dataset.bookId; return star instanceof HTMLButtonElement && !star.hidden && star.getAttribute('aria-pressed')===${JSON.stringify(pressed)} && typeof id==='string' && !document.querySelector('#app-sidebar [data-nav-book="'+id+'"]'); })()`;
+  const initial = await renderer.evaluate(`document.querySelector(${JSON.stringify(pin)})?.getAttribute('aria-pressed')`);
+  requireJourney(initial === 'true' || initial === 'false', 'current-book-pin-initial');
+  const flipped = initial === 'true' ? 'false' : 'true';
+  await waitFor(renderer, state(initial), 'current-book-pin-state');
+  const center = await renderer.evaluate(`(() => { const r=document.querySelector(${JSON.stringify(row)}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...center });
+  await pointerClick(renderer, waitFor, pin, 'current-book-pin-press');
+  await waitFor(renderer, state(flipped), 'current-book-pin-flipped');
+  await assertRenderer(renderer, `(() => { const star=document.querySelector(${JSON.stringify(pin)}); star.focus(); return document.activeElement===star; })()`, 'current-book-pin-focus');
+  await pressKey(renderer, ENTER_KEY);
+  await waitFor(renderer, `${state(initial)} && document.activeElement===document.querySelector(${JSON.stringify(pin)})`, 'current-book-pin-restored-focus-kept');
+}
+
 // #1325: actual shell layout, shortcut dispatch and menu; shared selectors cover all other Journeys.
 async function checkSidebarPrototype(renderer) {
   await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
@@ -141,6 +234,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-03' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -306,8 +400,8 @@ async function runSettingsPages(renderer, cancellation) {
   at('usage-settings');
   cancellation.throwIfRequested();
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'usage-open-settings');
-  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'usage-hub-ready');
-  await clickSelector(renderer, '[data-settings-route="usage"]', 'usage-open');
+  await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'usage-hub-ready');
+  await clickSelector(renderer, '.settings-navigation [data-settings-nav="usage"]', 'usage-open');
   await waitFor(renderer, `document.querySelector('[data-screen="usage"] .usage-page[data-usage-range]') && document.querySelector('[data-usage-empty]')`, 'usage-ready');
   // Nothing has run in this data root: the page says so, offers no export, and shows no cost it could not have.
   await assertRenderer(renderer, `document.querySelector('[data-usage-empty]').textContent==='尚无用量' && document.querySelector('[data-usage-export]').closest('.button-row').hidden===true && !document.querySelector('[data-usage-cost]')`, 'usage-empty');
@@ -320,8 +414,6 @@ async function runSettingsPages(renderer, cancellation) {
   await assertRenderer(renderer, `(() => { const submit=document.querySelector('[data-usage-price-route="opencode-go"] button[type="submit"]'); if(!(submit instanceof HTMLButtonElement))return false; submit.click(); return true; })()`, 'usage-price-submit');
   await waitForValue(renderer, `window.ai7.getPreferences().then((preferences)=>{ const held=preferences.values['usage.unitPrices']['opencode-go']; return held?.inputPerMillion===2 && held.outputPerMillion===8 && held.currency==='CNY' && held.enteredAt.length===10; })`, 'usage-price-kept');
   await assertRenderer(renderer, `document.querySelector('[data-usage-price-route="opencode-go"] .usage-price-note')?.textContent.includes('录入于')`, 'usage-price-dated');
-  await click(renderer, '返回', 'usage-back');
-  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'usage-back-library');
 
   at('keyboard-settings');
   cancellation.throwIfRequested();
@@ -332,9 +424,20 @@ async function runSettingsPages(renderer, cancellation) {
 
   // Q1: the shared command registry is reachable from the palette, and its added shortcuts are listed here.
   await assertRenderer(renderer, `['command.palette','book.switch','review.new','evaluation.start','nav.tasks'].every(id=>document.querySelector('[data-keyboard-command="'+id+'"]'))`, 'quick-shortcuts-listed');
-  await chord('KeyK', 'k', mod);
-  await waitFor(renderer, `document.querySelector('.command-palette')?.open===true && document.querySelector('.command-palette-results')?.textContent.includes('新建审阅') && document.querySelector('.command-palette-results')?.textContent.includes('发起任务')`, 'command-palette-open');
-  await assertRenderer(renderer, `(() => { const sheet=document.querySelector('.command-palette'); sheet.close(); return !sheet.open; })()`, 'command-palette-close');
+  // #1522: on a global page the palette lists only what does something there — no Book commands, no editing commands — and an
+  // empty answer says so; at both Gate window sizes, inside the window.
+  for (const [paletteWidth, paletteHeight] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: paletteWidth, height: paletteHeight, deviceScaleFactor: 1, mobile: false });
+    await waitFor(renderer, `innerWidth === ${paletteWidth} && innerHeight === ${paletteHeight}`, `command-palette-size-${paletteWidth}`);
+    await chord('KeyK', 'k', mod);
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('.command-palette'); const text=sheet?.querySelector('.command-palette-results')?.textContent ?? ''; const rect=sheet?.getBoundingClientRect(); return sheet?.open===true && text.includes('书库') && text.includes('发起任务') && !text.includes('新建审阅') && !text.includes('开始评估') && !text.includes('查找') && !text.includes('保存') && rect.right <= innerWidth && rect.bottom <= innerHeight; })()`, `command-palette-open-${paletteWidth}`);
+    await renderer.send('Input.insertText', { text: '没有这样的命令' });
+    await waitFor(renderer, `document.querySelector('.command-palette-none')?.textContent === '没有匹配的命令'`, `command-palette-none-${paletteWidth}`);
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...ESCAPE_KEY });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...ESCAPE_KEY });
+    await waitFor(renderer, `document.querySelector('.command-palette')?.open === false`, `command-palette-close-${paletteWidth}`);
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
 
   at('keyboard-remap-refused');
   cancellation.throwIfRequested();
@@ -383,7 +486,7 @@ async function runSettingsPages(renderer, cancellation) {
   at('keyboard-restore-default');
   cancellation.throwIfRequested();
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'series-back');
-  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'series-back-library');
+  await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'series-back-library');
   await click(renderer, '键盘与无障碍', 'keyboard-reopen');
   await waitFor(renderer, `document.querySelector('[data-screen="keyboard"]')`, 'keyboard-reopen-screen');
   await waitForValue(renderer, `${bindings}.then((held)=>held==='{"nav.series":"Mod+Shift+U"}')`, 'keyboard-reopen-preference');
@@ -393,27 +496,31 @@ async function runSettingsPages(renderer, cancellation) {
   await assertRenderer(renderer, `document.querySelector('[data-nav-destination="series"]')?.title.includes(${JSON.stringify(seriesDefault)})`, 'keyboard-sidebar-label-restored');
   // A freed default may have been taken by another command; restoring it must name and refuse the conflict.
   await renderer.evaluate(`window.ai7.savePreference({ key: 'keyboard.bindings', value: { 'nav.series': 'Mod+Shift+U', 'nav.library': ${JSON.stringify(darwin ? 'Mod+Alt+3' : 'Alt+3')} } })`);
-  await click(renderer, '返回', 'keyboard-reset-conflict-back');
-  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'keyboard-reset-conflict-library');
+  await click(renderer, '外观', 'keyboard-reset-conflict-back');
+  await waitFor(renderer, `document.querySelector('[data-screen="appearance"]')`, 'keyboard-reset-conflict-library');
   await click(renderer, '键盘与无障碍', 'keyboard-reset-conflict-reopen');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesRemapped)}`, 'keyboard-reset-conflict-ready');
   await clickSelector(renderer, '[data-keyboard-reset="nav.series"]', 'keyboard-reset-conflict');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('「书库」') && ${label('nav.series')}===${JSON.stringify(seriesRemapped)}`, 'keyboard-reset-conflict-refused');
+  // #1519: the refusal stands in a bar fixed to the bottom of the content area — inside the window, beside the sidebar, on a page taller
+  // than the window and without scrolling — and its appearance did not change the page's height. Both Gate-relevant window sizes.
+  for (const [width, height] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await waitFor(renderer, `innerWidth === ${width} && innerHeight === ${height} && scrollY === 0 && document.documentElement.scrollHeight > innerHeight && ${statusBarClear()}`, `keyboard-error-fixed-${width}`);
+  }
+  // The settings pages run at the window's own size: the override ends here, so a later stage reads the real window.
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
   // 全部恢复默认 for the whole section.
   await renderer.evaluate(`window.ai7.savePreference({ key: 'keyboard.bindings', value: { 'nav.series': 'Mod+Shift+U', 'nav.knowledge': 'Mod+Shift+K' } })`);
-  await click(renderer, '返回', 'keyboard-back');
-  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'keyboard-back-library');
+  await click(renderer, '外观', 'keyboard-back');
+  await waitFor(renderer, `document.querySelector('[data-screen="appearance"]')`, 'keyboard-back-library');
+  // A stale refusal does not follow the editor to another page.
+  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.hidden===true && !document.querySelector('#persistence-status')?.textContent.includes('「书库」')`, 'keyboard-error-cleared-on-page-change');
   await click(renderer, '键盘与无障碍', 'keyboard-reopen-all');
   await waitFor(renderer, `${label('nav.knowledge')}===${JSON.stringify(darwin ? 'Command+Shift+K' : 'Ctrl+Shift+K')}`, 'keyboard-two-remaps');
   await clickSelector(renderer, '[data-keyboard-reset-all]', 'keyboard-reset-all');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesDefault)}`, 'keyboard-all-restored');
   await waitForValue(renderer, `${bindings}.then((held)=>held==='{}')`, 'keyboard-all-restored-kept');
-  // A4: a later successful reset leaves the earlier refusal visible until the editor acknowledges it.
-  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('「书库」') && document.querySelector('#persistence-status')?.hidden===false`, 'keyboard-error-retained-after-success');
-  await clickSelector(renderer, '#persistence-status .status-dismiss', 'keyboard-error-dismiss');
-  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.hidden===true`, 'keyboard-error-dismissed');
-  await click(renderer, '返回', 'keyboard-done');
-  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'keyboard-done-hub');
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'keyboard-done-library');
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'keyboard-done-library-ready');
 }
@@ -861,8 +968,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
-    await click(renderer, '模型服务', 'model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     at('model-settings-ready');
     cancellation.throwIfRequested();
@@ -880,7 +986,7 @@ async function main() {
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference) && readyConnection?.credentialOperationState === 'ready', 'model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
     cancellation.throwIfRequested();
-    await click(renderer, '移除凭据', 'model-remove');
+    await click(renderer, '移除密钥', 'model-remove');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     at('model-credential-removed');
     const missingConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
@@ -897,9 +1003,10 @@ async function main() {
     await clickSelector(renderer, `[data-nav-pin="${imported.bookId}"]`, 'book-row-pin');
     await waitFor(renderer, `document.querySelector('[data-nav-books="pinned"] [data-nav-pin="${imported.bookId}"]')`, 'book-row-pinned');
     await assertRenderer(renderer, `!document.querySelector('[data-shell-book-switcher]')`, 'book-switcher-removed');
-    await assertRenderer(renderer, `(() => { const link=document.querySelector('[data-nav-book="${crossBookId}"]'); if(!(link instanceof HTMLAnchorElement))return false; link.click(); return true; })()`, 'book-row-open');
+    await pointerClick(renderer, waitFor, `[data-nav-book="${crossBookId}"]`, 'book-row-open');
     await waitFor(renderer, `document.querySelector('.book-overview')?.dataset.bookId===${JSON.stringify(crossBookId)}`, 'book-row-route');
-    await assertRenderer(renderer, `document.querySelector('[data-nav-book][aria-current="true"]')?.dataset.navBook===${JSON.stringify(crossBookId)}`, 'book-row-current');
+    // #1521: the open Book is the heading of its groups and has no row of its own.
+    await assertRenderer(renderer, `(() => { const group=document.querySelector('#app-sidebar .sidebar-book'); return group?.hidden===false && group.dataset.bookId===${JSON.stringify(crossBookId)} && group.querySelector('.sidebar-current-book')?.textContent===document.querySelector('#context-title')?.textContent && !document.querySelector('[data-nav-book=${JSON.stringify(crossBookId)}], [data-nav-book][aria-current]'); })()`, 'book-row-current');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'book-row-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'book-row-library-route');
 
@@ -909,6 +1016,7 @@ async function main() {
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
     await assertShellFrame(renderer, 'shell-frame-manuscript');
+    await rightColumnGeometry(renderer, requireJourney, waitFor);
     await assertCardFrames(renderer);
     for (const section of ['overview', 'analysis', 'review', 'evaluation', 'deliverables']) {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section(section)), `shell-frame-open-${section}`);
@@ -921,6 +1029,12 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('#context-title').dataset.contextBook==='false'`, 'shell-global-header-no-book');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'shell-frame-back-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-window')`, 'shell-frame-back-ready');
+    at('sidebar-settings-pinned');
+    await checkSettingsPinned(renderer);
+    at('sidebar-long-book-list');
+    await checkLongBookList(renderer);
+    at('sidebar-current-book-pin');
+    await checkCurrentBookPin(renderer);
     at('editorial-disclosure-motion');
     // A closed native disclosure may hide its content by content-visibility rather than display, so ask checkVisibility().
     const closedDisclosure = await renderer.evaluate(`(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); const summary=document.querySelector('[data-technical-collection] > summary') ?? details?.querySelector('summary'); summary?.focus(); return { details: details instanceof HTMLDetailsElement, outsideToolbar: details?.closest('.editor-toolbar')===null, closed: (details?.open===false || details?.hidden===true), journal: (journal?.textContent ?? '').startsWith('修订日志序号 ') && Number.isSafeInteger(Number(journal.textContent.slice(7))), journalHidden: journal?.checkVisibility()===false, summary: ['查看技术详情','记录信息'].includes(summary?.textContent), summaryFocused: summary!==undefined && document.activeElement===summary, singletonNotice: document.querySelectorAll('[data-toast]').length===1 }; })()`);
@@ -1139,7 +1253,7 @@ async function main() {
     // At 1120 px and wider the page makes room for the drawer, which is a column beside it; below, the
     // drawer lies over the page and the page keeps its width (editor-surfaces §0.3).
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1180, height: 820, deviceScaleFactor: 1, mobile: false });
-    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const page=document.querySelector('#screen'); const status=document.querySelector('[data-toast]'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!page||!status)return false; const box=drawer.getBoundingClientRect(); const viewport=document.documentElement; return innerWidth===1180 && Math.abs(box.width-500)<=1 && Math.abs(box.right-viewport.clientWidth)<=1 && box.top<=0.5 && box.bottom>=viewport.clientHeight-0.5 && Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-box.width)<=1 && page.getBoundingClientRect().right<=box.left+0.5 && document.querySelectorAll('[data-toast]').length===1; })()`, 'drawer-push-column');
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const page=document.querySelector('#screen'); const status=document.querySelector('#persistence-status'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!page||!status)return false; const box=drawer.getBoundingClientRect(); const viewport=document.documentElement; return innerWidth===1180 && Math.abs(box.width-500)<=1 && Math.abs(box.right-viewport.clientWidth)<=1 && box.top<=0.5 && box.bottom>=viewport.clientHeight-0.5 && Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-box.width)<=1 && page.getBoundingClientRect().right<=box.left+0.5 && document.querySelectorAll('[data-toast]').length<=1; })()`, 'drawer-push-column');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1000, height: 820, deviceScaleFactor: 1, mobile: false });
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const page=document.querySelector('#screen'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!page)return false; const box=drawer.getBoundingClientRect(); return innerWidth===1000 && getComputedStyle(document.body).paddingRight==='0px' && getComputedStyle(drawer).position==='fixed' && page.getBoundingClientRect().right>box.left+100 && box.width<=document.documentElement.clientWidth; })()`, 'drawer-overlay-below-1120');
     await renderer.send('Emulation.clearDeviceMetricsOverride');

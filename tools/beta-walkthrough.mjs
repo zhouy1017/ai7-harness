@@ -137,7 +137,7 @@ async function controlledSourceTranslation(page,bookId,dataRoot,channel,input,ex
  if(!probe.blockId){
   check(await page.evaluate(`(()=>{const e=document.querySelector('[data-testid=manuscript-editor]');const p=[...e.querySelectorAll('p[data-block-id]')].find(n=>n.textContent.length>30);if(!p)return false;e.focus();const r=document.createRange();r.selectNodeContents(p);r.collapse(false);getSelection().removeAllRanges();getSelection().addRange(r);return true})()`),'controlled-insertion-caret');
   await enter();await page.send('Input.insertText',{text:fact});await enter();await page.send('Input.insertText',{text:typo});
-  await ready(page,`[...document.querySelectorAll('[data-testid=manuscript-editor] p[data-block-id]')].some(n=>n.textContent===${JSON.stringify(fact)})&&document.querySelector('#persistence-status')?.dataset.tone!=='busy'`,'controlled-public-edit-saved');
+  await ready(page,`[...document.querySelectorAll('[data-testid=manuscript-editor] p[data-block-id]')].some(n=>n.textContent===${JSON.stringify(fact)})&&!(document.querySelector('#persistence-status')?.textContent??'').startsWith('正在')`,'controlled-public-edit-saved');
   probe.blockId=await page.evaluate(`[...document.querySelectorAll('[data-testid=manuscript-editor] p[data-block-id]')].find(n=>n.textContent===${JSON.stringify(fact)}).dataset.blockId`);checkpoint();
  }
  // This factual contract does not offer range supplement. Isolate one edited Public SampleBook paragraph,
@@ -158,7 +158,7 @@ async function controlledSourceTranslation(page,bookId,dataRoot,channel,input,ex
  if(!probe.isolatedEdited){
   check(await page.evaluate("(()=>{const e=document.querySelector('[data-testid=manuscript-editor]');e.focus();const r=document.createRange();r.selectNodeContents(e);getSelection().removeAllRanges();getSelection().addRange(r);return true})()"),'controlled-isolated-edit-selection');
   await page.send('Input.insertText',{text:fact});
-  await ready(page,`document.querySelector('[data-testid=manuscript-editor]')?.textContent===${JSON.stringify(fact)}&&document.querySelector('#persistence-status')?.dataset.tone!=='busy'`,'controlled-isolated-edit-saved');
+  await ready(page,`document.querySelector('[data-testid=manuscript-editor]')?.textContent===${JSON.stringify(fact)}&&!(document.querySelector('#persistence-status')?.textContent??'').startsWith('正在')`,'controlled-isolated-edit-saved');
   probe.isolatedEdited=true;checkpoint();
  }
  const sourceBookId=probe.isolatedBookId;
@@ -512,7 +512,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await fill(page,'select[aria-label=段落样式]','heading-2');await ready(page,`document.querySelectorAll('[data-testid=manuscript-editor] > :is(h2,h3,h4,h5,h6)[data-block-id]').length===${headingCount+1}`,'heading-style-saved');
   await fill(page,'select[aria-label=段落样式]','paragraph');await ready(page,`document.querySelectorAll('[data-testid=manuscript-editor] > :is(h2,h3,h4,h5,h6)[data-block-id]').length===${headingCount}`,'paragraph-style-restored');
   check(true,expectedChannel+'-heading-style-edit');
-  await ready(page,"document.querySelector('#persistence-status')?.dataset.tone!=='busy'",'editor-persistence-idle');
+  await ready(page,"!(document.querySelector('#persistence-status')?.textContent??'').startsWith('正在')",'editor-persistence-idle');
   const selectionBlockId=await page.evaluate(`(()=>{const editor=document.querySelector('[data-testid=manuscript-editor]');const p=[...editor.querySelectorAll('p[data-block-id]')].find(n=>n.firstChild?.nodeType===3&&n.firstChild.length>30&&!n.querySelector('.editorial-mark'));if(!p)return null;editor.focus();const r=document.createRange();r.setStart(p.firstChild,2);r.setEnd(p.firstChild,22);getSelection().removeAllRanges();getSelection().addRange(r);document.dispatchEvent(new Event('selectionchange'));return p.dataset.blockId})()`);
   check(Boolean(selectionBlockId),'contextual-selection');
   await page.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');

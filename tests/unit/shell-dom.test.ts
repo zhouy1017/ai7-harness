@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountShell, ShellPreferences } from '../../src/renderer/shell.js';
+import { SHELL_LABELS } from '../../src/renderer/shell-labels.js';
 import { preferenceDefaults, PREFERENCES_NOTICES, type PreferenceValues, type PreferencesRendererApi } from '../../src/shared/preferences.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
@@ -37,13 +38,14 @@ function mounted(notice: string | null = null) {
   const openBook = vi.fn();
   const openDestination = vi.fn();
   miniDocument.body.append(sidebar as unknown as MiniElement);
+  const toggle = document.createElement('button');
   const surface = mountShell({
     sidebar, preferenceNotice, actions, preferences, title: document.createElement('h1'), position, pinLimit: 6,
-    attentionEntry: document.createElement('button'), toggle: document.createElement('button'),
+    attentionEntry: document.createElement('button'), toggle,
     setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback,
     openDestination, openSection: vi.fn(), openAgentWorkspace, openBook, openSettings: vi.fn(),
   });
-  return { sidebar, preferences, preferenceNotice, surface, actions, openAgentWorkspace, position, openBook, openDestination };
+  return { toggle, sidebar, preferences, preferenceNotice, surface, actions, openAgentWorkspace, position, openBook, openDestination };
 }
 
 describe('mounted shell preferences', () => {
@@ -128,21 +130,60 @@ describe('sidebar book entries', () => {
 
   it('opens a recent book directly and keeps the complete library reachable without a switcher', async () => {
     const { sidebar, preferences, surface, openBook, openDestination } = mounted();
+    await preferences.visit({ bookId: 'book-b', title: '乙书', section: 'review' });
     await preferences.visit({ bookId: 'book-a', title: '甲书', section: 'overview' });
     surface.follow('book-overview', { bookId: 'book-a', title: '甲书', section: 'overview' });
     expect(sidebar.querySelector('[data-shell-book-switcher]')).toBeNull();
     expect(sidebar.querySelector('.sidebar-book-title')).toBeNull();
+    // The open Book is the heading of its groups and has no row of its own (#1521); the others keep theirs.
     expect(sidebar.querySelector('.sidebar-current-book')?.textContent).toBe('甲书');
-    const row = sidebar.querySelector<HTMLAnchorElement>('[data-nav-book="book-a"]')!;
-    expect(row.querySelector('.nav-book-initial')?.textContent).toBe('甲');
+    expect(sidebar.querySelector('[data-nav-book="book-a"]')).toBeNull();
+    expect(Array.from(sidebar.querySelectorAll<HTMLElement>('[data-nav-book-group]'), (group) => group.dataset['navBookGroup'])).toEqual(['work', 'records']);
+    const row = sidebar.querySelector<HTMLAnchorElement>('[data-nav-book="book-b"]')!;
+    expect(row.querySelector('.nav-book-initial')?.textContent).toBe('乙');
     expect(row.querySelector('.icon')).toBeNull();
-    expect(row.querySelector('.nav-label')?.textContent).toBe('甲书');
-    expect(row.querySelector('.nav-state')?.textContent).toBe('当前');
-    expect(row.getAttribute('aria-current')).toBe('true');
+    expect(row.querySelector('.nav-label')?.textContent).toBe('乙书');
+    expect(row.querySelector('.nav-state')).toBeNull();
+    expect(row.getAttribute('aria-current')).toBeNull();
     row.click();
-    expect(openBook).toHaveBeenCalledWith('book-a');
+    expect(openBook).toHaveBeenCalledWith('book-b');
     sidebar.querySelector<HTMLAnchorElement>('[data-nav-destination="library"]')!.click();
     expect(openDestination).toHaveBeenCalledWith('library');
+  });
+
+  it('pins and unpins the open Book from its heading with the list star write, and keeps focus there (#1521)', async () => {
+    const { sidebar, preferences, surface } = mounted();
+    await preferences.load();
+    const pin = () => sidebar.querySelector<HTMLButtonElement>('.sidebar-current-book-row [data-nav-current-pin]')!;
+    expect(pin().hidden).toBe(true);
+    surface.follow('book-overview', { bookId: 'book-a', title: '甲书', section: 'overview' });
+    await vi.waitFor(() => expect(preferences.current['shell.recentBooks'][0]?.bookId).toBe('book-a'));
+    expect(pin().hidden).toBe(false);
+    expect([pin().getAttribute('aria-pressed'), pin().getAttribute('aria-label'), pin().textContent]).toEqual(['false', '置顶《甲书》', '☆']);
+    pin().focus();
+    const element = pin();
+    element.click();
+    await vi.waitFor(() => expect(preferences.current['shell.pinnedBooks'].map((entry) => entry.bookId)).toEqual(['book-a']));
+    // The same element, painted anew: it keeps the focus the keyboard put there; the Book still has no list row.
+    expect(pin()).toBe(element);
+    expect(document.activeElement).toBe(element);
+    expect([element.getAttribute('aria-pressed'), element.getAttribute('aria-label'), element.textContent]).toEqual(['true', '取消置顶《甲书》', '★']);
+    expect(sidebar.querySelector('[data-nav-book="book-a"]')).toBeNull();
+    element.click();
+    await vi.waitFor(() => expect(preferences.current['shell.pinnedBooks']).toEqual([]));
+    expect([element.getAttribute('aria-pressed'), document.activeElement === element]).toEqual(['false', true]);
+    surface.leaveBook();
+    expect(pin().hidden).toBe(true);
+  });
+
+  it('hides the Book list while the open Book is the only one known, and says so when no Book is open (#1521)', async () => {
+    const { sidebar, preferences, surface } = mounted();
+    await preferences.visit({ bookId: 'book-a', title: '甲书', section: 'overview' });
+    surface.follow('book-overview', { bookId: 'book-a', title: '甲书', section: 'overview' });
+    expect(sidebar.querySelector<HTMLElement>('.sidebar-books')!.hidden).toBe(true);
+    surface.leaveBook();
+    expect(sidebar.querySelector<HTMLElement>('.sidebar-books')!.hidden).toBe(false);
+    expect(sidebar.querySelector('[data-nav-book="book-a"]')).not.toBeNull();
   });
 
   it('remembers collapse through the existing preference store and keeps row tooltips', async () => {
@@ -155,4 +196,26 @@ describe('sidebar book entries', () => {
     expect(sidebar.querySelector<HTMLAnchorElement>('[data-nav-book="book-a"]')?.title).toContain('甲书');
     expect(sidebar.querySelector<HTMLAnchorElement>('[data-nav-destination="library"]')?.title).toBe('书库');
   });
+});
+
+it('automatically shows icons without saving collapse and holds the toggle, saying why, until the column closes', async () => {
+  let notify = () => {};
+  vi.stubGlobal('MutationObserver', class { constructor(callback: () => void) { notify = callback; } observe() {} });
+  const { toggle, preferences } = mounted();
+  await preferences.load();
+  document.documentElement.dataset['rightColumn'] = 'icons'; notify();
+  expect(document.documentElement.dataset['sidebar']).toBe('icons');
+  expect(preferences.current['shell.sidebarCollapsed']).toBe(false);
+  expect([toggle.disabled, toggle.title]).toEqual([true, SHELL_LABELS.column]);
+  toggle.click();
+  expect(preferences.current['shell.sidebarCollapsed']).toBe(false);
+  // The overlay form needs the width as much: the same automatic icons, the same held toggle.
+  document.documentElement.dataset['rightColumn'] = 'overlay'; notify();
+  expect([document.documentElement.dataset['sidebar'], toggle.disabled, toggle.title]).toEqual(['icons', true, SHELL_LABELS.column]);
+  document.documentElement.dataset['rightColumn'] = 'none'; notify();
+  expect([document.documentElement.dataset['sidebar'], toggle.disabled, toggle.title]).toEqual(['full', false, SHELL_LABELS.collapse]);
+  toggle.click();
+  await vi.waitFor(() => expect(preferences.current['shell.sidebarCollapsed']).toBe(true));
+  expect(document.documentElement.dataset['sidebar']).toBe('icons');
+  delete document.documentElement.dataset['rightColumn'];
 });

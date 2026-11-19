@@ -375,6 +375,11 @@ _Avoid_: Harness Session, project copy
 The durable ordered record of continuous changes to one Manuscript Branch since its base revision, used to reconstruct working state without making every saved edit a Manuscript Revision.
 _Avoid_: Manuscript history, Operation journal
 
+**Editor Step**:
+One editor action — typing, a structural edit, a replacement, an accepted suggestion or batch, a replace-all, an AI edit, a card's 撤销本次修改, an in-place revision decision or a version restore — recorded as the unit Ctrl+Z takes back and redo replays, owning the command groups and Apply Effects it wrote; a step that can no longer be undone is set aside and the next Ctrl+Z moves on ([ADR 0105 §1](../../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md#1--undo-is-an-editor-step)).
+_中文_: 编辑步骤
+_Avoid_: Edit Journal entry, command group, Apply Effect
+
 **Editor Revision**:
 An editor's own change to manuscript text recorded as a Proposal Change Item and applied in the same action, so it keeps an Apply Effect, a card and its own reversal; it is how changes are made in Reading and Revision Mode and how each occurrence of a replacement is written. Typing under free direct editing stays an ordinary Edit Journal edit ([ADR 0096 §4.3–4.4](../../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#43-reading-and-revision-mode-by-default)).
 _Avoid_: AI suggestion, Word tracked change, direct edit, Manuscript Checkpoint
@@ -525,6 +530,16 @@ A versioned, house- or authority-issued document with numbered clauses that revi
 _中文_: 审阅规范文件
 _Avoid_: Policy Document, prompt fragment, Editorial Profile, style sheet artifact of one Book
 
+**Standards Table**:
+A versioned, house-wide table in the Knowledge Base class 字表与词表, of one kind — 规范字 or 字形对照 (a 字表), or 词形 or 常用词 (a 词表) — whose entries each carry a recommended form, discouraged forms (none for 规范字 and 常用词), a condition or note, a source and a strength (国家规范 / 辞书推荐 / 本社要求); it is imported by the editor from any file, or pre-installed for the public national standards and the default 常用词表 《现代汉语常用词表（第2版）》, presented as one item together with its imported source, and deleted with it ([ADR 0106](../../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)).
+_中文_: 字表 / 词表
+_Avoid_: 本社词表 (the house literal risk list, rule H01), Review Guideline Document, a program constant
+
+**Standard Usage Check**:
+The deterministic part of the local text check that reads the enabled Standards Tables, pins each by table, version and digest, and presents every finding with its entry's strength and basis; it transmits nothing, and a place on which enabled tables disagree becomes an annotation listing them, never a suggestion; a 常用词 table only adds 「请核对」 annotations and never outranks a national standard ([ADR 0106](../../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)).
+_中文_: 规范用语核查
+_Avoid_: the model review category 错别字与规范用语, 本社词表 matching (H01), proof of standard compliance
+
 **Finding Disposition**:
 The editor's recorded handling of one Editorial Error Finding or Annotation — handled, reviewed, ignored with reason, or converted — shared by the manuscript mark, the Review Workspace and the Findings Center as one record (ADR 0076).
 _中文_: 发现处置
@@ -551,7 +566,7 @@ _中文_: 报告
 _Avoid_: Task Outcome, Effect Receipt, Delivery Package, transient notice
 
 **Knowledge Base**:
-The house-managed, centralized collection of professional material Books select from: Review Guideline Documents, Evaluation Profiles, expert skills, House Editorial Memory and Exemplars, each versioned and snapshotted by the work that uses it (ADR 0076).
+The house-managed, centralized collection of professional material Books select from: Review Guideline Documents, Standards Tables (ADR 0106), Evaluation Profiles, expert skills, House Editorial Memory and Exemplars, each versioned and snapshotted by the work that uses it (ADR 0076).
 _中文_: 知识库
 _Avoid_: Working Corpus, Series Knowledge, Settings, a Book's own sources
 

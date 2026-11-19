@@ -93,7 +93,7 @@ describe('task overview', () => {
       expect([...card.querySelector('.task-overview-card-line')!.textContent!].length).toBeLessThanOrEqual(60);
       expect(card.querySelector('[data-task-action="pause"]')).toBeNull();
       expect(card.querySelector('[data-task-action="up"]')).toBeNull();
-      expect(card.textContent).toContain(state === 'analysis-waiting-network' ? '等待联网' : state === 'analysis-waiting-connection' ? '等待模型连接' : state === 'analysis-waiting-admission' ? '等待开始前检查' : '等待运行名额');
+      expect(card.textContent).toContain(state === 'analysis-waiting-network' ? '等待联网' : state === 'analysis-waiting-connection' ? '等待模型连接' : state === 'analysis-waiting-admission' ? '等待开始前检查' : '排队中');
     } finally { uninstall(); }
   });
   it('keeps a stopped dialogue available to continue in the paused group', () => {

@@ -73,7 +73,7 @@ export const LEARNING_AUDIT_STANDING_LABELS: Readonly<Record<LearningAuditStandi
   changed: '改过 · 需要重新决定',
   deferred: '稍后决定',
   book: '仅纳入当前图书',
-  house: '纳入出版社经验',
+  house: '纳入本社经验',
   excluded: '明确排除',
 };
 
@@ -193,7 +193,7 @@ function namedTasks(named: ReadonlyArray<string>, count: number): string {
 
 export function learningRemediationFuture(count: number, scope: 'book' | 'house' | null, bookTitle: string, version: { readonly currentVersion: number | null; readonly linesAffected: number } = { currentVersion: null, linesAffected: 0 }): string {
   if (count === 0 || scope === null) return '所选材料中没有可以停止今后使用的。';
-  const was = scope === 'book' ? `仅纳入《${bookTitle}》` : '纳入出版社经验';
+  const was = scope === 'book' ? `仅纳入《${bookTitle}》` : '纳入本社经验';
   const lines = version.currentVersion === null || version.linesAffected === 0 ? ''
     : `本社审阅偏好 v${version.currentVersion} 中有 ${version.linesAffected} 行出自它们，记录后会生成不含它们的新版本，之后的审阅只读新版本。`;
   return `${count} 条学习材料今后不再可用于学习（原来是${was}）；它们会显示为明确排除。${lines}`;

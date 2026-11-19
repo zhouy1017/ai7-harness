@@ -1,3 +1,4 @@
+import { styleInput } from './components/controls.js';
 import type { PreferencesRendererApi } from '../shared/preferences.js';
 import type { KeyboardBindings } from '../shared/preferences.js';
 import type { RendererApi } from '../shared/protocol.js';
@@ -24,6 +25,8 @@ import {
   type CommandDefinition,
 } from './commands.js';
 import { bindingRefusalLabel } from './commands-labels.js';
+import { TRIAGE_KEY_NAMES, triageKeyLabel } from './triage-keys.js';
+import { REVIEW_ENTER_KEY_NAME } from './review-labels.js';
 import {
   KEYBOARD_ALWAYS_ON,
   KEYBOARD_CAPTURE_ADD_STEP,
@@ -299,6 +302,16 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
       item.append(`${entry.name} · `, label);
       list.append(item);
     }
+    // The single keys of a focused card (Issue #1523): fixed, since a key without a modifier types everywhere else.
+    for (const action of ['accept', 'reject'] as const) {
+      const item = el('li');
+      item.dataset['triageKey'] = action;
+      item.append(`${TRIAGE_KEY_NAMES[action]} · `, el('kbd', undefined, triageKeyLabel(action)));
+      list.append(item);
+    }
+    const reviewReturn = el('li');
+    reviewReturn.append(`${REVIEW_ENTER_KEY_NAME} · `, el('kbd', undefined, 'Enter'));
+    list.append(reviewReturn);
     fixed.append(list);
     table.replaceChildren(grid, fixed);
     resetAll.disabled = Object.keys(bindings).length === 0;
@@ -314,7 +327,7 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
   actions.append(resetAll);
   const motion = el('label', 'preference-toggle');
   const reduce = el('input');
-  reduce.type = 'checkbox';
+  reduce.type = 'checkbox'; styleInput(reduce);
   reduce.checked = reducedMotion();
   reduce.dataset['reducedMotion'] = 'true';
   reduce.addEventListener('change', () => chooseReducedMotion(reduce.checked));
@@ -328,7 +341,7 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
       // What the preference holds is what every label and the dispatcher read from here on.
       onChanged(bindings);
       paint();
-      setStatus(KEYBOARD_STATUS_LINES.loaded, 'success');
+      setStatus(KEYBOARD_STATUS_LINES.loaded);
     } catch (error) {
       setStatus(errorMessage(error, KEYBOARD_STATUS_LINES.loadFailed), 'error');
     }

@@ -13,13 +13,17 @@ import {
 } from '../../src/renderer/shell.js';
 import {
   SETTINGS_HUB_GROUPS,
+  SHELL_AGENT_WORKSPACE_ROW,
   SHELL_BOOK_GROUPS,
   SHELL_DESTINATIONS,
   SHELL_LABELS,
   SHELL_SETTINGS,
   shellRecentStateLine,
+  shellSectionGroupLabel,
+  shellSectionLabel,
   globalAgentAnswerStatus,
 } from '../../src/renderer/shell-labels.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type { DialogueAttemptProjection } from '../../src/shared/protocol.js';
 
 it('keeps Global Agent closing, account-limit and cancel states in editorial words', () => {
@@ -50,28 +54,38 @@ describe('the sidebar', () => {
   });
   it('lists the seven global destinations in their fixed order, each with a fixed SVG symbol ID', () => {
     expect(SHELL_DESTINATIONS.map((entry) => [entry.key, entry.label])).toEqual([
-      ['attention', '待我处理'], ['tasks', '任务'], ['library', '书库'], ['series', '书系'], ['knowledge', '知识库'], ['quality', '质量与学习'], ['global-agent', '全域智能体'],
+      ['attention', '待我处理'], ['tasks', '任务'], ['library', '书库'], ['series', '书系'], ['knowledge', '知识库'], ['quality', '质量与学习'], ['global-agent', 'AI 助手'],
     ]);
     for (const entry of [...SHELL_DESTINATIONS, SHELL_SETTINGS]) {
       expect(entry.icon).toMatch(/^i-[a-z]+$/u);
     }
   });
 
-  it('groups the current Book as 工作 · 处理 · 资料与记录 with every section once', () => {
+  it('groups the current Book as 工作 · 资料与记录 with every section once, 待办汇总 after 审阅 (#1521)', () => {
     expect(SHELL_BOOK_GROUPS.map((group) => [group.label, group.sections.map((section) => section.label)])).toEqual([
-      ['工作', ['主稿件', '衍生稿件', '审阅', '评估', '交付物']],
-      ['处理', ['发现']],
-      ['资料与记录', ['分析', '来源与证据', '工作概览', '历史与恢复']],
+      ['工作', ['主稿件', '衍生稿件', '审阅', '待办汇总', '评估', '交付物']],
+      ['资料与记录', ['分析', '来源与证据', '工作概览']],
     ]);
-    expect(SHELL_BOOK_GROUPS.flatMap((group) => group.sections.map((section) => section.key))).toEqual([...SHELL_BOOK_SECTIONS]);
-    for (const section of SHELL_BOOK_GROUPS.flatMap((group) => group.sections)) {
-      expect(section.icon).toMatch(/^i-[a-z]+$/u);
-    }
+    // 历史与恢复 is no row; `history` stays a stored section, which reads as 工作概览 wherever it is named.
+    expect(SHELL_BOOK_GROUPS.flatMap((group) => group.sections.map((section) => section.key)).sort())
+      .toEqual(SHELL_BOOK_SECTIONS.filter((section) => section !== 'history').sort());
+    expect([shellSectionLabel('history'), shellSectionGroupLabel('history'), shellRecentStateLine('history')]).toEqual(['工作概览', '资料与记录', '上次在「工作概览」']);
+    const icons = SHELL_BOOK_GROUPS.flatMap((group) => group.sections.map((section) => section.icon));
+    for (const icon of icons) expect(icon).toMatch(/^i-[a-z]+$/u);
+    expect(new Set(icons).size).toBe(icons.length);
+  });
+
+  it('calls the AI row of a Book AI 改稿 for the editor and Agent 工作区 in the developer layer (#1521)', () => {
+    expect(SHELL_AGENT_WORKSPACE_ROW.label).toBe('Agent 工作区');
+    setTechnicalLayerVisible(false);
+    try { expect(SHELL_AGENT_WORKSPACE_ROW.label).toBe('AI 改稿'); } finally { setTechnicalLayerVisible(true); }
   });
 
   it('shows icons only when collapsed or narrower than 760 px', () => {
     expect(SIDEBAR_ICONS_ONLY_BELOW_PX).toBe(760);
     expect(sidebarMode(false, false)).toBe('full');
+    expect(sidebarMode(false, false, true)).toBe('icons');
+    expect(sidebarMode(true, false, true)).toBe('icons');
     expect(sidebarMode(true, false)).toBe('icons');
     expect(sidebarMode(false, true)).toBe('icons');
     expect(sidebarMode(true, true)).toBe('icons');
@@ -129,13 +143,20 @@ describe('pinned and recent Books', () => {
   });
 
   it('lists pinned Books first, then recent ones that are not pinned, with their one-line state', () => {
-    const rows = sidebarBookRows([b], [{ ...a, section: 'manuscript' }, { ...b, section: 'review' }, { ...c, section: 'history' }], 'a');
-    expect(rows.pinned).toEqual([{ bookId: 'b', title: '乙书', state: '上次在「审阅」', pinned: true, current: false }]);
+    const rows = sidebarBookRows([b], [{ ...a, section: 'manuscript' }, { ...b, section: 'review' }, { ...c, section: 'history' }], null);
+    expect(rows.pinned).toEqual([{ bookId: 'b', title: '乙书', state: '上次在「审阅」', pinned: true }]);
     expect(rows.recent).toEqual([
-      { bookId: 'a', title: '甲书', state: '上次在「主稿件」', pinned: false, current: true },
-      { bookId: 'c', title: '丙书', state: '上次在「历史与恢复」', pinned: false, current: false },
+      { bookId: 'a', title: '甲书', state: '上次在「主稿件」', pinned: false },
+      { bookId: 'c', title: '丙书', state: '上次在「工作概览」', pinned: false },
     ]);
     expect(sidebarBookRows([c], [], null).pinned[0]!.state).toBe(SHELL_LABELS.pinned);
+  });
+
+  it('leaves the open Book out of both lists, pinned or not, since its groups carry its title (#1521)', () => {
+    const recent = [{ ...a, section: 'manuscript' as const }, { ...b, section: 'review' as const }];
+    const open = sidebarBookRows([b], recent, 'b');
+    expect([open.pinned, open.recent.map((row) => row.bookId)]).toEqual([[], ['a']]);
+    expect(sidebarBookRows([], recent, 'a').recent.map((row) => row.bookId)).toEqual(['b']);
   });
 });
 
@@ -146,7 +167,7 @@ describe('what a screen marks as current', () => {
     expect(screenActive('series', null)).toEqual({ kind: 'destination', destination: 'series' });
     expect(screenActive('knowledge-base', null)).toEqual({ kind: 'destination', destination: 'knowledge' });
     expect(screenActive('quality-learning', null)).toEqual({ kind: 'destination', destination: 'quality' });
-    for (const state of ['settings', 'model-service', 'data-storage', 'evaluation-calibration', 'diagnostics']) expect(screenActive(state, null)).toEqual({ kind: 'settings' });
+    for (const state of ['model-service', 'data-storage', 'evaluation-calibration', 'diagnostics']) expect(screenActive(state, null)).toEqual({ kind: 'settings' });
     expect(screenActive('target', null)).toEqual({ kind: 'destination', destination: 'library' });
     expect(screenActive('error', null)).toEqual({ kind: 'none' });
   });
@@ -159,7 +180,7 @@ describe('what a screen marks as current', () => {
     const book = { bookId: 'a', title: '甲书' };
     expect(contextHeading('editor', { kind: 'section', section: 'manuscript' }, book)).toEqual({ title: '甲书', position: '工作 · 主稿件', book: true });
     expect(contextHeading('book-sources', { kind: 'section', section: 'sources' }, book)).toEqual({ title: '甲书', position: '资料与记录 · 来源与证据', book: true });
-    expect(contextHeading('landing', { kind: 'destination', destination: 'library' }, null)).toEqual({ title: '书库', position: '全局', book: false });
+    expect(contextHeading('landing', { kind: 'destination', destination: 'library' }, null)).toEqual({ title: '书库', position: '', book: false });
     expect(contextHeading('data-storage', { kind: 'settings' }, book)).toEqual({ title: '设置', position: '本机 · 数据与存储', book: false });
     expect(contextHeading('diagnostics', { kind: 'settings' }, book)).toEqual({ title: '设置', position: '本机 · 诊断', book: false });
     expect(contextHeading('target', { kind: 'destination', destination: 'library' }, null)).toEqual({ title: '导入稿件', position: '书库', book: false });
@@ -174,7 +195,7 @@ describe('the 设置 hub', () => {
       ['本机', [['data-storage', '数据与存储'], ['appearance', '外观'], ['keyboard', '键盘与无障碍'], ['notifications', '通知'], ['diagnostics', '诊断'], ['help', '帮助']]],
     ]);
     const rows = SETTINGS_HUB_GROUPS.flatMap((group) => group.rows);
-    expect(rows.filter((row) => row.developerOnly !== true)).toHaveLength(6);
-    expect(rows.filter((row) => row.developerOnly === true).map((row) => row.route)).toEqual(['usage', 'evaluation-calibration', 'diagnostics']);
+    expect(rows.filter((row) => row.developerOnly !== true)).toHaveLength(7);
+    expect(rows.filter((row) => row.developerOnly === true).map((row) => row.route)).toEqual(['usage', 'diagnostics']);
   });
 });

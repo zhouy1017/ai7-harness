@@ -47,9 +47,9 @@ const REGENERATE_REASON = '当前运行范围未允许重新生成建议：这�
 const RESOLVE_CONFLICT = '解决冲突…';
 const SAFE_MERGE = '本段后来改过别处，没有碰到这条建议的原文';
 const DRAFT_SAVED = '草稿已保存';
-const UNRESOLVED_REASON = '还有 1 处未解决；每一处都选定后才能保存为新提案版本。';
+const UNRESOLVED_REASON = '还有 1 处未解决；每一处都选定后才能保存为这条修改建议的新写法。';
 const UNCHANGED_REASON = '解决结果与当前稿件相同，请选「保留当前稿件」。';
-const NEW_VERSION_DONE = '已保存为新提案版本 · 尚未应用';
+const NEW_VERSION_DONE = '已保存为这条修改建议的新写法 · 尚未应用';
 const KEEP_CURRENT_DONE = '已保留当前稿件；稿件没有改动。';
 const DEFER_DONE = '已记下暂不处理；这处冲突仍未解决。';
 const KEPT_STATE = '已拒绝 · 保留当前稿件';
@@ -90,6 +90,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-06' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -819,7 +820,7 @@ async function main() {
       const card = window.__j06.card();
       const accept = card.querySelector('[data-mark-action="accept-and-apply"]');
       const resolve = card.querySelector('[data-mark-action="resolve-conflict"]');
-      return card.dataset.markAnchor === 'drifted' && card.querySelector('[data-mark-state]')?.textContent === '待你处理 · 原文已变' &&
+      return card.dataset.markAnchor === 'drifted' && card.querySelector('[data-mark-state]')?.textContent === '待处理 · 原文已变' &&
         accept instanceof HTMLButtonElement && accept.disabled && (document.getElementById(accept.getAttribute('aria-describedby') ?? '')?.textContent ?? '').includes('原文已变') &&
         resolve instanceof HTMLButtonElement && !resolve.disabled && resolve.textContent === ${JSON.stringify(RESOLVE_CONFLICT)} && resolve.classList.contains('primary') &&
         card.querySelector('[data-mark-safe-merge]') === null;
@@ -870,7 +871,7 @@ async function main() {
       const card = window.__j06.card();
       const accept = card.querySelector('[data-mark-action="accept-and-apply"]');
       const line = card.querySelector('[data-mark-safe-merge]');
-      return card.dataset.markAnchor === 'exact' && card.querySelector('[data-mark-state]')?.textContent === '待你处理' &&
+      return card.dataset.markAnchor === 'exact' && card.querySelector('[data-mark-state]')?.textContent === '待处理' &&
         accept instanceof HTMLButtonElement && !accept.disabled && line?.textContent === ${JSON.stringify(SAFE_MERGE)} &&
         card.querySelector('[data-mark-action="resolve-conflict"]') === null;
     })()`, 'safe-merge-line-beside-an-available-apply');
@@ -951,7 +952,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
       const accept = card.querySelector('[data-mark-action="accept-and-apply"]');
-      return card.dataset.markKind === 'change-suggestion' && card.dataset.markAnchor === 'exact' && card.querySelector('[data-mark-state]')?.textContent === '待你处理' &&
+      return card.dataset.markKind === 'change-suggestion' && card.dataset.markAnchor === 'exact' && card.querySelector('[data-mark-state]')?.textContent === '待处理' &&
         (card.querySelector('.editorial-mark-more [data-mark-provenance]')?.textContent ?? '').includes(${JSON.stringify(NEW_VERSION_SOURCE)}) &&
         card.querySelector('[data-mark-region="content"] del')?.textContent === window.__j06Texts.current &&
         card.querySelector('[data-mark-region="content"] ins')?.textContent === ${JSON.stringify(MERGED)} &&
@@ -968,7 +969,7 @@ async function main() {
     // 接受并应用 on the new version writes its words over exactly its range, all or none.
     await assertRenderer(renderer, `window.__j06.act('accept-and-apply')`, 'new-version-accept-and-apply');
     await waitFor(renderer, `window.__j06.card()?.querySelector('[data-mark-application]') && window.__j06.text(${JSON.stringify(first)}) === window.__j06Texts.now.slice(0, ${RANGE[0]}) + ${JSON.stringify(MERGED)} + window.__j06Texts.now.slice(${RANGE[1] + TYPED_INSIDE.length})`, 'new-version-written', 60_000);
-    await assertRenderer(renderer, `window.__j06.card().querySelector('[data-mark-state]')?.textContent === '已应用' && window.__j06.markById(${JSON.stringify(versionId)})?.dataset.markStatus === 'applied'`, 'new-version-applied-with-its-receipt');
+    await assertRenderer(renderer, `window.__j06.card().querySelector('[data-mark-state]')?.textContent === '已接受' && window.__j06.markById(${JSON.stringify(versionId)})?.dataset.markStatus === 'applied'`, 'new-version-applied-with-its-receipt');
     await assertRenderer(renderer, `(() => { window.__j06Applied = window.__j06.text(${JSON.stringify(first)}); window.__j06Replaced = window.__j06Texts.current; return true; })()`, 'applied-text-kept');
     cancellation.throwIfRequested();
 
@@ -1023,7 +1024,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
       const accept = card.querySelector('[data-mark-action="accept-and-apply"]');
-      return card.querySelector('[data-mark-state]')?.textContent==='待你处理 · 原文已变' && (card.querySelector('.editorial-mark-more [data-mark-state-detail]')?.textContent ?? '').startsWith('待你处理 · 原文已变 · 暂不处理 · ') && accept instanceof HTMLButtonElement && accept.disabled &&
+      return card.querySelector('[data-mark-state]')?.textContent==='待处理 · 原文已变' && (card.querySelector('.editorial-mark-more [data-mark-state-detail]')?.textContent ?? '').startsWith('待处理 · 原文已变 · 暂不处理 · ') && accept instanceof HTMLButtonElement && accept.disabled &&
         card.querySelector('[data-mark-action="resolve-conflict"]') !== null && window.__j06.markById(${JSON.stringify(secondId)})?.dataset.markAnchor === 'drifted';
     })()`, 'deferred-still-blocks-and-says-since-when');
     await openConflict(renderer, secondId, 'deferred-conflict');
@@ -1035,7 +1036,7 @@ async function main() {
     // 待我处理 (Issue #424; V2-UX-ATTN-002): the conflict put aside is 异常与结果待确认's — blocking, from the moment 暂不处理
     // was recorded — and its 解决冲突… opens 稿件冲突 of exactly that suggestion.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'attention-entry');
-    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host')?.dataset.attentionCount !== undefined && document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4`, 'attention-painted');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host')?.dataset.attentionCount !== undefined`, 'attention-painted');
     const conflictRow = await renderer.evaluate(`(() => {
       const item = document.querySelector('[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(`conflict:${secondId}`)}]');
       if (!(item instanceof HTMLElement)) return null;
@@ -1064,7 +1065,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
       const reverse = card.querySelector('[data-mark-action="reverse-revision"]');
-      return card.querySelector('[data-mark-state]')?.textContent === '已应用 · 之后又改过' && reverse instanceof HTMLButtonElement && reverse.disabled &&
+      return card.querySelector('[data-mark-state]')?.textContent === '已接受 · 之后又改过' && reverse instanceof HTMLButtonElement && reverse.disabled &&
         card.querySelector('[data-mark-action="resolve-conflict"]') !== null;
     })()`, 'reversal-blocked-and-offers-resolve-conflict');
     await openConflict(renderer, versionId, 'reversal-conflict');
@@ -1084,7 +1085,7 @@ async function main() {
     requireJourney(UUID_PATTERN.test(correctionId ?? ''), 'correction-identity');
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
-      return (card.querySelector('.editorial-mark-more [data-mark-provenance]')?.textContent ?? '').includes(${JSON.stringify(CORRECTION_SOURCE)}) && card.querySelector('[data-mark-state]')?.textContent === '待你处理' &&
+      return (card.querySelector('.editorial-mark-more [data-mark-provenance]')?.textContent ?? '').includes(${JSON.stringify(CORRECTION_SOURCE)}) && card.querySelector('[data-mark-state]')?.textContent === '待处理' &&
         card.querySelector('[data-mark-region="content"] ins')?.textContent === window.__j06Replaced && window.__j06.text(${JSON.stringify(first)}) === window.__j06Reversal.now;
     })()`, 'correction-proposal-not-applied');
     const corrected = await renderer.evaluate(`(async () => { const binding = await ${BINDING}; const applied = await window.ai7.getEditorialMarkCard({ ...binding, markId: ${JSON.stringify(versionId)} }); const correction = await window.ai7.getEditorialMarkCard({ ...binding, markId: ${JSON.stringify(correctionId)} }); return { applied: applied.status, conflict: applied.conflict, resolvedFrom: correction.resolvedFrom, convertedFrom: correction.convertedFrom }; })()`);
@@ -1206,7 +1207,7 @@ async function main() {
     await press(renderer, 'Escape');
     await openCard(renderer, secondId, second, 'restart-deferred-card');
     await assertRenderer(renderer, `(() => { const more=window.__j06.card().querySelector('.editorial-mark-more'); if(!more.open)more.querySelector('summary').click(); return more.open; })()`, 'restart-deferred-more-open');
-    await assertRenderer(renderer, `(window.__j06.card().querySelector('.editorial-mark-more [data-mark-state-detail]')?.textContent ?? '').includes(' · 暂不处理 · ') && window.__j06.card().querySelector('[data-mark-state]')?.textContent==='待你处理 · 原文已变' && window.__j06.card().querySelector('[data-mark-action="resolve-conflict"]') !== null`, 'restart-deferred-still-deferred');
+    await assertRenderer(renderer, `(window.__j06.card().querySelector('.editorial-mark-more [data-mark-state-detail]')?.textContent ?? '').includes(' · 暂不处理 · ') && window.__j06.card().querySelector('[data-mark-state]')?.textContent==='待处理 · 原文已变' && window.__j06.card().querySelector('[data-mark-action="resolve-conflict"]') !== null`, 'restart-deferred-still-deferred');
     await press(renderer, 'Escape');
 
     at('zero-activity');

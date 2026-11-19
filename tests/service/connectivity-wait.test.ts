@@ -498,7 +498,7 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       const blocked = store.inspectBaselineAnalysis(bookId, () => null);
       expect([blocked.run?.blockedBy, blocked.stateLabel, blocked.run?.stateLabel]).toEqual(['launch', '已授权 · 派发前阻止', '派发前阻止 · 未启动']);
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
-      expect([plan.state, plan.reprepare]).toEqual([{ key: 'blocked', label: '派发前已阻止' }, null]);
+      expect([plan.state, plan.reprepare]).toEqual([{ key: 'blocked', label: '没有开始' }, null]);
       expect(store.inspectGlobalAttention(() => null, false).groups.find((group) => group.key === 'exceptions')?.items
         .find((entry) => entry.itemId === `analysis:${taskIntentId}`)).toMatchObject({ state: 'analysis-blocked', nextStep: 'view-run' });
       // Why travels in the state record's canonical detail: no schema change.
