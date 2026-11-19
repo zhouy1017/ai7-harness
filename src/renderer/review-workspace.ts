@@ -993,13 +993,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (previous?.run !== null && previous?.run !== undefined && previous.run.reviewRunId === next.run?.reviewRunId &&
         previous.run.state !== next.run.state) options.planChanged();
     if (query.reviewRunId === null && next.run !== null) query.reviewRunId = next.run.reviewRunId;
-    const key = stableKeyOf(next);
-    if (previous !== null && key === stableKey && card?.isConnected === true) {
-      updateProgress(next);
-    } else {
-      stableKey = key;
-      renderCard(next);
-    }
+    if (pressInCard && card?.isConnected === true) heldPaint = true;
+    else paintRead(previous, next);
     updateLive(previous, next);
     if (sheet.open) sheetUpdate();
     // A Run waiting to start once online is read again too (Issue #760, S74c), so 审阅 follows it into running.
@@ -1030,6 +1025,40 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (opener !== null && next.newReview.available) void openSheet(null, opener, procedureId);
     }
   }
+
+  /** A read on screen: its progress alone when nothing else changed, the whole card otherwise. */
+  function paintRead(previous: ReviewWorkspaceProjection | null, next: ReviewWorkspaceProjection): void {
+    const key = stableKeyOf(next);
+    if (previous !== null && key === stableKey && card?.isConnected === true) {
+      updateProgress(next);
+    } else {
+      stableKey = key;
+      renderCard(next);
+    }
+  }
+
+  /**
+   * A control the editor is pressing is never replaced under the pointer (Issue #1592): while a press that began on the card is
+   * down, a read is kept and drawn on the frame after the release — after that press's click — as the 批注栏 holds its layout.
+   */
+  let pressInCard = false;
+  let heldPaint = false;
+  const pressCard = (event: PointerEvent): void => {
+    if (event.button === 0 && card !== undefined && card.contains(event.target as Node | null)) pressInCard = true;
+  };
+  const releaseCard = (): void => {
+    if (!pressInCard) return;
+    pressInCard = false;
+    if (!heldPaint) return;
+    window.requestAnimationFrame(() => {
+      if (destroyed || pressInCard || !heldPaint || projection === null) return;
+      heldPaint = false;
+      paintRead(projection, projection);
+    });
+  };
+  host.addEventListener('pointerdown', pressCard, true);
+  document.addEventListener('pointerup', releaseCard, true);
+  document.addEventListener('pointercancel', releaseCard, true);
 
   function renderUnavailable(error: unknown): void {
     const unavailable = el('section', 'review-workspace-card attention-note');
@@ -3685,6 +3714,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (toastShown) hideToast();
       unregisterCommands?.();
       document.removeEventListener('keydown', escapeFromPage);
+      host.removeEventListener('pointerdown', pressCard, true);
+      document.removeEventListener('pointerup', releaseCard, true);
+      document.removeEventListener('pointercancel', releaseCard, true);
       generation += 1;
       clearFactual(true);
       clearPoll();
