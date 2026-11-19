@@ -234,6 +234,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-03' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -498,7 +499,8 @@ async function runSettingsPages(renderer, cancellation) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await waitFor(renderer, `innerWidth === ${width} && innerHeight === ${height} && scrollY === 0 && document.documentElement.scrollHeight > innerHeight && ${statusBarClear()}`, `keyboard-error-fixed-${width}`);
   }
-  await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
+  // The settings pages run at the window's own size: the override ends here, so a later stage reads the real window.
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
   // 全部恢复默认 for the whole section.
   await renderer.evaluate(`window.ai7.savePreference({ key: 'keyboard.bindings', value: { 'nav.series': 'Mod+Shift+U', 'nav.knowledge': 'Mod+Shift+K' } })`);
   await click(renderer, '返回', 'keyboard-back');

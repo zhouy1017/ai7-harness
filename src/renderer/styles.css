@@ -1650,8 +1650,18 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .manuscript-comments-heading { height: 34px; min-height: 34px; box-sizing: border-box; flex-shrink: 0; display: flex; align-items: center; gap: .2rem; padding: .15rem .4rem; border-bottom: 1px solid var(--boundary); }
 .manuscript-comments-heading button { height: 28px; box-sizing: border-box; line-height: 20px; min-height: 28px; padding: .15rem .2rem; white-space: nowrap; font-size: .7rem; }
 .manuscript-comments-heading > strong { font-size: .8rem; white-space: nowrap; }
-.manuscript-comments-heading .editorial-mark-filter-chips { flex: 1; flex-wrap: nowrap; gap: .1rem; margin: 0; }
-.manuscript-comments-heading .editorial-mark-filter-chips button { border: 0; border-radius: 4px; padding: .15rem .2rem; }
+/* The Book's pending count and 上一条 / 下一条待处理 (Issue #1523). */
+.manuscript-comments-book-pending { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .7rem; color: var(--text-subdued); font-variant-numeric: tabular-nums; }
+.manuscript-comments-heading .manuscript-comments-step { min-width: 24px; width: 24px; padding: 0; }
+/* A compact 修改建议's 接受 and 拒绝 take their own room at the end of its preview line on hover and focus; the card keeps its height. */
+.editorial-mark-compact-line { display: flex; align-items: center; gap: .3rem; min-width: 0; margin: .2rem 0 0; }
+.editorial-mark-compact-line > .editorial-mark-compact-preview { flex: 1; min-width: 0; margin: 0; }
+.editorial-mark-card[data-expanded="true"] > .editorial-mark-compact-line { display: none; }
+.editorial-mark-quick-actions { display: none; flex: none; gap: .25rem; }
+.manuscript-comments-card[data-expanded="false"]:is(:hover, :focus-within) .editorial-mark-quick-actions { display: flex; }
+.editorial-mark-quick-actions .btn { min-height: 20px; height: 20px; padding: 0 .4rem; font-size: .7rem; line-height: 18px; }
+/* 下一条待处理 offered once a pointer decision reached the page's end (Issue #1523). */
+.manuscript-comments-heading .manuscript-comments-step[data-offered="true"] { color: var(--action-primary-text); background: var(--action-primary); }
 .manuscript-comments-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .manuscript-comments-canvas { position: relative; min-height: 100%; margin-inline: 8px; }
 .manuscript-comments-card { position: absolute; left: 0; right: 0; overflow-wrap: anywhere; border-radius: 10px; }
@@ -1846,7 +1856,8 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editor-input-mode-toggle { white-space: nowrap; }
 .inline-track-del { color: var(--status-blocked); text-decoration: line-through; background: var(--status-blocked-surface); user-select: none; }
 .inline-track-ins { color: var(--status-attention); text-decoration: underline; text-underline-offset: .18em; background: var(--status-attention-surface); }
-.paragraph-revision-bar { border-inline-start: 3px solid var(--status-attention); padding-inline-start: 8px; }
+/* The same 12.4 px as a plain paragraph's 2 px line and .65rem: a first revision does not move the text (Issue #1523). */
+.paragraph-revision-bar { border-inline-start: 3px solid var(--status-attention); padding-inline-start: calc(.65rem - 1px); }
 .inline-track-del[data-mark-filtered-out="true"], .inline-track-ins[data-mark-filtered-out="true"] { opacity: .2; }
 .editor-input-mode-toggle[data-input-mode="direct-edit"] { color: var(--status-blocked); border-color: currentColor; }
 .ProseMirror .editorial-mark[data-mark-anchor="drifted"] { background: transparent; border-bottom-style: dashed; border-bottom-width: 2px; }
@@ -1973,6 +1984,10 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
    scrolled clear of it; the manuscript keeps its height and its text pane gets that padding instead. */
 body[data-task-drawer="open"] .status-bar { right: max(calc(min(var(--task-drawer-width), 100vw - 1rem) + .75rem), calc(var(--status-area-right, 0px) + .75rem)); }
 :root[data-focus-mode="on"] .status-bar { left: .75rem; }
+/* Until it has been placed above the page's bottom controls the bar takes no pointer and shows nothing (it stays in the
+   accessibility tree, so its words are still said): a press in that instant reaches the control under it, never the ×. Its
+   position, the scroll padding and the space above a sticky bar then take effect together. */
+:root:not([data-status-bar="shown"]) .status-bar { opacity: 0; pointer-events: none; }
 :root[data-status-bar="shown"] body:not(:has(#screen[data-screen="editor"])) { padding-bottom: calc(var(--status-bar-height, 0px) + 1rem); }
 /* A sticky action bar takes the bar's height as space above itself, so at the page's end the bar stands in that space and the
    control just above the sticky bar is not under it. */
@@ -2974,9 +2989,9 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-finding.is-split > .review-finding-main { grid-column: 1; min-width: 0; }
 .review-finding.is-split > .review-finding-actions { grid-column: 2; margin-top: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: .35rem; }
 .review-finding.is-split > :not(.review-finding-heading):not(.review-finding-main):not(.review-finding-actions) { grid-column: 1 / -1; }
-@media (max-width: 760px) {
-  .review-finding.is-split { grid-template-columns: minmax(0, 1fr); }
-  .review-finding.is-split > .review-finding-actions { grid-column: 1; flex-wrap: wrap; }
+@container review-finding (max-width: 720px) {
+  .review-finding.is-split > .review-finding-main { grid-column: 1 / -1; }
+  .review-finding.is-split > .review-finding-actions { grid-column: 1 / -1; flex-wrap: wrap; margin-top: .35rem; }
 }
 
 /* BEGIN Issue #1429: semantic mark categories and persistent comments filters. */
@@ -3151,6 +3166,34 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-synthesis > summary::before { content: '▸'; }
 .review-synthesis[open] > summary::before { content: '▾'; }
 .review-synthesis-preview { display: inline; flex: 1; min-width: 0; }
+
+/* Review results: a compact header and filters leave the findings in view. */
+.review-workspace-card:has(.review-run-leading) { margin-top: .4rem; padding: .6rem .8rem; }
+.review-run-leading { margin-top: 0; padding-top: 0; border-top: 0; }
+.review-run-leading > .review-run-heading { justify-content: flex-start; gap: .3rem .5rem; font-size: .84rem; }
+.review-run-leading > .review-run-heading h4 { font: inherit; font-weight: 700; }
+.review-run-leading .review-run-meta, .review-run-leading .review-new-actions { margin: 0; }
+.review-run-leading .review-history-fold { flex: 0 0 auto; order: 0; position: relative; }
+.review-run-leading .review-history-fold[open] { flex-basis: 100%; order: 2; }
+.review-run-leading .review-new-actions { margin-left: auto; }
+/* Category frames already separate findings; no second padded divider above them. The .3rem gap keeps the header row apart from the filters and collapses into the synthesis box's margin. */
+.review-run-leading > .review-results { margin-top: .3rem; padding-top: 0; border-top: 0; }
+.review-run-leading .review-filters { margin-top: 0; gap: .3rem .5rem; align-items: center; }
+.review-run-leading .review-filter { display: flex; align-items: center; gap: .3rem; }
+.review-run-leading .review-filter:has(select) { max-width: 15rem; }
+.review-run-leading .review-group { margin-top: .35rem; padding: .35rem .5rem; }
+.review-category-fold > summary { cursor: pointer; }
+.review-category-fold > summary .review-group-heading { display: inline-flex; width: calc(100% - 1.5rem); }
+.review-card-more { position: relative; }
+.review-card-more > summary { cursor: pointer; padding: .15rem .65rem; }
+.review-finding { container: review-finding / inline-size; }
+
+.review-filters > :is(.review-filtered, .review-no-findings) { font-size: .86rem; color: var(--text-subdued); }
+
+.review-category-fold > article.review-finding:first-of-type { margin-top: .35rem; }
+
+/* The menu controls place the panel from its width while it still sits in the narrow header box; a content-sized panel keeps that width right, so the panel stays inside a 1008 px window. */
+.review-header-export > .export-menu-body { width: max-content; max-width: calc(100vw - 16px); }
 
 .dialogue-follow-up { display: grid; gap: .5rem; margin-top: 1rem; }
 .dialogue-follow-up textarea { width: 100%; box-sizing: border-box; }
