@@ -1548,6 +1548,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'outcome-unconfirmed-completed',
     'outcome-unconfirmed-kept',
     'review-controls-prepare',
+    'review-controls-progress-floor',
     'review-controls-pause-resume',
     'review-controls-cancel-impact',
     'review-controls-redo-plan',
@@ -1674,6 +1675,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'editorial-memory-page',
     'learning-ask-frequency',
     'editorial-memory-governance',
+    // Issue #1526: a selected admitted reference reaches the initial evaluation's plan preview, which creates no Task.
+    'launch-reference-preview',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

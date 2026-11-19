@@ -64,6 +64,11 @@ import {
 } from './plan-preview-labels.js';
 import type { mountTaskDrawer } from './task-drawer.js';
 
+/** What starting each 更新这份分析 mode does, as its start says it. */
+const ANALYSIS_UPDATE_START_LABELS: Readonly<Record<BaselineAnalysisUpdateMode, string>> = {
+  'sync-current': '开始同步', 'reanalyze-range': '开始重新分析', 'reanalyze-book': '开始全部重来',
+};
+
 /**
  * ②A's seven tabs (editor-surfaces §3). The first six are what the baseline is for; the last holds
  * everything about how it was made and how it is brought up to date. The order is the specification's.
@@ -126,6 +131,10 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       awaitServiceJob, jumpToManuscript, leaveReturnChip, openEditorWindow, openTaskPlan, quickStartStartedLine, renderBookReview,
       rendererErrorMessage, screen, setStatus, taskDrawer, taskPlanOpenButton, technicalDetails
   } = options;
+  /** A prepared Task is being prepared again from its mode button: the 更新这份分析 bar on screen waits (Issue #1526). */
+  let updatePreparing = false;
+  /** Show the bar now on screen with the current wait; a bar of an earlier paint that left the screen is not touched. */
+  let syncUpdateBar: (() => void) | null = null;
 
   /**
    * The Technical Identity Layer's form of one item's provenance (V2-UX-LAYER-006): every source range
@@ -914,6 +923,30 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const actionButtons: HTMLButtonElement[] = [];
     const cancel = analysisCancelButton();
     const modes: BaselineAnalysisUpdateMode[] = ['sync-current', 'reanalyze-range', 'reanalyze-book'];
+    // A Task prepared and not yet started keeps its own mode on the card; otherwise the first mode that can run.
+    const preparedMode = projection.state === 'prepared' ? projection.update?.mode : undefined;
+    let activeMode: BaselineAnalysisUpdateMode = preparedMode !== undefined && controls.actions[preparedMode].available ? preparedMode
+      : modes.find(mode => controls.actions[mode].available) ?? 'sync-current';
+    // …and its range, when that mode is 重新分析所选范围.
+    let activeRange: BaselineAnalysisSelectedRange | null = activeMode === 'reanalyze-range' && preparedMode === 'reanalyze-range' ? projection.update?.selectedRange ?? null : null;
+    const launchHost = element('div', 'analysis-actions');
+    const modeButtons = new Map<BaselineAnalysisUpdateMode, HTMLButtonElement>();
+    // The bar's start names the mode it runs, as 0.7.2's per-mode starts did; the pressed mode button shows the same choice.
+    const openUpdateLaunch = (): void => taskDrawer.openLaunch({ bookId: host.dataset['analysisBookId']!, operation: 'launchBaselineAnalysis', title: '分析', mount: launchHost,
+      startLabel: ANALYSIS_UPDATE_START_LABELS[activeMode], startDisabled: updatePreparing,
+      input: { goal: controls.actions[activeMode].goal as Parameters<typeof rendererApi.launchBaselineAnalysis>[0]['goal'], update: { mode: activeMode, selectedRange: null } },
+      readInput: () => ({ goal: controls.actions[activeMode].goal as Parameters<typeof rendererApi.launchBaselineAnalysis>[0]['goal'], update: { mode: activeMode, selectedRange: activeMode === 'reanalyze-range' ? activeRange : null } }),
+      beforeLaunch: async () => {
+        if (!controls.actions[activeMode].available || activeMode === 'reanalyze-range' && activeRange === null) { setStatus('请先选择可用的分析范围。', 'error'); return false; }
+        return true;
+      }, inputEvents: section
+    }, () => launchHost.querySelector('button'));
+    syncUpdateBar = () => { if (launchHost.isConnected) openUpdateLaunch(); };
+    const selectMode = (mode: BaselineAnalysisUpdateMode): void => {
+      activeMode = mode;
+      for (const [entry, choice] of modeButtons) choice.setAttribute('aria-pressed', String(entry === mode));
+      openUpdateLaunch();
+    };
     for (const mode of modes) {
       const action = controls.actions[mode];
       const block = element('section', 'analysis-update-action');
@@ -935,7 +968,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         element('dt', undefined, '预期单元血缘'), expectedExact,
         element('dt', undefined, technicalWords('固定任务目标')), element('dd', 'technical-identity', action.goal)));
       if (action.unavailableReason !== null) block.append(element('p', 'attention-note', serviceWords(action.unavailableReason)));
-      let selectedRange: BaselineAnalysisSelectedRange | null = null;
+      let selectedRange: BaselineAnalysisSelectedRange | null = mode === 'reanalyze-range' ? activeRange : null;
       if (mode === 'reanalyze-range') {
         const fieldset = element('fieldset', 'analysis-range-options');
         fieldset.append(element('legend', undefined, '选择要重新分析的连续范围'));
@@ -951,10 +984,14 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
             radio.id = `analysis-range-${option.unitOrdinal}`;
             radio.value = `${option.startPosition}-${option.endPosition}`;
             radio.disabled = !action.available;
+            if (selectedRange !== null && selectedRange.startPosition === option.startPosition && selectedRange.endPosition === option.endPosition) {
+              radio.checked = true; block.dataset['selectedRange'] = radio.value;
+            }
             radio.addEventListener('change', async () => {
               if (!radio.checked) return;
               // The pick is the range at once, as before; only its expected counts are derived for it (#988), so they follow.
               selectedRange = { startPosition: option.startPosition, endPosition: option.endPosition };
+              activeRange = selectedRange; selectMode('reanalyze-range');
               block.dataset['selectedRange'] = radio.value;
               for (const key of ['expectedReused', 'expectedRecomputed', 'expectedInvalidated', 'expectedBypassed']) delete block.dataset[key];
               expected.textContent = `所选段落 ${option.startPosition}–${option.endPosition}：${ANALYSIS_READING}`;
@@ -973,7 +1010,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
               } catch {
                 if (!radio.checked || !block.isConnected) return;
                 // A range the current manuscript no longer derives, or whose counts cannot be read, is not started.
-                selectedRange = null;
+                selectedRange = null; activeRange = null;
                 delete block.dataset['selectedRange'];
                 start.disabled = true;
                 setStatus(ANALYSIS_READ_FAILED, 'error');
@@ -1006,20 +1043,24 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         }
         block.append(fieldset);
       }
-      const start = button('查看计划', 'secondary', async () => {
-        const update: BaselineAnalysisUpdateRequest = { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null };
-        if (mode === 'reanalyze-range' && update.selectedRange === null) {
-          setStatus('请先选择要重新分析的范围。', 'error');
-          return;
-        }
-        await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update, reconfirm: false }, {
-          start,
-          cancel,
-          others: actionButtons.filter((other) => other !== start),
-        }, null, true);
+      // A Task prepared and not yet started (a quick start held offline, say) keeps 0.7.2's path: the mode's button prepares it again
+      // with the mode and range chosen and opens its plan, where a changed plan is reconfirmed; otherwise it only chooses the mode.
+      const start = button(action.label, 'secondary', async () => {
+        selectMode(mode);
+        if (projection.state !== 'prepared') return;
+        if (mode === 'reanalyze-range' && selectedRange === null) { setStatus('请先选择要重新分析的范围。', 'error'); return; }
+        // The card bar waits through its own start state while this prepares, so a range pick or a settings read cannot re-enable
+        // it, and every exit (prepared, cancelled, refused) gives it back as its own state says.
+        updatePreparing = true; syncUpdateBar?.();
+        try {
+          await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update: { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null }, reconfirm: false },
+            { start, cancel, others: actionButtons.filter((other) => other !== start) }, null, true);
+        } finally { updatePreparing = false; syncUpdateBar?.(); }
       });
+      start.setAttribute('aria-pressed', String(activeMode === mode));
+      modeButtons.set(mode, start);
       start.dataset['analysisAction'] = mode;
-      start.disabled = !action.available || mode === 'reanalyze-range';
+      start.disabled = !action.available || mode === 'reanalyze-range' && selectedRange === null;
       actionButtons.push(start);
       // The mode's own button opens the two ways to begin (editor-surfaces §3). 先看计划 prepares the Task
       // and shows its plan in the drawer, whose bar starts it. The quick start is the Book's 默认执行规则's to give
@@ -1028,7 +1069,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       // Run never starts behind a plan the editor has not seen and no rule has spoken for.
       const quickStart = action.quickStart ?? null;
       const quickRule = quickStart !== null && quickStart.available ? quickStart.rule : null;
-      const quick = button(mode === 'sync-current' ? '开始同步' : mode === 'reanalyze-range' ? '开始重新分析' : '开始全部重来', mode === 'sync-current' ? 'primary' : 'secondary', async () => {
+      const quick = button(ANALYSIS_UPDATE_START_LABELS[mode], mode === 'sync-current' ? 'primary' : 'secondary', async () => {
         if (mode === 'reanalyze-range' && selectedRange === null) { setStatus('请先选择要重新分析的范围。', 'error'); return; }
         await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update: { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null }, reconfirm: false }, {
           start: quick,
@@ -1043,11 +1084,13 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       actionButtons.push(quick);
       // The mode's start and 查看计划 stand on the card at once (Issue #1410 item 15): no button only unfolds them.
       const actions = element('div', 'button-row analysis-actions');
-      actions.append(quick, start);
+      actions.append(start);
+      if (quickRule !== null) actions.append(quick);
       block.append(actions);
       section.append(block);
     }
-    section.append(cancel);
+    openUpdateLaunch();
+    section.append(launchHost, cancel);
     card.append(section);
   }
 
@@ -1265,12 +1308,11 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       goal.readOnly = true;
       const actions = element('div', 'button-row analysis-actions');
       const cancel = analysisCancelButton();
-      const start = button('开始分析', 'primary', () =>
-        startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start, cancel, others: [] }));
-      start.dataset['analysisAction'] = 'start';
-      const preview = button('查看计划', 'secondary', () => startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: preview, cancel, others: [start] }, null, true));
-      preview.dataset['analysisAction'] = 'prepare';
-      actions.append(start, preview, cancel);
+      taskDrawer.openLaunch({ bookId: host.dataset['analysisBookId']!, operation: 'launchBaselineAnalysis', title: '分析', mount: actions,
+        input: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } }, () => actions.querySelector('button'));
+      actions.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-analysis-action', 'start');
+      actions.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-analysis-action', 'prepare');
+      actions.append(cancel);
       form.append(label, goal, actions);
       records.append(form);
       host.replaceChildren(card);
@@ -1303,13 +1345,11 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const restart = element('section', 'form-row analysis-form analysis-restart');
       const restartActions = element('div', 'button-row analysis-actions');
       const restartCancel = analysisCancelButton();
-      const restartStart = button('重新开始分析', 'primary', () =>
-        startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartStart, cancel: restartCancel, others: [restartPreview] }));
-      restartStart.dataset['analysisAction'] = 'start';
-      const restartPreview = button('查看计划', 'secondary', () =>
-        startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartPreview, cancel: restartCancel, others: [restartStart] }, null, true));
-      restartPreview.dataset['analysisAction'] = 'prepare';
-      restartActions.append(restartStart, restartPreview, restartCancel);
+      taskDrawer.openLaunch({ bookId: host.dataset['analysisBookId']!, operation: 'launchBaselineAnalysis', title: '分析', mount: restartActions,
+        input: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } }, () => restartActions.querySelector('button'));
+      restartActions.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-analysis-action', 'start');
+      restartActions.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-analysis-action', 'prepare');
+      restartActions.append(restartCancel);
       restart.append(restartActions);
       records.append(restart);
     }

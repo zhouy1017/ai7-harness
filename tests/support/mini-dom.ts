@@ -83,6 +83,7 @@ export class MiniElement {
   get className(): string { return this.attributes.get('class') ?? ''; }
   get childElementCount(): number { return this.children.filter((child) => child.tagName !== '#TEXT').length; }
   get firstElementChild(): MiniElement | null { return this.children.find((child) => child.tagName !== '#TEXT') ?? null; }
+  get lastElementChild(): MiniElement | null { return this.children.findLast((child) => child.tagName !== '#TEXT') ?? null; }
   set className(value: string) { this.attributes.set('class', value); }
   get classList(): { contains(name: string): boolean; add(...names: string[]): void; remove(...names: string[]): void } {
     return {
@@ -237,6 +238,12 @@ export class MiniElement {
   }
   focus(): void { miniDocument.activeElement = this; }
   scrollIntoView(): void { /* nothing lays out */ }
+  #style: Record<string, string> | undefined;
+  /** The style object a renderer writes (the page's policy refuses style attributes); nothing reads it but tests. */
+  get style(): Record<string, string> { return (this.#style ??= {}); }
+  set style(value: Record<string, string>) { this.#style = value; }
+  /** Nothing is styled: every element counts as rendered unless a test says otherwise. */
+  checkVisibility(): boolean { return true; }
   /** Nothing lays out: every box is empty at the origin unless a test gives it a place. */
   getBoundingClientRect(): { top: number; bottom: number; left: number; right: number; width: number; height: number } {
     return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 };

@@ -795,7 +795,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     localThumb.hidden = overflow <= 0;
     if (overflow > 0) {
       const height = Math.max(24, editorWindow.clientHeight ** 2 / editorWindow.scrollHeight);
-      localThumb.setAttribute('style', `height:${height}px;transform:translateY(${Math.max(0, Math.min(1, editorWindow.scrollTop / overflow)) * (editorWindow.clientHeight - height)}px)`);
+      localThumb.style.height = `${height}px`;
+      localThumb.style.transform = `translateY(${Math.max(0, Math.min(1, editorWindow.scrollTop / overflow)) * (editorWindow.clientHeight - height)}px)`;
     }
   };
 

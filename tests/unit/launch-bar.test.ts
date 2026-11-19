@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { mountLaunchBar, type LaunchBar } from '../../src/renderer/components/launch-bar.js';
+import { createLaunchBarPresentation, mountLaunchBar, type LaunchBar } from '../../src/renderer/components/launch-bar.js';
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../../src/shared/runtime-execution-config.js';
 import { preferenceDefaults } from '../../src/shared/preferences.js';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { MODEL_SERVICE_CONNECTION_IDS } from '../../src/shared/protocol/model-service.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 import { WRITING_REQUEST } from '../support/writing-task.js';
 
@@ -43,7 +44,7 @@ function launchApi(operation: LedgerTaskLaunchOperation, options: { values?: Rec
 }
 
 async function mount(api: unknown, request: unknown) {
-  const callbacks = { errorMessage: (_error: unknown, fallback: string) => fallback, setStatus: vi.fn(), settle: async () => true, onRecorded: vi.fn(), openRun: vi.fn() };
+  const callbacks = { errorMessage: (_error: unknown, fallback: string) => fallback, setStatus: vi.fn(), settle: async () => true, onRecorded: vi.fn(), openRun: vi.fn(), openSettings: vi.fn() };
   const bar = mountLaunchBar({ api: api as never, request: request as never, ...callbacks, interrupted: false });
   mounted.push(bar);
   document.body.append(...bar.body, ...bar.bar);
@@ -79,7 +80,7 @@ it.each(OPERATIONS)('builds the %s input from the run options and the remembered
   await bar.openPlan();
   const previewed = previewTaskLaunch.mock.calls[0]![0].launch;
   expect(previewed.operation).toBe(operation);
-  choose('[data-task-launch-option="budget"]', '12345', 'input');
+  choose('[data-task-launch-option="budget"]', '50000', 'change');
   choose('[data-task-launch-option="retry"]', 'never', 'change');
   choose('[data-task-start-when]', 'idle', 'change');
   await bar.openPlan();
@@ -90,7 +91,7 @@ it.each(OPERATIONS)('builds the %s input from the run options and the remembered
   expect(launch).toHaveBeenCalledOnce();
   expect(launch.mock.calls[0]![0]).toEqual({
     ...inputFor(operation), executionConfig: remembered, rememberedChoice: true, startWhen: 'idle', clientCommandId: latest,
-    planEdits: { removedSteps: [], disallowedAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 12_345 } },
+    planEdits: { removedSteps: [], disallowedAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } },
   });
   // A custom analysis is read as a baseline-analysis Task; every other launch is read as its own kind.
   const planKind = operation === 'launchCustomAnalysis' ? 'baseline-analysis' : kind;
@@ -206,4 +207,85 @@ it('reads the baseline-only options 先问我, no sampling and 联网后开始 i
   expect(miniDocument.querySelector('[data-task-launch-option="sampling"]')!.checked).toBe(false);
   expect(miniDocument.querySelector('[data-task-launch-option="budget"]')!.value).toBe('500');
   expect(miniDocument.querySelector('[data-task-start-when]')!.value).toBe('when-online');
+});
+
+it('keeps 去设置 available beside a missing model after a refused start', async () => {
+  const { api } = launchApi('launchBaselineAnalysis', { launch: async () => { throw new Error('missing model'); } });
+  const { bar, openSettings } = await mount(api, { operation: 'launchBaselineAnalysis', bookId: 'book', title: '分析', input: inputFor('launchBaselineAnalysis') });
+  await bar.start();
+  const settings = miniDocument.querySelector('[data-task-drawer-control="launch-settings"]')!;
+  expect(settings.hidden).toBe(false); settings.click();
+  expect(openSettings).toHaveBeenCalledOnce();
+  expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')!.disabled).toBe(false);
+});
+
+it('offers the ordinary 本次用量 as the four shared tiers, keeps a custom ceiling as 上次上限, and marks a change on 选项', async () => {
+  setTechnicalLayerVisible(false);
+  try {
+    const { api, launch } = launchApi('launchWritingTask');
+    const { bar } = await mount(api, { operation: 'launchWritingTask', bookId: 'book', title: '写作',
+      input: { ...WRITING_REQUEST, planEdits: { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 75_000 } } } });
+    const budget = miniDocument.querySelector('[data-task-launch-option="budget"]')!;
+    expect(budget.querySelectorAll('option').map(option => [option.value, option.textContent])).toEqual([
+      ['50000', '较少'], ['100000', '标准（推荐）'], ['200000', '较多'], ['', '不设上限'], ['75000', '上次上限']]);
+    expect(budget.value).toBe('75000');
+    const summary = miniDocument.querySelector('.task-launch-options summary')!;
+    expect(summary.textContent).toBe('选项');
+    choose('[data-task-launch-option="budget"]', '50000', 'change');
+    expect(summary.textContent).toBe('选项 · 已调整');
+    choose('[data-task-launch-option="budget"]', '75000', 'change');
+    expect(summary.textContent).toBe('选项');
+    choose('[data-task-launch-option="budget"]', '', 'change');
+    await bar.start();
+    expect(launch.mock.calls[0]![0]).toMatchObject({ planEdits: { removedSteps: [], disallowedAdaptations: [] } });
+    expect((launch.mock.calls[0]![0] as { planEdits: Record<string, unknown> }).planEdits).not.toHaveProperty('runBudgetCeiling');
+  } finally { setTechnicalLayerVisible(true); }
+});
+
+it('reads no plan and offers no start while the surface says it cannot start, and both again once it can', async () => {
+  const { api, previewTaskLaunch } = launchApi('launchWritingTask');
+  const request = { operation: 'launchWritingTask', bookId: 'book', title: '写作', input: WRITING_REQUEST, startDisabled: true };
+  const bar = mountLaunchBar({ api: api as never, request: request as never, errorMessage: (_error: unknown, fallback: string) => fallback, setStatus: vi.fn(),
+    settle: async () => true, onRecorded: vi.fn(), openRun: vi.fn(), interrupted: false });
+  mounted.push(bar); document.body.append(...bar.body, ...bar.bar);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await bar.openPlan();
+  expect(previewTaskLaunch).not.toHaveBeenCalled();
+  expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')!.disabled).toBe(true);
+  request.startDisabled = false; bar.sync();
+  await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')!.disabled).toBe(false));
+  await bar.openPlan();
+  expect(previewTaskLaunch).toHaveBeenCalledOnce();
+});
+
+it('closes a launch popover when focus arrives on another control, also after a press rested focus on the sheet', () => {
+  const sheet = document.createElement('dialog'); sheet.tabIndex = -1; document.body.append(sheet);
+  const options = document.createElement('div'); const inside = document.createElement('select'); options.append(inside);
+  const start = document.createElement('button');
+  const bar = createLaunchBarPresentation(document.createElement('span'), start, { title: '选项', content: options }, null);
+  sheet.append(bar);
+  const details = bar.querySelector<HTMLDetailsElement>('.task-launch-options')!;
+  const focusOn = (target: HTMLElement) => target.dispatchEvent({ type: 'focusin', bubbles: true } as never);
+  details.open = true; details.dispatchEvent({ type: 'toggle' } as never);
+  focusOn(inside);
+  expect(details.open).toBe(true);
+  // A press on the panel's text focuses the sheet around it: still open.
+  focusOn(sheet);
+  expect(details.open).toBe(true);
+  // Tab from there on to the bar's start: closed.
+  focusOn(start);
+  expect(details.open).toBe(false);
+});
+
+it('keeps a launch popover open while focus leaves the window, and closes it when focus comes back on another control', () => {
+  const options = document.createElement('div'); options.append(document.createElement('select'));
+  const start = document.createElement('button');
+  const bar = createLaunchBarPresentation(document.createElement('span'), start, { title: '选项', content: options }, null);
+  document.body.append(bar);
+  const details = bar.querySelector<HTMLDetailsElement>('.task-launch-options')!;
+  details.open = true; details.dispatchEvent({ type: 'toggle' } as never);
+  details.dispatchEvent({ type: 'focusout', bubbles: true, relatedTarget: null } as never);
+  expect(details.open).toBe(true);
+  start.dispatchEvent({ type: 'focusin', bubbles: true } as never);
+  expect(details.open).toBe(false);
 });

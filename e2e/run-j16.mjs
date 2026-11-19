@@ -1,6 +1,6 @@
 import { rightColumnGeometry } from './comments-pane.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
-import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -330,7 +330,7 @@ async function startFirstBaseline(renderer, readiness, name) {
 async function prepareFirstBaseline(renderer, readiness, name) {
   await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='available'`, `${name}-available`);
   await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-open`);
-  await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-bar-ready`);
+  await waitFor(renderer, `document.querySelector('[data-task-launch-kind] [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-bar-ready`);
 }
 
 // ---- J-16's own: the Book, the hold, and the 任务 panel as the editor reads it ------------------------------------
@@ -1725,7 +1725,7 @@ async function main() {
     at('selection-task-reanalyze');
     // 重新分析这段 starts the exact paragraph update and closes the composer; the recorded outcome retains any fixture gaps.
     await assertRenderer(renderer, `(() => { const select = window.__j16.composer()?.querySelector('select[data-mark-field="procedure"]'); if (!(select instanceof HTMLSelectElement)) return false; select.value = 'reanalyze-range'; select.dispatchEvent(new Event('change', { bubbles: true })); return window.__j16.act('submit'); })()`, 'selection-task-reanalyze-submit');
-    await waitFor(renderer, `window.__j16.composer() === null && document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, 'selection-task-reanalyze-bar');
+    await waitFor(renderer, `window.__j16.composer() === null && document.querySelector('[data-task-launch-kind] [data-task-drawer-control="launch"]')?.disabled===false`, 'selection-task-reanalyze-bar');
     await launchTaskFromBar(renderer, waitFor, 'selection-task-reanalyze-start');
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis.state==='settled')`, 'selection-task-reanalyze-direct', 120_000);
     const rangeTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => ({ mode: analysis.taskIntent?.mode ?? null, run: analysis.run, outcome: analysis.taskOutcome, resultRevisionId: analysis.resultSetRevision?.revisionId, update: analysis.update === null ? null : { mode: analysis.update.mode, selectedRange: analysis.update.selectedRange } }))`);

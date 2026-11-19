@@ -3,6 +3,7 @@ import { houseAnnotationWords } from './editorial-mark-labels.js';
 import { serviceWords } from './service-wording.js';
 import { clearReviewReturn } from './review-return.js';
 import { navigation, rendererApi } from './navigation-generation.js';
+import { createLaunchBarPresentation, syncLaunchModelSettings } from './components/launch-bar.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_DEFAULT_LEVEL, EVIDENCE_ASSURANCE_LEVEL_LABELS,
@@ -359,6 +360,8 @@ interface SheetState {
   executionConfig?: RuntimeExecutionConfig;
   chooser?: ReturnType<typeof createDispatchChooser>;
   choicePending?: boolean;
+  choiceReady?: Promise<void>;
+  startWhen?: 'now' | 'when-online';
   choiceTicket?: number;
   launchPending?: boolean;
   clientCommandId?: string;
@@ -977,8 +980,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     card.dataset['reviewRead'] = 'failed';
     const earlier = card.querySelector('.review-read-failed');
     if (earlier !== null && !changed) return;
+    const putBack = screenPlace();
     if (earlier !== null) earlier.replaceWith(readFailedNote(reason));
     else card.prepend(readFailedNote(reason));
+    putBack();
   }
 
   function show(next: ReviewWorkspaceProjection): void {
@@ -993,7 +998,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     rereadPressed = false;
     if (card !== undefined) {
       delete card.dataset['reviewRead'];
-      card.querySelector('.review-read-failed')?.remove();
+      const note = card.querySelector('.review-read-failed');
+      if (note !== null) { const putBack = screenPlace(); note.remove(); putBack(); }
     }
     // The drawer beside 审阅 states where the Run stands; it reads the plan again when that changes.
     if (previous?.run !== null && previous?.run !== undefined && previous.run.reviewRunId === next.run?.reviewRunId &&
@@ -1090,6 +1096,62 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   document.addEventListener('keyup', keyRelease, true);
   window.addEventListener('blur', releaseCard);
 
+  /**
+   * What stays where it stands on screen when the card is drawn again (Issues #1525, #1526): the control under the editor's
+   * resting pointer inside the card — findings arriving above 查看计划 must not walk it out from under the pointer — otherwise
+   * the caller's own anchor (the focused card). Measured before the draw, put back once after it by one relative scroll; nothing
+   * when it is off screen, gone, hidden or not the only control of its kind. The last input wins: a pointer move over the card
+   * arms the pointer's place, and leaving the card, the window losing focus, a key or the wheel disarm it until the next move
+   * (not `pointerover`, which a still pointer receives whenever what lies under it changes).
+   */
+  let pointerAt: { x: number; y: number } | null = null;
+  const trackPointer = (event: PointerEvent): void => { pointerAt = { x: event.clientX, y: event.clientY }; };
+  const leavePointer = (): void => { pointerAt = null; };
+  host.addEventListener('pointermove', trackPointer, true);
+  host.addEventListener('pointerleave', leavePointer);
+  document.addEventListener('keydown', leavePointer, true);
+  document.addEventListener('wheel', leavePointer, true);
+  window.addEventListener('blur', leavePointer);
+  const PLACE_CONTROLS = 'button, select, textarea, input, summary, a';
+  const sameControls = (key: string): HTMLElement[] =>
+    Array.from(card?.querySelectorAll<HTMLElement>(PLACE_CONTROLS) ?? []).filter((candidate) => focusKeyOf(candidate) === key);
+  function screenPlace(fallback: HTMLElement | null = null): () => void {
+    const hit = pointerAt === null ? null : document.elementFromPoint(pointerAt.x, pointerAt.y);
+    const under = hit instanceof HTMLElement && card?.contains(hit) === true ? hit.closest<HTMLElement>(PLACE_CONTROLS) : null;
+    const key = under === null ? null : focusKeyOf(under);
+    const control = key !== null && sameControls(key).length === 1 ? under : null;
+    const held = control ?? fallback;
+    const box = held?.getBoundingClientRect();
+    if (held === null || box === undefined || box.bottom <= 0 || box.top >= window.innerHeight) return () => undefined;
+    return () => {
+      const matches = control === null ? (held.isConnected ? [held] : []) : sameControls(key!);
+      const page = scroller();
+      if (matches.length !== 1 || !matches[0]!.checkVisibility() || page === null) return;
+      const drift = matches[0]!.getBoundingClientRect().top - box.top;
+      if (Math.abs(drift) >= 1) page.scrollTop += drift;
+    };
+  }
+
+  /**
+   * While a Run is running, its progress never gets shorter under the editor (#1526): at the page's end a shorter list would pull
+   * the page down by the browser's clamp, which no scroll can put back. It keeps its tallest height at its width until the Run
+   * stops running; a new width (the Task Drawer opened or closed) starts again from the list's own height. The floor is set
+   * through the style object: the page's policy refuses inline style attributes.
+   */
+  let progressFloor: { runId: string; width: number; height: number } | null = null;
+  function measureProgress(run: ReviewRunProjection | null): void {
+    if (run === null || run.state !== 'running') { progressFloor = null; return; }
+    const list = card?.dataset['reviewRunId'] === run.reviewRunId ? card.querySelector<HTMLElement>('ol.review-progress') : null;
+    if (list === null) { if (progressFloor?.runId !== run.reviewRunId) progressFloor = null; return; }
+    // The list's own height, read from its rows (they stand at its top) rather than by taking its floor away, which at the page's
+    // end would let the browser clamp the scroll before the new list is in.
+    const { top, width } = list.getBoundingClientRect();
+    const last = list.lastElementChild?.getBoundingClientRect();
+    const height = last === undefined ? 0 : last.bottom - top;
+    const kept = progressFloor?.runId === run.reviewRunId && Math.abs(progressFloor.width - width) < 1 ? progressFloor.height : 0;
+    progressFloor = { runId: run.reviewRunId, width, height: Math.max(kept, height) };
+  }
+
   function renderUnavailable(error: unknown): void {
     const unavailable = el('section', 'review-workspace-card attention-note');
     unavailable.dataset['reviewState'] = 'unavailable';
@@ -1182,6 +1244,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           selection: active instanceof HTMLTextAreaElement ? [active.selectionStart, active.selectionEnd] as const : null,
         }
       : null;
+    const putBack = screenPlace();
+    measureProgress(next.run);
     const node = el('section', 'review-workspace-card');
     if (readFailure !== null) {
       node.dataset['reviewRead'] = 'failed';
@@ -1242,6 +1306,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         node.querySelector<HTMLElement>('.review-filters button[aria-pressed="true"]:not(:disabled)')?.focus({ preventScroll: true });
       }
     }
+    putBack();
   }
 
   const actionButton = (action: ReviewAction, tone: 'primary' | 'secondary' | 'quiet', run: () => void, label: string = REVIEW_ACTION_LABELS[action]): HTMLButtonElement => {
@@ -1694,6 +1759,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   function progressList(run: ReviewRunProjection): HTMLElement {
     const list = el('ol', 'review-progress');
+    if (run.state === 'running' && progressFloor?.runId === run.reviewRunId && progressFloor.height > 0) list.style.minHeight = `${progressFloor.height}px`;
     const now = Date.now();
     for (const category of run.categories) {
       const item = el('li');
@@ -1719,7 +1785,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** Between re-renders only the measured progress moves; it is redrawn in place, and nothing focusable lives in it. */
   function updateProgress(next: ReviewWorkspaceProjection): void {
     const current = card?.querySelector('ol.review-progress');
-    if (current && next.run !== null) current.replaceWith(progressList(next.run));
+    if (!current || next.run === null) return;
+    measureProgress(next.run);
+    current.replaceWith(progressList(next.run));
   }
 
   // ---- results ----------------------------------------------------------------------------------------
@@ -1803,7 +1871,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       details.append(el('summary', '', reviewExcludedHeading(run.excludedTotal ?? 0)));
       for (const finding of run.excluded ?? []) {
         const item = el('div', 'review-excluded-entry');
-        item.setAttribute('style', 'overflow-wrap: anywhere');
+        item.style.overflowWrap = 'anywhere';
         item.append(el('strong', undefined, `${finding.categoryLabel} · ${finding.reasonLabel}${technicalWords(` · 单元 ${finding.unitOrdinal}${finding.textPart === undefined ? '' : ` · 原文 ${finding.textPart.index}/${finding.textPart.total}`} · ${finding.reasonCode}`)}`),
           el('blockquote', undefined, finding.text));
         details.append(item);
@@ -2598,14 +2666,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // A card the editor is not on (its reason prompt arriving, say) may change height; the card they are on stays where it is —
     // while it is on screen. Scrolled away from it, the editor is reading something else, which nothing here moves.
     const kept = hadFocus ? null : document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>('article.review-finding') : null;
-    const keptBox = kept?.getBoundingClientRect();
-    const keptTop = keptBox !== undefined && keptBox.bottom > 0 && keptBox.top < window.innerHeight ? keptBox.top : undefined;
+    const putBack = screenPlace(kept);
     before.replaceWith(updated);
-    const page = scroller();
-    if (kept !== null && kept !== undefined && keptTop !== undefined && page !== null) {
-      const drift = kept.getBoundingClientRect().top - keptTop;
-      if (Math.abs(drift) >= 1) page.scrollTop += drift;
-    }
+    putBack();
     if (hadFocus && finding.status !== 'pending') {
       const pending = visiblePending(run);
       const next = pending.find((entry) => entry.finding.ordinal > finding.ordinal) ?? pending[0];
@@ -3051,7 +3114,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
     renderSheet(projection, sheetState);
     sheet.show();
-    if (immediate) { await startOrEstimateRun(sheetState, 'start'); return; }
+    if (immediate) {
+      const state = sheetState;
+      await state.choiceReady;
+      if (!state.dismissed && sheetState === state) await startOrEstimateRun(state, 'start');
+      return;
+    }
     if (procedureId !== null && PROCEDURE_DEFINITION_KEY.test(procedureId)) {
       await chooseDefinition(sheetState, procedureId);
       return;
@@ -3207,14 +3275,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const text = el('span', 'review-category-text');
       const basis = el('a', 'review-category-basis', [...entry.guidelineDocuments.map((document) => document.title), entry.procedure.title].join(' · '));
       basis.href = '#'; basis.title = basis.textContent ?? '';
-      basis.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); sheet.close(); options.openRules?.(); });
+      const basisDetail = el('p', 'review-category-basis-detail', reviewBasisWords(entry.basis));
+      basisDetail.hidden = true;
+      basis.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); basisDetail.hidden = !basisDetail.hidden; basis.setAttribute('aria-expanded', String(!basisDetail.hidden)); });
       basis.id = uid('category-basis');
       const reason = el('span', 'review-category-reason');
       reason.id = uid('category-reason');
       input.setAttribute('aria-describedby', `${basis.id} ${reason.id}`);
       text.append(el('strong', undefined, entry.label), el('span', 'review-category-description', entry.description.split(/[；。]/u)[0] + '。'), reason);
       const calls = el('span', 'review-category-calls');
-      label.append(input, text, basis, calls);
+      label.append(input, text, basis, calls, basisDetail);
       input.addEventListener('change', () => {
         if (input.checked) state.categories.add(entry.categoryId);
         else state.categories.delete(entry.categoryId);
@@ -3472,18 +3542,29 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const actions = el('div', 'button-row review-sheet-actions');
     const newChooser = state.chooser === undefined;
     const chooser = state.chooser ??= createDispatchChooser({ role: 'main-editorial', changed: config => { void updateExecutionChoice(state, config); } });
-    if (newChooser) { state.choicePending = true; void (async () => {
+    if (newChooser) { state.choicePending = true; state.choiceReady = (async () => {
       const [settings, preferences] = await Promise.allSettled([api.getModelServiceSettings(), rendererApi.getPreferences()]);
       if (!state.dismissed) {
         if (state.executionConfig === undefined) { state.executionConfig = preferences.status === 'fulfilled' ? preferences.value.values['model.dispatchChoices']['review-run'] ?? {} : {}; state.rememberedChoice = Object.keys(state.executionConfig).length > 0; }
         if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {}, state.executionConfig);
         else chooser.unavailable();
       }
-    })().catch(() => { chooser.unavailable(); }).finally(() => { if (!state.dismissed) { state.choicePending = false; sheetUpdate(); } }); }
-    const primaryActions = el('div', 'button-row'); primaryActions.append(chooser.element, start, prepare);
+    })().catch(() => { chooser.unavailable(); }).finally(() => { if (!state.dismissed) { state.choicePending = false; sheetUpdate();
+      const bar = sheet.querySelector<HTMLElement>('.task-launch-bar'); if (bar !== null) syncLaunchModelSettings(bar); } }); }
+    const timing = el('select'); timing.setAttribute('aria-label', '开始时间');
+    for (const [value, title] of [['now', '立即'], ['when-online', '联网后开始']]) { const option = el('option', undefined, title); option.value = value!; timing.append(option); }
+    timing.value = state.startWhen ?? 'now';
+    timing.addEventListener('change', () => { state.startWhen = timing.value === 'when-online' ? 'when-online' : 'now'; delete state.clientCommandId; });
+    const timingRow = el('label', undefined, '开始时间'); timingRow.append(timing, el('small', undefined, '只安排这一次审阅的开始时间。'));
+    const planContent = el('div'); planContent.append(consequences, estimateNotice, prepare);
+    prepare.textContent = '更新计划';
+    const primaryActions = createLaunchBarPresentation(chooser.element, start, { title: '选项', content: timingRow }, planContent);
+    syncLaunchModelSettings(primaryActions);
+    const estimatePanel = primaryActions.querySelector<HTMLDetailsElement>('.task-launch-estimate')!;
+    estimatePanel.addEventListener('toggle', () => { if (estimatePanel.open) void startOrEstimateRun(state); });
     actions.append(procedureField, primaryActions, el('small', 'review-management-note', technicalWords('规范文件与工序在知识库里管理；这里只选用', '规范文件在知识库里管理；这里只选用')));
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
-    form.append(categories, localOptions, assurance, scopes, consequences, networkNotice, networkSettings, problem, estimateNotice, progress, actions);
+    form.append(categories, localOptions, assurance, scopes, networkNotice, networkSettings, problem, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());
     for (const event of ['input', 'change']) form.addEventListener(event, () => { delete state.clientCommandId; delete state.estimate; estimateNotice.textContent = ''; estimateNotice.hidden = true; });
 
@@ -3597,8 +3678,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (destroyed || sheetState !== state || state.choiceTicket !== ticket) return;
       const focused = state.chooser?.element.contains(document.activeElement) ? document.activeElement : null;
       state.choicePending = false;
-      projection = next;
-      renderSheet(next, state);
+      // Chapters and report pages the editor already read stay read after a model choice.
+      projection = retainTaskPlanPages(next, projection);
+      renderSheet(projection, state);
       if (focused instanceof HTMLElement) queueMicrotask(() => {
         // renderSheet reopens the native chooser popover in its preceding microtask.
         if (document.activeElement === document.body || state.chooser?.element.contains(document.activeElement)) focused.focus({ preventScroll: true });
@@ -3675,7 +3757,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       state.launchPending = true;
       const taskInput = { ...preparationInput,
         ...(categoryIds.includes('factual-review') ? { evidenceAssuranceLevel: state.evidenceAssuranceLevel ?? EVIDENCE_ASSURANCE_DEFAULT_LEVEL } : {}),
-        ...(projection.connectivity === 'offline' && !localOnly(state) ? { startWhen: 'when-online' as const } : {}) };
+        ...(projection.connectivity === 'offline' && !localOnly(state) || state.startWhen === 'when-online' ? { startWhen: 'when-online' as const } : {}) };
       const launchInput = JSON.stringify({ taskInput, executionConfig: state.executionConfig ?? {} });
       if (state.launchInput !== launchInput) delete state.clientCommandId;
       state.launchInput = launchInput;
@@ -3751,6 +3833,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       unregisterCommands?.();
       document.removeEventListener('keydown', escapeFromPage);
       host.removeEventListener('pointerdown', pressCard, true);
+      host.removeEventListener('pointermove', trackPointer, true);
+      host.removeEventListener('pointerleave', leavePointer);
+      document.removeEventListener('keydown', leavePointer, true);
+      document.removeEventListener('wheel', leavePointer, true);
+      window.removeEventListener('blur', leavePointer);
       host.removeEventListener('keydown', keyCard, true);
       document.removeEventListener('pointerup', releaseCard, true);
       document.removeEventListener('pointercancel', releaseCard, true);

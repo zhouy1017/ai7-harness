@@ -1,5 +1,12 @@
 # E2E journeys: what each admitted runner proves
 
+## #1526 synchronized deltas (0.7.3 slice, `codex/integration-0.7.3`)
+
+Every page and sheet start is the shared launch bar (模型 · 选项 · 开始 · 先看计划); the shared launch helpers find the owning bar and start with one real pointer press. Stage changes are listed in PR #1578; two stages are new:
+
+- J-11 `launch-reference-preview`: a pointer-selected excerpt of the admitted sample1 appears in the current initial-evaluation plan at 1280×800 and 1008×681, nothing overflows and the preview creates no task.
+- J-10 `review-controls-progress-floor` (the review held running at its first part): the review card's progress list carries a floor its computed `min-height` shows (not `0px`) — the floor that keeps a running review's page from being pulled down at its end, set through the style object because the page's policy refuses inline style attributes; with the page scrolled to its end, 「查看计划」 keeps its viewport top across a poll that draws the list again. After the stop-impact wording, with one part read, the drawer's progress fill is wider than nothing and narrower than its track. The review-sheet helper rests the real pointer on 「查看计划」 before its one strict press.
+
 ## #1543 synchronized deltas (0.7.3 slice, `codex/integration-0.7.3`)
 
 评估校准与预测, 本社词表 and 分析 › 自定义 are read as ordinary pages. The two window forms are 1280×800 and 1008×681; each stage that must hold at both writes with real pointer presses and typed input (`Input.insertText`), and the one-top-edge check (`buttonRowsAtOneEdge`: every visible button row holds its buttons on one top edge, none full width, no sideways scroll) runs at both. `e2e/ordinary-pages.mjs` holds the shared steps (`atBothSizes`, `typeInto`, `setDeveloperMode`, `HOUSE_DRAFT_MEASURE`).

@@ -308,6 +308,7 @@ describe('the Manuscript screen lifecycle', () => {
     app.showing?.destroy();
   });
   it('keeps the full long outline heading available to assistive tools and its title', async () => {
+    const style = Object.getOwnPropertyDescriptor(MiniElement.prototype, 'style')!;
     Object.defineProperty(MiniElement.prototype, 'style', { configurable: true, value: { setProperty: vi.fn() } });
     try {
       const heading = '长'.repeat(200);
@@ -322,7 +323,7 @@ describe('the Manuscript screen lifecycle', () => {
       expect(headingButton.getAttribute('title')).toBe(heading);
       expect(headingButton.getAttribute('aria-label')).toBe(heading);
       app.showing?.destroy();
-    } finally { Reflect.deleteProperty(MiniElement.prototype, 'style'); }
+    } finally { Object.defineProperty(MiniElement.prototype, 'style', style); }
   });
 
   it('keeps a long manuscript heading compact while retaining its full position detail', () => {
@@ -514,6 +515,7 @@ describe('the Manuscript screen lifecycle', () => {
   });
 
   it('counts a chapter\'s marks only where it has some, and the outline\'s own headings in its footer', async () => {
+    const style = Object.getOwnPropertyDescriptor(MiniElement.prototype, 'style')!;
     Object.defineProperty(MiniElement.prototype, 'style', { configurable: true, value: { setProperty: vi.fn() } });
     try {
       const entries = ['blk_3', 'omitted'].map((blockId) => ({ blockId, kind: 'heading', level: 1, text: blockId, displayTextTruncated: false }));
@@ -530,7 +532,7 @@ describe('the Manuscript screen lifecycle', () => {
       expect(rows[1]!.querySelector('.outline-marks')).toBeNull();
       expect(app.screen.querySelector('.navigation-footer')!.textContent).toContain('共 2 个章节标题');
       app.showing?.destroy();
-    } finally { Reflect.deleteProperty(MiniElement.prototype, 'style'); }
+    } finally { Object.defineProperty(MiniElement.prototype, 'style', style); }
   });
 
   it.each(['modes', 'editor'] as const)(

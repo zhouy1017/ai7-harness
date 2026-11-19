@@ -1,5 +1,5 @@
 import { pointerClick } from './dispatch-chooser.mjs';
-import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { launchTaskFromBar, popoverShownInside } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -467,7 +467,7 @@ const READ_EVALUATION = `(() => {
         task: section.querySelector('.evaluation-initial-task')?.firstChild?.textContent ?? null,
         none: section.querySelector('.evaluation-initial-none')?.textContent ?? null,
         latest: section.querySelector('.evaluation-initial-latest')?.firstChild?.textContent ?? null,
-        actions: Array.from(section.querySelectorAll('.evaluation-initial-actions button:not([data-evaluation-action="close-initial-sheet"])'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
+        actions: Array.from(section.querySelectorAll('.evaluation-initial-actions button[data-evaluation-action]:not([data-evaluation-action="close-initial-sheet"])'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
         reason: section.querySelector('.evaluation-initial-reason')?.textContent ?? null,
       };
     })(),
@@ -541,7 +541,7 @@ const READ_EVALUATION = `(() => {
         state: section.dataset.rewriteState ?? null,
         task: section.querySelector('.evaluation-rewrite-task')?.textContent ?? null,
         reason: section.querySelector('.evaluation-rewrite-reason')?.textContent ?? null,
-        actions: Array.from(section.querySelectorAll('.evaluation-rewrite-start button'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
+        actions: Array.from(section.querySelectorAll('.evaluation-rewrite-start button[data-evaluation-action]'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
         proposal: card === null ? null : {
           current: card.dataset.current ?? null,
           line: card.querySelector('.evaluation-rewrite-proposal-line')?.firstChild?.textContent ?? null,
@@ -629,7 +629,7 @@ async function prepareFirstBaseline(renderer, readiness, name) {
   void readiness;
   await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='available'`, `${name}-available`);
   await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-prepare`);
-  await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-launch-ready`);
+  await waitFor(renderer, `document.querySelector('[data-task-launch-kind] [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-launch-ready`);
 }
 
 /**
@@ -2020,16 +2020,17 @@ async function main() {
     at('initial-evaluation-start');
     // ②C offers AI7's 初评 before there is one; 准备 AI7 初评 opens its plan in the Task Drawer, whose bar starts it, and ②C follows
     // the Run to its end on the J-04 adapter's authored fixture.
+    await waitFor(renderer, `document.querySelector('[data-evaluation-action="start-initial"]')?.disabled===false`, 'initial-evaluation-model-ready');
     const beforeInitial = await readEvaluation(renderer, (page) => page.initial !== null, 'initial-evaluation-offered');
     requireJourney(beforeInitial.initial.state === 'none' && beforeInitial.initial.none === '还没有评估报告：生成后，AI7 通读全稿，给出逐项评分与评语、原文依据、优缺点、下一步建议和市场分析。' &&
       JSON.stringify(beforeInitial.initial.actions) === JSON.stringify([['start-initial', '生成评估报告', false], ['prepare-initial', '先看计划', false]]) && beforeInitial.editReport === null && beforeInitial.view === 'record',
     'initial-evaluation-offered-words', beforeInitial.initial);
-    await assertRenderer(renderer, `!document.querySelector('.evaluation-sheet') && !document.querySelector('.evaluation')?.textContent.includes('允许参考')`, 'initial-evaluation-reference-location');
+    await assertRenderer(renderer, `!document.querySelector('.evaluation-sheet') && !!document.querySelector('.evaluation-initial .task-launch-options .task-launch-references')`, 'initial-evaluation-reference-location');
     await clickSelector(renderer, '[data-evaluation-action="prepare-initial"]', 'initial-evaluation-prepare');
-    await waitFor(renderer, `document.querySelector('#task-drawer .task-launch-references [data-evaluation-materials="initial"]')`, 'initial-evaluation-launch-references');
+    await waitFor(renderer, `document.querySelector('[data-task-launch-kind] .task-launch-references [data-evaluation-materials="initial"]')`, 'initial-evaluation-launch-references');
     await launchTaskFromBar(renderer, waitFor, 'initial-evaluation');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', 'initial-evaluation-full-plan');
-    await assertRenderer(renderer, `!document.querySelector('.evaluation')?.textContent.includes('允许参考')`, 'initial-evaluation-page-no-references');
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.evaluation [data-evaluation-materials]')).every(node=>node.closest('.task-launch-popover')!==null)`, 'initial-evaluation-page-no-references');
     // The plan in the editor's words, as the drawer reads it: its task, its two steps, its 工序, and that it scores nothing for
     // the editor; no button of the drawer carries 授权.
     const planWords = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'initial-evaluation', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
@@ -2222,9 +2223,12 @@ async function main() {
         ['editorial', '给编辑部 / 选题会的审读报告', null, [['prepare', '起草', false]]],
       ]), 'readers-report-offered-words', reportOffered);
     // 起草 prepares the plan and starts it at once (Issue #1410 item 11); the plan stays one disclosure away (查看任务).
-    await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="prepare"]', 'readers-report-prepare');
+    await pointerClick(renderer, waitFor, '.evaluation-readers-report-launch .task-launch-estimate > summary', 'readers-report-prepare');
     at('readers-report-preview-basis');
-    await launchTaskFromBar(renderer, waitFor, 'readers-report', undefined, ['评估记录', '定稿']);
+    // The template row's own 起草 starts through the bar (the bar is bound to the row's template), never the bar's first template.
+    await launchTaskFromBar(renderer, waitFor, 'readers-report', undefined, ['评估记录', '定稿'],
+      '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="prepare"]');
+    requireJourney(await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => page.readersReport.task?.template === 'author' && page.readersReport.task.taskIntentId === document.querySelector('#task-drawer')?.dataset.taskPlanRef)`) === true, 'readers-report-launched-template');
     const endedReport = await readReport((page) => ['settled', 'failed', 'interrupted'].includes(page.state), 'readers-report-ended');
     requireJourney(endedReport.state === 'settled', 'readers-report-settled', endedReport);
     // The plan in the editor's words: the 定稿 version and template it drafts from, no exemplar, its two steps, and that it writes
@@ -2309,6 +2313,7 @@ async function main() {
     await fill(renderer, `${item('readers-and-market')} [data-evaluation-field="score"]`, '10', 'evaluation-rewrite-market');
     await tick(renderer, `${item('readers-and-market')} [data-evaluation-field="adjustment-reason"][value="insufficient-basis"]`, 'evaluation-rewrite-market-reason');
     await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-rewrite-save');
+    await waitFor(renderer, `document.querySelector('[data-evaluation-action="prepare-rewrite"]')?.disabled===false`, 'evaluation-rewrite-model-ready');
     const rewriteOffered = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.rewrite?.actions.length === 2, 'evaluation-rewrite-offered-read');
     requireJourney(JSON.stringify(rewriteOffered.rewrite.actions) === JSON.stringify([['prepare-rewrite', '按我的修改重新生成', false], ['preview-rewrite', '先看计划', false]]) && rewriteOffered.rewrite.reason === null &&
       JSON.stringify(rewriteOffered.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '13', '14', '10']), 'evaluation-rewrite-offered-words', rewriteOffered.rewrite);
@@ -2318,7 +2323,8 @@ async function main() {
     // 按我的修改重新生成 is one click (Issue #1407): it prepares and starts at once over the saved changes, the manuscript, AI7's report
     // and the house's active editorial memory; the plan stays one disclosure away — the version and the save it follows, its two
     // steps, and that it moves no score and writes nothing into the version by itself. It runs on the J-04 adapter's fixture.
-    await clickSelector(renderer, '[data-evaluation-action="prepare-rewrite"]', 'evaluation-rewrite-prepare');
+    requireJourney(await renderer.evaluate(`document.querySelectorAll('.evaluation [data-task-launch-kind]').length===3`)===true, 'evaluation-three-launch-bars');
+    await pointerClick(renderer, waitFor, '[data-evaluation-action="preview-rewrite"]', 'evaluation-rewrite-prepare');
     await launchTaskFromBar(renderer, waitFor, 'evaluation-rewrite');
     const endedRewrite = await readEvaluation(renderer, (page) => ['settled', 'failed', 'interrupted'].includes(page.rewrite?.state), 'evaluation-rewrite-ended');
     requireJourney(endedRewrite.rewrite.state === 'settled' && endedRewrite.view === 'record', 'evaluation-rewrite-settled', endedRewrite.rewrite);
@@ -3015,9 +3021,9 @@ async function main() {
     await clickSelector(renderer, '[data-analysis-tab="history"]', 'feedback-pending-history');
     // 重新分析全书's 查看计划 stands on the card with no chooser to unfold (Issue #1410 item 15). The plan is opened, not quick-started,
     // so the follower hold below is in place before the drawer's 开始任务 runs it.
-    await waitFor(renderer, `(() => { const whole=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-book"]'); const plan=whole?.querySelector('[data-analysis-action="reanalyze-book"]'); return whole?.dataset.updateAvailable==='true' && plan instanceof HTMLButtonElement && !plan.disabled && plan.textContent==='查看计划' && document.querySelector('.baseline-analysis-card [data-analysis-action^="choose-"]')===null; })()`, 'feedback-pending-mode', 10_000);
+    await waitFor(renderer, `(() => { const whole=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-book"]'); const plan=whole?.querySelector('[data-analysis-action="reanalyze-book"]'); return whole?.dataset.updateAvailable==='true' && plan instanceof HTMLButtonElement && !plan.disabled && document.querySelector('.baseline-analysis-card [data-analysis-action^="choose-"]')===null; })()`, 'feedback-pending-mode', 10_000);
     await clickSelector(renderer, '.baseline-analysis-card [data-update-action="reanalyze-book"] [data-analysis-action="reanalyze-book"]', 'feedback-pending-prepare');
-    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, 'feedback-pending-plan-ready');
+    await waitFor(renderer, `document.querySelector('[data-task-launch-kind] [data-task-drawer-control="launch"]')?.disabled===false`, 'feedback-pending-plan-ready');
     // ②A arms its 250 ms follower only when a draw finds the Run under way. Unheld, the J-04 adapter's Run can end before
     // the card's first read after 开始任务 answers on a slow runner, leaving no follower to hold (#641). J-10's unit hold
     // keeps the Run's first unit in flight until the follower is held; nothing else in the stage waits on the hold.
@@ -3034,9 +3040,9 @@ async function main() {
         }
         return original(callback,delay,...args);
       };
-      document.querySelector('#task-drawer [data-task-drawer-control="launch"]').click();
       return true;
     })()`, 'feedback-pending-hold-follow');
+    await pointerClick(renderer, waitFor, '[data-task-launch-kind] [data-task-drawer-control="launch"]', 'feedback-pending-start');
     await waitFor(renderer, `typeof window.__j11HeldFeedbackFollow?.release==='function' && ['admitted','executing'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'feedback-pending-follow-held', 60_000);
     await rm(unitHoldPath, { force: true });
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'feedback-pending-close-plan');
@@ -3368,7 +3374,7 @@ async function main() {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'poll-evaluation-return');
       await waitFor(renderer, `document.querySelector('.evaluation-more') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'poll-evaluation-empty-ready');
       await writeFile(unitHoldPath, '0', 'utf8');
-      await clickSelector(renderer, '[data-evaluation-action="start-initial"]', `${name}-start`);
+      await pointerClick(renderer, waitFor, '[data-evaluation-action="prepare-initial"]', `${name}-start`);
       await launchTaskFromBar(renderer, waitFor, name);
       await waitFor(renderer, `document.querySelector('.evaluation-initial')?.dataset.initialState==='executing'`, 'poll-evaluation-running', 120_000);
       const taskId=await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then(page=>page.initial.task.taskIntentId)`);
@@ -3417,6 +3423,8 @@ async function main() {
     // feedback-prerequisites, is enabled for this Book from its card on the overview the import lands on, as J-16 does.
     await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'empty'`, `${name}-summary`);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), `${name}-open`);
+    // The bar's start is offered once its model settings are read.
+    await waitFor(renderer, `document.querySelector('[data-evaluation-action="start-initial"]')?.disabled===false`, `${name}-start-ready`);
     const fresh = await readEvaluation(renderer, (page) => page.state === 'ready' && page.initial?.state === 'none', `${name}-ready`);
     requireJourney(JSON.stringify(fresh.initial.actions) === JSON.stringify([['start-initial', '生成评估报告', false], ['prepare-initial', '先看计划', false]]), `${name}-prepare-offered`, fresh.initial);
     await runInitialEvaluation(name);
@@ -3801,6 +3809,52 @@ async function main() {
     requireJourney(wordRestoredAfter.items === c0BeforeWord.items &&
       JSON.stringify(wordRestoredAfter.words) === JSON.stringify([[wordSignal.signalId, 'house']]) &&
       JSON.stringify(wordRestoredAfter.downstream) === JSON.stringify({ signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 }), 'word-restore-no-new-capture-or-downstream');
+
+    at('launch-reference-preview');
+    const launchReferencePath = resolve(runRoot, 'sample1-launch-reference.txt');
+    await writeFile(launchReferencePath, await admittedSpanText(ADMITTED_BASELINE_DOCX, { block: 9, from: 0, to: 5 }), 'utf8');
+    await close(); await launch({ pickerPath: launchReferencePath });
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'`, 'launch-reference-ready');
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'launch-reference-knowledge');
+    // 知识库 opens on its home of class cards; 资料库 is one of them.
+    // Each card's 最近 line fills in after the home paints; press 资料库 once the home is ready and its cards stay put.
+    await waitFor(renderer, `document.querySelector('.knowledge-base[data-knowledge-tab="home"] [data-knowledge-home-ready="true"] .knowledge-category[data-knowledge-category="library"]')`, 'launch-reference-knowledge-home');
+    await pointerClick(renderer, waitFor, '.knowledge-category[data-knowledge-category="library"]', 'launch-reference-library');
+    await pointerClick(renderer, waitFor, '[data-library-action="add"]', 'launch-reference-add');
+    await waitFor(renderer, `document.querySelector('article.library-material [data-library-action="attribute"]')?.disabled===false`, 'launch-reference-added');
+    const launchReferenceId = await renderer.evaluate(`window.ai7.inspectLibraryMaterials().then(page=>page.materials[0].materialId)`);
+    // Press the buttons of the item just added, not the first of the kind on the page.
+    const launchReferenceItem = `article.library-material[data-material-id="${launchReferenceId}"]`;
+    // Its decisions sit inside its 查看资料, which the editor opens first (the page keeps it open across repaints).
+    const openLaunchReference = async (name) => {
+      if (!(await renderer.evaluate(`document.querySelector(${JSON.stringify(`${launchReferenceItem} > details.knowledge-file-more`)})?.open===true`))) await pointerClick(renderer, waitFor, `${launchReferenceItem} > details.knowledge-file-more > summary`, name);
+    };
+    await openLaunchReference('launch-reference-more');
+    await pointerClick(renderer, waitFor, `${launchReferenceItem} [data-library-action="attribute"]`, 'launch-reference-attribute');
+    await pointerClick(renderer, waitFor, '.library-attribution-chooser [data-library-choice="house"]', 'launch-reference-house');
+    await pointerClick(renderer, waitFor, '[data-library-action="confirm-attribution"]', 'launch-reference-attributed');
+    await openLaunchReference('launch-reference-more-again');
+    await pointerClick(renderer, waitFor, `${launchReferenceItem} [data-library-action="eligibility"]`, 'launch-reference-eligibility');
+    await pointerClick(renderer, waitFor, '.library-eligibility-chooser [data-library-choice="excluded"]', 'launch-reference-excluded');
+    await pointerClick(renderer, waitFor, '[data-library-action="confirm-eligibility"]', 'launch-reference-confirmed');
+    await waitFor(renderer, `window.ai7.inspectLibraryMaterial({materialId:${JSON.stringify(launchReferenceId)}}).then(page=>page.index.state==='complete'&&page.reference.state==='available')`, 'launch-reference-indexed', 60_000);
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('library'), 'launch-reference-books');
+    await pointerClick(renderer, waitFor, `button[data-book-id="${thirdId}"]`, 'launch-reference-book');
+    await pointerClick(renderer, waitFor, SIDEBAR.section('evaluation'), 'launch-reference-evaluation');
+    const initialBar = '[data-task-launch-kind="initial-evaluation"]';
+    await pointerClick(renderer, waitFor, `${initialBar} .task-launch-options > summary`, 'launch-reference-options');
+    await pointerClick(renderer, waitFor, `${initialBar} [data-evaluation-material="${launchReferenceId}"]`, 'launch-reference-select');
+    const initialBeforeReference = await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then(page=>page.initial.task?.taskIntentId??null)`);
+    try {
+      for (const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        await pointerClick(renderer, waitFor, `${initialBar} .task-launch-estimate > summary`, `launch-reference-plan-${width}`);
+        await waitFor(renderer, `document.querySelector('${initialBar} .task-launch-estimate')?.textContent.includes('sample1')===true`, `launch-reference-plan-current-${width}`);
+        await waitFor(renderer, popoverShownInside(`document.querySelector('${initialBar} .task-launch-estimate .task-launch-popover')`), 'launch-reference-plan-reachable');
+        await pointerClick(renderer, waitFor, `${initialBar} .task-launch-estimate > summary`, `launch-reference-plan-close-${width}`);
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+    requireJourney(await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then(page=>(page.initial.task?.taskIntentId??null)===${JSON.stringify(initialBeforeReference)})`)===true,'launch-reference-preview-creates-no-task');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
