@@ -122,12 +122,18 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
     }
     const panel = el('div', 'task-launch-popover'); panel.append(content);
     details.append(summary, panel);
-    // A non-modal panel: focus moving on to another control (Tab, Shift+Tab) closes it, so it never stays over the controls the
-    // editor moved to. A press on the panel's text focuses its nearest focusable ancestor (a sheet), and a window switch moves
-    // focus nowhere: neither closes it.
-    details.addEventListener('focusout', event => {
-      const next = (event as FocusEvent).relatedTarget as Node | null;
-      if (details.open && next !== null && !details.contains(next) && !next.contains(details)) details.open = false;
+    // A non-modal panel: focus arriving on another control (Tab, Shift+Tab, also after a press on the panel's text rested focus on
+    // the sheet) closes it, so it never stays over the controls the editor moved to. Focus on an ancestor (the sheet a press on
+    // the panel's text focuses) or on nothing (a window switch) leaves it open.
+    const onFocusIn = (event: Event): void => {
+      if (!details.isConnected || !details.open) { document.removeEventListener('focusin', onFocusIn, true); return; }
+      const next = event.target as Node | null;
+      if (next !== null && !details.contains(next) && !next.contains(details)) details.open = false;
+    };
+    details.addEventListener('toggle', event => {
+      if (event.target !== details) return;
+      if (details.open) document.addEventListener('focusin', onFocusIn, true);
+      else document.removeEventListener('focusin', onFocusIn, true);
     });
     if (typeof panel.showPopover === 'function') {
       panel.setAttribute('popover', 'auto');

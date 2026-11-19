@@ -258,28 +258,34 @@ it('reads no plan and offers no start while the surface says it cannot start, an
   expect(previewTaskLaunch).toHaveBeenCalledOnce();
 });
 
-it('closes a launch popover when focus moves on past it, and keeps it while focus stays inside', () => {
+it('closes a launch popover when focus arrives on another control, also after a press rested focus on the sheet', () => {
+  const sheet = document.createElement('dialog'); sheet.tabIndex = -1; document.body.append(sheet);
   const options = document.createElement('div'); const inside = document.createElement('select'); options.append(inside);
+  const start = document.createElement('button');
+  const bar = createLaunchBarPresentation(document.createElement('span'), start, { title: '选项', content: options }, null);
+  sheet.append(bar);
+  const details = bar.querySelector<HTMLDetailsElement>('.task-launch-options')!;
+  const focusOn = (target: HTMLElement) => target.dispatchEvent({ type: 'focusin', bubbles: true } as never);
+  details.open = true; details.dispatchEvent({ type: 'toggle' } as never);
+  focusOn(inside);
+  expect(details.open).toBe(true);
+  // A press on the panel's text focuses the sheet around it: still open.
+  focusOn(sheet);
+  expect(details.open).toBe(true);
+  // Tab from there on to the bar's start: closed.
+  focusOn(start);
+  expect(details.open).toBe(false);
+});
+
+it('keeps a launch popover open while focus leaves the window, and closes it when focus comes back on another control', () => {
+  const options = document.createElement('div'); options.append(document.createElement('select'));
   const start = document.createElement('button');
   const bar = createLaunchBarPresentation(document.createElement('span'), start, { title: '选项', content: options }, null);
   document.body.append(bar);
   const details = bar.querySelector<HTMLDetailsElement>('.task-launch-options')!;
-  details.open = true;
-  details.dispatchEvent({ type: 'focusout', bubbles: true, relatedTarget: inside } as never);
-  expect(details.open).toBe(true);
-  details.dispatchEvent({ type: 'focusout', bubbles: true, relatedTarget: start } as never);
-  expect(details.open).toBe(false);
-});
-
-it('keeps a launch popover open when a press inside it focuses the sheet around it, or focus leaves the window', () => {
-  const sheet = document.createElement('dialog'); sheet.tabIndex = -1; document.body.append(sheet);
-  const options = document.createElement('div'); options.append(document.createElement('select'));
-  const bar = createLaunchBarPresentation(document.createElement('span'), document.createElement('button'), { title: '选项', content: options }, null);
-  sheet.append(bar);
-  const details = bar.querySelector<HTMLDetailsElement>('.task-launch-options')!;
-  details.open = true;
-  details.dispatchEvent({ type: 'focusout', bubbles: true, relatedTarget: sheet } as never);
-  expect(details.open).toBe(true);
+  details.open = true; details.dispatchEvent({ type: 'toggle' } as never);
   details.dispatchEvent({ type: 'focusout', bubbles: true, relatedTarget: null } as never);
   expect(details.open).toBe(true);
+  start.dispatchEvent({ type: 'focusin', bubbles: true } as never);
+  expect(details.open).toBe(false);
 });
