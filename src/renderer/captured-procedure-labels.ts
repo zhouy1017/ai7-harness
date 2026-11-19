@@ -121,7 +121,7 @@ export function captureNextVersionOption(title: string, latestVersion: number): 
 }
 
 export function captureSavedLine(title: string, version: number): string {
-  return `已保存《${title}》${technicalWords(` 第 ${version} 版`)} · 已启用，可直接运行。`;
+  return `已保存《${title}》${technicalWords(`第 ${version} 版`)} · 已启用，可直接运行。`;
 }
 
 export function proposalSavedLine(title: string, version: number): string {

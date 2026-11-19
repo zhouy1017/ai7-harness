@@ -70,7 +70,7 @@ const REASON_BLOCKED = '模型服务当前不可用，任务尚未开始。';
 // A start waiting on the instance's concurrency governor (Issue #49, S14; CONC-007), in 待我处理's words and the bar's
 // (`src/renderer/task-drawer-labels.ts`), pinned there by their unit suites.
 const REASON_WAITING_CAPACITY = '正在等运行名额，轮到后自动开始。';
-const QUEUED_NOTE = '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
+const QUEUED_NOTE = '排队中：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
 // 后台处理登记's words (`src/service/background-analysis-enrollments.ts`, `src/renderer/background-analysis-labels.ts`), pinned
 // there by `tests/unit/background-analysis.test.ts`.
 const BACKGROUND_CURRENT_LINE = '现在：分析结果与当前稿件一致，没有要做的。';

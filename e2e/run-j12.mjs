@@ -1130,7 +1130,7 @@ async function main() {
       const save=Array.from(form.querySelectorAll('button')).find(node=>node.textContent==='新增并启用偏好');
       return Boolean(category&&scope&&text&&save)&&save.type==='submit'&&!save.disabled&&text.required&&text.value===''&&
         Array.from(category.options).some(option=>option.value==='style-and-format')&&
-        scope.options[0].value===''&&scope.options[0].textContent==='全社'&&
+        scope.options[0].value===''&&scope.options[0].textContent==='本社'&&
         Array.from(scope.options).slice(1).every(option=>option.textContent.startsWith('本书：《'));
     })()`, 'ordinary-preference-editor-shape');
     await assertRenderer(primary, `(() => {

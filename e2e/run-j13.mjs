@@ -2255,7 +2255,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.knowledge-category[data-knowledge-category="exemplars"]')?.textContent.includes('不含图书原稿')`, 'catalogue-category-copy');
     await click(renderer, '范例', 'catalogue-open');
     await waitFor(renderer, `document.querySelector('[data-exemplar-action="import"]')`, 'catalogue-empty-ready');
-    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===0 && document.querySelector('.exemplars-empty')?.textContent==='暂无范例，已发稿并交付的本社文档会自动加入。'`, 'catalogue-no-manuscripts');
+    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===0 && document.querySelector('.exemplars-empty')?.textContent==='暂无范例，已发稿并交付的本社衍生稿件会自动加入。'`, 'catalogue-no-manuscripts');
     // assertRenderer wraps Boolean(expression); await this async fixture command directly before refreshing the catalogue.
     requireJourney(await renderer.evaluate(`(async () => { const preview=await window.ai7.previewImportedExemplar(); const book=await window.ai7.importEarlierExemplar({previewId:preview.previewId,bookId:null,bookTitle:'书系工作文档来源',authors:['测试作者'],editors:['测试责编'],typeId:'news-release',expectedVersion:0}); return book.bookTitle==='书系工作文档来源' && book.exemplars.length===1 && book.exemplars[0].typeId==='news-release'; })()`), 'catalogue-import-work-document');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'catalogue-refresh-home');

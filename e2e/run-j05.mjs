@@ -1025,7 +1025,7 @@ async function main() {
     at('proposal-decision-record');
     // One 应用已采纳修改 records the decisions and applies what was accepted; a deferred draft applies nothing.
     await assertRenderer(renderer, `(() => { const button = document.querySelector('[data-proposal-action="apply-accepted"]'); if (!(button instanceof HTMLButtonElement) || button.disabled || button.textContent !== '应用已采纳修改') return false; button.click(); return true; })()`, 'proposal-apply-accepted');
-    await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"]').textContent.includes('提案决定已记录；没有可应用的已采纳修改，稿件未发生变化。')`, 'proposal-recorded-nothing-applied');
+    await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"]').textContent.includes('决定已记录；没有可应用的已采纳修改，稿件未发生变化。')`, 'proposal-recorded-nothing-applied');
     await click(renderer, '返回稿件', 'proposal-return');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'proposal-back-to-manuscript');
     await settled(renderer, 'proposal-settled');
