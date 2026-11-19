@@ -1,3 +1,4 @@
+import { reportResult } from './notifications.js';
 import { styleInput } from './components/controls.js';
 
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
@@ -194,7 +195,7 @@ async function renderLanding(
       const result = await api.selectAndStageManuscript();
       if (result.status === 'cancelled') {
         importButton.disabled = false;
-        setStatus('已取消文件选择');
+        reportResult(setStatus, '已取消文件选择');
         return;
       }
       setStatus('DOCX 已完成本地暂存', 'success');
@@ -249,7 +250,7 @@ async function renderLanding(
       try {
         await api.savePreference({ key: 'onboarding.state', value: 'skipped' });
         onboarding.remove();
-        setStatus(labels.skipped);
+        reportResult(setStatus, labels.skipped);
       } catch (error) {
         skip.disabled = false;
         setStatus(rendererErrorMessage(error, labels.skipFailed), 'error');

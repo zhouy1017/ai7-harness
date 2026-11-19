@@ -1,4 +1,5 @@
 import { stateTerm, windowStep } from './components/controls.js';
+import { reportResult } from './notifications.js';
 import { identityWords, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import {
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
@@ -866,7 +867,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       if (chosen.outcome === 'cancelled') {
         current.phase = current.prepared === null ? 'ready' : 'prepared';
         draw('export-choose');
-        options.setStatus(PACKAGE_EXPORT_STATUS_LINES.cancelled);
+        reportResult(options.setStatus, PACKAGE_EXPORT_STATUS_LINES.cancelled);
         return;
       }
       if (chosen.export.packageVersionId !== current.packageVersionId) throw new Error(PACKAGE_EXPORT_STATUS_LINES.chooseFailed);
@@ -929,7 +930,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
           exporting = null;
           exportTicket += 1;
           draw({ opener: current.packageVersionId });
-          options.setStatus(PACKAGE_EXPORT_STATUS_LINES.closed);
+          reportResult(options.setStatus, PACKAGE_EXPORT_STATUS_LINES.closed);
         } else if (current.phase === 'writing') {
           options.setStatus('文件已开始写入，正在等待导出结果。', 'busy');
         }
@@ -942,7 +943,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     exporting = null;
     exportTicket += 1;
     draw({ opener: current.packageVersionId });
-    if (announce) options.setStatus(PACKAGE_EXPORT_STATUS_LINES.closed);
+    if (announce) reportResult(options.setStatus, PACKAGE_EXPORT_STATUS_LINES.closed);
   }
 
   async function revealExport(preparationId: string): Promise<void> {

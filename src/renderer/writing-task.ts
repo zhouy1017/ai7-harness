@@ -1,4 +1,5 @@
 import type { TaskLaunchRequest } from './task-drawer.js';
+import { reportResult } from './notifications.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import type {
   DefaultExecutionRuleReference,
@@ -538,7 +539,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       if (planEnvelopeDigest === null) {
         // A quick start whose preparation froze no plan stops at it, and says so (#701 review P3-5).
         const note = taskPlanQuickStartFellBack([WRITING_STATUS.quickNoPlan]);
-        options.setStatus(note);
+        reportResult(options.setStatus, note);
         paint(null);
         options.openPlan(ref, note);
         return;
@@ -584,7 +585,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       return;
     }
     const note = taskPlanQuickStartFellBack(result.reasons);
-    options.setStatus(note);
+    reportResult(options.setStatus, note);
     options.openPlan(ref, note);
   }
 
