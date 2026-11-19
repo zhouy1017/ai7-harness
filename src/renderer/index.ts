@@ -1,3 +1,4 @@
+import { leaveReviewReturn } from './review-return.js';
 import { createLibraryScreen } from './library-screen.js';
 import { createBookOverviewScreen } from './book-overview-screen.js';
 import { createSettingsScreens } from './settings-screens.js';
@@ -29,8 +30,8 @@ import type { BookFindingProjection, ProductionDocumentProjection } from '../sha
 import { mountDiagnostics } from './diagnostics.js';
 import { DIAGNOSTICS_OPENED } from './diagnostics-labels.js';
 import { mountProposalWorkspace } from './proposal-workspace.js';
+import { preserveReadingReturn, type ReadingPlace } from './reading-return.js';
 import { hasErrorCode, rendererErrorCode, rendererErrorData, rendererErrorMessage } from './error-words.js';
-import { preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
 import type { AgentWorkspacePromotionProjection, BaselineAnalysisGoal, BaselineAnalysisWireProjection as BaselineAnalysisProjection, BookTaskItemProjection, DefaultExecutionRuleReference, QuickStartBaselineAnalysisWireResult as QuickStartBaselineAnalysisResult, BaselineAnalysisUpdateRequest, BookManuscriptAnchorProjection, BookRecordPresentation, BookSummaryPageProjection, BookWorkbenchRoute, BookWorkOverviewProjection, ContinueImportProjection, ForegroundExecutionBoundaryProjection, GlobalAttentionItemProjection, ImportCommitProjection, ManuscriptReimportCommitProjection, ImportDraftRecoveryProjection, ImportStartupProjection, HistoricalRevisionProjection, ManuscriptWindowProjection, PriorWorkItemProjection, RecoveryComparisonProjection, RecoveryRestorationProjection, RecoverySelection, RecoveryWindowProjection, ResolvedBookWorkbenchRoute, ReviewBeforeImportProjection, ReviewBeforeSourceImportProjection, ServiceWireJobProjection as ServiceJobProjection, StagedImportProjection, StartupProjection, TaskAuthorizationProjection, TaskPlanKind, TaskPlanProjection } from '../shared/protocol.js';
 import { mountTaskNotices } from './task-notices.js';
 import { finishedResultRoute } from './result-destination.js';
@@ -59,7 +60,7 @@ import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from '.
 
 import { EVALUATION_STATUS } from './evaluation-labels.js';
 import { openTaskResultWindow, type TaskResultWindow } from './task-result-window.js';
-import { TASK_PANEL_COMPOSE_STATUS, TASK_PANEL_JUMP_GONE, TASK_PANEL_LEAVE_STATUS, returnChipPlace } from './task-panel-labels.js';
+import { TASK_PANEL_COMPOSE_STATUS, TASK_PANEL_JUMP_GONE, TASK_PANEL_LEAVE_STATUS } from './task-panel-labels.js';
 
 import { DOCUMENT_STATUS_LINES, showRestoreStands } from './production-document-labels.js';
 import type { ProductionDocumentContext } from './production-document-lens.js';
@@ -454,18 +455,7 @@ let manuscriptOnScreen: ManuscriptScreen | null = null;
 
 /** A jump from another screen — 审阅's 回到原文, ②A's 回到稿件范围, a result's 跳到 — leaves the way back to where the editor last read. */
 async function leaveReturnChip(bookId: string, manuscriptId: string, branchId: string): Promise<void> {
-  if (await readReturnPlace(manuscriptId, branchId) !== null) return;
-  const known = lastReadingPlace;
-  if (known?.manuscriptId === manuscriptId && known.branchId === branchId) {
-    await preserveReturnPlace(known);
-    return;
-  }
-  const overview = await api.getBookOverview({ bookId, historyCursor: null });
-  const anchor = overview.manuscriptAnchor;
-  if (anchor?.manuscriptId !== manuscriptId || anchor.branchId !== branchId || anchor.entry === null) return;
-  const remembered = await api.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId: anchor.entry.blockId } });
-  const block = remembered.blocks.find((item) => item.blockId === anchor.entry?.blockId);
-  if (block !== undefined) await preserveReturnPlace({ manuscriptId, branchId, blockId: block.blockId, place: returnChipPlace(remembered.position.structureLabel, block.position) });
+  await preserveReadingReturn(api, lastReadingPlace, bookId, manuscriptId, branchId);
 }
 
 /**
@@ -2559,6 +2549,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     focus,
     // 运行此工序… from 知识库 (Issue #65, S30): the 新建审阅 sheet opens filled from the procedure.
     procedureId,
+    registerCommands: (handlers) => commandDispatcher.register(handlers),
     api: api,
     awaitServiceJob,
     technicalDetails,
@@ -2583,7 +2574,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
         target: { kind: 'block', blockId: target.blockId },
       });
       if (!current.isCurrent()) return;
-      await leaveReturnChip(bookId, target.manuscriptId, target.branchId);
+      leaveReviewReturn(bookId, target, () => { void leaveThen(async () => renderBookReview(bookId, bookTitle)); });
       if (!current.isCurrent() || screen.firstElementChild !== origin) return;
       await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined, undefined, current);
     },

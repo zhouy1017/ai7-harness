@@ -1,3 +1,4 @@
+import { reviewReturnButton } from './review-return.js';
 import type { TaskLaunchRequest } from './task-drawer.js';
 import { BookOwnershipFailure, sendJournalEdit } from './navigation-generation.js';
 import { reviewReportExportButton } from './review-report-export.js';
@@ -1612,6 +1613,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (editor?.selectRange(blockId, 0, 0) === true) editor.focus();
   };
   function paintReturnChip(): void {
+    const review = reviewReturnButton(currentWindow.manuscriptId, currentWindow.branchId);
+    if (review) { chipHost.hidden = false; chipHost.replaceChildren(review); return; }
     const chip = returnPlace;
     chipHost.hidden = chip === null && !returnReadFailed;
     if (returnReadFailed) {
