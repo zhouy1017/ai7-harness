@@ -2711,7 +2711,7 @@ async function main() {
     requireJourney(exemplars?.books?.length === 1 && exemplars.nextCursor === null && exemplarBook.bookId === bookId && exemplarBook.withdrawn === true &&
       exemplarBook.publicationOrdinal === exemplarDesignation.ordinal &&
       exemplarPage[0]?.designation?.startsWith(`第 ${exemplarBook.publicationOrdinal} 次设为发稿版本于 `) === true &&
-      exemplarPage[0].designation.endsWith(' · 已在 AI7 内撤回；之后交付的文档，另设发稿版本后才归入') && exemplarPage[0].more === true &&
+      exemplarPage[0].designation.endsWith(' · 已在 AI7 内撤回；之后交付的衍生稿件，另设发稿版本后才归入') && exemplarPage[0].more === true &&
       exemplarNews?.typeLabel === '新闻稿' && exemplarNews.eligibility === 'house-only' &&
       exemplarNews.earlierVersions.length === 1 && exemplarPage.length === 1 && exemplarPage[0].bookId === bookId && exemplarPage[0].title === (exemplarNews.title && exemplarNews.title !== exemplarNews.typeLabel ? exemplarNews.title : `《${EXCERPT.title}》新闻稿`) &&
       exemplarPage[0].attribution === '作者：未填写 · 责编：未填写' && exemplarPage[0].items.length === exemplarBook.exemplars.length &&
