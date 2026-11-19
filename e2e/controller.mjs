@@ -842,6 +842,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'sample-book-import',
     'guided-strip',
     'offline-empty-and-import',
+    'settings-lands-on-model-service',
     'distinct-and-duplicate-book-routing',
     'serialized-newest-route-wins',
     'background-state-no-focus-and-later-revision',
@@ -1227,6 +1228,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'selection-span-review-choices-wide',
     'selection-span-review-choices-gate',
     'local-check-exact-sample1',
+    'review-keyboard-wide',
+    'review-keyboard-gate',
+    'review-batch-undo-wide',
+    'review-batch-undo-gate',
     'dispatch-review-wide',
     'dispatch-review-gate',
     'dispatch-chooser-wide',
@@ -1400,6 +1405,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'exact-sample1',
     'renderer-api-boundary',
     'entry-in-the-sidebar',
+    'task-overview-empty',
     'first-book-import',
     'first-book-prerequisites',
     'model-credential-saved',
@@ -1448,9 +1454,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'background-revoked-no-dispatch',
     'idle-start-choice',
     'idle-yield-to-foreground',
+    'idle-result-in-place',
     'model-question-launch',
+    'model-question-notice',
     'model-question-decision-item',
     'model-question-answer-turn',
+    'model-question-second-notice',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
@@ -2529,9 +2538,9 @@ export async function runJ14DarkPass({ renderer, journey, at, representative = '
   const node = `document.querySelector(${JSON.stringify(representative)})`;
   const open = async () => {
     await wait(sidebarNavigate(SIDEBAR.settings), 'j14-dark-pass-open-settings');
-    // 设置 opens through `leaveThen`, so the hub paints after the click: wait for its 外观 row before following it.
-    await wait(`(() => { const button = document.querySelector('#screen[data-screen="settings"] [data-settings-route="appearance"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'j14-dark-pass-settings');
-    await wait(`(() => { const button = document.querySelector('#screen[data-screen="settings"] [data-settings-route="appearance"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, 'j14-dark-pass-open-appearance');
+    // 设置 opens through `leaveThen`, so its first page paints after the click: wait for the 外观 entry in the navigation before following it.
+    await wait(`(() => { const button = document.querySelector('#screen .settings-navigation [data-settings-nav="appearance"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'j14-dark-pass-settings');
+    await wait(`(() => { const button = document.querySelector('#screen .settings-navigation [data-settings-nav="appearance"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, 'j14-dark-pass-open-appearance');
     // 外观 is ready when its three choices are there with the saved preference checked, so a choice reads a settled page.
     await wait(`window.ai7.getPreferences().then((preferences) => { const inputs = Array.from(document.querySelectorAll('#screen[data-screen="appearance"] input[data-appearance-theme]')); return inputs.length === 3 && inputs.filter((input) => input.checked).map((input) => input.value).join() === (preferences.values['appearance.theme'] ?? 'system'); })`, 'j14-dark-pass-appearance');
   };

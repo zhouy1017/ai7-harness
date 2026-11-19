@@ -44,11 +44,67 @@ export function systemNoticeSuffix(bookTitle: string | null, count: number): str
   return `${bookTitle === null ? '' : ` · ${bookTitle}`}${count > 1 ? ` · 共 ${count} 项` : ''}`;
 }
 
+/** The word a notice calls a task by: its kind, never its plan's long name. */
+export function taskKindWord(item: GlobalAttentionItemProjection): string {
+  return item.object.kind === 'analysis' ? '分析' : item.object.kind === 'review' ? '审阅' : item.object.kind === 'dialogue' ? '对话' : item.object.kind === 'task' ? item.object.taskKind === 'writing' ? '写作' : '评估' : '任务';
+}
+
+function bookWord(item: GlobalAttentionItemProjection): string {
+  return item.book.title === null ? '' : `《${item.book.title}》`;
+}
+
 export function completionLabel(item: GlobalAttentionItemProjection): string {
-  const title = item.book.title === null ? '' : `《${item.book.title}》`;
-  if (item.facts.dialogueCancelled) return `${title}对话已取消`;
-  const kind = item.object.kind === 'analysis' ? '分析' : item.object.kind === 'review' ? '审阅' : item.object.kind === 'dialogue' ? '对话' : item.object.kind === 'task' ? item.object.taskKind === 'writing' ? '写作' : '评估' : '任务';
-  return `${title}${kind}完成${item.state === 'analysis-completed-with-gaps' ? ' · 仍有未完成部分' : ''}`;
+  if (item.facts.dialogueCancelled) return `${bookWord(item)}对话已取消`;
+  return `${bookWord(item)}${taskKindWord(item)}完成${item.state === 'analysis-completed-with-gaps' ? ' · 仍有未完成部分' : ''}`;
+}
+
+/**
+ * What stops a task until the editor acts (#1528): it failed, it reached the usage the editor set, the model service refused it
+ * for its account limit, the model asked a question, or its outcome cannot be confirmed. Every other 待我处理 item is not a
+ * task that stopped, and raises no notice of its own.
+ */
+export type AttentionKind = 'failed' | 'budget' | 'quota' | 'question' | 'unconfirmed';
+const ATTENTION_KINDS: Partial<Record<GlobalAttentionStateKey, AttentionKind>> = {
+  'analysis-failed': 'failed', 'analysis-interrupted': 'failed', 'analysis-blocked': 'failed', 'analysis-orphaned': 'failed',
+  'review-failed': 'failed', 'review-stopped': 'failed', 'dialogue-failed': 'failed', 'dialogue-interrupted': 'failed',
+  'analysis-budget-reached': 'budget', 'analysis-account-limit': 'quota', 'analysis-clarification': 'question',
+  'analysis-outcome-unknown': 'unconfirmed', 'analysis-outcome-unconfirmed': 'unconfirmed',
+};
+export function attentionKind(item: GlobalAttentionItemProjection): AttentionKind | null {
+  // A dialogue the editor cancelled is the editor's own doing: quiet, as in 0.7.2. A global dialogue has no Book to name.
+  if (item.group === 'active' || item.facts.dialogueCancelled === true) return null;
+  return ATTENTION_KINDS[item.state] ?? null;
+}
+
+/** The notice for a task that needs the editor: the Book, the task and what happened to it. */
+export const ATTENTION_NOTICE_WORDS = Object.freeze({
+  go: '去处理',
+  view: '查看',
+  close: '关闭提示',
+  phrases: Object.freeze({
+    failed: '没有完成', budget: '用量已到上限', quota: '被模型服务拒绝：账户限额已用完', question: '在等你回答', unconfirmed: '结果待确认',
+  } satisfies Record<AttentionKind, string>),
+});
+
+export function attentionLabel(item: GlobalAttentionItemProjection): string {
+  const kind = attentionKind(item);
+  return `${bookWord(item)}${taskKindWord(item)}${kind === null ? '需要你处理' : ATTENTION_NOTICE_WORDS.phrases[kind]}`;
+}
+
+/** Several tasks that need the editor collapse into one line. */
+export function attentionManyLabel(count: number): string {
+  return `有 ${count} 项任务需要你处理`;
+}
+
+/** On returning to the window: what finished and what needs the editor while it was in the background. */
+export function awaySummaryLabel(finished: number, needing: number): string {
+  if (finished === 0) return `你不在时，有 ${needing} 项任务需要你处理`;
+  return needing === 0 ? `你不在时，${finished} 项任务已完成` : `你不在时，${finished} 项任务已完成，${needing} 项需要你处理`;
+}
+
+/** The header's pill on every page. */
+export function attentionPillLabel(count: number): string {
+  return `待处理 ${count}`;
 }
 
 /** 设置 › 本机 › 通知 and the quiet completion notice (Issue #937). */
@@ -59,9 +115,9 @@ export const NOTIFICATION_SETTINGS_WORDS = Object.freeze({
   completions: '普通完成提示也发系统通知',
   sound: '通知声音',
   bookName: '在通知中显示图书名',
+  autoResult: '正在看本书时自动显示结果',
   saved: '通知设置已保存在本机。',
   unsaved: '通知设置未保存。',
-  back: '返回设置',
   opened: '通知设置',
 });
 
@@ -82,6 +138,12 @@ function recordKey(target: GlobalAttentionTarget): string {
 }
 
 /** A Task Outcome can stand alongside unresolved external effects; that is still actionable, not an ordinary completion. */
+/** A task the editor cancelled or stopped is in 最近完成 as it is in the 任务 panel, but it is not a completion to say. */
+const NOT_COMPLETIONS: ReadonlySet<GlobalAttentionStateKey> = new Set(['analysis-cancelled', 'dialogue-stopped']);
+export function isCompletion(item: GlobalAttentionItemProjection): boolean {
+  return item.group === 'recent' && attentionKind(item) === null && !NOT_COMPLETIONS.has(item.state);
+}
+
 export function isOrdinaryOutcome(item: GlobalAttentionItemProjection, projection: GlobalAttentionProjection): boolean {
   return item.group === 'recent' && !projection.groups.some((group) =>
     (group.key === 'exceptions' || group.key === 'decisions') && group.items.some((attention) =>

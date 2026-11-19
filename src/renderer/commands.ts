@@ -489,6 +489,8 @@ export interface CommandDispatcherOptions {
 
 export interface CommandDispatcher {
   execute(id: string): void;
+  /** Whether a handler stands for the command on the screen now. */
+  has(id: string): boolean;
   /** Handlers by command id; a command with no handler on the current screen does nothing. */
   register(handlers: Readonly<Record<string, CommandHandler>>): () => void;
   /** The listener for the window's `keydown`. */
@@ -525,6 +527,7 @@ export function createCommandDispatcher(options: CommandDispatcherOptions): Comm
 
   return {
     execute: run,
+    has: (id) => handlers.has(id),
     register(next) {
       const ids = Object.keys(next);
       for (const id of ids) handlers.set(id, next[id]!);

@@ -999,7 +999,7 @@ async function main() {
     renderer = await waitForRenderer(manager, 'earlier-exemplar-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'earlier-exemplar-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'exemplar-ordinary-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'exemplar-ordinary-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'exemplar-ordinary-settings-ready');
     await click(renderer, '帮助', 'exemplar-ordinary-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'exemplar-mode-ready');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'; })()`, 'exemplar-ordinary-mode');
@@ -1038,7 +1038,7 @@ async function main() {
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value=""]', 'exemplar-type-return');
     await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="book"]').dataset.value!==''`, 'exemplar-book-selection-survives');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'exemplar-restore-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'exemplar-restore-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'exemplar-restore-settings-ready');
     await click(renderer, '帮助', 'exemplar-restore-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'exemplar-restore-mode-ready');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(!input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='true' && localStorage.getItem('ai7.technicalLayerVisible')==='true'; })()`, 'exemplar-restore-developer');

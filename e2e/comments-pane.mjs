@@ -9,8 +9,8 @@ const commentsRailBeside = `(() => { const edge=document.querySelector('.editor-
 
 async function commentsReadingSize(renderer, check, waitFor, size) {
   await pointerClick(renderer,waitFor,SIDEBAR.settings,'comments-reading-settings');
-  await waitFor(renderer, `document.querySelector('[data-settings-route="appearance"]')`, 'comments-reading-settings-ready');
-  await pointerClick(renderer,waitFor,'[data-settings-route="appearance"]','comments-reading-appearance');
+  await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation [data-settings-nav="appearance"]')`, 'comments-reading-settings-ready');
+  await pointerClick(renderer,waitFor,'.settings-navigation [data-settings-nav="appearance"]','comments-reading-appearance');
   await waitFor(renderer, `document.querySelector('[data-view-typography="fontSize"]')`, 'comments-reading-size-ready');
   const bounds=await renderer.evaluate(`(() => {const input=document.querySelector('[data-view-typography="fontSize"]');return {min:Number(input.min),max:Number(input.max),step:Number(input.step)};})()`);
   await pointerClick(renderer,waitFor,'[data-view-typography="fontSize"]','comments-reading-size-focus');
@@ -108,8 +108,8 @@ async function commentsSeedConnectorCases(renderer, check, waitFor) {
 export async function commentsOrdinaryMode(renderer, check, waitFor) {
   await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'comments-startup-landing');
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.settings)), 'comments-settings');
-  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'comments-settings-ready');
-  check(await renderer.evaluate(`(() => { const help=document.querySelector('.settings-hub-row[data-settings-route="help"]') ?? Array.from(document.querySelectorAll('[data-screen="settings"] button')).find((button)=>button.textContent==='帮助'); if(!help||help.disabled)return false; help.click(); return true; })()`), 'comments-settings-help');
+  await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'comments-settings-ready');
+  check(await renderer.evaluate(`(() => { const help=document.querySelector('.settings-navigation [data-settings-nav="help"]'); if(!help||help.disabled)return false; help.click(); return true; })()`), 'comments-settings-help');
   await waitFor(renderer, `document.querySelector('.help-developer-mode input[aria-label="开发者模式"]')?.disabled===false`, 'comments-enabled-mode-toggle');
   check(await renderer.evaluate(`(() => { const input=document.querySelector('.help-developer-mode input[aria-label="开发者模式"]'); if(input.checked)input.click(); return true; })()`), 'comments-mode-off');
   await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'comments-ordinary-mode');
@@ -349,6 +349,9 @@ export async function commentsSelectMark(renderer, check, waitFor, markId, requi
   await renderer.evaluate(`(() => {globalThis.__commentsPoint=null;globalThis.__commentsPointPrevious=null;document.querySelector('[data-comment-card="'+${id}+'"]')?.scrollIntoView({block:'start',behavior:'instant'});return true;})()`);
   try { await waitFor(renderer, `(() => {
     const node=document.querySelector('[data-comment-card="'+${id}+'"]');if(!node)return false;
+    // Every card of the page is read: a card read late re-stacks the pane and moves this one from under the pointer (a slow
+    // guest pressed the pane between two cards). Only a point that holds while no read is in flight counts.
+    if(document.querySelector('.manuscript-comments-canvas')?.dataset.loading!=='false'){__commentsPointPrevious=null;return false;}
     const r=node.getBoundingClientRect(),pane=document.querySelector('.manuscript-comments-scroll').getBoundingClientRect(),x=r.left+12,y=r.top+10;
     const before=__commentsPointPrevious;__commentsPointPrevious={x,y};
     if(node.hidden||y<pane.top||y>pane.bottom||!node.contains(document.elementFromPoint(x,y))){node.scrollIntoView({block:'start',behavior:'instant'});return false;}
@@ -359,9 +362,10 @@ export async function commentsSelectMark(renderer, check, waitFor, markId, requi
       const node=document.querySelector('[data-comment-card="'+${id}+'"]'),pane=document.querySelector('.manuscript-comments-scroll');
       if(!node)return 'missing';if(!pane||pane.getClientRects().length===0)return 'pane-hidden';if(node.hidden)return 'not-listed';
       const r=node.getBoundingClientRect(),p=pane.getBoundingClientRect(),x=r.left+12,y=r.top+10;
+      if(document.querySelector('.manuscript-comments-canvas')?.dataset.loading!=='false')return 'reading';
       if(y<p.top||y>p.bottom)return 'outside-pane';if(!node.contains(document.elementFromPoint(x,y)))return 'covered';return 'moving';
     })()`);
-    const names={missing:'comments-card-hit-ready-missing','pane-hidden':'comments-card-hit-ready-pane-hidden','not-listed':'comments-card-hit-ready-not-listed','outside-pane':'comments-card-hit-ready-outside-pane',covered:'comments-card-hit-ready-covered',moving:'comments-card-hit-ready-moving'};
+    const names={missing:'comments-card-hit-ready-missing','pane-hidden':'comments-card-hit-ready-pane-hidden','not-listed':'comments-card-hit-ready-not-listed','outside-pane':'comments-card-hit-ready-outside-pane',covered:'comments-card-hit-ready-covered',moving:'comments-card-hit-ready-moving',reading:'comments-card-hit-ready-reading'};
     const detail=await renderer.evaluate(`(() => {
       const describe=${pointerElementDescription.toString()},node=document.querySelector('[data-comment-card="'+${id}+'"]'),r=node?.getBoundingClientRect(),x=r?r.left+12:null,y=r?r.top+10:null,hit=r?document.elementFromPoint(x,y):null,coveringAncestors=[];
       for(let ancestor=hit?.parentElement;ancestor&&coveringAncestors.length<12;ancestor=ancestor.parentElement){const box=ancestor.getBoundingClientRect();coveringAncestors.push({...describe(ancestor),rect:[box.left,box.top,box.width,box.height]});}

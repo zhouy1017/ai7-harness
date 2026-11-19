@@ -947,7 +947,7 @@ async function main() {
     // ordinary rule editor (one to add a rule, 编辑偏好 on an active one).
     for (const developer of ['false', 'true']) {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
-      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `quality-mode-${developer}-settings-ready`);
       await click(renderer, '帮助', `quality-mode-${developer}-help`);
       await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `quality-mode-${developer}-switch-ready`);
       await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
@@ -983,8 +983,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
-    await click(renderer, '模型服务', 'model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -1003,7 +1002,7 @@ async function main() {
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     credentialRemoved = true;
-    await click(renderer, '返回', 'model-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-back');
 
     const writeHold = (settled) => writeFile(holdPath, String(settled), 'utf8');
 
@@ -1014,6 +1013,15 @@ async function main() {
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
     await runJ14DarkPass({ renderer, journey: 'J-16', at, representative: '#screen[data-screen="editor"] .editor-window', returnTo: SIDEBAR.section('manuscript') });
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]')`, 'panel-manuscript-after-dark-pass', 120_000);
+    // Opt out of the automatic result window in 设置 › 通知 (#1528: the switch moved there from 发起任务), so the explicit
+    // result-window steps below own their focus; the manuscript is then reopened through the sidebar.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'panel-result-popup-settings');
+    await waitFor(renderer, `document.querySelector('#screen .settings-navigation [data-settings-nav="notifications"]')`, 'panel-result-popup-hub');
+    await clickSelector(renderer, '.settings-navigation [data-settings-nav="notifications"]', 'panel-result-popup-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="notifications"] [data-task-overview-auto-result]')`, 'panel-result-popup-preference');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-screen="notifications"] [data-task-overview-auto-result]'); if (!(input instanceof HTMLInputElement) || !input.checked) return false; input.click(); return !input.checked && localStorage.getItem('ai7.task-overview.auto-result') === 'off'; })()`, 'panel-result-popup-off');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'panel-result-popup-return');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]')`, 'panel-manuscript-after-popup-off', 120_000);
     const opened = await openPanel(renderer, 'panel-open');
     requireJourney(opened.title === '任务' && opened.scope === '这本书 · 0 项' && opened.compose.heading === '发起全书任务' &&
       JSON.stringify(opened.compose.modes) === JSON.stringify([['first-baseline', true, false]]) && opened.compose.prepare === 'enabled' &&
@@ -1022,10 +1030,11 @@ async function main() {
         JSON.stringify([['等你处理', '0', '这里暂时没有任务。', 0], ['进行中', '0', '这里暂时没有任务。', 0], ['最近完成', '0', '这里暂时没有任务。', 0]]),
     'panel-empty', opened);
     await assertRenderer(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === true && document.body.dataset.taskDrawer === 'open'`, 'panel-one-slot');
-    // Opt out through the shared sheet so the explicit result-window steps below own their focus.
+
+    // The in-Book 发起任务 sheet still opens and closes; it no longer carries the result-window switch (#1528: it is in 设置 › 通知).
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-overview-start]')?.disabled===false`, 'panel-sheet-ready');
-    await clickSelector(renderer, '#task-drawer [data-task-overview-start]', 'panel-result-popup-preference');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('#task-drawer [data-task-overview-auto-result]'); if (!(input instanceof HTMLInputElement) || !input.checked) return false; input.click(); return !input.checked; })()`, 'panel-result-popup-off');
+    await clickSelector(renderer, '#task-drawer [data-task-overview-start]', 'panel-sheet-open');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('#task-drawer .task-overview-sheet'); return sheet instanceof HTMLDialogElement && sheet.open && sheet.querySelector('[data-task-overview-auto-result]') === null; })()`, 'panel-sheet-without-result-switch');
     await clickSelector(renderer, '#task-drawer .task-overview-sheet .sheet-foot button:last-child', 'panel-sheet-close');
 
     at('panel-prepare');
@@ -1063,7 +1072,7 @@ async function main() {
     const pollTaskId=await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then(page=>page.taskIntent.taskIntentId)`);
     await clickSelector(renderer,'#task-drawer [data-task-drawer-control="close"]','poll-attention-close-pane');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-ordinary-settings');
-    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-ordinary-settings-ready');
+    await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'poll-attention-ordinary-settings-ready');
     await click(renderer,'帮助','poll-attention-ordinary-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'poll-attention-ordinary-mode');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('attention')),'poll-attention-open');
@@ -1079,7 +1088,7 @@ async function main() {
       requireJourney(await renderer.evaluate(`window.ai7.inspectGlobalAttention().then(page=>page.groups.flatMap(group=>group.items).find(item=>item.itemId===${JSON.stringify(pollAttentionId)})?.facts.progress?.unitsSettled===${done})`),'attention-changed-unit-record');
     }
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-developer-settings');
-    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-developer-settings-ready');
+    await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'poll-attention-developer-settings-ready');
     await click(renderer,'帮助','poll-attention-developer-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`,'poll-attention-developer-mode');
     await openManuscriptOf(renderer,bookId,'poll-attention-return-book');

@@ -41,10 +41,10 @@ describe('the one error helper (#1519)', () => {
     expect(rendererErrorMessage({ code: 'SEARCH_CREDENTIAL_MISSING', message: '尚未填写密钥。' }, '无法检索。')).toBe('暂不可用 · 尚未填写密钥。');
   });
 
-  it('serves all four task-page paths, with no instanceof Error left in the task page', () => {
+  it('serves all five task-page paths, with no instanceof Error left in the task page', () => {
     const source = readFileSync(new URL('../../src/renderer/tasks-overview.ts', import.meta.url), 'utf8');
     expect(source).not.toMatch(/instanceof Error/u);
-    expect(source.match(/rendererErrorMessage\(error, '/gu)).toHaveLength(4);
+    expect(source.match(/rendererErrorMessage\(error, '/gu)).toHaveLength(5);
   });
 
   it.each([

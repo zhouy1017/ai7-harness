@@ -60,6 +60,17 @@ export const REVIEW_COVERAGE_NOTE = '每一类对照当前稿件：稿件改动�
 export const REVIEW_RUNS_HEADING = '审阅记录';
 export const REVIEW_NO_RUNS = '还没有审阅记录。';
 export const REVIEW_WORKSPACE_UNAVAILABLE = '无法读取这本书的审阅记录。';
+/** A refused read of a workspace already on screen (Issue #1592): what is shown is the last one read. */
+export const reviewReadFailedLine = (reason: string): string => `${reason}下面是上次读到的审阅，可能已经过时。`;
+/** A report list or the local check's 未生成批注 read only in part (Issue #1592), beside 「已显示 N / M 条。」. */
+export const REVIEW_STATISTICS_TOTALS_WHOLE = '合计计入全部章节。';
+export const REVIEW_PART_MORE = '显示更多';
+export const reviewPartMoreName = (part: string): string => `显示更多${part}`;
+/** The list changed between two pages, so it was read again from its first page; said once that read is on screen. */
+export const REVIEW_PART_REREAD = '审阅结果已变化，已重新读取，从第一页显示。';
+export const REVIEW_PAGE_FAILED = '无法读取更多审阅内容，请稍后再试。';
+/** A first read of 审阅 that was refused offers to ask again. */
+export const REVIEW_REREAD = '重新读取';
 
 /** The persistent actions of the destination, in the order it builds them (V2-UX-LAYER-005). */
 export const REVIEW_DESTINATION_ACTIONS = ['打开稿件', '工作概览'] as const;
@@ -83,6 +94,7 @@ export const REVIEW_ACTION_LABELS = {
   continue: '继续审阅',
   'go-to-text': '回到原文',
   'accept-apply': '接受并应用',
+  reject: '拒绝',
   'mark-handled': '标记为已处理',
   'convert-to-suggestion': '转为修改建议',
   'convert-confirm': '转为修改建议',
@@ -576,7 +588,35 @@ export const REVIEW_STATUS_LINES = {
   cancelling: '正在取消任务…',
   cancelled: '已取消任务；这次审阅不再继续。',
   cancelFailed: '无法取消任务。',
+  // One finding decided in place (Issue #1525); each has its 撤销 in the toast that says it.
+  rejecting: '正在记录拒绝…',
+  rejected: '已拒绝这条修改建议；原文保留。',
+  rejectFailed: '未能拒绝这条修改建议。',
+  withdrawingReject: '正在撤回拒绝…',
+  rejectWithdrawn: '已撤回拒绝，这条修改建议回到待处理。',
+  withdrawFailed: '未能撤回拒绝。',
+  undoingApply: '正在撤销应用…',
+  applyUndone: '已撤销本次应用。',
+  undoApplyFailed: '未能撤销应用。',
 } as const;
+
+/** The toast's undo after a finding is decided in place (Issue #1525). */
+export const REVIEW_UNDO = '撤销';
+/** Closes the line that says what a batch wrote; it only folds the line away (Issue #1525). */
+export const REVIEW_BATCH_DONE = '知道了';
+/**
+ * What a finding decided in place says until it is read again — the service's own words for the same state
+ * (`reviewFindingStatus`), so a re-read never rewords the card.
+ */
+export const REVIEW_SETTLED_DETAILS = {
+  rejected: '已拒绝这条修改建议',
+  applied: '已接受并应用',
+  pending: '待处理',
+  resolved: '已标记为已处理',
+  converted: '已转为修改建议',
+} as const;
+/** 设置 › 键盘's fixed key of a focused review card (Issue #1525). */
+export const REVIEW_ENTER_KEY_NAME = '回到原文（审阅卡片有焦点时）';
 
 /**
  * 书系检索范围已变化 · 需要重新确认计划 (Issue #64, S29b; SER-024, SER-025): why the Run stopped, what it kept, what cannot be
@@ -618,8 +658,8 @@ export function reviewBatchReadyLine(count: number): string {
 export const REVIEW_IGNORE_DEFAULT_REASON = '编辑决定忽略';
 export const REVIEW_BATCH_UNDO_FAILED = '未能撤销本批应用。';
 /** 撤销本批应用's outcome: all reversed, or how far it came before one could not be. */
-export function reviewBatchUndoneLine(undone: number, total: number): string {
-  return undone === total ? `已撤销本批应用的 ${total} 条修改建议，原文已写回稿件。` : `已撤销 ${undone} 条；其余 ${total - undone} 条的文字已经变过，不能直接撤销，可在稿件中逐条处理。`;
+export function reviewBatchUndoneLine(total: number): string {
+  return `已撤销 ${total} 条。`;
 }
 
 export function reviewBatchAppliedLine(count: number, recovered: boolean): string {
