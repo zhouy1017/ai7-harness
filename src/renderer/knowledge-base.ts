@@ -153,7 +153,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     }
     // 本社词表 (Issue #1543): the house's own words, edited here as a page; the review sheet mounts the same editor.
     if (tab === 'house-words') {
-      const editor = mountHouseWordList({ root: panelNode, api: rendererApi, setStatus });
+      const editor = mountHouseWordList({ root: panelNode, api: rendererApi, setStatus: (message, tone) => { if (page.isCurrent()) setStatus(message, tone); } });
       await editor.load();
       // A refused read says so itself and stands; only a read that went through is reported as opened.
       if (page.isCurrent() && !editor.failed()) setStatus('本社词表已打开');

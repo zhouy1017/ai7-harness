@@ -1050,7 +1050,7 @@ async function main() {
         plain: !/(?<!发稿)版本|AI7 初评|v[0-9]/u.test(root.textContent), checkbox: Array.from(root.querySelectorAll('input[data-calibration-switch]')).every((input) => input.classList.contains('ui-checkbox')),
         current: nav?.getAttribute('aria-current') ?? null };
     })()`);
-    requireJourney(ordinaryCalibration.lede === '这里的两个开关只影响 AI7 的初始评分与预测，不改你的评分；定价与首印由你录入，AI7 默认不预测。' && ordinaryCalibration.folds === 2 && ordinaryCalibration.closed === true &&
+    requireJourney(ordinaryCalibration.lede === '这里的两个开关只影响 AI 初始评分与预测，不改你的评分；定价与首印由你录入，AI7 默认不预测。' && ordinaryCalibration.folds === 2 && ordinaryCalibration.closed === true &&
       JSON.stringify(ordinaryCalibration.summaries) === JSON.stringify(['怎么算的', '怎么算的']) && ordinaryCalibration.formulaFolded === true && ordinaryCalibration.plain === true && ordinaryCalibration.checkbox === true && ordinaryCalibration.current === 'page',
     'ordinary-calibration-words', ordinaryCalibration);
     // Both window forms: the page fits its width and its first switch is reachable.

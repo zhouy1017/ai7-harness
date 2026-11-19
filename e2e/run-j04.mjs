@@ -75,7 +75,7 @@ const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 
   // Synchronized delta with Issue #922 (slice 7f): the 自定义 tab's 运行, 查看计划 and each answer's quotation link.
   'custom-run', 'custom-open-plan', 'custom-jump',
   // #1543: 分析 › 自定义 offers writing a dimension in place.
-  'custom-create'];
+  'custom-create', 'custom-enable', 'custom-stop'];
 /** Every button on screen and in the drawer whose words name 授权: AUTH-002 keeps the word off every start (ADR 0077). */
 const AUTHORIZE_LABELED_BUTTONS = `Array.from(document.querySelectorAll('#screen button, #task-drawer button')).filter((button)=>/授权/u.test(button.textContent??'')).length`;
 /** The words the authorization bar says before every start (AUTH-003 as ADR 0077 revised it). */

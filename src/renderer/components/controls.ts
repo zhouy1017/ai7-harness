@@ -564,7 +564,7 @@ export function tabButton(options: { label: string; id: string; panel: string; s
 }
 
 /** Shared presentation; native controls retain their values and form ownership. */
-export function styleInput(input: HTMLInputElement): HTMLInputElement {
+export function styleInput<T extends HTMLInputElement | HTMLTextAreaElement>(input: T): T {
   input.classList.add(input.type === 'checkbox' ? 'ui-checkbox' : 'ui-input');
   return input;
 }

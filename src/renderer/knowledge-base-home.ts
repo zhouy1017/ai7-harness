@@ -1,7 +1,7 @@
 import type { RendererApi } from '../shared/protocol.js';
 import { createButton } from './components/controls.js';
 import { visibleKnowledgeBaseTabs, type KnowledgeBaseTab } from './knowledge-base-labels.js';
-import { HOUSE_NAME, houseSavedAt } from './house-word-list-labels.js';
+import { houseSavedAt } from './house-word-list-labels.js';
 
 interface Summary {
   count: string;
@@ -49,7 +49,7 @@ export function mountKnowledgeBaseHome(root: HTMLElement, api: RendererApi, deve
     'house-words': async () => {
       const { selected } = await api.inspectHouseWordList({ versionId: null, entryOffset: 0, historyOffset: 0 });
       return selected === null ? { count: '尚未创建', latest: '暂无词表' }
-        : { count: `${selected.entryCount} 条`, latest: houseSavedAt(selected.createdAt), changes: [{ title: HOUSE_NAME, at: selected.createdAt }] };
+        : { count: `${selected.entryCount} 条`, latest: houseSavedAt(selected.createdAt), changes: [{ title: `${selected.entryCount} 条词条`, at: selected.createdAt }] };
     },
     external: async () => ({ count: '未提供', latest: '在各书的来源与证据中查看' }),
   };

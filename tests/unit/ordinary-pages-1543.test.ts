@@ -134,8 +134,8 @@ describe('本社词表 for an ordinary editor', () => {
       (miniDocument.body.querySelector('[data-house-field="literal"]') as MiniElement).dispatchEvent({ type: 'input' });
       await click('save');
       const rows = root.querySelectorAll('button').filter((node) => /^history-[0-9]+$/.test(node.dataset['houseAction'] ?? ''));
-      expect(rows).toHaveLength(2);
-      for (const row of rows) expect(row.textContent).toMatch(/月 \d+ 日 \d\d:\d\d · 3 条/u);
+      expect(rows).toHaveLength(1);
+      for (const row of rows) expect(row.textContent).toMatch(/月 [0-9]+ 日 [0-9]{2}:[0-9]{2}:[0-9]{2} · 3 条/u);
       expectOrdinaryWords(root.textContent);
     } finally { panel.destroy(); db.close(); }
   });

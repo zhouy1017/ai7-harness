@@ -14,6 +14,7 @@ import {
   CUSTOM_TAB_EMPTY,
   CUSTOM_TAB_FEEDBACK_NOTE,
   CUSTOM_TAB_NEW,
+  CUSTOM_TAB_NOT_ENABLED,
   CUSTOM_TAB_NOT_RUN,
   CUSTOM_TAB_PREPARED,
   CUSTOM_TAB_STARTED,
@@ -103,6 +104,11 @@ const readings = new Map<string, { projection: CustomAnalysisDimensionsProjectio
 const RUN_REFRESH_MS = 1_000;
 const RUN_UNDER_WAY: ReadonlySet<string> = new Set(['authorized-blocked', 'queued', 'waiting', 'admitted', 'executing', 'cancelling', 'pausing']);
 
+/** Whether the form for a new dimension is open under `root`: the card holds its redraws while it is, so what was typed stays. */
+export function customDimensionFormOpen(root: ParentNode): boolean {
+  return root.querySelector('[data-custom-form]') !== null;
+}
+
 /** The event ②A's tab strip raises on a panel as it is shown, so the tab reads again when the editor comes to it. */
 export const ANALYSIS_TAB_SHOWN_EVENT = 'analysis-tab-shown';
 
@@ -135,12 +141,29 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     } else if (kind === 'list' && offer !== null) nodes.push(buttonRow(offer));
     head.replaceChildren(...nodes);
   };
-  const closeForm = (saved: boolean): void => {
+  /** The title of a dimension just saved: its card takes focus once it is drawn, so the editor's place is where the result is. */
+  let focusCardOf: string | null = null;
+  const closeForm = (saved: boolean, title?: string): void => {
     creating = false;
     formHost.replaceChildren();
     drawHead();
-    if (saved) void load();
+    if (saved) { focusCardOf = title ?? null; void load(); }
     else head.querySelector<HTMLElement>('[data-custom-action="create"]')?.focus();
+  };
+  /** 启用 and 停用 on a card, in place: the same two operations the house's page uses, then the tab reads again. */
+  const change = async (pending: string, work: () => Promise<unknown>, done: string): Promise<void> => {
+    if (busy || author === undefined) return;
+    busy = true;
+    options.setStatus(pending, 'busy');
+    try {
+      await work();
+      busy = false;
+      options.setStatus(done, 'success');
+      void load();
+    } catch (error) {
+      busy = false;
+      options.setStatus(options.errorMessage(error, '无法完成这项操作。'), 'error');
+    }
   };
   const openForm = (): void => {
     if (creating || author === undefined) return;
@@ -253,10 +276,25 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
         actions.append(open);
       }
       if (book?.unavailableReason != null) {
-        const reason = el('span', 'custom-unavailable', book.unavailableReason);
+        // A dimension with no enabled version is told to be enabled in 知识库 › 工序与规则, a developer page: an ordinary editor reads the card's own 启用.
+        const reason = el('span', 'custom-unavailable', !technicalLayerVisible && dimension.enabledVersion === null ? CUSTOM_TAB_NOT_ENABLED : book.unavailableReason);
         reason.id = `custom-unavailable-${dimension.dimensionId}`;
         start.setAttribute('aria-describedby', reason.id);
         actions.append(reason);
+      }
+      const latestVersion = dimension.versions[0];
+      if (author !== undefined && latestVersion?.state === 'pending-validation') {
+        const { versionId, title, version } = latestVersion;
+        const enable = actionButton(CUSTOM_DIMENSION_ENABLE, 'primary', 'enable', () => change('正在验证并启用…', () => author.api.enableCustomAnalysisDimension({ versionId }), customDimensionEnabledLine(title, version)));
+        enable.dataset['analysisAction'] = 'custom-enable';
+        actions.append(enable);
+      }
+      const enabledVersion = dimension.versions.find((version) => version.versionId === dimension.enabledVersion?.versionId);
+      if (author !== undefined && enabledVersion !== undefined) {
+        const { versionId, title, version } = enabledVersion;
+        const stop = actionButton(`${CUSTOM_DIMENSION_STOP} · 已有分析保留`, 'quiet', 'stop', () => change('正在停用…', () => author.api.stopCustomAnalysisDimension({ versionId }), customDimensionStoppedLine(title, version)));
+        stop.dataset['analysisAction'] = 'custom-stop';
+        actions.append(stop);
       }
       card.append(actions);
       if (book?.latest == null) {
@@ -270,6 +308,12 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     });
     body.replaceChildren(...cards);
     restoreInteraction();
+    if (focusCardOf !== null) {
+      const card = cards.find((entry) => entry.querySelector('h3')?.textContent === focusCardOf);
+      focusCardOf = null;
+      if (card !== undefined) { card.tabIndex = -1; card.focus(); }
+      else head.querySelector<HTMLElement>('[data-custom-action="create"]')?.focus();
+    }
   };
 
   let refresh: ReturnType<typeof setTimeout> | null = null;
@@ -322,8 +366,8 @@ export interface MountCustomAnalysisDimensionsOptions {
   /** The house's page lists every dimension with its versions and their facts; the form alone needs neither. */
   technicalDetails?(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   localInstantLabel?(instant: string): string;
-  /** 分析 › 自定义 writes a new dimension in place: only the form opens, and `done` closes it once saved or cancelled. */
-  readonly createInPlace?: { done(saved: boolean): void };
+  /** 分析 › 自定义 writes a new dimension in place: only the form opens, and `done` closes it once saved (with the title) or cancelled. */
+  readonly createInPlace?: { done(saved: boolean, title?: string): void };
 }
 
 export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimensionsOptions): { load(): Promise<void> } {
@@ -337,7 +381,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
   /** A version saved whose enabling was refused: the next try writes onto it, not a second dimension. */
   let savedNotEnabled: string | null = null;
 
-  const act = async (pending: string, body: () => Promise<CustomAnalysisDimensionsProjection>, done: (next: CustomAnalysisDimensionsProjection) => string): Promise<void> => {
+  const act = async (pending: string, body: () => Promise<CustomAnalysisDimensionsProjection>, done: (next: CustomAnalysisDimensionsProjection) => string, savedTitle?: string): Promise<void> => {
     if (busy) return;
     busy = true;
     options.setStatus(pending, 'busy');
@@ -347,7 +391,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
       editing = undefined;
       savedNotEnabled = null;
       if (options.createInPlace === undefined) render();
-      else options.createInPlace.done(true);
+      else options.createInPlace.done(true, savedTitle);
       options.setStatus(done(next), 'success');
     } catch (error) {
       options.setStatus(options.errorMessage(error, '无法完成这项操作。'), 'error');
@@ -367,7 +411,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
     title.value = latest?.title ?? '';
     titleLabel.append(title);
     const templateLabel = el('label', undefined, `${CUSTOM_DIMENSION_TEMPLATE_LABEL} · 最多 400 字，勿粘贴稿件原文`);
-    const template = el('textarea', 'ui-input');
+    const template = styleInput(el('textarea'));
     template.name = 'questionTemplate';
     template.rows = 4;
     template.placeholder = CUSTOM_DIMENSION_TEMPLATE_PLACEHOLDER;
@@ -398,7 +442,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
         savedNotEnabled = dimension === null ? owner?.dimensionId ?? null : null;
         const fresh = owner?.versions[0];
         return fresh?.state === 'pending-validation' ? api.enableCustomAnalysisDimension({ versionId: fresh.versionId }) : saved;
-      }, () => customDimensionSavedLine(titleText));
+      }, () => customDimensionSavedLine(titleText), titleText);
     });
     node.append(titleLabel, templateLabel, actions);
     return node;

@@ -9,6 +9,8 @@ import type { CustomAnalysisRowProjection } from '../shared/protocol.js';
 export const CUSTOM_TAB_LABEL = '自定义';
 export const CUSTOM_TAB_EMPTY = '还没有自定义分析维度。新建并启用一个后，它会出现在这里。';
 export const CUSTOM_TAB_NEW = '新建自定义分析维度…';
+/** An ordinary editor's sentence for a dimension that is saved but not enabled; the service's names a developer page. */
+export const CUSTOM_TAB_NOT_ENABLED = '这个维度已保存但还没有启用；点「启用」后才能运行。';
 export const CUSTOM_TAB_NOT_RUN = '尚未运行';
 export const CUSTOM_TAB_RUN = '运行';
 export const CUSTOM_TAB_READING = '正在读取自定义分析维度…';

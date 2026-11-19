@@ -665,7 +665,7 @@ export const CUSTOM_DIMENSION_FIXED_LINES = [
 export const CUSTOM_DIMENSION_STOP_NOTE = '停用后这个版本不能再运行；已经用它完成的分析仍然保留，并一直标明所用的版本。';
 
 export function customDimensionVersionLine(version: { version: number; stateLabel: string; taskCount: number }): string {
-  return `${technicalWords(`第 ${version.version} 版`, '版本')} · ${version.stateLabel} · ${version.taskCount === 0 ? '还没有运行过' : `用于 ${version.taskCount} 项任务`}`;
+  return `${technicalWords(`第 ${version.version} 版 · `)}${version.stateLabel} · ${version.taskCount === 0 ? '还没有运行过' : `用于 ${version.taskCount} 项任务`}`;
 }
 
 export function customDimensionSavedLine(title: string): string {
@@ -673,9 +673,9 @@ export function customDimensionSavedLine(title: string): string {
 }
 
 export function customDimensionEnabledLine(title: string, version: number): string {
-  return `已启用「${title}」${technicalWords(`第 ${version} 版`, '版本')}；可以在书的「分析 › 自定义」中运行。`;
+  return `已启用「${title}」${technicalWords(`（第 ${version} 版）`)}；可以在书的「分析 › 自定义」中运行。`;
 }
 
 export function customDimensionStoppedLine(title: string, version: number): string {
-  return `已停用「${title}」${technicalWords(`第 ${version} 版`, '版本')}；已完成的分析仍保留。`;
+  return `已停用「${title}」${technicalWords(`（第 ${version} 版）`)}；已完成的分析仍保留。`;
 }
