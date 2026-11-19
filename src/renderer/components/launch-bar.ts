@@ -137,18 +137,17 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
     });
     if (typeof panel.showPopover === 'function') {
       panel.setAttribute('popover', 'auto');
-      // Above or below its whole bar, never over it: a bar that wraps onto two rows keeps its other controls (选项 beside 先看计划)
-      // reachable while the panel is open. The side with more room when the panel fits on neither, bounded to that room (its
-      // content scrolls), so the summary that closes it stays reachable; across, it starts at its own summary.
+      // Above or below its summary, never over it: the side with more room when the panel fits on neither, bounded to that room
+      // (its content scrolls), so the summary that closes it stays reachable.
       const place = (): void => {
         if (!panel.matches(':popover-open')) return;
         panel.style.maxHeight = '';
-        const anchor = summary.getBoundingClientRect(), row = bar.getBoundingClientRect(), natural = panel.getBoundingClientRect();
-        const above = row.top - 12, below = innerHeight - row.bottom - 12;
+        const anchor = summary.getBoundingClientRect(), natural = panel.getBoundingClientRect();
+        const above = anchor.top - 12, below = innerHeight - anchor.bottom - 12;
         const up = natural.height > below && above > below;
         const height = Math.min(natural.height, up ? above : below);
         if (height < natural.height) panel.style.maxHeight = `${Math.max(0, height)}px`;
-        const left = Math.max(8, Math.min(anchor.left, innerWidth - natural.width - 8)), top = up ? row.top - 4 - height : row.bottom + 4;
+        const left = Math.max(8, Math.min(anchor.left, innerWidth - natural.width - 8)), top = up ? anchor.top - 4 - height : anchor.bottom + 4;
         panel.style.left = `${left}px`; panel.style.top = `${top}px`;
         // Inside a sheet the fixed offsets may resolve against the sheet rather than the window: correct by where it landed.
         const landed = panel.getBoundingClientRect();
