@@ -1,4 +1,6 @@
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
+import { pointerClick } from './dispatch-chooser.mjs';
+import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, pressEscape, typeInto } from './ordinary-pages.mjs';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -529,7 +531,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'knowledge-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'knowledge-landing');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-open');
-    await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelectorAll('[data-knowledge-category]').length===7`, 'knowledge-category-home');
+    await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelectorAll('[data-knowledge-category]').length===8`, 'knowledge-category-home');
     await assertRenderer(renderer, `document.querySelectorAll('.guideline-card, .library-material').length===0 && document.querySelector('.knowledge-recent') !== null`, 'knowledge-home-has-no-files');
     await click(renderer, '审阅规范文件', 'knowledge-open-category');
     const opened = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-guidelines-ready');
@@ -1198,6 +1200,68 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${wordSignal.source.bookId}"] [data-testid="manuscript-editor"] > [data-block-id]')`, 'word-lineage-restart-book-ready');
     const wordAfter = await renderer.evaluate(wordRead);
     requireJourney(JSON.stringify(wordAfter)===JSON.stringify(wordBefore), 'word-lineage-and-full-source-survive-restart');
+
+    // ---- 本社词表 (Issue #1543): a category of 知识库, written there and chosen from the review sheet ------------------------
+    at('knowledge-house-words');
+    // From the Book's 审阅, at both window forms: 知识库 offers 本社词表 as a card; the first time it holds nothing and one button creates
+    // it; two typed entries are saved; the review sheet then offers the list as a choice; the second form reads it back, edits and leaves.
+    const houseWordA = '合成词甲';
+    const houseWordB = '合成词乙';
+    const houseDraftColumns = `(() => { const rows = Array.from(document.querySelectorAll('[data-house-entry-row]')); return rows.length > 0 && rows.every((row) => {
+      const [literal, note, enabled, remove] = ['[data-house-field="literal"]', '[data-house-field="note"]', '[data-house-field="enabled"]', '[data-house-action^="remove-"]'].map((selector) => row.querySelector(selector)?.getBoundingClientRect());
+      return Boolean(literal && note && enabled && remove) && literal.right <= note.left + 1 && note.right <= enabled.left + 1 && enabled.right <= remove.left + 1 && Math.abs(literal.top - note.top) <= 8 && Math.abs(note.top - remove.top) <= 12; }); })()`;
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'house-words-book-review');
+    await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'house-words-review-ready');
+    await atBothSizes(renderer, waitFor, 'house-words', async (viewport) => {
+      const size = viewport.width;
+      const first = viewport === ORDINARY_VIEWPORTS[0];
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), `house-words-open-${size}`);
+      await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelector('[data-knowledge-category="house-words"]')`, `house-words-home-${size}`);
+      await pointerClick(renderer, waitFor, '[data-knowledge-category="house-words"]', `house-words-card-${size}`);
+      await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='house-words' && document.querySelector('[data-house-word-list="panel"] [data-house-action="edit"]')`, `house-words-page-${size}`);
+      if (first) {
+        await assertRenderer(renderer, `(() => { const panel = document.querySelector('[data-house-word-list="panel"]'); const buttons = Array.from(panel.querySelectorAll('button')); return buttons.length === 1 && buttons[0].textContent === '创建词表' && buttons[0].classList.contains('primary') && !panel.querySelector('details') && panel.textContent.includes('还没有保存本社词表'); })()`, `house-words-empty-${size}`);
+        await assertRenderer(renderer, buttonRowsAtOneEdge('[data-house-word-list="panel"]'), `house-words-empty-row-${size}`);
+        await pointerClick(renderer, waitFor, '[data-house-action="edit"]', `house-words-create-${size}`);
+        await waitFor(renderer, `document.querySelector('[data-house-action="save"]') && document.querySelector('[data-house-action="add"]')`, `house-words-draft-${size}`);
+        await pointerClick(renderer, waitFor, '[data-house-action="add"]', `house-words-add-first-${size}`);
+        await waitFor(renderer, `document.querySelector('[data-house-entry-row="1"] [data-house-field="literal"]')`, `house-words-row-one-${size}`);
+        await typeInto(renderer, waitFor, '[data-house-entry-row="1"] [data-house-field="literal"]', houseWordA, `house-words-literal-one-${size}`);
+        await typeInto(renderer, waitFor, '[data-house-entry-row="1"] [data-house-field="note"]', '合成说明甲', `house-words-note-one-${size}`);
+        await pointerClick(renderer, waitFor, '[data-house-action="add"]', `house-words-add-second-${size}`);
+        await waitFor(renderer, `document.querySelector('[data-house-entry-row="2"] [data-house-field="literal"]')`, `house-words-row-two-${size}`);
+        await typeInto(renderer, waitFor, '[data-house-entry-row="2"] [data-house-field="literal"]', houseWordB, `house-words-literal-two-${size}`);
+        await assertRenderer(renderer, houseDraftColumns, `house-words-draft-columns-${size}`);
+        await assertRenderer(renderer, buttonRowsAtOneEdge('[data-house-word-list="panel"]'), `house-words-draft-row-${size}`);
+        await assertRenderer(renderer, `Array.from(document.querySelectorAll('[data-house-word-list="panel"] button.primary')).map((button) => button.textContent).join()==='保存'`, `house-words-draft-primary-${size}`);
+        await pointerClick(renderer, waitFor, '[data-house-action="save"]', `house-words-save-${size}`);
+        await waitFor(renderer, `document.querySelector('[data-house-word-list="panel"] [data-house-action="edit"]')?.textContent==='编辑' && document.querySelector('[data-house-word-list="panel"]').textContent.includes('2 条，启用 2 条')`, `house-words-saved-${size}`);
+        const houseSaved = await renderer.evaluate(`window.ai7.inspectHouseWordList({ versionId: null, entryOffset: 0, historyOffset: 0 }).then((page) => JSON.stringify([page.selected?.entryCount, page.selected?.enabledCount, page.entries.map((entry) => entry.literal)]))`);
+        requireJourney(houseSaved === JSON.stringify([2, 2, [houseWordA, houseWordB]]), 'house-words-saved-service', houseSaved);
+      } else {
+        await assertRenderer(renderer, `(() => { const panel = document.querySelector('[data-house-word-list="panel"]'); return panel.textContent.includes(${JSON.stringify(houseWordA)}) && panel.textContent.includes(${JSON.stringify(houseWordB)}) && !panel.querySelector('.house-history'); })()`, `house-words-read-${size}`);
+        await assertRenderer(renderer, buttonRowsAtOneEdge('[data-house-word-list="panel"]'), `house-words-read-row-${size}`);
+        await pointerClick(renderer, waitFor, '[data-house-action="edit"]', `house-words-edit-${size}`);
+        await waitFor(renderer, `document.querySelector('[data-house-entry-row="2"] [data-house-field="literal"]')`, `house-words-edit-rows-${size}`);
+        await assertRenderer(renderer, houseDraftColumns, `house-words-draft-columns-${size}`);
+        await assertRenderer(renderer, buttonRowsAtOneEdge('[data-house-word-list="panel"]'), `house-words-draft-row-${size}`);
+        await pointerClick(renderer, waitFor, '[data-house-action="discard"]', `house-words-discard-${size}`);
+        await waitFor(renderer, `document.querySelector('[data-house-word-list="panel"] [data-house-action="edit"]') && !document.querySelector('[data-house-action="save"]')`, `house-words-discarded-${size}`);
+      }
+      // Back to the review the editor came from: the sheet offers the saved list, and the editor inside it is the same component.
+      await renderer.evaluate(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回')?.setAttribute('data-j15-back', 'true')`);
+      await pointerClick(renderer, waitFor, '[data-j15-back="true"]', `house-words-back-${size}`);
+      await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, `house-words-review-again-${size}`);
+      await pointerClick(renderer, waitFor, '[data-review-action="new-local-check"]', `house-words-sheet-${size}`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('dialog.review-sheet [data-local-house-word-list]')?.disabled===false`, `house-words-selectable-${size}`);
+      await assertRenderer(renderer, `(() => { const sheet = document.querySelector('dialog.review-sheet'); const text = sheet.textContent; return text.includes('本社词表') && text.includes('2 条启用') && !text.includes('本社自用词表') && !text.includes('本社敏感词表') && Array.from(sheet.querySelectorAll('summary')).some((summary) => summary.textContent === '编辑本社词表') && sheet.querySelector('[data-house-word-list="panel"]') !== null; })()`, `house-words-sheet-words-${size}`);
+      await pointerClick(renderer, waitFor, 'dialog.review-sheet [data-local-house-word-list]', `house-words-choose-${size}`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-local-house-word-list]')?.checked===true`, `house-words-chosen-${size}`);
+      await pointerClick(renderer, waitFor, 'dialog.review-sheet [data-local-house-word-list]', `house-words-unchoose-${size}`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-local-house-word-list]')?.checked===false`, `house-words-unchosen-${size}`);
+      await pressEscape(renderer);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open!==true`, `house-words-sheet-closed-${size}`);
+    });
 
     // Select an editable deterministic version, execute the admitted public Book offline, then capture the completed Run.
     at('knowledge-procedures');

@@ -1,4 +1,5 @@
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, typeInto } from './ordinary-pages.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
@@ -3560,7 +3561,7 @@ async function main() {
     // ---- 自定义分析维度 (Issue #922, slice 7f; ADR 0090 item 4) ----
     // Synchronized delta with Issue #922: a fresh, unedited sample1 Book on the provider-free `sample1-custom-analysis-authored`
     // fixture, layered on `sample1-baseline-happy`, running the dimension before any baseline on this Book and reading the one
-    // synthetic dimension 「单元开篇」 the fixture answers. The dimension is written in 知识库 › 工序与规则 and run from ②A through
+    // synthetic dimension 「单元开篇」 the fixture answers. The dimension is written in place in ②A › 自定义 (#1543) and run from ②A through
     // the ordinary plan and 开始任务; nothing reaches a network.
     at('custom-dimension-define');
     await closeOwnedBrowser();
@@ -3570,17 +3571,44 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'custom-launch-ready');
     const customBook = await importSample1(renderer, cancellation, true);
     at('custom-dimension-define');
+    // #1543: 分析 › 自定义 writes a dimension in place — no trip to 知识库 — at both window forms, with real presses and typing.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'custom-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'custom-library');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(customBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'custom-open-book-first');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(customBook.bookId)}]')`, 'custom-manuscript-first', 120_000);
+    await openAnalysisDestination(renderer, 'custom-analysis-first');
+    await pointerClick(renderer, waitFor, '.baseline-analysis-card [role="tab"][data-analysis-tab="custom"]', 'custom-tab-first');
+    const customPanel = '.baseline-analysis-card [data-analysis-panel="custom"]';
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${customPanel} [data-custom-empty="no-dimension"]`)})`, 'custom-tab-empty');
+    // The empty state no longer sends the editor to 知识库: it offers the one primary action, here.
+    await assertRenderer(renderer, `(() => { const empty=document.querySelector(${JSON.stringify(`${customPanel} [data-custom-empty="no-dimension"]`)}); const create=empty?.querySelector('[data-custom-action="create"]'); return create?.textContent==='新建自定义分析维度…' && create.classList.contains('primary') && !empty.textContent.includes('知识库') && !empty.textContent.includes('工序与规则'); })()`, 'custom-tab-empty-offer');
+    await atBothSizes(renderer, waitFor, 'custom-in-place', async (viewport) => {
+      const size = viewport.width;
+      if (viewport === ORDINARY_VIEWPORTS[0]) {
+        await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-empty-row-${size}`);
+        await pointerClick(renderer, waitFor, `${customPanel} [data-custom-action="create"]`, `custom-create-${size}`);
+        await waitFor(renderer, `document.querySelector(${JSON.stringify(`${customPanel} [data-custom-form="new"]`)})`, `custom-form-${size}`);
+        await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-form-row-${size}`);
+        await typeInto(renderer, waitFor, `${customPanel} [data-custom-form="new"] input[name="title"]`, CUSTOM_DIMENSION_TITLE, `custom-title-${size}`);
+        await typeInto(renderer, waitFor, `${customPanel} [data-custom-form="new"] textarea[name="questionTemplate"]`, CUSTOM_DIMENSION_TEMPLATE, `custom-template-${size}`);
+        await pointerClick(renderer, waitFor, `${customPanel} [data-custom-form="new"] [data-custom-action="save"]`, `custom-save-${size}`);
+        await waitFor(renderer, `document.querySelector(${JSON.stringify(`${customPanel} .custom-dimension-card`)})?.querySelector('h3')?.textContent===${JSON.stringify(CUSTOM_DIMENSION_TITLE)} && !document.querySelector(${JSON.stringify(`${customPanel} [data-custom-form="new"]`)})`, `custom-card-${size}`);
+      } else {
+        // With a card on the page the offer stands above the list; opened and left again, nothing is written.
+        await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${customPanel} .custom-head [data-custom-action="create"]`)})?.classList.contains('secondary')===true`, `custom-offer-above-list-${size}`);
+        await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-list-row-${size}`);
+        await pointerClick(renderer, waitFor, `${customPanel} .custom-head [data-custom-action="create"]`, `custom-create-again-${size}`);
+        await waitFor(renderer, `document.querySelector(${JSON.stringify(`${customPanel} [data-custom-form="new"]`)})`, `custom-form-${size}`);
+        await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-form-row-${size}`);
+        await pointerClick(renderer, waitFor, `${customPanel} [data-custom-form="new"] [data-custom-action="cancel"]`, `custom-cancel-${size}`);
+        await waitFor(renderer, `!document.querySelector(${JSON.stringify(`${customPanel} [data-custom-form="new"]`)}) && document.querySelector(${JSON.stringify(`${customPanel} .custom-head [data-custom-action="create"]`)})`, `custom-form-closed-${size}`);
+      }
+    });
+    // 知识库 › 工序与规则 still lists the house's dimensions, with what AI7 fixes beside the template.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'custom-knowledge-open');
     await click(renderer, '工序与规则', 'custom-knowledge-rules');
-    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='0' && document.querySelector('.knowledge-custom-dimensions .custom-dimensions-empty')?.textContent==='还没有自定义分析维度。'`, 'custom-knowledge-empty');
-    // AI7's fixed answer schema and Authority Ceiling are stated beside the template the editor writes.
-    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.knowledge-custom-dimensions .custom-dimension-fixed li')).map((item)=>item.textContent).join('').includes('不打分') && document.querySelector('.knowledge-custom-dimensions')?.textContent.includes('名称只在本机显示，不会发送')`, 'custom-knowledge-fixed');
-    await reviewAction(renderer, '.knowledge-custom-dimensions [data-custom-action="new"]', 'custom-new');
-    await assertRenderer(renderer, `(() => { const form=document.querySelector('.knowledge-custom-dimensions [data-custom-form="new"]'); const title=form?.querySelector('input[name="title"]'); const template=form?.querySelector('textarea[name="questionTemplate"]'); if(!(title instanceof HTMLInputElement)||!(template instanceof HTMLTextAreaElement))return false; title.value=${JSON.stringify(CUSTOM_DIMENSION_TITLE)}; template.value=${JSON.stringify(CUSTOM_DIMENSION_TEMPLATE)}; const save=form.querySelector('[data-custom-action="save"]'); if(!(save instanceof HTMLButtonElement))return false; save.click(); return true; })()`, 'custom-save');
     await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='1' && document.querySelector('.knowledge-custom-dimensions .custom-dimension-version[data-version="1"]')?.dataset.versionState==='enabled'`, 'custom-saved');
-    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions .custom-dimension-version[data-version="1"]')?.dataset.versionState==='enabled'`, 'custom-enabled');
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.knowledge-custom-dimensions .custom-dimension-fixed li')).map((item)=>item.textContent).join('').includes('不打分') && document.querySelector('.knowledge-custom-dimensions')?.textContent.includes('名称只在本机显示，不会发送')`, 'custom-knowledge-fixed');
     const defined = await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: false })`);
     const customDimension = defined?.dimensions?.[0];
     requireJourney(defined?.dimensions?.length === 1 && customDimension.title === CUSTOM_DIMENSION_TITLE && customDimension.kind === `custom-analysis/${customDimension.dimensionId}` &&
