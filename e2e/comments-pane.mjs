@@ -349,6 +349,9 @@ export async function commentsSelectMark(renderer, check, waitFor, markId, requi
   await renderer.evaluate(`(() => {globalThis.__commentsPoint=null;globalThis.__commentsPointPrevious=null;document.querySelector('[data-comment-card="'+${id}+'"]')?.scrollIntoView({block:'start',behavior:'instant'});return true;})()`);
   try { await waitFor(renderer, `(() => {
     const node=document.querySelector('[data-comment-card="'+${id}+'"]');if(!node)return false;
+    // Every card of the page is read: a card read late re-stacks the pane and moves this one from under the pointer (a slow
+    // guest pressed the pane between two cards). Only a point that holds while no read is in flight counts.
+    if(document.querySelector('.manuscript-comments-canvas')?.dataset.loading!=='false'){__commentsPointPrevious=null;return false;}
     const r=node.getBoundingClientRect(),pane=document.querySelector('.manuscript-comments-scroll').getBoundingClientRect(),x=r.left+12,y=r.top+10;
     const before=__commentsPointPrevious;__commentsPointPrevious={x,y};
     if(node.hidden||y<pane.top||y>pane.bottom||!node.contains(document.elementFromPoint(x,y))){node.scrollIntoView({block:'start',behavior:'instant'});return false;}
@@ -359,9 +362,10 @@ export async function commentsSelectMark(renderer, check, waitFor, markId, requi
       const node=document.querySelector('[data-comment-card="'+${id}+'"]'),pane=document.querySelector('.manuscript-comments-scroll');
       if(!node)return 'missing';if(!pane||pane.getClientRects().length===0)return 'pane-hidden';if(node.hidden)return 'not-listed';
       const r=node.getBoundingClientRect(),p=pane.getBoundingClientRect(),x=r.left+12,y=r.top+10;
+      if(document.querySelector('.manuscript-comments-canvas')?.dataset.loading!=='false')return 'reading';
       if(y<p.top||y>p.bottom)return 'outside-pane';if(!node.contains(document.elementFromPoint(x,y)))return 'covered';return 'moving';
     })()`);
-    const names={missing:'comments-card-hit-ready-missing','pane-hidden':'comments-card-hit-ready-pane-hidden','not-listed':'comments-card-hit-ready-not-listed','outside-pane':'comments-card-hit-ready-outside-pane',covered:'comments-card-hit-ready-covered',moving:'comments-card-hit-ready-moving'};
+    const names={missing:'comments-card-hit-ready-missing','pane-hidden':'comments-card-hit-ready-pane-hidden','not-listed':'comments-card-hit-ready-not-listed','outside-pane':'comments-card-hit-ready-outside-pane',covered:'comments-card-hit-ready-covered',moving:'comments-card-hit-ready-moving',reading:'comments-card-hit-ready-reading'};
     const detail=await renderer.evaluate(`(() => {
       const describe=${pointerElementDescription.toString()},node=document.querySelector('[data-comment-card="'+${id}+'"]'),r=node?.getBoundingClientRect(),x=r?r.left+12:null,y=r?r.top+10:null,hit=r?document.elementFromPoint(x,y):null,coveringAncestors=[];
       for(let ancestor=hit?.parentElement;ancestor&&coveringAncestors.length<12;ancestor=ancestor.parentElement){const box=ancestor.getBoundingClientRect();coveringAncestors.push({...describe(ancestor),rect:[box.left,box.top,box.width,box.height]});}

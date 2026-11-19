@@ -1437,6 +1437,13 @@ async function main() {
     requireJourney(endedRow.members.some(([id]) => id === member), 'exclusion-member-row-again');
     await leaveSeries(renderer, 'exclusion-ended-leave');
     await openMemberReview();
+    // 审阅 comes back where the editor left it for this Book (Issue #1525): the first Run, opened at `exclusion-marker`. The stopped
+    // Run is opened again from 历史, by pointer, and is still stopped.
+    await waitFor(renderer, `['settled','scope-changed'].includes(document.querySelector('.review-workspace-card')?.dataset.reviewState)`, 'exclusion-review-kept');
+    if (await renderer.evaluate(`document.querySelector('.review-workspace-card')?.dataset.reviewState !== 'scope-changed'`)) {
+      if (await renderer.evaluate(`document.querySelector('details.review-history-fold')?.open === false`)) await pointerClick(renderer, waitFor, 'details.review-history-fold > summary', 'exclusion-open-stopped-history');
+      await pointerClick(renderer, waitFor, 'ol.review-runs li[data-review-run="2"] [data-review-action="open-run"]', 'exclusion-open-stopped');
+    }
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='scope-changed'`, 'exclusion-still-stopped');
 
     at('j14-scope-stop-keyboard-reflow-forced-colors');

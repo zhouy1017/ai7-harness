@@ -26,6 +26,7 @@ import {
 } from './commands.js';
 import { bindingRefusalLabel } from './commands-labels.js';
 import { TRIAGE_KEY_NAMES, triageKeyLabel } from './triage-keys.js';
+import { REVIEW_ENTER_KEY_NAME } from './review-labels.js';
 import {
   KEYBOARD_ALWAYS_ON,
   KEYBOARD_CAPTURE_ADD_STEP,
@@ -308,6 +309,9 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
       item.append(`${TRIAGE_KEY_NAMES[action]} · `, el('kbd', undefined, triageKeyLabel(action)));
       list.append(item);
     }
+    const reviewReturn = el('li');
+    reviewReturn.append(`${REVIEW_ENTER_KEY_NAME} · `, el('kbd', undefined, 'Enter'));
+    list.append(reviewReturn);
     fixed.append(list);
     table.replaceChildren(grid, fixed);
     resetAll.disabled = Object.keys(bindings).length === 0;
