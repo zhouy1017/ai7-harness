@@ -3652,10 +3652,12 @@ async function main() {
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${dimensionCard} [data-custom-empty="not-run"]`)})?.textContent==='尚未运行' && document.querySelector(${JSON.stringify(`${dimensionCard} [data-analysis-action="custom-run"]`)})?.disabled===false`, 'custom-tab-not-run');
     // 运行 runs in one step (Issue #1410 item 13): the plan is prepared and started at once; 查看计划 stays beside the result.
     await pointerClick(renderer, waitFor, `${dimensionCard} [data-analysis-action="custom-preview"]`, 'custom-run');
-    await waitFor(renderer, `document.querySelector('[data-task-launch-kind]')?.dataset.taskLaunchKind==='custom-analysis'`, 'custom-launch-options');
-    await openLaunchOptions(renderer, waitFor, '[data-task-launch-kind]', 'custom-launch-options-open');
-    await chooseLaunchOption(renderer, waitFor, '[data-task-launch-kind] [data-task-launch-option="retry"]', 'never', 'custom-withdraw-safe-retry');
-    await launchTaskFromBar(renderer, waitFor, 'custom-analysis');
+    // Since #1543 the tab shows a card per enabled dimension, each with its own bar: every step here is this dimension's bar.
+    const dimensionBar = `${dimensionCard} [data-task-launch-kind]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(dimensionBar)})?.dataset.taskLaunchKind==='custom-analysis'`, 'custom-launch-options');
+    await openLaunchOptions(renderer, waitFor, dimensionBar, 'custom-launch-options-open');
+    await chooseLaunchOption(renderer, waitFor, `${dimensionBar} [data-task-launch-option="retry"]`, 'never', 'custom-withdraw-safe-retry');
+    await launchTaskFromBar(renderer, waitFor, 'custom-analysis', undefined, [], null, dimensionBar);
     await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => (([entry]) => entry?.book?.latest !== null && entry?.book?.taskState?.state === 'settled')(value.dimensions.filter((item) => item.dimensionId === ${JSON.stringify(customDimension.dimensionId)})))`, 'custom-settled', 180_000);
     const customTask = (await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: true })`)).dimensions.find((item) => item.dimensionId === customDimension.dimensionId).book.taskState;
     // The plan it ran: the dimension's exact version as its procedure, and nothing sent here.

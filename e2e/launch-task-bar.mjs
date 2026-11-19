@@ -43,12 +43,13 @@ export function popoverShownInside(panelExpression) {
 
 /**
  * Inspect this surface's current choices at both sizes, then start with one real click — on the bar's own start, or on
- * `startSelector` when the surface's own row starts through the bar (审稿意见's template rows).
+ * `startSelector` when the surface's own row starts through the bar (审稿意见's template rows). `barSelector` names the bar when
+ * the page shows several (one per 自定义 dimension card); otherwise the shown bar with its plan open, the drawer's, or the first.
  */
-export async function launchTaskFromBar(renderer, waitFor, name, viewport, previewContains = [], startSelector = null) {
+export async function launchTaskFromBar(renderer, waitFor, name, viewport, previewContains = [], startSelector = null, barSelector = null) {
   // A surface may open its bar after an asynchronous read (the 任务 panel's 发起任务 opens the drawer's): wait for one shown.
   await waitFor(renderer, `Array.from(document.querySelectorAll('[data-task-launch-kind]')).some(node=>node.getClientRects().length>0)`, `${name}-launch-surface`);
-  const id = await renderer.evaluate(`(() => {
+  const id = barSelector !== null ? await renderer.evaluate(`document.querySelector(${JSON.stringify(barSelector)})?.id`) : await renderer.evaluate(`(() => {
     const active = Array.from(document.querySelectorAll('[data-task-launch-kind]')).filter(node=>node.getClientRects().length>0);
     return (active.find(node=>node.querySelector('.task-launch-estimate[open]')) ?? active.find(node=>node.id==='task-drawer') ?? active[0])?.id;
   })()`);
