@@ -648,7 +648,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   async function prepareCorrection(): Promise<void> {
     working = true;
     render();
-    options.setStatus('正在准备更正提案…', 'busy');
+    options.setStatus('正在准备修改建议…', 'busy');
     try {
       const next = await api.prepareCorrectionProposal({ bookId, resultId });
       if (destroyed) return;
@@ -657,7 +657,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       const first = next.variants[0];
       correction = { choice: first === undefined ? 'own-edit' : first.variantId, text: first?.text ?? '', rationale: first?.rationale ?? '',
         ranges: new Set(next.ranges.filter((range) => range.primary && range.current).map((range) => range.rangeId)), problem: null };
-      reportResult(options.setStatus, '更正提案已准备：已选第一个方案，可改选或自行编辑。');
+      reportResult(options.setStatus, '修改建议已准备：已选第一个方案，可改选或自行编辑。');
     } catch (error) {
       options.setStatus(options.errorMessage(error, CORRECTION_PREPARE_FAILED), 'error');
     } finally {
@@ -672,7 +672,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     if (form === null || offer === null || form.choice === null) return;
     working = true;
     render();
-    options.setStatus('正在保存为更正提案…', 'busy');
+    options.setStatus('正在保存为修改建议…', 'busy');
     try {
       saved = await api.saveCorrectionProposal({
         bookId, resultId, resultVersion: offer.result.version, variantId: form.choice === 'own-edit' ? null : form.choice,

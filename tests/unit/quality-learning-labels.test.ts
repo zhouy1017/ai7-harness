@@ -48,11 +48,11 @@ it('ends an inclusive calendar day at the next midnight after a midnight DST gap
 describe('学习准入 words', () => {
   it('offers the choices in their fixed order, Book first, with what each would mean', () => {
     expect(LEARNING_CHOICES.map((entry) => [entry.choice, entry.label])).toEqual([
-      ['book', '仅纳入当前图书'], ['house', '纳入出版社经验'], ['excluded', '明确排除'], ['deferred', '稍后决定'],
+      ['book', '仅纳入当前图书'], ['house', '纳入本社经验'], ['excluded', '明确排除'], ['deferred', '稍后决定'],
     ]);
     expect(LEARNING_CHOICES.map((entry) => learningChoiceConsequence(entry.choice, '样书'))).toEqual([
       '仅纳入当前图书：它只在《样书》里帮 AI7 学习。',
-      '纳入出版社经验：全社以后的图书都可能从它学习。',
+      '纳入本社经验：本社以后的图书都可能从它学习。',
       '明确排除：它不会用来学习；它来自的反馈与改动仍原样保留。',
       '稍后决定：它仍然待定，不算纳入，也不算排除。',
     ]);
@@ -80,7 +80,7 @@ describe('学习准入 words', () => {
     expect(learningPeopleLine({ authors: ['周一'], editors: ['郑三'] })).toBe('作者：周一 · 责编：郑三');
     expect(learningOriginLine({ originLabel: '修改建议 · 拒绝', recordedAt: '2026-09-25T06:00:00.000Z' }, instant)).toBe('修改建议 · 拒绝 · 记录于 〔2026-09-25〕');
     expect(learningDecisionLine({ decision: null }, instant)).toBe('还没有决定。');
-    expect(learningDecisionLine({ decision: { choice: 'house', note: null, decidedAt: '2026-09-25T06:00:00.000Z' } }, instant)).toBe('纳入出版社经验 · 〔2026-09-25〕');
+    expect(learningDecisionLine({ decision: { choice: 'house', note: null, decidedAt: '2026-09-25T06:00:00.000Z' } }, instant)).toBe('纳入本社经验 · 〔2026-09-25〕');
     expect(learningDecisionLine({ decision: { choice: 'book', note: '只在这本书里参考', decidedAt: '2026-09-25T06:00:00.000Z' } }, instant))
       .toBe('仅纳入当前图书 · 〔2026-09-25〕 · 只在这本书里参考');
     expect(LEARNING_STATE_LABELS).toEqual({ pending: '待定', changed: '改过 · 需要重新决定', deferred: '稍后决定', decided: '已决定' });

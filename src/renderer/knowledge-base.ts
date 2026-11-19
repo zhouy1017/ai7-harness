@@ -214,7 +214,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         books.set(book.bookId, book.bookTitle);
         for (const entry of [...book.exemplars, ...book.readersReports]) {
           const kind = exemplarKindFilter(entry);
-          kinds.set(kind, kind === 'readers-report' ? '审稿意见' : `工作文档 · ${entry.typeLabel}`);
+          kinds.set(kind, kind === 'readers-report' ? '审稿意见' : `衍生稿件 · ${entry.typeLabel}`);
         }
       }
       toolbar.replaceChildren();
@@ -262,7 +262,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         for (const exemplar of exemplars) {
           const item = element('li', 'exemplar-entry');
           const actions = element('div', 'exemplar-actions');
-          actions.append(stateTerm(`学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}`));
+          actions.append(stateTerm(`可用于学习：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}`));
           if (exemplar.imported) actions.append(exemplarEligibility(surface, exemplar));
           const heading = element('div', 'exemplar-heading');
           const badge = stateTerm(exemplarKind(exemplar)); badge.classList.add('exemplar-kind-badge');
@@ -326,7 +326,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     for (const entry of book.readersReports) {
       const item = element('li', 'exemplar-entry');
       const actions = element('div', 'exemplar-actions');
-      actions.append(stateTerm(`学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[entry.eligibility]}`));
+      actions.append(stateTerm(`可用于学习：${EXEMPLAR_ELIGIBILITY_LABELS[entry.eligibility]}`));
       const heading = element('div', 'exemplar-heading');
       const badge = stateTerm(exemplarKind(entry)); badge.classList.add('exemplar-kind-badge');
       heading.append(badge, element('strong', 'exemplar-title', exemplarTitle(book, entry)), actions);

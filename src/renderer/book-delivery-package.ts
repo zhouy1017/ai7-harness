@@ -218,12 +218,12 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   }
 
   /**
-   * 随书稿件 (Issue #1405): every derivative document by its type and title, ticked to go into the package at the saved version
+   * 衍生稿件 (Issue #1405, named in #1531): every derivative document by its type and title, ticked to go into the package at the saved version
    * chosen beside it — newest first, the latest offered — with no Delivery Record and no workflow phase asked for.
    */
   function renderDocumentChoices(next: BookDeliveryPackageProjection): HTMLElement {
     const block = el('section', 'package-documents');
-    block.append(el('h4', undefined, '随书稿件'));
+    block.append(el('h4', undefined, '衍生稿件'));
     if (next.documents.length === 0) {
       block.append(el('p', 'field-note', '本书还没有衍生稿件；可在「稿件」选项卡新建或导入。'));
       return block;

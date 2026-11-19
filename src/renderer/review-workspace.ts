@@ -3157,7 +3157,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         const versionLabel = el('label', 'review-field');
         versionSelect.dataset['reviewField'] = 'procedure-version';
         const procedureId = state.procedure.procedureId;
-        state.procedure.eligibleVersions.forEach((version, index) => versionSelect.append(new Option(sheetProcedureVersionOption(version.version, index === 0), version.versionId)));
+        state.procedure.eligibleVersions.forEach((version, index) => versionSelect.append(new Option(sheetProcedureVersionOption(version.version, index === 0, index), version.versionId)));
         versionSelect.value = selection.versionId ?? '';
         versionSelect.addEventListener('change', () => void chooseProcedure(state, procedureId, versionSelect.value));
         versionLabel.append(el('span', undefined, SHEET_PROCEDURE_VERSION_LABEL), versionSelect);

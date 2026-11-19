@@ -51,7 +51,7 @@ export const EVIDENCE_SUMMARY_HEADING = 'AI7 对比摘要';
 export const EVIDENCE_SUMMARY_NOT_EVIDENCE = '非证据：这段摘要只整理下面的来源卡片，每一句都链接到它所说的来源；它本身不是证据。';
 export const EVIDENCE_HISTORY_HEADING = '核查结果的各个版本';
 export const EVIDENCE_LIMITATIONS_HEADING = '局限';
-export const EVIDENCE_NO_MUTATION = '证据工作区只用于阅读与比较：它不改稿、不作出提案或审阅决定、不批准任何应用。';
+export const EVIDENCE_NO_MUTATION = '证据工作区只用于阅读与比较：它不改稿、不作出修改建议或审阅决定、不批准任何应用。';
 
 export const DECISION_HEADING = '核查审阅决定';
 export const DECISION_NOTE = '决定记录后不可更改，新结果仍由你决定。';
@@ -64,17 +64,17 @@ export const DECISION_RECORDED = '已记录核查审阅决定。';
 export const DECISION_FAILED = '无法记录核查审阅决定。';
 export const DECISION_SUPERSEDED = '这项决定针对的是较早的结果版本；当前版本等待你的决定。';
 
-export const CORRECTION_PREPARE = '准备更正提案';
-export const CORRECTION_HEADING = '更正提案';
+export const CORRECTION_PREPARE = '准备修改建议';
+export const CORRECTION_HEADING = '更正的修改建议';
 export const CORRECTION_OWN_EDIT = '自行编辑';
 export const CORRECTION_OWN_TEXT_LABEL = '改为';
 export const CORRECTION_RATIONALE_LABEL = '更正理由';
 export const CORRECTION_RANGES_HEADING = '要更正的位置';
 export const CORRECTION_RANGES_NOTE = '只列出完全相同的文字，默认只改这条发现所在的一处。';
-export const CORRECTION_SAVE = '保存为更正提案';
+export const CORRECTION_SAVE = '保存为修改建议';
 export const CORRECTION_SAVED_GO = '在稿件中查看';
-export const CORRECTION_FAILED = '无法保存为更正提案。';
-export const CORRECTION_PREPARE_FAILED = '无法准备更正提案。';
+export const CORRECTION_FAILED = '无法保存为修改建议。';
+export const CORRECTION_PREPARE_FAILED = '无法准备修改建议。';
 export const CORRECTION_NO_VARIANTS = '这次运行没有给出更正方案；可以自行编辑。';
 
 export const FACTUAL_LINEAGE_HEADING = '事实核查来源';
@@ -103,7 +103,7 @@ export function factLocationLine(result: Pick<FactualVerificationResultProjectio
 
 /** The level the Run executed, and the level the plan named when an offline start lowered it (EASSURE-002). */
 export function factLevelLine(result: Pick<FactualVerificationResultProjection, 'level' | 'plannedLevel' | 'disclosure'>): string {
-  const line = `证据保证级别：${EVIDENCE_ASSURANCE_LEVEL_LABELS[result.level]}`;
+  const line = `核查力度：${EVIDENCE_ASSURANCE_LEVEL_LABELS[result.level]}`;
   return result.disclosure === null ? line : `${line}（计划为${EVIDENCE_ASSURANCE_LEVEL_LABELS[result.plannedLevel]}；${result.disclosure}）`;
 }
 

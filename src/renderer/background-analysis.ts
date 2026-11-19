@@ -9,13 +9,16 @@ import {
   BACKGROUND_CEILING_ORDINARY_LABEL,
   BACKGROUND_CANCEL,
   BACKGROUND_CEILING_FIRST,
-  BACKGROUND_CEILING_LABEL,
+  backgroundCeilingLabel,
   BACKGROUND_CHOOSE_FIRST,
   BACKGROUND_PAUSE,
   BACKGROUND_PAUSED_STATUS,
   BACKGROUND_RESUME,
   BACKGROUND_RESUMED_STATUS,
   BACKGROUND_SCOPE_LEGEND,
+  BACKGROUND_SWITCH_BUSY,
+  BACKGROUND_SWITCH_NOTE,
+  BACKGROUND_SWITCH_ON_STATUS,
   backgroundCeilingLine,
   backgroundCeilingOf,
   backgroundSharePreview,
@@ -201,7 +204,27 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     root.dataset['backgroundStarted'] = String(projection.startedRunCount);
     const heading = el('div', 'background-analysis-heading');
     const pill = el('span', `state-term status-pill background-analysis-state background-analysis-state-${projection.state}`, projection.stateLabel);
-    heading.append(el('h3', undefined, BACKGROUND_HEADING), pill);
+    const title = el('h3', undefined, BACKGROUND_HEADING);
+    title.id = 'background-analysis-heading';
+    // Ordinary mode with a single kind on offer (Issue #1531, review #1541): the kind select and 登记 become one switch and one sentence.
+    const single = !technicalLayerVisible && (projection.kinds ?? []).length <= 1;
+    const on = projection.enrollment !== null && (projection.state === 'active' || projection.state === 'paused' || projection.state === 'suspended');
+    if (single) {
+      const toggle = el('input');
+      toggle.type = 'checkbox';
+      toggle.setAttribute('role', 'switch');
+      toggle.setAttribute('aria-labelledby', title.id);
+      toggle.dataset['backgroundAction'] = 'switch';
+      toggle.checked = on;
+      toggle.disabled = on ? !projection.revoke.canRevoke : !projection.offer.canEnroll || projection.offer.disclosureDigest === null;
+      toggle.addEventListener('change', () => {
+        if (on && projection.enrollment !== null) void submitRevoke(toggle, projection, projection.enrollment.enrollmentId);
+        else void submitSwitchOn(toggle, projection);
+      });
+      const control = el('label', 'settings-switch');
+      control.append(toggle);
+      heading.append(title, control);
+    } else heading.append(title, pill);
     const kindChoice = el('select');
     kindChoice.setAttribute('aria-label', BACKGROUND_KIND_LABEL);
     for (const offered of projection.kinds ?? []) {
@@ -210,7 +233,12 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       kindChoice.append(option);
     }
     kindChoice.addEventListener('change', () => { selectedKind = kindChoice.value; lastJson = ''; void load(); });
-    const nodes: HTMLElement[] = [heading, kindChoice, el('p', 'field-note background-analysis-statement', BACKGROUND_SUMMARY)];
+    const nodes: HTMLElement[] = single
+      ? [heading, el('p', 'field-note background-analysis-statement', BACKGROUND_SWITCH_NOTE)]
+      : [heading, kindChoice, el('p', 'field-note background-analysis-statement', BACKGROUND_SUMMARY)];
+    if (single && !on && !projection.offer.canEnroll && projection.offer.reason !== null) {
+      nodes.push(el('p', 'field-note background-analysis-unavailable', projection.offer.reason));
+    }
     if (projection.enrollment !== null) {
       const line = el('p', 'background-analysis-enrollment', backgroundEnrollmentLine(projection.enrollment, localInstantLabel));
       line.dataset['enrollmentVersionId'] = projection.enrollment.enrollmentVersionId;
@@ -275,20 +303,20 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     const actions = el('div', 'button-row background-analysis-actions');
     const form = el('div', 'background-analysis-form');
     form.hidden = true;
-    // 暂停 / 续行 hold and release what the Enrollment would start (Issue #864); a Run it started keeps its own controls.
-    if ((projection.hold.canPause || projection.hold.canResume) && projection.enrollment !== null) {
+    // 暂停 / 继续 hold and release what the Enrollment would start (Issue #864); a Run it started keeps its own controls.
+    if ((single ? projection.hold.canResume : projection.hold.canPause || projection.hold.canResume) && projection.enrollment !== null) {
       const enrollmentId = projection.enrollment.enrollmentId;
       const pausing = projection.hold.canPause;
       const hold = action(pausing ? BACKGROUND_PAUSE : BACKGROUND_RESUME, 'secondary', pausing ? 'pause' : 'resume', () => void submitHold(hold, enrollmentId, pausing ? 'pause' : 'resume'));
       actions.append(hold);
     }
-    if ((projection.state === 'active' || projection.state === 'paused' || projection.state === 'suspended') && projection.enrollment !== null && projection.revoke.canRevoke) {
+    if (!single && on && projection.enrollment !== null && projection.revoke.canRevoke) {
       const enrollmentId = projection.enrollment.enrollmentId;
       // 撤销登记 revokes in one step (Issue #1410 item 24): what stops and what is kept is said with the result.
       const revoke = action(BACKGROUND_REVOKE_CONFIRM, 'secondary', 'revoke', () => void submitRevoke(revoke, projection, enrollmentId));
       actions.append(revoke);
     }
-    if (projection.state !== 'active' && projection.state !== 'paused') {
+    if (!single && projection.state !== 'active' && projection.state !== 'paused') {
       const open = action(BACKGROUND_ENROLL_OPEN, 'secondary', 'enroll-open', () => {
         engaged = true;
         open.setAttribute('aria-expanded', 'true');
@@ -316,7 +344,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
 
   const submitHold = async (control: HTMLButtonElement, enrollmentId: string, hold: 'pause' | 'resume'): Promise<void> => {
     control.disabled = true;
-    options.setStatus(hold === 'pause' ? '正在暂停后台处理登记…' : '正在续行后台处理登记…', 'busy');
+    options.setStatus(hold === 'pause' ? '正在暂停空闲时自动更新分析…' : '正在继续空闲时自动更新分析…', 'busy');
     try {
       const projectionAfter = await api.holdBackgroundAnalysisEnrollment({ enrollmentId, hold });
       options.setStatus(hold === 'pause' ? BACKGROUND_PAUSED_STATUS : BACKGROUND_RESUMED_STATUS, 'success');
@@ -325,7 +353,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       root.querySelector<HTMLButtonElement>(`[data-background-action="${hold === 'pause' ? 'resume' : 'pause'}"]`)?.focus();
     } catch (error) {
       control.disabled = false;
-      options.setStatus(options.errorMessage(error, hold === 'pause' ? '无法暂停后台处理登记。' : '无法续行后台处理登记。'), 'error');
+      options.setStatus(options.errorMessage(error, hold === 'pause' ? '无法暂停空闲时自动更新分析。' : '无法继续空闲时自动更新分析。'), 'error');
     }
   };
 
@@ -388,8 +416,8 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     preview.id = 'background-analysis-share';
     preview.setAttribute('aria-live', 'polite');
     ceilingInput.setAttribute('aria-describedby', preview.id);
-    ceilingInput.setAttribute('aria-label', `${BACKGROUND_CEILING_LABEL} · ${offer.ceilingRule}`);
-    if (technicalLayerVisible) ceilingLabel.append(el('span', undefined, `${BACKGROUND_CEILING_LABEL} · ${offer.ceilingRule}`), ceilingInput, preview);
+    ceilingInput.setAttribute('aria-label', `${backgroundCeilingLabel()} · ${offer.ceilingRule}`);
+    if (technicalLayerVisible) ceilingLabel.append(el('span', undefined, `${backgroundCeilingLabel()} · ${offer.ceilingRule}`), ceilingInput, preview);
     else {
       // A level in place of a token count (Issue #1431 item 81); it fills the same ceiling the service validates.
       const level = el('select');
@@ -481,9 +509,34 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     return [section];
   };
 
-  const submitRevoke = async (button: HTMLButtonElement, projection: BackgroundAnalysisEnrollmentProjection, enrollmentId: string): Promise<void> => {
+  // The switch turned on enrolls what the form would start with (Issue #1531): the narrowest scope, the first starting point and the
+  // routine ceiling — the same request 登记 sends, with nothing the editor did not see chosen beyond those defaults.
+  const submitSwitchOn = async (control: HTMLInputElement, projection: BackgroundAnalysisEnrollmentProjection): Promise<void> => {
+    const offer = projection.offer;
+    const scope: BackgroundAnalysisScopeOffer = offer.scopes[0] ?? { kind: 'book', seriesId: null, label: offer.scope, books: [] };
+    const startingPoint = offer.startingPoints[0]?.value;
+    const ceilingTokens = backgroundCeilingOf(BACKGROUND_CEILING_DEFAULT, scope.books.length, BACKGROUND_ANALYSIS_CEILING_MAX);
+    if (startingPoint === undefined || ceilingTokens === null || offer.disclosureDigest === null) { control.checked = false; return; }
+    control.disabled = true;
+    options.setStatus(BACKGROUND_SWITCH_BUSY, 'busy');
+    try {
+      const projectionAfter = await api.enrollBackgroundAnalysis({ kind: selectedKind,
+        disclosureDigest: offer.disclosureDigest, startingPoint, scope: { kind: scope.kind, seriesId: scope.seriesId }, ceilingTokens,
+      });
+      options.setStatus(BACKGROUND_SWITCH_ON_STATUS, 'success');
+      if (!root.isConnected) return;
+      draw(projectionAfter);
+      root.querySelector<HTMLInputElement>('[data-background-action="switch"]')?.focus();
+    } catch (error) {
+      control.disabled = false;
+      control.checked = false;
+      options.setStatus(options.errorMessage(error, '无法打开空闲时自动更新分析。'), 'error');
+    }
+  };
+
+  const submitRevoke = async (button: HTMLButtonElement | HTMLInputElement, projection: BackgroundAnalysisEnrollmentProjection, enrollmentId: string): Promise<void> => {
     button.disabled = true;
-    options.setStatus('正在撤销后台处理登记…', 'busy');
+    options.setStatus('正在关闭空闲时自动更新分析…', 'busy');
     try {
       const projectionAfter = await api.revokeBackgroundAnalysisEnrollment({ enrollmentId });
       engaged = false;
@@ -491,10 +544,11 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       options.setStatus(kept.length === 0 ? BACKGROUND_REVOKED_STATUS : `${BACKGROUND_REVOKED_STATUS.replace(/。$/u, '')}：${kept}`, 'success');
       if (!root.isConnected) return;
       draw(projectionAfter);
-      root.querySelector<HTMLButtonElement>('[data-background-action="enroll-open"]')?.focus();
+      root.querySelector<HTMLElement>('[data-background-action="enroll-open"], [data-background-action="switch"]')?.focus();
     } catch (error) {
       button.disabled = false;
-      options.setStatus(options.errorMessage(error, '无法撤销后台处理登记。'), 'error');
+      if (button instanceof HTMLInputElement) button.checked = true;
+      options.setStatus(options.errorMessage(error, '无法关闭空闲时自动更新分析。'), 'error');
     }
   };
 

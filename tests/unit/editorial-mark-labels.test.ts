@@ -69,12 +69,12 @@ describe('the wording of the Mark surface', () => {
   });
 
   it('never calls a recorded acceptance an applied change', () => {
-    expect(markStateLabel(suggestionState(null))).toBe('待你处理');
+    expect(markStateLabel(suggestionState(null))).toBe('待处理');
     expect(markStateLabel(suggestionState('rejected'))).toBe('已拒绝');
     expect(markStateLabel(suggestionState('accepted-with-edit'))).toBe('已记录 · 尚未写入稿件');
-    expect(markStateLabel({ ...suggestionState(null), anchorState: 'drifted' })).toBe('待你处理 · 原文已变');
-    expect(markStateLabel({ ...suggestionState(null), status: 'applied' })).toBe('已应用');
-    expect(markStateLabel({ ...suggestionState(null), status: 'applied', anchorState: 'drifted' })).toBe('已应用 · 之后又改过');
+    expect(markStateLabel({ ...suggestionState(null), anchorState: 'drifted' })).toBe('待处理 · 原文已变');
+    expect(markStateLabel({ ...suggestionState(null), status: 'applied' })).toBe('已接受');
+    expect(markStateLabel({ ...suggestionState(null), status: 'applied', anchorState: 'drifted' })).toBe('已接受 · 之后又改过');
     expect(markStateLabel({ kind: 'annotation', status: 'resolved', anchorState: 'exact', suggestion: null })).toBe('已处理');
     expect(markStateLabel({ kind: 'editor-note', status: 'open', anchorState: 'exact', suggestion: null })).toBe('仅自己可见');
   });
@@ -101,16 +101,16 @@ describe('the wording of the Mark surface', () => {
       kind, state, deferredAt: state === 'deferred' ? deferredAt : null, outcome, newMarkId: null, resolvedAt: null,
     });
     const drifted = { ...suggestionState(null), anchorState: 'drifted' as const };
-    expect(markStateLabel({ ...drifted, conflict: conflict('unresolved', null) })).toBe('待你处理 · 原文已变');
-    expect(markStateLabel({ ...drifted, conflict: conflict('deferred', null) })).toBe('待你处理 · 原文已变 · 暂不处理 · 9月22日 09:05');
+    expect(markStateLabel({ ...drifted, conflict: conflict('unresolved', null) })).toBe('待处理 · 原文已变');
+    expect(markStateLabel({ ...drifted, conflict: conflict('deferred', null) })).toBe('待处理 · 原文已变 · 暂不处理 · 9月22日 09:05');
     expect(markStateLabel({ ...suggestionState('accepted-with-edit'), anchorState: 'drifted', conflict: conflict('deferred', null) }))
       .toBe('已记录 · 尚未写入稿件 · 原文已变 · 暂不处理 · 9月22日 09:05');
     expect(markStateLabel({ ...suggestionState('rejected'), anchorState: 'drifted', conflict: conflict('resolved', 'keep-current') })).toBe('已拒绝 · 保留当前稿件');
     expect(markStateLabel({ ...suggestionState('rejected'), anchorState: 'drifted', conflict: null })).toBe('已拒绝 · 原文已变');
     const applied = { ...suggestionState(null), status: 'applied' as const, anchorState: 'drifted' as const };
-    expect(markStateLabel({ ...applied, conflict: conflict('deferred', null, 'reversal') })).toBe('已应用 · 之后又改过 · 暂不处理 · 9月22日 09:05');
+    expect(markStateLabel({ ...applied, conflict: conflict('deferred', null, 'reversal') })).toBe('已接受 · 之后又改过 · 暂不处理 · 9月22日 09:05');
     expect(markStateLabel({ ...applied, conflict: conflict('resolved', 'keep-current', 'reversal') })).toBe('已保留当前稿件');
-    expect(markStateLabel({ ...applied, conflict: conflict('resolved', 'new-version', 'reversal') })).toBe('已应用 · 之后又改过');
+    expect(markStateLabel({ ...applied, conflict: conflict('resolved', 'new-version', 'reversal') })).toBe('已接受 · 之后又改过');
   });
 
   it('words the conflict entry, the §2 line and a reversal\'s correction exactly', () => {

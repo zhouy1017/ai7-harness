@@ -138,7 +138,7 @@ describe('评估 arithmetic', () => {
 
 describe('评估 words', () => {
   it('says the total, each item, the revision and 定稿 in the editor\'s words, never a weight', () => {
-    expect(EVALUATION_AI7_PENDING).toBe('这一版不是从 AI7 初评开始的：由你打分。');
+    expect(EVALUATION_AI7_PENDING).toBe('这一版不是从评估报告开始的：由你打分。');
     expect([evaluationScore(18), evaluationScore(16.5)]).toEqual(['18', '16.5']);
     expect(evaluationTotalLine(PROFILE, { score: 66.5, fullMarks: 80, notRated: 1, unscored: 0 })).toBe('总分 66.5 / 80 · 优秀（1 项不评）');
     expect(evaluationTotalLine(PROFILE, { score: 34, fullMarks: 100, notRated: 0, unscored: 3 })).toBe('总分 34 / 100 · 还有 3 项没有打分');
@@ -207,12 +207,12 @@ describe('评估 words', () => {
 describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)', () => {
   const draftItem = { score: 16.5, sufficiency: 'sufficient' as const, citedBlocks: 9, unitsCited: 8 };
   it('says AI7\'s score beside the editor\'s with how well it stands, and never as the editor\'s', () => {
-    expect(evaluationAi7ItemLine(draftItem, 20)).toBe('AI7 初评 16.5 / 20 · 依据充分度 充分（引用 9 个段落，分布在 8 个阅读范围）');
+    expect(evaluationAi7ItemLine(draftItem, 20)).toBe('评估报告 16.5 / 20 · 依据充分度 充分（引用 9 个段落，分布在 8 个阅读范围）');
     expect(evaluationAi7ItemLine({ ...draftItem, score: null, sufficiency: 'insufficient', citedBlocks: 0, unitsCited: 0 }, 20))
-      .toBe('AI7 初评 没有给出分数 · 依据充分度 不足（没有引用段落）');
+      .toBe('评估报告 没有给出分数 · 依据充分度 不足（没有引用段落）');
     expect(evaluationAi7SufficiencyLine({ sufficiency: 'fair', citedBlocks: 2, unitsCited: 1 })).toBe('依据充分度 一般（引用 2 个段落，分布在 1 个阅读范围）');
     expect(evaluationAi7RecordLine({ ordinal: 2, revisionLabel: 'r3' })).toBe('这一版从 AI7 第 2 次初评开始（读的是修订版 r3）：AI7 的分数列在每一项旁边，记录保存的是你的评分。');
-    expect(EVALUATION_STATE_LABELS).toEqual({ draft: 'AI7 初稿', editing: '编辑评分中', finalized: '定稿' });
+    expect(EVALUATION_STATE_LABELS).toEqual({ draft: '评估报告', editing: '编辑评分中', finalized: '定稿' });
   });
 
   it('marks AI7\'s suggested conclusion as AI7\'s, and names the five adjustment reasons unticked', () => {
@@ -223,7 +223,7 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
   });
 
   it('says the Task and the latest 初评 in one line each, and when the manuscript moved past it', () => {
-    expect(evaluationAi7TaskLine({ taskIntentId: 'x', state: 'executing', label: '运行中' })).toBe('AI7 评估报告 · 运行中');
+    expect(evaluationAi7TaskLine({ taskIntentId: 'x', state: 'executing', label: '运行中' })).toBe('评估报告 · 运行中');
     const latest = {
       revisionId: 'r', ordinal: 1, revisionLabel: 'r1', createdAt: '2026-10-07T00:00:00.000Z', items: [], strengths: [], weaknesses: [], nextStep: null,
       suggestedConclusion: null, complete: true, current: true, total: { score: 73, fullMarks: 100, notRated: 0, unscored: 0 },
@@ -232,7 +232,7 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
     expect(evaluationAi7LatestLine(PROFILE, latest)).toBe('第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀');
     expect(evaluationAi7LatestLine(PROFILE, { ...latest, current: false })).toBe('第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀（稿件此后改过：重新生成后才能在报告上修改）');
     expect(evaluationAi7LatestLine(PROFILE, { ...latest, complete: false })).toBe('第 1 次初评 · 读的是修订版 r1 · 全书综合没有给出分数');
-    expect(EVALUATION_AI7_PREPARE).toEqual({ 'evaluation-first': 'AI7 初评', 'evaluation-again': '重新初评' });
+    expect(EVALUATION_AI7_PREPARE).toEqual({ 'evaluation-first': '生成评估报告', 'evaluation-again': '重新生成评估报告' });
   });
 
   it('shows AI7\'s evidence range by range, and says which ranges a 初评 that completed with gaps never read', () => {
@@ -295,13 +295,13 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
     expect(evaluationRewriteProposalLine({ revisionId: 'x', createdAt: 'y', entryOrdinal: 2, current: true, reading, items: [], verdict: null, strengths: { before: [], after: ['新优点。'] }, weaknesses: null, withheld: [] }))
       .toBe('AI7 按你第 2 次保存的修改重新生成了评估报告（评语、总评、优点与问题），等你决定：采用后才记入这一版，分数与结论不变。');
     // How much of the Book the rewrite read is said whenever it shows, and plainly when some ranges were not read.
-    expect(evaluationRewriteReadingLine(reading)).toBe('AI7 这次重写读了全部 8 个阅读范围。');
-    expect(evaluationRewriteReadingLine({ unitsTotal: 8, unitsRead: 6 })).toBe('AI7 这次重写只读到 6 / 8 个阅读范围：没读到的范围里的内容没有进入重写的评语。');
-    expect(evaluationRewriteDecidedLine({ decision: 'accepted', entryOrdinal: 3, decidedAt: 'x' })).toBe('上一次重写的评语已采用（记为第 3 次保存），分数没有改动。');
+    expect(evaluationRewriteReadingLine(reading)).toBe('AI7 这次重新生成读了全部 8 个阅读范围。');
+    expect(evaluationRewriteReadingLine({ unitsTotal: 8, unitsRead: 6 })).toBe('AI7 这次重新生成只读到 6 / 8 个阅读范围：没读到的范围里的内容没有进入重新生成的评语。');
+    expect(evaluationRewriteDecidedLine({ decision: 'accepted', entryOrdinal: 3, decidedAt: 'x' })).toBe('上一次重新生成的评语已采用（记为第 3 次保存），分数没有改动。');
     setTechnicalLayerVisible(false);
-    expect(evaluationRewriteDecidedLine({ decision: 'accepted', entryOrdinal: 3, decidedAt: 'x' })).toBe('上次重写已采用，分数不变。');
+    expect(evaluationRewriteDecidedLine({ decision: 'accepted', entryOrdinal: 3, decidedAt: 'x' })).toBe('上次重新生成已采用，分数不变。');
     setTechnicalLayerVisible(true);
-    expect(evaluationRewriteDecidedLine({ decision: 'discarded', entryOrdinal: null, decidedAt: 'x' })).toBe('上一次重写的评语已放弃，评语保持原样。');
+    expect(evaluationRewriteDecidedLine({ decision: 'discarded', entryOrdinal: null, decidedAt: 'x' })).toBe('上一次重新生成的评语已放弃，评语保持原样。');
   });
 
   it('names the start that skips a damaged latest version, what it will do, and what the new version says of it (Issue #726)', () => {
@@ -319,12 +319,12 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
 
   it('shows the calibrated start beside AI7\'s raw score, and says what the house calibration did to a version (EVAL-011a)', () => {
     const item = { score: 12, sufficiency: 'insufficient' as const, citedBlocks: 0, unitsCited: 0 };
-    expect(evaluationAi7ItemLine(item, 20)).toBe('AI7 初评 12 / 20 · 依据充分度 不足（没有引用段落）');
-    expect(evaluationAi7ItemLine(item, 20, null)).toBe('AI7 初评 12 / 20 · 依据充分度 不足（没有引用段落）');
-    expect(evaluationAi7ItemLine(item, 20, { adjusted: 10 })).toBe('AI7 初评 12 / 20 · 校准后 10 / 20 · 依据充分度 不足（没有引用段落）');
-    expect(evaluationAi7ItemLine({ ...item, score: 16.5 }, 20, { adjusted: 17 })).toBe('AI7 初评 16.5 / 20 · 校准后 17 / 20 · 依据充分度 不足（没有引用段落）');
+    expect(evaluationAi7ItemLine(item, 20)).toBe('评估报告 12 / 20 · 依据充分度 不足（没有引用段落）');
+    expect(evaluationAi7ItemLine(item, 20, null)).toBe('评估报告 12 / 20 · 依据充分度 不足（没有引用段落）');
+    expect(evaluationAi7ItemLine(item, 20, { adjusted: 10 })).toBe('评估报告 12 / 20 · 校准后 10 / 20 · 依据充分度 不足（没有引用段落）');
+    expect(evaluationAi7ItemLine({ ...item, score: 16.5 }, 20, { adjusted: 17 })).toBe('评估报告 16.5 / 20 · 校准后 17 / 20 · 依据充分度 不足（没有引用段落）');
     // No raw score, nothing to calibrate: the line says so and names no adjusted score.
-    expect(evaluationAi7ItemLine({ ...item, score: null }, 20, { adjusted: 1 })).toBe('AI7 初评 没有给出分数 · 依据充分度 不足（没有引用段落）');
+    expect(evaluationAi7ItemLine({ ...item, score: null }, 20, { adjusted: 1 })).toBe('评估报告 没有给出分数 · 依据充分度 不足（没有引用段落）');
     expect(evaluationAi7CalibrationLine(null)).toBeNull();
     expect(evaluationAi7CalibrationLine({ basisBooks: 10, items: [{ itemId: 'readers-and-market', raw: 12, offset: -2, adjusted: 10 }] }))
       .toBe('AI7 的初评分数已按本社校准（依据 10 本书的定稿评估）：调整了 1 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分。');

@@ -26,6 +26,13 @@ export function localInstantLabel(iso: string): string {
   });
 }
 
+/** The day an editor tells one dated thing from another by (Issue #1531): `11 月 16 日`, in this computer's time zone. */
+export function localDayLabel(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  return `${at.getMonth() + 1} 月 ${at.getDate()} 日`;
+}
+
 /** Findings by severity and by status, each counted once in both. */
 export function reviewCountsLine(counts: ReviewFindingCountsProjection): string {
   return `必须处理 ${counts.must} · 建议处理 ${counts.should} · 提示 ${counts.note} · 待处理 ${counts.pending} · 已处理 ${counts.handled} · 已忽略 ${counts.ignored}`;

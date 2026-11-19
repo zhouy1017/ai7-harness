@@ -302,7 +302,7 @@ describe('the 后台分析 block words', () => {
       .toBe('范围：书系《乙》的 3 本书 · 预算上限 1000 tokens，本书份额 333 tokens · 第 2 本');
     expect(backgroundCeilingLine({ ...enrollment, ceilingTokens: null, shareTokens: null })).toBe('范围：《甲》这一本书 · 这份登记没有预算上限');
     expect(backgroundSkippedLine([{ bookId: randomUUID(), title: '丙', reason: '登记之后稿件还没有改动。' }])).toBe('这次跳过：《丙》：登记之后稿件还没有改动。');
-    expect([BACKGROUND_PAUSE, BACKGROUND_RESUME]).toEqual(['暂停', '续行']);
+    expect([BACKGROUND_PAUSE, BACKGROUND_RESUME]).toEqual(['暂停', '继续']);
     expect([backgroundCeilingOf('1000', 3, 10_000), backgroundCeilingOf(' 7 ', 1, 10), backgroundCeilingOf('2', 3, 10), backgroundCeilingOf('1e3', 1, 10_000),
       backgroundCeilingOf('', 1, 10), backgroundCeilingOf('11', 1, 10), backgroundCeilingOf('-5', 1, 10)]).toEqual([1000, 7, null, null, null, null, null]);
     expect(backgroundSharePreview(500, [{ title: '甲' }])).toBe('每次后台分析最多用 500 tokens，达到就停下。');

@@ -102,9 +102,9 @@ export function awaySummaryLabel(finished: number, needing: number): string {
   return needing === 0 ? `你不在时，${finished} 项任务已完成` : `你不在时，${finished} 项任务已完成，${needing} 项需要你处理`;
 }
 
-/** The header's pill on every page. */
+/** The header's pill on every page: the tasks that need the editor, named as 待我处理 is (Issue #1531; the 批注栏 counts 待处理 marks). */
 export function attentionPillLabel(count: number): string {
-  return `待处理 ${count}`;
+  return `待我处理 ${count}`;
 }
 
 /** 设置 › 本机 › 通知 and the quiet completion notice (Issue #937). */

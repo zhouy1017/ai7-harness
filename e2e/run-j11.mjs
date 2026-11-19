@@ -111,11 +111,11 @@ const DRAFT_FILE = '评估旅程丙 · 审稿意见 · 给作者的修改意见 
 const READERS_REPORT_HEADINGS = ['总体评价', '主要优点', '主要问题', '修改建议', '结论'];
 /** AI7 初评's scores and lines as the authored fixture gives them, item by item (Issue #429, S81b1). */
 const AI7_ITEM_LINES = [
-  ['literary-quality', 'sufficient', '文学品质与作者声音：AI7 初评 16.5 / 20 · 依据充分度 充分（引用 19 个段落，分布在 8 个阅读范围）'],
-  ['theme-and-context', 'fair', '主题、价值与社会文化语境：AI7 初评 15 / 20 · 依据充分度 一般（引用 6 个段落，分布在 3 个阅读范围）'],
-  ['structure-and-coherence', 'sufficient', '结构、叙事逻辑与连贯：AI7 初评 15.5 / 20 · 依据充分度 充分（引用 16 个段落，分布在 8 个阅读范围）'],
-  ['chinese-language', 'sufficient', '中文语言与表达：AI7 初评 14 / 20 · 依据充分度 充分（引用 9 个段落，分布在 7 个阅读范围）'],
-  ['readers-and-market', 'insufficient', '读者与市场潜力：AI7 初评 12 / 20 · 依据充分度 不足（没有引用段落）'],
+  ['literary-quality', 'sufficient', '文学品质与作者声音：评估报告 16.5 / 20 · 依据充分度 充分（引用 19 个段落，分布在 8 个阅读范围）'],
+  ['theme-and-context', 'fair', '主题、价值与社会文化语境：评估报告 15 / 20 · 依据充分度 一般（引用 6 个段落，分布在 3 个阅读范围）'],
+  ['structure-and-coherence', 'sufficient', '结构、叙事逻辑与连贯：评估报告 15.5 / 20 · 依据充分度 充分（引用 16 个段落，分布在 8 个阅读范围）'],
+  ['chinese-language', 'sufficient', '中文语言与表达：评估报告 14 / 20 · 依据充分度 充分（引用 9 个段落，分布在 7 个阅读范围）'],
+  ['readers-and-market', 'insufficient', '读者与市场潜力：评估报告 12 / 20 · 依据充分度 不足（没有引用段落）'],
 ];
 /** 分析反馈's words the Journey writes: stand-ins of its own, never the manuscript's. */
 const ENTITY_CORRECTION = '（旅程示例）应分作两个人物';
@@ -1615,7 +1615,7 @@ async function main() {
     await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-start');
     const started = await readEvaluation(renderer, (page) => page.record !== null && page.focus === 'heading', 'evaluation-started');
     requireJourney(started.record.heading === '第 1 版 · 编辑评分中' && started.record.revision === '评估的是修订版 r1' &&
-      started.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分' && started.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
+      started.record.ai7 === '这一版不是从评估报告开始的：由你打分' && started.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
       JSON.stringify(started.record.items.map(([, legend, score]) => [legend, score])) === JSON.stringify(ITEM_LEGENDS.map((legend) => [legend, ''])) &&
       started.record.conclusions.every(([, checked]) => checked === false) && JSON.stringify(started.record.actions) === JSON.stringify(['保存修改', '定稿']) &&
       started.startReason === '第 1 版还没有定稿；定稿后才能重新评估。', 'evaluation-started-words', started);
@@ -2335,7 +2335,7 @@ async function main() {
     requireJourney(waiting.rewrite.task === '按我的修改重新生成 · 版本 · 已完成' && waiting.rewrite.proposal.current === 'true' &&
       waiting.rewrite.proposal.line === 'AI7 按你第 2 次保存的修改重新生成了评估报告（评语、总评、优点与问题），等你决定：采用后才记入这一版，分数与结论不变。' &&
       // How much it read, and each 评语's notes beside it (EVAL-006); nothing set aside.
-      waiting.rewrite.proposal.reading === 'AI7 这次重写读了全书。' && waiting.rewrite.proposal.withheld.length === 0 &&
+      waiting.rewrite.proposal.reading === 'AI7 这次重新生成读了全书。' && waiting.rewrite.proposal.withheld.length === 0 &&
       JSON.stringify(waiting.rewrite.proposal.evidence) === JSON.stringify([3, 2, 4, 3, 0, 0, 0, 0]) &&
       JSON.stringify(waiting.rewrite.proposal.pairs) === JSON.stringify([
         ...AI7_COMMENTS.map(([itemId, comment], index) => [itemId, `现在：${comment}`, `重写：${REWRITTEN_COMMENTS[index]}`]),
@@ -2361,7 +2361,7 @@ async function main() {
       JSON.stringify(accepted.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '13', '14', '10']) &&
       JSON.stringify(accepted.record.ai7Items.map(([, , , ticked]) => ticked)) === JSON.stringify([[], [], ['too-high'], [], ['insufficient-basis']]) &&
       accepted.record.heading === '版本 · 编辑评分中' && accepted.record.report === true && accepted.rewrite.proposal === null &&
-      accepted.rewrite.decided === '上次重写已采用，分数不变。', 'evaluation-rewrite-accepted-words', accepted);
+      accepted.rewrite.decided === '上次重新生成已采用，分数不变。', 'evaluation-rewrite-accepted-words', accepted);
     const acceptedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.entries, page.record.content.items.map((entry) => entry.score), page.rewrite.decided?.decision ?? null, page.record.content.strengths, page.record.content.weaknesses]))`);
     requireJourney(acceptedService === JSON.stringify([3, [16.5, 15, 13, 14, 10], 'accepted', REWRITTEN_STRENGTHS, REWRITTEN_WEAKNESSES]), 'evaluation-rewrite-accepted-service', acceptedService);
     at('evaluation-ai-lock');
@@ -2546,11 +2546,11 @@ async function main() {
     'learning-card-words', learningCard);
 
     at('learning-decide');
-    // 纳入出版社经验 says its house-wide consequence beside it before anything is recorded, 仅纳入当前图书 the Book's; with the
+    // 纳入本社经验 says its house-wide consequence beside it before anything is recorded, 仅纳入当前图书 the Book's; with the
     // editor's note, 记录学习准入决定 records the Book, and the row reads 已决定 with the focus back on 查看….
     await tick(renderer, `${learningRow('proposal-decision')} .learning-choices input[value="house"]`, 'learning-choose-house');
     const houseCard = await readLearning(renderer, (page) => typeof page.card?.consequence === 'string', 'learning-house-consequence');
-    requireJourney(houseCard.card.consequence === '纳入出版社经验：全社以后的图书都可能从它学习。' && houseCard.card.record === 'enabled', 'learning-house-words', houseCard.card);
+    requireJourney(houseCard.card.consequence === '纳入本社经验：本社以后的图书都可能从它学习。' && houseCard.card.record === 'enabled', 'learning-house-words', houseCard.card);
     await tick(renderer, `${learningRow('proposal-decision')} .learning-choices input[value="book"]`, 'learning-choose-book');
     const bookCard = await readLearning(renderer, (page) => page.card?.consequence?.startsWith('仅纳入当前图书') === true, 'learning-book-consequence');
     requireJourney(bookCard.card.consequence === `仅纳入当前图书：它只在《${THIRD.title}》里帮 AI7 学习。`, 'learning-book-words', bookCard.card);
@@ -3108,7 +3108,7 @@ async function main() {
     await fill(renderer, '#learning-audit-query', '分页原因3', 'learning-audit-query');
     await choose(renderer, '#learning-audit-filter-standing', 'house', 'learning-audit-filter-house');
     const auditSearched = await readAudit(renderer, (page) => page.rows.length === 1, 'learning-audit-searched');
-    requireJourney(auditSearched.rows[0][0] === auditHouse && auditSearched.rows[0][2] === '纳入出版社经验', 'learning-audit-searched-words', auditSearched);
+    requireJourney(auditSearched.rows[0][0] === auditHouse && auditSearched.rows[0][2] === '纳入本社经验', 'learning-audit-searched-words', auditSearched);
     await choose(renderer, '#learning-audit-filter-kind', 'review-disposition', 'learning-audit-filter-kind');
     const auditNone = await readAudit(renderer, (page) => page.rows.length === 0 && page.none !== null, 'learning-audit-none');
     requireJourney(auditNone.none === '没有符合的学习材料。', 'learning-audit-none-words', auditNone);
@@ -3219,7 +3219,7 @@ async function main() {
     await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="stop"]', 'learning-audit-stale-stop');
     // The material moved after the page read it: nothing is appended, and the explorer reads the chain as it stands.
     const refused = await readAudit(renderer, (page) => page.view === 'lineage' && page.busy === false && page.lineage?.decisions.length === 4 && page.lineage?.standing === 'house', 'learning-audit-stale-read');
-    requireJourney(refused.preview === null && refused.lineage.decisions[0][2] === '纳入出版社经验', 'learning-audit-stale-words', refused);
+    requireJourney(refused.preview === null && refused.lineage.decisions[0][2] === '纳入本社经验', 'learning-audit-stale-words', refused);
     const staleService = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => read.decisions.map((entry) => entry.choice).join('>'))`);
     requireJourney(staleService === 'book>excluded>book>house', 'learning-audit-stale-service', staleService);
 
@@ -3236,7 +3236,7 @@ async function main() {
     await clickSelector(renderer, `${auditRow(auditFirst)} [data-learning-audit-action="open"]`, 'learning-audit-restart-open');
     const restarted = await readAudit(renderer, (page) => page.lineage?.key === auditFirst, 'learning-audit-restart-lineage');
     requireJourney(JSON.stringify(restarted.lineage.decisions.map(([state, via, choice]) => [state, via, choice])) === JSON.stringify([
-      ['current', 'learning-eligibility', '纳入出版社经验'], ['superseded', 'learning-eligibility', '仅纳入当前图书'],
+      ['current', 'learning-eligibility', '纳入本社经验'], ['superseded', 'learning-eligibility', '仅纳入当前图书'],
       ['superseded', 'learning-audit', '明确排除'], ['superseded', 'learning-eligibility', '仅纳入当前图书'],
     ]), 'learning-audit-restart-words', restarted);
     const auditAfter = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => JSON.stringify(read))`);
@@ -3256,7 +3256,7 @@ async function main() {
     const keyboardStopped = await readAudit(renderer, (page) => page.lineage?.decisions.length === 5 && JSON.stringify(page.focus) === JSON.stringify([auditFirst, 'H4', false]), 'learning-audit-keyboard-preview');
     requireJourney(keyboardStopped.preview === null && keyboardStopped.lineage.standing === 'excluded' &&
       JSON.stringify(keyboardStopped.lineage.decisions[0]) === JSON.stringify(['current', 'learning-audit', '明确排除', '现在的决定 · 在学习回溯中停止今后使用']) &&
-      JSON.stringify(keyboardStopped.lineage.decisions[1].slice(0, 3)) === JSON.stringify(['superseded', 'learning-eligibility', '纳入出版社经验']) &&
+      JSON.stringify(keyboardStopped.lineage.decisions[1].slice(0, 3)) === JSON.stringify(['superseded', 'learning-eligibility', '纳入本社经验']) &&
       JSON.stringify(keyboardStopped.lineage.actions) === JSON.stringify(['reinclude', 'back']), 'learning-audit-keyboard-stopped-words', keyboardStopped);
     const keyboardService = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => [read.standing, read.decisions.map((entry) => entry.choice).join('>')])`);
     requireJourney(JSON.stringify(keyboardService) === JSON.stringify(['excluded', 'book>excluded>book>house>excluded']), 'learning-audit-keyboard-records-one-exclusion', keyboardService);
@@ -3330,7 +3330,7 @@ async function main() {
     // 第 16 版 is seeded from 第 14 版定稿 — its scores, not its conclusion — says in its own words which version it skipped, compares
     // with 第 14 版, and the list keeps 第 15 版 named among the unreadable.
     const skippedVersion = await readEvaluation(renderer, (page) => page.record?.heading === '第 16 版 · 编辑评分中', 'evaluation-damaged-skipped');
-    requireJourney(skippedVersion.record.skipped === '这一版跳过了已损坏的第 15 版，从第 14 版定稿重新评估。' && skippedVersion.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分' &&
+    requireJourney(skippedVersion.record.skipped === '这一版跳过了已损坏的第 15 版，从第 14 版定稿重新评估。' && skippedVersion.record.ai7 === '这一版不是从评估报告开始的：由你打分' &&
       skippedVersion.record.comparison?.[0] === '与第 14 版相比' && JSON.stringify(skippedVersion.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '15.5', '14', '10']) &&
       skippedVersion.record.conclusions.every(([, checked]) => checked === false) &&
       skippedVersion.unreadable === '第 15 版评估记录已损坏，无法显示；其他版本照常可用。' && skippedVersion.startReason === '第 16 版还没有定稿；定稿后才能重新评估。',
@@ -3768,11 +3768,11 @@ async function main() {
     // The editor widens it to the house; that choice, not the default, is what 记录 records.
     await tick(renderer, '.learning-reinclude input[value="house"]', 'word-audit-reinclude-house');
     const wordHouseChosen = await readAudit(renderer, (page) => JSON.stringify(page.reinclude?.choices) === JSON.stringify([['book', false], ['house', true]]), 'word-audit-reinclude-chosen');
-    requireJourney(wordHouseChosen.reinclude.record === true && wordHouseChosen.reinclude.consequence === '纳入出版社经验：全社以后的图书都可能从它学习。',
+    requireJourney(wordHouseChosen.reinclude.record === true && wordHouseChosen.reinclude.consequence === '纳入本社经验：本社以后的图书都可能从它学习。',
       'word-audit-reinclude-house-words', wordHouseChosen.reinclude);
     await clickSelector(renderer, '.learning-reinclude [data-learning-audit-action="reinclude-record"]', 'word-audit-reinclude-record');
     await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent === '学习准入决定已记录。'`, 'word-audit-reinclude-status');
-    const wordHistory = JSON.stringify([['current', '纳入出版社经验'], ['superseded', '明确排除']]);
+    const wordHistory = JSON.stringify([['current', '纳入本社经验'], ['superseded', '明确排除']]);
     // An explicit house re-inclusion is a human decision; the standing line must not call it the default.
     const wordDecidedLine = "document.querySelector('.learning-lineage')?.textContent.includes('当前按人工决定纳入本机学习') && !document.querySelector('.learning-lineage')?.textContent.includes('没有人工纳入决定')";
     const wordRestored = await readAudit(renderer, (page) => page.lineage?.decisions.length === 2 && page.reinclude === null, 'word-audit-reincluded');

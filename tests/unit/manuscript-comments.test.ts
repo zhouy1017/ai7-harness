@@ -570,7 +570,7 @@ describe('comments command parity and refresh continuity', () => {
     ui.update.mockRejectedValueOnce(new Error('service refused'));
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="resolve"]')!.click(); await paint();
     expect(ui.status).toHaveBeenLastCalledWith('标记未能更新。', 'error');
-    expect(ui.pane.querySelector('[data-mark-state]')?.textContent).toContain('待你处理');
+    expect(ui.pane.querySelector('[data-mark-state]')?.textContent).toContain('待处理');
     expect(input.value).toBe('失败后保留的回复');
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="resolve"]')!.click(); await paint();
     expect(ui.pane.querySelector('[data-mark-state]')?.textContent).toContain('已处理');
@@ -660,8 +660,8 @@ describe('comments command parity and refresh continuity', () => {
     collectTechnicalDisclosures(document.body);
     const full = ui.scroll.querySelector('[data-mark-card]')!;
     expect(full.querySelector('[data-mark-receipt]')).toBeNull();
-    expect(full.querySelector('[data-mark-application]')?.textContent).toContain('已应用 · 已写入稿件');
-    expect(full.querySelector('[data-mark-state]')?.textContent).toBe('已应用');
+    expect(full.querySelector('[data-mark-application]')?.textContent).toContain('已接受 · 已写入稿件');
+    expect(full.querySelector('[data-mark-state]')?.textContent).toBe('已接受');
     expect(full.textContent).not.toContain('effect-private-id'); expect(full.textContent).not.toContain('receipt-private-id');
     expect(full.textContent).not.toContain(application.receiptDigest);
   });

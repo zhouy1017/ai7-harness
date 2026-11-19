@@ -65,7 +65,7 @@ export function mountGlobalAgent(options: {
   state.dataset['globalAgentPolicy'] = 'state';
   const items = el('fieldset');
   items.className = 'global-agent-sources';
-  items.append(el('legend', '本社审阅偏好与记忆'), el('p', '勾选后用于提问或管理。'));
+  items.append(el('legend', '审阅偏好'), el('p', '勾选后用于提问或管理。'));
   const list = el('div');
   list.className = 'global-agent-choice-list';
   items.append(list);
@@ -417,7 +417,7 @@ export function mountGlobalAgent(options: {
     list.replaceChildren();
     const candidates = projection.sourceCandidates ?? [];
     const ids = new Set([...projection.items.map((item) => item.itemId), ...candidates.map((item) => item.itemId)]);
-    if (ids.size === 0) list.append(el('p', '还没有记忆。可以新建一条本社审阅偏好。'));
+    if (ids.size === 0) list.append(el('p', '还没有审阅偏好。可以新建一条。'));
     for (const id of ids) {
       const item = projection.items.find((item) => item.itemId === id);
       const source = candidates.find((entry) => entry.itemId === id);

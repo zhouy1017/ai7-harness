@@ -42,7 +42,7 @@ export function packageNotReadyLine(unmet: ReadonlyArray<string>): string {
 
 /** The content moved on since the newest version (BUNDLE-004). */
 export function packageChangedLine(label: string): string {
-  return technicalWords(`内容与图书交付包 ${label} 不同：再次准备会生成新的版本，${label} 保持不变。`, '稿件已更新，可重新准备交付包。');
+  return technicalWords(`内容与图书交付包 ${label} 不同：再次准备会生成新的版本，${label} 保持不变。`, '稿件已更新，可以为新内容准备交付包。');
 }
 
 /** `v2 · 图书交付包已准备 · 暂无导出记录` (DPKG-011): the prepared state beside its derived export history. */

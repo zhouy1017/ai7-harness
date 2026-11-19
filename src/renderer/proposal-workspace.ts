@@ -150,7 +150,7 @@ export function mountProposalWorkspace(options: {
       })); control.disabled = disposition === 'accepted' && group.some((member) => member.conflict || !member.loaded); yours.append(control);
     }
     if (item.conflict) yours.append(button('解决冲突…', 'conflict', () => options.openConflict(item.markId)));
-    yours.append(el('p', item.appliedRevisionId !== null ? '已应用 · 已写入稿件' : item.disposition === 'accepted' || item.disposition === 'accepted-with-edit' ? '已采纳 · 尚未应用' : item.draft !== null ? `${dispositions[item.draft]} · 草稿已保存，尚未记录决定` : '尚未选择处理。'));
+    yours.append(el('p', item.appliedRevisionId !== null ? '已接受 · 已写入稿件' : item.disposition === 'accepted' || item.disposition === 'accepted-with-edit' ? '已采纳 · 尚未应用' : item.draft !== null ? `${dispositions[item.draft]} · 草稿已保存，尚未记录决定` : '尚未选择处理。'));
     const decision = suggestion.decision;
     if (decision !== null) {
       if (decision.reason !== null) yours.append(el('p', `你的原因：${decision.reason}`));
@@ -174,7 +174,7 @@ export function mountProposalWorkspace(options: {
   }
   function receiptCard(receipt: ApplyReceiptProjection): HTMLElement {
     const node = el('section', undefined, 'proposal-receipt'); node.dataset['applyReceiptState'] = receipt.state;
-    const labels = { applied: '已应用', 'not-applied': '未应用', confirming: '正在确认应用结果', unresolved: '结果待确认' } as const;
+    const labels = { applied: '已接受', 'not-applied': '未写入稿件', confirming: '正在确认修改是否生效', unresolved: '修改是否生效待确认' } as const;
     node.append(el('h4', labels[receipt.state]), el('p', receipt.reason), button('在稿件中查看', 'receipt-manuscript', () => void options.returnToManuscript(position.blockId, position.activeMarkId)),
       button('返回提案', 'receipt-proposal', () => { controls.replaceChildren(); renderControls(); }));
     node.append(el('p', `${options.bookTitle} · 你 · ${receipt.approvedAt ?? '尚无批准记录'} · ${receipt.application?.changeCount ?? 0} 处写入`), technical(proposalIdentityRows({ 分支: receipt.branchId })));

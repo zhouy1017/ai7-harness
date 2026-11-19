@@ -61,7 +61,7 @@ export const LEARNING_STATE_LABELS: Readonly<Record<LearningMaterialState, strin
 /** The choices in their fixed order, none selected; `仅纳入当前图书` is the recommendation, never the default (LEARN-004). */
 export const LEARNING_CHOICES: ReadonlyArray<{ readonly choice: LearningEligibilityChoice; readonly label: string }> = [
   { choice: 'book', label: '仅纳入当前图书' },
-  { choice: 'house', label: '纳入出版社经验' },
+  { choice: 'house', label: '纳入本社经验' },
   { choice: 'excluded', label: '明确排除' },
   { choice: 'deferred', label: '稍后决定' },
 ];
@@ -83,7 +83,7 @@ export function learningChoiceConsequence(choice: LearningEligibilityChoice, boo
     case 'book':
       return `仅纳入当前图书：它只在《${bookTitle}》里帮 AI7 学习。`;
     case 'house':
-      return '纳入出版社经验：全社以后的图书都可能从它学习。';
+      return '纳入本社经验：本社以后的图书都可能从它学习。';
     case 'excluded':
       return '明确排除：它不会用来学习；它来自的反馈与改动仍原样保留。';
     case 'deferred':

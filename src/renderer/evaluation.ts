@@ -1064,7 +1064,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     node.dataset['recordId'] = record.recordId;
     node.dataset['evaluationState'] = record.state;
     node.dataset['entries'] = String(record.entries);
-    const heading = el('h3', undefined, record.initial === null ? evaluationHeading(record) : `${EVALUATION_REPORT_HEADING} · ${evaluationHeading(record)}`);
+    const dated = { ...record, createdAt: record.savedAt, finalizedAt: record.finalized?.at ?? null };
+    const heading = el('h3', undefined, record.initial === null ? evaluationHeading(dated) : `${EVALUATION_REPORT_HEADING} · ${evaluationHeading(dated)}`);
     heading.tabIndex = -1;
     heading.append(' · ', el('span', 'evaluation-revision', evaluationRevisionLine(record)));
     node.append(heading);

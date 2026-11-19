@@ -3271,7 +3271,7 @@ async function main() {
     await waitFor(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(overlapFinding.blockId)}}});return page.blocks[1].blockId===${JSON.stringify(overlapFinding.blockId)} && page.blocks[1].text==='开头👩‍💻Ａ　Ｂ结尾' && page.blocks[0].text==='甲'.repeat(1200);})()`, 'overlap-reversal-restored-exactly');
     // The store commits before the renderer finishes its Apply refresh. As in J-05, wait for the
     // reopened suggestion before closing this browser, so the transition cannot race an active write.
-    await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-state]')?.textContent==='待你处理' && document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${overlapFinding.markId}"]')?.dataset.markStatus==='open'`, 'overlap-reversal-renderer-settled');
+    await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-state]')?.textContent==='待处理' && document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${overlapFinding.markId}"]')?.dataset.markStatus==='open'`, 'overlap-reversal-renderer-settled');
 
     // #1506: 生成统合总结 on the overlap Book, whose summary its fixture leaves 暂缺. The offer row is clicked for real at both
     // sizes; the one summary-only request is the stage's own bytes, so this fixture answers it as it answered the stage

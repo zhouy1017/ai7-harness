@@ -1237,7 +1237,7 @@ export function createImportReview(options: ImportReviewOptions) {
           }
           const result = completed.result;
           if (completed.kind !== 'reimport-commit' || result === null || !('reimportRecordId' in result)) {
-            throw new Error('重新导入提交任务未返回完成凭据。');
+            throw new Error('重新导入提交任务未返回完成记录。');
           }
           await presentImportCompletion(result, recoveryReturn, follow);
         } catch (error) {

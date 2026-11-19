@@ -73,11 +73,11 @@ export function readOnlyLine(reason: ProtectionReadOnlyReason): string {
 /** DUR-005: the exact reason beside an attempted action that could discard, duplicate or fork the buffered input. */
 export function blockedActionLine(action: string | null): string {
   const named = action === null || action.length === 0 ? '这项操作' : `「${action}」`;
-  return `本地写入中断，当前更改尚未持久保存：暂不能执行${named}。请先${PROTECTION_RETRY_ACTION}，或${PROTECTION_COPY_ACTION}。`;
+  return `本地写入中断，修改还没有保存：暂不能执行${named}。请先${PROTECTION_RETRY_ACTION}，或${PROTECTION_COPY_ACTION}。`;
 }
 
 /** DUR-010: a close request with at-risk input opens the protection surface and says why the window stays. */
-export const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有未持久保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
+export const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有还没有保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
 
 /** Only a distinct cause belongs in the status bar; the banner owns the general state. */
 export function protectionFailureReason(error: unknown): string {

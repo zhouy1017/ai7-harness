@@ -89,9 +89,9 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       section.classList.add('review-preferences-ordinary');
       section.append(el('p', REVIEW_PREFERENCES_NOTE));
       const candidates = el('section', ''); candidates.dataset['memoryCandidates'] = '';
-      candidates.append(el('h4', '待你确认的偏好与记忆候选'));
+      candidates.append(el('h4', '待你确认的审阅偏好（AI 归纳）'));
       const active = el('section', ''); active.dataset['memoryPreferences'] = '';
-      active.append(el('h4', '已启用的审阅偏好与记忆'));
+      active.append(el('h4', '已启用的审阅偏好'));
       const category = (id: string): string => global!.categories.find((entry) => entry.categoryId === id)?.label ?? '其他编辑维度';
       const bookTitle = (id: string): string => global!.books.find((book) => book.bookId === id)?.title ?? page.signals.find((signal) => signal.source.bookId === id)?.bookTitle ?? '来源图书';
       for (const { current, usable, history, sources, nextHistoryOffset, nextSourceOffset } of page.items) {
@@ -160,7 +160,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         controls.append(lineage); item.append(controls); active.append(item);
       }
       if (candidates.querySelector('article') !== null) section.append(candidates);
-      if (active.querySelector('article') === null) active.append(el('p', '尚无已启用的审阅偏好与记忆。'));
+      if (active.querySelector('article') === null) active.append(el('p', '尚无已启用的审阅偏好。'));
       section.append(active);
       if (page.nextItemOffset !== null) section.append(action('更多记忆', () => {
         itemOffset = page.nextItemOffset!;
@@ -172,7 +172,8 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       const curation = page.curation;
       const panel = el('details', ''); panel.append(el('summary', '空闲时整理学习记录'), el('p', curation.disclosure));
       panel.append(el('p', curation.envelope === null ? '尚未设置模型整理范围；现有学习记录只保留在本机。'
-        : `已预留 ${curation.passesUsed} / ${curation.envelope.budget.maxPasses} 次整理，${curation.reservedTokens} / ${curation.envelope.budget.totalTokens} tokens。重启不重置；不确定的发送也保留预算。`));
+        : technicalWords(`已预留 ${curation.passesUsed} / ${curation.envelope.budget.maxPasses} 次整理，${curation.reservedTokens} / ${curation.envelope.budget.totalTokens} tokens。重启不重置；不确定的发送也保留预算。`,
+          `已预留 ${curation.passesUsed} / ${curation.envelope.budget.maxPasses} 次整理。重启不重置；不确定的发送也保留用量。`)));
       for (const entry of curation.recentRuns) panel.append(el('p', entry.summary));
       if (curation.available) {
         const form = el('form', '');
@@ -326,34 +327,35 @@ export function renderHouseReviewPreference(root: HTMLElement, projection: House
   root.replaceChildren();
   const section = el('section', '');
   section.dataset['houseReviewPreference'] = '';
-  section.append(el('h3', '本社审阅偏好'), el('p', '已判定反馈形成的偏好，供后续审阅参考；不改变审阅规范或编辑定稿。'), el('p', projection.basis));
-  const update = el('button', '更新本社审阅偏好');
+  // The house preference record is the developer layer's (mountReviewPreferences shows it only there), so its words are too.
+  section.append(el('h3', technicalWords('本社审阅偏好', '审阅偏好')), el('p', '已判定反馈形成的偏好，供后续审阅参考；不改变审阅规范或编辑定稿。'), el('p', projection.basis));
+  const update = el('button', technicalWords('更新本社审阅偏好', '更新审阅偏好'));
   update.type = 'button';
   const status = el('p', announce ?? '');
   status.setAttribute('role', 'status');
   update.addEventListener('click', () => {
     update.disabled = true;
-    status.textContent = '正在更新本社审阅偏好…';
+    status.textContent = technicalWords('正在更新本社审阅偏好…', '正在更新审阅偏好…');
     void api.rebuildHouseReviewPreference().then((next) => {
       const changed = next.current?.versionId !== projection.current?.versionId;
-      renderHouseReviewPreference(root, next, api, changed ? `已更新为本社审阅偏好 v${next.current!.ordinal}。` : '本社审阅偏好没有变化。');
+      renderHouseReviewPreference(root, next, api, changed ? technicalWords(`已更新为本社审阅偏好 v${next.current!.ordinal}。`, '审阅偏好已更新。') : technicalWords('本社审阅偏好没有变化。', '审阅偏好没有变化。'));
       // The new rendering's own button keeps the keyboard where the editor left it.
       root.querySelector<HTMLButtonElement>('[data-house-review-preference] button')?.focus();
     }).catch(() => {
       update.disabled = false;
-      status.textContent = '无法更新本社审阅偏好，请稍后重试。';
+      status.textContent = technicalWords('无法更新本社审阅偏好，请稍后重试。', '无法更新审阅偏好，请稍后重试。');
     });
   });
   section.append(update, status);
-  if (projection.current === null || projection.current.lines.length === 0) section.append(el('p', '尚无符合学习准入的审阅反馈。'));
+  if (projection.current === null || projection.current.lines.length === 0) section.append(el('p', technicalWords('尚无符合学习准入的审阅反馈。', '尚无可用于学习的审阅反馈。')));
   if (projection.current !== null) {
     const version = projection.current;
-    section.append(el('h4', `本社审阅偏好 ${technicalWords(`v${version.ordinal}`)}`), el('p', `来源：${version.sourceCount} 条已判定反馈 · ${version.recordedAt}`));
+    section.append(el('h4', technicalWords(`本社审阅偏好 v${version.ordinal}`, '审阅偏好')), el('p', `来源：${version.sourceCount} 条已判定反馈 · ${version.recordedAt}`));
     const lines = el('ul', '');
     for (const line of version.lines) {
       const item = el('li', line.text);
       const bookTitle = line.bookId === null ? null : line.sources.find((source) => source.bookId === line.bookId)?.bookTitle ?? null;
-      item.append(el('p', `学习准入：${learningChoiceLabel(line.bookId === null ? 'house' : 'book')}${bookTitle === null ? '' : `《${bookTitle}》`}`));
+      item.append(el('p', `${technicalWords('学习准入', '可用于学习')}：${learningChoiceLabel(line.bookId === null ? 'house' : 'book')}${bookTitle === null ? '' : `《${bookTitle}》`}`));
       const books = new Map<string, Set<string>>();
       const authors = new Map<string, Set<string>>();
       const editors = new Map<string, Set<string>>();

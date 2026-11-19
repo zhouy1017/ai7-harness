@@ -1367,7 +1367,7 @@ async function main() {
     requireJourney(Number.isSafeInteger(beforeAccept?.journalSequence) && beforeAccept.applied === false, 'apply-c-suggestion-wrote-no-text', beforeAccept);
     await openMarkCard(renderer, 'change-suggestion', markable, 'apply-c-card');
     await assertRenderer(renderer, `window.__j09.act('accept-and-apply')`, 'apply-c-accept');
-    await waitFor(renderer, `window.__j09.card()?.querySelector('[data-mark-state]')?.textContent === '已应用' && window.__j09.markText('change-suggestion', ${JSON.stringify(markable)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j09.status().includes('已应用这条修改建议')`, 'apply-c-applied', 30_000);
+    await waitFor(renderer, `window.__j09.card()?.querySelector('[data-mark-state]')?.textContent === '已接受' && window.__j09.markText('change-suggestion', ${JSON.stringify(markable)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j09.status().includes('已接受这条修改建议')`, 'apply-c-applied', 30_000);
     const afterApply = await renderer.evaluate(`${READ_WINDOW_C}.then((page) => ({ revisionId: page.revisionId, journalSequence: page.journalSequence, applied: page.blocks.find((block) => block.blockId === ${JSON.stringify(markable)})?.text.includes(${JSON.stringify(APPLIED_TEXT)}) === true }))`);
     requireJourney(afterApply.journalSequence === beforeAccept.journalSequence + 1 && afterApply.applied === true,
       'apply-c-wrote-once', { beforeMark: beforeMark.journalSequence, beforeAccept: beforeAccept.journalSequence, after: afterApply.journalSequence, applied: afterApply.applied });

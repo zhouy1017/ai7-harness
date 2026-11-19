@@ -150,17 +150,17 @@ export function markStateLabel(
   const deferred = card.conflict?.state === 'deferred' && card.conflict.deferredAt !== null ? ` · 暂不处理 · ${markTimeLabel(card.conflict.deferredAt)}` : '';
   const keptCurrent = card.conflict?.state === 'resolved' && card.conflict.outcome === 'keep-current';
   if (card.kind === 'change-suggestion') {
-    // 已应用 is the state of a verified Effect Receipt, never of a decision alone (V2-UX-EAPP-011).
+    // 已接受 (formerly 已应用, Issue #1531) is the state of a verified Effect Receipt, never of a decision alone (V2-UX-EAPP-011).
     if (card.status === 'applied') {
       if (keptCurrent) return '已保留当前稿件';
-      return card.anchorState === 'exact' ? '已应用' : `已应用 · 之后又改过${deferred}`;
+      return card.anchorState === 'exact' ? '已接受' : `已接受 · 之后又改过${deferred}`;
     }
     const disposition = card.suggestion?.decision?.disposition;
     if (disposition === 'rejected') return keptCurrent ? '已拒绝 · 保留当前稿件' : `已拒绝${drifted}`;
     if (disposition === 'accepted-with-edit') return `已记录 · 尚未写入稿件${drifted}${deferred}`;
-    return `待你处理${drifted}${deferred}`;
+    return `待处理${drifted}${deferred}`;
   }
-  if (card.kind === 'annotation') return `${card.status === 'resolved' ? '已处理' : '待你处理'}${drifted}`;
+  if (card.kind === 'annotation') return `${card.status === 'resolved' ? '已处理' : '待处理'}${drifted}`;
   return `仅自己可见${drifted}`;
 }
 

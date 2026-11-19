@@ -820,7 +820,7 @@ async function main() {
       const card = window.__j06.card();
       const accept = card.querySelector('[data-mark-action="accept-and-apply"]');
       const resolve = card.querySelector('[data-mark-action="resolve-conflict"]');
-      return card.dataset.markAnchor === 'drifted' && card.querySelector('[data-mark-state]')?.textContent === '待你处理 · 原文已变' &&
+      return card.dataset.markAnchor === 'drifted' && card.querySelector('[data-mark-state]')?.textContent === '待处理 · 原文已变' &&
         accept instanceof HTMLButtonElement && accept.disabled && (document.getElementById(accept.getAttribute('aria-describedby') ?? '')?.textContent ?? '').includes('原文已变') &&
         resolve instanceof HTMLButtonElement && !resolve.disabled && resolve.textContent === ${JSON.stringify(RESOLVE_CONFLICT)} && resolve.classList.contains('primary') &&
         card.querySelector('[data-mark-safe-merge]') === null;
@@ -871,7 +871,7 @@ async function main() {
       const card = window.__j06.card();
       const accept = card.querySelector('[data-mark-action="accept-and-apply"]');
       const line = card.querySelector('[data-mark-safe-merge]');
-      return card.dataset.markAnchor === 'exact' && card.querySelector('[data-mark-state]')?.textContent === '待你处理' &&
+      return card.dataset.markAnchor === 'exact' && card.querySelector('[data-mark-state]')?.textContent === '待处理' &&
         accept instanceof HTMLButtonElement && !accept.disabled && line?.textContent === ${JSON.stringify(SAFE_MERGE)} &&
         card.querySelector('[data-mark-action="resolve-conflict"]') === null;
     })()`, 'safe-merge-line-beside-an-available-apply');
@@ -952,7 +952,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
       const accept = card.querySelector('[data-mark-action="accept-and-apply"]');
-      return card.dataset.markKind === 'change-suggestion' && card.dataset.markAnchor === 'exact' && card.querySelector('[data-mark-state]')?.textContent === '待你处理' &&
+      return card.dataset.markKind === 'change-suggestion' && card.dataset.markAnchor === 'exact' && card.querySelector('[data-mark-state]')?.textContent === '待处理' &&
         (card.querySelector('.editorial-mark-more [data-mark-provenance]')?.textContent ?? '').includes(${JSON.stringify(NEW_VERSION_SOURCE)}) &&
         card.querySelector('[data-mark-region="content"] del')?.textContent === window.__j06Texts.current &&
         card.querySelector('[data-mark-region="content"] ins')?.textContent === ${JSON.stringify(MERGED)} &&
@@ -969,7 +969,7 @@ async function main() {
     // 接受并应用 on the new version writes its words over exactly its range, all or none.
     await assertRenderer(renderer, `window.__j06.act('accept-and-apply')`, 'new-version-accept-and-apply');
     await waitFor(renderer, `window.__j06.card()?.querySelector('[data-mark-application]') && window.__j06.text(${JSON.stringify(first)}) === window.__j06Texts.now.slice(0, ${RANGE[0]}) + ${JSON.stringify(MERGED)} + window.__j06Texts.now.slice(${RANGE[1] + TYPED_INSIDE.length})`, 'new-version-written', 60_000);
-    await assertRenderer(renderer, `window.__j06.card().querySelector('[data-mark-state]')?.textContent === '已应用' && window.__j06.markById(${JSON.stringify(versionId)})?.dataset.markStatus === 'applied'`, 'new-version-applied-with-its-receipt');
+    await assertRenderer(renderer, `window.__j06.card().querySelector('[data-mark-state]')?.textContent === '已接受' && window.__j06.markById(${JSON.stringify(versionId)})?.dataset.markStatus === 'applied'`, 'new-version-applied-with-its-receipt');
     await assertRenderer(renderer, `(() => { window.__j06Applied = window.__j06.text(${JSON.stringify(first)}); window.__j06Replaced = window.__j06Texts.current; return true; })()`, 'applied-text-kept');
     cancellation.throwIfRequested();
 
@@ -1024,7 +1024,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
       const accept = card.querySelector('[data-mark-action="accept-and-apply"]');
-      return card.querySelector('[data-mark-state]')?.textContent==='待你处理 · 原文已变' && (card.querySelector('.editorial-mark-more [data-mark-state-detail]')?.textContent ?? '').startsWith('待你处理 · 原文已变 · 暂不处理 · ') && accept instanceof HTMLButtonElement && accept.disabled &&
+      return card.querySelector('[data-mark-state]')?.textContent==='待处理 · 原文已变' && (card.querySelector('.editorial-mark-more [data-mark-state-detail]')?.textContent ?? '').startsWith('待处理 · 原文已变 · 暂不处理 · ') && accept instanceof HTMLButtonElement && accept.disabled &&
         card.querySelector('[data-mark-action="resolve-conflict"]') !== null && window.__j06.markById(${JSON.stringify(secondId)})?.dataset.markAnchor === 'drifted';
     })()`, 'deferred-still-blocks-and-says-since-when');
     await openConflict(renderer, secondId, 'deferred-conflict');
@@ -1065,7 +1065,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
       const reverse = card.querySelector('[data-mark-action="reverse-revision"]');
-      return card.querySelector('[data-mark-state]')?.textContent === '已应用 · 之后又改过' && reverse instanceof HTMLButtonElement && reverse.disabled &&
+      return card.querySelector('[data-mark-state]')?.textContent === '已接受 · 之后又改过' && reverse instanceof HTMLButtonElement && reverse.disabled &&
         card.querySelector('[data-mark-action="resolve-conflict"]') !== null;
     })()`, 'reversal-blocked-and-offers-resolve-conflict');
     await openConflict(renderer, versionId, 'reversal-conflict');
@@ -1085,7 +1085,7 @@ async function main() {
     requireJourney(UUID_PATTERN.test(correctionId ?? ''), 'correction-identity');
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
-      return (card.querySelector('.editorial-mark-more [data-mark-provenance]')?.textContent ?? '').includes(${JSON.stringify(CORRECTION_SOURCE)}) && card.querySelector('[data-mark-state]')?.textContent === '待你处理' &&
+      return (card.querySelector('.editorial-mark-more [data-mark-provenance]')?.textContent ?? '').includes(${JSON.stringify(CORRECTION_SOURCE)}) && card.querySelector('[data-mark-state]')?.textContent === '待处理' &&
         card.querySelector('[data-mark-region="content"] ins')?.textContent === window.__j06Replaced && window.__j06.text(${JSON.stringify(first)}) === window.__j06Reversal.now;
     })()`, 'correction-proposal-not-applied');
     const corrected = await renderer.evaluate(`(async () => { const binding = await ${BINDING}; const applied = await window.ai7.getEditorialMarkCard({ ...binding, markId: ${JSON.stringify(versionId)} }); const correction = await window.ai7.getEditorialMarkCard({ ...binding, markId: ${JSON.stringify(correctionId)} }); return { applied: applied.status, conflict: applied.conflict, resolvedFrom: correction.resolvedFrom, convertedFrom: correction.convertedFrom }; })()`);
@@ -1207,7 +1207,7 @@ async function main() {
     await press(renderer, 'Escape');
     await openCard(renderer, secondId, second, 'restart-deferred-card');
     await assertRenderer(renderer, `(() => { const more=window.__j06.card().querySelector('.editorial-mark-more'); if(!more.open)more.querySelector('summary').click(); return more.open; })()`, 'restart-deferred-more-open');
-    await assertRenderer(renderer, `(window.__j06.card().querySelector('.editorial-mark-more [data-mark-state-detail]')?.textContent ?? '').includes(' · 暂不处理 · ') && window.__j06.card().querySelector('[data-mark-state]')?.textContent==='待你处理 · 原文已变' && window.__j06.card().querySelector('[data-mark-action="resolve-conflict"]') !== null`, 'restart-deferred-still-deferred');
+    await assertRenderer(renderer, `(window.__j06.card().querySelector('.editorial-mark-more [data-mark-state-detail]')?.textContent ?? '').includes(' · 暂不处理 · ') && window.__j06.card().querySelector('[data-mark-state]')?.textContent==='待处理 · 原文已变' && window.__j06.card().querySelector('[data-mark-action="resolve-conflict"]') !== null`, 'restart-deferred-still-deferred');
     await press(renderer, 'Escape');
 
     at('zero-activity');

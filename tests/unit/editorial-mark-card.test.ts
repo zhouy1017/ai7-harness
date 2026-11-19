@@ -89,7 +89,7 @@ describe('shared editorial card hierarchy in ordinary mode (#1379)', () => {
   it('keeps a deferred conflict and its timestamp in More while the author status stays compact', () => {
     const { panel, more } = render({ ...card, anchorState: 'drifted', conflict: { kind: 'suggestion', state: 'deferred',
       deferredAt: '2026-11-07T00:00:00Z', outcome: null, newMarkId: null, resolvedAt: null } });
-    expect(panel.querySelector('[data-mark-state]')?.textContent).toBe('待你处理 · 原文已变');
+    expect(panel.querySelector('[data-mark-state]')?.textContent).toBe('待处理 · 原文已变');
     expect(more.querySelector('[data-mark-state-detail]')?.textContent).toContain(' · 暂不处理 · ');
     expect(more.open).toBe(false);
   });

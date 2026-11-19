@@ -2718,7 +2718,7 @@ async function main() {
       exemplarPage[0].items[0][0] === 'news-release' && exemplarPage[0].items[0][1] === String(exemplarNews.version) &&
       exemplarPage[0].items[0][2].startsWith(`来自《${EXCERPT.title}》（作者：未填写 · 责编：未填写） · 版本 ${exemplarNews.version} · 交付给`) &&
       exemplarPage[0].items[0][2].includes(` · 此前还交付过版本 ${exemplarNews.earlierVersions[0]}`) &&
-      exemplarPage[0].items[0][3] === '工作文档 · 新闻稿' && exemplarPage[0].items[0][4] === '学习准入：仅本社' &&
+      exemplarPage[0].items[0][3] === '衍生稿件 · 新闻稿' && exemplarPage[0].items[0][4] === '可用于学习：仅本社' &&
       // This Book has no 审稿意见; earlier Books can now be imported through the KB.
       exemplarBook.readersReports.length === 0 && exemplarPage[0].readersReports === 0 &&
       JSON.stringify(exemplarPage[0].later) === JSON.stringify([]),

@@ -133,7 +133,7 @@ it('shows each same-type document title directly and refreshes a renamed title i
   expect(Array.from(page.root.querySelectorAll('.exemplar-title'), (node) => node.textContent))
     .toEqual(['春季发布会新闻稿', '秋季发布会新闻稿', '《春季图书》审稿意见 · 给作者的修改意见']);
   expect(page.root.querySelector('.knowledge-file-more')).toBeNull();
-  expect(page.root.querySelector('.exemplar-kind-badge')?.textContent).toBe('工作文档 · 新闻稿');
+  expect(page.root.querySelector('.exemplar-kind-badge')?.textContent).toBe('衍生稿件 · 新闻稿');
   expect(page.root.querySelector('.exemplar-context')?.textContent).toContain('来自《春季图书》（作者：作者甲 · 责编：责编乙）');
   inspect.mockResolvedValueOnce({ books: [{ ...sampleBook, exemplars: [{ ...sampleExemplar, title: '更名后的新闻稿' }] }], nextCursor: null });
   await page.renderKnowledgeBase('exemplars');

@@ -312,8 +312,8 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewBatchReadyLine(3)).toBe('将把 3 条修改建议写入稿件；请核对后确认应用。');
     expect(reviewBatchAppliedLine(3, false)).toBe('已把 3 条修改建议写入稿件。');
     expect(reviewBatchAppliedLine(3, true)).toBe('已把 3 条修改建议写入稿件。写入结果已从记录确认。');
-    expect(REVIEW_STATUS_LINES.applied).toBe('已应用这条修改建议。');
-    expect(REVIEW_STATUS_LINES.appliedRecovered).toBe('已应用这条修改建议。写入结果已从记录确认。');
+    expect(REVIEW_STATUS_LINES.applied).toBe('已接受这条修改建议。');
+    expect(REVIEW_STATUS_LINES.appliedRecovered).toBe('已接受这条修改建议。写入结果已从记录确认。');
     expect(REVIEW_STATUS_LINES.applyUnknown).toBe('无法确认这次应用的结果；请刷新审阅后查看。');
     expect(REVIEW_STATUS_LINES.ignored).toBe('已忽略这条发现，原因已记录。');
   });

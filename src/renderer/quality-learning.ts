@@ -57,7 +57,7 @@ export function editorialPreferenceEditor(options: {
     const option = el('option', undefined, entry.label); option.value = entry.categoryId; category.append(option);
   }
   const scope = el('select'); scope.setAttribute('aria-label', '适用范围');
-  const house = el('option', undefined, '全社'); house.value = ''; scope.append(house);
+  const house = el('option', undefined, '本社'); house.value = ''; scope.append(house);
   for (const book of options.books) {
     const option = el('option', undefined, `本书：《${book.title}》`); option.value = book.bookId; scope.append(option);
   }
@@ -559,7 +559,7 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
     for (const row of adoptionRows) {
       adoption.append(el('p', 'field-note', `${row.bookTitle} · ${row.versionId === null ? '全部规则' : `本社审阅偏好${technicalWords(` v${row.ordinal} · ${row.versionId}`)}`}：已参考 ${share(row.referenced)}；未参考 ${share(row.unreferenced)}${row.mostlyRejected ? '；参考后的发现多数被拒绝，请复核这条规则。' : '。'}`));
     }
-    adoption.append(el('p', 'field-note', '采纳数包含接受、修改后接受及已应用，分母包含尚未处理的发现；此比较不证明规则导致采纳。'));
+    adoption.append(el('p', 'field-note', '采纳数包含接受、修改后接受及已写入稿件的修改，分母包含尚未处理的发现；此比较不证明规则导致采纳。'));
   };
   adoptionMore.addEventListener('click', () => void load(false).catch(() => { adoptionMore.disabled = false; body.textContent = '无法读取更多规则采纳率。'; }));
   paintBooks();
