@@ -148,12 +148,34 @@ export function evaluationItemLegend(item: { label: string; fullMarks: number })
 }
 
 /** `第 2 版 · 定稿`; ordinary mode tells one version from another by its day (Issue #1531): `11 月 16 日的定稿`. */
-export function evaluationHeading(record: Pick<EvaluationRecordSummaryProjection, 'ordinal' | 'state'> & { readonly createdAt?: string; readonly finalizedAt?: string | null }, withTime = false): string {
+/**
+ * How one version of a list is told from the others in ordinary mode (Issue #1531, review S7, N8): its day; its time too
+ * when another version shares the day (`EvaluationDayTell.time`), and its order within that minute when even the time is
+ * shared (`order`).
+ */
+export interface EvaluationDayTell { readonly time: boolean; readonly order: number | null }
+export function evaluationHeading(record: Pick<EvaluationRecordSummaryProjection, 'ordinal' | 'state'> & { readonly createdAt?: string; readonly finalizedAt?: string | null },
+  tell: EvaluationDayTell | boolean = false): string {
+  const { time, order } = typeof tell === 'boolean' ? { time: tell, order: null } : tell;
   const at = record.finalizedAt ?? record.createdAt;
-  const day = at === undefined ? undefined : withTime ? localDayTimeLabel(at) : localDayLabel(at);
   const label = EVALUATION_STATE_LABELS[record.state];
-  const ordinary = day === undefined ? label : record.state === 'editing' ? `${label}（${day}开始）` : `${day}的${label}`;
+  const which = order === null ? '' : ` · 这一分钟的第 ${order} 份`;
+  const ordinary = at === undefined ? label
+    : record.state === 'editing' ? `${label}（${time ? localDayTimeLabel(at) : localDayLabel(at)}开始）${which}`
+      : time ? `${label} · ${localDayTimeLabel(at)}${which}` : `${localDayLabel(at)}的${label}`;
   return technicalWords(`第 ${record.ordinal} 版 · ${label}`, ordinary);
+}
+
+/** What tells each version of a list apart: its time when its day is shared, its order when its minute is too. */
+export function evaluationDayTells(records: ReadonlyArray<Pick<EvaluationRecordSummaryProjection, 'recordId' | 'ordinal' | 'createdAt' | 'finalizedAt'>>): ReadonlyMap<string, EvaluationDayTell> {
+  const at = (record: (typeof records)[number]): string => record.finalizedAt ?? record.createdAt;
+  const tells = new Map<string, EvaluationDayTell>();
+  for (const record of records) {
+    const sameDay = records.filter((other) => localDayLabel(at(other)) === localDayLabel(at(record)));
+    const sameMinute = sameDay.filter((other) => localDayTimeLabel(at(other)) === localDayTimeLabel(at(record))).sort((a, b) => a.ordinal - b.ordinal);
+    tells.set(record.recordId, { time: sameDay.length > 1, order: sameMinute.length > 1 ? sameMinute.indexOf(record) + 1 : null });
+  }
+  return tells;
 }
 
 /** The revision a version evaluated, and whether edits waited in the journal beyond it then. */
@@ -180,7 +202,7 @@ export function evaluationConclusionLabel(profile: Pick<EvaluationProfileProject
 }
 
 /** One version in the list: its number and state, the revision, the total and — once chosen — the conclusion. */
-export function evaluationVersionLine(profile: Pick<EvaluationProfileProjection, 'bands' | 'conclusions'>, summary: EvaluationRecordSummaryProjection, withTime = false): string {
+export function evaluationVersionLine(profile: Pick<EvaluationProfileProjection, 'bands' | 'conclusions'>, summary: EvaluationRecordSummaryProjection, withTime: EvaluationDayTell | boolean = false): string {
   const conclusion = summary.conclusion === null ? '' : ` · ${evaluationConclusionLabel(profile, summary.conclusion)}`;
   return `${evaluationHeading(summary, withTime)}${technicalWords(` · 修订版 ${summary.revisionLabel}`)} · ${evaluationTotalLine(profile, summary.total)}${conclusion}`;
 }

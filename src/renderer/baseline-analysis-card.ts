@@ -1415,7 +1415,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const note = element('p', 'attention-note analysis-plan-drift-note', projection.actions.canReconfirmPlan
         ? technicalWords(`${TASK_PLAN_DRIFT_HEADING}：原计划不能再开始；在任务计划里查看计划修订并重新确认计划后，新的计划版本才能开始。`,
           `${TASK_PLAN_DRIFT_HEADING}：请在任务计划里查看变化后重新开始。`)
-        : `${TASK_PLAN_DRIFT_HEADING}：要更新的那一份分析已不是最新的一份；请基于最新的一份重新开始。`);
+        : `${TASK_PLAN_DRIFT_HEADING}：要更新的那一份分析已不是最新的一份；请基于最新的一份另做一份计划。`);
       note.dataset['planRevisionState'] = revision.planRevisionId === null ? 'live' : 'pending';
       note.dataset['planRevisionPrior'] = String(revision.priorOrdinal);
       note.dataset['planRevisionFields'] = revision.changedFields.join(',');

@@ -171,7 +171,8 @@ export function markStateLabel(
     }
     const disposition = card.suggestion?.decision?.disposition;
     if (disposition === 'rejected') return keptCurrent ? '已拒绝 · 保留当前稿件' : `已拒绝${drifted}`;
-    if (disposition === 'accepted-with-edit') return `已记录 · 尚未写入稿件${drifted}${deferred}`;
+    // Accepted and not yet written, with or without the editor's edit: the one word of the three finding lists (review N9).
+    if (disposition === 'accepted-with-edit' || disposition === 'accepted') return `已接受 · 尚未写入稿件${drifted}${deferred}`;
     return `待处理${drifted}${deferred}`;
   }
   if (card.kind === 'annotation') return `${card.status === 'resolved' ? '已处理' : '待处理'}${drifted}`;

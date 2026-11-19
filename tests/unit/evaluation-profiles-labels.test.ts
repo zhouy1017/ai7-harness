@@ -13,7 +13,7 @@ describe('the house profile editing surface', () => {
     expect([1, 2, 4, 5, 10].map(profileFullMarks)).toEqual([100, 50, 25, 20, 10]);
     expect([0, 3, 6, 8, 16].map(profileFullMarks)).toEqual([null, null, null, null, null]);
     expect(PROFILE_ITEM_COUNT).toBe('评分项数需要能把 100 分平均分成整数：1、2、4、5 或 10 项。');
-    expect(PROFILE_PROSPECTIVE).toBe('新版本只用于之后准备的初评和新建的评估，已有记录保留当时的方案。');
+    expect(PROFILE_PROSPECTIVE).toBe('新版本只用于之后准备的评估报告和新建的评估，已有记录保留当时的方案。');
     expect(PROFILE_CALIBRATION).toContain('改名或修改说明保留该项的校准依据');
     expect(PROFILE_CALIBRATION).toContain('新增的项等待自己的调分依据');
   });

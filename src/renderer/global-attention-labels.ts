@@ -452,7 +452,7 @@ function attentionReason(item: GlobalAttentionItemProjection): string {
     case 'analysis-plan-revision':
       return '计划依据已有变化，请确认新计划后再开始。';
     case 'analysis-plan-moved':
-      return '等待联网期间计划依据已有变化，需要重新开始任务。';
+      return '等待联网期间计划依据已有变化，需要另做一份计划。';
     // Issue #422 (S76d; CLAR-004): whether only that step waits, or the whole Task.
     case 'analysis-clarification':
       if (item.facts.clarificationOrigin === 'model') return '模型有一个需要你决定的问题，回答后或等待 24 小时后接着处理。';
@@ -467,11 +467,11 @@ function attentionReason(item: GlobalAttentionItemProjection): string {
       return '模型连接缺少密钥：到设置连接模型服务后，任务会在联网时开始。';
     case 'analysis-waiting-slot':
       // It holds no place in the queue of starts waiting for one, and says so (Issue #632).
-      return '已联网，正在等运行名额，尚未开始且不占队列位次。';
+      return '已联网，等待开始：还没有开始，也不占排队的位次。';
     case 'analysis-waiting-idle': return technicalWords('已记录本次运行授权；停下编辑 30 秒且没有编辑操作运行后开始，可以取消任务。', '停下编辑 30 秒后开始，可以取消任务。');
-    case 'analysis-yielded': return '让位给你的任务：已完成的部分都已保存，下次空闲后接着处理；预算上限不变。';
+    case 'analysis-yielded': return '让位给你的任务：已完成的部分都已保存，下次空闲后接着处理；用量上限不变。';
     case 'analysis-waiting-capacity':
-      return '正在等运行名额，轮到后自动开始。';
+      return '排队中，轮到后自动开始。';
     case 'analysis-waiting-admission':
       return '已经联网：AI7 先核对计划，没有变化就开始；现在什么都没有运行。';
     case 'analysis-running':

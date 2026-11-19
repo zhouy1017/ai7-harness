@@ -118,6 +118,27 @@ function onEscape(root: HTMLElement, cancel: () => void): void {
   });
 }
 
+/**
+ * Where one switch stands for 登记 (ordinary mode, one kind on offer), the block's own service sentences say 打开 and 关闭
+ * as the switch does (review N5): the starting points, the states and what each waits for. Nothing else is touched.
+ */
+const SWITCH_PHRASES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^未登记$/u, '未打开'], [/^已登记$/u, '已打开'], [/^已撤销$/u, '已关闭'], [/^登记记录无法读取$/u, '设置记录无法读取'],
+  [/请撤销后重新登记/gu, '请关闭后重新打开'], [/重新登记/gu, '重新打开'], [/登记之后/gu, '打开之后'], [/登记时/gu, '打开时'], [/登记后/gu, '打开后'],
+  [/这份登记/gu, '这项设置'], [/已撤销/gu, '已关闭'], [/撤销后/gu, '关闭后'],
+];
+function switchPhrased(words: string): string {
+  return SWITCH_PHRASES.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), words);
+}
+function switched(projection: BackgroundAnalysisEnrollmentProjection): BackgroundAnalysisEnrollmentProjection {
+  if (technicalLayerVisible || (projection.kinds ?? []).filter((kind) => kind.enabled).length > 1) return projection;
+  return { ...projection, stateLabel: switchPhrased(projection.stateLabel), next: { ...projection.next, reason: switchPhrased(projection.next.reason) },
+    offer: { ...projection.offer, ...(projection.offer.reason === null ? {} : { reason: switchPhrased(projection.offer.reason) }),
+      startingPoints: projection.offer.startingPoints.map((point) => ({ ...point, label: switchPhrased(point.label), note: switchPhrased(point.note) })) },
+    enrollment: projection.enrollment === null ? null : { ...projection.enrollment, startingPointLabel: switchPhrased(projection.enrollment.startingPointLabel) },
+    history: projection.history.map((entry) => ({ ...entry, stateLabel: switchPhrased(entry.stateLabel) })) };
+}
+
 export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions): { load(): Promise<void> } {
   const { root, api } = options;
   root.classList.add('source-card', 'background-analysis');
@@ -125,6 +146,17 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
   let selectedKind = 'baseline-analysis';
   // The switch's choices (Issue #1531, review S6): the form's defaults until the editor picks another under 选项.
   const choice: { scope: string | null; ceiling: string; startingPoint: BackgroundAnalysisStartingPoint | null } = { scope: null, ceiling: BACKGROUND_CEILING_DEFAULT, startingPoint: null };
+  // A setting that is on reads ITS scope, level and starting point under 选项, never the defaults (review N5).
+  let choiceOf: string | null = null;
+  const choiceFromEnrollment = (projection: BackgroundAnalysisEnrollmentProjection): void => {
+    const enrollment = projection.enrollment;
+    if (enrollment === null || enrollment.enrollmentVersionId === choiceOf) return;
+    choiceOf = enrollment.enrollmentVersionId;
+    const scope = projection.offer.scopes.findIndex((entry) => entry.kind === enrollment.scope.kind && entry.label === enrollment.scope.label);
+    choice.scope = scope < 0 ? null : String(scope);
+    choice.ceiling = enrollment.ceilingTokens === null ? BACKGROUND_CEILING_DEFAULT : String(enrollment.ceilingTokens);
+    choice.startingPoint = enrollment.startingPoint;
+  };
   const headingId = `background-analysis-heading-${++mounted}`;
   let last: BackgroundAnalysisEnrollmentProjection | null = null;
   let lastJson = '';
@@ -154,7 +186,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
   const draw = (recorded: BackgroundAnalysisEnrollmentProjection): void => {
     // The service's own sentences read in the table's words in ordinary mode (Issue #1531, review N1), field by field: the
     // Book's title, the scope and Series labels, the binds the form checks by label and every id stay as they are.
-    const projection: BackgroundAnalysisEnrollmentProjection = { ...recorded, stateLabel: serviceWords(recorded.stateLabel), statement: serviceWords(recorded.statement),
+    const worded: BackgroundAnalysisEnrollmentProjection = { ...recorded, stateLabel: serviceWords(recorded.stateLabel), statement: serviceWords(recorded.statement),
       next: { ...recorded.next, reason: serviceWords(recorded.next.reason) },
       lastLook: recorded.lastLook === null ? null : { ...recorded.lastLook, reason: serviceWords(recorded.lastLook.reason) },
       lastNotStarted: recorded.lastNotStarted === null ? null : { ...recorded.lastNotStarted, reason: serviceWords(recorded.lastNotStarted.reason) },
@@ -167,6 +199,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       history: recorded.history.map((entry) => ({ ...entry, stateLabel: serviceWords(entry.stateLabel) })),
       startedRuns: recorded.startedRuns.map((run) => ({ ...run, modeLabel: serviceWords(run.modeLabel) })),
       revoke: { ...recorded.revoke, consequences: recorded.revoke.consequences.map((line) => serviceWords(line)) } };
+    const projection = switched(worded);
     const startedBefore = last?.startedRunCount ?? null;
     last = projection;
     if (startedBefore !== null && projection.startedRunCount > startedBefore) options.onRunStarted();
@@ -550,17 +583,20 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
   /** 选项 beside the switch: the scope, the usage level and the starting point the form offered, with its defaults. */
   const switchOptions = (projection: BackgroundAnalysisEnrollmentProjection, on: boolean): HTMLElement => {
     const offer = projection.offer;
+    choiceFromEnrollment(projection);
+    // A suspended setting asks the editor again: its options open, and 重新打开 sends what they say (review N5).
+    const locked = on && projection.state !== 'suspended';
     const details = el('details', 'background-analysis-options');
     details.dataset['backgroundDetails'] = 'options';
     details.append(el('summary', undefined, BACKGROUND_SWITCH_OPTIONS));
-    if (on) details.append(el('p', 'field-note', BACKGROUND_SWITCH_OPTIONS_LOCKED));
+    if (locked) details.append(el('p', 'field-note', BACKGROUND_SWITCH_OPTIONS_LOCKED));
     const radios = (legend: string, name: string, entries: ReadonlyArray<{ value: string; label: string }>, chosen: string, pick: (value: string) => void): HTMLElement => {
       const set = el('fieldset');
       set.append(el('legend', undefined, legend));
       for (const entry of entries) {
         const label = el('label');
         const radio = el('input');
-        radio.type = 'radio'; radio.name = `${headingId}-${name}`; radio.value = entry.value; radio.checked = entry.value === chosen; radio.disabled = on;
+        radio.type = 'radio'; radio.name = `${headingId}-${name}`; radio.value = entry.value; radio.checked = entry.value === chosen; radio.disabled = locked;
         radio.dataset['backgroundOption'] = name;
         radio.addEventListener('change', () => { if (radio.checked) pick(entry.value); });
         label.append(radio, el('span', undefined, entry.label));
@@ -570,7 +606,10 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     };
     const scopes = offer.scopes.map((entry, index) => ({ value: String(index), label: entry.label }));
     if (scopes.length > 1) details.append(radios(BACKGROUND_SCOPE_LEGEND, 'scope', scopes, choice.scope ?? '0', (value) => { choice.scope = value; }));
-    details.append(radios(BACKGROUND_CEILING_ORDINARY_LABEL, 'ceiling', BACKGROUND_CEILING_LEVELS.map(([value, label]) => ({ value, label })), choice.ceiling, (value) => { choice.ceiling = value; }));
+    // A ceiling set in the developer layer that is none of the three levels is shown as itself, checked.
+    const levels = BACKGROUND_CEILING_LEVELS.map(([value, label]) => ({ value, label }));
+    const ceilings = levels.some((level) => level.value === choice.ceiling) ? levels : [...levels, { value: choice.ceiling, label: `用量上限 ${Number(choice.ceiling).toLocaleString('en-US')}` }];
+    details.append(radios(BACKGROUND_CEILING_ORDINARY_LABEL, 'ceiling', ceilings, choice.ceiling, (value) => { choice.ceiling = value; }));
     const starts = offer.startingPoints.map((point) => ({ value: point.value, label: `${point.label} · ${point.note}` }));
     if (starts.length > 0) details.append(radios(BACKGROUND_STARTING_POINT_LEGEND, 'starting-point', starts, choice.startingPoint ?? starts[0]!.value, (value) => { choice.startingPoint = value as BackgroundAnalysisStartingPoint; }));
     return details;

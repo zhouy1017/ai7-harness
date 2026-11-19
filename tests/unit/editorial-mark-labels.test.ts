@@ -75,7 +75,7 @@ describe('the wording of the Mark surface', () => {
   it('never calls a recorded acceptance an applied change', () => {
     expect(markStateLabel(suggestionState(null))).toBe('待处理');
     expect(markStateLabel(suggestionState('rejected'))).toBe('已拒绝');
-    expect(markStateLabel(suggestionState('accepted-with-edit'))).toBe('已记录 · 尚未写入稿件');
+    expect(markStateLabel(suggestionState('accepted-with-edit'))).toBe('已接受 · 尚未写入稿件');
     expect(markStateLabel({ ...suggestionState(null), anchorState: 'drifted' })).toBe('待处理 · 原文已变');
     expect(markStateLabel({ ...suggestionState(null), status: 'applied' })).toBe('已接受');
     expect(markStateLabel({ ...suggestionState(null), status: 'applied', anchorState: 'drifted' })).toBe('已接受 · 之后又改过');
@@ -108,7 +108,7 @@ describe('the wording of the Mark surface', () => {
     expect(markStateLabel({ ...drifted, conflict: conflict('unresolved', null) })).toBe('待处理 · 原文已变');
     expect(markStateLabel({ ...drifted, conflict: conflict('deferred', null) })).toBe('待处理 · 原文已变 · 暂不处理 · 9 月 22 日 09:05');
     expect(markStateLabel({ ...suggestionState('accepted-with-edit'), anchorState: 'drifted', conflict: conflict('deferred', null) }))
-      .toBe('已记录 · 尚未写入稿件 · 原文已变 · 暂不处理 · 9 月 22 日 09:05');
+      .toBe('已接受 · 尚未写入稿件 · 原文已变 · 暂不处理 · 9 月 22 日 09:05');
     expect(markStateLabel({ ...suggestionState('rejected'), anchorState: 'drifted', conflict: conflict('resolved', 'keep-current') })).toBe('已拒绝 · 保留当前稿件');
     expect(markStateLabel({ ...suggestionState('rejected'), anchorState: 'drifted', conflict: null })).toBe('已拒绝 · 原文已变');
     const applied = { ...suggestionState(null), status: 'applied' as const, anchorState: 'drifted' as const };

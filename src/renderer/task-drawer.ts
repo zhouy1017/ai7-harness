@@ -2317,7 +2317,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const asked = request;
     const again = current?.reprepare ?? null;
     if (current === null || again === null || !beginWork()) return;
-    options.setStatus('正在重新开始这项任务…', 'busy');
+    options.setStatus('正在另做一份计划…', 'busy');
     let prepared: string | null = null;
     try {
       if (current.custom !== undefined) {
@@ -2326,7 +2326,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         const initial = await api.prepareBaselineAnalysis({ goal: again.prepare.goal, update: again.prepare.update, reconfirm: false, redoOf: null });
         const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
         if (completed.state === 'cancelled') {
-          options.setStatus('重新开始已取消；这项任务保持原样。', 'success');
+          options.setStatus('另做一份计划已取消；这项任务保持原样。', 'success');
           return;
         }
         if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {

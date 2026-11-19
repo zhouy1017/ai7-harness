@@ -38,6 +38,11 @@ const base = (state: State, enabled: ReadonlyArray<string> = ['baseline-analysis
   };
 };
 
+/** A setting made with the series scope, the 较多 level and 从现在的稿件开始. */
+const seriesWide = (projection: BackgroundAnalysisEnrollmentProjection): BackgroundAnalysisEnrollmentProjection => ({ ...projection,
+  enrollment: { ...projection.enrollment!, startingPoint: 'backfill', ceilingTokens: 200000, shareTokens: 100000,
+    scope: { kind: 'series', label: '书系《乙》的 2 本书', books: [{ bookId: 'a', title: '甲' }, { bookId: 'b', title: '乙' }], position: 1 } } });
+
 let restore: () => void;
 beforeEach(() => {
   restore = installMiniDom();
@@ -105,13 +110,21 @@ describe('the 空闲时自动更新分析 switch in ordinary mode', () => {
     expect(root.querySelector('[data-background-action="resume"]')?.textContent).toBe('继续');
   });
 
-  it('offers a suspended setting its way out: 重新打开 with the chosen options, or the switch turned off', async () => {
-    const enroll = vi.fn(async () => base('active'));
-    const { root } = await mount({ inspectBackgroundAnalysisEnrollment: vi.fn(async () => base('suspended')), enrollBackgroundAnalysis: enroll });
+  it('reads an open setting\'s own scope, level and starting point under 选项, locked (review N5)', async () => {
+    const { root } = await mount({ inspectBackgroundAnalysisEnrollment: vi.fn(async () => seriesWide(base('active'))) });
+    const checked = (name: string) => (root.querySelectorAll(`[data-background-option="${name}"]`) as unknown as HTMLInputElement[]).filter((radio) => radio.checked).map((radio) => [radio.value, radio.disabled]);
+    expect([checked('scope'), checked('ceiling'), checked('starting-point')]).toEqual([[['1', true]], [['200000', true]], [['backfill', true]]]);
+    expect(root.querySelector('.background-analysis-enrollment')?.textContent).toContain('只分析打开之后的改动');
+  });
+
+  it('offers a suspended setting its way out: 重新打开 with its own options, open to change, or the switch turned off', async () => {
+    const enroll = vi.fn(async (_input: unknown) => base('active'));
+    const { root } = await mount({ inspectBackgroundAnalysisEnrollment: vi.fn(async () => seriesWide(base('suspended'))), enrollBackgroundAnalysis: enroll });
     expect([toggle(root).checked, toggle(root).disabled, root.querySelector('.background-analysis-statement')?.textContent]).toEqual([true, false, BACKGROUND_SWITCH_STATE.suspended]);
+    expect((root.querySelectorAll('[data-background-option="scope"]') as unknown as HTMLInputElement[]).every((radio) => !radio.disabled)).toBe(true);
     (root.querySelector('[data-background-action="reopen"]') as unknown as { click(): void }).click();
     await flush();
-    expect(enroll).toHaveBeenCalledTimes(1);
+    expect(enroll).toHaveBeenCalledWith({ kind: 'baseline-analysis', disclosureDigest: 'd'.repeat(64), startingPoint: 'backfill', scope: { kind: 'series', seriesId: 'series' }, ceilingTokens: 200000 });
   });
 
   it('puts the switch back and says why when turning it on or off fails', async () => {

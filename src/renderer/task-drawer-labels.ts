@@ -202,7 +202,7 @@ export function taskPlanWording(plan: TaskPlanProjection): TaskPlanProjection {
     chips: { ...plan.goal.chips, procedure: words(plan.wording?.procedure, plan.goal.chips.procedure) } },
     ...(plan.runOutcome === undefined ? {} : { runOutcome: { ...plan.runOutcome, reason: serviceWords(plan.runOutcome.reason) } }),
     scope: { ...plan.scope, process: serviceWords(plan.scope.process),
-      reference: plan.wording?.reference?.map((parts) => words(parts, '')) ?? all(plan.scope.reference),
+      reference: plan.wording?.reference?.map((parts) => serviceWords(words(parts, ''))) ?? all(plan.scope.reference),
       send: serviceWords(words(plan.wording?.scopeSend, plan.scope.send)) },
     steps: plan.steps.map((step) => ({ ...step, label: serviceWords(step.label) })),
     participation: { during: serviceWords(plan.participation.during), after: serviceWords(plan.participation.after) },
