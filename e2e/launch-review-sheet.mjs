@@ -26,7 +26,15 @@ export async function launchReviewFromSheet(renderer, waitFor, viewport) {
   }
   const runId = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.run?.reviewRunId)`);
   if (typeof runId !== 'string') throw new Error('REVIEW_SHEET_RUN_MISSING');
-  await pointerClick(renderer, waitFor, '[data-review-action="view-plan"]', 'review-sheet-view-plan');
+  // The running review's card repaints as it polls: a repaint between press and release replaces the button under the pointer
+  // and loses the press, for an editor as for this click. Release, and press the new button once more.
+  try {
+    await pointerClick(renderer, waitFor, '[data-review-action="view-plan"]', 'review-sheet-view-plan');
+  } catch (error) {
+    if (!String(error?.message ?? '').endsWith('-target-moved-after-press')) throw error;
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 1, y: 1, button: 'left', buttons: 0, clickCount: 1 });
+    await pointerClick(renderer, waitFor, '[data-review-action="view-plan"]', 'review-sheet-view-plan-again');
+  }
   await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef === ${JSON.stringify(runId)}`, 'review-sheet-run-plan');
   if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanState==='waiting'`)) {
     try {
