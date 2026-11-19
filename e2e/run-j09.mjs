@@ -1870,7 +1870,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-question-library');
     await openAnalysisOf(renderer, questionBook, 'model-question-analysis');
     const beforeQuestion = await readSettledAttention(renderer);
-    const recentBeforeQuestion = beforeQuestion.groups.find((group) => group.key === 'recent').items.map((item) => item.itemId);
+    const recentBeforeQuestion = (beforeQuestion.groups.find((group) => group.key === 'recent')?.items ?? []).map((item) => item.itemId);
     // #1528: the Run is held at its first range while the editor goes to the manuscript and puts the caret in its text; the
     // question then comes, and its notice stands at both window sizes without moving the caret or the focus.
     at('model-question-notice');
@@ -1921,7 +1921,7 @@ async function main() {
     const questionPage = await renderer.evaluate(READ_PAGE);
     const shownQuestion = questionPage.groups.find((group) => group.key === 'decisions').items.find((item) => item.itemId === questionItem?.itemId);
     requireJourney(questionItem?.state === 'analysis-clarification' && questionItem.nextStep === 'answer-clarification' && shownQuestion?.blocked === 'true' &&
-      JSON.stringify(questionAttention.groups.find((group) => group.key === 'recent').items.map((item) => item.itemId)) === JSON.stringify(recentBeforeQuestion), 'model-question-decision-and-completed-counts');
+      JSON.stringify((questionAttention.groups.find((group) => group.key === 'recent')?.items ?? []).map((item) => item.itemId)) === JSON.stringify(recentBeforeQuestion), 'model-question-decision-and-completed-counts');
     await openItem(renderer, questionItem.itemId, 'model-question-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('.task-plan-clarification-question')?.textContent==='本范围按哪个阅读重点处理？'`, 'model-question-drawer', 30_000);
     const questionPlan = await renderer.evaluate(`window.ai7.taskOverviewCall({operation:'inspectTaskPlan',bookId:${JSON.stringify(questionBook)},input:{kind:'baseline-analysis',ref:${JSON.stringify(questionTask)}}})`);
@@ -1937,7 +1937,7 @@ async function main() {
     requireJourney(questionDone.resultSetRevision?.units.filter((unit) => unit.state === 'closed').length === SAMPLE1_UNITS && questionDone.run?.attempt?.spans.length === SAMPLE1_UNITS + 1, 'model-question-one-follow-up');
     await openAttention(renderer, 'model-question-answered-attention');
     const answeredAttention = await readSettledAttention(renderer);
-    requireJourney(!answeredAttention.groups.find((group) => group.key === 'decisions').items.some((item) => item.itemId === questionItem.itemId), 'model-question-item-removed');
+    requireJourney(!(answeredAttention.groups.find((group) => group.key === 'decisions')?.items ?? []).some((item) => item.itemId === questionItem.itemId), 'model-question-item-removed');
 
     at('model-question-second-notice');
     // #1528: a second raise — another Book's question while the editor types in its manuscript — is closed with × by the real
