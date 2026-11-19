@@ -4,10 +4,10 @@ import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_C
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
 import { AI7_FAILURE_CODES, RETRY_SAFE_FAILURE_TABLE, classifyModelFailure, evaluateRunBudgetCeiling, isRetrySafeFailure, retryBackoffMs } from '../../src/service/provider/classification.js';
+import { DEFAULT_TRANSPORT_SETTINGS } from '../../src/service/provider/request-deadlines.js';
 import { CredentialBroker, type CredentialSlotBinding } from '../../src/service/provider/credential-broker.js';
 import {
   DEEPSEEK_ROUTE_PROFILE,
-  MODEL_REQUEST_DEADLINE_MS,
   DeepSeekOpenAiCompatibleAdapter,
   OPENCODE_GO_ROUTE_PROFILE,
   OPENCODE_GO_SESSION_HEADER,
@@ -735,9 +735,11 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
     expect(running.calls).toHaveLength(1);
   });
 
+  // #1599: a request is bounded by what it waits for — the first byte, then the gap between bytes — never by its answer's length.
+  // A whole-answer request has no byte before its answer is complete, so one bound covers the headers and the body alike.
   it.each([
     ['headers', undefined], ['body', undefined], ['headers', 2], ['body', 2],
-  ] as const)('bounds a stalled %s read by the projected or fallback deadline (%s) without resending', async (stage, seconds) => {
+  ] as const)('bounds a whole-answer request stalled before its %s completes by firstByteSeconds (%s) without resending', async (stage, seconds) => {
     vi.useFakeTimers();
     try {
       let sent = false;
@@ -750,18 +752,69 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
         });
         if (stage === 'headers') return pending();
         return { status: 200, json: pending };
-      }, ...(seconds === undefined ? {} : { transportSettings: { requestDeadlineSeconds: seconds, rateLimitRetry: { honourRetryAfter: true, maxRetries: 1 } } }) });
+      }, ...(seconds === undefined ? {} : { transportSettings: { ...DEFAULT_TRANSPORT_SETTINGS, firstByteSeconds: seconds, idleSeconds: seconds } }) });
       const completed = collect(stalled.adapter.stream(request()));
       await vi.advanceTimersByTimeAsync(0);
       expect(sent).toBe(true);
       expect(signal).toBeInstanceOf(AbortSignal);
-      await vi.advanceTimersByTimeAsync((seconds === undefined ? MODEL_REQUEST_DEADLINE_MS : seconds * 1000) - 1);
+      await vi.advanceTimersByTimeAsync((seconds ?? DEFAULT_TRANSPORT_SETTINGS.firstByteSeconds) * 1000 - 1);
       expect(signal?.aborted).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       expect((await completed).at(-1)).toMatchObject({ reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN } } });
       expect(signal?.aborted).toBe(true);
       expect(stalled.calls).toHaveLength(1);
       expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('lets a whole-answer request whose headers come early and whose body completes at 200 s settle', async () => {
+    vi.useFakeTimers();
+    try {
+      const slow = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: async () => ({ status: 200, json: () => new Promise((resolve) => {
+        setTimeout(() => resolve({ choices: [{ message: { content: '{"ok":true}' } }], usage: { prompt_tokens: 10, completion_tokens: 2 } }), 200_000);
+      }) }) });
+      const completed = collect(slow.adapter.stream(request()));
+      await vi.advanceTimersByTimeAsync(199_999);
+      expect(slow.adapter.lastCanonicalResult).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await completed).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } });
+      expect(slow.adapter.lastCanonicalResult).toMatchObject({ kind: 'answer', text: '{"ok":true}' });
+      expect(slow.calls).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('lets a whole-answer request whose headers arrive after 180 s (below the first-byte bound) settle', async () => {
+    vi.useFakeTimers();
+    try {
+      const slow = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: () => new Promise((resolve) => {
+        setTimeout(() => resolve({ status: 200, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }], usage: { prompt_tokens: 10, completion_tokens: 2 } }) }), 300_000);
+      }) });
+      const completed = collect(slow.adapter.stream(request()));
+      await vi.advanceTimersByTimeAsync(299_999);
+      expect(slow.adapter.lastCanonicalResult).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await completed).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } });
+      expect(slow.adapter.lastCanonicalResult).toMatchObject({ kind: 'answer', text: '{"ok":true}' });
+      expect(slow.calls).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('keeps the total ceiling over a request that never stops answering, and never resends it', async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const endless = adapter({ ticket: ticketFor(), secret: 'placeholder', transportSettings: { ...DEFAULT_TRANSPORT_SETTINGS, firstByteSeconds: 1000, totalCeilingSeconds: 200 }, transport: async (_url, init) => {
+        signal = init.signal;
+        return { status: 200, json: () => new Promise<never>((_resolve, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true })) };
+      } });
+      const completed = collect(endless.adapter.stream(request()));
+      await vi.advanceTimersByTimeAsync(199_999);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await completed).at(-1)).toMatchObject({ reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN } } });
+      expect(endless.calls).toHaveLength(1);
     } finally { vi.useRealTimers(); }
   });
 

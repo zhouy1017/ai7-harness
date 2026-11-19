@@ -9,6 +9,7 @@ import { admittedProxyRequest, armSingleHostAllowance, guardedConnect, guardedLo
 import {
   ProxyConnectionEvidence, createProxyDispatcher, parseProxyUrl, probeProxy, proxyAwareFetch, readProxySetting, writeProxySetting, type ProxyDispatcherFactory,
 } from '../../src/service/provider/proxy-setting.js';
+import { observeRequestActivity } from '../../src/service/provider/request-deadlines.js';
 import { DeepSeekOpenAiCompatibleAdapter, classifyTransportError } from '../../src/service/provider/deepseek-adapter.js';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 import { DEEPSEEK_MODEL, DEEPSEEK_ROUTE, type TransmitTicket } from '../../src/service/provider/egress-gate.js';
@@ -184,6 +185,33 @@ describe('per-request native-fetch dispatcher', () => {
     expect(classifyTransportError(socketFailure).code).toBe('AI7_PROXY_UNREACHABLE');
     expect(classifyTransportError(socketFailure, true, init).code).toBe('AI7_OUTCOME_UNKNOWN');
     expect(reports).toEqual(['proxy-unreachable', 'model-service-unreachable', 'proxy-unreachable']);
+  });
+  // #1599: undici's hidden 300 s header and body timers must not cut a long answer; the caller's own bounds are the only ones.
+  it.each(['direct', 'proxy'] as const)('turns off the hidden undici header and body timers on the %s dispatcher', async (mode) => {
+    let dispatcher: object | undefined;
+    const native = vi.fn<typeof fetch>(async (_input, init) => { dispatcher = (init as { dispatcher: object }).dispatcher; return new Response('ok'); });
+    const fetch = proxyAwareFetch(native, async () => mode === 'direct' ? { mode: 'direct' } : parseProxyUrl('http://127.0.0.1:9'));
+    await (await fetch(modelUrl, { method: 'POST', body: '{}' })).text();
+    // The options live under undici's private `options` symbol, on the dispatcher itself or on the agent a proxy dispatcher wraps.
+    const optionsOf = (value: object): unknown[] => Object.getOwnPropertySymbols(value).flatMap((symbol) => {
+      const held = (value as Record<symbol, unknown>)[symbol];
+      return symbol.description === 'options' ? [held] : symbol.description === 'proxy agent' && typeof held === 'object' && held !== null ? optionsOf(held) : [];
+    });
+    expect(optionsOf(dispatcher!)).toEqual([expect.objectContaining({ headersTimeout: 0, bodyTimeout: 0 })]);
+  });
+  it('tells the request it was made for that bytes arrived, on every read of the answer', async () => {
+    const init = { method: 'POST', body: '{}' };
+    const seen: number[] = [];
+    observeRequestActivity(init, () => seen.push(seen.length));
+    const native = vi.fn<typeof fetch>(async () => new Response(new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(new Uint8Array([1])); controller.enqueue(new Uint8Array([2])); controller.close();
+    } })));
+    const fetch = proxyAwareFetch(native, async () => ({ mode: 'direct' }));
+    await (await fetch(modelUrl, init)).arrayBuffer();
+    expect(seen.length).toBeGreaterThanOrEqual(2);
+    const other = { method: 'POST', body: '{}' };
+    await (await fetch(modelUrl, other)).arrayBuffer();
+    expect(seen.length).toBeGreaterThanOrEqual(2);
   });
   it('recognizes proxy 407 separately and preserves cancellation', async () => {
     const { factory } = fixture();

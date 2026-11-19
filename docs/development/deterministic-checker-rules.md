@@ -42,6 +42,8 @@ Cards use the existing disposition, explicit annotation-to-suggestion conversion
 
 ## Selected offline tables and mechanical Apply
 
+> R5 replaces the built-in tables with the 字表与词表 library ([ADR 0106](../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)): C01, C02 and V01 gain version 2, which reads the enabled library tables pinned by table, version and digest, and the default 常用词表 adds 「请核对」 annotations (slice R5-L3); `standard-data.json` becomes the pre-installed seed (R5-L1, R5-L5). Until those slices land, this section describes the delivered behaviour; version 1 stays readable for older results.
+
 Local@3 freezes `ai7.review.local-plan/3`, result/3 and stage-artifact/3 beside the earlier formats. The source revision, import boundary, scope, all options, complete selected House document/pin, Book term rows and built-in table version 1 are bound by the plan digest. It uses the existing local-stage ledger and recovery chain, without a model, credential, network, new execution owner or policy change.
 
 - **C01/v1:** membership in the complete 8,105-character 2013 table, derived from `kTGH` in the pinned Unicode 17.0.0 Unihan distribution. An unlisted unified ideograph is a review annotation, never a wrong-character verdict.

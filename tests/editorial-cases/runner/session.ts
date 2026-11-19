@@ -45,7 +45,8 @@ export interface ImportedBook {
   readonly revisionId: string;
 }
 
-export type CaseManuscript = { readonly source: 'sample1' } | { readonly source: 'synthetic'; readonly id: string };
+export type CaseManuscript = { readonly source: 'sample1' } | { readonly source: 'synthetic'; readonly id: string }
+  | { readonly source: 'public-samplebook'; readonly file: string };
 
 const applicationRequests = new WeakMap<EditorialStore, ModelRequestGovernor>();
 
@@ -88,7 +89,8 @@ export async function openStore(roots: CaseRoots, codeRoot: string, fixture: Res
  * the provider-free deterministic route only; nothing of it is transmitted or recorded.
  */
 export async function importManuscript(store: EditorialStore, codeRoot: string, _roots: CaseRoots, manuscript: CaseManuscript, title: string): Promise<ImportedBook> {
-  const path = join(codeRoot, 'SampleBooks', 'sample1.docx');
+  // A score-only case (#1074) imports its exact ADR 0091 file only to check its anchors and chapter range; it never replays.
+  const path = join(codeRoot, 'SampleBooks', manuscript.source === 'public-samplebook' ? manuscript.file : 'sample1.docx');
   const staged = await store.stageSelectedManuscript(randomUUID(), path);
   const choice = staged.targetChoices.find((entry) => entry.kind === 'new-book');
   if (choice === undefined) throw new Error('EDITORIAL_CASE/import-choice-absent');

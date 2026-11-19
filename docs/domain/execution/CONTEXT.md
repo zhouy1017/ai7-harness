@@ -268,29 +268,29 @@ A provider-independent function actually needed by a Task Intent, native DSH art
 _中文_: 模型角色
 _Avoid_: Model Provider, model name, Provider Binding
 
-**Fast Interaction Role**:
-The Model Role for quick interaction, low-risk candidate generation, and latency-sensitive assistance.
-_中文_: 快速交互角色
-_Avoid_: Cheap model, draft-only model, factual authority
+**Foreground Pro Role**:
+The Model Role for editor-facing deep reasoning and long-form editorial production: whole-book and ranged Review Runs and cross-unit synthesis, Factual Verification, Baseline and Custom Manuscript Analysis, Initial Evaluation, Reader's Reports and Evaluation Rewrite, and derivative document Writing Tasks ([ADR 0107](../../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md); `Pro` describes the high-reasoning capability tier, never a vendor's model branding; supersedes the historical `Main Editorial Role` / `主编辑角色`).
+_中文_: 前台 Pro 角色
+_Avoid_: Main Editorial Role (legacy alias), vendor-specific Pro model brand, editor, decision maker, factual authority
 
-**Main Editorial Role**:
-The Model Role for Chinese long-form writing, editorial proposals, cross-source synthesis, factual research, and complex instruction following.
-_中文_: 主编辑角色
-_Avoid_: Default model, editor, decision maker, factual authority
+**Foreground Flash Role**:
+The Model Role for editor-facing, low-latency interactive dialogue and localized text adjustments — manuscript Q&A and Editorial Dialogue (`editorial-dialogue`), Global AI Assistant dialogue (`global-agent-dialogue`, `global-agent-scoped-dialogue`), localized passage polish / scoped AI edit (`editorial-polish`, `scoped-edit`), and single-region conflict suggestion regeneration (`conflict-regenerate`) — inheriting the Foreground Pro Role binding by default when not separately configured ([ADR 0107](../../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md); `Flash` describes the low-latency capability tier, never a vendor's model branding).
+_中文_: 前台 Flash 角色
+_Avoid_: Underlying Flash Role, vendor-specific Flash model brand, factual authority
 
-**Difficult Escalation Role**:
-The Model Role for difficult or unusually consequential work that exceeds the Main Editorial Role's expected capability. Escalation is an AI7 policy and plan decision, never a model's own choice.
-_中文_: 疑难升级角色
-_Avoid_: Retry model, automatic fallback, authority upgrade
+**Underlying Pro Role**:
+The Model Role for behind-the-scenes high-capability induction, autonomous learning and knowledge distillation whose reasoning process is not part of foreground manuscript editing — specifically Autonomous Learning Rule Synthesis (`learning-curation` / `learning-synthesis`, inducing durable house/book `审阅偏好` proposals, resolving rule conflicts and producing the `审阅习惯总结` from pre-tidied editing examples and supervision directives) — inheriting the Foreground Pro Role by default while allowing a dedicated, even stronger reasoning model or higher reasoning effort to be configured ([ADR 0107](../../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md); replaces the unused `Difficult Escalation Role` / `Frontier Model Role` placeholders).
+_中文_: 底层 Pro 角色
+_Avoid_: Underlying Flash Role, Foreground Pro Role, automatic policy mutation, factual authority
 
-**Frontier Model Role**:
-The Model Role for challenge or explicitly authorized high-consequence work. An explicitly configured eligible alternative enters the same one-loop topology, Provider Resolution Plan, Credential Broker, Run Budget Ceiling state, and egress boundary.
-_中文_: 前沿模型角色
-_Avoid_: Second harness, silent fallback, escape hatch, truth oracle
+**Underlying Flash Role**:
+The Model Role for behind-the-scenes, non-user-facing structured tasks whose difficulty lies within a lightweight Flash model's capability and whose output is verified by deterministic code before taking effect — including unstructured standards-table and guideline-clause formatting (`standards-table-formatting`, `guideline-clause-formatting`), autonomous-learning sample pre-tidying and deduplication (`learning-sample-tidying`), retrieval query expansion and candidate reranking (`retrieval-query-expansion`, `retrieval-rerank`), non-Chinese material translation (`material-translation`), and channel connection probes (`model-connection-test`) ([ADR 0107](../../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md); `Flash` describes the lightweight capability tier, never a vendor's model branding; supersedes the historical `Fast Interaction Role` / `快速交互角色`).
+_中文_: 底层 Flash 角色
+_Avoid_: Fast Interaction Role (legacy alias), Foreground Flash Role, Underlying Pro Role, unverified free-form output, factual authority
 
-Concrete provider/model defaults are configuration decisions owned by [ADR 0080](../../adr/0080-assign-a-provider-route-and-model-to-every-task-that-transmits.md), [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) and [ADR 0094](../../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md)'s unified selector, not part of these role definitions.
+Concrete provider/model defaults are configuration decisions owned by [ADR 0080](../../adr/0080-assign-a-provider-route-and-model-to-every-task-that-transmits.md), [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md), [ADR 0094](../../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md) and [ADR 0107](../../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md), not part of these role definitions.
 
-These four named roles remain Model Roles: Task Intents, native DSH artifacts, and DSH Analysis Contracts may declare hard requirements and soft preferences, never a provider, model, endpoint, or credential. A default binding is a configuration fact, never factual authority; output remains a proposal or research lead.
+These four named roles (`Foreground Pro Role`, `Foreground Flash Role`, `Underlying Pro Role`, `Underlying Flash Role`) form the 2×2 Model Role matrix (`前台/底层 × Pro/Flash`; historical ledger and wire readers continue to recognize `Main Editorial Role`, `Fast Interaction Role`, `Difficult Escalation Role` and `Frontier Model Role` as legacy aliases). Task Intents, native DSH artifacts, and DSH Analysis Contracts may declare hard requirements and soft preferences, never a provider, model, endpoint, or credential. A default binding is a configuration fact, never factual authority; output remains a proposal or research lead.
 
 **Model-role Requirement**:
 A non-negotiable capability, context, policy, or compatibility condition for one used Model Role.
