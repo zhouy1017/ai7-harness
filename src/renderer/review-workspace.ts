@@ -993,8 +993,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (previous?.run !== null && previous?.run !== undefined && previous.run.reviewRunId === next.run?.reviewRunId &&
         previous.run.state !== next.run.state) options.planChanged();
     if (query.reviewRunId === null && next.run !== null) query.reviewRunId = next.run.reviewRunId;
-    if (pressInCard && card?.isConnected === true) heldPaint = true;
-    else paintRead(previous, next);
+    paintRead(previous, next);
     updateLive(previous, next);
     if (sheet.open) sheetUpdate();
     // A Run waiting to start once online is read again too (Issue #760, S74c), so 审阅 follows it into running.
@@ -1003,6 +1002,13 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       rereadPending = false;
       reportResult(options.setStatus, REVIEW_PART_REREAD);
     }
+    // What looks for the card on screen waits for a held draw, and runs against it once drawn.
+    if (heldPaint) shownWhileHeld = true;
+    else afterShow(next);
+  }
+
+  /** The part of a read that looks for the card on screen: 查看任务's finding, the return's place, a sheet asked to open. */
+  function afterShow(next: ReviewWorkspaceProjection): void {
     followFocus(next);
     if (anchor !== null && card !== undefined) {
       // The card the editor left, where it stood; failing that (gone from these pages), the page's own position.
@@ -1038,14 +1044,22 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   /**
-   * A control the editor is pressing is never replaced under the pointer (Issue #1592): while a press that began on the card is
-   * down, a read is kept and drawn on the frame after the release — after that press's click — as the 批注栏 holds its layout.
+   * A control the editor is pressing is never replaced under the pointer or the key (Issue #1592): while a primary-button press, or
+   * a Space key, that began on the card is down, every whole-card draw waits and the newest is drawn once, on the frame after the
+   * release — after that press's click — as the 批注栏 holds its layout. A release anywhere, a cancelled press and the window
+   * losing focus all end the hold.
    */
   let pressInCard = false;
   let heldPaint = false;
+  let shownWhileHeld = false;
   const pressCard = (event: PointerEvent): void => {
     if (event.button === 0 && card !== undefined && card.contains(event.target as Node | null)) pressInCard = true;
   };
+  const keyCard = (event: KeyboardEvent): void => {
+    const target = event.target as HTMLElement | null;
+    if (event.key === ' ' && !event.repeat && card !== undefined && card.contains(target) && target?.matches('button, summary, [role="button"]') === true) pressInCard = true;
+  };
+  const keyRelease = (event: KeyboardEvent): void => { if (event.key === ' ') releaseCard(); };
   const releaseCard = (): void => {
     if (!pressInCard) return;
     pressInCard = false;
@@ -1053,12 +1067,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     window.requestAnimationFrame(() => {
       if (destroyed || pressInCard || !heldPaint || projection === null) return;
       heldPaint = false;
-      paintRead(projection, projection);
+      renderCard(projection);
+      if (shownWhileHeld) { shownWhileHeld = false; afterShow(projection); }
     });
   };
   host.addEventListener('pointerdown', pressCard, true);
+  host.addEventListener('keydown', keyCard, true);
   document.addEventListener('pointerup', releaseCard, true);
   document.addEventListener('pointercancel', releaseCard, true);
+  document.addEventListener('keyup', keyRelease, true);
+  window.addEventListener('blur', releaseCard);
 
   function renderUnavailable(error: unknown): void {
     const unavailable = el('section', 'review-workspace-card attention-note');
@@ -1128,6 +1146,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   function renderCard(next: ReviewWorkspaceProjection): void {
+    if (pressInCard && card?.isConnected === true) { heldPaint = true; return; }
     paintCard(next);
     if (pendingFocus !== null && !working) applyPendingFocus();
   }
@@ -3718,8 +3737,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       unregisterCommands?.();
       document.removeEventListener('keydown', escapeFromPage);
       host.removeEventListener('pointerdown', pressCard, true);
+      host.removeEventListener('keydown', keyCard, true);
       document.removeEventListener('pointerup', releaseCard, true);
       document.removeEventListener('pointercancel', releaseCard, true);
+      document.removeEventListener('keyup', keyRelease, true);
+      window.removeEventListener('blur', releaseCard);
       generation += 1;
       clearFactual(true);
       clearPoll();
