@@ -119,7 +119,7 @@ const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步会被�
 const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存';
 const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
 const RESUMABLE_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
-const SHUTDOWN_STATEMENT = 'AI7 关闭时正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
+const SHUTDOWN_STATEMENT = 'AI7 关闭时正在运行；已读完的部分都已保存。继续时从下一部分接着读，在此之前不会发送任何内容。';
 const THIRD_PAUSED_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
 /** 改计划重做's summary on the third Book, paused with two ranges kept (Issue #422, S76c). */
 const REDO_SUMMARY = Object.freeze([
@@ -483,15 +483,15 @@ function runningWith(settled) {
 /** The bar of a Run under way (AUTH-010): 暂停 and 取消任务 act on it, 改计划重做 says it waits for 暂停. */
 const RUNNING_ACTIONS = Object.freeze([
   ['pause', '暂停', 'enabled', null],
-  ['cancel-run', '停止任务', 'enabled', null],
-  ['redo', '改计划重做', 'disabled', REDO_REASON],
+  ['cancel-run', '取消任务', 'enabled', null],
+  ['redo', '重新开始', 'disabled', REDO_REASON],
   ['run-link', '查看运行', 'enabled', null],
 ]);
 /** The bar of a stopped Run that can go on (CONT-015): 续行 first, then 取消任务, 改计划重做 and the way to the Run. */
 const STOPPED_ACTIONS = Object.freeze([
-  ['resume', '续行', 'enabled', null],
-  ['cancel-run', '停止任务', 'enabled', null],
-  ['redo', '改计划重做', 'enabled', null],
+  ['resume', '继续', 'enabled', null],
+  ['cancel-run', '取消任务', 'enabled', null],
+  ['redo', '重新开始', 'enabled', null],
   ['run-link', '查看运行', 'enabled', null],
 ]);
 
@@ -821,7 +821,7 @@ async function main() {
     const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference) && readyConnection?.credentialOperationState === 'ready', 'model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除凭据', 'model-remove');
+    await click(renderer, '移除密钥', 'model-remove');
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     credentialRemoved = true;
@@ -1019,7 +1019,7 @@ async function main() {
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanState==='cancelled-after-start' && drawer.querySelector('.task-drawer-pill')?.textContent==='已取消' && drawer.querySelector('.task-bar-status')?.textContent==='已取消' && drawer.querySelector('.task-plan-activity')===null; })()`, 'cancelled-shown', 60_000);
     const cancelledDrawer = await renderer.evaluate(READ_DRAWER);
     // 改计划重做 is offered beside the way to the Run, now that it has stopped (Issue #422, S76c).
-    requireJourney(JSON.stringify(cancelledDrawer?.actions) === JSON.stringify([['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]]) && cancelledDrawer.note === null, 'cancelled-bar', cancelledDrawer);
+    requireJourney(JSON.stringify(cancelledDrawer?.actions) === JSON.stringify([['redo', '重新开始', 'enabled', null], ['run-link', '查看运行', 'enabled', null]]) && cancelledDrawer.note === null, 'cancelled-bar', cancelledDrawer);
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='cancelled' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='已取消'`, 'cancelled-card-label', 30_000);
 
     at('partial-revision-kept');
@@ -1204,7 +1204,7 @@ async function main() {
     const redoSummary = await renderer.evaluate(READ_DRAWER);
     const thirdPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(thirdIntentId)} })`);
     requireJourney(redoSummary?.redo?.heading === '改计划重做摘要' && JSON.stringify(redoSummary.redo.lines) === JSON.stringify(REDO_SUMMARY) &&
-      JSON.stringify(thirdPlan?.redo?.summary) === JSON.stringify(REDO_SUMMARY) && redoSummary.redo.confirm === '确认改计划重做' && redoSummary.redo.keep === '先不重做' &&
+      JSON.stringify(thirdPlan?.redo?.summary) === JSON.stringify(REDO_SUMMARY) && redoSummary.redo.confirm === '确认重新开始' && redoSummary.redo.keep === '先不重做' &&
       redoSummary.impact === null,
     'redo-summary', redoSummary?.redo ?? null);
     const unrecordedRedo = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1313,7 +1313,7 @@ async function main() {
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='awaiting-clarification')`, 'run-waits', 60_000);
     await waitForBar(renderer, {
       state: 'awaiting-clarification', pill: SCOPE_WAITING, status: '等你回答', note: '已读完 7 / 8 个阅读范围；1 个问题等你回答，回答后接着做',
-      actions: [['cancel-run', '停止任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
+      actions: [['cancel-run', '取消任务', 'enabled', null], ['redo', '重新开始', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
     }, 'waiting-bar', 30_000);
     const waitingRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(waitingRun?.state === 'awaiting-clarification' && waitingRun.stateLabel === SCOPE_WAITING &&
@@ -1606,7 +1606,7 @@ async function main() {
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(sixthIntentId)} && analysis.run?.state==='resumable')`, 'account-limit-stopped', 180_000);
     await waitForBar(renderer, {
       state: 'account-limit', pill: '模型服务账户限额', status: '模型服务账户限额', note: ACCOUNT_LIMIT_NOTE,
-      actions: [['connect', '处理模型服务', 'enabled', null], ['resume', '续行', 'enabled', null], ['cancel-run', '停止任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
+      actions: [['connect', '处理模型服务', 'enabled', null], ['resume', '继续', 'enabled', null], ['cancel-run', '取消任务', 'enabled', null], ['redo', '重新开始', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
     }, 'account-limit-bar', 30_000);
     const limited = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(limited?.state === 'resumable' && limited.stateLabel === '模型服务账户限额' && limited.run?.stateLabel === '模型服务账户限额' &&
@@ -1870,7 +1870,7 @@ async function main() {
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='review-run'||drawer.dataset.taskPlanRef!==${JSON.stringify(reviewRef)})return false; const button=drawer.querySelector('[data-task-drawer-control="cancel-run"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'review-controls-cancel-ready');
 
     at('review-controls-cancel-impact');
-    await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.textContent==='停止任务'`, 'review-controls-stop-wording');
+    await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.textContent==='取消任务'`, 'review-controls-stop-wording');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="cancel-run"]', 'review-controls-impact');
     await waitFor(renderer, `document.querySelector('#task-drawer-cancel-impact') && document.querySelector('#task-drawer [data-task-drawer-control="confirm-cancel-run"]')?.textContent==='确认取消任务'`, 'review-controls-confirm-wording');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="confirm-cancel-run"]', 'review-controls-cancel');

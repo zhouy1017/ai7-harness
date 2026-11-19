@@ -557,7 +557,7 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
     const share = (count: { accepted: number; findings: number; rate: number | null }) => count.rate === null ? '暂无发现' : `${count.accepted}/${count.findings} · ${Math.round(count.rate * 100)}%`;
     if (!adoptionRows.length) adoption.append(el('p', 'field-note', '尚无可比较的审阅发现。'));
     for (const row of adoptionRows) {
-      adoption.append(el('p', 'field-note', `${row.bookTitle} · ${row.versionId === null ? '全部规则' : `本社审阅偏好${technicalWords(` v${row.ordinal} · ${row.versionId}`)}`}：已参考 ${share(row.referenced)}；未参考 ${share(row.unreferenced)}${row.mostlyRejected ? '；参考后的发现多数被拒绝，请复核这条规则。' : '。'}`));
+      adoption.append(el('p', 'field-note', `${row.bookTitle} · ${row.versionId === null ? '全部规则' : `审阅偏好${technicalWords(` v${row.ordinal} · ${row.versionId}`)}`}：已参考 ${share(row.referenced)}；未参考 ${share(row.unreferenced)}${row.mostlyRejected ? '；参考后的发现多数被拒绝，请复核这条规则。' : '。'}`));
     }
     adoption.append(el('p', 'field-note', '采纳数包含接受、修改后接受及已写入稿件的修改，分母包含尚未处理的发现；此比较不证明规则导致采纳。'));
   };

@@ -1,4 +1,4 @@
-import { identityWords } from './technical-layer.js';
+import { identityWords, technicalWords } from './technical-layer.js';
 import { reportResult } from './notifications.js';
 import {
   draftText,
@@ -932,7 +932,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     return options.technicalDetails(
       undefined,
       ...fact('修改建议标识', next.markId),
-      ...fact('提案修改项', next.suggestion.itemId),
+      ...fact(technicalWords('提案修改项'), next.suggestion.itemId),
       ...fact('比较依据摘要', next.basisDigest),
       ...fact('段落', `${next.blockId} · 字素 ${next.fromGrapheme}–${next.toGrapheme}`),
       ...(next.draft === null ? [] : fact('已保存的解决草稿', `第 ${next.draft.ordinal} 份 · ${next.draft.draftId}`)),

@@ -100,7 +100,7 @@ describe('the status card of a started Task in ordinary mode', () => {
 
   it('keeps the Run Budget Ceiling on the card of a task that has one, in the plan\'s own words (ADR 0096 §4.2)', async () => {
     const bounded = { service: { ...taskPlanFixture().service, usage: '达到 20,000 tokens 后不再发送新的请求（8 个阅读范围）', usageIsCeiling: true } };
-    expect(text((await openDrawer(runningPlan(bounded))).root, '.task-status-ceiling')).toBe('达到 20,000 tokens 后不再发送');
+    expect(text((await openDrawer(runningPlan(bounded))).root, '.task-status-ceiling')).toBe('用量达到 20,000 后不再发送');
     expect(text((await openDrawer(runningPlan())).root, '.task-status-ceiling')).toBeUndefined();
   });
 
@@ -143,7 +143,7 @@ describe('the status card of a started Task in ordinary mode', () => {
   const WAITS: ReadonlyArray<readonly [string, Partial<TaskPlanProjection>, string]> = [
     ['waiting for the network', { state: { key: 'waiting', label: '等待网络' } }, 'cancel-wait'],
     ['waiting for idle', { state: { key: 'queued', label: '等待空闲' } }, 'cancel-wait'],
-    ['queued', { state: { key: 'queued', label: '等待运行名额' } }, 'cancel-wait'],
+    ['queued', { state: { key: 'queued', label: '排队中' } }, 'cancel-wait'],
     ['paused', { state: { key: 'paused', label: '已暂停' }, runControl: paused() }, 'resume'],
     ['stopped on the budget', { state: { key: 'budget-reached', label: '已停止 · 预算已达上限' },
       budgetStop: { maxTotalTokens: 1000, usedTokens: 1000, unitsSettled: 3, unitsTotal: 8, launchSetsCeiling: false },

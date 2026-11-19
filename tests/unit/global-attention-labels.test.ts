@@ -248,7 +248,7 @@ describe('each item', () => {
       'analysis-running': '运行中',
       'analysis-waiting-network': '等待网络',
       'analysis-waiting-connection': '需要处理模型连接',
-      // Issue #632: a Connectivity-Wait Run holds no place in the capacity queue, so it never reads 等待运行名额.
+      // Issue #632: a Connectivity-Wait Run holds no place in the capacity queue, so it never reads 排队中.
       'analysis-waiting-slot': '已联网 · 名额已满',
       'analysis-waiting-admission': '正在排队',
       'analysis-waiting-capacity': '排队中',
@@ -321,8 +321,8 @@ describe('each item', () => {
       'open-network-proxy': '去设置 › 模型服务 › 网络代理',
       // 结果待确认's first step (Issue #51, S16c): which ranges are unconfirmed, never a repeat-shaped action.
       'view-unconfirmed': '查看未确认的部分',
-      reprepare: '重新准备',
-      redo: '改计划重做',
+      reprepare: '重新开始',
+      redo: '重新开始',
       // A prepared plan nobody started (Issue #423, S77a): the drawer's own entry to it.
       'view-plan': '查看计划并开始',
       'maintenance-link-proposal': '关联修改建议',

@@ -1,4 +1,4 @@
-import { identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { identityWords, technicalDisclosure, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { reportResult } from './notifications.js';
 import { SOURCE_TRANSLATION_LABEL, type RendererApi, type ResearchEvidenceBookProjection, type ResearchEvidenceProjection, type ReviewEvidenceSource } from '../shared/protocol.js';
 import { FINDING_EVIDENCE_HEADING } from '../shared/report-wording.js';
@@ -98,7 +98,7 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
     facts.append(el('summary', undefined, '查看技术详情'));
     const list = el('dl');
     const row = (term: string, value: string): void => { list.append(el('dt', undefined, term), el('dd', 'technical-identity', value)); };
-    row('运行', `${record.runRecordId} · 阅读范围 ${record.unitOrdinal}`);
+    row('运行', technicalWords(`${record.runRecordId} · 阅读范围 ${record.unitOrdinal}`));
     row('检索后端', record.backendId ?? '—');
     row('查询类别', record.queryClass);
     row('内容摘要', record.contentSha256 ?? '—');

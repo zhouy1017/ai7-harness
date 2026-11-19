@@ -25,7 +25,7 @@ export function conflictPaneLabels(kind: ProposalConflictKind): { base: string; 
   return {
     base: technicalWords('提案基准', '原文'),
     current: technicalWords('当前权威稿件', '当前稿件'),
-    proposed: kind === 'reversal' ? '提议内容 · 撤销后会恢复的原文' : '提议内容',
+    proposed: kind === 'reversal' ? technicalWords('提议内容 · 撤销后会恢复的原文', '修改建议 · 撤销后会恢复的原文') : technicalWords('提议内容', '修改建议'),
   };
 }
 
@@ -61,7 +61,7 @@ export const CONFLICT_PATH_LABELS: Readonly<Record<ConflictPath, string>> = {
  * said, the path says it is finding out.
  */
 export const CONFLICT_REGENERATE_READING = '正在确认能否重新生成建议…';
-export const CONFLICT_REGENERATE_NOTE = '把一处冲突的三段文字和原提议的理由交给模型，重新写这一处的建议放进解决草稿；稿件和这条修改建议都不会改动，是否保存为新提案版本由你决定。';
+export const CONFLICT_REGENERATE_NOTE = '把一处冲突的三段文字和原修改建议的理由交给模型，重新写这一处的建议放进解决草稿；稿件和这条修改建议都不会改动，是否保存为新的修改建议由你决定。';
 export function conflictRegenerateUnitLabel(ordinal: number): string {
   return `重新生成第 ${ordinal} 处`;
 }
@@ -81,7 +81,7 @@ export function conflictPathNote(path: ConflictPath, kind: ProposalConflictKind)
         ? '稿件不变；这次应用保持有效，只记下这处冲突已按「保留当前稿件」处理。'
         : '稿件不变；这条修改建议记为拒绝，原因「保留当前稿件」。';
     case 'edit-draft':
-      return '在下面的解决草稿里逐处选定，再保存为新提案版本；稿件不会改动。';
+      return '在下面的解决草稿里逐处选定，再保存为新的修改建议；稿件不会改动。';
     case 'regenerate':
       return CONFLICT_REGENERATE_NOTE;
     case 'defer':
@@ -92,13 +92,13 @@ export function conflictPathNote(path: ConflictPath, kind: ProposalConflictKind)
 export const CONFLICT_CONFIRM_LABELS = { keepCurrent: '确认保留当前稿件', defer: '暂不处理，返回稿件' } as const;
 
 export const CONFLICT_DRAFT_HEADING = '解决草稿';
-export const CONFLICT_DRAFT_NOTE = '解决草稿只是草稿：保存为新提案版本之前，稿件和这条修改建议都不会改动。';
+export const CONFLICT_DRAFT_NOTE = '解决草稿只是草稿：保存为新的修改建议之前，稿件和这条修改建议都不会改动。';
 export const CONFLICT_DRAFT_TEXT_LABEL = '解决草稿全文';
 
 /** The Diff-Merge Quick Actions of V2-UX-CONFLICT-006, in words beside every unit. */
 export const CONFLICT_QUICK_ACTIONS = {
   takeCurrent: '采用当前内容',
-  takeProposed: '采用提议内容',
+  takeProposed: '采用修改建议',
   keepBoth: '两者都保留',
   currentFirst: '当前后接提议',
   proposedFirst: '提议后接当前',
@@ -109,18 +109,18 @@ export const CONFLICT_QUICK_ACTIONS = {
   previousUnresolved: '上一处未解决',
   nextUnresolved: '下一处未解决',
   includeNonConflicting: '将全部无冲突更改加入解决草稿',
-  saveVersion: '保存为新提案版本',
+  saveVersion: '保存为新的修改建议',
 } as const;
 
 export const CONFLICT_KEEP_BOTH_PROMPT = '两者都保留：请选择先后顺序';
-export const CONFLICT_EDIT_REFERENCE = { current: '当前内容', proposed: '提议内容' } as const;
+export const CONFLICT_EDIT_REFERENCE = { current: '当前内容', proposed: '修改建议' } as const;
 export const CONFLICT_EDIT_FIELD = '合并结果';
 
 /** Where one changed unit stands in the draft. */
 export const CONFLICT_RESOLUTION_LABELS: Readonly<Record<ConflictResolution, string>> = {
   unresolved: '未解决',
   current: '已采用当前内容',
-  proposed: '已采用提议内容',
+  proposed: '已采用修改建议',
   'both-current-first': '两者都保留 · 当前后接提议',
   'both-proposed-first': '两者都保留 · 提议后接当前',
   edited: '已编辑合并结果',
@@ -151,7 +151,7 @@ export function conflictSaveReason(blocker: ConflictSaveBlocker | null, unresolv
     case null:
       return null;
     case 'unresolved':
-      return `还有 ${unresolved} 处未解决；每一处都选定后才能保存为新提案版本。`;
+      return `还有 ${unresolved} 处未解决；每一处都选定后才能保存为新的修改建议。`;
     case 'unchanged':
       return '解决结果与当前稿件相同，请选「保留当前稿件」。';
     case 'target-deleted':
@@ -175,7 +175,7 @@ export function conflictDeferredLine(deferredAt: string): string {
 }
 
 export const CONFLICT_COMPLETION = {
-  newVersion: '已保存为新提案版本 · 尚未应用',
+  newVersion: '已保存为新的修改建议 · 尚未应用',
   keepCurrent: '已保留当前稿件；稿件没有改动。',
   defer: '已记下暂不处理；这处冲突仍未解决。',
 } as const;

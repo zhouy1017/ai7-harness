@@ -155,7 +155,7 @@ export async function documentContextOf(api: RendererApi, window_: ManuscriptWin
   }
   // A 审稿意见 draft (Issue #429, S81c) is no card of 交付物: 评估 names it, and it is drawn exactly as a document is.
   const draft = await readersReportDraftOf(api, window_.manuscriptId);
-  if (draft === null) throw new Error('这份生产文档已不在这本书的交付物中。');
+  if (draft === null) throw new Error('这份衍生稿件已不在这本书的交付物中。');
   return draft;
 }
 
@@ -2711,7 +2711,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       try { if (!(await settleLocalEdit())) return; await rememberEntryPosition();
       if (destroyed) return;
       renderProposalWorkspace({ manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId, resultId: null }, initialWindow.bookId, bookTitle); }
-      catch (error) { setStatus(rendererErrorMessage(error, '无法打开提案审阅工作区。'), 'error'); }
+      catch (error) { setStatus(rendererErrorMessage(error, '无法打开修改建议工作区。'), 'error'); }
     })(),
     // 书系知识 (Issue #63, S28b): a member Book's manuscript offers its selected words to each Series it is in; a Production
     // Document offers nothing of 书系.

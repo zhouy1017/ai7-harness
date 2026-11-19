@@ -6,7 +6,7 @@
 export const STARTUP_LOCATION_LABELS = Object.freeze({
   title: '选择数据位置',
   message: '图书、稿件与历史保存在本机',
-  defaultLocation: (root: string) => `默认位置：${root}\n模型服务凭据由操作系统单独保护。`,
+  defaultLocation: (root: string) => `默认位置：${root}\n模型服务密钥由操作系统单独保护。`,
   useDefault: '使用默认位置',
   chooseFolder: '选择文件夹…',
   cancel: '取消',

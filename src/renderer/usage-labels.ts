@@ -17,7 +17,7 @@ import { UNBOUND_ROUTE_LABEL, type UsageCostEstimate } from '../shared/usage.js'
  */
 
 export const USAGE_TITLE = '用量';
-export const USAGE_LEDE = '汇总各次运行报告记录的输入和输出词元，不另行记账。';
+export const USAGE_LEDE = '汇总各次运行报告记录的输入和输出用量，不另行记账。';
 export const USAGE_EMPTY = USAGE_EMPTY_LABEL;
 export const USAGE_RANGE_HEADING = '时间范围';
 export const USAGE_GROUPING_HEADING = '汇总方式';
@@ -25,13 +25,13 @@ export const USAGE_RETURN = '返回';
 export const USAGE_EXPORT = '导出为 CSV…';
 export const USAGE_EXPORT_NOTE = 'CSV 只含数字和标识，不含书名或任何文字。';
 export const USAGE_PRICES_HEADING = '单价';
-export const USAGE_PRICES_LEDE = '单价由你录入，AI7 不查询服务商；费用按词元数与单价估算，并非账单。';
+export const USAGE_PRICES_LEDE = '单价由你录入，AI7 不查询服务商；费用按用量与单价估算，并非账单。';
 export const USAGE_UNPRICED = '未填写单价，无法估算';
 export const USAGE_UNRECORDED_NOTE = (count: number): string => `另有 ${count.toLocaleString('zh-CN')} 次运行在运行报告出现之前结束，没有用量记录，未计入。`;
 export const USAGE_MORE_RUNS = '显示更多运行';
 export const USAGE_RUNS_SHOWN = (shown: number, total: number): string => `已列出 ${shown.toLocaleString('zh-CN')} 次运行，共 ${total.toLocaleString('zh-CN')} 次。`;
-export const USAGE_COLUMNS = ['运行次数', '输入词元', '输出词元', '估算费用'] as const;
-export const USAGE_PRICE_FIELDS = { input: '输入单价（每百万词元）', output: '输出单价（每百万词元）', currency: '币种', save: '保存单价', clear: '清除', empty: '未填写单价' } as const;
+export const USAGE_COLUMNS = ['运行次数', '输入用量', '输出用量', '估算费用'] as const;
+export const USAGE_PRICE_FIELDS = { input: '输入单价（每百万）', output: '输出单价（每百万）', currency: '币种', save: '保存单价', clear: '清除', empty: '未填写单价' } as const;
 export const USAGE_RUN_TITLE = '运行详情';
 export const USAGE_RUN_REPORT_ABSENT = '这次运行的报告不可用。';
 export const usageRunIdentity = (id: string): string => `运行标识：${id}`;
@@ -62,7 +62,7 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   'global-agent-dialogue': '全域对话',
   'baseline-manuscript-analysis': '稿件分析',
   'factual-review': '事实核查',
-  evaluation: 'AI7 初评',
+  evaluation: '评估报告',
   'readers-report': '审稿意见',
   'evaluation-rewrite': '按我的评分重写评语',
   writing: '写作任务',

@@ -144,7 +144,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     );
     content.append(
       element('h2', undefined, '模型服务'),
-      element('p', 'lede', technicalLayerVisible ? '选择渠道，保存凭据并获取模型，再分别指定主编辑与快速交互模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
+      element('p', 'lede', technicalLayerVisible ? '选择渠道，保存密钥并获取模型，再分别指定主编辑与快速交互模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
     );
     content.append(modelServiceFlow(projection, { api: rendererApi, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
       effortDraft: (channel, role) => effortDrafts.get(`${channel}/${role}`),
@@ -207,7 +207,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     const protectedStore = element(
       'p',
       'field-note',
-      `安全凭据库：${projection.protectedSecretStore.label} · ${projection.protectedSecretStore.availability === 'available' ? '可用' : '不可用'}；未启用文件或命令行替代存储。`,
+      `${technicalWords('安全凭据库')}：${projection.protectedSecretStore.label} · ${projection.protectedSecretStore.availability === 'available' ? '可用' : '不可用'}；未启用文件或命令行替代存储。`,
     );
     const technical = element('details', 'model-service-technical');
     technical.append(element('summary', undefined, '查看技术详情'), unsupported, policy, protectedStore);
@@ -226,7 +226,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     // yet. The policy-boundary sentence and the authority statement are the developer layer's.
     const label = projection.launchPolicy.providerProcessing.label;
     const ordinaryPolicy = projection.launchPolicy.integrityState !== 'verified' || label.endsWith('零次实时传输') || label.endsWith('当前不会传输');
-    content.append(...(technicalLayerVisible ? [] : [...(ordinaryPolicy ? [policyIntegrity] : []), ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]), technicalDisclosure(technical));
+    content.append(...(technicalLayerVisible ? [] : [...(ordinaryPolicy ? [policyIntegrity] : []), ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统的安全存储不可用，无法保存新密钥。')] : [])]), technicalDisclosure(technical));
     replaceScreen('model-service', content);
     mounted = content;
     restoreInteraction(content);

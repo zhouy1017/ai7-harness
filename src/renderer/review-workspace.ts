@@ -1661,7 +1661,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** 为什么会影响这个结果 (Issue #912; LAUD-004): each category's 本社审阅偏好 version and the materials behind it, closed until asked. */
   function renderInfluence(run: ReviewRunProjection): HTMLElement {
     const details = el('details', 'review-influence');
-    details.append(el('summary', undefined, `${REVIEW_INFLUENCE_HEADING} · 本社审阅偏好仅供参考`));
+    details.append(el('summary', undefined, `${REVIEW_INFLUENCE_HEADING} · 审阅偏好仅供参考`));
     for (const entry of run.influence) {
       const group = el('div', 'review-influence-category');
       group.dataset['categoryId'] = entry.categoryId;
@@ -3333,9 +3333,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
 
     const assurance = el('fieldset', 'review-evidence-assurance');
-    assurance.append(el('legend', undefined, '证据保证级别'));
+    assurance.append(el('legend', undefined, '核查力度'));
     const assuranceSelect = el('select'); assuranceSelect.dataset['reviewField'] = 'evidenceAssuranceLevel';
-    assuranceSelect.setAttribute('aria-label', '证据保证级别');
+    assuranceSelect.setAttribute('aria-label', '核查力度');
     for (const level of EVIDENCE_ASSURANCE_LEVELS) {
       const option = el('option', undefined, EVIDENCE_ASSURANCE_LEVEL_LABELS[level]); option.value = level; assuranceSelect.append(option);
     }

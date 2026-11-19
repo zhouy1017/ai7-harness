@@ -1287,7 +1287,7 @@ async function main() {
         designate instanceof HTMLButtonElement && designate.disabled && designate.getAttribute('aria-label') === '设为发稿版本…' && reason?.textContent === '先保存里程碑版本' &&
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
         block.querySelector('.publication-change-notice') === null &&
-        window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 生产文档' &&
+        window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 衍生稿件' &&
         // New documents are made on 稿件 (Issue #1403): a technical card offers no way of making one, only 本书不做.
         Array.from(window.__j07.documents().querySelectorAll('li.production-document-card')).every((card) =>
           card.dataset.documentState === 'none' && card.querySelector('[data-document-action="create"], [data-document-action="blank"], [data-document-action="import"]') === null &&
@@ -1783,7 +1783,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const block = window.__j07.documents();
       const cards = Array.from(block.querySelectorAll('li.production-document-card'));
-      return block.querySelector(':scope > h3')?.firstChild?.textContent === '交付 · 生产文档' && block.dataset.documentSources === '1' &&
+      return block.querySelector(':scope > h3')?.firstChild?.textContent === '交付 · 衍生稿件' && block.dataset.documentSources === '1' &&
         JSON.stringify(cards.map((card) => card.dataset.documentTypeId + ':' + card.querySelector('h4')?.textContent + ':' + card.dataset.documentState)) === ${JSON.stringify(JSON.stringify(DOCUMENT_TYPES.map(([typeId, label]) => `${typeId}:${label}:none`)))} &&
         // New documents are made on 稿件 (Issue #1403): the technical card keeps 本书不做 and no way of making one.
         cards.every((card) => card.querySelector('.document-state-none')?.textContent === '尚未创建' &&
@@ -2861,7 +2861,7 @@ async function main() {
     const readyConnection = await renderer.evaluate(READ_CONNECTION);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference ?? '') && readyConnection?.credentialOperationState === 'ready', 'writing-model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除凭据', 'writing-model-remove');
+    await click(renderer, '移除密钥', 'writing-model-remove');
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus === 'setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'writing-model-removed');
     credentialRemoved = true;
@@ -3087,8 +3087,8 @@ async function main() {
     await openDerivativePanel(renderer, { title: '评论文章', typeId: WRITING_LIBRARY_REQUEST.typeId, mode: 'writing' }, 'writing-library-new');
     const librarySheet = await readWriting((page) => page.open, 'writing-library-sheet');
     const libraryBox = await renderer.evaluate(`(() => { const box = document.querySelector(${JSON.stringify(`[data-screen="editor"] .writing-task input[type="checkbox"][data-writing-material="${libraryMaterialId}"]`)}); return box instanceof HTMLInputElement ? [box.checked, box.disabled, box.labels?.[0]?.textContent ?? null, document.querySelectorAll('[data-screen="editor"] .writing-task input[data-writing-material]').length] : null; })()`);
-    requireJourney(librarySheet.references[3] === `${WRITING_MATERIALS_STATEMENT}《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 社级资料` &&
-      JSON.stringify(libraryBox) === JSON.stringify([false, false, `《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 社级资料`, 1]), 'writing-library-offered', [librarySheet.references, libraryBox]);
+    requireJourney(librarySheet.references[3] === `${WRITING_MATERIALS_STATEMENT}《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 本社资料` &&
+      JSON.stringify(libraryBox) === JSON.stringify([false, false, `《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 本社资料`, 1]), 'writing-library-offered', [librarySheet.references, libraryBox]);
     await assertRenderer(renderer, `(() => { const radio = document.querySelector('[data-screen="editor"] .writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_LIBRARY_REQUEST.typeId)}]'); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, 'writing-library-type');
     await assertRenderer(renderer, `(() => { const box = document.querySelector(${JSON.stringify(`[data-screen="editor"] .writing-task input[data-writing-material="${libraryMaterialId}"]`)}); if (!(box instanceof HTMLInputElement) || box.disabled || box.checked) return false; box.click(); return box.checked; })()`, 'writing-library-tick');
     await fill(renderer, '[data-screen="editor"] .writing-task [data-writing-field="audience"]', WRITING_LIBRARY_REQUEST.audience, 'writing-library-audience');

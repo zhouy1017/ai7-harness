@@ -81,7 +81,7 @@ export function renderExportFidelity(
   section.dataset['exportDegraded'] = reviewed.degraded ? 'true' : 'false';
   section.dataset['exportRestoration'] = reviewed.restoration;
   if (parts.heading) section.append(el('h5', undefined, EXPORT_FIDELITY_HEADING));
-  section.append(el('p', 'export-restoration-line', reviewed.restorationLine.replace('直接并入正文（作为定稿基线）', '直接并入正文 · 定稿基线').replaceAll('修订建议', '修改建议')));
+  section.append(el('p', 'export-restoration-line', reviewed.restorationLine.replace('直接并入正文（作为定稿基线）', '直接并入正文 · 定稿基线').replace(/修订建议/gu, '修改建议')));
   if (reviewed.retentionSummary !== null) section.append(el('p', 'export-retention-summary', reviewed.retentionSummary));
   const list = el('ol', 'export-fidelity-list');
   for (const row of exportShownRows(reviewed.fidelity)) list.append(renderExportFidelityRow(row));

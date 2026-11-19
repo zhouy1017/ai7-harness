@@ -14,7 +14,7 @@ import {
 
 export const EXCLUSIONS_HEADING = '书系检索排除';
 /** SER-023, SER-029: an immediate restriction of this Series' retrieval, and nothing more. */
-export const EXCLUSIONS_NOTE = '本书系检索排除记录后立即生效，后续任务不再读取被排除对象，已授权运行会在下次读取前停下；不删除、不隐藏图书或稿件，不改变成员或学习准入。';
+export const EXCLUSIONS_NOTE = '本书系检索排除记录后立即生效，后续任务不再读取被排除对象，已授权运行会在下次读取前停下；不删除、不隐藏图书或稿件，不改变成员或是否可用于学习。';
 export const EXCLUSIONS_EMPTY = '这个书系没有在生效的检索排除。';
 export const EXCLUSIONS_ADD_OPEN = '添加检索排除…';
 export const EXCLUSIONS_CHANGE_OPEN = '修改检索排除…';

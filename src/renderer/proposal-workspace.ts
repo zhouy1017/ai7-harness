@@ -32,7 +32,7 @@ export async function readProposalWorkspace(api: Pick<RendererApi, 'inspectPropo
   const items = [...first.items]; let decision = first.decision; let offset = first.nextOffset;
   while (offset !== null) {
     const page = await api.inspectProposalWorkspace({ ...input, offset });
-    if (page.scopeDigest !== first.scopeDigest || (page.nextOffset !== null && page.nextOffset <= offset)) throw new Error('提案范围已变，请重新检查。');
+    if (page.scopeDigest !== first.scopeDigest || (page.nextOffset !== null && page.nextOffset <= offset)) throw new Error('修改建议的范围已变，请重新检查。');
     items.push(...page.items);
     if (decision !== null && page.decision !== null) decision = { ...decision,
       baseRevisionIds: [...new Set([...decision.baseRevisionIds, ...page.decision.baseRevisionIds])],
@@ -64,7 +64,7 @@ export function mountProposalWorkspace(options: {
   const comparison = el('main', undefined, 'proposal-comparison'); const controls = el('section', undefined, 'proposal-controls');
   const message = el('p'); message.setAttribute('role', 'status');
   const returnButton = button('返回稿件', 'return', () => void act(async () => { await persist(); await options.returnToManuscript(position.blockId, position.activeMarkId); }));
-  header.append(el('h2', '提案审阅工作区'), el('p', options.bookTitle), returnButton);
+  header.append(el('h2', '修改建议工作区'), el('p', options.bookTitle), returnButton);
   nav.append(navigator, railTrack); layout.append(nav, comparison); root.append(header, toolbar, layout, controls, message);
   const rail = mountPositionRail({ track: railTrack, api, binding: () => binding,
     jumpToBlock: (blockId) => { const index = filtered().findIndex((item) => item.blockId === blockId); if (index >= 0) list.activate(index); }, onError: () => {} });
@@ -112,7 +112,7 @@ export function mountProposalWorkspace(options: {
     return { ...first, included, excluded, nextOffset: null, workspace: await readProposalWorkspace(api, input) };
   }
   function renderToolbar(): void {
-    message.textContent = workspace?.truncated ? '提案超过本次可审阅的精确范围；本次不能记录或批量执行，请按结果分开审阅。' : `共 ${workspace?.totalItems ?? 0} 项修改；浏览与筛选不会记录决定。`;
+    message.textContent = workspace?.truncated ? '修改建议超过本次可审阅的精确范围；本次不能记录或批量执行，请按结果分开审阅。' : `共 ${workspace?.totalItems ?? 0} 项修改；浏览与筛选不会记录决定。`;
     const chapters = [...new Map((workspace?.items ?? []).filter((item) => item.chapterBlockId !== null).map((item) => [item.chapterBlockId!, item.chapter])).entries()];
     const advance = el('input'); advance.type = 'checkbox'; advance.addEventListener('change', () => { autoAdvance = advance.checked; }); const advanceLabel = el('label', '选择后前往下一未决定项'); advanceLabel.append(advance);
     toolbar.replaceChildren(selectFilter('审阅状态', [['all', '全部'], ['unreviewed', '未审阅'], ['reviewed', '已审阅'], ['stale', technicalWords('旧基准', '原文已变化')], ['conflicting', '冲突']] as const, position.review, (value) => { position.review = value; }),
@@ -133,7 +133,7 @@ export function mountProposalWorkspace(options: {
     const context = `${words.slice(Math.max(0, item.fromGrapheme - 40), item.fromGrapheme).join('')}〔当前范围〕${words.slice(item.toGrapheme, item.toGrapheme + 40).join('')}`;
     const before = el('div'); before.append(el('h5', technicalWords('提案基准', '原文')), el('del', suggestion.currentText));
     const now = el('div'); now.append(el('h5', technicalWords('当前权威稿件', '当前稿件')), el('p', words.slice(item.fromGrapheme, item.toGrapheme).join('')));
-    const proposed = el('div'); proposed.append(el('h5', '提议内容（未应用）'), el('ins', suggestion.proposedText || '（删去）'));
+    const proposed = el('div'); proposed.append(el('h5', '修改建议（未应用）'), el('ins', suggestion.proposedText || '（删去）'));
     content.append(before, now, proposed);
     const yours = region('你的处理'); const group = item.atomicGroupId === null ? [item] : workspace!.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId);
     if (item.atomicGroupId !== null) {
@@ -176,7 +176,7 @@ export function mountProposalWorkspace(options: {
     const node = el('section', undefined, 'proposal-receipt'); node.dataset['applyReceiptState'] = receipt.state;
     const labels = { applied: '已接受', 'not-applied': '未写入稿件', confirming: '正在确认修改是否生效', unresolved: '修改是否生效待确认' } as const;
     node.append(el('h4', labels[receipt.state]), el('p', receipt.reason), button('在稿件中查看', 'receipt-manuscript', () => void options.returnToManuscript(position.blockId, position.activeMarkId)),
-      button('返回提案', 'receipt-proposal', () => { controls.replaceChildren(); renderControls(); }));
+      button('返回修改建议', 'receipt-proposal', () => { controls.replaceChildren(); renderControls(); }));
     node.append(el('p', `${options.bookTitle} · 你 · ${receipt.approvedAt ?? '尚无批准记录'} · ${receipt.application?.changeCount ?? 0} 处写入`), technical(proposalIdentityRows({ 分支: receipt.branchId })));
     if (receipt.safeRetry && receipt.state === 'not-applied') node.append(button('重新应用', 'safe-reprepare', () => void act(applyAccepted)));
     // EREC-005: no retry while 结果待确认; the editor's re-check reads the authoritative records and dispatches nothing.
@@ -185,7 +185,7 @@ export function mountProposalWorkspace(options: {
       if (!destroyed) node.replaceWith(receiptCard(next));
     })));
     // The raw receipt is diagnostics only (Issue #1431 item 23): the whole disclosure, never an empty shell, in ordinary mode.
-    if (technicalLayerVisible) { const details = el('details'); details.append(el('summary', '查看完整凭据'), el('pre', JSON.stringify(receipt, null, 2))); node.append(technicalDisclosure(details)); }
+    if (technicalLayerVisible) { const details = el('details'); details.append(el('summary', technicalWords('查看完整凭据')), el('pre', JSON.stringify(receipt, null, 2))); node.append(technicalDisclosure(details)); }
     return node;
   }
   function renderControls(): void {
@@ -199,7 +199,7 @@ export function mountProposalWorkspace(options: {
       }
     }
     controls.append(button('采纳全部无冲突项', 'accept-conflict-free', () => void act(() => saveBatch('filter', 'accepted', []))));
-    const summary = el('details'); summary.append(el('summary', `提案决定范围 · ${workspace.items.filter((item) => item.draft !== null).length} 项草稿 · ${workspace.items.filter((item) => item.draft === null || item.draft === 'deferred' || item.conflict).length} 项未解决`));
+    const summary = el('details'); summary.append(el('summary', `决定范围 · ${workspace.items.filter((item) => item.draft !== null).length} 项草稿 · ${workspace.items.filter((item) => item.draft === null || item.draft === 'deferred' || item.conflict).length} 项未解决`));
     const rows = el('ul'); for (const item of workspace.items) rows.append(el('li', `第 ${item.position} 段 · ${item.draft === null ? '未决定' : dispositions[item.draft]}${item.conflict ? ' · 冲突' : ''}`)); summary.append(rows);
     controls.append(summary, button('应用已采纳修改', 'apply-accepted', () => void act(applyAccepted)));
   }
@@ -242,7 +242,7 @@ export function mountProposalWorkspace(options: {
     workspace = await readProposalWorkspace(api, input); preparedDecision = workspace.decision?.decisionId ?? null;
     const ready = workspace.decision?.items.filter((entry) => entry.disposition === 'accepted' && workspace!.items.some((item) => item.markId === entry.markId && item.decisionId === entry.decisionId && item.disposition === 'accepted' && !item.conflict && item.loaded && item.appliedRevisionId === null)).map((entry) => entry.markId) ?? [];
     renderControls();
-    if (preparedDecision === null || ready.length === 0) { message.textContent = '提案决定已记录；没有可应用的已采纳修改，稿件未发生变化。'; return; }
+    if (preparedDecision === null || ready.length === 0) { message.textContent = '决定已记录；没有可应用的已采纳修改，稿件未发生变化。'; return; }
     // One Effect carries at most the existing batch bound; the line says so instead of sending what would be refused.
     if (ready.length > MAX_BATCH_APPLY_SUGGESTIONS) { message.textContent = `一次应用最多 ${MAX_BATCH_APPLY_SUGGESTIONS} 项；请按章节或筛选分开应用。`; return; }
     const fresh = await readProposalWorkspace(api, input);

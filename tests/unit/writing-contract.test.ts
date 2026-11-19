@@ -841,7 +841,7 @@ describe('the draft and the page\'s words', () => {
     expect(WRITING_REFERENCE_TERMS).toEqual(['梗概与人物', '评估结论与营销要点', '范例', '资料库', '图书信息']);
     // 资料库 under 允许参考 (Issue #428): one box per item, and how many more were not listed.
     expect(writingMaterialLabel({ title: '参考资料甲', characters: 1234, scope: 'book' })).toBe('《参考资料甲》 · 已提取 1,234 字 · 本书资料');
-    expect(writingMaterialLabel({ title: '社级资料', characters: 80, scope: 'house' })).toBe('《社级资料》 · 已提取 80 字 · 社级资料');
+    expect(writingMaterialLabel({ title: '社级资料', characters: 80, scope: 'house' })).toBe('《社级资料》 · 已提取 80 字 · 本社资料');
     expect(writingMaterialsMore(3)).toBe('另有 3 份资料没有列出：这里只列最近收进的几份。');
     expect(writingTaskLine({ taskIntentId: 'x', typeId: 'promotion-article', typeLabel: '宣传文章', state: 'settled', label: '已完成', refusal: null, planEnvelopeDigest: null })).toBe('写作任务「宣传文章」：已完成');
     // 查看任务 is the page's next step only for a prepared Task nothing refuses; a Task whose 范例 is gone is quiet (#698).

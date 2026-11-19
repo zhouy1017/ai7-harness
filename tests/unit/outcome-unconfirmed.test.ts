@@ -81,17 +81,17 @@ describe('待我处理 over 结果待确认 a completed Run left', () => {
     const item = projection.groups[0]!.items[0]!;
     expect(GLOBAL_ATTENTION_STATE_LABELS[item.state]).toBe('结果待确认');
     expect(globalAttentionView(projection)[0]!.items[0]!.stateLabel).toBe('该单元结果未知');
-    expect(globalAttentionObjectLabel(item.object)).toBe('基线分析 · 1 个阅读范围、保证抽样、运行反思');
+    expect(globalAttentionObjectLabel(item.object)).toBe('基线分析 · 1 个部分、保证抽样、运行反思');
     expect(globalAttentionReason(item)).toBe('回答未完整传回，处理与计费结果待确认，AI7 没有自动重发。');
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS[item.nextStep]).toBe(TASK_BAR_VIEW_UNCONFIRMED);
-    expect(globalAttentionObjectLabel({ kind: 'unconfirmed', taskKind: 'writing', ranges: 3, steps: [] })).toBe('写作任务 · 3 个阅读范围');
+    expect(globalAttentionObjectLabel({ kind: 'unconfirmed', taskKind: 'writing', ranges: 3, steps: [] })).toBe('写作任务 · 3 个部分');
   });
 });
 
 describe('the drawer\'s 结果待确认 block', () => {
   it('says what is known, what is missing, and that 保留为缺口 sends and changes nothing', () => {
     expect(unconfirmedWhat(0, ['cross-unit-reduction'])).toBe('跨单元归纳');
-    expect(unconfirmedWhat(2, [])).toBe('2 个阅读范围');
+    expect(unconfirmedWhat(2, [])).toBe('2 个部分');
     const listed: NonNullable<TaskPlanProjection['unconfirmed']> = {
       ranges: [{ unitOrdinal: 3, category: '错别字与规范用语', recordedAt: NOW.toISOString(), earlierText: false }],
       steps: [{ stage: 'assurance-sampling', category: null, recordedAt: NOW.toISOString() }, { stage: 'assurance-sampling', category: null, recordedAt: NOW.toISOString() }],
@@ -99,14 +99,14 @@ describe('the drawer\'s 结果待确认 block', () => {
     };
     expect(unconfirmedHeading(listed)).toBe('该单元结果未知');
     expect(unconfirmedHeading({ ...listed, ranges: [] })).toBe('结果待确认');
-    expect(unconfirmedStatement(listed)).toBe('回答未传全，处理与计费未知，缺口未重发；保留只记确认；原文已改不再列出，上次重读失败仍待确认。');
-    expect(unconfirmedStatement({ ...listed, ranges: [] })).toBe('回答未传全，处理与计费未知，缺口未重发；保留只记确认。');
+    expect(unconfirmedStatement(listed)).toBe('回答未传全，处理与计费未知，未完成的部分未重发；保留只记确认；原文已改不再列出，上次重读失败仍待确认。');
+    expect(unconfirmedStatement({ ...listed, ranges: [] })).toBe('回答未传全，处理与计费未知，未完成的部分未重发；保留只记确认。');
     expect(unconfirmedStatement(listed).length).toBeLessThanOrEqual(60);
     expect(unconfirmedLine({ unitOrdinal: 4, earlierText: true, category: null })).toBe('第 4 个阅读范围（当时的文字） · 请求已发出 · 回答没有完整传回');
     expect(unconfirmedLine({ unitOrdinal: 3, category: '错别字与规范用语' })).toBe('「错别字与规范用语」第 3 个阅读范围 · 请求已发出 · 回答没有完整传回');
     expect(unconfirmedLine({ unitOrdinal: 3, category: null, rereadFailed: true })).toContain('上次重读未成功');
     expect(unconfirmedLine({ stage: 'run-report-reflection', category: null })).toBe('运行反思 · 请求已发出 · 回答没有完整传回');
-    expect(UNCONFIRMED_KEEP_AS_GAP).toBe('保留为缺口');
+    expect(UNCONFIRMED_KEEP_AS_GAP).toBe('留作未完成的部分');
   });
 });
 

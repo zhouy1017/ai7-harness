@@ -132,7 +132,7 @@ describe('the words of the 审阅 destination', () => {
       'batch-prepare': '接受并应用全部',
       'batch-confirm': '确认应用',
       'batch-cancel': '取消',
-      'batch-reprepare': '重新准备应用',
+      'batch-reprepare': '重新开始应用',
       'batch-undo': '撤销本批应用',
       'all-categories': '全部类别',
       'export-version': '导出报告',

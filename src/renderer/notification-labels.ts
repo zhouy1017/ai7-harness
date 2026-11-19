@@ -14,7 +14,7 @@ export const NOTIFICATION_LABELS = Object.freeze({
   outcomeWithGaps: '任务结果已记录，仍有未完成部分',
   indexing: '资料索引结果已记录',
   // No 待我处理 state is a committed Effect Receipt yet; the class keeps its own words for when one is.
-  effect: '应用凭据已记录',
+  effect: '修改结果已记录',
 });
 
 export type NotificationLabelKey = keyof typeof NOTIFICATION_LABELS;

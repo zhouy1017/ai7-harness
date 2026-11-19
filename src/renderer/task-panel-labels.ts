@@ -99,8 +99,8 @@ export const REVIEW_RESULT_NOT_DONE = '没有修改稿件：发现作为标记�
 
 /** A reading range, by the heading the manuscript gives it when it has one. */
 export function taskResultRangeTitle(unitOrdinal: number, heading: string | null): string {
-  if (!technicalLayerVisible) return heading === null ? `正文第 ${unitOrdinal} 部分` : `「${heading}」`;
-  return heading === null ? `第 ${unitOrdinal} 个阅读范围` : `第 ${unitOrdinal} 个阅读范围 · 「${heading}」`;
+  return technicalWords(heading === null ? `第 ${unitOrdinal} 个阅读范围` : `第 ${unitOrdinal} 个阅读范围 · 「${heading}」`,
+    heading === null ? `正文第 ${unitOrdinal} 部分` : `「${heading}」`);
 }
 
 /** What the analysis made of one range: read, or not read and why (ANALYSIS-004). */

@@ -23,7 +23,7 @@ import type {
  * ceiling is what bounds a Run that can actually transmit.
  */
 export function runBudgetCeilingLabel(ceiling: RunBudgetCeilingState): string {
-  return ceiling === 'unset' ? '未设置任务预算上限' : `任务运行预算上限：${ceiling.maxTotalTokens} tokens`;
+  return ceiling === 'unset' ? '未设置任务预算上限' : technicalWords(`任务运行预算上限：${ceiling.maxTotalTokens} tokens`, '已设用量上限');
 }
 
 /**
@@ -287,5 +287,6 @@ export const RUN_LIVENESS_STAGE_LABELS: Record<'units' | 'cross-unit-reduction' 
 
 /** The report's unit accounting as one sentence; every figure is the record's own count. */
 export function runReportUnitsSentence(units: RunReportUnitAccountingProjection): string {
-  return `共 ${units.submitted} 个阅读范围：沿用上一份 ${units.reused} 个，重新分析 ${units.recomputed} 个，其中 ${units.gaps} 个没有读成，${units.retried} 个安全重试过。`;
+  return technicalWords(`共 ${units.submitted} 个阅读范围：沿用上一份 ${units.reused} 个，重新分析 ${units.recomputed} 个，其中 ${units.gaps} 个没有读成，${units.retried} 个安全重试过。`,
+    `共 ${units.submitted} 个部分：沿用上一份 ${units.reused} 个，重新分析 ${units.recomputed} 个，其中 ${units.gaps} 个没有读成，${units.retried} 个安全重试过。`);
 }
