@@ -8,6 +8,12 @@ import { technicalWords } from './technical-layer.js';
  * carry it (the PR lists them); a sentence that holds none of them comes back unchanged.
  */
 const RULES: ReadonlyArray<readonly [RegExp, string | ((...parts: string[]) => string)]> = [
+  // A finding's terminal status, in the one vocabulary of the three finding lists (review point 4): 已接受 / 已拒绝 / 已处理 / 已忽略.
+  [/^已接受并应用$/u, '已接受'],
+  [/^已拒绝这条修改建议$/u, '已拒绝'],
+  [/^已标记为已处理$/u, '已处理'],
+  [/^已修改后接受，尚未应用$/u, '已记录 · 尚未写入稿件'],
+  [/^已忽略并说明原因$/u, '已忽略'],
   // 阅读范围 / 单元 → 部分 (by the sentence's grammar: a numbered part, a count of parts, the parts in general).
   [/第 ([\d、]+) 个阅读范围/gu, '正文第 $1 部分'],
   [/([\d,]+ \/ [\d,]+|[\d,]+|全部 [\d,]+) 个(要重新分析的)?阅读范围/gu, (_all, count: string, again?: string) => `${count} 个${again ?? ''}部分`],

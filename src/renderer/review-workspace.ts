@@ -2082,7 +2082,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const sources = attached.length > 0 || category.categoryId !== 'factual-review' || retained === undefined ? null : findingResearchLines(retained, finding, localInstantLabel);
     if (showEvidence && attached.length > 0) main.append(findingEvidenceList(attached, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
     if (showEvidence) for (const line of sources ?? []) main.append(el('p', 'review-finding-source', line));
-    if (finding.status !== 'pending') main.append(el('p', 'review-finding-status-detail', finding.statusDetail));
+    if (finding.status !== 'pending') main.append(el('p', 'review-finding-status-detail', serviceWords(finding.statusDetail)));
     if (finding.ignoreReason !== null) main.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
     if (finding.historicalMarker !== null) main.append(el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker));
     const actions = renderFindingActions(run, finding);

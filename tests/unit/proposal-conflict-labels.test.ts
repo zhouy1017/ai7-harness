@@ -80,7 +80,7 @@ describe('the words of 稿件冲突', () => {
     expect(CONFLICT_PATHS).toEqual(['keep-current', 'edit-draft', 'regenerate', 'defer']);
     expect(CONFLICT_PATHS.map((path) => CONFLICT_PATH_LABELS[path])).toEqual(['保留当前稿件', '自行编辑解决草稿', '基于当前稿件重新生成建议', '暂不处理']);
     expect(CONFLICT_REGENERATE_READING).toBe('正在确认能否重新生成建议…');
-    expect(CONFLICT_REGENERATE_NOTE).toBe('把一处冲突的三段文字和原修改建议的理由交给模型，重新写这一处的建议放进解决草稿；稿件和这条修改建议都不会改动，是否保存为新的修改建议由你决定。');
+    expect(CONFLICT_REGENERATE_NOTE).toBe('把一处冲突的三段文字和原修改建议的理由交给模型，重新写这一处的建议放进解决草稿；稿件和这条修改建议都不会改动，是否保存为这条修改建议的新写法由你决定。');
     expect(conflictRegenerateUnitLabel(2)).toBe('重新生成第 2 处');
     expect(CONFLICT_REGENERATED_TAG).toBe('AI7 重新生成');
     expect(CONFLICT_REGENERATE_STATUS).toEqual({
@@ -99,7 +99,7 @@ describe('the words of 稿件冲突', () => {
     expect(CONFLICT_QUICK_ACTIONS).toMatchObject({
       takeCurrent: '采用当前内容', takeProposed: '采用修改建议', keepBoth: '两者都保留', currentFirst: '当前后接提议', proposedFirst: '提议后接当前',
       edit: '编辑合并结果', undo: '撤销', redo: '重做', previousUnresolved: '上一处未解决', nextUnresolved: '下一处未解决',
-      includeNonConflicting: '将全部无冲突更改加入解决草稿', saveVersion: '保存为新的修改建议',
+      includeNonConflicting: '将全部无冲突更改加入解决草稿', saveVersion: '保存为这条修改建议的新写法',
     });
     expect(Object.values(CONFLICT_QUICK_ACTIONS).some((label) => label.includes('自动解决'))).toBe(false);
   });
@@ -117,7 +117,7 @@ describe('the words of 稿件冲突', () => {
 
   it('says why 保存为新提案版本 is unavailable, and nothing once it can be saved', () => {
     expect(conflictSaveReason(null, 0)).toBeNull();
-    expect(conflictSaveReason('unresolved', 2)).toBe('还有 2 处未解决；每一处都选定后才能保存为新的修改建议。');
+    expect(conflictSaveReason('unresolved', 2)).toBe('还有 2 处未解决；每一处都选定后才能保存为这条修改建议的新写法。');
     expect(conflictSaveReason('unchanged', 0)).toBe('解决结果与当前稿件相同，请选「保留当前稿件」。');
     expect(conflictSaveReason('target-deleted', 1)).toBe('原文已被删去，不能在原处生成新版本；可选「保留当前稿件」或「暂不处理」。');
     // On a Production Document the text kept is the document's (Issue #543 follow-up); the other completions name no 稿件.
@@ -158,7 +158,7 @@ describe('the words of 稿件冲突', () => {
   it('says whether the draft is durable, and what each way out did', () => {
     expect(CONFLICT_DRAFT_STATUS).toEqual({ saving: '正在保存草稿…', saved: '草稿已保存', unsaved: '草稿尚未保存' });
     expect(conflictDraftUnsaved('稿件又有改动，请重新比较。')).toBe('草稿未保存：稿件又有改动，请重新比较。');
-    expect(CONFLICT_COMPLETION.newVersion).toBe('已保存为新的修改建议 · 尚未应用');
+    expect(CONFLICT_COMPLETION.newVersion).toBe('已保存为这条修改建议的新写法 · 尚未应用');
     expect(conflictDeferredLine(new Date(2026, 8, 22, 9, 5).toISOString())).toBe('已于 9 月 22 日 09:05 暂不处理；这处冲突仍未解决。');
     expect(conflictKeyboardHint('win32')).toBe('Ctrl+Z 撤销 · Ctrl+Shift+Z 或 Ctrl+Y 重做（在解决草稿内）');
     expect(conflictKeyboardHint('darwin')).toBe('Command+Z 撤销 · Command+Shift+Z 或 Command+Y 重做（在解决草稿内）');
