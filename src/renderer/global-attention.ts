@@ -1,8 +1,10 @@
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { identityWords, technicalLayerVisible } from './technical-layer.js';
 import { showToast } from './components/toast.js';
+import { attentionPillLabel } from './notification-labels.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../shared/protocol.js';
 import {
+  GLOBAL_ATTENTION_ENTRY_LABEL,
   GLOBAL_ATTENTION_HEADING,
   GLOBAL_ATTENTION_LEDE,
   GLOBAL_ATTENTION_SECTION_LABEL,
@@ -157,6 +159,24 @@ export function mountGlobalAttentionEntry(options: { button: HTMLButtonElement; 
   paint(null);
   options.reader.subscribe((reading) => {
     if (reading.kind === 'projection') paint(visibleGlobalAttention(reading.projection, technicalLayerVisible).actionableCount);
+  });
+  button.addEventListener('click', () => options.open());
+}
+
+/**
+ * The context header's 待处理 pill (#1528): on every page, also in focus mode where the sidebar is gone, with the same count as
+ * the sidebar's entry, and only while that count is above nothing. It opens 待我处理.
+ */
+export function mountAttentionPill(options: { button: HTMLElement; reader: GlobalAttentionReader; open(): void }): void {
+  const { button } = options;
+  button.dataset['attentionPill'] = 'true';
+  options.reader.subscribe((reading) => {
+    if (reading.kind !== 'projection') return;
+    const count = visibleGlobalAttention(reading.projection, technicalLayerVisible).actionableCount;
+    if (button.textContent !== attentionPillLabel(count)) button.textContent = attentionPillLabel(count);
+    button.setAttribute('aria-label', `${attentionPillLabel(count)}，打开${GLOBAL_ATTENTION_ENTRY_LABEL}`);
+    button.dataset['attentionCount'] = String(count);
+    button.hidden = count <= 0;
   });
   button.addEventListener('click', () => options.open());
 }

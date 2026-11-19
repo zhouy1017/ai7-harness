@@ -1,3 +1,4 @@
+import { styleInput } from './controls.js';
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation, type RuntimeExecutionConfig, type TaskExecutionLaunchResult } from '../../shared/runtime-execution-config.js';
 import type { ServiceOperationMap, TaskLaunchPreviewInput, TaskPlanKind, RendererApi } from '../../shared/protocol.js';
 import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
@@ -102,7 +103,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
 
   const runOptions = el('details', 'task-launch-options');
   runOptions.append(el('summary', undefined, '本次运行选项'));
-  const budget = el('input'); budget.inputMode = 'numeric'; budget.type = 'text';
+  const budget = el('input'); budget.inputMode = 'numeric'; budget.type = 'text'; styleInput(budget);
   budget.value = String(request.input.planEdits?.runBudgetCeiling?.maxTotalTokens ?? '');
   budget.dataset['taskLaunchOption'] = 'budget';
   budget.setAttribute('aria-label', '本次预算上限 · 词元（不填为不设上限）');
@@ -116,7 +117,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     const option = el('option', undefined, label); option.value = value!; retry.append(option);
   }
   retry.value = request.input.planEdits?.askFirstAdaptations?.includes('safe-retry') ? 'ask-first' : request.input.planEdits?.disallowedAdaptations.includes('safe-retry') ? 'never' : 'auto';
-  const sampling = el('input'); sampling.type = 'checkbox'; sampling.dataset['taskLaunchOption'] = 'sampling';
+  const sampling = el('input'); sampling.type = 'checkbox'; styleInput(sampling); sampling.dataset['taskLaunchOption'] = 'sampling';
   sampling.checked = !request.input.planEdits?.removedSteps.includes('assurance-sampling');
   const retryLabel = el('label', undefined, '遇到可重试的失败'); retryLabel.append(retry);
   runOptions.append(retryLabel);

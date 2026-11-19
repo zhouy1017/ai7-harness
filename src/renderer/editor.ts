@@ -21,7 +21,7 @@ import {
   type AtRiskExtent,
   type ProtectionView,
 } from './editor-protection.js';
-import { PENDING_BUFFER_REFUSED, PROTECTION_BUFFER_REFUSED, protectionAckMismatchLine, atRiskLocation, readOnlyLine, type ProtectionCause, type ProtectionReadOnlyReason } from './editor-protection-labels.js';
+import { protectionFailureReason, PENDING_BUFFER_REFUSED, PROTECTION_BUFFER_REFUSED, protectionAckMismatchLine, atRiskLocation, readOnlyLine, type ProtectionCause, type ProtectionReadOnlyReason } from './editor-protection-labels.js';
 import {
   MAX_BLOCK_CODE_UNITS,
   MAX_BLOCK_GRAPHEMES,
@@ -1023,14 +1023,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           ownershipBlocked = error instanceof BookOwnershipFailure;
           // The journal did not acknowledge: Editing Protection Mode (DUR-001). A moved target stops replay (DUR-007).
           enterProtection(interrupted ? 'service-stopped' : classifyJournalFailure(error) === 'drift' ? 'drift' : 'journal-unavailable');
-          options.onAnnouncement(
-            interrupted
-              ? '本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。'
-              : error instanceof Error
-                ? `本地写入中断；未确认修改仍保留。${error.message}`
-                : '本地写入中断；未确认修改仍保留，请重试。',
-            'error',
-          );
+          // Only the specific cause belongs beside the persistent protection banner.
+          options.onAnnouncement(protectionFailureReason(error), 'error');
           break;
         }
       }
@@ -1046,12 +1040,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       // Nothing the editor can bind exactly: input pauses, and the content stays for 复制受影响内容 (DUR-007).
       enterProtection(interrupted ? 'service-stopped' : 'drift');
       announceState();
-      options.onAnnouncement(
-        error instanceof Error
-          ? `本地写入中断；未确认修改仍保留。${error.message}`
-          : '本地写入中断；未确认修改仍保留，请重试。',
-        'error',
-      );
+      options.onAnnouncement(protectionFailureReason(error), 'error');
     }).finally(() => {
       flushPromise = undefined;
     });
@@ -1396,7 +1385,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       enterProtection('service-stopped');
       applyEditableState();
       announceState();
-      options.onAnnouncement('本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。', 'error');
+      options.onAnnouncement('本地业务服务已中断。', 'error');
     },
     destroy: () => {
       options.scrollContainer.removeEventListener('scrollend', endSmoothJump);

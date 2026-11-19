@@ -1,3 +1,4 @@
+import { styleInput } from './components/controls.js';
 import { filterChoices } from './components/controls.js';
 import { technicalLayerVisible } from './technical-layer.js';
 import type { FeedbackHistoryInput, FeedbackHistoryEntryProjection, FeedbackHistoryPeopleVersion, FeedbackHistoryProjection, FeedbackHistoryTarget, RendererApi } from '../shared/protocol.js';
@@ -97,7 +98,7 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
     const label = el('label', 'feedback-filter');
     const control = el('input');
     control.id = 'feedback-filter-dimension';
-    control.type = 'text';
+    control.type = 'text'; styleInput(control);
     control.maxLength = 200;
     control.placeholder = FEEDBACK_HISTORY_ALL;
     control.setAttribute('list', 'feedback-dimensions');
@@ -120,7 +121,7 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
     const unclassified = el('label');
     const check = el('input');
     check.id = 'feedback-filter-unclassified';
-    check.type = 'checkbox';
+    check.type = 'checkbox'; styleInput(check);
     check.checked = chosen.dimension === 'null';
     check.disabled = loading || opening;
     check.addEventListener('change', () => {
@@ -135,7 +136,7 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
   const dateFilter = (filter: 'from' | 'to'): HTMLLabelElement => {
     const wrapper = el('label', 'feedback-filter');
     const control = el('input');
-    control.type = 'date';
+    control.type = 'date'; styleInput(control);
     control.id = `feedback-filter-${filter}`;
     control.value = chosen[filter];
     control.disabled = loading || opening;
