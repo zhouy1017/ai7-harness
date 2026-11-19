@@ -78,7 +78,7 @@ let surfaces: ReviewWorkspaceSurface[];
 beforeEach(() => {
   restoreDom = installMiniDom();
   surfaces = [];
-  vi.stubGlobal('window', { setTimeout, clearTimeout, getSelection: () => null });
+  vi.stubGlobal('window', { setTimeout, clearTimeout, getSelection: () => null, addEventListener: () => undefined, removeEventListener: () => undefined });
   Object.defineProperty(MiniElement.prototype, 'options', { configurable: true, get(this: MiniElement) { return this.querySelectorAll('option'); } });
   vi.stubGlobal('Option', class extends MiniElement { constructor(text: string, value: string) { super('option'); this.textContent = text; this.value = value; } });
   Object.defineProperty(MiniElement.prototype, 'prepend', { configurable: true, value(this: MiniElement, ...nodes: MiniElement[]) {
@@ -116,7 +116,7 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1, proc
   const status = vi.fn(); const searchSettings = vi.fn(); const goToText = vi.fn(async () => undefined);
   const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: resume ? null : { reviewRunId: RUN, findingId: null }, api, procedureId,
     awaitServiceJob: async (initial) => initial, technicalDetails: (_className, ...rows) => { const node = new MiniElement('dl'); node.append(...rows as unknown as MiniElement[]); return technicalDisclosure(node as unknown as HTMLElement); },
-    setStatus: status, errorMessage: (_error, fallback) => fallback, errorCode: () => null, openManuscript: async () => undefined,
+    setStatus: Object.assign(status, { settle: vi.fn() }), errorMessage: (_error, fallback) => fallback, errorCode: () => null, openManuscript: async () => undefined,
     goToText, openPlan: () => undefined, openSearchSettings: searchSettings, planChanged: () => undefined, ...(registerCommands === undefined ? {} : { registerCommands }) });
   surfaces.push(surface);
   surface.start();

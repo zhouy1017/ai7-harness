@@ -119,27 +119,61 @@ export function taskPlanPage(plan: TaskPlanProjection, path: string, afterOrdina
 }
 
 export const REVIEW_CHAPTER_PAGE_PATH = 'scopeOptions.chapters.chapters';
-export function reviewWorkspacePage(workspace: ReviewWorkspaceProjection, afterOrdinal: number, digest: string) {
-  const value = workspace.scopeOptions.chapters.chapters;
-  requireAnalysis(sha256Hex(canonicalJson(value)) === digest, 'TASK_PLAN_PAGE_CHANGED', '章节已变化，请重新打开审阅。');
-  const page = planValuePage(value, afterOrdinal, PAGE_BYTES);
-  requireAnalysis(afterOrdinal <= page.total, 'TASK_PLAN_PAGE_INVALID', '章节读取位置无效。');
-  return { path: REVIEW_CHAPTER_PAGE_PATH, items: page.items, nextOrdinal: page.nextOrdinal, digest };
+/**
+ * What of a review workspace grows with the Book's chapters or the Run's findings (#1592), paged at the transport edge and
+ * read back through `getTaskPlanPage` with the opened Run's identity. The findings themselves page by their own cursor.
+ */
+export const REVIEW_WORKSPACE_PAGE_PATHS: readonly string[] = [REVIEW_CHAPTER_PAGE_PATH, 'run.report.record.findings.entries',
+  'run.report.record.mustItems.items', 'run.report.record.appendix.referencedRules', 'run.report.record.statistics.rows', 'run.localCheck.excluded'];
+export function reviewWorkspacePage(workspace: ReviewWorkspaceProjection, path: string, afterOrdinal: number, digest: string) {
+  requireAnalysis(REVIEW_WORKSPACE_PAGE_PATHS.includes(path), 'TASK_PLAN_PAGE_INVALID', '审阅读取范围无效。');
+  const chapters = path === REVIEW_CHAPTER_PAGE_PATH;
+  const value = taskPlanValue(workspace, path);
+  requireAnalysis(Array.isArray(value) && sha256Hex(canonicalJson(value)) === digest, 'TASK_PLAN_PAGE_CHANGED',
+    chapters ? '章节已变化，请重新打开审阅。' : '审阅结果已变化，请重新打开审阅。');
+  const page = planValuePage(value as ReadonlyArray<unknown>, afterOrdinal, PAGE_BYTES);
+  requireAnalysis(afterOrdinal <= page.total, 'TASK_PLAN_PAGE_INVALID', chapters ? '章节读取位置无效。' : '审阅读取位置无效。');
+  return { path, items: page.items, nextOrdinal: page.nextOrdinal, digest };
 }
 
+/**
+ * A review workspace always crosses (#1592). The chapter list is paged first, exactly as before, so every workspace that fitted
+ * that way reads unchanged; only then are the report's growing lists paged too and the findings page shortened to what the
+ * reply leaves — at least one finding, `findingsTruncated` set, the next page read with `findingsAfterOrdinal` as always.
+ */
 export function reviewWorkspaceWire(workspace: ReviewWorkspaceProjection, replyBudget = TASK_REPLY_BUDGET): ReviewWorkspaceProjection {
   if (serializedBytes(workspace) <= replyBudget) return workspace;
-  const chapters = workspace.scopeOptions.chapters.chapters;
-  let share = INLINE_SHARE;
-  for (;;) {
-    const page = planValuePage(chapters, 0, share);
-    const wire = { ...workspace, scopeOptions: { ...workspace.scopeOptions, chapters: { ...workspace.scopeOptions.chapters,
-      chapters: page.items as ReviewWorkspaceProjection['scopeOptions']['chapters']['chapters'] } },
-      listPages: { [REVIEW_CHAPTER_PAGE_PATH]: { shown: page.shown, total: page.total, nextOrdinal: page.nextOrdinal,
-        digest: sha256Hex(canonicalJson(chapters)) } } };
+  const wire = reviewWorkspaceFit(workspace, [REVIEW_CHAPTER_PAGE_PATH], replyBudget, false)
+    ?? reviewWorkspaceFit(workspace, REVIEW_WORKSPACE_PAGE_PATHS, replyBudget, true);
+  requireAnalysis(wire !== null, 'TASK_PLAN_SUMMARY_TOO_LARGE', '审阅摘要超出可读取范围。');
+  return wire!;
+}
+
+function reviewWorkspaceFit(workspace: ReviewWorkspaceProjection, paths: readonly string[], replyBudget: number, shortenFindings: boolean) {
+  for (let share = INLINE_SHARE; ; share = share < 256 ? 0 : Math.floor(share / 2)) {
+    const wire = structuredClone(workspace);
+    const listPages: Record<string, NonNullable<ReviewWorkspaceProjection['listPages']>[string]> = {};
+    for (const path of paths) {
+      const value = taskPlanValue(workspace, path);
+      if (!Array.isArray(value) || (path !== REVIEW_CHAPTER_PAGE_PATH && serializedBytes(value) <= share)) continue;
+      const page = planValuePage(value, 0, share);
+      replaceTaskPlanValue(wire, path, page.items);
+      listPages[path] = { shown: page.shown, total: page.total, nextOrdinal: page.nextOrdinal, digest: sha256Hex(canonicalJson(value)) };
+    }
+    wire.listPages = listPages;
+    if (shortenFindings && wire.run !== null && wire.run.findings.length > 1) {
+      const { findings } = wire.run;
+      let spent = serializedBytes({ ...wire, run: { ...wire.run, findings: [], findingsTruncated: false } });
+      let kept = 0;
+      for (const finding of findings) {
+        const weight = serializedBytes(finding) + (kept > 0 ? 1 : 0);
+        if (kept > 0 && spent + weight > replyBudget) break;
+        spent += weight; kept += 1;
+      }
+      if (kept < findings.length) wire.run = { ...wire.run, findings: findings.slice(0, kept), findingsTruncated: true };
+    }
     if (serializedBytes(wire) <= replyBudget) return wire;
-    requireAnalysis(share > 0, 'TASK_PLAN_SUMMARY_TOO_LARGE', '审阅摘要超出可读取范围。');
-    share = share < 256 ? 0 : Math.floor(share / 2);
+    if (share === 0) return null;
   }
 }
 

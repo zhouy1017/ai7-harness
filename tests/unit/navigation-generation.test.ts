@@ -722,7 +722,7 @@ it.each<readonly [string, (drawer: Drawer, root: HTMLElement) => { working: HTML
  ['a dialog', () => { const dialog = document.createElement('section'); dialog.setAttribute('role', 'dialog'); miniDocument.body.append(dialog as unknown as MiniElement); return { working: inside(dialog), kept: true }; }],
  ['no overlay (the closed drawer still marks the shell)', () => ({ working: inside(document.body), kept: false })],
 ])('a late 评估 answer keeps focus in %s only while it is open (#1504 item 5)', async (_name, overlay) => {
- vi.stubGlobal('window', { setTimeout, clearTimeout, setInterval: () => 0, clearInterval: () => undefined, getSelection: () => null });
+ vi.stubGlobal('window', { setTimeout, clearTimeout, setInterval: () => 0, clearInterval: () => undefined, getSelection: () => null, addEventListener: () => undefined, removeEventListener: () => undefined });
  try {
   const root = document.createElement('aside'); miniDocument.body.append(root as unknown as MiniElement);
   const never = new Proxy({}, { get: () => () => new Promise(() => undefined) });

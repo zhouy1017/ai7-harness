@@ -12,10 +12,11 @@ import { technicalWords, identityWords, technicalLayerVisible } from './technica
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { hideToast, showToast } from './components/toast.js';
-import { reportResult } from './notifications.js';
+import { reportResult, type StatusSetter } from './notifications.js';
 import { filterChoices, menuPanel, enhanceSelect } from './components/controls.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
-import { reviewExcludedHeading, estimateReviewCalls, reviewConsequenceEstimate } from './review-labels.js';
+import { reviewExcludedHeading, estimateReviewCalls, reviewConsequenceEstimate, reviewReadFailedLine, reviewPartMoreName,
+  REVIEW_STATISTICS_TOTALS_WHOLE, REVIEW_PART_MORE, REVIEW_PART_REREAD, REVIEW_PAGE_FAILED, REVIEW_REREAD } from './review-labels.js';
 import { learningReasonAskCard } from './analysis-feedback.js';
 import { taskMaterialSelection } from './task-material-selection.js';
 import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
@@ -280,7 +281,8 @@ export interface MountReviewWorkspaceOptions {
   api: ReviewApi;
   awaitServiceJob(initial: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
-  setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
+  /** The status line; `settle` ends an error this page raised once a read succeeds again (Issue #1592). */
+  setStatus: StatusSetter;
   errorMessage(error: unknown, fallback: string): string;
   errorCode(error: unknown): string | null;
   /** 打开稿件 — the manuscript at the editor's last position, as the destination's own action opens it. */
@@ -445,6 +447,16 @@ const FILTER_KEYS: Readonly<Record<FilterName, keyof Filters>> = {
 };
 /** The 章节 choices a long Book's workspace carries in part (Issue #996), read on by the sheet's range and the findings filter. */
 const CHAPTER_PAGE_PATH = 'scopeOptions.chapters.chapters';
+/**
+ * The report's lists and the local check's 未生成批注 a workspace too large for one reply carries in part (Issue #1592),
+ * read on in order with the opened Run's identity. (The report's referenced rules page too; this page does not show them.)
+ */
+const REPORT_PAGE_PATHS = {
+  mustItems: 'run.report.record.mustItems.items',
+  statistics: 'run.report.record.statistics.rows',
+  findings: 'run.report.record.findings.entries',
+  localExcluded: 'run.localCheck.excluded',
+} as const;
 /** A finding's mark that 回到原文 can open a card on: it still stands on the manuscript. */
 const LIVE_MARK_STATUSES: ReadonlySet<string> = new Set(['open', 'resolved', 'applied']);
 const CAPABILITY_CODE = 'AI7_EDITOR_CAPABILITY_INVALID';
@@ -504,6 +516,7 @@ function focusKeyOf(node: HTMLElement): string {
     node.closest<HTMLElement>('[data-finding-id]')?.dataset['findingId'] ?? '',
     node.closest<HTMLElement>('[data-review-category]')?.dataset['reviewCategory'] ?? '',
     node.closest<HTMLElement>('[data-review-run-id]')?.dataset['reviewRunId'] ?? '',
+    node.closest<HTMLElement>('[data-review-page]')?.dataset['reviewPage'] ?? '',
   ].join('|');
 }
 
@@ -819,45 +832,183 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       },
       (error) => {
         if (destroyed || ticket !== generation || !host.isConnected) return;
+        // Any refused read stands at the bottom (Issue #1592); the card says what it shows is the last one read.
+        rereadPending = false;
+        markReadFailed(options.errorMessage(error, projection === null ? REVIEW_WORKSPACE_UNAVAILABLE : REVIEW_STATUS_LINES.refreshFailed));
         if (projection === null) {
           renderUnavailable(error);
           return;
         }
-        options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.refreshFailed), 'error');
         if (projection.run?.state === 'running' || projection.run?.state === 'waiting') schedulePoll();
       },
     );
   }
 
-  /** The next 章节 choices of the same snapshot (Issue #996), appended exactly once; a changed snapshot is refused. */
-  async function readChapterPage(workspace: ReviewWorkspaceProjection): Promise<ReviewWorkspaceProjection> {
-    const meta = workspace.listPages?.[CHAPTER_PAGE_PATH];
+  /** The next page of a list the workspace carries in part (Issues #996, #1592), appended exactly once; a changed list is refused. */
+  async function readWorkspacePage(workspace: ReviewWorkspaceProjection, path: string): Promise<ReviewWorkspaceProjection> {
+    const meta = workspace.listPages?.[path];
     if (meta === undefined || meta.nextOrdinal === null) throw new Error(TASK_PAGE_FAILED);
-    const page = await api.getTaskPlanPage({ kind: 'review-run', ref: workspace.run?.reviewRunId ?? null, path: CHAPTER_PAGE_PATH,
+    const page = await api.getTaskPlanPage({ kind: 'review-run', ref: workspace.run?.reviewRunId ?? null, path,
       afterOrdinal: meta.nextOrdinal, digest: meta.digest });
-    if (page.path !== CHAPTER_PAGE_PATH) throw new Error(TASK_PAGE_FAILED);
+    if (page.path !== path) throw new Error(TASK_PAGE_FAILED);
     return appendTaskPlanPage(workspace, page);
+  }
+  const readChapterPage = (workspace: ReviewWorkspaceProjection): Promise<ReviewWorkspaceProjection> => readWorkspacePage(workspace, CHAPTER_PAGE_PATH);
+
+  /**
+   * The lists whose next page is being read, and a failed page's words, by path (Issue #1592). The controls are drawn from
+   * these, so a repaint meanwhile — a poll, an action on a finding — keeps the control held, and its failure said, as it was.
+   */
+  const pagesReading = new Set<string>();
+  const pageFailures = new Map<string, string>();
+  /** A list that changed between pages was read again: said once that read is on screen. */
+  let rereadPending = false;
+
+  /**
+   * Read the next page of a list the workspace carries in part (Issues #996, #1592) and append it to the workspace on screen
+   * when the answer arrives — exactly once, in order: a page that no longer continues that list (another Run, a changed list,
+   * a page already appended) is dropped and its control is free again. A list that changed meanwhile reads the workspace
+   * again; any other failure is said beside the control and in the status bar. `focus` names what takes focus once the list
+   * is whole, when focus was on the control.
+   */
+  function readPartPage(path: string, focus: string): void {
+    const asked = projection;
+    const meta = asked?.listPages?.[path];
+    if (asked === null || meta === undefined || meta.nextOrdinal === null || working) return;
+    const runId = asked.run?.reviewRunId ?? null;
+    pagesReading.add(path);
+    const earlierFailure = pageFailures.get(path);
+    pageFailures.delete(path);
+    const control = card?.querySelector<HTMLButtonElement>(`[data-review-page="${path}"] button`);
+    if (control) control.disabled = true;
+    card?.querySelector(`[data-review-page="${path}"] .review-page-failed`)?.remove();
+    const release = (): void => {
+      pagesReading.delete(path);
+      const free = card?.querySelector<HTMLButtonElement>(`[data-review-page="${path}"] button`);
+      // While a finding action is in flight the control waits for it, and that action's end frees it.
+      if (free) { if (working) free.dataset['workHeld'] = ''; else free.disabled = false; }
+    };
+    void api.getTaskPlanPage({ kind: 'review-run', ref: runId, path, afterOrdinal: meta.nextOrdinal, digest: meta.digest }).then((page) => {
+      release();
+      // The page that failed before has now been read: its error in the status bar is over.
+      if (earlierFailure !== undefined) options.setStatus.settle(earlierFailure);
+      const current = projection;
+      const now = current?.listPages?.[path];
+      if (destroyed || current === null || page.path !== path || (current.run?.reviewRunId ?? null) !== runId || now === undefined ||
+          now.digest !== meta.digest || now.nextOrdinal !== meta.nextOrdinal) return;
+      const held = document.activeElement;
+      const onControl = held === null || held === document.body || (held instanceof HTMLElement && held.closest(`[data-review-page="${path}"]`) !== null);
+      const loaded = appendTaskPlanPage(current, page);
+      projection = loaded;
+      stableKey = stableKeyOf(loaded);
+      renderCard(loaded);
+      // Focus stays where the editor pressed: the list's next 显示更多, or the part once the list is whole.
+      if (onControl && card?.contains(document.activeElement) !== true) {
+        (card?.querySelector<HTMLElement>(`[data-review-page="${path}"] button`) ?? card?.querySelector<HTMLElement>(focus))?.focus();
+      }
+    }, (error: unknown) => {
+      release();
+      if (destroyed || (projection?.run?.reviewRunId ?? null) !== runId) return;
+      if (options.errorCode(error) === 'TASK_PLAN_PAGE_CHANGED') {
+        rereadPending = true;
+        refresh(true);
+        return;
+      }
+      const reason = options.errorMessage(error, REVIEW_PAGE_FAILED);
+      pageFailures.set(path, reason);
+      card?.querySelector(`[data-review-page="${path}"]`)?.append(pageFailedNode(reason));
+      options.setStatus(reason, 'error');
+    }).catch(() => { /* A repaint that failed leaves the card as it was. */ });
+  }
+
+  function pageFailedNode(reason: string): HTMLElement {
+    const failed = el('span', 'review-page-failed', reason);
+    failed.setAttribute('role', 'alert');
+    return failed;
+  }
+
+  /**
+   * How much of a list the part shows, and 显示更多 reading the next page of it (Issue #1592), or nothing for a list
+   * already whole. A failed page is said beside the control, and the control stays for another try.
+   */
+  function partPaging(workspace: ReviewWorkspaceProjection, path: string, title: string, note?: string): HTMLElement | null {
+    const meta = workspace.listPages?.[path];
+    if (meta === undefined || meta.nextOrdinal === null) return null;
+    const row = el('p', 'review-part-paging');
+    row.dataset['reviewPage'] = path;
+    row.append(el('span', undefined, `${reviewShownLine(meta.shown, meta.total)}${note ?? ''}`));
+    const more = el('button', 'secondary', REVIEW_PART_MORE);
+    more.type = 'button';
+    more.dataset['reviewAction'] = 'more-part';
+    more.setAttribute('aria-label', reviewPartMoreName(title));
+    more.disabled = pagesReading.has(path);
+    holdForWork(more);
+    more.addEventListener('click', () => readPartPage(path, `[data-review-part-path="${path}"]`));
+    row.append(more);
+    const failure = pageFailures.get(path);
+    if (failure !== undefined) row.append(pageFailedNode(failure));
+    return row;
+  }
+
+  /**
+   * A refused read leaves the last workspace on screen, never as if it were current (Issue #1592): the card carries the
+   * reason until a read succeeds, through every repaint. The status bar and the card's alert hear it only when the words change.
+   */
+  let readFailure: string | null = null;
+  let rereadPressed = false;
+  function readFailedNote(reason: string): HTMLElement {
+    const note = el('p', 'review-read-failed attention-note', reviewReadFailedLine(reason));
+    note.setAttribute('role', 'alert');
+    return note;
+  }
+  function markReadFailed(reason: string): void {
+    // The editor's own 重新读取 hears its answer even when the words are the same as before.
+    const changed = readFailure !== reason || rereadPressed;
+    rereadPressed = false;
+    readFailure = reason;
+    if (changed) options.setStatus(reason, 'error');
+    if (card === undefined || card.dataset['reviewState'] === 'unavailable') return;
+    card.dataset['reviewRead'] = 'failed';
+    const earlier = card.querySelector('.review-read-failed');
+    if (earlier !== null && !changed) return;
+    if (earlier !== null) earlier.replaceWith(readFailedNote(reason));
+    else card.prepend(readFailedNote(reason));
   }
 
   function show(next: ReviewWorkspaceProjection): void {
     const previous = projection;
     next = retainTaskPlanPages(next, previous);
     projection = next;
+    // A failed page of another Run's list is not this Run's to say.
+    if ((previous?.run?.reviewRunId ?? null) !== (next.run?.reviewRunId ?? null)) pageFailures.clear();
+    // A read that succeeds after refused ones ends the error they raised, silently, unless another has replaced it.
+    if (readFailure !== null) options.setStatus.settle(readFailure);
+    readFailure = null;
+    rereadPressed = false;
+    if (card !== undefined) {
+      delete card.dataset['reviewRead'];
+      card.querySelector('.review-read-failed')?.remove();
+    }
     // The drawer beside 审阅 states where the Run stands; it reads the plan again when that changes.
     if (previous?.run !== null && previous?.run !== undefined && previous.run.reviewRunId === next.run?.reviewRunId &&
         previous.run.state !== next.run.state) options.planChanged();
     if (query.reviewRunId === null && next.run !== null) query.reviewRunId = next.run.reviewRunId;
-    const key = stableKeyOf(next);
-    if (previous !== null && key === stableKey && card?.isConnected === true) {
-      updateProgress(next);
-    } else {
-      stableKey = key;
-      renderCard(next);
-    }
+    paintRead(previous, next);
     updateLive(previous, next);
     if (sheet.open) sheetUpdate();
     // A Run waiting to start once online is read again too (Issue #760, S74c), so 审阅 follows it into running.
     if (next.run?.state === 'running' || next.run?.state === 'waiting') schedulePoll();
+    if (rereadPending) {
+      rereadPending = false;
+      reportResult(options.setStatus, REVIEW_PART_REREAD);
+    }
+    // What looks for the card on screen waits for a held draw, and runs against it once drawn.
+    if (heldPaint) shownWhileHeld = true;
+    else afterShow(next);
+  }
+
+  /** The part of a read that looks for the card on screen: 查看任务's finding, the return's place, a sheet asked to open. */
+  function afterShow(next: ReviewWorkspaceProjection): void {
     followFocus(next);
     if (anchor !== null && card !== undefined) {
       // The card the editor left, where it stood; failing that (gone from these pages), the page's own position.
@@ -881,11 +1032,65 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
   }
 
+  /** A read on screen: its progress alone when nothing else changed, the whole card otherwise. */
+  function paintRead(previous: ReviewWorkspaceProjection | null, next: ReviewWorkspaceProjection): void {
+    const key = stableKeyOf(next);
+    if (previous !== null && key === stableKey && card?.isConnected === true) {
+      updateProgress(next);
+    } else {
+      stableKey = key;
+      renderCard(next);
+    }
+  }
+
+  /**
+   * A control the editor is pressing is never replaced under the pointer or the key (Issue #1592): while a primary-button press, or
+   * a Space key, that began on the card is down, every whole-card draw waits and the newest is drawn once, on the frame after the
+   * release — after that press's click — as the 批注栏 holds its layout. A release anywhere, a cancelled press and the window
+   * losing focus all end the hold.
+   */
+  let pressInCard = false;
+  let heldPaint = false;
+  let shownWhileHeld = false;
+  const pressCard = (event: PointerEvent): void => {
+    if (event.button === 0 && card !== undefined && card.contains(event.target as Node | null)) pressInCard = true;
+  };
+  const keyCard = (event: KeyboardEvent): void => {
+    const target = event.target as HTMLElement | null;
+    if (event.key === ' ' && !event.repeat && card !== undefined && card.contains(target) && target?.matches('button, summary, [role="button"]') === true) pressInCard = true;
+  };
+  const keyRelease = (event: KeyboardEvent): void => { if (event.key === ' ') releaseCard(); };
+  const releaseCard = (): void => {
+    if (!pressInCard) return;
+    pressInCard = false;
+    if (!heldPaint) return;
+    window.requestAnimationFrame(() => {
+      if (destroyed || pressInCard || !heldPaint || projection === null) return;
+      heldPaint = false;
+      renderCard(projection);
+      if (shownWhileHeld) { shownWhileHeld = false; afterShow(projection); }
+    });
+  };
+  host.addEventListener('pointerdown', pressCard, true);
+  host.addEventListener('keydown', keyCard, true);
+  document.addEventListener('pointerup', releaseCard, true);
+  document.addEventListener('pointercancel', releaseCard, true);
+  document.addEventListener('keyup', keyRelease, true);
+  window.addEventListener('blur', releaseCard);
+
   function renderUnavailable(error: unknown): void {
     const unavailable = el('section', 'review-workspace-card attention-note');
     unavailable.dataset['reviewState'] = 'unavailable';
     unavailable.append(el('h3', undefined, REVIEW_CARD_HEADING), el('p', undefined, options.errorMessage(error, REVIEW_WORKSPACE_UNAVAILABLE)));
+    // The service may answer again (Issue #1592): one way to ask, keeping focus on it while the answer is still a refusal.
+    const reread = el('button', 'secondary', REVIEW_REREAD);
+    reread.type = 'button';
+    reread.dataset['reviewAction'] = 'reread';
+    reread.addEventListener('click', () => { reread.disabled = true; rereadPressed = true; refresh(true); });
+    unavailable.append(reread);
+    const refocus = document.activeElement instanceof HTMLElement && document.activeElement.dataset['reviewAction'] === 'reread';
     swapCard(unavailable);
+    if (refocus) reread.focus();
   }
 
   function swapCard(next: HTMLElement): void {
@@ -941,6 +1146,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   function renderCard(next: ReviewWorkspaceProjection): void {
+    if (pressInCard && card?.isConnected === true) { heldPaint = true; return; }
     paintCard(next);
     if (pendingFocus !== null && !working) applyPendingFocus();
   }
@@ -965,6 +1171,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         }
       : null;
     const node = el('section', 'review-workspace-card');
+    if (readFailure !== null) {
+      node.dataset['reviewRead'] = 'failed';
+      node.append(readFailedNote(readFailure));
+    }
     const run = next.run;
     node.dataset['reviewState'] = run === null ? 'empty' : run.state;
     if (run !== null) {
@@ -1271,7 +1481,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         const exclusions = el('ul');
         exclusions.setAttribute('aria-label', '未生成批注');
         for (const exclusion of run.localCheck.excluded) exclusions.append(el('li', undefined, `${exclusion.reason}${technicalWords(` · ${exclusion.candidateId}`)}`));
+        exclusions.dataset['reviewPartPath'] = REPORT_PAGE_PATHS.localExcluded;
+        exclusions.tabIndex = -1;
         local.append(el('strong', undefined, '未生成批注'), exclusions);
+        const paging = partPaging(next, REPORT_PAGE_PATHS.localExcluded, '未生成批注');
+        if (paging !== null) local.append(paging);
       }
       section.append(local);
       if (run.authorization !== null && (run.state === 'running' || run.canContinue)) {
@@ -1315,7 +1529,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (run.historicalMarker !== null) section.append(historicalMarker(run.historicalMarker, run));
       if (run.influence.length > 0) section.append(renderInfluence(run));
       if (!leading) section.append(renderResults(next, run));
-      section.append(renderReport(run));
+      section.append(renderReport(next, run));
     }
     section.append(options.technicalDetails(
       'review-facts',
@@ -1554,24 +1768,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const more = el('button', 'secondary', taskPageMore('章节', chapterPage.shown, chapterPage.total));
       more.type = 'button';
       more.dataset['reviewFilter'] = 'chapter-page';
+      more.disabled = pagesReading.has(CHAPTER_PAGE_PATH);
       holdForWork(more);
-      more.addEventListener('click', () => {
-        const current = projection;
-        if (current === null) return;
-        more.disabled = true;
-        void readChapterPage(current).then((loaded) => {
-          if (destroyed || projection !== current) return;
-          projection = loaded;
-          stableKey = stableKeyOf(loaded);
-          renderCard(loaded);
-          if (card?.contains(document.activeElement) !== true) card?.querySelector<HTMLElement>('[data-review-filter="chapter"]')?.focus();
-        }).catch((error: unknown) => {
-          if (destroyed || projection !== current) return;
-          more.disabled = false;
-          options.setStatus(options.errorMessage(error, TASK_PAGE_FAILED), 'error');
-        });
-      });
-      filters.append(more);
+      more.addEventListener('click', () => readPartPage(CHAPTER_PAGE_PATH, '[data-review-filter="chapter"]'));
+      // The control is found by its list, as every list's 显示更多 is.
+      const holder = el('span', 'review-chapter-page');
+      holder.dataset['reviewPage'] = CHAPTER_PAGE_PATH;
+      holder.append(more);
+      const failure = pageFailures.get(CHAPTER_PAGE_PATH);
+      if (failure !== undefined) holder.append(pageFailedNode(failure));
+      filters.append(holder);
     }
     if (query.filters.categoryId !== null) {
       const all = actionButton('all-categories', 'quiet', () => { query.filters.categoryId = null; query.pages = 1; refresh(true); }, '全部类别');
@@ -2098,7 +2304,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   // ---- the 审阅报告 ----------------------------------------------------------------------------------
 
-  function renderReport(run: ReviewRunProjection): HTMLElement {
+  function renderReport(next: ReviewWorkspaceProjection, run: ReviewRunProjection): HTMLElement {
     const section = el('section', 'review-report');
     const modelLabel = run.report?.record.run.modelLabel ?? run.modelLabel;
     if (modelLabel) section.append(el('p', 'review-report-model', modelLabel));
@@ -2131,7 +2337,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     holdForWork(...actions.querySelectorAll('button'));
     section.append(actions);
     if (report !== null) section.append(exportSlot);
-    if (run.report !== null) section.append(renderReportRecord(run.report, run.categories));
+    if (run.report !== null) section.append(renderReportRecord(next, run.report, run.categories));
     return section;
   }
 
@@ -2179,13 +2385,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     return menu;
   }
 
-  function renderReportRecord(report: ReviewReportProjection, categories: ReviewRunProjection['categories']): HTMLElement {
+  function renderReportRecord(next: ReviewWorkspaceProjection, report: ReviewReportProjection, categories: ReviewRunProjection['categories']): HTMLElement {
     const record = report.record;
     const body = el('div', 'review-report-record');
     const part = (name: string, title: string, ...children: HTMLElement[]): HTMLElement => {
       const node = el('section', 'review-report-part');
       node.dataset['reportPart'] = name;
       node.append(el('h6', undefined, title), ...children);
+      return node;
+    };
+    // A list carried in part says so and reads on (Issue #1592); its part takes focus once the list is whole.
+    const paged = (node: HTMLElement, path: string, title: string, note?: string): HTMLElement => {
+      node.dataset['reviewPartPath'] = path;
+      node.tabIndex = -1;
+      const paging = partPaging(next, path, title, note);
+      if (paging !== null) node.append(paging);
       return node;
     };
     const table = el('table', 'review-report-table');
@@ -2249,7 +2463,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         statsBody.append(tr);
       }
       stats.append(statsHead, statsBody);
-      derived.push(part('statistics', record.statistics.title, stats));
+      derived.push(paged(part('statistics', record.statistics.title, stats), REPORT_PAGE_PATHS.statistics, record.statistics.title, REVIEW_STATISTICS_TOTALS_WHOLE));
     }
     if (record.findings !== undefined) {
       const list = el('ol', 'review-report-list review-report-findings');
@@ -2263,7 +2477,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const omitted = reviewReportOmittedLine(record.findings.omitted);
       const findings = part('findings', record.findings.title, list);
       if (omitted !== null) findings.querySelector('h6')?.append(' · ', el('span', undefined, omitted));
-      derived.push(findings);
+      derived.push(paged(findings, REPORT_PAGE_PATHS.findings, record.findings.title));
     }
     const appendix = el('ul', 'review-report-list');
     appendix.append(el('li', undefined, reviewReportConfigurationLine(record.appendix.configuration.version)));
@@ -2274,7 +2488,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       ...(record.run.usage === undefined ? [] : [el('p', 'review-report-usage', `本次共进行了 ${record.run.usage.requests} 次模型调用。`)]),
       ...(record.synthesis === undefined ? [] : [reviewSynthesisNode(record.synthesis, record.synthesis.modelLabel ?? record.run.modelLabel)]),
       overview,
-      part('must-items', record.mustItems.title, must),
+      paged(part('must-items', record.mustItems.title, must), REPORT_PAGE_PATHS.mustItems, record.mustItems.title),
       ...derived,
       part('category-summaries', record.categorySummaries.title, summaries),
       part('appendix', record.appendix.title, appendix, options.technicalDetails(
@@ -3522,6 +3736,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (toastShown) hideToast();
       unregisterCommands?.();
       document.removeEventListener('keydown', escapeFromPage);
+      host.removeEventListener('pointerdown', pressCard, true);
+      host.removeEventListener('keydown', keyCard, true);
+      document.removeEventListener('pointerup', releaseCard, true);
+      document.removeEventListener('pointercancel', releaseCard, true);
+      document.removeEventListener('keyup', keyRelease, true);
+      window.removeEventListener('blur', releaseCard);
       generation += 1;
       clearFactual(true);
       clearPoll();
