@@ -1,3 +1,4 @@
+import { styleInput } from './components/controls.js';
 import type { PreferencesRendererApi } from '../shared/preferences.js';
 import type { KeyboardBindings } from '../shared/preferences.js';
 import type { RendererApi } from '../shared/protocol.js';
@@ -326,7 +327,7 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
   actions.append(resetAll);
   const motion = el('label', 'preference-toggle');
   const reduce = el('input');
-  reduce.type = 'checkbox';
+  reduce.type = 'checkbox'; styleInput(reduce);
   reduce.checked = reducedMotion();
   reduce.dataset['reducedMotion'] = 'true';
   reduce.addEventListener('change', () => chooseReducedMotion(reduce.checked));

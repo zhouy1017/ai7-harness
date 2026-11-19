@@ -596,11 +596,11 @@ editing persistence
 │  ├─ 正在写入修订日志…
 │  ├─ 已写入修订日志
 │  └─ Editing Protection Mode
-│     ├─ 本地写入中断
-│     ├─ Last Durable Edit Boundary
-│     ├─ At-risk Edit Extent
+│     ├─ 保存中断 · 更改尚未保存 · 处理…
+│     ├─ 保护对话框：最近保存时间（Last Durable Edit Boundary）
+│     ├─ 保护对话框：受影响内容（At-risk Edit Extent）
 │     ├─ Bounded Edit Safety Buffer
-│     ├─ 自动重试 / 查看保护选项
+│     ├─ 保护对话框：自动重试 / 重试写入 / 复制受影响内容
 │     └─ Protective Read-only State at safety limit
 ├─ milestone relation
 │  ├─ 自里程碑版本「{标签}」后有修改

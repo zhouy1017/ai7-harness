@@ -85,6 +85,7 @@ function importFormHarness() {
   const context = createContext({
     document: { createElement: (tag: string) => new FormElement(tag) },
     technicalWords: (_technical: string, ordinary = '') => ordinary,
+    styleInput: (input: FormElement) => { input.className = 'ui-input'; return input; },
     surface: {
       api: {
         previewImportedExemplar: async () => preview,
