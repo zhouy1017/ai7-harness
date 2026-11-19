@@ -1099,13 +1099,13 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
    * resting pointer inside the card — findings arriving above 查看计划 must not walk it out from under the pointer — otherwise
    * the caller's own anchor (the focused card). Measured before the draw, put back once after it by one relative scroll; nothing
    * when it is off screen, gone, hidden or not the only control of its kind. The last input wins: a pointer move over the card
-   * arms the pointer's place, and leaving the card, the window losing focus, a key or the wheel disarm it until the next move.
+   * arms the pointer's place, and leaving the card, the window losing focus, a key or the wheel disarm it until the next move
+   * (not `pointerover`, which a still pointer receives whenever what lies under it changes).
    */
   let pointerAt: { x: number; y: number } | null = null;
   const trackPointer = (event: PointerEvent): void => { pointerAt = { x: event.clientX, y: event.clientY }; };
   const leavePointer = (): void => { pointerAt = null; };
   host.addEventListener('pointermove', trackPointer, true);
-  host.addEventListener('pointerover', trackPointer, true);
   host.addEventListener('pointerleave', leavePointer);
   document.addEventListener('keydown', leavePointer, true);
   document.addEventListener('wheel', leavePointer, true);
@@ -1132,15 +1132,22 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   /**
    * While a Run is running, its progress never gets shorter under the editor (#1526): at the page's end a shorter list would pull
-   * the page down by the browser's clamp, which no scroll can put back. It keeps its tallest height until the Run stops running.
+   * the page down by the browser's clamp, which no scroll can put back. It keeps its tallest height at its width until the Run
+   * stops running; a new width (the Task Drawer opened or closed) starts again from the list's own height. The floor is set
+   * through the style object: the page's policy refuses inline style attributes.
    */
-  let progressFloor: { runId: string; height: number } | null = null;
+  let progressFloor: { runId: string; width: number; height: number } | null = null;
   function measureProgress(run: ReviewRunProjection | null): void {
     if (run === null || run.state !== 'running') { progressFloor = null; return; }
-    const list = card?.dataset['reviewRunId'] === run.reviewRunId ? card.querySelector('ol.review-progress') : null;
-    const height = list?.getBoundingClientRect().height ?? 0;
-    const floor = progressFloor?.runId === run.reviewRunId ? progressFloor.height : 0;
-    progressFloor = { runId: run.reviewRunId, height: Math.max(floor, height) };
+    const list = card?.dataset['reviewRunId'] === run.reviewRunId ? card.querySelector<HTMLElement>('ol.review-progress') : null;
+    if (list === null) { if (progressFloor?.runId !== run.reviewRunId) progressFloor = null; return; }
+    // The list's own height, read from its rows (they stand at its top) rather than by taking its floor away, which at the page's
+    // end would let the browser clamp the scroll before the new list is in.
+    const { top, width } = list.getBoundingClientRect();
+    const last = list.lastElementChild?.getBoundingClientRect();
+    const height = last === undefined ? 0 : last.bottom - top;
+    const kept = progressFloor?.runId === run.reviewRunId && Math.abs(progressFloor.width - width) < 1 ? progressFloor.height : 0;
+    progressFloor = { runId: run.reviewRunId, width, height: Math.max(kept, height) };
   }
 
   function renderUnavailable(error: unknown): void {
@@ -1750,7 +1757,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   function progressList(run: ReviewRunProjection): HTMLElement {
     const list = el('ol', 'review-progress');
-    if (run.state === 'running' && progressFloor?.runId === run.reviewRunId && progressFloor.height > 0) list.setAttribute('style', `min-height: ${progressFloor.height}px`);
+    if (run.state === 'running' && progressFloor?.runId === run.reviewRunId && progressFloor.height > 0) list.style.minHeight = `${progressFloor.height}px`;
     const now = Date.now();
     for (const category of run.categories) {
       const item = el('li');
@@ -1862,7 +1869,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       details.append(el('summary', '', reviewExcludedHeading(run.excludedTotal ?? 0)));
       for (const finding of run.excluded ?? []) {
         const item = el('div', 'review-excluded-entry');
-        item.setAttribute('style', 'overflow-wrap: anywhere');
+        item.style.overflowWrap = 'anywhere';
         item.append(el('strong', undefined, `${finding.categoryLabel} · ${finding.reasonLabel}${technicalWords(` · 单元 ${finding.unitOrdinal}${finding.textPart === undefined ? '' : ` · 原文 ${finding.textPart.index}/${finding.textPart.total}`} · ${finding.reasonCode}`)}`),
           el('blockquote', undefined, finding.text));
         details.append(item);
@@ -3823,7 +3830,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       document.removeEventListener('keydown', escapeFromPage);
       host.removeEventListener('pointerdown', pressCard, true);
       host.removeEventListener('pointermove', trackPointer, true);
-      host.removeEventListener('pointerover', trackPointer, true);
       host.removeEventListener('pointerleave', leavePointer);
       document.removeEventListener('keydown', leavePointer, true);
       document.removeEventListener('wheel', leavePointer, true);

@@ -1862,6 +1862,19 @@ async function main() {
     await waitFor(renderer, `window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}}).then((plan)=>plan.runControl?.activity?.currentUnitOrdinal===1)`, 'review-controls-first-unit');
     const reviewStarted = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}})`);
 
+    at('review-controls-progress-floor');
+    // #1526: while the Run runs, the page's own polls draw its progress list again and it keeps its height — set through the style
+    // object, which the page's policy admits (an inline style attribute it refuses) — so 查看计划 stays where it stands at the end.
+    await waitFor(renderer, `(() => { const list=document.querySelector('.review-workspace-card[data-review-state="running"] ol.review-progress'); if(!list||list.style.minHeight==='')return false;
+      const shown=getComputedStyle(list).minHeight; return shown===list.style.minHeight && shown!=='0px'; })()`, 'review-controls-progress-floor-applied', 30_000);
+    const progressPlace = await renderer.evaluate(`new Promise(resolve => { const page=document.scrollingElement; page.scrollTop=page.scrollHeight; requestAnimationFrame(() => {
+      window.__ai7ProgressProbe=document.querySelector('ol.review-progress'); resolve({ top: document.querySelector('[data-review-action="view-plan"]').getBoundingClientRect().top,
+      end: Math.abs(page.scrollTop + page.clientHeight - page.scrollHeight) < 1 }); }); })`);
+    requireJourney(progressPlace?.end === true, 'review-controls-progress-page-end', progressPlace);
+    await waitFor(renderer, `document.querySelector('ol.review-progress')!==window.__ai7ProgressProbe && document.querySelector('.review-workspace-card')?.dataset.reviewState==='running'`, 'review-controls-progress-redrawn', 30_000);
+    const progressTop = await renderer.evaluate(`document.querySelector('[data-review-action="view-plan"]').getBoundingClientRect().top`);
+    requireJourney(Math.abs(progressTop - progressPlace.top) < 1, 'review-controls-progress-kept-place', { before: progressPlace.top, after: progressTop });
+
     at('review-controls-pause-resume');
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='review-run'||drawer.dataset.taskPlanRef!==${JSON.stringify(reviewRef)})return false; const button=drawer.querySelector('[data-task-drawer-control="pause"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'review-controls-pause-ready');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'review-controls-pause');
@@ -1874,6 +1887,8 @@ async function main() {
       pausedWorkspace.run?.categories?.[1]?.state==='waiting', 'review-controls-checkpoint');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'review-controls-resume');
     await waitFor(renderer, `window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}}).then((plan)=>plan.runControl?.activity?.currentUnitOrdinal===2 && plan.runControl.runRecordId===${JSON.stringify(reviewStarted.runControl.runRecordId)})`, 'review-controls-same-run');
+    // The drawer's bar fills by the parts read (its width set through the style object, as the page's policy requires).
+    await waitFor(renderer, `(() => { const fill=document.querySelector('#task-drawer .task-plan-progress-fill'); return !!fill && Number.parseFloat(getComputedStyle(fill).width) > 0; })()`, 'review-controls-progress-fill', 30_000);
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='review-run'||drawer.dataset.taskPlanRef!==${JSON.stringify(reviewRef)})return false; const button=drawer.querySelector('[data-task-drawer-control="cancel-run"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'review-controls-cancel-ready');
 
     at('review-controls-cancel-impact');

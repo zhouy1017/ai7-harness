@@ -431,7 +431,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-influence-materials li[data-withdrawn="true"] { color: var(--status-attention); }
 .learning-lineage-signals, .learning-lineage-tasks { margin: 0; padding-left: 1.2rem; }
 .learning-lineage-signals li, .learning-lineage-tasks li { overflow-wrap: anywhere; }
-.review-progress { display: grid; gap: .45rem; margin: .55rem 0 0; padding-left: 1.4rem; }
+.review-progress { display: grid; align-content: start; gap: .45rem; margin: .55rem 0 0; padding-left: 1.4rem; }
 .review-progress > li { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
 .review-progress-label { font-weight: 800; }
 .review-progress-detail { flex-basis: 100%; color: var(--text-subdued); font-size: .9rem; }

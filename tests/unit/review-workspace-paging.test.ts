@@ -637,20 +637,19 @@ describe('the control under a resting pointer stays where it stands when the car
    * its own min-height) and 600 px more. The window is 800 px tall and the scroll is clamped to [0, page − window], also when the
    * page gets shorter. `under` names what lies under the pointer's last position.
    */
-  async function laidOut(body: (view: ReturnType<typeof mount>, state: Stub, scroller: { scrollTop: number }, under: (find: () => MiniElement | null) => void) => Promise<void>): Promise<void> {
+  type Layout = { scrollTop: number; width: number };
+  async function laidOut(body: (view: ReturnType<typeof mount>, state: Stub, scroller: Layout, under: (find: () => MiniElement | null) => void) => Promise<void>): Promise<void> {
     const root = miniDocument.body;
-    const progressHeight = (): number => {
-      const list = root.querySelector('ol.review-progress');
-      const natural = list?.querySelector('li')?.dataset['reviewProgress'] === '7/7' ? 54 : 100;
-      return Math.max(natural, Number(/min-height: (\d+)px/u.exec(list?.getAttribute('style') ?? '')?.[1] ?? 0));
-    };
+    // The list's rows: 100 px at 600 px wide, 130 px when the page is narrower and they wrap; 54 px once the last part is read.
+    const natural = (): number => root.querySelector('ol.review-progress li')?.dataset['reviewProgress'] === '7/7' ? 54 : scroller.width < 600 ? 130 : 100;
+    const progressHeight = (): number => Math.max(natural(), Number.parseFloat(root.querySelector('ol.review-progress')?.style['minHeight'] || '0'));
     const findings = (): MiniElement[] => root.querySelectorAll('article.review-finding');
     // A failed read's note at the card's top pushes everything down by 46 px.
     const noted = (): number => root.querySelector('.review-read-failed') === null ? 0 : 46;
     const planTop = (): number => 400 + 300 * findings().length + noted();
     const max = (): number => Math.max(0, planTop() + 34 + progressHeight() + 600 - 800);
     let stored = 0;
-    const scroller = { get scrollTop() { return Math.min(stored, max()); }, set scrollTop(value: number) { stored = Math.max(0, Math.min(value, max())); } };
+    const scroller = { width: 600, get scrollTop() { return Math.min(stored, max()); }, set scrollTop(value: number) { stored = Math.max(0, Math.min(value, max())); } };
     const empty = Object.getOwnPropertyDescriptor(MiniElement.prototype, 'getBoundingClientRect')!;
     let pointed: () => MiniElement | null = () => null;
     Object.defineProperty(miniDocument, 'scrollingElement', { configurable: true, value: scroller });
@@ -659,10 +658,12 @@ describe('the control under a resting pointer stays where it stands when the car
     Object.defineProperty(MiniElement.prototype, 'getBoundingClientRect', { configurable: true, value(this: MiniElement) {
       const article = this.closest('article.review-finding');
       const list = this.tagName === 'OL' && this.className === 'review-progress';
-      const height = list ? progressHeight() : 34;
-      const place = article !== null ? 100 + noted() + 200 * findings().indexOf(article) : list ? planTop() + 34 : planTop();
+      const row = this.parentElement?.tagName === 'OL' && this.parentElement.className === 'review-progress';
+      const height = list ? progressHeight() : row ? natural() : 34;
+      const place = article !== null ? 100 + noted() + 200 * findings().indexOf(article) : list || row ? planTop() + 34 : planTop();
       const top = place - scroller.scrollTop;
-      return { top, bottom: top + height, left: 0, right: 80, width: 80, height };
+      const width = list ? scroller.width : 80;
+      return { top, bottom: top + height, left: 0, right: width, width, height };
     } });
     const state: Stub = { full: reading([]), budget: 4 * 1024 * 1024, opened: [] };
     try { await body(mount(state), state, scroller, (find) => { pointed = find; }); } finally {
@@ -720,6 +721,14 @@ describe('the control under a resting pointer stays where it stands when the car
       state.full = reading(['f-1', 'f-2', 'f-3']);
       view.surface.refresh(); await flush();
       expect(scroller.scrollTop).toBe(300);
+      // A still pointer receives pointerover when what lies under it changes: that is no move, and arms nothing.
+      miniDocument.body.dispatchEvent({ type: 'keydown', key: 'j' });
+      scroller.scrollTop = 900;
+      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(400);
+      viewPlan(view.root).dispatchEvent(Object.assign({ type: 'pointerover', bubbles: true }, { clientX: 300, clientY: 400 }));
+      state.full = reading(['f-1', 'f-2', 'f-3', 'f-4']);
+      view.surface.refresh(); await flush();
+      expect(scroller.scrollTop).toBe(900);
     });
   });
 
@@ -782,7 +791,8 @@ describe('the control under a resting pointer stays where it stands when the car
       view.surface.refresh(); await flush();
       scroller.scrollTop = 0;
       under(() => inFinding(view.root, 'f-1')); rest(inFinding(view.root, 'f-1'));
-      state.full = reading(['f-0', 'f-1', 'f-1']);
+      // After the draw f-1's control is the only one, 200 px lower: only its being one of two before the draw keeps the page still.
+      state.full = reading(['f-0', 'f-1']);
       view.surface.refresh(); await flush();
       expect(scroller.scrollTop).toBe(0);
     });
@@ -824,6 +834,34 @@ describe('the control under a resting pointer stays where it stands when the car
       expect(view.root.querySelector('.review-read-failed')).toBeNull();
       expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
       expect(scroller.scrollTop).toBe(200);
+    });
+  });
+
+  it('keeps the progress floor through a whole-card draw that arrives before any progress-only poll, at the page end', async () => {
+    await laidOut(async (view, state, scroller, under) => {
+      await flush();
+      scroller.scrollTop = 1e6;
+      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      const before = viewPlan(view.root).getBoundingClientRect().top;
+      state.full = reading(['f-1'], 7);
+      view.surface.refresh(); await flush();
+      expect(view.root.querySelector('ol.review-progress')!.style['minHeight']).toBe('100px');
+      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+    });
+  });
+
+  it('starts the progress floor again when the width of the list changes, as when the Task Drawer opens or closes', async () => {
+    await laidOut(async (view, state, scroller) => {
+      await flush();
+      const floor = (): string => view.root.querySelector('ol.review-progress')!.style['minHeight'] ?? '';
+      await poll();
+      expect(floor()).toBe('100px');
+      scroller.width = 400;
+      await poll();
+      expect(floor()).toBe('130px');
+      scroller.width = 600;
+      await poll();
+      expect(floor()).toBe('100px');
     });
   });
 });

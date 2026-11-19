@@ -70,7 +70,7 @@ export function createTaskStatusCard(options: { readonly viewPlan: () => void })
         progress.setAttribute('aria-valuemax', String(lines.progress.total));
         progress.setAttribute('aria-valuenow', String(lines.progress.settled));
         progress.setAttribute('aria-valuetext', lines.progress.text);
-        fill.setAttribute('style', `width: ${lines.progress.total === 0 ? 0 : lines.progress.settled / lines.progress.total * 100}%`);
+        fill.style.width = `${lines.progress.total === 0 ? 0 : lines.progress.settled / lines.progress.total * 100}%`;
       }
       setLine(stale, lines.stale);
       setLine(stage, lines.line);

@@ -2491,7 +2491,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     progress.setAttribute('aria-valuemax', String(activity.unitsTotal));
     progress.setAttribute('aria-valuenow', String(activity.unitsSettled));
-    progress.firstElementChild!.setAttribute('style', `width: ${activity.unitsTotal === 0 ? 0 : activity.unitsSettled / activity.unitsTotal * 100}%`);
+    (progress.firstElementChild as HTMLElement).style.width = `${activity.unitsTotal === 0 ? 0 : activity.unitsSettled / activity.unitsTotal * 100}%`;
     for (const node of section.querySelectorAll<HTMLElement>('[data-stage]')) {
       if (node.dataset['stage'] === activity.stage) node.setAttribute('aria-current', 'step');
       else node.removeAttribute('aria-current');

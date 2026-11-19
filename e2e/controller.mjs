@@ -1548,6 +1548,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'outcome-unconfirmed-completed',
     'outcome-unconfirmed-kept',
     'review-controls-prepare',
+    'review-controls-progress-floor',
     'review-controls-pause-resume',
     'review-controls-cancel-impact',
     'review-controls-redo-plan',
