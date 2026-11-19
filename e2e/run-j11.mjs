@@ -2332,7 +2332,7 @@ async function main() {
     // The regenerated report waits beside the version's own (Issue #1407): every 评语, the 总评 with its next step, and the
     // strengths and problems; nothing is written into the version yet.
     const waiting = await readEvaluation(renderer, (page) => page.rewrite?.proposal !== null && page.rewrite?.proposal !== undefined, 'evaluation-rewrite-proposal-read');
-    requireJourney(waiting.rewrite.task === '按我的修改重新生成 · 版本 · 已完成' && waiting.rewrite.proposal.current === 'true' &&
+    requireJourney(waiting.rewrite.task === '按我的修改重新生成 · 已完成' && waiting.rewrite.proposal.current === 'true' &&
       waiting.rewrite.proposal.line === 'AI7 按你第 2 次保存的修改重新生成了评估报告（评语、总评、优点与问题），等你决定：采用后才记入这一版，分数与结论不变。' &&
       // How much it read, and each 评语's notes beside it (EVAL-006); nothing set aside.
       waiting.rewrite.proposal.reading === 'AI7 这次重新生成读了全书。' && waiting.rewrite.proposal.withheld.length === 0 &&

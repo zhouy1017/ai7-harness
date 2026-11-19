@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error Plain build tooling intentionally has no TypeScript declarations.
 import { findTerms, scanSource, scanTargets } from '../../tools/words-report.mjs';
 import { RUN_QUEUED_LABEL, RUN_STATE_LABELS } from '../../src/service/analysis/run-state.js';
-import { REVIEW_CATEGORY_PLACE_WAIT_LABEL } from '../../src/service/review/review-run-state.js';
 import { BACKGROUND_OUTCOME_UNKNOWN, BACKGROUND_PAUSED, BACKGROUND_PLACE_BUSY } from '../../src/service/background-analysis-enrollments.js';
 import { OUTCOME_UNKNOWN_NO_REDO, RUN_CONTROL_REDO_NOT_BEGUN_REASON, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
 import { BOOK_DELIVERY_PACKAGE_WORDS } from '../../src/service/book-delivery-packages.js';
@@ -34,7 +33,7 @@ const DEVELOPER_SENTENCES: ReadonlyArray<{ readonly file: string; readonly text:
 /** Service-authored sentences shown as they are, projected on every read: none is stored in a record, digested or sent to a model. */
 const SERVICE_SENTENCES: Readonly<Record<string, string>> = {
   ...Object.fromEntries(Object.entries(RUN_STATE_LABELS).map(([state, label]) => [`RUN_STATE_LABELS.${state}`, label])),
-  RUN_QUEUED_LABEL, REVIEW_CATEGORY_PLACE_WAIT_LABEL, BACKGROUND_PAUSED, BACKGROUND_OUTCOME_UNKNOWN, BACKGROUND_PLACE_BUSY,
+  RUN_QUEUED_LABEL, BACKGROUND_PAUSED, BACKGROUND_OUTCOME_UNKNOWN, BACKGROUND_PLACE_BUSY,
   OUTCOME_UNKNOWN_NO_REDO, RUN_CONTROL_REDO_REASON, RUN_CONTROL_REDO_NOT_BEGUN_REASON,
   ...Object.fromEntries(Object.entries(BOOK_DELIVERY_PACKAGE_WORDS).map(([key, words]) => [`BOOK_DELIVERY_PACKAGE_WORDS.${key}`, String(words)])),
 };
