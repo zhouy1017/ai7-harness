@@ -44,6 +44,7 @@ export function mountHouseWordList(options: {
   let loadFailed = false;
   /** Where the editor's place goes after the next paint: every paint draws the panel anew, so the control they were on is gone. */
   let pendingFocus: string | null = null;
+  let historyOpen = false;
   const EDIT = '[data-house-action="edit"]'; const ADD = '[data-house-action="add"]'; const SAVE = '[data-house-action="save"]';
   const rowField = (row: number): string => `[data-house-entry-row="${row}"] [data-house-field="literal"]`;
   const button = (label: string, name: string, run: () => void, disabled = false, tone: Tone = 'secondary'): HTMLButtonElement => {
@@ -138,7 +139,7 @@ export function mountHouseWordList(options: {
     if (current.length > 0) panel.append(head);
     panel.append(list, el('p', current.length === 0 ? '' : houseCountLine(current.length, draftOffset + 1, last), 'field-note'));
     if (current.length > HOUSE_PAGE_SIZE) {
-      panel.append(pager('draft', () => { draftOffset -= HOUSE_PAGE_SIZE; pendingFocus = '[data-house-action="draft-previous"]'; paint(); }, () => { draftOffset += HOUSE_PAGE_SIZE; pendingFocus = '[data-house-action="draft-next"]'; paint(); },
+      panel.append(pager('draft', () => { draftOffset -= HOUSE_PAGE_SIZE; pendingFocus = draftOffset === 0 ? '[data-house-action="draft-next"]' : '[data-house-action="draft-previous"]'; paint(); }, () => { draftOffset += HOUSE_PAGE_SIZE; pendingFocus = draftOffset + HOUSE_PAGE_SIZE >= current.length ? '[data-house-action="draft-previous"]' : '[data-house-action="draft-next"]'; paint(); },
         draftOffset === 0, draftOffset + HOUSE_PAGE_SIZE >= current.length));
     }
     panel.append(buttons(button(HOUSE_ADD, 'add', () => {
@@ -205,6 +206,8 @@ export function mountHouseWordList(options: {
     const currentId = page.current?.versionId; const earlier = page.history.filter((version) => version.pin.versionId !== currentId);
     if (earlier.length > 0 || request.historyOffset > 0 || page.nextHistoryOffset !== null) {
       const history = el('details', undefined, 'house-history'); history.append(el('summary', HOUSE_HISTORY_SUMMARY));
+      // Every paint draws the fold anew: it stays as the editor left it.
+      history.open = historyOpen; history.addEventListener('toggle', () => { historyOpen = history.open; });
       for (const version of earlier) {
         history.append(button(houseHistoryLabel(version), `history-${version.ordinal}`, () => { pendingFocus = '[data-house-action="current"]'; void run(() => inspect({ ...request, versionId: version.pin.versionId, entryOffset: 0 })); }, false, 'quiet'));
       }
@@ -231,7 +234,9 @@ export function mountHouseWordList(options: {
       const usable = (node: HTMLElement | null): node is HTMLButtonElement => node !== null && (node as HTMLButtonElement).disabled !== true;
       const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('button')).filter((node) => !node.disabled);
       const target = root.querySelector<HTMLElement>(pendingFocus);
-      (usable(target) || target?.tagName !== 'BUTTON' && target !== null ? target : buttons.find((node) => node.className.includes('primary')) ?? buttons[0])?.focus();
+      // A pager at its boundary hands the place to its other button before the page's primary action: one more Enter must not save.
+      const other = root.querySelector<HTMLElement>(pendingFocus.replace(/-(next|previous)"\]$/u, (_match, way: string) => `-${way === 'next' ? 'previous' : 'next'}"]`));
+      (usable(target) || target?.tagName !== 'BUTTON' && target !== null ? target : usable(other) && other !== target ? other : buttons.find((node) => node.className.includes('primary')) ?? buttons[0])?.focus();
       pendingFocus = null;
     }
   };

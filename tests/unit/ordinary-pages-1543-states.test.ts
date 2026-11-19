@@ -12,7 +12,7 @@ import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProject
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 
 // Issue #1543 review: the three states of 本社词表's page, where focus goes after each step, every sentence the word list and the
-// in-place dimension flow say in ordinary mode, a form that survives the card's redraws, and 启用 / 停用 on the card itself.
+// in-place dimension flow say in ordinary mode, a form kept per Book, and 停用 on the card itself.
 
 let uninstall: () => void;
 beforeEach(() => { uninstall = installMiniDom(); setTechnicalLayerVisible(false); });
@@ -133,6 +133,41 @@ describe('本社词表: reading, failed and nothing saved are three states', () 
   });
 });
 
+describe('本社词表: the fold and the pager keep the place of the editor', () => {
+  it('keeps the history fold open across a paint and hands a pager at its boundary to its other button, never to 保存', async () => {
+    const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const owner = new HouseWordLists(db);
+    owner.save({ expectedCurrent: null, sourceKind: 'editor-entry', entries: Array.from({ length: 53 }, (_, index) => entry(`词${index}`)) });
+    const first = owner.inspect().current!;
+    owner.save({ expectedCurrent: { versionId: first.versionId, digest: first.digest }, sourceKind: 'editor-entry', entries: [entry('词0')] });
+    const root = miniDocument.createElement('div'); miniDocument.body.append(root);
+    const panel = mountHouseWordList({ root: root as unknown as HTMLElement, api: { inspectHouseWordList: async (value) => owner.inspect(value), saveHouseWordList: async (value) => owner.save(value) }, setStatus: vi.fn() });
+    try {
+      await panel.load();
+      const fold = q(root, 'details.house-history') ?? qa(root, 'details').find((node) => node.className.includes('house-history'))!;
+      fold.open = true; fold.dispatchEvent({ type: 'toggle' });
+      const row = qa(root, 'button').find((node) => /^history-[0-9]+$/.test(node.dataset['houseAction'] ?? ''))!;
+      row.click(); await settle();
+      expect(qa(root, 'details').find((node) => node.className.includes('house-history'))!.open).toBe(true);
+      expect(active()).toBe(q(root, '[data-house-action="current"]'));
+      (q(root, '[data-house-action="current"]') as MiniElement).click(); await settle();
+      (q(root, '[data-house-action="edit"]') as MiniElement).click(); await settle();
+    } finally { panel.destroy(); }
+    // A draft of more than one page: 下一页 onto the last page leaves focus on 上一页, so one more Enter does not save.
+    const long = miniDocument.createElement('div'); miniDocument.body.append(long);
+    owner.save({ expectedCurrent: { versionId: owner.inspect().current!.versionId, digest: owner.inspect().current!.digest }, sourceKind: 'editor-entry', entries: Array.from({ length: 53 }, (_, index) => entry(`新词${index}`)) });
+    const second = mountHouseWordList({ root: long as unknown as HTMLElement, api: { inspectHouseWordList: async (value) => owner.inspect(value), saveHouseWordList: async (value) => owner.save(value) }, setStatus: vi.fn() });
+    try {
+      await second.load();
+      (q(long, '[data-house-action="edit"]') as MiniElement).click(); await settle();
+      (q(long, '[data-house-action="draft-next"]') as MiniElement).click();
+      expect(active()).toBe(q(long, '[data-house-action="draft-previous"]'));
+      (q(long, '[data-house-action="draft-previous"]') as MiniElement).click();
+      expect(active()).toBe(q(long, '[data-house-action="draft-next"]'));
+    } finally { second.destroy(); db.close(); }
+  });
+});
+
 describe('分析 › 自定义 in ordinary words, with a form that is kept and a card that can be stopped', () => {
   const BOOK = '11111111-1111-4111-8111-111111111111';
   const FIXED = { answerSchema: {} as never, authorityCeiling: {} as never };
@@ -218,6 +253,31 @@ describe('分析 › 自定义 in ordinary words, with a form that is kept and a
       ask.mockReturnValue(true);
       (q(running.panel, '[data-custom-action="stop"]') as MiniElement).click(); await settle();
       expect(running.api.stopCustomAnalysisDimension).toHaveBeenCalledWith({ versionId: 'v1' });
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
+
+describe('停用 in place continues with the offer, and a press while it is out asks nothing', () => {
+  it('focuses the offer to write another once the stopped card is gone, and does not ask twice while the stop is out', async () => {
+    let reading: CustomAnalysisDimensionsProjection = { bookId: '11111111-1111-4111-8111-111111111111', truncated: false, fixed: { answerSchema: {} as never, authorityCeiling: {} as never }, dimensions: [{
+      dimensionId: '22222222-2222-4222-8222-222222222222', kind: 'custom-analysis/x', title: '人物出场', enabledVersion: { versionId: 'v1', version: 1 }, versionsTruncated: false,
+      versions: [{ versionId: 'v1', version: 1, title: '人物出场', questionTemplate: '问？', documentDigest: 'd'.repeat(64), supersedes: null, state: 'enabled', stateLabel: '已启用', createdAt: '2026-11-01T00:00:00.000Z', stateRecordedAt: '2026-11-01T00:00:00.000Z', taskCount: 0 }],
+      book: { taskState: null, latest: null, unavailableReason: null } }] };
+    const release = Promise.withResolvers<void>();
+    const api = { inspectCustomAnalysisDimensions: vi.fn(async () => reading), saveCustomAnalysisDimension: vi.fn(), enableCustomAnalysisDimension: vi.fn(),
+      stopCustomAnalysisDimension: vi.fn(async () => { await release.promise; reading = { ...reading, dimensions: [] }; return reading; }) };
+    const panel = miniDocument.createElement('section'); miniDocument.body.append(panel);
+    mountCustomAnalysisTab(panel as unknown as HTMLElement, { bookId: '11111111-1111-4111-8111-111111111111', api, author: { api }, setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback, openLaunch: vi.fn(), openPlan: vi.fn(), jump: vi.fn() });
+    const ask = vi.fn((_question: string) => true);
+    vi.stubGlobal('confirm', ask);
+    try {
+      await settle();
+      const stop = q(panel, '[data-custom-action="stop"]') as MiniElement;
+      stop.click(); stop.click(); await settle();
+      expect(ask).toHaveBeenCalledOnce(); expect(api.stopCustomAnalysisDimension).toHaveBeenCalledOnce();
+      release.resolve(); await settle();
+      expect(q(panel, '.custom-dimension-card')).toBeNull();
+      expect(active()).toBe(q(panel, '[data-custom-action="create"]'));
     } finally { vi.unstubAllGlobals(); }
   });
 });

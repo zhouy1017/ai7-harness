@@ -106,8 +106,26 @@ const RUN_REFRESH_MS = 1_000;
 const RUN_UNDER_WAY: ReadonlySet<string> = new Set(['authorized-blocked', 'queued', 'waiting', 'admitted', 'executing', 'cancelling', 'pausing']);
 
 /** What the editor has typed into the form for a new dimension, kept per Book so a redraw of the card reopens it as it was. */
-export interface CustomDimensionDraft { title: string; questionTemplate: string; field: 'title' | 'questionTemplate' | null }
+export interface CustomDimensionDraft {
+  title: string; questionTemplate: string; field: 'title' | 'questionTemplate' | null;
+  /** A save is out: the form on screen, whichever mount drew it, is disabled until the answer settles it. */
+  saving?: boolean; sync?: () => void; composing?: boolean;
+}
 const drafts = new Map<string, CustomDimensionDraft>();
+/** The tab mounted last for a Book settles its form: a save started under an earlier mount answers to the form on screen now. */
+const closers = new Map<string, (saved: boolean, title?: string) => void>();
+
+/**
+ * Whether the editor is in the form for a new dimension, or its save is out: ②A holds its follow-up draws then, as for 分析反馈, so a
+ * save is never orphaned and text being composed in an input method is never redrawn under the editor. A form in a hidden tab
+ * holds nothing: the card follows the Run, and any draw reopens the form from its draft.
+ */
+export function customDimensionFormEngaged(root: HTMLElement): boolean {
+  const form = root.querySelector<HTMLElement>('[data-custom-form="new"]');
+  if (form === null) return false;
+  const active = document.activeElement;
+  return form.dataset['saving'] === 'true' || (active instanceof HTMLElement && form.contains(active));
+}
 
 /** The event ②A's tab strip raises on a panel as it is shown, so the tab reads again when the editor comes to it. */
 export const ANALYSIS_TAB_SHOWN_EVENT = 'analysis-tab-shown';
@@ -143,6 +161,8 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
   };
   /** The title of a dimension just saved: its card takes focus once it is drawn, so the editor's place is where the result is. */
   let focusCardOf: string | null = null;
+  /** After 停用 the card may be gone: the editor continues with the offer to write another. */
+  let focusOfferAfterLoad = false;
   const closeForm = (saved: boolean, title?: string): void => {
     creating = false;
     drafts.delete(bookId);
@@ -151,7 +171,8 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     if (saved) { focusCardOf = title ?? null; void load(); }
     else head.querySelector<HTMLElement>('[data-custom-action="create"]')?.focus();
   };
-  /** 启用 and 停用 on a card, in place: the same two operations the house's page uses, then the tab reads again. */
+  closers.set(bookId, closeForm);
+  /** 停用 on a card, in place: the same operation the house's page uses, then the tab reads again. */
   const change = async (pending: string, work: () => Promise<unknown>, done: string): Promise<void> => {
     if (busy || author === undefined) return;
     busy = true;
@@ -160,6 +181,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       await work();
       busy = false;
       options.setStatus(done, 'success');
+      focusOfferAfterLoad = true;
       void load();
     } catch (error) {
       busy = false;
@@ -172,11 +194,16 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     drawHead();
     const draft = drafts.get(bookId) ?? { title: '', questionTemplate: '', field: null };
     drafts.set(bookId, draft);
-    mountCustomAnalysisDimensions({ root: formHost, api: author.api, setStatus: options.setStatus, errorMessage: options.errorMessage, createInPlace: { done: closeForm, draft } });
-    // A form reopened by a redraw gives focus back only where the redraw took it from.
+    mountCustomAnalysisDimensions({ root: formHost, api: author.api, setStatus: options.setStatus, errorMessage: options.errorMessage, createInPlace: { done: (saved, title) => (closers.get(bookId) ?? closeForm)(saved, title), draft } });
+    // A form reopened by a redraw gives focus back only where the redraw took it from. The card is attached when the draw ends, so
+    // the focus is given then, to a node that is on the page.
     const field = restoring ? draft.field : 'title';
-    const lost = document.activeElement === null || document.activeElement === document.body;
-    if (field !== null && (!restoring || lost)) formHost.querySelector<HTMLElement>(field === 'title' ? 'input[name="title"]' : 'textarea[name="questionTemplate"]')?.focus();
+    const field_ = (): HTMLElement | null => field === null ? null : formHost.querySelector<HTMLElement>(field === 'title' ? 'input[name="title"]' : 'textarea[name="questionTemplate"]');
+    if (!restoring) field_()?.focus();
+    else if (field !== null) queueMicrotask(() => {
+      const lost = document.activeElement === null || document.activeElement === document.body;
+      if (lost && formHost.isConnected && draft.saving !== true) field_()?.focus();
+    });
   };
 
   const updateFor = (dimension: CustomAnalysisDimensionProjection): BaselineAnalysisUpdateRequest | null => {
@@ -251,6 +278,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       kind = 'empty';
       drawHead();
       body.replaceChildren();
+      if (focusOfferAfterLoad) { focusOfferAfterLoad = false; head.querySelector<HTMLElement>('[data-custom-action="create"]')?.focus(); }
       return;
     }
     kind = 'list';
@@ -293,7 +321,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
         const { versionId, title, version } = enabledVersion;
         // 停用 is final for the version and holds for every Book: asked once, with the app's own confirm.
         const stop = actionButton(`${CUSTOM_DIMENSION_STOP} · 已有分析保留`, 'quiet', 'stop', () => {
-          if (!confirm(customDimensionStopAsk(dimension.title))) return Promise.resolve();
+          if (busy || !confirm(customDimensionStopAsk(dimension.title))) return Promise.resolve();
           return change('正在停用…', () => author.api.stopCustomAnalysisDimension({ versionId }), customDimensionStoppedLine(title, version));
         });
         stop.dataset['analysisAction'] = 'custom-stop';
@@ -317,6 +345,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       if (card !== undefined) { card.tabIndex = -1; card.focus(); }
       else head.querySelector<HTMLElement>('[data-custom-action="create"]')?.focus();
     }
+    if (focusOfferAfterLoad) { focusOfferAfterLoad = false; head.querySelector<HTMLElement>('[data-custom-action="create"]')?.focus(); }
   };
 
   let refresh: ReturnType<typeof setTimeout> | null = null;
@@ -387,6 +416,8 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
   const act = async (pending: string, body: () => Promise<CustomAnalysisDimensionsProjection>, done: (next: CustomAnalysisDimensionsProjection) => string, savedTitle?: string): Promise<void> => {
     if (busy) return;
     busy = true;
+    const draft = options.createInPlace?.draft;
+    if (draft !== undefined) { draft.saving = true; draft.sync?.(); }
     options.setStatus(pending, 'busy');
     try {
       const next = await body();
@@ -399,6 +430,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
       options.setStatus(options.errorMessage(error, '无法完成这项操作。'), 'error');
     } finally {
       busy = false;
+      if (draft !== undefined) { draft.saving = false; draft.sync?.(); }
     }
   };
 
@@ -419,9 +451,12 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
     template.placeholder = CUSTOM_DIMENSION_TEMPLATE_PLACEHOLDER;
     template.maxLength = 1600;
     template.value = latest?.questionTemplate ?? '';
+    let saveButton: HTMLButtonElement | null = null;
     const draft = options.createInPlace?.draft;
     if (draft !== undefined) {
       title.value = draft.title; template.value = draft.questionTemplate;
+      // The form on screen follows the draft's state: disabled while a save is out, whichever mount sent it.
+      draft.sync = () => { for (const field of [title, template]) field.disabled = draft.saving === true; node.dataset['saving'] = String(draft.saving === true); if (saveButton !== null) saveButton.disabled = draft.saving === true; };
       title.addEventListener('input', () => { draft.title = title.value; });
       template.addEventListener('input', () => { draft.questionTemplate = template.value; });
       title.addEventListener('focus', () => { draft.field = 'title'; });
@@ -430,6 +465,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
     templateLabel.append(template);
     const actions = el('div', 'button-row');
     const save = el('button', 'primary', CUSTOM_DIMENSION_SAVE);
+    saveButton = save;
     save.type = 'submit';
     save.dataset['customAction'] = 'save';
     actions.append(save, actionButton(CUSTOM_DIMENSION_CANCEL, 'quiet', 'cancel', () => {
@@ -454,6 +490,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
       }, () => customDimensionSavedLine(titleText), titleText);
     });
     node.append(titleLabel, templateLabel, actions);
+    draft?.sync?.();
     return node;
   };
 
