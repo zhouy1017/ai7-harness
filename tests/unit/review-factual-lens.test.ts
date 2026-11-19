@@ -834,34 +834,70 @@ describe('review triage in place (#1525)', () => {
     expect(mounted.root.querySelectorAll('section.review-group')).toHaveLength(0);
   });
 
-  it('keeps the card the editor moved on to in place when the decided card above it grows', async () => {
-    const ask = deferred<unknown>();
+  // No layout of its own: cards stand at fixed places, and a reason prompt in a card pushes every card below it down by 60 px.
+  async function withPlaces(placeOf: Record<string, number>, body: (scroller: { scrollTop: number }) => Promise<void>): Promise<void> {
     const scroller = { scrollTop: 0 };
-    // No layout of its own: cards stand at fixed places, and a reason prompt in card 1 pushes the cards below it down by 60 px.
-    const placeOf: Record<string, number> = { rvf_s1: 100, rvf_s2: 400, rvf_s3: 700 };
     const empty = Object.getOwnPropertyDescriptor(MiniElement.prototype, 'getBoundingClientRect')!;
     Object.defineProperty(miniDocument, 'scrollingElement', { configurable: true, value: scroller });
+    Object.assign(window, { innerHeight: 800 });
     Object.defineProperty(MiniElement.prototype, 'getBoundingClientRect', { configurable: true, value(this: MiniElement) {
       const id = this.dataset['findingId'] ?? '';
-      const grown = id !== 'rvf_s1' && miniDocument.body.querySelector('article[data-finding-id="rvf_s1"] .learning-reason-ask') !== null;
-      const top = (placeOf[id] ?? 0) + (grown ? 60 : 0) - scroller.scrollTop;
+      const above = Object.keys(placeOf).filter((other) => placeOf[other]! < (placeOf[id] ?? 0)
+        && miniDocument.body.querySelector(`article[data-finding-id="${other}"] .learning-reason-ask`) !== null).length;
+      const top = (placeOf[id] ?? 0) + 60 * above - scroller.scrollTop;
       return { top, bottom: top + 280, left: 0, right: 800, width: 800, height: 280 };
     } });
-    try {
+    try { await body(scroller); } finally {
+      Reflect.deleteProperty(miniDocument, 'scrollingElement');
+      Object.defineProperty(MiniElement.prototype, 'getBoundingClientRect', empty);
+    }
+  }
+  const askFor = (decisionId: string) => ({ askId: `ask-${decisionId}`, decisionId, question: '为什么拒绝？', options: [] });
+
+  it('keeps the card the editor moved on to in place when the decided card above it grows', async () => {
+    await withPlaces({ rvf_s1: 100, rvf_s2: 400, rvf_s3: 700 }, async (scroller) => {
+      const ask = deferred<unknown>();
       const { root } = await view([suggestion(1), suggestion(2), suggestion(3)], {
         recordChangeSuggestionDecision: vi.fn(async () => rejected('decision-1')), recordLearningReasonAsk: vi.fn(() => ask.promise) });
       article(root, 'rvf_s1').focus();
       article(root, 'rvf_s1').dispatchEvent({ type: 'keydown', key: 'r' }); await flush();
       expect(miniDocument.activeElement).toBe(article(root, 'rvf_s2'));
       const before = article(root, 'rvf_s2').getBoundingClientRect().top;
-      ask.resolve({ askId: 'ask-1', decisionId: 'decision-1', question: '为什么拒绝？', options: [] }); await flush();
+      ask.resolve(askFor('decision-1')); await flush();
       expect(root.querySelector('article[data-finding-id="rvf_s1"] .learning-reason-ask')).not.toBeNull();
       expect(article(root, 'rvf_s2').getBoundingClientRect().top).toBe(before);
       expect(scroller.scrollTop).toBe(60);
-    } finally {
-      Reflect.deleteProperty(miniDocument, 'scrollingElement');
-      Object.defineProperty(MiniElement.prototype, 'getBoundingClientRect', empty);
+    });
+  });
+
+  it('scrolls nothing when the card that grows is below the focused one, when no card has focus, or when the focused card grows', async () => {
+    for (const focus of ['above', 'none', 'itself'] as const) {
+      await withPlaces({ rvf_s1: 100, rvf_s2: 400, rvf_s3: 700 }, async (scroller) => {
+        const ask = deferred<unknown>();
+        const { root } = await view([suggestion(1), suggestion(2), suggestion(3)], {
+          recordChangeSuggestionDecision: vi.fn(async () => rejected('decision-3')), recordLearningReasonAsk: vi.fn(() => ask.promise) });
+        if (focus === 'above') article(root, 'rvf_s1').focus();
+        // 拒绝 by its button: the card the editor is on (if any) keeps focus.
+        inCard(root, 'rvf_s3', 'reject').click(); await flush();
+        if (focus === 'itself') article(root, 'rvf_s3').focus();
+        ask.resolve(askFor('decision-3')); await flush();
+        expect(root.querySelector('article[data-finding-id="rvf_s3"] .learning-reason-ask'), focus).not.toBeNull();
+        expect(scroller.scrollTop, focus).toBe(0);
+      });
     }
+  });
+
+  it('moves nothing the editor is reading when the card they are on is scrolled out of the window', async () => {
+    await withPlaces({ rvf_s1: 100, rvf_s2: 400, rvf_s3: 2000 }, async (scroller) => {
+      const ask = deferred<unknown>();
+      const { root } = await view([suggestion(1), suggestion(2), suggestion(3)], {
+        recordChangeSuggestionDecision: vi.fn(async () => rejected('decision-1')), recordLearningReasonAsk: vi.fn(() => ask.promise) });
+      article(root, 'rvf_s3').focus();
+      inCard(root, 'rvf_s1', 'reject').click(); await flush();
+      ask.resolve(askFor('decision-1')); await flush();
+      expect(root.querySelector('article[data-finding-id="rvf_s1"] .learning-reason-ask')).not.toBeNull();
+      expect(scroller.scrollTop).toBe(0);
+    });
   });
 
   it('says only that an unfiltered empty Run has no findings', async () => {

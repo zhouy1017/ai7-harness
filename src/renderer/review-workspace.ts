@@ -2367,9 +2367,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       updated = renderFinding(run, category, finding);
     }
     for (const node of updated.querySelectorAll<HTMLDetailsElement>('details')) if (opened.has(node.className)) node.open = true;
-    // A card the editor is not on (its reason prompt arriving, say) may change height; the card they are on stays where it is.
+    // A card the editor is not on (its reason prompt arriving, say) may change height; the card they are on stays where it is —
+    // while it is on screen. Scrolled away from it, the editor is reading something else, which nothing here moves.
     const kept = hadFocus ? null : document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>('article.review-finding') : null;
-    const keptTop = kept?.getBoundingClientRect().top;
+    const keptBox = kept?.getBoundingClientRect();
+    const keptTop = keptBox !== undefined && keptBox.bottom > 0 && keptBox.top < window.innerHeight ? keptBox.top : undefined;
     before.replaceWith(updated);
     const page = scroller();
     if (kept !== null && kept !== undefined && keptTop !== undefined && page !== null) {

@@ -1224,17 +1224,17 @@ async function main() {
         // R, A, R, then R until a decision has moved focus to a card that was not wholly in the window before it, at least once.
         for (let index=0; index<3 || outside===0; index+=1) {
           requireJourney(index<24,'review-keyboard-next-not-wholly-visible',{decided});
-          const state=await renderer.evaluate(`(() => { const card=${ACTIVE_CARD}; const next=Array.from(document.querySelectorAll('article.review-finding[data-status="pending"]')).find((node)=>node!==card && (card.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)); return {id:card?.dataset.findingId??null, next:next?.dataset.findingId??null, hidden:next!==undefined && next.getBoundingClientRect().bottom>innerHeight}; })()`);
+          const state=await renderer.evaluate(`(() => { const card=${ACTIVE_CARD}; const next=Array.from(document.querySelectorAll('article.review-finding[data-status="pending"]')).find((node)=>node!==card && (card.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)); return {id:card?.dataset.findingId??null, next:next?.dataset.findingId??null, hidden:next!==undefined && next.getBoundingClientRect().bottom>innerHeight+1}; })()`);
           requireJourney(state.id!==null && !decided.includes(state.id),'review-keyboard-focused-distinct',{state,decided});
           if (state.hidden) outside+=1;
           await press(renderer,index===1?'a':'r');
           decided.push(state.id);
           // Decided in place; focus moves to the next pending card — the one not wholly in view before — and it is now wholly inside
           // the window, so the next key decides what is seen.
-          // (1 px for subpixel layout: a card scrolled to the nearest edge can end a fraction past it.)
+          // (1 px for subpixel layout, here and in the before-test: a card scrolled to the nearest edge can end a fraction past it.)
           const landed=`(() => { const card=document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(state.id)})+']'); const next=${ACTIVE_CARD}; if(card?.dataset.status!=='handled'||!next||next===card)return false; if(${JSON.stringify(state.next)}!==null && next.dataset.findingId!==${JSON.stringify(state.next)})return false; const r=next.getBoundingClientRect(); return r.top>=-1 && r.bottom<=innerHeight+1; })()`;
           try {
-            await waitFor(renderer, landed, 'review-keyboard-decided-next-in-view', 15_000);
+            await waitFor(renderer, landed, 'review-keyboard-decided-next-in-view');
           } catch {
             requireJourney(false, 'review-keyboard-decided-next-in-view', {state, index, now: await renderer.evaluate(`(() => { const card=document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(state.id)})+']'); const next=${ACTIVE_CARD}; const r=next?.getBoundingClientRect(); return {decided:card?.dataset.status??null, decidedOutput:card?.dataset.output??null, active:document.activeElement?.tagName+'.'+(document.activeElement?.className??''), focused:next?.dataset.findingId??null, top:r?.top??null, bottom:r?.bottom??null, innerHeight}; })()`)});
           }
