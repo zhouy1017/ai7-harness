@@ -124,6 +124,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
   const drawHead = (): void => {
     const offer = author === undefined || creating ? null
       : actionButton(CUSTOM_TAB_NEW, kind === 'empty' ? 'primary' : 'secondary', 'create', () => openForm());
+    if (offer !== null) offer.dataset['analysisAction'] = 'custom-create';
     const nodes: HTMLElement[] = [];
     if (kind === 'empty') {
       const empty = el('section', 'custom-empty');
