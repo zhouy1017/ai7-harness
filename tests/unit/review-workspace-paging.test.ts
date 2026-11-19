@@ -59,10 +59,13 @@ function workspace(rows: number, version = 1, state: 'partial' | 'running' = 'pa
 
 let restoreDom: () => void;
 let surfaces: ReviewWorkspaceSurface[];
+let frames: Array<() => void>;
+const nextFrame = (): void => { const due = frames.splice(0); for (const frame of due) frame(); };
 beforeEach(() => {
   restoreDom = installMiniDom();
   surfaces = [];
-  vi.stubGlobal('window', { setTimeout, clearTimeout, getSelection: () => null });
+  frames = [];
+  vi.stubGlobal('window', { setTimeout, clearTimeout, getSelection: () => null, requestAnimationFrame: (callback: () => void) => { frames.push(callback); return frames.length; } });
   Object.defineProperty(MiniElement.prototype, 'options', { configurable: true, get(this: MiniElement) { return this.querySelectorAll('option'); } });
   vi.stubGlobal('Option', class extends MiniElement { constructor(text: string, value: string) { super('option'); this.textContent = text; this.value = value; } });
   Object.defineProperty(MiniElement.prototype, 'prepend', { configurable: true, value(this: MiniElement, ...nodes: MiniElement[]) {
@@ -428,5 +431,52 @@ describe('重新读取 after the bar was dismissed (#1592 re-check)', () => {
     card(view.root).querySelector('[data-review-action="reread"]')!.click(); await flush();
     expect(bar.textContent).toContain(TOO_LARGE);
     expect(card(view.root).querySelector('[data-review-action="reread"]')!.disabled).toBe(false);
+  });
+});
+
+describe('a press on the running card while a read arrives (#1592: 查看计划 lost under the pointer)', () => {
+  it('keeps the pressed control until its click, then draws the read that arrived meanwhile', async () => {
+    const state: Stub = { full: workspace(3, 1, 'running'), budget: 4 * 1024 * 1024 };
+    const view = mount(state); await flush();
+    const opened: string[] = [];
+    view.surface.destroy();
+    // The same surface, with a plan opener that records what it opened.
+    const root = new MiniElement('main');
+    miniDocument.body.append(root);
+    const status = Object.assign(vi.fn(), { settle: vi.fn() });
+    const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: { reviewRunId: RUN, findingId: null },
+      api: new Proxy({ inspectReviewWorkspace: view.inspectReviewWorkspace, getTaskPlanPage: view.getTaskPlanPage, inspectFactualVerification: view.inspectFactualVerification },
+        { get: (target, key) => Reflect.get(target, key) ?? view.unexpected }) as unknown as MountReviewWorkspaceOptions['api'],
+      awaitServiceJob: async (initial) => initial,
+      technicalDetails: (_className, ...rows) => { const node = new MiniElement('dl'); node.append(...rows as unknown as MiniElement[]); return technicalDisclosure(node as unknown as HTMLElement); },
+      setStatus: status, errorMessage: (_error, fallback) => fallback, errorCode: () => null, openManuscript: async () => undefined, goToText: async () => undefined,
+      openPlan: (reviewRunId) => { opened.push(reviewRunId); }, openSearchSettings: () => undefined, planChanged: () => undefined });
+    surfaces.push(surface);
+    surface.start(); await flush();
+    const pressed = root.querySelector('[data-review-action="view-plan"]')!;
+    pressed.dispatchEvent({ type: 'pointerdown', bubbles: true, button: 0 });
+    // A poll answers while the button is down: the Run moved on (its label and counts changed), so the card would be drawn again.
+    state.full = { ...state.full, run: { ...state.full.run!, stateLabel: '正在审阅 · 已读完一半', findingsTotal: 2 } };
+    surface.refresh(); await flush();
+    expect(root.querySelector('[data-review-action="view-plan"]')).toBe(pressed);
+    expect(root.querySelector('.review-workspace-card')!.textContent).not.toContain('已读完一半');
+    pressed.dispatchEvent({ type: 'pointerup', bubbles: true, button: 0 });
+    pressed.click(); await flush();
+    expect(opened).toEqual([RUN]);
+    // The frame after the release draws the held read; the button is a new one and the press acted once.
+    expect(root.querySelector('[data-review-action="view-plan"]')).toBe(pressed);
+    nextFrame(); await flush();
+    expect(root.querySelector('.review-workspace-card')!.textContent).toContain('已读完一半');
+    expect(root.querySelector('[data-review-action="view-plan"]')).not.toBe(pressed);
+    expect(opened).toEqual([RUN]);
+  });
+
+  it('draws a read at once when no press is down', async () => {
+    const state: Stub = { full: workspace(3, 1, 'running'), budget: 4 * 1024 * 1024 };
+    const view = mount(state); await flush();
+    state.full = { ...state.full, run: { ...state.full.run!, stateLabel: '正在审阅 · 已读完一半', findingsTotal: 2 } };
+    view.surface.refresh(); await flush();
+    expect(card(view.root).textContent).toContain('已读完一半');
+    expect(frames).toHaveLength(0);
   });
 });
