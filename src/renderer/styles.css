@@ -1666,8 +1666,8 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .manuscript-comments-canvas { position: relative; min-height: 100%; margin-inline: 8px; }
 .manuscript-comments-card { position: absolute; left: 0; right: 0; overflow-wrap: anywhere; border-radius: 10px; }
 .manuscript-comments-card > .editorial-mark-card { position: static; width: 100%; box-sizing: border-box; padding: .6rem .7rem; box-shadow: 0 2px 8px var(--shadow); }
-.manuscript-comments-card[data-selected="true"] { outline: 2px solid var(--category-accent); outline-offset: -2px; }
-.manuscript-comments-card[data-hovered="true"]:not([data-selected="true"]) { outline: 1px solid var(--category-accent); }
+.manuscript-comments-card[data-selected="true"] { outline: 2px solid var(--category-accent, var(--focus)); outline-offset: -2px; }
+.manuscript-comments-card[data-hovered="true"]:not([data-selected="true"]) { outline: 1px solid var(--category-accent, var(--focus)); }
 .manuscript-comments-reply { padding: .6rem; background: var(--surface); border: 1px solid var(--boundary); }
 .manuscript-comments-reply textarea { width: 100%; box-sizing: border-box; resize: vertical; }
 .manuscript-comments-problem { color: var(--status-blocked); margin: .2rem 0; }
@@ -1677,7 +1677,7 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .manuscript-comments-leaders circle { fill: var(--category-accent); }
 .ProseMirror .editorial-mark.manuscript-comments-anchor[data-mark-category]:not(.editorial-mark-personal-highlight),
 .ProseMirror .editorial-mark-point.manuscript-comments-anchor[data-mark-category] { background-color: var(--category-fill); border-bottom: 3px solid var(--category-accent); }
-.ProseMirror [data-comment-hovered="true"] { outline: 1px solid var(--category-accent); }
+.ProseMirror [data-comment-hovered="true"] { outline: 1px solid var(--category-accent, var(--focus)); }
 @media (forced-colors: active) {
   .manuscript-comments-card[data-selected="true"] { outline-color: Highlight; }
   .manuscript-comments-leaders path { stroke: Highlight; }
@@ -1851,7 +1851,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editor-shell[data-applied-marks="hidden"] .ProseMirror .editorial-mark-applied-badge { display: none; }
 .editor-shell[data-applied-marks="hidden"] .ProseMirror .editorial-mark-change-suggestion[data-mark-status="applied"] { background: transparent; border-bottom-color: transparent; }
 .editor-shell[data-applied-marks="hidden"] .ProseMirror [data-block-id][data-mark-line="applied"] { border-left-color: transparent; }
-.manuscript-comments-card.editorial-mark-card-active { outline: 2px solid var(--category-accent); outline-offset: -2px; }
+.manuscript-comments-card.editorial-mark-card-active { outline: 2px solid var(--category-accent, var(--focus)); outline-offset: -2px; }
 /* 阅读与修订模式 (Issue #1411): the mode pill says which mode the text is in. */
 .editor-input-mode-toggle { white-space: nowrap; }
 .inline-track-del { color: var(--status-blocked); text-decoration: line-through; background: var(--status-blocked-surface); user-select: none; }
@@ -2751,7 +2751,7 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .task-overview-card-title { display:flex; gap:6px; align-items:center; flex-wrap:nowrap; }
 .task-overview-card-title strong { overflow:hidden; text-overflow:ellipsis; }
 .task-overview-card-actions { position:static; display:flex; align-items:center; gap:4px; flex-shrink:0; flex-wrap:wrap; max-width:100%; justify-content:flex-end; }
-.task-overview-card:focus { outline:2px solid var(--accent); outline-offset:2px; }
+.task-overview-card:focus { outline:2px solid var(--focus); outline-offset:2px; }
 .task-overview-more { position:relative; }
 .task-overview-more > summary { cursor:pointer; opacity:0; }
 .task-overview-card:hover .task-overview-more > summary, .task-overview-card:focus-within .task-overview-more > summary { opacity:1; }
@@ -2820,7 +2820,7 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .export-menu > summary { cursor: pointer; list-style: none; padding: .4rem .65rem; }
 .export-menu[open] { background: var(--surface); border: 1px solid var(--boundary); border-radius: 8px; }
 .export-menu-body { position: absolute; top: 100%; right: 0; z-index: 60; min-width: 13rem; padding: .5rem; border: 1px solid var(--boundary); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px var(--shadow); }
-.export-menu-body > :is(button, details) { display: block; margin: .25rem; }
+.export-menu-body > :is(button, details) { display: block; margin: .25rem 0; }
 .export-menu-options .export-option { display: flex; gap: .4rem; padding: .25rem; }
 .global-attention-item[data-read="true"] .global-attention-object { font-weight: 400; }
 .task-card-answer { grid-column: 1 / -1; padding: .75rem; }
@@ -3206,3 +3206,26 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .dialogue .ui-disclosure-menu { position: relative; }
 .dialogue .ui-disclosure-menu > summary { cursor: pointer; list-style: none; padding: .4rem .65rem; }
 .dialogue .ui-disclosure-menu > summary::-webkit-details-marker { display: none; }
+
+/* Shared controls and viewport-bounded menu contents (#1520). */
+.ui-input { box-sizing: border-box; min-width: 0; max-width: 100%; padding: .5rem .65rem; border: 1px solid var(--boundary-strong); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+.ui-checkbox { appearance: none; width: 1.1rem; height: 1.1rem; flex: none; border: 1px solid var(--boundary-strong); border-radius: 4px; background: var(--surface); vertical-align: middle; cursor: pointer; }
+.ui-checkbox:checked { background: var(--action-primary); border-color: var(--action-primary); }
+.ui-checkbox:checked::after { content: '✓'; display: block; color: var(--surface); text-align: center; line-height: 1rem; }
+.ui-input:focus-visible, .ui-checkbox:focus-visible, .settings-switch input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ui-input:disabled, .ui-checkbox:disabled, .settings-switch input:disabled { opacity: .5; cursor: default; }
+.settings-switch input { appearance: none; position: relative; border: 1px solid var(--boundary-strong); border-radius: 1rem; background: var(--surface-subdued); }
+.settings-switch input::after { content: ''; position: absolute; top: 2px; left: 2px; width: .8rem; height: .8rem; border-radius: 50%; background: var(--text-subdued); }
+.settings-switch input:checked { background: var(--action-primary); }
+.settings-switch input:checked::after { left: calc(100% - .8rem - 2px); background: var(--surface); }
+button.danger { color: var(--status-blocked); border-color: var(--status-blocked); background: var(--status-blocked-surface); }
+button.danger:hover { box-shadow: inset 0 0 0 1px var(--status-blocked); }
+:is(.ui-menu-panel, .view-menu-list, .editor-save-menu-body, .export-menu-body, .editing-protection-options) { box-sizing: border-box; max-width: calc(100vw - 16px); }
+:is(.editor-save-menu-body, .editing-protection-options) { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+:is(.editor-save-menu-body, .editing-protection-options) :is(input, textarea, select, fieldset, label, details, .button-row) { box-sizing: border-box; min-width: 0; max-width: 100%; }
+.editing-protection-host { min-width: 0; }
+.editing-protection { flex-wrap: nowrap; gap: .3rem; padding: 0; border: 0; background: transparent; white-space: nowrap; }
+.editing-protection-headline { font-size: .8rem; }
+.editing-protection[data-protection-read-only]:not([data-protection-read-only="none"]) { border: 0; }
+.editing-protection-options .editing-protection-facts { display: grid; gap: .5rem; }
+.editing-protection-options .button-row { flex-wrap: wrap; }
