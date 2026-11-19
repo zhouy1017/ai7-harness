@@ -509,7 +509,7 @@ Owner 2026-11-17 定下三个名字与一张词表，并把几处只在开发者
 | 任务输入固定点 · 由已确认编辑创建 | 任务输入修订版 N（准备任务时自动保存） |
 | 来源版本证据 · 原生构件 · 权限侧车 · Harness 执行区段 · 模型服务数据处理策略 · 各类 ID / SHA-256 | 查看技术详情 |
 | 凭据引用 readiness missing | 未连接 · 缺少凭据 → 去设置连接 |
-| Main Editorial Role 等英文角色名 | 主编辑角色 · 底层辅助角色（底层辅助模型（Flash），原「快速交互角色」，[ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md)） · 疑难升级角色 · 前沿模型角色 |
+| Main Editorial Role 等英文角色名 | 前台 Pro 角色 · 前台 Flash 角色 · 底层 Pro 角色（自主学习与深度归纳） · 底层 Flash 角色（底层转换与检索整理）（`Pro`/`Flash` 表能力档位而非具体模型名，取代原「主编辑 / 快速交互 / 疑难升级 / 前沿模型」四角色，[ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md)） |
 | 派发状态 · 任务运行记录 · 状态转换 1. recorded → … | 状态词（尚未开始 / 运行中 / 等待网络 …）· 里程碑（编辑语言） |
 | 分析单元进度 5/12 · 正在处理单元 6 | 阶段 + 当前对象（正在比较证据 · 第 2 / 3 处 …） |
 | 明确不会发生：不派发调度器任务 / 不创建 DSH Session / 不构造 Provider payload … | 普通模式不显示；开发者模式：不会做：不会直接修改稿件 / 不读范围外正文 / 不导出或发布 / 不存里程碑（技术性的进技术详情）（ADR 0096 §4.2） |

@@ -152,10 +152,10 @@ This maintained bilingual reference routes readers to target-qualified definitio
 | Implementation Assumption | 实现假设 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Run Source Scope | 任务运行来源范围 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Model Role | 模型角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Underlying Flash Role | 底层辅助角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Main Editorial Role | 主编辑角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Difficult Escalation Role | 疑难升级角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Frontier Model Role | 前沿模型角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Foreground Pro Role | 前台 Pro 角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Foreground Flash Role | 前台 Flash 角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Underlying Pro Role | 底层 Pro 角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Underlying Flash Role | 底层 Flash 角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Model-role Requirement | 模型角色硬性要求 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Model-role Preference | 模型角色偏好 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Model Provider | 模型服务提供方 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
