@@ -1,4 +1,4 @@
-import { windowStep } from './components/controls.js';
+import { styleInput } from './components/controls.js';
 import type { EvaluationCalibrationBookProjection, EvaluationCalibrationCursor, EvaluationCalibrationProjection, RendererApi } from '../shared/protocol.js';
 import { formatPriceFen, parseFirstPrint, parsePriceYuan } from '../shared/evaluation-calibration.js';
 import {
@@ -13,8 +13,12 @@ import {
   ACTUALS_PRINT_LABEL,
   ACTUALS_SAVE,
   CALIBRATION_HEADING,
+  CALIBRATION_HOW,
   CALIBRATION_METHOD,
+  CALIBRATION_NEXT,
   CALIBRATION_OFF_EFFECT,
+  CALIBRATION_PAGE_LEDE,
+  CALIBRATION_PREVIOUS,
   CALIBRATION_SCOPE,
   CALIBRATION_STATUS,
   CALIBRATION_SWITCH,
@@ -71,6 +75,8 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
   let form: { bookId: string; publicationVersionId: string; expectedEntries: number; price: string; print: string } | null = null;
   let refusal: { readonly where: string; readonly message: string } | null = null;
   let after: EvaluationCalibrationCursor | null = null;
+  /** The cursors of the pages before this one, so 上一页 goes back where the editor came from. */
+  const earlier: Array<EvaluationCalibrationCursor | null> = [];
   const focusBookId = (): string | null => form?.bookId ?? options.focusBookId;
   const visibleBooks = (): ReadonlyArray<EvaluationCalibrationBookProjection> => {
     if (projection === null) return [];
@@ -86,7 +92,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
       books: projection.books.map((book) => next.focusedBook?.bookId === book.bookId ? next.focusedBook : book),
       focusedBook: next.focusedBook ?? projection.focusedBook };
   };
-  const page = async (cursor: EvaluationCalibrationCursor | null): Promise<void> => {
+  const page = async (cursor: EvaluationCalibrationCursor | null, move: 'next' | 'previous'): Promise<void> => {
     if (busy) return;
     busy = true;
     paint(null);
@@ -94,6 +100,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
       const next = await api.inspectEvaluationCalibration({ after: cursor, focusBookId: focusBookId() });
       if (!root.isConnected) return;
       projection = next;
+      if (move === 'next') earlier.push(after); else earlier.pop();
       after = cursor;
       busy = false;
       paint('[data-calibration-page-heading]');
@@ -105,34 +112,38 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     }
   };
 
+  /** 怎么算的: the section's method sentences, closed until asked. */
+  const howFolded = (...lines: ReadonlyArray<HTMLElement>): HTMLDetailsElement => {
+    const fold = el('details', 'calibration-how');
+    fold.append(el('summary', undefined, CALIBRATION_HOW), ...lines);
+    return fold;
+  };
+
   const paint = (focus: string | null): void => {
     if (projection === null) return;
     const { calibration, prediction } = projection;
     root.dataset['calibrationAdjustments'] = String(calibration.adjustments);
     root.dataset['predictionBooks'] = String(prediction.booksWithActuals);
 
+    // Each section: one sentence of state, its switch, and 怎么算的 folded.
     const calibrationSection = el('section', 'calibration-section calibration-calibration');
     const calibrationSwitch = switchNode('calibration', CALIBRATION_SWITCH, calibration.enabled, false, (on) =>
       void savePreferences({ predictionEnabled: prediction.enabled, calibrationEnabled: on }, 'calibration'));
-    const method = el('p', 'field-note');
-    method.append(CALIBRATION_SCOPE.replace(/。$/u, ''), '；', el('span', 'calibration-method', CALIBRATION_METHOD));
     const progress = el('p', 'calibration-status');
     progress.append(el('span', 'calibration-progress', calibrationProgressLine(calibration)));
     const unreadable = calibrationUnreadableLine(calibration.unreadableBooks);
-    if (unreadable !== null) progress.append(' · ', el('span', 'calibration-unreadable', unreadable));
-    if (!calibration.enabled) progress.append(' · ', el('span', 'calibration-off-effect', CALIBRATION_OFF_EFFECT));
-    // The house offset as computed now (EVAL-011a): its basis and each item's offset past the gate, or what it waits for.
+    const method: HTMLElement[] = [el('p', 'field-note', CALIBRATION_SCOPE), el('p', 'field-note calibration-method', CALIBRATION_METHOD)];
+    if (!calibration.initialScoresConnected) method.push(el('p', 'field-note calibration-waiting', CALIBRATION_WAITING));
+    // The house offset as computed now (EVAL-011a): each item's offset past the gate stays in view; before it, what it waits for is method.
     const offsetNode = el('div', 'calibration-offset');
     offsetNode.dataset['calibrationOffset'] = calibration.offset === null ? 'waiting' : 'computed';
-    const offsetSummary = el('p', 'field-note');
-    if (!calibration.initialScoresConnected) offsetSummary.append(el('span', 'calibration-waiting', CALIBRATION_WAITING.replace(/。$/u, '')), '；');
     if (calibration.offset === null) {
-      offsetSummary.append(el('span', 'calibration-offset-waiting', calibrationOffsetWaiting(calibration.threshold)));
-      offsetNode.append(offsetSummary);
+      method.push(el('p', 'field-note calibration-offset-waiting', calibrationOffsetWaiting(calibration.threshold)));
     } else {
-      // Why the basis may be fewer Books than 调分记录 counts (a damaged from-初评 version): said beside the two counts.
+      // Why the basis may be fewer Books than 调分记录 counts (a damaged from-AI-初始评分 evaluation): said beside the two counts.
       const withoutBasis = calibrationWithoutBasisLine(calibration.offset);
       const basis = calibrationBasisLine(calibration.offset);
+      const offsetSummary = el('p', 'field-note');
       offsetSummary.append(el('span', 'calibration-offset-basis', withoutBasis === null ? basis : basis.replace(/。$/u, '')));
       if (withoutBasis !== null) offsetSummary.append('；', el('span', 'calibration-offset-without-basis', withoutBasis));
       offsetNode.append(offsetSummary);
@@ -145,14 +156,11 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
       }
       offsetNode.append(list);
     }
-    calibrationSection.append(
-      el('h3', undefined, CALIBRATION_HEADING),
-      progress,
-      method,
-      offsetNode,
-      // Off: new versions start from the raw 初评, and the switch stays reversible (EVAL-011).
-      calibrationSwitch,
-    );
+    // Off: new evaluations start from the raw score, and the switch stays reversible (EVAL-011).
+    if (!calibration.enabled) method.push(el('p', 'field-note calibration-off-effect', CALIBRATION_OFF_EFFECT));
+    calibrationSection.append(el('h3', undefined, CALIBRATION_HEADING), progress);
+    if (unreadable !== null) calibrationSection.append(el('p', 'attention-note calibration-unreadable', unreadable));
+    calibrationSection.append(calibrationSwitch, offsetNode, howFolded(...method));
     refusalFor('calibration', calibrationSection);
 
     const predictionSection = el('section', 'calibration-section calibration-prediction');
@@ -162,8 +170,8 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     predictionSection.append(
       el('h3', undefined, PREDICTION_HEADING),
       el('p', 'calibration-progress', predictionProgressLine(prediction)),
-      el('p', 'field-note', PREDICTION_ADDS),
       predictionSwitch,
+      howFolded(el('p', 'field-note', PREDICTION_ADDS)),
     );
     refusalFor('prediction', predictionSection);
 
@@ -177,20 +185,18 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     const list = el('ul', 'calibration-actuals-list');
     for (const book of books) list.append(bookNode(book));
     if (books.length > 0) actualsSection.append(list);
-    const pages = el('div', 'button-row');
-    if (after !== null) {
-      const first = action('回到开头', 'quiet', 'first', () => void page(null));
-      first.disabled = busy;
-      pages.append(first);
-    }
-    if (projection.nextCursor !== null) {
+    if (after !== null || projection.nextCursor !== null) {
+      // The page before and the page after, as two text buttons.
+      const pages = el('div', 'button-row');
       const nextCursor = projection.nextCursor;
-      const next = windowStep(action('下一页图书', 'secondary', 'next', () => void page(nextCursor)), 'after', "向后浏览图书");
-      next.disabled = busy;
-      pages.append(next);
+      const previous = action(CALIBRATION_PREVIOUS, 'secondary', 'previous', () => void page(earlier[earlier.length - 1] ?? null, 'previous'));
+      previous.disabled = busy || after === null;
+      const next = action(CALIBRATION_NEXT, 'secondary', 'next', () => { if (nextCursor !== null) void page(nextCursor, 'next'); });
+      next.disabled = busy || nextCursor === null;
+      pages.append(previous, next);
+      actualsSection.append(pages);
     }
-    actualsSection.append(pages);
-    root.replaceChildren(calibrationSection, predictionSection, actualsSection);
+    root.replaceChildren(el('p', 'lede calibration-lede', CALIBRATION_PAGE_LEDE), calibrationSection, predictionSection, actualsSection);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
   };
 
@@ -205,6 +211,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     const wrapper = el('label', 'calibration-switch');
     const input = el('input');
     input.type = 'checkbox';
+    styleInput(input);
     input.checked = checked;
     input.disabled = disabled || busy;
     input.dataset['calibrationSwitch'] = name;
@@ -247,6 +254,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
       const wrapper = el('label', 'calibration-field');
       const input = el('input');
       input.type = 'text';
+      styleInput(input);
       input.inputMode = name === 'price' ? 'decimal' : 'numeric';
       input.value = form![name];
       input.disabled = busy;

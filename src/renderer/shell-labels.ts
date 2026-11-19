@@ -146,7 +146,7 @@ export const SETTINGS_HUB_GROUPS: ReadonlyArray<{
     { route: 'usage', label: '用量', note: '按图书、任务与时间汇总的用量。', developerOnly: true },
   ] },
   { key: 'editorial', label: '编辑工作', rows: [
-    { route: 'evaluation-calibration', label: '评估校准与预测', note: '校准进度、预测开关与定价、首印实际数据。', developerOnly: true },
+    { route: 'evaluation-calibration', label: '评估校准与预测', note: '校准进度、预测开关与定价、首印实际数据。' },
   ] },
   { key: 'local', label: '本机', rows: [
     { route: 'data-storage', label: '数据与存储', note: '数据位置、定期自动备份、导出与导入数据库。' },

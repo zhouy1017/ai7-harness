@@ -79,7 +79,9 @@ describe('②A › 自定义', () => {
     expect(api.inspectCustomAnalysisDimensions).toHaveBeenCalledWith({ forBook: true });
     expect(panel.dataset['customAnalysis']).toBe('ready');
     expect(panel.querySelector('[data-custom-empty="no-dimension"]')?.textContent).toContain(CUSTOM_TAB_EMPTY);
+    // Without a place to write one the tab only says so; the in-place offer is tested with the other 1543 surfaces.
     expect(panel.querySelectorAll('button')).toHaveLength(0);
+    expect(panel.querySelector('[data-custom-empty="no-dimension"]')?.textContent).not.toContain('知识库');
   });
 
   it('opens the start bar for an enabled dimension without preparing a Task', async () => {

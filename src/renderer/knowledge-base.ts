@@ -22,6 +22,7 @@ import { FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS, LEARNING_HEADING, LE
 import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, exemplarAttribution, exemplarDesignation, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TAB_VIEWS, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, visibleKnowledgeBaseTabs, type KnowledgeBaseTab } from './knowledge-base-labels.js';
 import { mountCapturedProcedures } from './captured-procedures.js';
 import { mountCustomAnalysisDimensions } from './custom-analysis.js';
+import { mountHouseWordList } from './house-word-list.js';
 import { mountImportedSkills } from './imported-skills.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import type { ShellPlace } from './shell.js';
@@ -148,6 +149,14 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         if (!page.isCurrent()) return;
         setStatus(rendererErrorMessage(error, LIBRARY_STATUS.unavailable), 'error');
       }
+      return;
+    }
+    // 本社词表 (Issue #1543): the house's own words, edited here as a page; the review sheet mounts the same editor.
+    if (tab === 'house-words') {
+      const editor = mountHouseWordList({ root: panelNode, api: rendererApi, setStatus: (message, tone) => { if (page.isCurrent()) setStatus(message, tone); } });
+      await editor.load();
+      // A refused read says so itself and stands; only a read that went through is reported as opened.
+      if (page.isCurrent() && !editor.failed()) setStatus('本社词表已打开');
       return;
     }
     if (tab !== 'guidelines') {

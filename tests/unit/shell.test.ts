@@ -195,7 +195,7 @@ describe('the 设置 hub', () => {
       ['本机', [['data-storage', '数据与存储'], ['appearance', '外观'], ['keyboard', '键盘与无障碍'], ['notifications', '通知'], ['diagnostics', '诊断'], ['help', '帮助']]],
     ]);
     const rows = SETTINGS_HUB_GROUPS.flatMap((group) => group.rows);
-    expect(rows.filter((row) => row.developerOnly !== true)).toHaveLength(6);
-    expect(rows.filter((row) => row.developerOnly === true).map((row) => row.route)).toEqual(['usage', 'evaluation-calibration', 'diagnostics']);
+    expect(rows.filter((row) => row.developerOnly !== true)).toHaveLength(7);
+    expect(rows.filter((row) => row.developerOnly === true).map((row) => row.route)).toEqual(['usage', 'diagnostics']);
   });
 });
