@@ -166,14 +166,17 @@ export function evaluationHeading(record: Pick<EvaluationRecordSummaryProjection
   return technicalWords(`第 ${record.ordinal} 版 · ${label}`, ordinary);
 }
 
-/** What tells each version of a list apart: its time when its day is shared, its order when its minute is too. */
+/**
+ * What tells each version of a list apart, in one form for the whole list (review S7): the time when any two share a day, and
+ * the order when two share a minute.
+ */
 export function evaluationDayTells(records: ReadonlyArray<Pick<EvaluationRecordSummaryProjection, 'recordId' | 'ordinal' | 'createdAt' | 'finalizedAt'>>): ReadonlyMap<string, EvaluationDayTell> {
   const at = (record: (typeof records)[number]): string => record.finalizedAt ?? record.createdAt;
   const tells = new Map<string, EvaluationDayTell>();
+  const time = new Set(records.map((record) => localDayLabel(at(record)))).size < records.length;
   for (const record of records) {
-    const sameDay = records.filter((other) => localDayLabel(at(other)) === localDayLabel(at(record)));
-    const sameMinute = sameDay.filter((other) => localDayTimeLabel(at(other)) === localDayTimeLabel(at(record))).sort((a, b) => a.ordinal - b.ordinal);
-    tells.set(record.recordId, { time: sameDay.length > 1, order: sameMinute.length > 1 ? sameMinute.indexOf(record) + 1 : null });
+    const sameMinute = records.filter((other) => localDayTimeLabel(at(other)) === localDayTimeLabel(at(record))).sort((a, b) => a.ordinal - b.ordinal);
+    tells.set(record.recordId, { time, order: sameMinute.length > 1 ? sameMinute.indexOf(record) + 1 : null });
   }
   return tells;
 }

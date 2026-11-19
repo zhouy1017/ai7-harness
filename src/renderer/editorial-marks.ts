@@ -2413,7 +2413,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       } else {
         const recorded = el('p', 'editorial-mark-recorded', decision.disposition === 'rejected'
           ? card.conflict?.outcome === 'keep-current' ? '已拒绝 · 保留当前稿件' : '已拒绝 · 原文保留'
-          : decision.disposition === 'deferred' ? '已记录 · 暂不决定' : '已采纳 · 尚未应用');
+          : decision.disposition === 'deferred' ? '已记录 · 暂不决定' : '已接受 · 尚未写入稿件');
         recorded.dataset['markDecision'] = decision.disposition;
         if (decision.disposition === 'accepted-with-edit' || decision.disposition === 'accepted') {
           disposition.append(exact
