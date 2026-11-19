@@ -75,9 +75,9 @@ it('labels missing historical /2 ancestry separately from a real withdrawal and 
   const legacy = { bookTitle: '原始图书标题', withdrawnAt: null };
   expect(reviewInfluenceMaterialLine(legacy, '修改建议', () => '日期')).toBe('《原始图书标题》 · 修改建议');
   expect(reviewInfluenceMaterialLine({ ...legacy, provenanceAvailability: 'available' }, '修改建议', () => '日期')).toBe('《原始图书标题》 · 修改建议');
-  expect(reviewInfluenceMaterialLine({ ...legacy, provenanceAvailability: 'unavailable' }, '修改建议', () => '日期')).toBe('《原始图书标题》 · 修改建议 · 原社记忆来源在本社不可用');
+  expect(reviewInfluenceMaterialLine({ ...legacy, provenanceAvailability: 'unavailable' }, '修改建议', () => '日期')).toBe('《原始图书标题》 · 修改建议 · 原社审阅偏好的来源在本社不可用');
   expect(reviewInfluenceMaterialLine({ ...legacy, withdrawnAt: '2026-10-01T00:00:00Z', provenanceAvailability: 'unavailable' }, '修改建议', () => '真实日期'))
-    .toBe('《原始图书标题》 · 修改建议 · 原社记忆来源在本社不可用 · 真实日期 已停止今后使用');
+    .toBe('《原始图书标题》 · 修改建议 · 原社审阅偏好的来源在本社不可用 · 真实日期 已停止今后使用');
 });
 
 const counts: ReviewFindingCountsProjection = { must: 2, should: 5, note: 1, pending: 6, handled: 1, ignored: 1 };

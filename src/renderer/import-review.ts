@@ -1290,7 +1290,7 @@ export function createImportReview(options: ImportReviewOptions) {
         element('p', undefined, choice.learnFromEdits ? technicalWords('已允许按当前本机学习设置保留符合准入的原始修改对。', '允许学习这些修改。') : technicalWords('本次不保留学习修改对；来源、稿件对应和导入标记仍会保留。', '不学习这些修改。')));
       if (review.wordLearning !== undefined && technicalLayerVisible) word.append(element('p', undefined,
         `当前全局学习${review.wordLearning.globalEnabled ? '开启' : '关闭'}；本书${review.wordLearning.bookExcluded ? '已被排除' : '未被排除'}。` +
-        `此次按当前设置可保留 ${review.wordLearning.eligibleSampleCount} / ${review.wordLearning.sourceTemplateCount} 条原始修改对，尚未用于编辑记忆、审阅偏好或模型任务。`));
+        `此次按当前设置可保留 ${review.wordLearning.eligibleSampleCount} / ${review.wordLearning.sourceTemplateCount} 条原始修改对，尚未用于审阅偏好或模型任务。`));
       content.append(word);
     }
     const identity = element('section', 'source-card');

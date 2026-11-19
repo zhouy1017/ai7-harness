@@ -211,7 +211,7 @@ it('defaults ordinary quality to preferences and shares its controls with the kn
   expect(page.root.querySelector('[id="quality-tab-preferences"]')!.getAttribute('aria-selected')).toBe('true');
   expect(Array.from(page.root.querySelectorAll('[role="tab"]'), (tab) => tab.textContent)).toEqual(['审阅偏好', '反馈记录']);
   expect(page.root.querySelector('[data-learning-enabled]')).not.toBeNull();
-  expect(Array.from(page.root.querySelectorAll('button'), (node) => node.textContent)).not.toContain('全域对话历史');
+  expect(Array.from(page.root.querySelectorAll('button'), (node) => node.textContent)).not.toContain('对话历史');
   page.root.querySelector<HTMLButtonElement>('[id="quality-tab-feedback"]')!.click();
   for (let i = 0; i < 4; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   expect(page.root.querySelector('[id="feedback-filter-book"]')).not.toBeNull();

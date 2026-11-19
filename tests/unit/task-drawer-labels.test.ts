@@ -140,7 +140,7 @@ import {
   taskPlanBudgetEdited,
   TASK_BAR_RESOLVE_MODEL_SERVICE,
   taskBarAccountLimitNote,
-  TASK_BAR_UNCONFIRMED_HEADING,
+  taskBarUnconfirmedHeading,
   TASK_BAR_VIEW_UNCONFIRMED,
   taskBarOutcomeUnknownNote,
   taskBarUnconfirmedUnit,
@@ -324,7 +324,7 @@ describe('精简 and 完整 (D6)', () => {
     expect(TASK_PLAN_DEFAULT_RULE_HEADING).toBe('这条默认规则会绑定的内容');
     expect(TASK_PLAN_DEFAULT_RULE_LEAD).toBe('以后用快速开始更新这本书的分析时，AI7 会先准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。规则不会自己开始任何任务。');
     // A writing plan's (S84b): the rule covers every 新建文档 of the Book.
-    expect(taskPlanDefaultRuleLead('writing')).toBe('以后在「交付物」的新建文档里选下面「适用于」这一类文档、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。');
+    expect(taskPlanDefaultRuleLead('writing')).toBe('以后在「交付物」的新建衍生稿件里选下面「适用于」这一类衍生稿件、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。');
     expect(taskPlanDefaultRuleLead('baseline-analysis')).toBe(TASK_PLAN_DEFAULT_RULE_LEAD);
     expect(TASK_PLAN_DEFAULT_RULE_FAILED).toBe('无法设为快速开始默认。');
     expect(taskPlanDefaultRuleSet('开始同步 · 第 1 版')).toBe('已设为快速开始默认：开始同步 · 第 1 版');
@@ -384,7 +384,7 @@ describe('the authorization bar (S74a)', () => {
       'needs-connection': '模型未连接：这份计划要发送到模型服务，所需的密钥还没有就绪；连接好之后才能开始',
       offline: '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容',
     });
-    expect(TASK_BAR_OUTCOMES).toEqual({ 'fixed-task': '一条运行记录（不派发）', 'baseline-analysis': '一份基线分析', 'review-run': '审阅发现与审阅报告', 'initial-evaluation': '评估报告', 'readers-report': '审稿意见草稿', 'evaluation-rewrite': '按你的评分重写的评语（待你采用）', writing: '文档草稿（打开后处于「起草」阶段）' });
+    expect(TASK_BAR_OUTCOMES).toEqual({ 'fixed-task': '一条运行记录（不派发）', 'baseline-analysis': '一份基线分析', 'review-run': '审阅发现与审阅报告', 'initial-evaluation': '评估报告', 'readers-report': '审稿意见草稿', 'evaluation-rewrite': '按你的评分重写的评语（待你采用）', writing: '衍生稿件草稿（打开后处于「起草」阶段）' });
     expect(TASK_BAR_RUN_LINKS).toEqual({ 'fixed-task': '查看运行记录', 'baseline-analysis': '查看运行', 'review-run': '查看审阅', 'initial-evaluation': '查看评估', 'readers-report': '查看评估', 'evaluation-rewrite': '查看评估', writing: '查看交付物' });
   });
 
@@ -947,7 +947,7 @@ describe('结果待确认 in the drawer (S16c)', () => {
   };
 
   it('names the unconfirmed ranges and what the editor can do, with no repeat-shaped action', () => {
-    expect([TASK_BAR_VIEW_UNCONFIRMED, TASK_BAR_UNCONFIRMED_HEADING]).toEqual(['查看未确认的部分', '该单元结果未知']);
+    expect([TASK_BAR_VIEW_UNCONFIRMED, taskBarUnconfirmedHeading()]).toEqual(['查看未确认的部分', '该单元结果未知']);
     expect(taskBarOutcomeUnknownNote(1, 8, 8)).toBe('1 处回答未传全，处理与计费未知且不会重发，取消后保留其余 7/8 处结果。');
     expect(taskBarOutcomeUnknownNote(1, 8, 8)).not.toMatch(/续行|重做|再次计费/u);
     expect(taskBarUnconfirmedUnit(4, 1)).toBe('第 4 个阅读范围 · 请求已发出 1 次 · 回答没有完整传回');

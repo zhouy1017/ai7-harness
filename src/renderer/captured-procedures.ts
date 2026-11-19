@@ -210,7 +210,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     heading.tabIndex = -1;
     const latest = el('p', 'captured-procedure-latest');
     latest.append(el('span', `state-term status-pill captured-procedure-state-${procedure.latestState}`, procedure.latestStateLabel),
-      el('span', undefined, ` 最新为${technicalWords(`第 ${procedure.latestVersion} 版`, '版本')} · 共 ${procedure.versionCount} 版`));
+      el('span', undefined, `${technicalWords(` 最新为第 ${procedure.latestVersion} 版 ·`)} 共 ${procedure.versionCount} 版`));
     card.append(heading, latest);
     const actions = el('div', 'button-row captured-procedure-actions');
     if (procedure.runnable) {
@@ -320,11 +320,11 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     item.tabIndex = -1;
     item.append(options.technicalDetails('captured-procedure-facts',
       el('dt', undefined, '可复用工序'), el('dd', 'technical-identity', procedure.procedureId),
-      el('dt', undefined, '版本'), el('dd', 'technical-identity', version.versionId),
+      el('dt', undefined, technicalWords('版本')), el('dd', 'technical-identity', version.versionId),
       el('dt', undefined, '文档 SHA-256'), el('dd', 'technical-identity', version.technical.documentSha256),
       el('dt', undefined, '上一版 SHA-256'), el('dd', 'technical-identity', version.technical.previousDocumentSha256 ?? '无（第 1 版）'),
       el('dt', undefined, '来源审阅'), el('dd', 'technical-identity', `${version.source.bookId} · ${version.source.reviewRunId}`),
-      ...version.steps.flatMap((step) => [el('dt', undefined, step.label), el('dd', 'technical-identity', `${step.categoryId} · ${step.procedureTitle} · ${technicalWords(`第 ${step.procedureVersion} 版`, '版本')}`)]),
+      ...version.steps.flatMap((step) => [el('dt', undefined, step.label), el('dd', 'technical-identity', `${step.categoryId} · ${step.procedureTitle}${technicalWords(` · 第 ${step.procedureVersion} 版`)}`)]),
     ));
     return item;
   }
@@ -472,7 +472,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     const heading = el('h4', undefined, `《${proposal.title}》`);
     heading.tabIndex = -1;
     heading.append(' · ', el('span', 'developer-proposal-latest',
-      `最新${technicalWords(`第 ${proposal.latestVersion} 版`, '版本')} · 记录于 ${options.localInstantLabel(proposal.latestCreatedAt)}`));
+      `${technicalWords(`最新第 ${proposal.latestVersion} 版 · `, '最新一版')}记录于 ${options.localInstantLabel(proposal.latestCreatedAt)}`));
     card.append(heading);
     const actions = el('div', 'button-row developer-proposal-actions');
     const toggle = button(page === null ? `查看各版本（${proposal.versionCount}）` : '收起各版本', 'quiet', 'proposal-versions', async () => {
@@ -551,7 +551,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     problem.setAttribute('role', 'alert');
     const actions = el('div', 'button-row');
     actions.append(
-      button(`保存为${technicalWords(`第 ${latest.version + 1} 版`, '版本')}`, 'primary', 'save-proposal', async () => {
+      button(`保存为${technicalWords(`第 ${latest.version + 1} 版`, '新的一版')}`, 'primary', 'save-proposal', async () => {
         problem.textContent = title.value.trim().length === 0 ? PROPOSAL_PICK_TITLE : missing.value.trim().length === 0 ? PROPOSAL_PICK_CAPABILITY : '';
         if (problem.textContent !== '') return;
         await act('正在保存开发建议…', '无法保存开发建议。', async () => {

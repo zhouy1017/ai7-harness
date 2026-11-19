@@ -150,7 +150,7 @@ export function analysisProvenanceSummary(
 ): string {
   const units = [...new Set(unitOrdinals)].sort((left, right) => left - right);
   const blocks = analysisBlockCountLabel(ranges);
-  return units.length === 0 ? blocks : `来自单元 ${units.join('、')} · ${blocks}`;
+  return units.length === 0 ? blocks : technicalWords(`来自单元 ${units.join('、')} · ${blocks}`, blocks);
 }
 
 /**

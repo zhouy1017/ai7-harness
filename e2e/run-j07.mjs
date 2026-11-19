@@ -60,12 +60,12 @@ const WRITING_SEND = '不发送任何内容：写作任务目前只在不连接�
 const WRITING_NOT_DO = '不改稿件；不照抄范例；不交付、不发送；草稿由你在稿件编辑面上修改后才用。';
 // Issue #432 (S84b): 快速开始 under the 宣传文章's writing 默认执行规则 — a rule covers one house type (#701 review P2-1): none at
 // first, then the one set from the settled plan.
-const WRITING_QUICK_PICK_TYPE = '选好类型后显示：快速开始按这一类文档的默认执行规则开始。';
+const WRITING_QUICK_PICK_TYPE = '选好类型后显示：快速开始按这一类衍生稿件的默认执行规则开始。';
 const WRITING_QUICK_START_REASON = '这本书还没有「写作任务 · 宣传文章」的默认执行规则：先看计划，可以在完整计划里设为快速开始默认。';
 const WRITING_RULE_PATTERN = 'writing:promotion-article';
 const WRITING_RULE_NAME = '写作任务 · 宣传文章 · 第 1 版';
 const WRITING_QUICK_NOTE = `按默认执行规则「${WRITING_RULE_NAME}」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。`;
-const WRITING_RULE_LEAD = '以后在「交付物」的新建文档里选下面「适用于」这一类文档、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。';
+const WRITING_RULE_LEAD = '以后在「交付物」的新建衍生稿件里选下面「适用于」这一类衍生稿件、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。';
 // Issue #428: J-07's last Task — a 评论文章 that lists one 资料库 item under 允许参考. The item is a plain-text file of the Journey's
 // own words, never a manuscript, put into 资料库 through 放入资料…'s picker, set to the house and kept out of learning; the plan
 // pins it at its Material Index build and the Run reads it there. Its words, the 评论文章's request and its draft are the authored
@@ -2872,7 +2872,7 @@ async function main() {
     // 写作 lives on 稿件 since Issue #1403: the Book opened on its manuscript is where it begins.
 
     at('writing-sheet');
-    // 新建文档 · 写作任务 under 交付 · 生产文档: 新建文档… opens the sheet in place — the five house types with none chosen, what AI7
+    // 新建衍生稿件 · 写作任务 under 交付 · 生产文档: 新建文档… opens the sheet in place — the five house types with none chosen, what AI7
     // will reference (each part the Book does not have says so, the 范例 once a type is chosen), the four consequence rows and
     // 快速开始 waiting, with why, for a writing 默认执行规则 (S84b).
     const READ_WRITING = `(() => {

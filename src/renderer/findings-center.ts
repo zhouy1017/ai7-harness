@@ -100,7 +100,7 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
             const body = document.createElement('p'); body.textContent = item.summary;
             const why = document.createElement('p'); why.className = 'finding-why'; why.textContent = `来自${item.categoryLabel}。`;
             const loc = document.createElement('p'); loc.className = 'finding-location';
-            loc.textContent = item.suggestion?.quote ?? (item.target.kind === 'gap' ? `第 ${item.target.unitOrdinal} 个阅读单元` : item.target.kind === 'risk' ? '评估中的风险项' : '稿件中的审阅标记');
+            loc.textContent = item.suggestion?.quote ?? (item.target.kind === 'gap' ? `正文第 ${item.target.unitOrdinal} 部分` : item.target.kind === 'risk' ? '评估中的风险项' : '稿件中的审阅标记');
             words.append(body, why, loc);
             const rowActions = document.createElement('div'); rowActions.className = 'finding-actions';
             const link = createButton(); link.type = 'button'; link.textContent = FINDINGS_CENTER_WORDS.open; link.addEventListener('click', () => open(item));

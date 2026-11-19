@@ -92,7 +92,7 @@ export function packageExportHeading(label: string): string {
 export const PACKAGE_EXPORT_FILES_LABEL = '写入所选文件夹的文件';
 
 /** The two switches of a package's files (EXP-023): the manuscript's and the documents' marks, never 备注. */
-export const PACKAGE_EXPORT_OPTIONS_NOTE = '这两项只改变写出的 DOCX 文件，不改变稿件、文档和上面的标记；备注从不随交付包导出。';
+export const PACKAGE_EXPORT_OPTIONS_NOTE = '这两项只改变写出的 DOCX 文件，不改变稿件、衍生稿件和上面的标记；备注从不随交付包导出。';
 
 /** Each file's own Export Fidelity Review (EXP-007), open by itself when something in it is not written as it was. */
 export function packageExportFidelitySummary(degraded: boolean): string {

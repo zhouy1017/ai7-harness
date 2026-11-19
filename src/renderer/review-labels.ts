@@ -236,7 +236,7 @@ export function reviewRunLine(summary: Pick<ReviewRunSummaryProjection, 'label' 
 }
 
 export function reviewRunReportLine(reportVersion: number | null): string {
-  return reportVersion === null ? '尚未生成报告' : `报告${technicalWords(`第 ${reportVersion} 版`, '版本')}`;
+  return reportVersion === null ? '尚未生成报告' : `报告${technicalWords(`第 ${reportVersion} 版`, '已生成')}`;
 }
 
 export function reviewRunsTruncatedLine(listed: number): string {
@@ -635,7 +635,7 @@ export function reviewInfluenceLine(entry: { readonly categoryLabel: string; rea
 
 /** One material behind a version, by its Book and kind; one 停止今后使用 since says so, and when. */
 export function reviewInfluenceMaterialLine(material: { readonly bookTitle: string; readonly withdrawnAt: string | null; readonly provenanceAvailability?: 'available' | 'unavailable' }, kindLabel: string, instant: (iso: string) => string): string {
-  return `《${material.bookTitle}》 · ${kindLabel}${material.provenanceAvailability === 'unavailable' ? ' · 原社记忆来源在本社不可用' : ''}${material.withdrawnAt === null ? '' : ` · ${instant(material.withdrawnAt)} 已停止今后使用`}`;
+  return `《${material.bookTitle}》 · ${kindLabel}${material.provenanceAvailability === 'unavailable' ? ' · 原社审阅偏好的来源在本社不可用' : ''}${material.withdrawnAt === null ? '' : ` · ${instant(material.withdrawnAt)} 已停止今后使用`}`;
 }
 
 export function reviewInfluenceMore(count: number): string {
@@ -667,7 +667,7 @@ export function reviewBatchAppliedLine(count: number, recovered: boolean): strin
 }
 
 export function reviewReportGeneratedLine(version: number): string {
-  return `已生成审阅报告${technicalWords(`第 ${version} 版`, '版本')}。`;
+  return `已生成审阅报告${technicalWords(`第 ${version} 版`)}。`;
 }
 
 // ---- entry points ----------------------------------------------------------------------------------

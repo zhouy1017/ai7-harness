@@ -228,7 +228,7 @@ export const TASK_PLAN_DEFAULT_RULE_LEAD =
  * P2-1); the audience and channel are each Task's own, and every other type has its own rule.
  */
 export const TASK_PLAN_WRITING_DEFAULT_RULE_LEAD =
-  '以后在「交付物」的新建文档里选下面「适用于」这一类文档、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。';
+  '以后在「交付物」的新建衍生稿件里选下面「适用于」这一类衍生稿件、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。';
 export function taskPlanDefaultRuleLead(kind: TaskPlanProjection['kind']): string {
   if (kind === 'review-run') return '以后对这本书选择相同的审阅类别并点快速开始时，AI7 会先准备计划：与下面这些一致时直接开始，有任何不同都停在计划上，等你看过再开始。规则不会自己开始任何任务。';
   return kind === 'writing' ? TASK_PLAN_WRITING_DEFAULT_RULE_LEAD : TASK_PLAN_DEFAULT_RULE_LEAD;
@@ -503,7 +503,7 @@ export function taskBarAccountLimitNote(unitOrdinal: number | null, unitsSettled
  * and what is missing, with 查看未确认的部分 to see which ranges — and no repeat-shaped action: this Run never sends them again.
  */
 export const TASK_BAR_VIEW_UNCONFIRMED = '查看未确认的部分';
-export const TASK_BAR_UNCONFIRMED_HEADING = '该单元结果未知';
+export const taskBarUnconfirmedHeading = (): string => technicalWords('该单元结果未知', '这部分结果未知');
 export function taskBarOutcomeUnknownNote(unconfirmed: number, unitsSettled: number, unitsTotal: number): string {
   return `${unconfirmed} 处回答未传全，处理与计费未知且不会重发，取消后保留其余 ${unitsSettled - unconfirmed}/${unitsTotal} 处结果。`;
 }
@@ -527,14 +527,14 @@ export const UNCONFIRMED_TASK_KIND_LABELS: Readonly<Record<TaskPlanKind, string>
 };
 /** The steps after the reading ranges, in the Run Report's own words. */
 export const UNCONFIRMED_STAGE_LABELS: Readonly<Record<UnconfirmedStageId, string>> = {
-  'cross-unit-reduction': '跨单元归纳',
+  get 'cross-unit-reduction'() { return technicalWords('跨单元归纳', '全书归纳'); },
   'assurance-sampling': '保证抽样',
   'run-report-reflection': '运行反思',
 };
 export const UNCONFIRMED_HEADING = '结果待确认';
 /** Completed unit gaps have their own state; unknown non-unit stages keep their existing wording. */
 export function unconfirmedHeading(listed: TaskPlanUnconfirmedProjection): string {
-  return listed.ranges.length > 0 ? '该单元结果未知' : UNCONFIRMED_HEADING;
+  return listed.ranges.length > 0 ? taskBarUnconfirmedHeading() : UNCONFIRMED_HEADING;
 }
 export const UNCONFIRMED_KEEP_AS_GAP = '留作未完成的部分';
 export const UNCONFIRMED_KEEP_FAILED = '未能记下这个决定。';
@@ -652,7 +652,7 @@ export const TASK_BAR_OUTCOMES: Readonly<Record<TaskPlanKind, string>> = {
   'initial-evaluation': '评估报告',
   'readers-report': '审稿意见草稿',
   'evaluation-rewrite': '按你的评分重写的评语（待你采用）',
-  writing: '文档草稿（打开后处于「起草」阶段）',
+  writing: '衍生稿件草稿（打开后处于「起草」阶段）',
 };
 
 /** Where each kind's Run is followed once it started (AUTH-007): the record's card, ②A or ②B. */

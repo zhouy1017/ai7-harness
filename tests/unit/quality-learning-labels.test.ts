@@ -58,7 +58,7 @@ describe('学习准入 words', () => {
     ]);
     expect(LEARNING_SERIES_UNAVAILABLE).toBe('还没有书系：书系接通后，才能把材料纳入书系。');
     // What a decision does not do, said on every card (LEARN-009, LEARN-010).
-    for (const words of ['不会改动稿件', '不会自动生效为规则', '不会启用记忆', '不会被发送出去']) expect(LEARNING_INFLUENCE).toContain(words);
+    for (const words of ['不会改动稿件', '不会自动生效为规则', '不会启用审阅偏好', '不会被发送出去']) expect(LEARNING_INFLUENCE).toContain(words);
     expect(LEARNING_ELIGIBILITY_BASIS).toContain('仅建议');
   });
 

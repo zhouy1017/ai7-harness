@@ -181,7 +181,7 @@ export const CONFLICT_COMPLETION = {
 } as const;
 
 /** 保留当前稿件's completion on a Production Document (Issue #543 follow-up), where the text kept is the document's. */
-export const CONFLICT_KEEP_CURRENT_ON_DOCUMENT = '已保留文档现在的文字；文档没有改动。';
+export const CONFLICT_KEEP_CURRENT_ON_DOCUMENT = '已保留衍生稿件现在的文字；衍生稿件没有改动。';
 
 /** A completion in the words of what the conflict was on: a document's own words for its text, the manuscript's otherwise. */
 export function conflictCompletionOn(onDocument: boolean, completion: string): string {

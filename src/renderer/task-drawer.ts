@@ -49,7 +49,7 @@ import {
   TASK_BAR_CANCEL_CONFIRM,
   TASK_BAR_CANCEL_FAILED,
   TASK_BAR_CANCEL_IMPACT_HEADING,
-  TASK_BAR_UNCONFIRMED_HEADING,
+  taskBarUnconfirmedHeading,
   taskBarUnconfirmedUnit,
   TASK_BAR_VIEW_UNCONFIRMED,
   unconfirmedHeading,
@@ -2042,7 +2042,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       assuranceBuffers.delete(editKey(current));
       if (budgetForm?.key === editKey(current)) budgetForm = null;
       const ordinal = typeof updated.planVersion === 'number' ? updated.planVersion : updated.planVersion?.ordinal;
-      options.setStatus(`计划已更新为${technicalWords(`第 ${ordinal ?? '?'} 版`, '版本')}。`, 'success');
+      options.setStatus(technicalWords(`计划已更新为第 ${ordinal ?? '?'} 版。`, '计划已更新。'), 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
       // 保存并开始 (Issue #1431 item 40): the version just written starts in the same click, through the one start path.
@@ -2349,7 +2349,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const section = el('section', 'task-bar-unconfirmed');
     section.id = UNCONFIRMED_ID;
     section.setAttribute('role', 'group');
-    const heading = el('h4', undefined, TASK_BAR_UNCONFIRMED_HEADING);
+    const heading = el('h4', undefined, taskBarUnconfirmedHeading());
     heading.id = uid('unconfirmed');
     heading.tabIndex = -1;
     // Named as the bar's controls are, so a repaint while the editor reads the list keeps focus on it.

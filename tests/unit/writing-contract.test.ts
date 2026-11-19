@@ -864,7 +864,7 @@ describe('the draft and the page\'s words', () => {
     expect(writingQuickFailed('这项任务已经开始了。')).not.toContain('可在任务计划里开始');
     expect(writingQuickFailed('  ')).toBe(WRITING_STATUS.quickFailed);
     expect(WRITING_STATUS.quickNoPlan).toBe('这份计划还没有冻结，没有按规则开始；请看过计划后再开始。');
-    expect(WRITING_QUICK_PICK_TYPE).toBe('选好类型后显示：快速开始按这一类文档的默认执行规则开始。');
+    expect(WRITING_QUICK_PICK_TYPE).toBe('选好类型后显示：快速开始按这一类衍生稿件的默认执行规则开始。');
   });
 });
 

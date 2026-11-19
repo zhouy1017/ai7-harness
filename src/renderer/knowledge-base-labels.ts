@@ -113,7 +113,7 @@ export const GUIDELINE_STATUS = {
 
 /** The pill of a document: the version that applies now, and who issued it. */
 export function guidelineVersionPill(document: Pick<ReviewGuidelineDocumentProjection, 'currentOrdinal' | 'issuer'>): string {
-  return `${technicalWords(`第 ${document.currentOrdinal} 版`, '版本')} · ${document.issuer}`;
+  return `${technicalWords(`第 ${document.currentOrdinal} 版 · `)}${document.issuer}`;
 }
 
 /** Which review categories apply a document. */
@@ -140,7 +140,7 @@ export function guidelineOlderBooks(document: Pick<ReviewGuidelineDocumentProjec
   // A Book whose version came with it when it was merged here says so (Issue #434 review).
   const books = document.olderVersionBooks.map((book) => `《${book.bookTitle}》${book.merged ? '随图书带来的' : ''}第 ${book.ordinal} 版`).join('、');
   const more = document.olderVersionBookCount > document.olderVersionBooks.length ? ` 等 ${document.olderVersionBookCount} 本书` : '';
-  return `还在用旧版：${books}${more}；这些书新准备的审阅会按${technicalWords(`第 ${document.currentOrdinal} 版`, '版本')}；已准备的审阅仍用原版本。`;
+  return `还在用旧版：${books}${more}；这些书新准备的审阅会按${technicalWords(`第 ${document.currentOrdinal} 版`, '现在的一版')}；已准备的审阅仍用原版本。`;
 }
 
 export function guidelineClausesSummary(count: number): string {
@@ -165,7 +165,7 @@ export function guidelineVersionLine(version: ReviewGuidelineVersionProjection, 
   const used = version.usedByCount === 0
     ? GUIDELINE_UNUSED
     : version.usedByCount > version.usedBy.length ? `用于 ${version.usedByCount} 次审阅，最近：${named}` : `用于 ${named}`;
-  return `${technicalWords(`第 ${version.ordinal} 版`, '版本')} · ${version.issuer} · ${origin} · ${version.clauseCount} 条 · ${used}`;
+  return `${technicalWords(`第 ${version.ordinal} 版 · `)}${version.issuer} · ${origin} · ${version.clauseCount} 条 · ${used}`;
 }
 
 /** The versions merged Books were reviewed under and this data never had (Issue #434 review): read-only, and how many. */
@@ -177,7 +177,7 @@ export function guidelineMergedVersionsSummary(count: number): string {
 export function guidelineMergedVersionLine(version: ReviewGuidelineMergedVersionProjection): string {
   const named = version.usedBy.map((run) => `《${run.bookTitle}》第 ${run.reviewOrdinal} 次审阅`).join('、');
   const used = version.usedByCount > version.usedBy.length ? `用于 ${version.usedByCount} 次审阅，最近：${named}` : `用于 ${named}`;
-  return `${technicalWords(`第 ${version.ordinal} 版`, '版本')} · ${version.issuer} · ${version.clauseCount} 条 · 随图书带来 · ${used}`;
+  return `${technicalWords(`第 ${version.ordinal} 版 · `)}${version.issuer} · ${version.clauseCount} 条 · 随图书带来 · ${used}`;
 }
 
 /** When more such versions exist than are named. */
@@ -186,17 +186,17 @@ export function guidelineMergedVersionsMore(shown: number, total: number): strin
 }
 
 export function guidelinePreviewHeading(preview: Pick<ReviewGuidelinePreviewProjection, 'ordinal' | 'title'>): string {
-  return `将导入为《${preview.title}》${technicalWords(`第 ${preview.ordinal} 版`, '版本')}`;
+  return `将导入为《${preview.title}》${technicalWords(`第 ${preview.ordinal} 版`, '的新一版')}`;
 }
 
 /** How the file's clauses differ from the version that applies now. */
 export function guidelinePreviewChanges(preview: Pick<ReviewGuidelinePreviewProjection, 'source' | 'currentOrdinal' | 'changes' | 'clauseCount'>): string {
   const { changed, added, removed } = preview.changes;
-  return `${preview.source.displayName} · ${preview.clauseCount} 条 · 与${technicalWords(`第 ${preview.currentOrdinal} 版`, '版本')}相比：改动 ${changed} 条，新增 ${added} 条，删去 ${removed} 条`;
+  return `${preview.source.displayName} · ${preview.clauseCount} 条 · 与${technicalWords(`第 ${preview.currentOrdinal} 版`, '现在的一版')}相比：改动 ${changed} 条，新增 ${added} 条，删去 ${removed} 条`;
 }
 
 export function guidelineImported(title: string, ordinal: number): string {
-  return `已导入《${title}》${technicalWords(`第 ${ordinal} 版`, '版本')}；新准备的审阅按${technicalWords(`第 ${ordinal} 版`, '版本')}；已准备的审阅仍用原版本。`;
+  return `已导入《${title}》${technicalWords(`第 ${ordinal} 版`, '的新一版')}；新准备的审阅按${technicalWords(`第 ${ordinal} 版`, '新的一版')}；已准备的审阅仍用原版本。`;
 }
 
 // ---- 范例 (Issue #427, plan slice S79b; KB-004, KB-006) --------------------------------------------------------------
@@ -268,7 +268,7 @@ export function exemplarAttribution(book: Pick<ExemplarBookProjection, 'authors'
 export function exemplarDesignation(book: Pick<ExemplarBookProjection, 'designatedAt' | 'publicationOrdinal' | 'withdrawn' | 'imported'>, instant: (iso: string) => string): string {
   if (book.imported) return `以前出版的图书 · 导入于 ${instant(book.designatedAt)}`;
   const designated = `第 ${book.publicationOrdinal} 次设为发稿版本于 ${instant(book.designatedAt)}`;
-  return book.withdrawn ? `${designated} · ${MAINTENANCE_WITHDRAWN}；之后交付的文档，另设发稿版本后才归入` : designated;
+  return book.withdrawn ? `${designated} · ${MAINTENANCE_WITHDRAWN}；之后交付的衍生稿件，另设发稿版本后才归入` : designated;
 }
 
 /** Delivery/import and history facts shown below the document's custom title. */
@@ -335,7 +335,7 @@ export const LIBRARY_ELIGIBILITY_RESET = '给谁用改了：是否可用于学�
 export const LIBRARY_RECOMMENDED = '建议';
 export const LIBRARY_REASON_LABEL = '补充说明 · 可不填';
 /** What eligibility does and does not do (LEARN-009, LEARN-010), said once beside the choice. */
-export const LIBRARY_ELIGIBILITY_BOUNDARY = '是否可用于学习只决定它能不能在所选范围内形成学习信号：不会启用记忆，不会扩大任务的读取范围，也不允许把它发送出去。';
+export const LIBRARY_ELIGIBILITY_BOUNDARY = '是否可用于学习只决定它能不能在所选范围内形成学习信号：不会启用审阅偏好，不会扩大任务的读取范围，也不允许把它发送出去。';
 /** The wider choice's consequence, shown inline when it is chosen (LEARN-005, LEARN-012). */
 export const LIBRARY_HOUSE_CONSEQUENCE = '纳入本社经验：本社以后的图书都可能从它学习。';
 export const LIBRARY_STATUS = {
@@ -666,7 +666,7 @@ export const CUSTOM_DIMENSION_FIXED_LINES = [
 export const CUSTOM_DIMENSION_STOP_NOTE = '停用后这个版本不能再运行；已经用它完成的分析仍然保留，并一直标明所用的版本。';
 
 export function customDimensionVersionLine(version: { version: number; stateLabel: string; taskCount: number }): string {
-  return `${technicalWords(`第 ${version.version} 版`, '版本')} · ${version.stateLabel} · ${version.taskCount === 0 ? '还没有运行过' : `用于 ${version.taskCount} 项任务`}`;
+  return `${technicalWords(`第 ${version.version} 版 · `)}${version.stateLabel} · ${version.taskCount === 0 ? '还没有运行过' : `用于 ${version.taskCount} 项任务`}`;
 }
 
 export function customDimensionSavedLine(title: string): string {
@@ -674,9 +674,9 @@ export function customDimensionSavedLine(title: string): string {
 }
 
 export function customDimensionEnabledLine(title: string, version: number): string {
-  return `已启用「${title}」${technicalWords(`第 ${version} 版`, '版本')}；可以在书的「分析 › 自定义」中运行。`;
+  return `已启用「${title}」${technicalWords(`第 ${version} 版`)}；可以在书的「分析 › 自定义」中运行。`;
 }
 
 export function customDimensionStoppedLine(title: string, version: number): string {
-  return `已停用「${title}」${technicalWords(`第 ${version} 版`, '版本')}；已完成的分析仍保留。`;
+  return `已停用「${title}」${technicalWords(`第 ${version} 版`)}；已完成的分析仍保留。`;
 }

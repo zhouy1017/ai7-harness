@@ -139,7 +139,7 @@ describe('范例 (Issue #427, S79b)', () => {
     // Which designation the time is — a Book set as a 发稿版本 twice reads its second — and a 撤回 that holds it.
     expect(exemplarDesignation({ designatedAt: 'x', publicationOrdinal: 2, withdrawn: false }, () => '9月25日')).toBe('第 2 次设为发稿版本于 9月25日');
     expect(exemplarDesignation({ designatedAt: 'x', publicationOrdinal: 1, withdrawn: true }, () => '9月25日'))
-      .toBe('第 1 次设为发稿版本于 9月25日 · 已在 AI7 内撤回；之后交付的文档，另设发稿版本后才归入');
+      .toBe('第 1 次设为发稿版本于 9月25日 · 已在 AI7 内撤回；之后交付的衍生稿件，另设发稿版本后才归入');
     const exemplar = {
       documentId: 'd', typeId: 'news-release', typeLabel: '新闻稿', version: 3, revisionId: 'r', revisionDigest: 'a'.repeat(64),
       deliveredTo: '编辑部', deliveredAt: 't1', archivedAt: 't2', earlierVersionCount: 2, earlierVersions: [1, 2], eligibility: 'house-only' as const,

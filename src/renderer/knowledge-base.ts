@@ -421,7 +421,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       back.append(all);
     }
     // AI 助手 is in the sidebar; the developer layer keeps this way in as well (#1521).
-    if (technicalLayerVisible) back.append(button('全域对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
+    if (technicalLayerVisible) back.append(button('对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
     back.append(button('返回', 'quiet', () => void returnToOrigin()));
     if (returnToReview !== null) back.prepend(button('返回原审阅', 'quiet', returnToReview));
     content.append(
@@ -619,7 +619,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       }
       view.append(summary, binds, technicalDetails('default-rule-facts',
         element('dt', undefined, '规则'), element('dd', 'technical-identity', `${rule.ruleId} · ${rule.taskKind} · ${rule.pattern}`),
-        element('dt', undefined, '规则版本'), element('dd', 'technical-identity', `${technicalWords(`第 ${rule.ordinal} 版`, '版本')} · ${rule.ruleVersionId}`),
+        element('dt', undefined, '规则版本'), element('dd', 'technical-identity', technicalWords(`第 ${rule.ordinal} 版 · ${rule.ruleVersionId}`)),
         element('dt', undefined, '设定时查看的计划'), element('dd', 'technical-identity', `${rule.sourceTaskIntentId} · ${rule.sourcePlanEnvelopeDigest}`)));
       heading.append(element('span', undefined, set));
       card.append(heading, element('p', undefined, rule.does), view);

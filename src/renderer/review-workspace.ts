@@ -2503,7 +2503,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       part('category-summaries', record.categorySummaries.title, summaries),
       part('appendix', record.appendix.title, appendix, options.technicalDetails(
         'review-facts',
-        el('dt', undefined, '报告'), el('dd', 'technical-identity', `${report.reportId} · ${technicalWords(`第 ${report.version} 版`, '版本')} · ${report.digest}`),
+        el('dt', undefined, '报告'), el('dd', 'technical-identity', technicalWords(`${report.reportId} · 第 ${report.version} 版 · ${report.digest}`)),
         el('dt', undefined, '生成时刻'), el('dd', 'technical-identity', report.generatedAt),
         el('dt', undefined, '审阅配置'), el('dd', 'technical-identity', `${record.appendix.configuration.schema} · ${record.appendix.configuration.version} · ${record.appendix.configuration.digest}`),
         ...record.appendix.categories.flatMap((category) => [
@@ -3175,7 +3175,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const categoryLegend = el('legend', undefined, REVIEW_CATEGORY_LEGEND);
     if (state.definition !== null) {
       const labels = state.definition.categoryIds.map((categoryId) => workspace.categories.find((entry) => entry.categoryId === categoryId)?.label ?? categoryId);
-      const line = el('span', 'review-sheet-definition', `按工序《${state.definition.title}》${technicalWords(`第 ${state.definition.pin.version} 版`, '版本')}依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
+      const line = el('span', 'review-sheet-definition', `按工序《${state.definition.title}》${technicalWords(`第 ${state.definition.pin.version} 版`)}依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
       line.dataset['procedureDefinition'] = `${state.definition.pin.procedureId}@${state.definition.pin.version}`;
       form.append(line);
     }

@@ -1109,7 +1109,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='审阅偏好已打开' && document.querySelector('[data-learning-enabled]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-quality-loaded');
     await assertRenderer(primary, `!document.querySelector('#persistence-status')?.textContent.includes('该页在开发者模式下显示') && !document.body.textContent.includes('该页在开发者模式下显示')`, 'ordinary-quality-no-shelved-notice');
     // #1521: AI 助手 is in the sidebar, so the page's footer button to it is gone in ordinary mode.
-    await assertRenderer(primary, `!Array.from(document.querySelectorAll('[data-screen="quality-learning"] button'), (node) => node.textContent).includes('全域对话历史')`, 'ordinary-quality-no-global-history-button');
+    await assertRenderer(primary, `!Array.from(document.querySelectorAll('[data-screen="quality-learning"] button'), (node) => node.textContent).includes('对话历史')`, 'ordinary-quality-no-global-history-button');
     // #1408: an editor's own rule is an active rule the moment it is saved. Ordinary mode, public synthetic text; the rule is
     // created, edited as the same rule, then stopped, so this stage leaves no active preference behind.
     const preferenceText = 'J12 合成偏好：保留有意使用的短句。';

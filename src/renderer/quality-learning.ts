@@ -350,7 +350,7 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     if (material.sourceTask !== null) fact('来源任务', `${material.sourceTask.label}${technicalWords(` · ${material.sourceTask.taskIntentId}`)}`, 'task');
     fact(LEARNING_CARD_TERMS.rationale, material.rationale, 'rationale');
     fact(LEARNING_CARD_TERMS.influence, material.kind === 'word-tracked-edit'
-      ? '尚未用于编辑记忆、审阅偏好或模型任务。' : LEARNING_INFLUENCE, 'influence');
+      ? '尚未用于审阅偏好或模型任务。' : LEARNING_INFLUENCE, 'influence');
     fact(LEARNING_CARD_TERMS.decision, learningDecisionLine(material, localInstantLabel), 'decision');
     card.append(heading, facts);
     if (material.target.kind === 'word-tracked-edit') {

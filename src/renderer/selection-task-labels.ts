@@ -55,7 +55,7 @@ export function selectionProcedureLabel(title: string): string {
 }
 export function selectionProcedureHint(version: number, steps: number, chosenApart: ReadonlyArray<string>): string {
   const apart = chosenApart.length === 0 ? '' : ` · ${chosenApart.map((label) => `「${label}」`).join('、')}另行勾选`;
-  return `可复用工序 · ${technicalWords(`第 ${version} 版`, '版本')} · ${steps} 步${apart}`;
+  return `可复用工序${technicalWords(` · 第 ${version} 版`)} · ${steps} 步${apart}`;
 }
 export const SELECTION_PROCEDURE_NO_VERSION = '现在没有可以运行的版本';
 export function selectionProcedureStepReason(label: string, reason: string): string {
@@ -127,7 +127,7 @@ export function selectionTaskGroupNote(procedures: ReadonlyArray<SelectionProced
  * A Production Document's manuscript (Issue #423 review, P3-5): no Task reads a document yet, so neither selection Task is
  * offered there. TASK-001 names Editorial Deliverables as a composer host too — an Owner question recorded on the PR.
  */
-export const SELECTION_TASK_DOCUMENT_REASON = '在交付物工具栏点击「发起任务」，以当前文档为目标。';
+export const SELECTION_TASK_DOCUMENT_REASON = '在交付物工具栏点击「发起任务」，以当前衍生稿件为目标。';
 
 export const SELECTION_TASK_STATUS = {
   reading: '正在读取可以就这段发起的工序…',

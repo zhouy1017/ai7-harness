@@ -276,7 +276,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     productionDocument === undefined ? undefined : documentStanding(productionDocument.document, windowNow.workingDigest).current?.label;
   const revisionWords = (windowNow: ManuscriptWindowProjection): string => {
     if (!isDocument) return technicalWords(`修订版 ${windowNow.revisionLabel.replace(/^r/u, '')}`, '当前稿件');
-    if (!technicalLayerVisible) return '当前文档';
+    if (!technicalLayerVisible) return '当前衍生稿件';
     const label = versionOf(windowNow);
     return label === undefined ? DOCUMENT_CHANGED_SINCE_VERSION : `${DOCUMENT_CURRENT_VERSION} ${label}`;
   };
