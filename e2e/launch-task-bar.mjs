@@ -65,6 +65,8 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
   try {
     for (const [width, height] of [[1280, 800], [1008, 681]]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      // The page makes room for a docked Task Drawer by a transition of its padding: the new width settles before anything is pressed.
+      await waitFor(renderer, `document.body.getAnimations().length===0`, `${name}-layout-settled-${width}`);
       const options = `${root} .task-launch-options`;
       // Below 1120 px the Task Drawer overlays the page: a drawer left open beside it at a wider window now lies over a page bar's
       // 选项, and the editor closes it first (as J-04's startUpdate does for the history tab).
