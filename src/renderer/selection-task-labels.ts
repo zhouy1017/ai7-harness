@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import { technicalWords } from './technical-layer.js';
 import type {
   BaselineAnalysisGoal,
@@ -182,7 +183,7 @@ export function selectionTaskChoices(
   if (analysis !== null) {
     const action = controls?.actions['reanalyze-range'] ?? null;
     if (controls === null || action === null) reasons.push(SELECTION_TASK_NO_BASELINE);
-    else if (controls.blockedByActiveRun) reasons.push(controls.blockedReason ?? action.unavailableReason ?? SELECTION_TASK_NO_BASELINE);
+    else if (controls.blockedByActiveRun) reasons.push(serviceWords(controls.blockedReason ?? action.unavailableReason) ?? SELECTION_TASK_NO_BASELINE);
     else if (!action.available) reasons.push(action.unavailableReason ?? SELECTION_TASK_NO_BASELINE);
     else choices.push({ kind: 'reanalyze', value: 'reanalyze-range', label: SELECTION_TASK_REANALYZE, goal: action.goal as BaselineAnalysisGoal });
   }

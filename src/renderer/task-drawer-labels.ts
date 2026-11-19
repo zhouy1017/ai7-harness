@@ -1,5 +1,5 @@
 import { technicalWords, technicalLayerVisible } from './technical-layer.js';
-import { serviceGoalWords, serviceWords } from './service-wording.js';
+import { serviceGoalWords, serviceWords, stateWords } from './service-wording.js';
 import type {
   BookTaskItemProjection,
   GlobalAttentionItemProjection,
@@ -224,7 +224,9 @@ export function taskPlanWording(plan: TaskPlanProjection): TaskPlanProjection {
     clarifications: plan.clarifications.map((asked) => ({ ...asked,
       ...(asked.origin === 'model' ? {} : { question: serviceWords(asked.question) }),
       why: serviceWords(asked.why), detail: serviceWords(asked.detail), scope: serviceWords(asked.scope), after: serviceWords(asked.after),
-      options: asked.options.map((option) => option.id.startsWith('model-option') ? option
+      // The editor's answer is theirs, the model's options are the model's: only the service's consequence of one is reworded (review B1 d, c).
+      answerable: { ...asked.answerable, reason: serviceWords(asked.answerable.reason) },
+      options: asked.options.map((option) => option.id.startsWith('model-option') ? { ...option, consequence: serviceWords(option.consequence) }
         : { ...option, label: serviceWords(option.label), consequence: serviceWords(option.consequence), recommended: serviceWords(option.recommended) }) })) };
 }
 
@@ -843,7 +845,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         summary,
         statement: null,
         note: plan.state.label === TASK_BAR_WAITING_FOR_IDLE ? TASK_BAR_WAITING_IDLE_NOTE : TASK_BAR_QUEUED_NOTE,
-        status: serviceWords(plan.state.label),
+        status: stateWords(plan.state),
         actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
       };
     }
@@ -853,7 +855,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         summary,
         statement: null,
         note: plan.state.label === TASK_BAR_WAITING_FOR_IDLE ? TASK_BAR_WAITING_IDLE_NOTE : plan.state.label === TASK_BAR_WAITING_FOR_SLOT ? TASK_BAR_WAITING_SLOT_NOTE : TASK_BAR_WAITING_NOTE,
-        status: serviceWords(plan.state.label),
+        status: stateWords(plan.state),
         actions: [
           ...(plan.state.label === TASK_BAR_WAITING_FOR_CONNECTION
             ? [{ name: 'connect', label: TASK_BAR_CONNECT, tone: 'secondary', disabledReason: null } as const]
@@ -868,10 +870,10 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
     const control = plan.runControl;
     if (control !== null) {
       if (control.cancelling) {
-        return { readiness, summary, statement: null, note: TASK_BAR_CANCELLING_NOTE, status: serviceWords(plan.state.label), actions: [runLink] };
+        return { readiness, summary, statement: null, note: TASK_BAR_CANCELLING_NOTE, status: stateWords(plan.state), actions: [runLink] };
       }
       if (control.pausing) {
-        return { readiness, summary, statement: null, note: TASK_BAR_PAUSING_NOTE, status: serviceWords(plan.state.label), actions: [runLink] };
+        return { readiness, summary, statement: null, note: TASK_BAR_PAUSING_NOTE, status: stateWords(plan.state), actions: [runLink] };
       }
       // 任务等待你的说明 (Issue #422, S76d; CLAR-004): 等你回答 — the card above the plan says what to decide — with
       // 取消任务 and 改计划重做 beside it; nothing goes on until the editor answers.
@@ -886,7 +888,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           note: continuation === null || continuation.unitsSettled === null
             ? (asked.count === 0 ? null : taskBarQuestionsNote(asked.count, asked.more))
             : taskBarAwaitingAnswerNote(continuation.unitsSettled, continuation.unitsTotal, asked.count, asked.more),
-          status: asked.count === 0 ? serviceWords(plan.state.label) : TASK_BAR_AWAITING_ANSWER,
+          status: asked.count === 0 ? stateWords(plan.state) : TASK_BAR_AWAITING_ANSWER,
           actions: [
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
             { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
@@ -907,7 +909,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           note: continuation === null || continuation.unitsSettled === null
             ? null
             : taskBarOutcomeUnknownNote(plan.listPages?.['runControl.outcomeUnknown.units']?.total ?? control.outcomeUnknown.units.length, continuation.unitsSettled, continuation.unitsTotal),
-          status: serviceWords(plan.state.label),
+          status: stateWords(plan.state),
           actions: [
             { name: 'view-unconfirmed', label: TASK_BAR_VIEW_UNCONFIRMED, tone: 'primary', disabledReason: null },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
@@ -929,7 +931,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           note: continuation === null || continuation.unitsSettled === null
             ? null
             : taskBarAccountLimitNote(control.accountLimit.unitOrdinal, continuation.unitsSettled, continuation.unitsTotal),
-          status: serviceWords(plan.state.label),
+          status: stateWords(plan.state),
           actions: [
             { name: 'connect', label: TASK_BAR_RESOLVE_MODEL_SERVICE, tone: 'secondary', disabledReason: null },
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
@@ -953,7 +955,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           summary,
           statement: control.stopReason === undefined ? null : taskBarResumableStatement(control.stopReason),
           note: [continuationNote, stopNote].filter((entry): entry is string => entry !== null).join('；') || null,
-          status: control.stopReason === undefined ? serviceWords(plan.state.label) : taskBarResumableStatus(control.stopReason),
+          status: control.stopReason === undefined ? stateWords(plan.state) : taskBarResumableStatus(control.stopReason),
           actions: [
             ...(control.stopReason === 'proxy-unreachable' || control.stopReason === 'model-service-unreachable'
               ? [{ name: 'connect', label: TASK_BAR_PROXY_SETTINGS, tone: 'secondary', disabledReason: null } as const] : []),
@@ -972,7 +974,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         summary,
         statement: null,
         note: asked.count === 0 ? null : taskBarQuestionsNote(asked.count, asked.more),
-        status: serviceWords(plan.state.label),
+        status: stateWords(plan.state),
         actions: [
           { name: 'pause', label: TASK_BAR_PAUSE, tone: 'secondary', disabledReason: control.pause.reason },
           { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
@@ -989,7 +991,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         summary,
         statement: null,
         note: taskBarReprepareNote(plan.reprepare.reason),
-        status: serviceWords(plan.state.label),
+        status: stateWords(plan.state),
         actions: [{ name: 'reprepare', label: TASK_BAR_REPREPARE, tone: 'primary', disabledReason: null }, runLink],
       };
     }
@@ -1000,8 +1002,8 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: `${plan.planMovedReason ?? `${serviceWords(plan.state.label)}。`}${TASK_BAR_PLAN_MOVED_ELSEWHERE[plan.kind]}${blockedRunCancellable(plan) ? TASK_BAR_BLOCKED_CANCEL_NOTE : ''}`,
-        status: serviceWords(plan.state.label),
+        note: `${plan.planMovedReason ?? `${stateWords(plan.state)}。`}${TASK_BAR_PLAN_MOVED_ELSEWHERE[plan.kind]}${blockedRunCancellable(plan) ? TASK_BAR_BLOCKED_CANCEL_NOTE : ''}`,
+        status: stateWords(plan.state),
         actions: blockedRunCancellable(plan) ? [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink] : [runLink],
       };
     }
@@ -1012,7 +1014,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         summary,
         statement: null,
         note: TASK_BAR_BLOCKED_CANCEL_NOTE,
-        status: serviceWords(plan.state.label),
+        status: stateWords(plan.state),
         actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
       };
     }
@@ -1023,7 +1025,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         summary,
         statement: null,
         note: plan.budgetStop.launchSetsCeiling ? `${taskBarBudgetStopNote(plan.budgetStop)}。${TASK_BAR_BUDGET_LAUNCH_NOTE}` : taskBarBudgetStopNote(plan.budgetStop),
-        status: serviceWords(plan.state.label),
+        status: stateWords(plan.state),
         actions: [
           ...(plan.redo === null ? [] : [{
             name: 'redo', label: plan.budgetStop.launchSetsCeiling ? TASK_BAR_REDO : TASK_BAR_ADJUST_BUDGET_REDO, tone: 'primary', disabledReason: null,
@@ -1037,7 +1039,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
       summary,
       statement: null,
       note: null,
-      status: plan.state.key === 'recorded' ? TASK_BAR_RECORDED : plan.state.key === 'cancelled' ? TASK_BAR_CANCELLED : serviceWords(plan.state.label),
+      status: plan.state.key === 'recorded' ? TASK_BAR_RECORDED : plan.state.key === 'cancelled' ? TASK_BAR_CANCELLED : stateWords(plan.state),
       // 改计划重做 (Issue #422, S76c): a Run the editor cancelled after it began can be redone as a new Task.
       actions: plan.redo === null ? [runLink] : [{ name: 'redo', label: TASK_BAR_REDO, tone: 'secondary', disabledReason: null }, runLink],
     };
@@ -1298,7 +1300,7 @@ function taskStatusSentence(plan: TaskPlanProjection, facts: TaskStatusFacts): s
     case 'recorded': return `${TASK_BAR_RECORDED}。`;
     case 'cancelled': return `${TASK_BAR_CANCELLED}。`;
     case 'cancelled-after-start': return `${TASK_BAR_CANCELLED_NOTE}。`;
-    case 'stopped': case 'blocked': return `${serviceWords(plan.state.label)}。`;
+    case 'stopped': case 'blocked': return `${stateWords(plan.state)}。`;
     default: return null;
   }
 }

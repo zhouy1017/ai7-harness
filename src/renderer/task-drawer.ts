@@ -1,4 +1,4 @@
-import { serviceWords } from './service-wording.js';
+import { serviceWords, stateWords } from './service-wording.js';
 import { LEDGER_TASK_LAUNCH_KINDS } from '../shared/runtime-execution-config.js';
 import { mountLaunchBar, type LaunchBar, type TaskLaunchOperation, type TaskLaunchRequest } from './components/launch-bar.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
@@ -1306,7 +1306,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const committed = committedEdit(entry);
       const shown = shownEdit(next, entry.id, committed);
       if (shown === 'removed') item.classList.add('task-plan-item-removed');
-      item.append(el('span', 'task-plan-adaptation', entry.label));
+      item.append(el('span', 'task-plan-adaptation', serviceWords(entry.label)));
       if (entry.removable || entry.movable) item.append(...adaptationControls(next, entry, committed, shown));
       if (shown === 'ask-first') asked.push(item);
       else adaptations.append(item);
@@ -1362,7 +1362,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       row.append(line);
     }
     if (!rule.canSet || rule.planEnvelopeDigest === null) {
-      row.append(unavailable(TASK_PLAN_DEFAULT_RULE, 'default-rule', rule.reason ?? TASK_PLAN_DEFAULT_RULE_FAILED));
+      row.append(unavailable(TASK_PLAN_DEFAULT_RULE, 'default-rule', serviceWords(rule.reason) ?? TASK_PLAN_DEFAULT_RULE_FAILED));
       section.append(row);
       return section;
     }
@@ -1370,7 +1370,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const open = control(TASK_PLAN_DEFAULT_RULE, 'secondary', 'default-rule');
     const binds = el('dl', 'task-plan-facts task-plan-default-rule-binds');
     for (const row of rule.binds) {
-      const value = el('dd', undefined, row.value);
+      const value = el('dd', undefined, serviceWords(row.value));
       value.dataset['defaultRuleBind'] = row.label;
       binds.append(el('dt', undefined, row.label), value);
     }
@@ -1481,7 +1481,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       status.tabIndex = -1;
       parts.push(status);
     } else if (technicalLayerVisible) {
-      const state = el('span', 'state-term task-bar-state', serviceWords(next.state.label));
+      const state = el('span', 'state-term task-bar-state', stateWords(next.state));
       state.dataset['pillTone'] = TASK_PLAN_STATE_PILLS[next.state.key].tone;
       parts.push(state);
     }

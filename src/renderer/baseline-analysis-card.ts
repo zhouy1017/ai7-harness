@@ -386,7 +386,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
   /** The Run Report's lines for a Run a 后台分析登记 started (Issue #864): counts and words only. */
   function backgroundReportList(lines: ReadonlyArray<string>): HTMLElement {
     const list = element('ul', 'analysis-list analysis-run-report-background');
-    for (const line of lines) list.append(element('li', undefined, line));
+    for (const line of lines) list.append(element('li', undefined, serviceWords(line)));
     return list;
   }
 

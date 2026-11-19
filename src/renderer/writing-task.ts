@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import type { TaskLaunchRequest } from './task-drawer.js';
 import { reportResult } from './notifications.js';
 import { createSheet, sheetContent } from './components/sheet.js';
@@ -324,7 +325,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       label.htmlFor = id;
       wrapper.append(input, label);
       if (!type.prepare.allowed) {
-        const reason = el('span', 'writing-type-reason', type.prepare.reason);
+        const reason = el('span', 'writing-type-reason', serviceWords(type.prepare.reason));
         reason.id = uid('reason');
         input.setAttribute('aria-describedby', reason.id);
         label.append(reason);

@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import { rendererApi } from './navigation-generation.js';
 import { reportResult } from './notifications.js';
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
@@ -613,7 +614,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       summary.dataset['ruleAction'] = 'view';
       const binds = element('dl', 'default-rule-binds');
       for (const row of rule.binds) {
-        const value = element('dd', undefined, row.value);
+        const value = element('dd', undefined, serviceWords(row.value));
         value.dataset['ruleBind'] = row.label;
         binds.append(element('dt', undefined, row.label), value);
       }

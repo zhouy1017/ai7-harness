@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import { technicalWords } from './technical-layer.js';
 import { retainPollInteraction } from './poll-interaction.js';
 import { styleInput } from './components/controls.js';
@@ -178,7 +179,7 @@ export function composeOptions(projection: Pick<BaselineAnalysisProjection, 'act
       label: entry.label,
       meaning: TASK_PANEL_COMPOSE_MEANINGS[mode],
       available,
-      reason: controls.blockedByActiveRun ? controls.blockedReason : entry.unavailableReason,
+      reason: serviceWords(controls.blockedByActiveRun ? controls.blockedReason : entry.unavailableReason),
       goal: entry.goal as BaselineAnalysisGoal,
       quick: quick === undefined
         ? { rule: null, reason: null }

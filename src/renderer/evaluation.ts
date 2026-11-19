@@ -1,9 +1,8 @@
 import type { TaskLaunchRequest } from './task-drawer.js';
-import { localDayLabel } from '../shared/report-wording.js';
 import { serviceWords } from './service-wording.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { filterChoices, menuPanel, stateTerm } from './components/controls.js';
-import { identityWords, technicalWords } from './technical-layer.js';
+import { identityWords } from './technical-layer.js';
 import type {
   EvaluationAdjustment,
   EvaluationAdjustmentReasonId,
@@ -447,7 +446,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         prepare.disabled = busy;
         row.append(prepare);
       } else {
-        template.append(' · ', el('span', 'readers-report-reason', entry.prepare.reason));
+        template.append(' · ', el('span', 'readers-report-reason', serviceWords(entry.prepare.reason)));
       }
       const modelLabel = entry.draft?.modelLabel ?? entry.drafted?.modelLabel;
       if (modelLabel) template.append(' · ', el('span', 'evaluation-report-model', modelLabel));
@@ -1073,8 +1072,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const dated = { ...record, ...(row === undefined ? {} : { createdAt: row.createdAt }), finalizedAt: record.finalized?.at ?? null };
     // The open record says what its row says (review N8): its time and order when the list needs them.
     const tell = evaluationDayTells(workspace?.records ?? []).get(record.recordId);
-    const reportDay = record.state === 'draft' ? technicalWords(evaluationHeading(dated, tell), localDayLabel(dated.finalizedAt ?? dated.createdAt ?? record.savedAt)) : evaluationHeading(dated, tell);
-    const heading = el('h3', undefined, record.initial === null ? evaluationHeading(dated, tell) : `${EVALUATION_REPORT_HEADING} · ${reportDay}`);
+    const heading = el('h3', undefined, record.initial === null ? evaluationHeading(dated, tell) : `${EVALUATION_REPORT_HEADING} · ${evaluationHeading(dated, tell)}`);
     heading.tabIndex = -1;
     heading.append(' · ', el('span', 'evaluation-revision', evaluationRevisionLine(record)));
     node.append(heading);

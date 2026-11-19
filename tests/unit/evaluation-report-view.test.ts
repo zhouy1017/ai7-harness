@@ -162,3 +162,12 @@ it('starts nothing when the save before regenerating is refused, and keeps the t
   expect(view.openLaunch).not.toHaveBeenCalled();
   expect(view.root.querySelector('.evaluation-lists [data-evaluation-field="verdict"]')!.value).toBe('按编辑意见收紧中段。');
 });
+
+it('says why a new 评估报告 cannot be prepared in the words of the editor (Issue #1531, review B1)', async () => {
+  const root = miniDocument.createElement('section'); miniDocument.body.append(root);
+  const blocked = { ...page, initial: { ...page.initial, prepare: { allowed: false, reason: '有一项评估任务在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的评估任务。' } } } as unknown as EvaluationWorkspaceProjection;
+  const surface = mountEvaluation({ root: root as unknown as HTMLElement, api: { inspectEvaluation: async () => blocked }, bookId: 'book',
+    technicalDetails: details, setStatus: vi.fn(), errorMessage: () => '' } as unknown as MountEvaluationOptions);
+  await surface.load();
+  expect(root.querySelector('.evaluation-initial-reason')!.textContent).toBe('有一项评估任务在排队；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的评估任务。');
+});
