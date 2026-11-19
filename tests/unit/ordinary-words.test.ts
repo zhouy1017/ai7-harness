@@ -27,6 +27,7 @@ const DEVELOPER_LITERALS: ReadonlyArray<{ readonly file: string; readonly litera
     "reincluding: '正在记录学习准入决定…'", "reincluded: '学习准入决定已记录。'"]
     .map((literal) => ({ file: 'src/renderer/learning-audit-labels.ts', literal,
       why: '学习回溯 is developer-only until 0.7.4 (#1539); the ordinary screens import only its heading and kind labels' })),
+  { file: 'src/renderer/manuscript-export.ts', literal: "replaceAll('修订建议'", why: 'the service word the restoration line is rewritten from, where it is displayed' },
 ];
 
 /** The service modules whose sentences the renderer shows: each literal is checked as `serviceWords` displays it. */

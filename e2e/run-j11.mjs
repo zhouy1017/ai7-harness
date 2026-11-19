@@ -68,6 +68,9 @@ const SECOND = Object.freeze({ title: '人员旅程乙' });
 const PEOPLE = Object.freeze({ authors: '周一、吴二', editors: '郑三', relatedRole: 'proofreader', relatedName: '王四' });
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const THIRD = Object.freeze({ title: '评估旅程丙' });
+/** Today as ordinary mode writes a day (`localDayLabel`): the records this Journey begins carry it (Issue #1531). */
+const todayLabel = () => { const now = new Date(); return `${now.getMonth() + 1} 月 ${now.getDate()} 日`; };
+
 /**
  * The J-04 model adapter's fixture: 按我的评分重写评语's authored units and words for 第 15 版 (Issue #429, S81b2), layered over
  * 审稿意见's authored units and five sections from 第 14 版定稿 (S81c), over AI7 初评's authored units and synthesis — with its
@@ -2082,7 +2085,8 @@ async function main() {
       'initial-evaluation-ordinary-report', ordinaryReport);
     // 修改报告: the report becomes 第 14 版, begun from it past the unfinished 第 13 版, which stays as it was.
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'initial-evaluation-begin');
-    const ordinaryDraft = await readEvaluation(renderer, (page) => page.view === 'record' && /^\d+ 月 \d+ 日的评估报告$/u.test(page.record?.heading ?? ''), 'initial-evaluation-begun-ordinary');
+    // The record is begun in this run: its heading says today, as the app writes a day (Issue #1531, review S12).
+    const ordinaryDraft = await readEvaluation(renderer, (page) => page.view === 'record' && page.record?.heading === todayLabel(), 'initial-evaluation-begun-ordinary');
     requireJourney(ordinaryDraft.record.report === true && ordinaryDraft.report === null && ordinaryDraft.record.reportConclusion === 'AI7 建议的结论：修改后再议' &&
       ordinaryDraft.record.nextStep === (nextStep === null ? null : `下一步建议：${nextStep}`) &&
       JSON.stringify(ordinaryDraft.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)) && ordinaryDraft.record.ai7Comments === 0 &&
@@ -2287,11 +2291,11 @@ async function main() {
     // The whole loop in ordinary mode (technicalLayerVisible=false): 修改报告 on the 定稿 report begins 第 15 版 from it; nothing is
     // changed yet, so there is nothing to regenerate from.
     const reportClosed = await evaluationMode(false, 'evaluation-rewrite-ordinary');
-    requireJourney(reportClosed.view === 'record' && /^\d+ 月 \d+ 日的定稿$/u.test(reportClosed.record.heading) && reportClosed.editReport === '修改报告',
+    requireJourney(reportClosed.view === 'record' && reportClosed.record.heading === `${todayLabel()}的定稿` && reportClosed.editReport === '修改报告',
       'evaluation-rewrite-edit-offered', reportClosed);
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'evaluation-rewrite-begin');
-    const fifteenth = await readEvaluation(renderer, (page) => /^\d+ 月 \d+ 日的评估报告$/u.test(page.record?.heading ?? '') && page.rewrite !== null, 'evaluation-rewrite-begun');
-    requireJourney(fifteenth.record.report === true && /^\d+ 月 \d+ 日的评估报告/u.test(fifteenth.versions[0]) && fifteenth.versions[1] === reportClosed.versions[0] &&
+    const fifteenth = await readEvaluation(renderer, (page) => page.record?.heading === todayLabel() && page.rewrite !== null, 'evaluation-rewrite-begun');
+    requireJourney(fifteenth.record.report === true && fifteenth.versions[0].startsWith(todayLabel()) && fifteenth.versions[0].includes('的评估报告') && fifteenth.versions[1] === reportClosed.versions[0] &&
       fifteenth.rewrite.reason === '先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。' &&
       JSON.stringify(fifteenth.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)) && fifteenth.record.verdict === '' &&
       JSON.stringify(fifteenth.market.lists) === JSON.stringify(MARKET_LISTS), 'evaluation-rewrite-begun-words', fifteenth);
@@ -2360,7 +2364,7 @@ async function main() {
       JSON.stringify(accepted.record.conclusions) === JSON.stringify(waiting.record.conclusions) &&
       JSON.stringify(accepted.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '13', '14', '10']) &&
       JSON.stringify(accepted.record.ai7Items.map(([, , , ticked]) => ticked)) === JSON.stringify([[], [], ['too-high'], [], ['insufficient-basis']]) &&
-      /^编辑评分中（\d+ 月 \d+ 日开始）$/u.test(accepted.record.heading) && accepted.record.report === true && accepted.rewrite.proposal === null &&
+      accepted.record.heading === `编辑评分中（${todayLabel()}开始）` && accepted.record.report === true && accepted.rewrite.proposal === null &&
       accepted.rewrite.decided === '上次重新生成已采用，分数不变。', 'evaluation-rewrite-accepted-words', accepted);
     const acceptedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.entries, page.record.content.items.map((entry) => entry.score), page.rewrite.decided?.decision ?? null, page.record.content.strengths, page.record.content.weaknesses]))`);
     requireJourney(acceptedService === JSON.stringify([3, [16.5, 15, 13, 14, 10], 'accepted', REWRITTEN_STRENGTHS, REWRITTEN_WEAKNESSES]), 'evaluation-rewrite-accepted-service', acceptedService);

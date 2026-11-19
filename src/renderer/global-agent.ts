@@ -433,7 +433,7 @@ export function mountGlobalAgent(options: {
         } else { selected.delete(id); selectedSources.delete(id); }
         invalidatePreview();
       });
-      const title = source?.title ?? (item?.kind === 'memory' ? '审阅偏好（AI 归纳）' : '审阅偏好');
+      const title = source?.title ?? '审阅偏好';
       const categoryLabel = projection.categories.find((entry) => entry.categoryId === item?.categoryId)?.label;
       const stateLabel = item === undefined ? '学习监督' : { proposed: '待接受', active: '已启用', frozen: '已冻结', inactive: '已停用' }[item.state];
       const row = el('article'); row.className = 'global-agent-source-card';

@@ -234,7 +234,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     expect(libraryDecisionLine({ ordinal: 1, recordedAt: '2026-09-25T02:00:00.000Z', decision: { kind: 'attribution', scope: 'book', bookId: 'b', bookTitle: '甲书' } }, instant))
       .toBe('第 1 条 · 给谁用：《甲书》 · 本机编辑 · 〔2026-09-25〕');
     expect(libraryDecisionLine({ ordinal: 2, recordedAt: '2026-09-25T03:00:00.000Z', decision: { kind: 'eligibility', reasonHasMore: false, choice: 'excluded', bookTitle: null, reason: '版权未清' } }, instant))
-      .toBe('第 2 条 · 可用于学习：明确排除（说明：版权未清） · 本机编辑 · 〔2026-09-25〕');
+      .toBe('第 2 条 · 是否可用于学习：明确排除（说明：版权未清） · 本机编辑 · 〔2026-09-25〕');
   });
 });
 

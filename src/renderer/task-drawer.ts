@@ -2137,7 +2137,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       }
       // The status line names the event, never a state the Run will leave (V2-UX-LIVE-004): the bar shows the state. A
       // start waiting for a place is recorded, and nothing has begun (CONC-007).
-      options.setStatus(current.kind === 'fixed-task' ? '已记录授权 · 未派发' : recordOnly ? '已记录运行；派发前会被阻止' : queued ? TASK_BAR_QUEUED_STATUS : '已开始任务', 'success');
+      options.setStatus(current.kind === 'fixed-task' ? technicalWords('已记录授权 · 未派发', '已记录 · 没有开始') : recordOnly ? technicalWords('已记录运行；派发前会被阻止', '已记录 · 现在没有可用的模型服务，没有开始') : queued ? TASK_BAR_QUEUED_STATUS : '已开始任务', 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {

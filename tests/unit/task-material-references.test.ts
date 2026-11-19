@@ -56,7 +56,7 @@ describe('exact Material Index reference contracts', () => {
       headingBlockId: null, headingText: null, headingLevel: null, startPosition: 0, endPosition: 0,
       blockIds: [randomUUID()], blockDigests: ['c'.repeat(64)], overlapBlockIds: [], graphemes: 1, digest: 'd'.repeat(64),
     }, 1, new Map())).toThrow('不能再开始');
-    expect(reading.refusal?.message).not.toContain('重新开始');
+    expect(reading.refusal?.message).not.toContain('改计划重做');
     expect(taskMaterialRefusal(source, 'MATERIAL_REFERENCE_UNAVAILABLE').refusal?.message).toContain('现在不能列进');
     expect(taskMaterialRefusal(source, 'MATERIAL_INDEX_RECORD_INVALID', '评估').refusal?.message).toBe('资料《合成资料》的索引记录已损坏，这份计划不能再开始；可以在「评估」重新准备计划。');
     expect(() => taskMaterialRefusal(source, 'MATERIAL_OUTSIDE_PLAN')).toThrow();

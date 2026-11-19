@@ -9,7 +9,7 @@ import { houseAnnotationWords } from './editorial-mark-labels.js';
 
 // One status vocabulary on the three finding lists (Issue #1531): the review page's, the 批注栏's and 待办汇总's.
 const STATUS_TONES: Readonly<Record<string, StateTone>> = {
-  '待处理': 'progress', '已处理': 'good', '已忽略': 'neutral',
+  '未覆盖': 'attention', '待处理': 'progress', '已处理': 'good', '已忽略': 'neutral',
 };
 
 export function mountFindingsCenter(root: HTMLElement, read: (offset: number) => Promise<BookFindingsProjection>, open: (item: BookFindingProjection) => void,
@@ -97,7 +97,7 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
             const row = document.createElement('article'); row.dataset['findingId'] = item.id; row.dataset['findingKind'] = item.target.kind;
             row.className = 'finding-row';
             const pills = document.createElement('div'); pills.className = 'finding-pills';
-            pills.append(stateTerm(item.status, STATUS_TONES[item.status] ?? 'neutral'), stateTerm(item.severity, item.severity === '必须处理' ? 'attention' : 'neutral'));
+            pills.append(stateTerm(item.status, item.target.kind === 'risk' ? 'attention' : STATUS_TONES[item.status] ?? 'neutral'), stateTerm(item.severity, item.severity === '必须处理' ? 'attention' : 'neutral'));
             const words = document.createElement('div'); words.className = 'finding-body';
             // A review finding's note is the model's or the house list's record; a gap's reason is the service's (Issue #1531).
             const body = document.createElement('p'); body.textContent = item.target.kind === 'gap' ? serviceWords(item.summary) : houseAnnotationWords(item.summary);

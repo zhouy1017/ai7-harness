@@ -321,7 +321,7 @@ export const LIBRARY_EMPTY = '暂无资料，放入后可供任务参考。';
 export const LIBRARY_TITLE_LABEL = '标题';
 export const LIBRARY_KIND_LEGEND = '这是什么';
 export const LIBRARY_ATTRIBUTION_TERM = '给谁用';
-export const LIBRARY_ELIGIBILITY_TERM = '可用于学习';
+export const LIBRARY_ELIGIBILITY_TERM = '是否可用于学习';
 export const LIBRARY_HOUSE = '本社';
 export const LIBRARY_SERIES = '书系';
 /** A Series cannot be named until Series exist (Issue #63, S28); the choice is shown, and says why it is not there. */

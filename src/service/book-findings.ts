@@ -72,7 +72,7 @@ export function inspectBookFindings(host: BookFindingsHost, bookId: string, offs
   function* findings(): Generator<BookFindingProjection> {
     const revision = store.latestAnalysisRevision(bookId);
     if (revision !== null) for (const gap of revision.gaps) {
-      yield { id: `gap:${revision.revisionId}:${gap.unitOrdinal}`, category: 'analysis-gaps', categoryLabel: '分析未完成的部分', severity: '提示', status: '待处理', summary: gap.reason,
+      yield { id: `gap:${revision.revisionId}:${gap.unitOrdinal}`, category: 'analysis-gaps', categoryLabel: '分析未完成的部分', severity: '提示', status: '未覆盖', summary: gap.reason,
         target: { kind: 'gap', revisionId: revision.revisionId, unitOrdinal: gap.unitOrdinal, blockId: gap.blockIds[0] ?? null } };
     }
     // The workspace's history is bounded; enumerate identities from its ledger, then page each Run through its owner.

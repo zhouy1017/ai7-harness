@@ -2719,7 +2719,7 @@ async function main() {
       exemplarPage[0].items[0][0] === 'news-release' && exemplarPage[0].items[0][1] === String(exemplarNews.version) &&
       exemplarPage[0].items[0][2].startsWith(`来自《${EXCERPT.title}》（作者：未填写 · 责编：未填写） · 版本 ${exemplarNews.version} · 交付给`) &&
       exemplarPage[0].items[0][2].includes(` · 此前还交付过版本 ${exemplarNews.earlierVersions[0]}`) &&
-      exemplarPage[0].items[0][3] === '衍生稿件 · 新闻稿' && exemplarPage[0].items[0][4] === '可用于学习：仅本社' &&
+      exemplarPage[0].items[0][3] === '衍生稿件 · 新闻稿' && exemplarPage[0].items[0][4] === '是否可用于学习：仅本社' &&
       // This Book has no 审稿意见; earlier Books can now be imported through the KB.
       exemplarBook.readersReports.length === 0 && exemplarPage[0].readersReports === 0 &&
       JSON.stringify(exemplarPage[0].later) === JSON.stringify([]),
@@ -2872,7 +2872,7 @@ async function main() {
     // 写作 lives on 稿件 since Issue #1403: the Book opened on its manuscript is where it begins.
 
     at('writing-sheet');
-    // 新建衍生稿件 · 写作任务 under 交付 · 生产文档: 新建文档… opens the sheet in place — the five house types with none chosen, what AI7
+    // 新建衍生稿件 · 写作任务 under 交付 · 衍生稿件: 新建衍生稿件… opens the sheet in place — the five house types with none chosen, what AI7
     // will reference (each part the Book does not have says so, the 范例 once a type is chosen), the four consequence rows and
     // 快速开始 waiting, with why, for a writing 默认执行规则 (S84b).
     const READ_WRITING = `(() => {
