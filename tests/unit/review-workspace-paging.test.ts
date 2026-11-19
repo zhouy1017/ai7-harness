@@ -454,13 +454,13 @@ describe('a press on the running card while a read arrives (#1592: 查看计划 
     surfaces.push(surface);
     surface.start(); await flush();
     const pressed = root.querySelector('[data-review-action="view-plan"]')!;
-    pressed.dispatchEvent({ type: 'pointerdown', bubbles: true, button: 0 });
+    pressed.dispatchEvent(Object.assign({ type: 'pointerdown', bubbles: true }, { button: 0 }));
     // A poll answers while the button is down: the Run moved on (its label and counts changed), so the card would be drawn again.
     state.full = { ...state.full, run: { ...state.full.run!, stateLabel: '正在审阅 · 已读完一半', findingsTotal: 2 } };
     surface.refresh(); await flush();
     expect(root.querySelector('[data-review-action="view-plan"]')).toBe(pressed);
     expect(root.querySelector('.review-workspace-card')!.textContent).not.toContain('已读完一半');
-    pressed.dispatchEvent({ type: 'pointerup', bubbles: true, button: 0 });
+    pressed.dispatchEvent(Object.assign({ type: 'pointerup', bubbles: true }, { button: 0 }));
     pressed.click(); await flush();
     expect(opened).toEqual([RUN]);
     // The frame after the release draws the held read; the button is a new one and the press acted once.
