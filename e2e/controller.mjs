@@ -911,6 +911,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-knowledge-keyboard',
     'j14-knowledge-reflow-forced-colors',
     'knowledge-guideline-restart',
+    'knowledge-house-words',
     'knowledge-procedures',
     'knowledge-library-add',
     'knowledge-library-attention',

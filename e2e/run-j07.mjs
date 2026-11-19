@@ -1,4 +1,5 @@
 import { pointerClick } from './dispatch-chooser.mjs';
+import { setDeveloperMode } from './ordinary-pages.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -2759,6 +2760,20 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, 'actuals-manuscript-again', 120_000);
     await openDeliverables(renderer, 'actuals-deliverables-again');
     await assertRenderer(renderer, `(() => { const prompt = window.__j07.block().querySelector('.publication-actuals-prompt'); const change = window.__j07.block().querySelector('[data-publication-action="actuals"]'); return prompt?.textContent === '录入定价与首印 · 已录入 · 定价 ¥45.00 · 首印 3,000 册' && prompt.dataset.actualsState === 'recorded' && change?.textContent === '修改…'; })()`, 'actuals-prompt-recorded');
+    // #1543: the same entry as an ordinary editor — 修改… on 交付物 opens 设置 › 评估校准与预测 as an ordinary page with this Book's entry
+    // open at 定价, its formula folded; then development mode is restored for the stages that follow.
+    await setDeveloperMode(renderer, waitFor, false, 'actuals-ordinary-off');
+    await pointerClick(renderer, waitFor, SIDEBAR.section('deliverables'), 'actuals-ordinary-deliverables-entry');
+    await waitForDeliverables(renderer, 'actuals-ordinary-deliverables');
+    await pointerClick(renderer, waitFor, '[data-screen="book-deliverables"] [data-publication-action="actuals"]', 'actuals-ordinary-enter');
+    await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-lede') && document.activeElement?.dataset.calibrationField === 'price'`, 'actuals-ordinary-page');
+    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="evaluation-calibration"] .evaluation-calibration'); const input = document.querySelector('[data-calibration-field="price"]'); return document.documentElement.dataset.technicalLayerVisible === 'false' && root.querySelectorAll('.calibration-how').length === 2 && input.value === '45.00' && input.classList.contains('ui-input') && document.querySelector('.settings-navigation [data-settings-nav="evaluation-calibration"]')?.getAttribute('aria-current') === 'page'; })()`, 'actuals-ordinary-words');
+    // Back the way the editor came: the shortcut for 返回 leaves the page for this Book's 交付物.
+    const back = process.platform === 'darwin' ? { key: '[', code: 'BracketLeft', windowsVirtualKeyCode: 219, modifiers: 4 } : { key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, modifiers: 1 };
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...back });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...back });
+    await waitFor(renderer, `document.querySelector('[data-screen="book-deliverables"]') && document.querySelector('[data-publication-action="actuals"]')`, 'actuals-ordinary-back');
+    await setDeveloperMode(renderer, waitFor, true, 'actuals-ordinary-on');
 
     // Twenty further real Books make the last Deliverables entry fall beyond the first bounded settings page.
     for (let index = 0; index < 20; index += 1) {
@@ -2783,7 +2798,7 @@ async function main() {
     for (let repetition = 0; repetition < 2; repetition += 1) {
       await clickSelector(renderer, '[data-calibration-action="next"]', 'actuals-next-page');
       await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 1 && document.querySelector('[data-calibration-field="price"]')?.value === '55' && document.querySelector('[data-calibration-field="print"]')?.value === '4000' && document.activeElement?.hasAttribute('data-calibration-page-heading')`, 'actuals-last-page-form-kept');
-      await clickSelector(renderer, '[data-calibration-action="first"]', 'actuals-first-page');
+      await pointerClick(renderer, waitFor, '[data-calibration-action="previous"]', 'actuals-previous-page');
       await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 21 && document.querySelector('[data-calibration-field="price"]')?.value === '55' && document.querySelector('[data-calibration-field="print"]')?.value === '4000'`, 'actuals-first-page-form-kept');
     }
     await clickSelector(renderer, '[data-calibration-action="save"]', 'actuals-stale-save');

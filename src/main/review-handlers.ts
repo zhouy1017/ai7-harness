@@ -42,16 +42,20 @@ export function registerReviewHandlers(context: {
     return result;
   };
 
-  for (const operation of ['inspectHouseWordList', 'saveHouseWordList'] as const) {
-    ipcMain.handle(IPC_CHANNELS[operation], (event, input: ServiceOperationMap[typeof operation]['input']) => envelope(async () => {
-      const owned = requireSender(event);
-      return serializeEffect(async () => {
-        requireAuthority();
-        requireCurrentBookRoute(owned);
-        return service.call(operation, input);
-      });
-    }));
-  }
+  // 本社词表 (Issue #1543) is the house's own list: its operations name no Book, and 知识库 reads it from a window on the library, so
+  // like every house-level handler a read needs only an owned window and the authority, and a write is serialized with the effects.
+  ipcMain.handle(IPC_CHANNELS.inspectHouseWordList, (event, input: ServiceOperationMap['inspectHouseWordList']['input']) => envelope(async () => {
+    requireSender(event);
+    requireAuthority();
+    return service.call('inspectHouseWordList', input);
+  }));
+  ipcMain.handle(IPC_CHANNELS.saveHouseWordList, (event, input: ServiceOperationMap['saveHouseWordList']['input']) => envelope(async () => {
+    requireSender(event);
+    return serializeEffect(async () => {
+      requireAuthority();
+      return service.call('saveHouseWordList', input);
+    });
+  }));
 
   ipcMain.handle(
     IPC_CHANNELS.inspectReviewWorkspace,

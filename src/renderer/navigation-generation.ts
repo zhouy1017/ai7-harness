@@ -150,7 +150,7 @@ const BOOK_OWNERSHIP_CALLS = new Set<keyof RendererApi>([
   'controlTaskRun', 'editTaskPlan', 'stopDialogueAnswer', 'continueDialogueAnswer', 'regenerateDialogueAnswer',
   'saveProductionDocumentType', 'deleteProductionDocumentType', 'reorderProductionDocumentTypes',
   'approveBookDeliveryPackageArchiveExport', 'approveBookDeliveryPackageExport',
-  'cancelBookDeliveryPackageArchiveExport', 'cancelBookDeliveryPackageExport', 'inspectHouseWordList', 'saveHouseWordList',
+  'cancelBookDeliveryPackageArchiveExport', 'cancelBookDeliveryPackageExport',
 ]);
 
 /** One boundary for the capability-revoking leave and subsequent Book-scoped calls.

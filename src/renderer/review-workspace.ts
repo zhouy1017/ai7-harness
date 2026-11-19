@@ -82,6 +82,7 @@ import {
 import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
 import { mountHouseWordList } from './house-word-list.js';
+import { houseSavedAt } from './house-word-list-labels.js';
 import { parseBookTerms, validBookTerms } from '../shared/protocol/deterministic.js';
 import type { BookTermEntry } from '../shared/protocol/procedures.js';
 import { openProcedureCapture } from './procedure-capture.js';
@@ -437,7 +438,7 @@ function sheetPreparationReason(workspace: ReviewWorkspaceProjection, state: She
     if (why !== null) return `${entry.label}：${why}`;
   }
   return state.categories.has('local-text-check') && state.houseWordListWanted && state.houseWordListLoading
-    ? '正在更新本社词表版本，请稍候再开始审阅。' : null;
+    ? '正在更新本社词表，请稍候再开始审阅。' : null;
 }
 
 /** 运行此工序… names a Procedure Definition version as `id@version`; a Captured Procedure is named by its UUID alone. */
@@ -3363,7 +3364,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     let refreshHouse: (() => Promise<void>) | null = null;
     if (api.inspectHouseWordList !== undefined && api.saveHouseWordList !== undefined) {
       const houseChoice = el('label', 'review-field'); const house = el('input'); house.type = 'checkbox'; house.disabled = true; house.dataset['localHouseWordList'] = '';
-      const houseStatus = el('span', undefined, '本社自用词表：正在读取');
+      const houseStatus = el('span', undefined, '本社词表：正在读取');
       refreshHouse = async (): Promise<void> => {
         const request = ++state.houseWordListRequest;
         state.houseWordListLoading = true;
@@ -3375,11 +3376,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           house.disabled = page.selected === null || page.selected.enabledCount === 0;
           house.checked = state.houseWordListWanted;
           state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, houseWordList: state.houseWordListWanted && !house.disabled ? page.current : null } };
-          houseStatus.textContent = page.selected === null ? '本社自用词表：尚无词条，可在下方编辑' : `本社自用词表 ${technicalWords(`第${page.selected.ordinal}版`, '版本')} · ${page.selected.enabledCount} 条启用；选中后仅生成批注`;
+          houseStatus.textContent = page.selected === null ? '本社词表：尚无词条，可在下方编辑' : `本社词表（${houseSavedAt(page.selected.createdAt)}保存${technicalWords(` · 第${page.selected.ordinal}版`)}）· ${page.selected.enabledCount} 条启用；选中后仅生成批注`;
           house.onchange = () => { state.houseWordListWanted = house.checked; state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, houseWordList: house.checked ? page.current : null } }; updateSheet(); };
         } catch {
           if (sheetState !== state || state.dismissed || destroyed || request !== state.houseWordListRequest) return;
-          house.disabled = true; houseStatus.textContent = '本社词表读取失败，保留此前选用的版本；请重新打开检查选项。';
+          house.disabled = true; houseStatus.textContent = '本社词表读取失败，保留此前的选择；请重新打开检查选项。';
         } finally {
           if (sheetState === state && !state.dismissed && !destroyed && request === state.houseWordListRequest) {
             state.houseWordListLoading = false;
@@ -3388,7 +3389,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         }
       };
       houseChoice.append(house, houseStatus); localOptions.append(houseChoice);
-      const details = el('details'); details.append(el('summary', undefined, '编辑本社自用词表')); const host = el('div'); details.append(host); localOptions.append(details);
+      const details = el('details'); details.append(el('summary', undefined, '编辑本社词表')); const host = el('div'); details.append(host); localOptions.append(details);
       const editor = mountHouseWordList({ root: host, api: { inspectHouseWordList: api.inspectHouseWordList, saveHouseWordList: api.saveHouseWordList }, setStatus: options.setStatus, onSaved: () => void refreshHouse?.() });
       details.addEventListener('toggle', () => { if (details.open) void editor.load(); });
       sheet.addEventListener('close', () => editor.destroy(), { once: true });

@@ -1036,7 +1036,30 @@ async function main() {
     await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'technical-mode-off');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false' && !document.querySelector('.help-about') && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'technical-mode-off-applied');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-settings-hub');
-    await waitFor(primary, `document.querySelectorAll('#screen .settings-navigation [data-settings-nav]').length===6 && !document.querySelector('[data-settings-nav="usage"]') && !document.querySelector('[data-settings-nav="evaluation-calibration"]') && !document.querySelector('[data-settings-nav="diagnostics"]')`, 'ordinary-settings-six-rows');
+    // #1543: 评估校准与预测 is an ordinary row now, so 编辑工作 is no empty heading; usage and diagnostics stay developer rows.
+    await waitFor(primary, `document.querySelectorAll('#screen .settings-navigation [data-settings-nav]').length===7 && !document.querySelector('[data-settings-nav="usage"]') && document.querySelector('[data-settings-nav="evaluation-calibration"]') && !document.querySelector('[data-settings-nav="diagnostics"]') && Array.from(document.querySelectorAll('#screen .settings-navigation section')).every((section)=>section.querySelector('[data-settings-nav]'))`, 'ordinary-settings-seven-rows');
+    await pointerClick(primary, waitFor, '#screen .settings-navigation [data-settings-nav="evaluation-calibration"]', 'ordinary-calibration-open');
+    await waitFor(primary, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-lede') && document.querySelector('[data-screen="evaluation-calibration"] .calibration-progress')`, 'ordinary-calibration-page');
+    const ordinaryCalibration = await primary.evaluate(`(() => {
+      const root = document.querySelector('[data-screen="evaluation-calibration"] .evaluation-calibration');
+      const folds = Array.from(root.querySelectorAll('.calibration-how'));
+      const outside = root.cloneNode(true); outside.querySelectorAll('.calibration-how').forEach((fold) => fold.remove());
+      const nav = document.querySelector('#screen .settings-navigation [data-settings-nav="evaluation-calibration"]');
+      return { lede: root.querySelector('.calibration-lede')?.textContent ?? null, folds: folds.length, closed: folds.every((fold) => fold.open === false),
+        summaries: folds.map((fold) => fold.querySelector('summary')?.textContent ?? null), formulaFolded: folds.some((fold) => fold.textContent.includes('校准偏移 =')) && !outside.textContent.includes('校准偏移 ='),
+        plain: !/(?<!发稿)版本|AI7 初评|v[0-9]/u.test(root.textContent), checkbox: Array.from(root.querySelectorAll('input[data-calibration-switch]')).every((input) => input.classList.contains('ui-checkbox')),
+        current: nav?.getAttribute('aria-current') ?? null };
+    })()`);
+    requireJourney(ordinaryCalibration.lede === '这里的两个开关只影响 AI 初始评分与预测，不改你的评分；定价与首印由你录入，AI7 默认不预测。' && ordinaryCalibration.folds === 2 && ordinaryCalibration.closed === true &&
+      JSON.stringify(ordinaryCalibration.summaries) === JSON.stringify(['怎么算的', '怎么算的']) && ordinaryCalibration.formulaFolded === true && ordinaryCalibration.plain === true && ordinaryCalibration.checkbox === true && ordinaryCalibration.current === 'page',
+    'ordinary-calibration-words', ordinaryCalibration);
+    // Both window forms: the page fits its width and its first switch is reachable.
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 1008, height: 681 }]) {
+      await primary.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
+      await waitFor(primary, `innerWidth===${viewport.width} && innerHeight===${viewport.height}`, 'ordinary-calibration-viewport');
+      await assertRenderer(primary, `(() => { const input = document.querySelector('[data-calibration-switch="calibration"]'); input.scrollIntoView({ block: 'center', behavior: 'instant' }); const box = input.getBoundingClientRect(); return document.documentElement.scrollWidth <= innerWidth + 1 && box.width > 0 && box.left >= 0 && box.right <= innerWidth; })()`, 'ordinary-calibration-fits');
+    }
+    await primary.send('Emulation.clearDeviceMetricsOverride');
     await click(primary, '键盘与无障碍', 'ordinary-keyboard-entry');
     await waitFor(primary, `document.querySelectorAll('[data-keyboard-command]').length>0 && !document.querySelector('[data-keyboard-change]') && !document.querySelector('[data-keyboard-reset-all]') && document.querySelector('input.ui-checkbox[data-reduced-motion]')`, 'ordinary-keyboard-read-only');
     await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'ordinary-reduced-motion');
@@ -1080,7 +1103,7 @@ async function main() {
     // that worked (#1519): its success clears that error, so the following page exposes its own ordinary status.
     await waitFor(primary, `document.querySelector('#persistence-status')?.hidden===true && !document.querySelector('#persistence-status')?.textContent.includes('代理不可达')`, 'ordinary-proxy-probe-error-cleared');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
-    await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===4 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、审阅偏好、范例、资料库'`, 'ordinary-knowledge-four-categories');
+    await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===5 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、审阅偏好、范例、资料库、本社词表'`, 'ordinary-knowledge-five-categories');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
     await waitFor(primary, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), node=>node.textContent).join('|')==='审阅偏好|反馈记录' && document.querySelector('#quality-tab-preferences')?.getAttribute('aria-selected')==='true'`, 'ordinary-quality-two-views');
     await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='审阅偏好已打开' && document.querySelector('[data-learning-enabled]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-quality-loaded');
@@ -2707,8 +2730,8 @@ async function main() {
     requireJourney(calibrationPage.calibration === '调分记录 0 / 10 本 · 满 10 本后生效' &&
       calibrationPage.waiting === null &&
       // The house offset (Issue #429, EVAL-011a): its method stated, waiting below ten 调分记录, nothing said of 停用 while on.
-      calibrationPage.offset === 'waiting' && calibrationPage.offsetWaiting === '校准偏移尚未计算：满 10 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。' &&
-      calibrationPage.method === '校准偏移 = 各本书最新一次从 AI7 初评开始并定稿的评估里，你的定稿分数减去 AI7 初评分数的平均值，取到半分；每次读取时重新计算，不另存。' &&
+      calibrationPage.offset === 'waiting' && calibrationPage.offsetWaiting === '校准偏移尚未计算：满 10 本调分记录后，按校准方法得出；之后新生成的评估会按偏移调整 AI 初始评分。' &&
+      calibrationPage.method === '校准偏移 = 各本书最新一次从 AI 初始评分开始并定稿的评估里，你的定稿分数减去 AI 初始评分的平均值，取到半分；每次读取时重新计算，不另存。' &&
       calibrationPage.offEffect === null &&
       calibrationPage.prediction === '已录入实际数据的已发稿图书 0 / 30 本 · 满 30 本后才能打开' &&
       JSON.stringify(calibrationPage.switches) === JSON.stringify({ calibration: [true, false], prediction: [false, true] }) &&
@@ -2719,7 +2742,7 @@ async function main() {
     const calibrationOff = await readCalibration(primary, (page) => page.calibration === '调分记录 0 / 10 本 · 已关闭', 'calibration-off');
     requireJourney(JSON.stringify(calibrationOff.switches.calibration) === JSON.stringify([false, false]) && calibrationOff.focus === 'calibration' &&
       // Off says what a new version does instead, and that the switch stays reversible (EVAL-011; EVAL-011a).
-      calibrationOff.offEffect === '新版本从 AI7 初评开始时直接用原始分数；随时可打开，开关都有记录。' && calibrationOff.offset === 'waiting',
+      calibrationOff.offEffect === '之后新生成的评估直接用 AI 初始评分，不按偏移调整；随时可打开，开关都有记录。' && calibrationOff.offset === 'waiting',
     'calibration-off-words', calibrationOff);
     const offService = await primary.evaluate(`window.ai7.inspectEvaluationCalibration().then((answer) => [answer.calibration.enabled, answer.calibration.active, answer.preferenceEntries, answer.prediction.enabled])`);
     requireJourney(JSON.stringify(offService) === JSON.stringify([false, false, 1, false]), 'calibration-off-service', offService);

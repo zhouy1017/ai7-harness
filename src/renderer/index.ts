@@ -2830,7 +2830,7 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
     setStatus,
     errorMessage: rendererErrorMessage,
     // 录入定价与首印… (Issue #430, S82): 设置 › 评估校准与预测 with this Book's entry open.
-    ...(technicalLayerVisible ? { openActuals: (bookId: string) => void renderEvaluationCalibration(bookId) } : {}),
+    openActuals: (bookId: string) => void renderEvaluationCalibration(bookId),
     // 打开 a Production Document (Issue #415): its own surface, read like the manuscript's window.
     openDocument: (documentNow, type, notice) => openProductionDocument(documentNow, type, bookTitle, notice),
     // 新闻稿、简介等衍生稿件 live on 稿件 (Issue #1403).

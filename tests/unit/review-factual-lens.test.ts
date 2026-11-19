@@ -546,7 +546,7 @@ describe('configuration selection memory (#1374)', () => {
     view.change(view.box('local-text-check'), true); await flush();
     let house = view.root.querySelector('[data-local-house-word-list]')!;
     house.checked = wanted; (house as unknown as { onchange(): void }).onchange();
-    const details = house.closest('fieldset')!.querySelector('details')!; details.open = true; details.dispatchEvent({ type: 'toggle' }); await flush();
+    const details = view.root.querySelectorAll('details').find((node) => node.querySelector('summary')?.textContent === '编辑本社词表')!; details.open = true; details.dispatchEvent({ type: 'toggle' }); await flush();
     view.root.querySelector('[data-house-action="edit"]')!.click(); await flush();
     view.root.querySelector('[data-house-action="save"]')!.click(); await flush();
     expect(saveHouse).toHaveBeenCalledOnce(); house = view.root.querySelector('[data-local-house-word-list]')!;
@@ -564,7 +564,7 @@ describe('configuration selection memory (#1374)', () => {
     view.change(view.box('local-text-check'), true); await flush();
     const house = view.root.querySelector('[data-local-house-word-list]')!;
     house.checked = true; (house as unknown as { onchange(): void }).onchange();
-    const details = house.closest('fieldset')!.querySelector('details')!; details.open = true; details.dispatchEvent({ type: 'toggle' }); await flush();
+    const details = view.root.querySelectorAll('details').find((node) => node.querySelector('summary')?.textContent === '编辑本社词表')!; details.open = true; details.dispatchEvent({ type: 'toggle' }); await flush();
     view.root.querySelector('[data-house-action="edit"]')!.click(); await flush();
     view.root.querySelector('[data-house-action="save"]')!.click(); await flush();
     for (const action of ['prepare', 'start']) expect(view.root.querySelector(`[data-review-action="${action}"]`)!.disabled).toBe(true);

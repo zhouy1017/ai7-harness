@@ -44,10 +44,6 @@ export function createSettingsScreens(state: Options) {
 
 
 async function renderEvaluationCalibration(focusBookId: string | null): Promise<void> {
-  if (!technicalLayerVisible) {
-    renderSettingsHome('该页在开发者模式下显示');
-    return;
-  }
   const content = panel();
   content.classList.add('evaluation-calibration-page');
   const host = element('div');

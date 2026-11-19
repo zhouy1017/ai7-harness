@@ -36,7 +36,7 @@ import { mountAnalysisFeedback, analysisFeedbackEngaged } from './analysis-feedb
 import { BACKGROUND_REPORT_HEADING, BACKGROUND_PREPARED_PLAN_NOTE } from './background-analysis-labels.js';
 import { AnalysisFollower } from './analysis-follow.js';
 import type { ReviewFocus } from './review-workspace.js';
-import { ANALYSIS_TAB_SHOWN_EVENT, mountCustomAnalysisTab } from './custom-analysis.js';
+import { ANALYSIS_TAB_SHOWN_EVENT, customDimensionFormEngaged, mountCustomAnalysisTab } from './custom-analysis.js';
 import { CUSTOM_TAB_LABEL } from './custom-analysis-labels.js';
 import { taskPlanQuickStartFellBack, TASK_DRAWER_TITLE, taskPlanSummaryLine, TASK_PLAN_DRIFT_HEADING } from './task-drawer-labels.js';
 
@@ -1260,7 +1260,8 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       unchanged: (next) => JSON.stringify(next) === JSON.stringify(projection),
       again: () => analysisFollowDelayMs(projection.state),
       // An open 分析反馈 card the editor is in stays as it is: the Run's progress is drawn once they leave it (Issue #94 review).
-      held: () => analysisFeedbackEngaged(host) || pollControlEngaged(host, false),
+      // The editor in the form for a new 自定义 dimension, or its save out, is not drawn over either (the same rule as 分析反馈).
+      held: () => analysisFeedbackEngaged(host) || pollControlEngaged(host, false) || customDimensionFormEngaged(host),
       draw: (next) => { const restore = retainPollInteraction(host); renderBaselineAnalysis(host, next, bookTitle); restore(); },
       failed: (error) => setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error'),
     });
@@ -1285,6 +1286,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     mountCustomAnalysisTab(panels.custom, {
       bookId: projection.bookId,
       api: rendererApi,
+      author: { api: rendererApi },
       setStatus,
       errorMessage: rendererErrorMessage,
       openPlan: (taskIntentId) => openTaskPlan(projection.bookId, 'baseline-analysis', taskIntentId),

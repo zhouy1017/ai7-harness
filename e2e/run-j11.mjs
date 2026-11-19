@@ -2166,7 +2166,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 1 / 2 本 · 满 2 本后生效'`, 'initial-evaluation-calibration-count');
     await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-waiting') === null`, 'initial-evaluation-calibration-connected');
     // The offset's waiting line names the same gate as the progress line above it (#741 review P1).
-    await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset-waiting')?.textContent === '校准偏移尚未计算：满 2 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。'`, 'initial-evaluation-calibration-waiting-gate');
+    await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset-waiting')?.textContent === '校准偏移尚未计算：满 2 本调分记录后，按校准方法得出；之后新生成的评估会按偏移调整 AI 初始评分。'`, 'initial-evaluation-calibration-waiting-gate');
     const calibrationService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((answer) => JSON.stringify([answer.calibration.adjustments, answer.calibration.initialScoresConnected, answer.calibration.active]))`);
     requireJourney(calibrationService === JSON.stringify([1, true, false]), 'initial-evaluation-calibration-service', calibrationService);
     // Back to 评估 by the manuscript's 工作 group, where the Journey goes on.
@@ -3466,17 +3466,17 @@ async function main() {
     await click(renderer, '评估校准与预测', 'calibration-disclosed-open');
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已生效'`, 'calibration-disclosed-active');
     const disclosed = await renderer.evaluate(`JSON.stringify((() => { const root = document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration'); return [root.querySelector('.calibration-offset')?.dataset.calibrationOffset ?? null, root.querySelector('.calibration-offset-basis')?.textContent ?? null, Array.from(root.querySelectorAll('.calibration-offset-list li'), (line) => [line.dataset.itemId, line.dataset.offset, line.textContent]), root.querySelector('.calibration-off-effect')?.textContent ?? null, root.querySelector('.calibration-offset-without-basis')?.textContent ?? null]; })())`);
-    requireJourney(disclosed === JSON.stringify(['computed', '校准依据：1 本书的定稿评估；正数表示你的定稿分数通常高于 AI7 初评', [
+    requireJourney(disclosed === JSON.stringify(['computed', '校准依据：1 本书的定稿评估；正数表示你的定稿分数通常高于 AI 初始评分', [
       ['literary-quality', '0.5', '文学品质与作者声音：+0.5 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
       ['theme-and-context', '0', '主题、价值与社会文化语境：0 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
       ['structure-and-coherence', '0', '结构、叙事逻辑与连贯：0 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
       ['chinese-language', '0', '中文语言与表达：0 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
       ['readers-and-market', '-2', '读者与市场潜力：−2 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
-    ], null, '其中 1 本书有从 AI7 初评开始的版本已损坏，不计入校准依据。']), 'calibration-disclosed-words', disclosed);
+    ], null, '其中 1 本书从 AI 初始评分开始的评估已损坏，不计入校准依据。']), 'calibration-disclosed-words', disclosed);
     const disclosedService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((answer) => JSON.stringify([answer.calibration.adjustments, answer.calibration.threshold, answer.calibration.unreadableBooks, answer.calibration.active, answer.calibration.offset.basisBooks, answer.calibration.offset.booksWithoutBasis, answer.calibration.offset.items.map((entry) => [entry.itemId, entry.offset, entry.books])]))`);
     requireJourney(disclosedService === JSON.stringify([2, 2, 0, true, 1, 1, [['literary-quality', 0.5, 1], ['theme-and-context', 0, 1], ['structure-and-coherence', 0, 1], ['chinese-language', 0, 1], ['readers-and-market', -2, 1]]]), 'calibration-disclosed-service', disclosedService);
     await assertRenderer(renderer, `(() => { const input = document.querySelector('[data-calibration-switch="calibration"]'); if (!(input instanceof HTMLInputElement) || input.disabled || !input.checked) return false; input.click(); return true; })()`, 'calibration-off-click');
-    await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已关闭' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-off-effect')?.textContent === '新版本从 AI7 初评开始时直接用原始分数；随时可打开，开关都有记录。' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset')?.dataset.calibrationOffset === 'computed'`, 'calibration-off');
+    await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已关闭' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-off-effect')?.textContent === '之后新生成的评估直接用 AI 初始评分，不按偏移调整；随时可打开，开关都有记录。' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset')?.dataset.calibrationOffset === 'computed'`, 'calibration-off');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'calibration-off-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'calibration-off-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${calibrationBookId}"]`, 'calibration-off-book');
