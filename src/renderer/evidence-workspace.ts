@@ -1,4 +1,5 @@
 import { technicalWords, identityWords } from './technical-layer.js';
+import { reportResult } from './notifications.js';
 import {
   EVIDENCE_MATRIX_MAX_PINNED,
   type CorrectionProposalDraftProjection,
@@ -656,7 +657,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       const first = next.variants[0];
       correction = { choice: first === undefined ? 'own-edit' : first.variantId, text: first?.text ?? '', rationale: first?.rationale ?? '',
         ranges: new Set(next.ranges.filter((range) => range.primary && range.current).map((range) => range.rangeId)), problem: null };
-      options.setStatus('更正提案已准备：已选第一个方案，可改选或自行编辑。');
+      reportResult(options.setStatus, '更正提案已准备：已选第一个方案，可改选或自行编辑。');
     } catch (error) {
       options.setStatus(options.errorMessage(error, CORRECTION_PREPARE_FAILED), 'error');
     } finally {

@@ -300,7 +300,7 @@ export function mountUsage(options: MountUsageOptions): void {
       usage = result;
       paintTable();
       paintPrices();
-      setStatus(USAGE_STATUS_LINES.loaded, 'success');
+      setStatus(USAGE_STATUS_LINES.loaded);
     } catch (error) {
       if (sequence !== loadSequence) return;
       setStatus(errorMessage(error, USAGE_STATUS_LINES.failed), 'error');

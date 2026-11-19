@@ -1,4 +1,5 @@
 import type { DatabaseImportPreviewProjection, DatabaseReplacementsProjection, RendererApi } from '../shared/protocol.js';
+import { reportResult } from './notifications.js';
 import {
   DATABASE_IMPORT_ACTIONS,
   DATABASE_IMPORT_CHOICES,
@@ -167,7 +168,7 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
     for (const [term, value] of databaseImportPreviewRows(file, instant)) rows.append(el('dt', undefined, term), el('dd', undefined, value));
     const cancel = action(DATABASE_IMPORT_ACTIONS.cancelPreview, 'quiet', 'cancel-preview', () => {
       closePreview();
-      setStatus(DATABASE_IMPORT_STATUS_LINES.closed);
+      reportResult(setStatus, DATABASE_IMPORT_STATUS_LINES.closed);
       choose.focus();
     });
     const buttons = el('div', 'button-row');
@@ -251,7 +252,7 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
       const result = await api.chooseDatabaseImportFile();
       if (!root.isConnected) return;
       if (result.outcome === 'cancelled') {
-        setStatus(DATABASE_IMPORT_STATUS_LINES.cancelled);
+        reportResult(setStatus, DATABASE_IMPORT_STATUS_LINES.cancelled);
         return;
       }
       setBusy(false);
