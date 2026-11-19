@@ -10,13 +10,12 @@ let restore: () => void;
 beforeEach(() => {
   restore = installMiniDom();
   vi.stubGlobal('Option', class extends MiniElement { constructor(text: string, value: string) { super('option'); this.textContent = text; this.value = value; } });
-  Object.defineProperty(MiniElement.prototype, 'style', { configurable: true, get: () => ({}) });
   Object.defineProperty(MiniElement.prototype, 'prepend', { configurable: true, value(this: MiniElement, ...nodes: MiniElement[]) {
     this.replaceChildren(...nodes, ...this.children);
   } });
 });
 afterEach(() => {
-  Reflect.deleteProperty(MiniElement.prototype, 'style'); Reflect.deleteProperty(MiniElement.prototype, 'prepend');
+  Reflect.deleteProperty(MiniElement.prototype, 'prepend');
   vi.unstubAllGlobals(); restore();
 });
 const flush = async (): Promise<void> => { for (let i = 0; i < 10; i++) await Promise.resolve(); };

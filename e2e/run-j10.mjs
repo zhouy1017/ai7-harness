@@ -1869,7 +1869,7 @@ async function main() {
       const shown=getComputedStyle(list).minHeight; return shown===list.style.minHeight && shown!=='0px'; })()`, 'review-controls-progress-floor-applied', 30_000);
     const progressPlace = await renderer.evaluate(`new Promise(resolve => { const page=document.scrollingElement; page.scrollTop=page.scrollHeight; requestAnimationFrame(() => {
       window.__ai7ProgressProbe=document.querySelector('ol.review-progress'); resolve({ top: document.querySelector('[data-review-action="view-plan"]').getBoundingClientRect().top,
-      end: Math.abs(page.scrollTop + page.clientHeight - page.scrollHeight) < 1 }); }); })`);
+      end: page.scrollTop > 0 && Math.abs(page.scrollTop + page.clientHeight - page.scrollHeight) < 1 }); }); })`);
     requireJourney(progressPlace?.end === true, 'review-controls-progress-page-end', progressPlace);
     await waitFor(renderer, `document.querySelector('ol.review-progress')!==window.__ai7ProgressProbe && document.querySelector('.review-workspace-card')?.dataset.reviewState==='running'`, 'review-controls-progress-redrawn', 30_000);
     const progressTop = await renderer.evaluate(`document.querySelector('[data-review-action="view-plan"]').getBoundingClientRect().top`);
@@ -1893,8 +1893,10 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.textContent==='停止任务'`, 'review-controls-stop-wording');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="cancel-run"]', 'review-controls-impact');
     await waitFor(renderer, `document.querySelector('#task-drawer-cancel-impact') && document.querySelector('#task-drawer [data-task-drawer-control="confirm-cancel-run"]')?.textContent==='确认取消任务'`, 'review-controls-confirm-wording');
-    // The Run still runs with one part read: the drawer's bar fills by the parts read (its width set through the style object, as the page's policy requires).
-    await waitFor(renderer, `(() => { const fill=document.querySelector('#task-drawer .task-plan-progress-fill'); return !!fill && Number.parseFloat(getComputedStyle(fill).width) > 0; })()`, 'review-controls-progress-fill', 30_000);
+    // The Run still runs with one part of several read: the drawer's bar is filled in proportion, neither empty nor whole (its width
+    // set through the style object, as the page's policy requires; a refused style attribute left it as wide as its track).
+    await waitFor(renderer, `(() => { const fill=document.querySelector('#task-drawer .task-plan-progress-fill'); if(!fill||!fill.parentElement)return false;
+      const width=fill.getBoundingClientRect().width, track=fill.parentElement.getBoundingClientRect().width; return width > 0 && width < track - 1; })()`, 'review-controls-progress-fill', 30_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="confirm-cancel-run"]', 'review-controls-cancel');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='cancelling'`, 'review-controls-cancelling');
     await writeFile(holdPath, '2', 'utf8');
