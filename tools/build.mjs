@@ -83,6 +83,8 @@ function typecheck() {
     maxBuffer: 4 * 1024 * 1024,
   });
   if (result.status !== 0) {
+    // The type check running out of heap prints no diagnostic line: say so, instead of an unclassified failure.
+    if (/heap out of memory/u.test(`${result.stderr ?? ''}`)) console.error('BUILD_TYPESCRIPT/heap-exhausted');
     reportTypeScriptDiagnostics(result.stdout, result.stderr);
     typeScriptDiagnosticsReported = true;
   }
