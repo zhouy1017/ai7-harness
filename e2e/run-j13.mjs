@@ -1,6 +1,5 @@
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
-import { pointerClick } from './dispatch-chooser.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
