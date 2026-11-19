@@ -1,4 +1,5 @@
 import { windowStep } from './components/controls.js';
+import { reportResult } from './notifications.js';
 import { identityWords, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import {
   LIBRARY_MATERIAL_KINDS,
@@ -872,7 +873,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       if (!root.isConnected) return;
       busy = false;
       if (read === null) {
-        setStatus(LIBRARY_STATUS.cancelled);
+        reportResult(setStatus, LIBRARY_STATUS.cancelled);
         paint('[data-library-action="add"]');
         return;
       }

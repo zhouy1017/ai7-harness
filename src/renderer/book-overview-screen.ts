@@ -1,3 +1,4 @@
+import { reportResult } from './notifications.js';
 
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { technicalWords, technicalLayerVisible } from './technical-layer.js';
@@ -50,6 +51,7 @@ interface Options {
   taskSurfaceRefresh: Partial<Record<TaskPlanKind, () => void>>;
   acknowledgeCompletionAfterPaint: (result: ImportCommitProjection) => Promise<boolean>;
   authorityInterrupted: boolean;
+  statusRevision: number;
 }
 
 export function createBookOverviewScreen(state: Options) {
@@ -361,7 +363,7 @@ function renderBookOverview(
         const result = await api.selectAndStageManuscript();
         if (result.status === 'cancelled') {
           importFirst.disabled = false;
-          setStatus('已取消文件选择');
+          reportResult(setStatus, '已取消文件选择');
           return;
         }
         let staged = result.staged;
@@ -483,10 +485,12 @@ function renderBookOverview(
     'review-run': inspectReviewSummary,
   };
   if (completion) {
+    // The acknowledgement can finish after a newer status: confirm only if nothing was said since the page landed.
+    const landingStatusRevision = state.statusRevision;
     void acknowledgeCompletionAfterPaint(completion).then((acknowledged) => {
       if (acknowledged && !state.authorityInterrupted && content.isConnected) {
         for (const action of completionActionButtons) action.disabled = false;
-        setStatus(completion.completionLabel, 'success');
+        if (state.statusRevision === landingStatusRevision) setStatus(completion.completionLabel, 'success');
       }
       inspectTaskAuthorization();
       inspectReviewSummary();

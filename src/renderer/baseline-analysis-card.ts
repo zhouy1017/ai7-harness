@@ -1,4 +1,5 @@
 import { rendererApi } from './navigation-generation.js';
+import { reportResult } from './notifications.js';
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { technicalWords, identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { analysisRunSummary, completedWithGapsLabel } from '../shared/analysis-run-summary.js';
@@ -844,7 +845,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       return;
     }
     const note = taskPlanQuickStartFellBack(result.reasons);
-    setStatus(note);
+    reportResult(setStatus, note);
     openTaskPlan(result.projection.bookId, 'baseline-analysis', taskIntentId, note);
   }
 
@@ -1072,7 +1073,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         const next = await rendererApi.inspectBaselineAnalysis({ revisionId });
         if (host.isConnected && next.bookId === host.dataset['analysisBookId']) {
           renderBaselineAnalysis(host, next, bookTitle);
-          setStatus(revisionId === null ? technicalWords('已返回最新修订版。', '已返回最新分析。') : technicalWords('历史修订版已只读打开。', '已打开历史分析。'), 'success');
+          setStatus(revisionId === null ? technicalWords('已返回最新修订版。', '已返回最新分析。') : technicalWords('历史修订版已只读打开。', '已打开历史分析。'));
         }
       } catch (error) {
         setStatus(rendererErrorMessage(error, '无法打开该分析结果。'), 'error');

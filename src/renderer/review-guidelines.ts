@@ -1,4 +1,5 @@
 import { windowStep } from './components/controls.js';
+import { reportResult } from './notifications.js';
 import { identityWords, technicalLayerVisible } from './technical-layer.js';
 import type { RendererApi, ReviewGuidelineDocumentProjection, ReviewGuidelinePreviewProjection, ReviewGuidelinesProjection } from '../shared/protocol.js';
 import {
@@ -316,7 +317,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     try {
       const read = await api.previewReviewGuidelineVersion({ documentId });
       if (read === null) {
-        setStatus(GUIDELINE_STATUS.cancelled);
+        reportResult(setStatus, GUIDELINE_STATUS.cancelled);
         busy = false;
         paint(`[data-guideline-document="${documentId}"] [data-guideline-action="import"]`);
         return;

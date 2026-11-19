@@ -20,13 +20,16 @@ export class NavigationGeneration {
     return { isCurrent: () => intent === this.intent };
   }
 
-  commit(destination: string | symbol = Symbol(), bookId: string | null = null): void {
-    if (destination !== this.destination) {
+  /** Answers whether this is another destination; a repaint of the one on screen is not. */
+  commit(destination: string | symbol = Symbol(), bookId: string | null = null): boolean {
+    const changed = destination !== this.destination;
+    if (changed) {
       this.intent += 1;
       this.page += 1;
       this.destination = destination;
     }
     this.bookId = bookId;
+    return changed;
   }
 
   read(root: HTMLElement): NavigationCheckpoint {
