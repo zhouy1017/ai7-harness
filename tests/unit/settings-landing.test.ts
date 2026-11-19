@@ -34,8 +34,8 @@ it('draws 模型服务 with its navigation and the reason when 设置 cannot rea
   expect(current.getAttribute('aria-current')).toBe('page');
   expect(root.querySelector('.model-service-settings .attention-note')!.textContent).toBe('无法读取模型服务设置。');
   expect(root.querySelectorAll('.settings-navigation [data-settings-nav]').map((entry) => entry.dataset['settingsNav'])).toEqual(
-    ['model-service', 'data-storage', 'appearance', 'keyboard', 'notifications', 'help']);
-  expect(root.querySelectorAll('.settings-navigation h3').map((heading) => heading.textContent)).toEqual(['服务', '本机']);
+    ['model-service', 'evaluation-calibration', 'data-storage', 'appearance', 'keyboard', 'notifications', 'help']);
+  expect(root.querySelectorAll('.settings-navigation h3').map((heading) => heading.textContent)).toEqual(['服务', '编辑工作', '本机']);
   expect(root.querySelector('.settings-navigation')!.textContent).not.toContain('全部设置');
 });
 

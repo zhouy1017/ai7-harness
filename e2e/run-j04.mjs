@@ -3583,7 +3583,7 @@ async function main() {
     // The empty state no longer sends the editor to 知识库: it offers the one primary action, here.
     await assertRenderer(renderer, `(() => { const empty=document.querySelector(${JSON.stringify(`${customPanel} [data-custom-empty="no-dimension"]`)}); const create=empty?.querySelector('[data-custom-action="create"]'); return create?.textContent==='新建自定义分析维度…' && create.classList.contains('primary') && !empty.textContent.includes('知识库') && !empty.textContent.includes('工序与规则'); })()`, 'custom-tab-empty-offer');
     await atBothSizes(renderer, waitFor, 'custom-in-place', async (viewport) => {
-      const size = viewport.width;
+      const size = viewport === ORDINARY_VIEWPORTS[0] ? 'wide' : 'gate';
       if (viewport === ORDINARY_VIEWPORTS[0]) {
         await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-empty-row-${size}`);
         await pointerClick(renderer, waitFor, `${customPanel} [data-custom-action="create"]`, `custom-create-${size}`);

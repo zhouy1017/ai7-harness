@@ -9,9 +9,9 @@ export const ORDINARY_VIEWPORTS = Object.freeze([{ width: 1280, height: 800 }, {
 /** Run `step` once per window form, then give the window back its own size. */
 export async function atBothSizes(renderer, waitFor, name, step) {
   try {
-    for (const viewport of ORDINARY_VIEWPORTS) {
+    for (const [index, viewport] of ORDINARY_VIEWPORTS.entries()) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
-      await waitFor(renderer, `innerWidth===${viewport.width} && innerHeight===${viewport.height}`, `${name}-viewport-${viewport.width}`);
+      await waitFor(renderer, `innerWidth===${viewport.width} && innerHeight===${viewport.height}`, `${name}-viewport-${index + 1}`);
       await step(viewport);
     }
   } finally {

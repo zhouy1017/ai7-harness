@@ -1213,8 +1213,8 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'house-words-book-review');
     await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'house-words-review-ready');
     await atBothSizes(renderer, waitFor, 'house-words', async (viewport) => {
-      const size = viewport.width;
       const first = viewport === ORDINARY_VIEWPORTS[0];
+      const size = first ? 'wide' : 'gate';
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), `house-words-open-${size}`);
       await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelector('[data-knowledge-category="house-words"]')`, `house-words-home-${size}`);
       await pointerClick(renderer, waitFor, '[data-knowledge-category="house-words"]', `house-words-card-${size}`);
