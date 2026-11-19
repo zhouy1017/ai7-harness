@@ -1,4 +1,5 @@
 import { pointerClick } from './dispatch-chooser.mjs';
+import { SIDEBAR, sidebarNavigate } from './controller.mjs';
 
 // Issue #1543: shared steps of the Journeys that read 本社词表, 分析 › 自定义 and 评估校准与预测 as ordinary pages. Each press and each
 // typed letter goes through the browser's own input events, the way the editor makes them.
@@ -50,3 +51,34 @@ export function buttonRowsAtOneEdge(scope) {
     return rows.length > 0 && rowsOk && root.getBoundingClientRect().right <= innerWidth + 1 && document.documentElement.scrollWidth <= innerWidth + 1;
   })()`;
 }
+
+/**
+ * Switch 设置 › 帮助's developer-mode switch to `developer`, pressed with the pointer, and wait until the window shows it. The ordinary
+ * editor's pages are read in ordinary mode, and the Journeys that run in development mode switch back after.
+ */
+export async function setDeveloperMode(renderer, waitFor, developer, name) {
+  await renderer.evaluate(sidebarNavigate(SIDEBAR.settings));
+  await waitFor(renderer, `document.querySelector('[data-settings-nav="help"]')`, `${name}-settings`);
+  await pointerClick(renderer, waitFor, '[data-settings-nav="help"]', `${name}-help`);
+  await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `${name}-switch`);
+  if (await renderer.evaluate(`document.querySelector('.help-developer-mode input').checked !== ${developer}`)) await pointerClick(renderer, waitFor, '.help-developer-mode input', `${name}-press`);
+  await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible===${JSON.stringify(String(developer))}`, `${name}-applied`);
+}
+
+/**
+ * An expression whose value is the measure of 本社词表's draft rows: each row's 词条, 说明 and 启用 + 移除 side by side on one line, and
+ * the three headings over the same three columns. `ok` is the one verdict; the rest says what was measured.
+ */
+export const HOUSE_DRAFT_MEASURE = `(() => {
+  const rows = Array.from(document.querySelectorAll('[data-house-entry-row]'));
+  const head = Array.from(document.querySelectorAll('.house-row-head > span'), (span) => Math.round(span.getBoundingClientRect().left));
+  const lefts = [];
+  const checks = rows.map((row) => {
+    const [literal, note, enabled, remove] = ['[data-house-field="literal"]', '[data-house-field="note"]', '[data-house-field="enabled"]', '[data-house-action^="remove-"]'].map((selector) => row.querySelector(selector)?.getBoundingClientRect());
+    if (!(literal && note && enabled && remove)) return false;
+    lefts.push([Math.round(literal.left), Math.round(note.left), Math.round(enabled.left)]);
+    return literal.right <= note.left + 1 && note.right <= enabled.left + 1 && enabled.right <= remove.left + 1 && Math.abs(literal.top - note.top) <= 8 && Math.abs(note.top - remove.top) <= 12;
+  });
+  const aligned = head.length === 3 && lefts.every((row) => row.every((left, index) => Math.abs(left - head[index]) <= 1));
+  return { ok: rows.length > 0 && checks.every(Boolean) && aligned, rows: rows.length, checks, head, lefts, width: innerWidth };
+})()`;

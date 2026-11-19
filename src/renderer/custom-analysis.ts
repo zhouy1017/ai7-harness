@@ -15,6 +15,7 @@ import {
   CUSTOM_TAB_FEEDBACK_NOTE,
   CUSTOM_TAB_NEW,
   CUSTOM_TAB_NOT_ENABLED,
+  CUSTOM_TAB_STOPPED,
   CUSTOM_TAB_NOT_RUN,
   CUSTOM_TAB_PREPARED,
   CUSTOM_TAB_STARTED,
@@ -277,7 +278,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       }
       if (book?.unavailableReason != null) {
         // A dimension with no enabled version is told to be enabled in 知识库 › 工序与规则, a developer page: an ordinary editor reads the card's own 启用.
-        const reason = el('span', 'custom-unavailable', !technicalLayerVisible && dimension.enabledVersion === null ? CUSTOM_TAB_NOT_ENABLED : book.unavailableReason);
+        const reason = el('span', 'custom-unavailable', !technicalLayerVisible && dimension.enabledVersion === null ? (dimension.versions[0]?.state === 'stopped' ? CUSTOM_TAB_STOPPED : CUSTOM_TAB_NOT_ENABLED) : book.unavailableReason);
         reason.id = `custom-unavailable-${dimension.dimensionId}`;
         start.setAttribute('aria-describedby', reason.id);
         actions.append(reason);
