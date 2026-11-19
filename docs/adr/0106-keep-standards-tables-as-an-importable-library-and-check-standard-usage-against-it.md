@@ -85,7 +85,9 @@ The editor chooses a file under 知识库 › 字表与词表 › 导入字表�
 - it sends only the imported file's text, in parts;
 - every entry the model returns must name its place in the file, and AI7 checks that its forms occur there; an entry that fails is listed as not recognised with its reason, never applied;
 - an entry the model marks as unsure, and an entry that conflicts with another in the same file, is held as 待确认;
-- a part that fails is retried once and then reported alone; the rest of the conversion stands.
+- a part whose answer was refused or invalid is sent again once, under the confirmation the editor already gave, and is then reported alone if it still fails;
+- a part whose outcome is unknown is never resent automatically ([#1599](https://github.com/zhouy1017/ai7-harness/issues/1599) and the transport rules): it is reported, and the editor may start that part again;
+- either way the rest of the conversion stands.
 
 **Refused:** a scanned PDF without a text layer. The editor is told it needs recognition, which is deferred ([#1034](https://github.com/zhouy1017/ai7-harness/issues/1034)).
 
