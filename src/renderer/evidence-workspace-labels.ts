@@ -28,7 +28,8 @@ export const FACT_LENS_FILTER_LABELS = {
   actionNeed: '需要处理',
 } as const;
 export const FACT_LENS_FILTER_ALL = '全部';
-export const FACT_SEVERITY_LABELS = { A: '高（A）', B: '中（B）', C: '低（C）' } as const;
+// One severity vocabulary with the review findings' (Issue #1531): the letters stay beside the words.
+export const FACT_SEVERITY_LABELS = { A: '必须处理（A）', B: '建议处理（B）', C: '提示（C）' } as const;
 export const FACT_STATE_TERMS = ['引文完整性', '断言支持', '事实核查'] as const;
 export const FACT_OPEN_WORKSPACE = '查看证据';
 export const FACT_CLOSE_WORKSPACE = '收起证据';

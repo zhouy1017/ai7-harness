@@ -254,8 +254,8 @@ export function mountProposalWorkspace(options: {
         const status = el('p', state === 'confirming' ? '正在确认应用结果' : '结果待确认'); status.dataset['applyReceiptState'] = state; controls.replaceChildren(status);
         const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId, recovery: state }); if (!destroyed) controls.replaceChildren(receiptCard(receipt));
       });
-    if (result.acknowledged) { const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId: result.result.application.effectId, recovery: 'settled' }); await refresh(); controls.prepend(receiptCard(receipt)); message.textContent = `已应用 ${ready.length} 项已采纳修改。`; }
-    else if (result.outcome !== null) { const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId: effectIdentity, recovery: 'settled' }); await refresh(); controls.prepend(receiptCard(receipt)); message.textContent = result.outcome.state === 'committed' ? '已应用，结果从记录确认。' : '未应用，请再试一次。'; }
+    if (result.acknowledged) { const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId: result.result.application.effectId, recovery: 'settled' }); await refresh(); controls.prepend(receiptCard(receipt)); message.textContent = `已接受并写入 ${ready.length} 项修改。`; }
+    else if (result.outcome !== null) { const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId: effectIdentity, recovery: 'settled' }); await refresh(); controls.prepend(receiptCard(receipt)); message.textContent = result.outcome.state === 'committed' ? '已接受并写入，结果从记录确认。' : '没有写入，请再试一次。'; }
   }
   return { start() { void act(async () => { workspace = await readProposalWorkspace(api, input); position = workspace.returnPosition ?? position; renderToolbar(); refreshList(); renderControls(); rail.refresh();
       const first = filtered().find((item) => item.markId === position.activeMarkId) ?? filtered()[0]; if (first) list.activate(filtered().indexOf(first), false); }); },

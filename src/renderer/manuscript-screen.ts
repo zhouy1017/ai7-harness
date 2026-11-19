@@ -1390,7 +1390,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (expected && (
       next.revisionId !== expected.revisionId || next.journalSequence !== expected.journalSequence ||
       next.workingDigest !== expected.workingDigest
-    )) throw new Error('权威写入确认与刷新窗口不一致。');
+    )) throw new Error('保存的结果与刷新后的稿件不一致，请重新打开稿件。');
     windowLoadCause = 'authoritative';
     try {
       if (!editor.loadWindow(next, continuity)) throw new Error('权威窗口已返回，但编辑器未能安全装载。');

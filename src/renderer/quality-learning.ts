@@ -551,7 +551,7 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
     adoptionAfter = metric.preferenceAdoptionNext ?? null;
     adoptionMore.hidden = adoptionAfter === null;
     adoptionMore.disabled = false;
-    body.textContent = `建议保留率：${metric.applied === 0 ? '暂无已应用的判定' : `${metric.surviving}/${metric.applied}（${Math.round(metric.surviving / metric.applied * 100)}%）`} · 按类别加权的改写量：${metric.editVolume} 字符单位`;
+    body.textContent = `建议保留率：${metric.applied === 0 ? '暂无已接受的判定' : `${metric.surviving}/${metric.applied}（${Math.round(metric.surviving / metric.applied * 100)}%）`} · 按类别加权的改写量：${metric.editVolume} 字符单位`;
     body.dataset['lineageDigest'] = metric.lineageDigest;
     adoption.replaceChildren(el('h4', undefined, '已参考规则的采纳率'));
     const share = (count: { accepted: number; findings: number; rate: number | null }) => count.rate === null ? '暂无发现' : `${count.accepted}/${count.findings} · ${Math.round(count.rate * 100)}%`;

@@ -1496,7 +1496,7 @@ async function renderStartupProjection(
     return;
   }
   if (startup.state === 'committed-recovered') {
-    setStatus('已核对中断前的原子提交结果', 'success');
+    setStatus('已确认：中断前的导入已经完成', 'success');
     navigation.present(() => renderImported(startup.result, recoveryReturn));
     return;
   }
@@ -1936,7 +1936,7 @@ function renderContinuation(
     return;
   }
   if (continuation.state === 'committed-recovered') {
-    setStatus('已核对中断前的原子提交结果', 'success');
+    setStatus('已确认：中断前的导入已经完成', 'success');
     renderImported(continuation.result, recoveryReturn);
     return;
   }
@@ -2900,7 +2900,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
   );
   if (projection.state === 'available' || (projection.taskIntent !== null && projection.checkpoint === null)) {
     const form = element('section', 'form-row task-authorization-form');
-    const label = element('label', undefined, '固定任务目标');
+    const label = element('label', undefined, '任务目标');
     label.htmlFor = 'j03-task-goal';
     const goal = element('input');
     goal.id = 'j03-task-goal';

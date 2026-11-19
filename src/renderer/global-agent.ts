@@ -1,4 +1,5 @@
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { localInstantLabel } from '../shared/report-wording.js';
 import { type GlobalAgentDialogueProjection, type GlobalAgentProcedure, type GlobalAgentProjection, type GlobalAgentRendererApi, type GlobalAgentScopeInput, type GlobalMemoryItem, type GlobalAgentSourceCandidate, type PrepareGlobalAgentTurnInput, type RecordLearningSupervisionInput } from '../shared/protocol.js';
 import { globalAgentAnswerStatus, shellDestinationLabel } from './shell-labels.js';
 import { CONFIGURED_RUNTIME_MODEL_LABELS } from '../shared/provider-configuration.generated.js';
@@ -446,7 +447,7 @@ export function mountGlobalAgent(options: {
     if (projection.categories.some((entry) => entry.categoryId === previousCategory)) category.value = previousCategory;
     if (projection.books.some((entry) => entry.bookId === previousBook)) book.value = previousBook;
     directives.replaceChildren(el('h3', '学习监督与治理记录'));
-    for (const directive of projection.directives) directives.append(el('p', `${directive.ordinal} · ${directive.text || '停用所选审阅偏好'} · ${directive.recordedAt}`));
+    for (const directive of projection.directives) directives.append(el('p', `${directive.ordinal} · ${directive.text || '停用所选审阅偏好'} · ${localInstantLabel(directive.recordedAt)}`));
     historyList.replaceChildren();
     for (const dialogue of projection.history) {
       const open = el('button', dialogue.question ?? '查看全域对话'); open.type = 'button'; open.className = 'btn ' + ('quiet global-agent-history-entry');

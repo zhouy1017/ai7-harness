@@ -932,7 +932,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const expectedExact = element('dd', 'technical-identity', action.expected === null ? '由所选范围决定' : reuseCountsText(action.expected));
       if (technicalLayerVisible) block.append(expected, technicalDetails('analysis-facts',
         element('dt', undefined, '预期单元血缘'), expectedExact,
-        element('dt', undefined, '固定任务目标'), element('dd', 'technical-identity', action.goal)));
+        element('dt', undefined, technicalWords('固定任务目标')), element('dd', 'technical-identity', action.goal)));
       if (action.unavailableReason !== null) block.append(element('p', 'attention-note', action.unavailableReason));
       let selectedRange: BaselineAnalysisSelectedRange | null = null;
       if (mode === 'reanalyze-range') {
@@ -1255,7 +1255,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     // it waited to start leaves no revision either, so the form is offered again (Issue #502, OFF-010).
     if ((projection.state === 'available' || (projection.state === 'cancelled' && projection.actions.canPrepare)) && projection.history === null) {
       const form = element('section', 'form-row analysis-form');
-      const label = element('label', undefined, '固定任务目标');
+      const label = element('label', undefined, '任务目标');
       label.htmlFor = 'j04-analysis-goal';
       const goal = element('input');
       goal.id = 'j04-analysis-goal';
