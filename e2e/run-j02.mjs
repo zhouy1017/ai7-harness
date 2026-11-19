@@ -1940,7 +1940,7 @@ async function runProtectionJourney(renderer) {
       const header = document.querySelector('.context-header');
       const h = header.getBoundingClientRect(), b = document.querySelector('#editing-protection').getBoundingClientRect();
       return b.width > 0 && b.height > 0 && b.left >= h.left && b.right <= h.right && b.top >= h.top && b.bottom <= h.bottom && header.getBoundingClientRect().height === ${headerHeights[index]}
-        && [...header.querySelectorAll('button, summary')].filter(node => node.getClientRects().length > 0)
+        && [...header.querySelectorAll('button, summary')].filter(node => node.checkVisibility())
           .every(node => { const r = node.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; });
     })()`, 'protection-header-height');
     await clickVisibleControl(renderer, '#editing-protection-options [data-protection-action="close"]', 'protection-geometry-close');
