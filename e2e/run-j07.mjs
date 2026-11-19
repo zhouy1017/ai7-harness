@@ -1914,10 +1914,28 @@ async function main() {
     await clickSelector(renderer, '.editor-shell[data-manuscript-kind="derivative"] [data-document-action="start-task"]', 'document-task-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView==='composer' && document.querySelector('.task-composer-deliverable')?.textContent.includes('新闻稿')`, 'document-task-composer');
     await waitFor(renderer, `Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-document.querySelector('#task-drawer').getBoundingClientRect().width)<1`, 'document-toolbar-dock-settled');
-    const widerToolbarViewport = await renderer.evaluate(`Math.round(innerWidth + 620 - document.querySelector('.editor-shell[data-manuscript-kind="derivative"]').getBoundingClientRect().width)`);
     // Exercise the widest style label without changing the document version fixed for this task.
     await renderer.evaluate(`(() => { const style=document.querySelector('.editor-toolbar select[aria-label="段落样式"]'); style.value='heading-6'; })()`);
-    for (const width of [1280, widerToolbarViewport]) {
+    // #1542: beside a docked drawer the sidebar takes its icon form so the text keeps 28 characters, so the shell is never narrower than
+    // the rail and that measure (about 592 px at the reading size), and a fixed 1280 no longer gives a shell under 600. Reach each shell
+    // width the toolbar must hold by measurement in the form the layout really takes: set a width, re-measure, step until the drawer is
+    // docked and the shell lies in range (a width where the drawer overlays instead is too narrow, so step wider).
+    const shellAt = async (width) => {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      return renderer.evaluate(`(async () => { await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); await Promise.all(document.body.getAnimations().map(animation=>animation.finished.catch(()=>undefined))); const drawer=document.querySelector('#task-drawer').getBoundingClientRect().width; return { shell: document.querySelector('.editor-shell[data-manuscript-kind="derivative"]').getBoundingClientRect().width, docked: Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-drawer)<1 }; })()`);
+    };
+    const viewportForShell = async (low, high, name) => {
+      let width = 1280;
+      for (let step = 0; step < 12; step += 1) {
+        const { shell, docked } = await shellAt(width);
+        if (docked && shell > low && shell < high) return width;
+        width = docked ? Math.round(width + (low + high) / 2 - shell) : width + 4;
+      }
+      requireJourney(false, name);
+      return width;
+    };
+    const toolbarShells = [[await viewportForShell(584, 600, 'document-toolbar-narrow-shell-reached'), 0, 600], [await viewportForShell(600, 640, 'document-toolbar-wider-shell-reached'), 600, 640]];
+    for (const [width, low, high] of toolbarShells) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
       let geometry;
       const geometryDeadline = Date.now() + 5_000;
@@ -1931,7 +1949,7 @@ async function main() {
         const controls=Array.from(toolbar.querySelector('.editor-edit-actions').children).filter(el=>!el.hidden && !el.classList.contains('ui-select-native') && getComputedStyle(el).display!=='none');
         const shellWidth=shell.getBoundingClientRect().width;
         const bounds=controls.map(el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,scroll:el.scrollWidth,client:el.clientWidth};});
-        return {shellWidth,bounds,checks:{viewport:innerWidth===${width} && innerHeight===800,heading:document.querySelector('.editor-toolbar select[aria-label="段落样式"]').value==='heading-6',drawer:document.body.dataset.taskDrawer==='open',narrow:${width}===1280 ? shellWidth<600 : shellWidth>600 && shellWidth<640,count:controls.length>=7,
+        return {shellWidth,bounds,checks:{viewport:innerWidth===${width} && innerHeight===800,heading:document.querySelector('.editor-toolbar select[aria-label="段落样式"]').value==='heading-6',drawer:document.body.dataset.taskDrawer==='open' && Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-document.querySelector('#task-drawer').getBoundingClientRect().width)<1,narrow:shellWidth>${low} && shellWidth<${high},count:controls.length>=7,
           visible:bounds.every(r=>r.width>0 && r.height>0 && r.left>=Math.max(0,box.left) && r.right<=Math.min(box.right,innerWidth) && r.top>=box.top && r.bottom<=Math.min(box.bottom,innerHeight)),untruncated:bounds.every(r=>r.scroll<=r.client+1)}};
       })()`);
         if (Object.values(geometry.checks).every(value=>value===true)) break;

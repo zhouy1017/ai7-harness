@@ -1,4 +1,5 @@
 import { identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { reportResult } from './notifications.js';
 import { SOURCE_TRANSLATION_LABEL, type RendererApi, type ResearchEvidenceBookProjection, type ResearchEvidenceProjection, type ReviewEvidenceSource } from '../shared/protocol.js';
 import { FINDING_EVIDENCE_HEADING } from '../shared/report-wording.js';
 import { localInstantLabel } from './plan-preview-labels.js';
@@ -170,7 +171,7 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
       if (!root.isConnected) return;
       await page(last.next);
     }
-    if (!records.some((record) => record.evidenceId === target)) options.setStatus('目标来源尚未显示；可继续读取更多来源。');
+    if (!records.some((record) => record.evidenceId === target)) reportResult(options.setStatus, '目标来源尚未显示；可继续读取更多来源。');
   } };
 }
 

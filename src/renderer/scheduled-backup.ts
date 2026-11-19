@@ -103,7 +103,8 @@ export function mountScheduledBackup(options: MountScheduledBackupOptions): void
       return;
     }
     const made = after.backups[0] !== undefined && after.backups[0].backupId !== before.backups[0]?.backupId;
-    setStatus(made ? SCHEDULED_BACKUP_STATUS_LINES.backedUp : SCHEDULED_BACKUP_STATUS_LINES.turnedOn, 'success');
+    // A timer settling the turn-on: it ends the busy line and says the result, but clears no error raised since.
+    setStatus(made ? SCHEDULED_BACKUP_STATUS_LINES.backedUp : SCHEDULED_BACKUP_STATUS_LINES.turnedOn);
   };
 
   // While a backup is being made, the section reads again until it is done, keeping focus where it was.

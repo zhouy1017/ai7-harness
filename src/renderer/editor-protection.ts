@@ -1,4 +1,5 @@
 import { MAX_BLOCK_GRAPHEMES } from '../shared/protocol.js';
+import { showTransientNotice } from './notifications.js';
 import {
   PROTECTION_CLOSE_OPTIONS,
   PROTECTION_COPY_ACTION,
@@ -273,7 +274,8 @@ export function mountProtectionSurface(options: ProtectionSurfaceOptions): Prote
   copyButton.addEventListener('click', () => {
     const text = options.affectedContent();
     void options.writeClipboard(text).then(
-      () => { options.setStatus(protectionCopiedLine()); },
+      // A toast, not a status: copying the unsaved text does not settle the write error the bar is standing for.
+      () => { showTransientNotice(protectionCopiedLine()); },
       () => { options.setStatus(PROTECTION_COPY_FAILED, 'error'); },
     );
   });
