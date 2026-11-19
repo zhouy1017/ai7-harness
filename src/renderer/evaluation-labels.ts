@@ -150,8 +150,9 @@ export function evaluationItemLegend(item: { label: string; fullMarks: number })
 /** `第 2 版 · 定稿`; ordinary mode tells one version from another by its day (Issue #1531): `11 月 16 日的定稿`. */
 export function evaluationHeading(record: Pick<EvaluationRecordSummaryProjection, 'ordinal' | 'state'> & { readonly createdAt?: string; readonly finalizedAt?: string | null }): string {
   const day = record.finalizedAt ?? record.createdAt;
-  return technicalWords(`第 ${record.ordinal} 版 · ${EVALUATION_STATE_LABELS[record.state]}`,
-    day === undefined ? EVALUATION_STATE_LABELS[record.state] : `${localDayLabel(day)}的${EVALUATION_STATE_LABELS[record.state]}`);
+  const label = EVALUATION_STATE_LABELS[record.state];
+  const ordinary = day === undefined ? label : record.state === 'editing' ? `${label}（${localDayLabel(day)}开始）` : `${localDayLabel(day)}的${label}`;
+  return technicalWords(`第 ${record.ordinal} 版 · ${label}`, ordinary);
 }
 
 /** The revision a version evaluated, and whether edits waited in the journal beyond it then. */

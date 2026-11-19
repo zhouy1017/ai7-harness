@@ -2082,7 +2082,7 @@ async function main() {
       'initial-evaluation-ordinary-report', ordinaryReport);
     // 修改报告: the report becomes 第 14 版, begun from it past the unfinished 第 13 版, which stays as it was.
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'initial-evaluation-begin');
-    const ordinaryDraft = await readEvaluation(renderer, (page) => page.view === 'record' && page.record?.heading === '版本 · AI7 初稿', 'initial-evaluation-begun-ordinary');
+    const ordinaryDraft = await readEvaluation(renderer, (page) => page.view === 'record' && /^\d+ 月 \d+ 日的评估报告$/u.test(page.record?.heading ?? ''), 'initial-evaluation-begun-ordinary');
     requireJourney(ordinaryDraft.record.report === true && ordinaryDraft.report === null && ordinaryDraft.record.reportConclusion === 'AI7 建议的结论：修改后再议' &&
       ordinaryDraft.record.nextStep === (nextStep === null ? null : `下一步建议：${nextStep}`) &&
       JSON.stringify(ordinaryDraft.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)) && ordinaryDraft.record.ai7Comments === 0 &&
@@ -2090,7 +2090,7 @@ async function main() {
       ordinaryDraft.editReport === null && JSON.stringify(ordinaryDraft.record.actions) === JSON.stringify(['保存修改', '定稿']),
     'initial-evaluation-begun-ordinary-words', ordinaryDraft.record);
     const draft = await evaluationMode(true, 'initial-evaluation-developer');
-    requireJourney(draft.view === 'record' && draft.record.report === true && draft.record.heading === '第 14 版 · AI7 初稿' &&
+    requireJourney(draft.view === 'record' && draft.record.report === true && draft.record.heading === '第 14 版 · 评估报告' &&
       draft.record.ai7 === '这一版从 AI7 第 1 次初评开始（读的是修订版 r1）：AI7 的分数列在每一项旁边，记录保存的是你的评分' &&
       JSON.stringify(draft.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '15.5', '14', '12']) &&
       JSON.stringify(draft.record.ai7Items.map(([itemId, line, offered, ticked]) => [itemId, line, offered, ticked.length])) ===
@@ -2100,7 +2100,7 @@ async function main() {
       draft.record.ai7Unread === null &&
       JSON.stringify(draft.record.suggested) === JSON.stringify([null, 'AI7 建议', null, null]) &&
       draft.record.ai7Conclusion === null && JSON.stringify(draft.record.actions) === JSON.stringify(['保存修改', '定稿']) &&
-      draft.versions[0].startsWith('第 14 版 · AI7 初稿 · 修订版 r1 · 总分 73 / 100') && draft.versions[1].startsWith('第 13 版 · 编辑评分中'),
+      draft.versions[0].startsWith('第 14 版 · 评估报告 · 修订版 r1 · 总分 73 / 100') && draft.versions[1].startsWith('第 13 版 · 编辑评分中'),
     'initial-evaluation-draft-words', draft.record);
 
     at('evaluation-market');
@@ -2287,11 +2287,11 @@ async function main() {
     // The whole loop in ordinary mode (technicalLayerVisible=false): 修改报告 on the 定稿 report begins 第 15 版 from it; nothing is
     // changed yet, so there is nothing to regenerate from.
     const reportClosed = await evaluationMode(false, 'evaluation-rewrite-ordinary');
-    requireJourney(reportClosed.view === 'record' && reportClosed.record.heading === '版本 · 定稿' && reportClosed.editReport === '修改报告',
+    requireJourney(reportClosed.view === 'record' && /^\d+ 月 \d+ 日的定稿$/u.test(reportClosed.record.heading) && reportClosed.editReport === '修改报告',
       'evaluation-rewrite-edit-offered', reportClosed);
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'evaluation-rewrite-begin');
-    const fifteenth = await readEvaluation(renderer, (page) => page.record?.heading === '版本 · AI7 初稿' && page.rewrite !== null, 'evaluation-rewrite-begun');
-    requireJourney(fifteenth.record.report === true && fifteenth.versions[0].startsWith('版本 · AI7 初稿') && fifteenth.versions[1] === reportClosed.versions[0] &&
+    const fifteenth = await readEvaluation(renderer, (page) => /^\d+ 月 \d+ 日的评估报告$/u.test(page.record?.heading ?? '') && page.rewrite !== null, 'evaluation-rewrite-begun');
+    requireJourney(fifteenth.record.report === true && /^\d+ 月 \d+ 日的评估报告/u.test(fifteenth.versions[0]) && fifteenth.versions[1] === reportClosed.versions[0] &&
       fifteenth.rewrite.reason === '先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。' &&
       JSON.stringify(fifteenth.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)) && fifteenth.record.verdict === '' &&
       JSON.stringify(fifteenth.market.lists) === JSON.stringify(MARKET_LISTS), 'evaluation-rewrite-begun-words', fifteenth);
@@ -2360,7 +2360,7 @@ async function main() {
       JSON.stringify(accepted.record.conclusions) === JSON.stringify(waiting.record.conclusions) &&
       JSON.stringify(accepted.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '13', '14', '10']) &&
       JSON.stringify(accepted.record.ai7Items.map(([, , , ticked]) => ticked)) === JSON.stringify([[], [], ['too-high'], [], ['insufficient-basis']]) &&
-      accepted.record.heading === '版本 · 编辑评分中' && accepted.record.report === true && accepted.rewrite.proposal === null &&
+      /^编辑评分中（\d+ 月 \d+ 日开始）$/u.test(accepted.record.heading) && accepted.record.report === true && accepted.rewrite.proposal === null &&
       accepted.rewrite.decided === '上次重新生成已采用，分数不变。', 'evaluation-rewrite-accepted-words', accepted);
     const acceptedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.entries, page.record.content.items.map((entry) => entry.score), page.rewrite.decided?.decision ?? null, page.record.content.strengths, page.record.content.weaknesses]))`);
     requireJourney(acceptedService === JSON.stringify([3, [16.5, 15, 13, 14, 10], 'accepted', REWRITTEN_STRENGTHS, REWRITTEN_WEAKNESSES]), 'evaluation-rewrite-accepted-service', acceptedService);
@@ -3413,7 +3413,7 @@ async function main() {
     requireJourney(JSON.stringify(fresh.initial.actions) === JSON.stringify([['start-initial', '生成评估报告', false], ['prepare-initial', '先看计划', false]]), `${name}-prepare-offered`, fresh.initial);
     await runInitialEvaluation(name);
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', `${name}-begin`);
-    const begun = await readEvaluation(renderer, (page) => page.record?.heading === '第 1 版 · AI7 初稿', `${name}-draft`);
+    const begun = await readEvaluation(renderer, (page) => page.record?.heading === '第 1 版 · 评估报告', `${name}-draft`);
     requireJourney(begun.record.calibration === null && JSON.stringify(begun.record.items.map(([, , score]) => score)) === JSON.stringify(RAW_SCORES), `${name}-raw-start`, begun.record);
     // Two departures from AI7's 初评: 读者与市场潜力 12 → 10 and 文学品质与作者声音 16.5 → 17.
     await fill(renderer, `${item('readers-and-market')} [data-evaluation-field="score"]`, '10', `${name}-readers`);
@@ -3432,7 +3432,7 @@ async function main() {
     // 初评开始 on 校准样书1 starts at the calibrated scores, each line keeping AI7's raw score, no 调分原因 offered for a score that
     // stays where the version started it, the risks carried untouched, no conclusion chosen.
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'calibrated-start');
-    const calibratedDraft = await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · AI7 初稿', 'calibrated-draft');
+    const calibratedDraft = await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 评估报告', 'calibrated-draft');
     const calibratedLine = (index, after) => ai7Line(index).replace(' · 依据充分度', ` · 校准后 ${after} / 20 · 依据充分度`);
     requireJourney(JSON.stringify(calibratedDraft.record.items.map(([, , score]) => score)) === JSON.stringify(['17', '15', '15.5', '14', '10']) &&
       calibratedDraft.record.total === '总分 71.5 / 100 · 优秀' &&
@@ -3476,7 +3476,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'calibration-off-open');
     await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.heading === '第 2 版 · 定稿', 'calibration-off-ready');
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'calibration-off-start');
-    const rawAgain = await readEvaluation(renderer, (page) => page.record?.heading === '第 3 版 · AI7 初稿', 'calibration-off-draft');
+    const rawAgain = await readEvaluation(renderer, (page) => page.record?.heading === '第 3 版 · 评估报告', 'calibration-off-draft');
     requireJourney(rawAgain.record.calibration === null && JSON.stringify(rawAgain.record.items.map(([, , score]) => score)) === JSON.stringify(RAW_SCORES) &&
       rawAgain.record.ai7Items[0][1] === ai7Line(0) && rawAgain.record.ai7Items[4][1] === ai7Line(4), 'calibration-off-raw', rawAgain.record);
     const onAgain = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((before) => window.ai7.setEvaluationPreferences({ expectedEntries: before.preferenceEntries, predictionEnabled: before.prediction.enabled, calibrationEnabled: true })).then((answer) => JSON.stringify([answer.calibration.enabled, answer.calibration.active, answer.calibration.offset?.basisBooks ?? null, answer.preferenceEntries]))`);
