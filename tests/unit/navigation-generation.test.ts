@@ -640,6 +640,17 @@ it('coalesces journal-action ownership retries without blocking unrelated reads 
  expect(opens).toBe(2);expect(read).toHaveBeenCalledTimes(2);
 });
 
+it('reads and saves 本社词表 while a leave is pending: the list belongs to the house, not to a Book (#1543)', async () => {
+ const leave=Promise.withResolvers<void>();
+ const page=harness({leaveBookWorkbench:()=>leave.promise,inspectHouseWordList:async()=>({selected:null}),saveHouseWordList:async()=>({created:true})});
+ const book=document.createElement('section');book.dataset['bookId']='book-a';page.replaceScreen('book-review',book);
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');
+ await expect(page.run('api.inspectHouseWordList({versionId:null,entryOffset:0,historyOffset:0})')).resolves.toEqual({selected:null});
+ await expect(page.run('api.saveHouseWordList({})')).resolves.toEqual({created:true});
+ leave.resolve();await pending;
+});
+
 it('the real re-acquisition notice uses editorial words even when the error formatter exposes a raw code', async () => {
  const page=harness();const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
  const formatter=vi.fn((error:Error)=>error.message);page.context['rendererErrorMessage']=formatter;
