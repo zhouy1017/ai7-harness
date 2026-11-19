@@ -611,3 +611,114 @@ describe('the new-review sheet over a paged workspace (#1526)', () => {
     expect(choices()).toBe(read);
   });
 });
+
+describe('the control under a resting pointer stays where it stands when the card is drawn again (#1526 J-04, 1 of 4 at 1008×681)', () => {
+  const category = (settled: number, count: number) => ({ categoryId: 'typos-and-usage', label: '错别字与用法', position: 1, output: 'change-suggestion', riskPointsOnly: false, batchApply: true,
+    basis: { categoryId: 'typos-and-usage', executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '审阅', version: '1' } },
+    state: 'settled', stateLabel: '已完成', detail: null, taskIntentId: null, planEnvelopeDigest: DIGEST, modeLabel: null, plan: null, findingsCount: count, excludedCount: 0,
+    progress: { unitsTotal: 7, unitsSettled: settled, currentUnitOrdinal: null, currentUnitStartedAt: null, attemptState: null, stage: 'units', longestSettledUnitMs: null } });
+  const finding = (id: string, ordinal: number) => ({ findingId: id, categoryId: 'typos-and-usage', categoryLabel: '错别字与用法', ordinal, severity: 'must', severityLabel: '必须处理',
+    output: 'change-suggestion', riskPoint: false, status: 'pending', statusLabel: '待处理', statusDetail: '公开合成状态', blockId: 'blk_777777777777777777777777',
+    fromGrapheme: 0, toGrapheme: 2, blockPosition: 0, chapterBlockId: null, chapterTitle: null, quote: '公开', note: '公开合成问题',
+    replacement: '公开合成', clauseRefs: [], stateLine: null, markId: `m-${id}`, markStatus: 'open', anchorState: 'exact', ignoreReason: null, historicalMarker: null });
+  const reading = (ids: string[], settled = 1): ReviewWorkspaceProjection => {
+    const base = workspace(3, 1, 'running');
+    return { ...base, run: { ...base.run!, categories: [category(settled, ids.length)], findings: ids.map((id, index) => finding(id, index + 1)), findingsTotal: ids.length, findingsTruncated: false,
+      findingCounts: { ...COUNTS, must: ids.length, pending: ids.length } } } as never;
+  };
+  const viewPlan = (root: MiniElement): MiniElement => root.querySelector('[data-review-action="view-plan"]')!;
+  const rest = (node: MiniElement): void => { node.dispatchEvent(Object.assign({ type: 'pointermove', bubbles: true }, { clientX: 300, clientY: 400 })); };
+
+  /**
+   * No layout of its own: each finding above 查看计划 pushes it down by 300 px, and a progress list that shrinks at the page's
+   * end (the browser clamping the scroll) pushes it down by 46 px. `under` names what the resting pointer is on.
+   */
+  async function laidOut(body: (view: ReturnType<typeof mount>, state: Stub, scroller: { scrollTop: number }, under: (find: () => MiniElement | null) => void) => Promise<void>): Promise<void> {
+    const scroller = { scrollTop: 0 };
+    const empty = Object.getOwnPropertyDescriptor(MiniElement.prototype, 'getBoundingClientRect')!;
+    let pointed: () => MiniElement | null = () => null;
+    Object.defineProperty(miniDocument, 'scrollingElement', { configurable: true, value: scroller });
+    Object.defineProperty(miniDocument, 'elementFromPoint', { configurable: true, value: () => pointed() });
+    Object.assign(window, { innerHeight: 800 });
+    Object.defineProperty(MiniElement.prototype, 'getBoundingClientRect', { configurable: true, value(this: MiniElement) {
+      const root = miniDocument.body;
+      const settled = root.querySelector('ol.review-progress li')?.dataset['reviewProgress'] === '7/7';
+      const base = this.closest('article.review-finding') !== null ? 100 : 400 + 300 * root.querySelectorAll('article.review-finding').length + (settled ? 46 : 0);
+      const top = base - scroller.scrollTop;
+      return { top, bottom: top + 34, left: 0, right: 80, width: 80, height: 34 };
+    } });
+    const state: Stub = { full: reading([]), budget: 4 * 1024 * 1024, opened: [] };
+    try { await body(mount(state), state, scroller, (find) => { pointed = find; }); } finally {
+      Reflect.deleteProperty(miniDocument, 'scrollingElement');
+      Reflect.deleteProperty(miniDocument, 'elementFromPoint');
+      Object.defineProperty(MiniElement.prototype, 'getBoundingClientRect', empty);
+    }
+  }
+
+  it('keeps 查看计划 under the resting pointer while findings arrive above it', async () => {
+    await laidOut(async (view, state, scroller, under) => {
+      await flush();
+      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      const before = viewPlan(view.root).getBoundingClientRect().top;
+      state.full = reading(['f-1', 'f-2']);
+      view.surface.refresh(); await flush();
+      expect(view.root.querySelectorAll('article.review-finding')).toHaveLength(2);
+      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+      expect(scroller.scrollTop).toBe(600);
+    });
+  });
+
+  it('keeps it in place when the progress alone is drawn again', async () => {
+    await laidOut(async (view, state, scroller, under) => {
+      await flush();
+      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      const pressed = viewPlan(view.root);
+      const before = pressed.getBoundingClientRect().top;
+      state.full = reading([], 7);
+      // The running Run's own poll: progress only, so the card is not drawn again, its list is.
+      await new Promise((resolve) => setTimeout(resolve, 300)); await flush();
+      expect(viewPlan(view.root)).toBe(pressed);
+      expect(pressed.getBoundingClientRect().top).toBe(before);
+      expect(scroller.scrollTop).toBe(46);
+    });
+  });
+
+  it('scrolls nothing when the pointer left the card, or rests on a control the draw removed', async () => {
+    await laidOut(async (view, state, scroller, under) => {
+      await flush();
+      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      view.root.querySelector('.review-host')!.dispatchEvent({ type: 'pointerleave' });
+      state.full = reading(['f-1']);
+      view.surface.refresh(); await flush();
+      expect(scroller.scrollTop).toBe(0);
+      // On f-1's own control, and the next read no longer has f-1: nothing to keep in place.
+      const control = (): MiniElement | null => view.root.querySelector('article[data-finding-id="f-1"] button');
+      under(control); rest(control()!);
+      state.full = reading(['f-2', 'f-3']);
+      view.surface.refresh(); await flush();
+      expect(view.root.querySelector('article[data-finding-id="f-1"]')).toBeNull();
+      expect(scroller.scrollTop).toBe(0);
+    });
+  });
+
+  it('still holds the draw while 查看计划 is pressed, then draws it once with the button where the pointer rests', async () => {
+    await laidOut(async (view, state, scroller, under) => {
+      await flush();
+      under(() => viewPlan(view.root)); rest(viewPlan(view.root));
+      const pressed = viewPlan(view.root);
+      const before = pressed.getBoundingClientRect().top;
+      pressed.dispatchEvent(Object.assign({ type: 'pointerdown', bubbles: true }, { button: 0 }));
+      state.full = reading(['f-1']);
+      view.surface.refresh(); await flush();
+      expect(viewPlan(view.root)).toBe(pressed);
+      expect(scroller.scrollTop).toBe(0);
+      pressed.dispatchEvent(Object.assign({ type: 'pointerup', bubbles: true }, { button: 0 }));
+      pressed.click(); await flush();
+      expect(state.opened).toEqual([RUN]);
+      nextFrame(); await flush();
+      expect(view.root.querySelectorAll('article.review-finding')).toHaveLength(1);
+      expect(viewPlan(view.root).getBoundingClientRect().top).toBe(before);
+      expect(scroller.scrollTop).toBe(300);
+    });
+  });
+});

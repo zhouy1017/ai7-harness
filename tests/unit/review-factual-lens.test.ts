@@ -862,7 +862,7 @@ describe('review triage in place (#1525)', () => {
     Object.defineProperty(miniDocument, 'scrollingElement', { configurable: true, value: scroller });
     Object.assign(window, { innerHeight: 800 });
     Object.defineProperty(MiniElement.prototype, 'getBoundingClientRect', { configurable: true, value(this: MiniElement) {
-      const id = this.dataset['findingId'] ?? '';
+      const id = this.closest('article.review-finding')?.dataset['findingId'] ?? '';
       const above = Object.keys(placeOf).filter((other) => placeOf[other]! < (placeOf[id] ?? 0)
         && miniDocument.body.querySelector(`article[data-finding-id="${other}"] .learning-reason-ask`) !== null).length;
       const top = (placeOf[id] ?? 0) + 60 * above - scroller.scrollTop;
@@ -888,6 +888,28 @@ describe('review triage in place (#1525)', () => {
       expect(root.querySelector('article[data-finding-id="rvf_s1"] .learning-reason-ask')).not.toBeNull();
       expect(article(root, 'rvf_s2').getBoundingClientRect().top).toBe(before);
       expect(scroller.scrollTop).toBe(60);
+    });
+  });
+
+  it('keeps the control under the resting pointer in place over the card the editor moved on to (#1526)', async () => {
+    await withPlaces({ rvf_s1: 100, rvf_s2: 400, rvf_s3: 700 }, async (scroller) => {
+      const ask = deferred<unknown>();
+      const { root } = await view([suggestion(1), suggestion(2), suggestion(3)], {
+        recordChangeSuggestionDecision: vi.fn(async () => rejected('decision-1')), recordLearningReasonAsk: vi.fn(() => ask.promise) });
+      article(root, 'rvf_s1').focus();
+      article(root, 'rvf_s1').dispatchEvent({ type: 'keydown', key: 'r' }); await flush();
+      expect(miniDocument.activeElement).toBe(article(root, 'rvf_s2'));
+      // The pointer rests on a control of the decided card itself, which does not move when its own reason prompt arrives.
+      const control = (): MiniElement => article(root, 'rvf_s1').querySelector('button')!;
+      Object.defineProperty(miniDocument, 'elementFromPoint', { configurable: true, value: () => control() });
+      try {
+        control().dispatchEvent(Object.assign({ type: 'pointermove', bubbles: true }, { clientX: 10, clientY: 110 }));
+        const before = control().getBoundingClientRect().top;
+        ask.resolve(askFor('decision-1')); await flush();
+        expect(root.querySelector('article[data-finding-id="rvf_s1"] .learning-reason-ask')).not.toBeNull();
+        expect(control().getBoundingClientRect().top).toBe(before);
+        expect(scroller.scrollTop).toBe(0);
+      } finally { Reflect.deleteProperty(miniDocument, 'elementFromPoint'); }
     });
   });
 
