@@ -1016,7 +1016,7 @@ async function main() {
     await click(renderer, '选择文件', 'earlier-exemplar-file');
     await waitFor(renderer, `document.querySelector('.exemplar-import-form select')?.disabled===false`, 'earlier-exemplar-preview');
     // No type is preselected and 导入范例 waits for the editor's choice (Issue #778); the choice is made as the editor makes it.
-    await assertRenderer(renderer, `(() => { const form = document.querySelector('.exemplar-import-form'); const select = form?.querySelector('select'); const submit = Array.from(form?.querySelectorAll('button') ?? []).find((button) => button.textContent === '导入范例'); return select?.value === '' && select.options[0]?.textContent === '请选择文档类型' && submit?.disabled === true; })()`, 'earlier-exemplar-type-unchosen');
+    await assertRenderer(renderer, `(() => { const form = document.querySelector('.exemplar-import-form'); const select = form?.querySelector('select'); const submit = Array.from(form?.querySelectorAll('button') ?? []).find((button) => button.textContent === '导入范例'); return select?.value === '' && select.options[0]?.textContent === '请选择衍生稿件类型' && submit?.disabled === true; })()`, 'earlier-exemplar-type-unchosen');
     await assertRenderer(renderer, `(() => { const select = document.querySelector('.exemplar-import-form select'); select.value='news-release'; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value==='news-release'; })()`, 'earlier-exemplar-type');
     await waitFor(renderer, `Array.from(document.querySelectorAll('.exemplar-import-form button')).find((button) => button.textContent === '导入范例')?.disabled === false`, 'earlier-exemplar-type-chosen');
     await click(renderer, '导入范例', 'earlier-exemplar-confirm');
@@ -1024,7 +1024,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card = document.querySelector('.exemplar-book');
       return card.querySelector('.exemplar-title')?.textContent==='《以前出版的测试图书》新闻稿' &&
-        card.querySelector('.exemplar-kind-badge')?.textContent==='工作文档 · 新闻稿' &&
+        card.querySelector('.exemplar-kind-badge')?.textContent==='衍生稿件 · 新闻稿' &&
         card.querySelector('.exemplar-context')?.textContent.startsWith('来自《以前出版的测试图书》') &&
         !card.querySelector('.knowledge-file-more') &&
         card.querySelector('.exemplar-attribution')?.textContent==='作者：测试作者 · 责编：测试责编' &&
@@ -1033,10 +1033,10 @@ async function main() {
     })()`, 'earlier-exemplar-grouped');
     await assertRenderer(renderer, `(() => { const select = document.querySelector('.exemplar-items select'); select.value='excluded'; return true; })()`, 'earlier-exemplar-exclude');
     await clickSelector(renderer, '.exemplar-items [data-exemplar-action="record-eligibility"]', 'earlier-exemplar-eligibility');
-    await waitFor(renderer, `document.querySelector('.exemplar-items li')?.textContent.includes('学习准入：明确排除')`, 'earlier-exemplar-excluded');
+    await waitFor(renderer, `document.querySelector('.exemplar-items li')?.textContent.includes('是否可用于学习：明确排除')`, 'earlier-exemplar-excluded');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'exemplar-type-filter');
     await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'exemplar-book-filter');
-    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="kind"]').dataset.value==='news-release' && document.querySelector('.exemplar-kind-badge').textContent==='工作文档 · 新闻稿'`, 'exemplar-combined-filters');
+    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="kind"]').dataset.value==='news-release' && document.querySelector('.exemplar-kind-badge').textContent==='衍生稿件 · 新闻稿'`, 'exemplar-combined-filters');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value=""]', 'exemplar-type-return');
     await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="book"]').dataset.value!==''`, 'exemplar-book-selection-survives');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'exemplar-restore-settings');

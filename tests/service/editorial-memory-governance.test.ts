@@ -13,6 +13,7 @@ import { HousePreferenceInfluence, HouseReviewPreferenceLedger } from '../../src
 import { SupervisionDirectives } from '../../src/service/learning/supervision-directives.js';
 import { mountEditorialMemory } from '../../src/renderer/knowledge-base-memory.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 import { installMiniDom } from '../support/mini-dom.js';
 import type { RendererApi } from '../../src/shared/protocol.js';
 import type { CreateEditorialMemoryInput, EditorialMemoryVersion, GlobalMemoryPin, RecordLearningSupervisionInput } from '../../src/shared/protocol.js';
@@ -242,8 +243,10 @@ it.each([false, true])('retains stopped ordinary preference source books and ite
     await view.remount();
     const row = view.root.querySelector(`[data-review-preference="${preference.itemId}"]`)!;
     expect(row.textContent).toContain(`来自《${sourceTitle}》`);
-    expect(row.textContent).toContain('2026-11-07T01:00:00.000Z');
-    expect(row.textContent).not.toContain('2026-11-07T02:00:00.000Z');
+    // The history reads local times as the page computes them (Issue #1531, review N8), never a raw ISO time.
+    expect(row.textContent).toContain(localInstantLabel('2026-11-07T01:00:00.000Z'));
+    expect(row.textContent).not.toContain(localInstantLabel('2026-11-07T02:00:00.000Z'));
+    expect(row.textContent).not.toContain('2026-11-07T');
     expect(row.textContent).toContain('已停用');
     expect(row.textContent).not.toMatch(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu);
   } finally { view.close(); }

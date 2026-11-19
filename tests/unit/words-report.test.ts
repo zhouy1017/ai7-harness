@@ -52,6 +52,11 @@ describe('the vocabulary report finds a banned term only in text an editor reads
     expect(banned(source)).toEqual(['6:提案']);
   });
 
+  it('reads a literal that is one ASCII word as a key, never as text (Issue #1531)', () => {
+    expect(banned("const ceiling = { kind: 'tokens', unit: \"tokens\", key: `tokens` };")).toEqual([]);
+    expect(banned("const a = '已用 tokens'; const b = `${n} tokens`;")).toEqual(['1:tokens', '1:tokens']);
+  });
+
   it('keeps ASCII words out of longer names and takes the longest term first', () => {
     expect(banned("const a = ['maxTokens', 'tokens-row', '已用 Tokens', '词元', 'API 凭据', '应用凭据', '结构单元', '保留缺口'];")).toEqual(
       ['1:Tokens', '1:词元', '1:API 凭据', '1:应用凭据', '1:结构单元', '1:保留缺口'],

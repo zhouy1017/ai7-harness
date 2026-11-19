@@ -35,7 +35,7 @@ export const SOURCE_SAVE_ACTION = '保存为来源材料';
 export const SOURCE_SAVE_NOTE = '仅在本机资料库保存；不发布、导出、发送或授予任务读取。';
 export const SOURCE_ORIGINAL_LABEL = '原文';
 export const SOURCE_TRANSLATION_MACHINE = '机器翻译，仅供理解；以原文为准。';
-export const SOURCE_UNITS_HEADING = '各阅读范围的联网核查';
+export const SOURCE_UNITS_HEADING = '各部分的联网核查';
 /** A factual card's way to the row 来源与证据 archives (Issue #1174). */
 export const FINDING_EVIDENCE_OPEN = '在来源与证据中查看';
 
@@ -99,9 +99,9 @@ export function findingResearchLines(projection: ResearchEvidenceBookProjection,
 
 /** 「单元 2 · 联网核查已完成 · 检索 1 次 · 留存取回 1 次 · 1 个来源未能取回 · 1 条发现没有外部来源」. */
 export function researchUnitLine(unit: ResearchEvidenceBookProjection['units'][number]): string {
-  if (unit.retentionFailure !== undefined) return `阅读范围 ${unit.unitOrdinal} · 来源留存失败${technicalWords(`（${unit.retentionFailure === 'storage' ? '保存失败' : '处理失败'}）`, ` · ${unit.retentionFailure === 'storage' ? '保存失败' : '处理失败'}`)}；没有可查看的留存来源。`;
+  if (unit.retentionFailure !== undefined) return `${technicalWords(`阅读范围 ${unit.unitOrdinal}`, `正文第 ${unit.unitOrdinal} 部分`)} · 来源留存失败${technicalWords(`（${unit.retentionFailure === 'storage' ? '保存失败' : '处理失败'}）`, ` · ${unit.retentionFailure === 'storage' ? '保存失败' : '处理失败'}`)}；没有可查看的留存来源。`;
   return [
-    `阅读范围 ${unit.unitOrdinal}`, unit.label, `检索 ${unit.searchCalls} 次`, `留存取回 ${unit.retentionFetches} 次`,
+    technicalWords(`阅读范围 ${unit.unitOrdinal}`, `正文第 ${unit.unitOrdinal} 部分`), unit.label, `检索 ${unit.searchCalls} 次`, `留存取回 ${unit.retentionFetches} 次`,
     unit.failedRetrievals > 0 ? `${unit.failedRetrievals} 个来源未能取回全文` : null,
     unit.unsupportedFindings > 0 ? `${unit.unsupportedFindings} 条发现没有可留存的外部来源` : null,
   ].filter((part): part is string => part !== null).join(' · ');

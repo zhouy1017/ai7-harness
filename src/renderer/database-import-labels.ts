@@ -39,18 +39,18 @@ export const DATABASE_IMPORT_CHOICES = {
 } as const;
 /** What `替换本机全部数据` will do, stated before it is confirmed. */
 export const DATABASE_REPLACE_CONSEQUENCE =
-  '本机现在的全部图书、稿件与历史、知识库和设置都会换成这个文件里的内容。AI7 先把现在的数据备份成一个文件，放在备份位置，之后可以回退；替换在 AI7 下次启动时完成。模型服务凭据不在文件里，替换后可能需要重新填写。';
+  '本机现在的全部图书、稿件与历史、知识库和设置都会换成这个文件里的内容。AI7 先把现在的数据备份成一个文件，放在备份位置，之后可以回退；替换在 AI7 下次启动时完成。模型服务密钥不在文件里，替换后可能需要重新填写。';
 /** What `只导入其中的图书` will do, stated before it is confirmed (ADR 0079 §1.5). */
 export const DATABASE_MERGE_CONSEQUENCE =
-  '本机还没有的图书会带着它的稿件与历史、标注与建议、任务与结果、交付物一起导入；和本机图书同名的另存为另一本。本机已有的图书、设置与模型服务凭据都不变。AI7 先把现在的数据备份成一个文件，放在备份位置；合并在 AI7 下次启动时完成。';
+  '本机还没有的图书会带着它的稿件与历史、标注与建议、任务与结果、交付物一起导入；和本机图书同名的另存为另一本。本机已有的图书、设置与模型服务密钥都不变。AI7 先把现在的数据备份成一个文件，放在备份位置；合并在 AI7 下次启动时完成。';
 /** When every Book of the file is already here. */
 export const DATABASE_MERGE_NOTHING = '这个文件里的图书本机都已经有了，没有可以合并的。';
 /** What stays behind when the Books merge. */
 export const DATABASE_MERGE_NOTICE_LINES: Readonly<Record<DatabaseMergeNotice, string>> = {
   series: '书系关系与书系知识不随图书合并。',
   'internal-number': '内部编号已被本机其他图书使用的，合并后不带内部编号。',
-  'writing-exemplar': '写作任务参照的其他图书的范例和导入的以前图书范例不随图书合并：这些起草的结果和草稿照常可看、可打开，但不能再开始，需要时重新准备。',
-  'writing-material': '写作、审阅与评估任务参考的资料库资料的索引版本不随图书合并，不属于被合并图书的资料本身也不随图书合并：已有的结果和草稿照常可看、可打开，再次运行需重新准备计划；写作可以用「新建文档…」重新准备。',
+  'writing-exemplar': '写作任务参照的其他图书的范例和导入的以前图书范例不随图书合并：这些起草的结果和草稿照常可看、可打开，但不能再开始；需要时另做一份计划。',
+  'writing-material': '写作、审阅与评估任务参考的资料库资料的索引版本不随图书合并，不属于被合并图书的资料本身也不随图书合并：已有的结果和草稿照常可看、可打开，再次运行需另做一份计划；写作可以用「新建衍生稿件…」另做一份。',
 };
 export const DATABASE_IMPORT_STATUS_LINES = {
   choosing: '正在打开系统的文件对话框…',

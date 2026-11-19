@@ -76,7 +76,7 @@ it('shows the newest report past an unfinished empty version, and 修改报告 o
   expect(startEvaluation).toHaveBeenCalledWith({ fromInitial: true, skipDamaged: false });
   expect(root.querySelector('.evaluation-report')).toBeNull();
   expect(root.querySelector('.evaluation-record h3')!.textContent).toContain('详细评估报告');
-  expect(root.querySelector('.evaluation-record .evaluation-report-model')!.textContent).toBe('初评模型 chosen-model@high');
+  expect(root.querySelector('.evaluation-record .evaluation-report-model')!.textContent).toBe('评估报告模型 chosen-model@high');
   expect(root.querySelector('.evaluation-record .evaluation-report-next-step')!.textContent).toBe('下一步建议：压缩中段。');
   // The 评语 field holds AI7's words until the editor changes them; they are not repeated beside it.
   expect(root.querySelectorAll('.evaluation-record .evaluation-item-ai7-comment')).toHaveLength(0);
@@ -176,6 +176,15 @@ it('starts nothing when the save before regenerating is refused, and keeps the t
   expect(view.api.authorizeEvaluationRewrite).not.toHaveBeenCalled();
   expect(view.launch).not.toHaveBeenCalled();
   expect(view.root.querySelector('.evaluation-lists [data-evaluation-field="verdict"]')!.value).toBe('按编辑意见收紧中段。');
+});
+
+it('says why a new 评估报告 cannot be prepared in the words of the editor (Issue #1531, review B1)', async () => {
+  const root = miniDocument.createElement('section'); miniDocument.body.append(root);
+  const blocked = { ...page, initial: { ...page.initial, prepare: { allowed: false, reason: '有一项评估任务在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的评估任务。' } } } as unknown as EvaluationWorkspaceProjection;
+  const surface = mountEvaluation({ root: root as unknown as HTMLElement, api: { inspectEvaluation: async () => blocked }, bookId: 'book',
+    technicalDetails: details, setStatus: vi.fn(), errorMessage: () => '' } as unknown as MountEvaluationOptions);
+  await surface.load();
+  expect(root.querySelector('.evaluation-initial-reason')!.textContent).toBe('有一项评估任务在排队；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的评估任务。');
 });
 
 it('keeps 查看计划 of a prepared regeneration beside its start (Issue #1407)', async () => {

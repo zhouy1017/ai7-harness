@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import { rendererApi } from './navigation-generation.js';
 import { reportResult } from './notifications.js';
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
@@ -214,7 +215,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         books.set(book.bookId, book.bookTitle);
         for (const entry of [...book.exemplars, ...book.readersReports]) {
           const kind = exemplarKindFilter(entry);
-          kinds.set(kind, kind === 'readers-report' ? '审稿意见' : `工作文档 · ${entry.typeLabel}`);
+          kinds.set(kind, kind === 'readers-report' ? '审稿意见' : `衍生稿件 · ${entry.typeLabel}`);
         }
       }
       toolbar.replaceChildren();
@@ -262,7 +263,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         for (const exemplar of exemplars) {
           const item = element('li', 'exemplar-entry');
           const actions = element('div', 'exemplar-actions');
-          actions.append(stateTerm(`学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}`));
+          actions.append(stateTerm(`是否可用于学习：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}`));
           if (exemplar.imported) actions.append(exemplarEligibility(surface, exemplar));
           const heading = element('div', 'exemplar-heading');
           const badge = stateTerm(exemplarKind(exemplar)); badge.classList.add('exemplar-kind-badge');
@@ -326,7 +327,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     for (const entry of book.readersReports) {
       const item = element('li', 'exemplar-entry');
       const actions = element('div', 'exemplar-actions');
-      actions.append(stateTerm(`学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[entry.eligibility]}`));
+      actions.append(stateTerm(`是否可用于学习：${EXEMPLAR_ELIGIBILITY_LABELS[entry.eligibility]}`));
       const heading = element('div', 'exemplar-heading');
       const badge = stateTerm(exemplarKind(entry)); badge.classList.add('exemplar-kind-badge');
       heading.append(badge, element('strong', 'exemplar-title', exemplarTitle(book, entry)), actions);
@@ -421,7 +422,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       back.append(all);
     }
     // AI 助手 is in the sidebar; the developer layer keeps this way in as well (#1521).
-    if (technicalLayerVisible) back.append(button('全域对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
+    if (technicalLayerVisible) back.append(button('对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
     back.append(button('返回', 'quiet', () => void returnToOrigin()));
     if (returnToReview !== null) back.prepend(button('返回原审阅', 'quiet', returnToReview));
     content.append(
@@ -613,13 +614,13 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       summary.dataset['ruleAction'] = 'view';
       const binds = element('dl', 'default-rule-binds');
       for (const row of rule.binds) {
-        const value = element('dd', undefined, row.value);
+        const value = element('dd', undefined, serviceWords(row.value));
         value.dataset['ruleBind'] = row.label;
         binds.append(element('dt', undefined, row.label), value);
       }
       view.append(summary, binds, technicalDetails('default-rule-facts',
         element('dt', undefined, '规则'), element('dd', 'technical-identity', `${rule.ruleId} · ${rule.taskKind} · ${rule.pattern}`),
-        element('dt', undefined, '规则版本'), element('dd', 'technical-identity', `${technicalWords(`第 ${rule.ordinal} 版`, '版本')} · ${rule.ruleVersionId}`),
+        element('dt', undefined, '规则版本'), element('dd', 'technical-identity', technicalWords(`第 ${rule.ordinal} 版 · ${rule.ruleVersionId}`)),
         element('dt', undefined, '设定时查看的计划'), element('dd', 'technical-identity', `${rule.sourceTaskIntentId} · ${rule.sourcePlanEnvelopeDigest}`)));
       heading.append(element('span', undefined, set));
       card.append(heading, element('p', undefined, rule.does), view);

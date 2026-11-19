@@ -1548,7 +1548,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
 
   const refuseWhileBusy = (): boolean => {
     if ([...recoveryCards.values()].some((receipt) => receipt.state === 'confirming' || receipt.state === 'unresolved')) {
-      options.setStatus('应用结果待确认，请先重新核对原来的应用结果。', 'error');
+      options.setStatus('修改是否生效待确认，请先重新核对原来的修改结果。', 'error');
       return true;
     }
     if (!options.busy() && !working) return false;
@@ -2292,7 +2292,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       const yours = actions;
       const pendingReceipt = recoveryCards.get(card.markId);
       if (pendingReceipt) {
-        const state = el('p', 'editorial-mark-recorded', pendingReceipt.state === 'confirming' ? '正在确认应用结果' : pendingReceipt.state === 'unresolved' ? '结果待确认' : pendingReceipt.state === 'applied' ? '已应用' : '未应用');
+        const state = el('p', 'editorial-mark-recorded', pendingReceipt.state === 'confirming' ? '正在确认修改是否生效' : pendingReceipt.state === 'unresolved' ? '修改是否生效待确认' : pendingReceipt.state === 'applied' ? '已接受' : '未写入稿件');
         state.dataset['applyReceiptState'] = pendingReceipt.state; yours.append(state, el('p', 'muted', pendingReceipt.reason));
       }
       // One decision system on the card (ADR 0096 §3): the draft dispositions live only in the proposal workspace, which the
@@ -2329,35 +2329,35 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           await openCard(card.markId);
         }).catch((error) => options.setStatus(options.errorMessage(error, '无法重新核对应用结果。'), 'error'))));
       } else if (suggestion.atomicGroupId !== null && applied === null) {
-        yours.append(el('p', 'muted', '本组只能记录一个整体处理；在专用提案工作区记录决定和准备应用。'));
+        yours.append(el('p', 'muted', '本组只能记录一个整体处理；在修改建议工作区记录决定和准备应用。'));
       } else if (applied !== null) {
-        // 已应用 is said only of a verified Effect Receipt (V2-UX-EAPP-011, EREC-002); what it binds is one step away.
-        const receipt = el('p', 'editorial-mark-recorded', `已应用 · 已写入稿件 · ${markTimeLabel(applied.committedAt)} · 你`);
+        // 已接受 (formerly 已应用) is said only of a verified Effect Receipt (V2-UX-EAPP-011, EREC-002); what it binds is one step away.
+        const receipt = el('p', 'editorial-mark-recorded', `已接受 · 已写入稿件 · ${markTimeLabel(applied.committedAt)} · 你`);
         receipt.dataset['markApplication'] = applied.effectId;
         more.append(receipt);
         void api.inspectApplyReceipt({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, clientEffectId: applied.effectId, recovery: 'settled' }).then((value) => { if (receipt.isConnected) receipt.dataset['applyReceiptState'] = value.state; }).catch(() => {});
-        more.append(cardAction('receipt-manuscript', '在稿件中查看', 'quiet', () => { closeFloating(); editor.focus(); }), cardAction('receipt-proposal', '返回提案', 'quiet', reopen));
+        more.append(cardAction('receipt-manuscript', '在稿件中查看', 'quiet', () => { closeFloating(); editor.focus(); }), cardAction('receipt-proposal', '返回修改建议', 'quiet', reopen));
         if (decision) {
           yours.dataset['markReasonState'] = decision.reasonState;
           more.append(...reasonNodes(card, decision));
         }
         const credentials = el('details', 'editorial-mark-receipt');
         credentials.dataset['markReceipt'] = applied.receiptId;
-        credentials.append(el('summary', undefined, '查看完整凭据'));
+        credentials.append(el('summary', undefined, technicalWords('查看完整凭据')));
         const bound = el('dl');
         for (const [term, value] of [
           ['应用（Effect）', applied.effectId],
-          ['提案决定', decision?.decisionId ?? ''],
+          [technicalWords('提案决定'), decision?.decisionId ?? ''],
           ['应用批准（Effect Approval）', applied.approvalId],
           ['派发', applied.dispatchId],
-          ['应用凭据（Effect Receipt）', `${applied.receiptId} · ${applied.receiptDigest}`],
+          [technicalWords('应用凭据（Effect Receipt）'), `${applied.receiptId} · ${applied.receiptDigest}`],
           ['应用前的稿件', `${applied.before.revisionId} · 修订日志序号 ${applied.before.journalSequence} · ${applied.before.workingDigest}`],
           ['应用后的稿件', `${applied.after.revisionId} · 修订日志序号 ${applied.after.journalSequence} · ${applied.after.workingDigest}`],
           ['写入处数', String(applied.changeCount)],
         ] as ReadonlyArray<readonly [string, string]>) {
           bound.append(el('dt', undefined, term), el('dd', undefined, value));
         }
-        credentials.append(bound, el('p', 'muted', '凭据只证明这次写入发生了，不证明内容的对错。'));
+        credentials.append(bound, el('p', 'muted', technicalWords('凭据只证明这次写入发生了，不证明内容的对错。')));
         more.append(technicalDisclosure(credentials));
         if (form) {
           yours.append(buildForm(form(reopen)));
@@ -2382,7 +2382,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           exact
             ? cardAction('accept-and-apply', '接受并应用', 'primary', (input) => triaged(input, writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
                 ...binding(), markId: card.markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null,
-              }), '已应用这条修改建议。', null, !inline)))
+              }), '已接受这条修改建议。', null, !inline)))
             : disabledAction('accept-and-apply', '接受并应用', '原文已变，无法应用这条修改建议。'),
           ...resolveConflict(),
           cardAction('reject', '拒绝', 'secondary', (input) => triaged(input, decide(card, 'rejected', null, null, !inline))),
@@ -2413,7 +2413,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       } else {
         const recorded = el('p', 'editorial-mark-recorded', decision.disposition === 'rejected'
           ? card.conflict?.outcome === 'keep-current' ? '已拒绝 · 保留当前稿件' : '已拒绝 · 原文保留'
-          : decision.disposition === 'deferred' ? '已记录 · 暂不决定' : '已采纳 · 尚未应用');
+          : decision.disposition === 'deferred' ? '已记录 · 暂不决定' : '已接受 · 尚未写入稿件');
         recorded.dataset['markDecision'] = decision.disposition;
         if (decision.disposition === 'accepted-with-edit' || decision.disposition === 'accepted') {
           disposition.append(exact
@@ -2485,8 +2485,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       ['标记时的段落摘要', card.pin.blockDigest],
       ['段落', `${card.blockId} · 字素 ${card.fromGrapheme}–${card.toGrapheme}`],
     ];
-    if (card.suggestion) identityRows.push(['提案修改项', card.suggestion.itemId]);
-    if (card.suggestion?.decision) identityRows.push(['提案决定', card.suggestion.decision.decisionId]);
+    if (card.suggestion) identityRows.push([technicalWords('提案修改项'), card.suggestion.itemId]);
+    if (card.suggestion?.decision) identityRows.push([technicalWords('提案决定'), card.suggestion.decision.decisionId]);
     for (const [term, value] of identityRows) {
       identities.append(el('dt', undefined, term), el('dd', undefined, value));
     }
@@ -3380,7 +3380,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
                 // The menu's 接受并应用 is the card's own decision, and asks why once as the card's does (Issue #61 review).
                 run: () => void writeManuscript(mark.markId, (clientEffectId) => api.applyChangeSuggestion({
                   ...binding(), markId: mark.markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null,
-                }), '已应用这条修改建议。', null),
+                }), '已接受这条修改建议。', null),
               }
             : { action: 'accept-and-apply', label: '接受并应用', disabledReason: exact ? '这条修改建议已经处理过' : '原文已变，无法应用' },
         ...((mark.conflict === 'unresolved' || mark.conflict === 'deferred') && options.openConflict !== undefined

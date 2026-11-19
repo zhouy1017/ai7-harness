@@ -75,9 +75,9 @@ it('labels missing historical /2 ancestry separately from a real withdrawal and 
   const legacy = { bookTitle: '原始图书标题', withdrawnAt: null };
   expect(reviewInfluenceMaterialLine(legacy, '修改建议', () => '日期')).toBe('《原始图书标题》 · 修改建议');
   expect(reviewInfluenceMaterialLine({ ...legacy, provenanceAvailability: 'available' }, '修改建议', () => '日期')).toBe('《原始图书标题》 · 修改建议');
-  expect(reviewInfluenceMaterialLine({ ...legacy, provenanceAvailability: 'unavailable' }, '修改建议', () => '日期')).toBe('《原始图书标题》 · 修改建议 · 原社记忆来源在本社不可用');
+  expect(reviewInfluenceMaterialLine({ ...legacy, provenanceAvailability: 'unavailable' }, '修改建议', () => '日期')).toBe('《原始图书标题》 · 修改建议 · 原社审阅偏好的来源在本社不可用');
   expect(reviewInfluenceMaterialLine({ ...legacy, withdrawnAt: '2026-10-01T00:00:00Z', provenanceAvailability: 'unavailable' }, '修改建议', () => '真实日期'))
-    .toBe('《原始图书标题》 · 修改建议 · 原社记忆来源在本社不可用 · 真实日期 已停止今后使用');
+    .toBe('《原始图书标题》 · 修改建议 · 原社审阅偏好的来源在本社不可用 · 真实日期 已停止今后使用');
 });
 
 const counts: ReviewFindingCountsProjection = { must: 2, should: 5, note: 1, pending: 6, handled: 1, ignored: 1 };
@@ -132,7 +132,7 @@ describe('the words of the 审阅 destination', () => {
       'batch-prepare': '接受并应用全部',
       'batch-confirm': '确认应用',
       'batch-cancel': '取消',
-      'batch-reprepare': '重新准备应用',
+      'batch-reprepare': '另做一份预览',
       'batch-undo': '撤销本批应用',
       'all-categories': '全部类别',
       'export-version': '导出报告',
@@ -312,8 +312,8 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewBatchReadyLine(3)).toBe('将把 3 条修改建议写入稿件；请核对后确认应用。');
     expect(reviewBatchAppliedLine(3, false)).toBe('已把 3 条修改建议写入稿件。');
     expect(reviewBatchAppliedLine(3, true)).toBe('已把 3 条修改建议写入稿件。写入结果已从记录确认。');
-    expect(REVIEW_STATUS_LINES.applied).toBe('已应用这条修改建议。');
-    expect(REVIEW_STATUS_LINES.appliedRecovered).toBe('已应用这条修改建议。写入结果已从记录确认。');
+    expect(REVIEW_STATUS_LINES.applied).toBe('已接受这条修改建议。');
+    expect(REVIEW_STATUS_LINES.appliedRecovered).toBe('已接受这条修改建议。写入结果已从记录确认。');
     expect(REVIEW_STATUS_LINES.applyUnknown).toBe('无法确认这次应用的结果；请刷新审阅后查看。');
     expect(REVIEW_STATUS_LINES.ignored).toBe('已忽略这条发现，原因已记录。');
   });
@@ -350,7 +350,8 @@ it('reports loaded group counts and the latest ordinal truthfully', () => {
   setTechnicalLayerVisible(true);
 });
 
-it('formats header timestamps to the minute', () => {
-  const at = new Date('2026-11-17T13:42:59Z');
-  expect(reviewMinuteLabel(at.toISOString())).toBe(at.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }));
+it('formats header timestamps to the minute, in the one day-and-time form (Issue #1531)', () => {
+  const at = new Date(new Date().getFullYear(), 10, 17, 13, 42, 59);
+  expect(reviewMinuteLabel(at.toISOString())).toBe('11 月 17 日 13:42');
+  expect(reviewMinuteLabel(new Date(2020, 0, 2, 3, 4).toISOString())).toBe('2020 年 1 月 2 日 03:04');
 });

@@ -139,7 +139,7 @@ describe('范例 (Issue #427, S79b)', () => {
     // Which designation the time is — a Book set as a 发稿版本 twice reads its second — and a 撤回 that holds it.
     expect(exemplarDesignation({ designatedAt: 'x', publicationOrdinal: 2, withdrawn: false }, () => '9月25日')).toBe('第 2 次设为发稿版本于 9月25日');
     expect(exemplarDesignation({ designatedAt: 'x', publicationOrdinal: 1, withdrawn: true }, () => '9月25日'))
-      .toBe('第 1 次设为发稿版本于 9月25日 · 已在 AI7 内撤回；之后交付的文档，另设发稿版本后才归入');
+      .toBe('第 1 次设为发稿版本于 9月25日 · 已在 AI7 内撤回；之后交付的衍生稿件，另设发稿版本后才归入');
     const exemplar = {
       documentId: 'd', typeId: 'news-release', typeLabel: '新闻稿', version: 3, revisionId: 'r', revisionDigest: 'a'.repeat(64),
       deliveredTo: '编辑部', deliveredAt: 't1', archivedAt: 't2', earlierVersionCount: 2, earlierVersions: [1, 2], eligibility: 'house-only' as const,
@@ -153,7 +153,7 @@ describe('范例 (Issue #427, S79b)', () => {
     expect(exemplarTitle({ bookTitle: '甲书' }, exemplar)).toBe('《甲书》新闻稿');
     expect(exemplarTitle({ bookTitle: '甲书' }, { ...exemplar, title: '新闻稿' })).toBe('《甲书》新闻稿');
     expect(exemplarTitle({ bookTitle: '甲书' }, { ...exemplar, title: '新书发布会' })).toBe('新书发布会');
-    expect(exemplarKind(exemplar)).toBe('工作文档 · 新闻稿');
+    expect(exemplarKind(exemplar)).toBe('衍生稿件 · 新闻稿');
 
     expect(exemplarKind({ typeId: 'readers-report-author', typeLabel: '审稿意见 · 给作者的修改意见' })).toBe('审稿意见 · 给作者的修改意见');
     expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'exemplars')?.holds).toContain('不含图书原稿');
@@ -206,11 +206,11 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     };
     expect(librarySourceLine(pending, instant)).toBe('sample1.docx · Word · 28.9 KB · 放入于 〔2026-09-25〕');
     expect([libraryAttributionLine(pending), libraryEligibilityLine(pending), libraryReferenceLine(pending)])
-      .toEqual(['尚未定归属', '尚未定', '定了归属与学习准入，任务才能把它列进「允许参考」。']);
+      .toEqual(['尚未定给谁用', '尚未定', '定了给谁用与是否可用于学习，任务才能把它列进「允许参考」。']);
     const book = { ...pending, attribution: { scope: 'book' as const, bookId: 'b', bookTitle: '甲书', decidedAt: '2026-09-25T02:00:00.000Z' } };
     const deferred = { ...book, eligibility: { reasonHasMore: false, ordinal: 2, choice: 'deferred' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' } };
     expect([libraryAttributionLine(book), libraryEligibilityLine(deferred), libraryReferenceLine(deferred)])
-      .toEqual(['《甲书》', '稍后决定', '学习准入记为稍后决定：决定之前，任务还不能把它列进「允许参考」。']);
+      .toEqual(['《甲书》', '稍后决定', '是否可用于学习记为稍后决定：决定之前，任务还不能把它列进「允许参考」。']);
     const own = {
       ...book,
       eligibility: { reasonHasMore: false, ordinal: 2, choice: 'book' as const, bookTitle: '甲书', reason: '责编确认', decidedAt: '2026-09-25T03:00:00.000Z' },
@@ -224,17 +224,17 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
       reference: { state: 'available' as const, scope: 'house' as const },
     };
     expect([libraryAttributionLine(house), libraryEligibilityLine(house), libraryReferenceLine(house)])
-      .toEqual(['社级', '纳入出版社经验', '每本书的任务都可以把它列进「允许参考」。']);
+      .toEqual(['本社', '纳入本社经验', '每本书的任务都可以把它列进「允许参考」。']);
     // The choices as LEARN-004 to LEARN-006 name them, and the wider one's consequence said where it is chosen.
     expect((['book', 'house', 'excluded', 'deferred'] as const).map((choice) => eligibilityChoiceLabel(choice, '甲书')))
-      .toEqual(['仅纳入《甲书》', '纳入出版社经验', '明确排除', '稍后决定']);
-    expect(LIBRARY_HOUSE_CONSEQUENCE).toBe('纳入出版社经验：全社以后的图书都可能从它学习。');
+      .toEqual(['仅纳入《甲书》', '纳入本社经验', '明确排除', '稍后决定']);
+    expect(LIBRARY_HOUSE_CONSEQUENCE).toBe('纳入本社经验：本社以后的图书都可能从它学习。');
     expect(LIBRARY_EMPTY).toContain('任务');
     // Each decision on record, by its ordinal, what it decided, who and when.
     expect(libraryDecisionLine({ ordinal: 1, recordedAt: '2026-09-25T02:00:00.000Z', decision: { kind: 'attribution', scope: 'book', bookId: 'b', bookTitle: '甲书' } }, instant))
-      .toBe('第 1 条 · 归属：《甲书》 · 本机编辑 · 〔2026-09-25〕');
+      .toBe('第 1 条 · 给谁用：《甲书》 · 本机编辑 · 〔2026-09-25〕');
     expect(libraryDecisionLine({ ordinal: 2, recordedAt: '2026-09-25T03:00:00.000Z', decision: { kind: 'eligibility', reasonHasMore: false, choice: 'excluded', bookTitle: null, reason: '版权未清' } }, instant))
-      .toBe('第 2 条 · 学习准入：明确排除（说明：版权未清） · 本机编辑 · 〔2026-09-25〕');
+      .toBe('第 2 条 · 是否可用于学习：明确排除（说明：版权未清） · 本机编辑 · 〔2026-09-25〕');
   });
 });
 

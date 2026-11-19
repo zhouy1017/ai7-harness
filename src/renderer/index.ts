@@ -443,7 +443,7 @@ async function prepareSelectionReview(
 /** What a quick start that started its Task says: a start the launch has no route for is recorded and blocked before dispatch. */
 function quickStartStartedLine(rule: DefaultExecutionRuleReference, projection: BaselineAnalysisProjection): string {
   return projection.state === 'authorized-blocked'
-    ? `已按默认执行规则「${rule.name}」记下这项任务；当前启动没有可执行的路由，派发前已阻止。`
+    ? `已按默认执行规则「${rule.name}」记下这项任务；${technicalWords('当前启动没有可执行的路由，派发前已阻止', '现在没有可用的模型服务，没有开始')}。`
     : `已按默认执行规则「${rule.name}」开始任务。`;
 }
 
@@ -1105,7 +1105,7 @@ async function renderLearningMaterialTarget(target: LearningMaterialTarget, book
       const content = panel();
       content.append(element('h2', undefined, `《${bookTitle}》 · Word 修改来源`));
       const reader = mountWordTrackedEditDetail({ root: content, api: api, ...target, openSourceVersion: openWordSourceVersion });
-      if (technicalLayerVisible) content.append(button('查看学习准入与排除', 'secondary', () => void renderQualityLearning('learning', target.bookId)));
+      if (technicalLayerVisible) content.append(button(technicalWords('查看学习准入与排除'), 'secondary', () => void renderQualityLearning('learning', target.bookId)));
       replaceScreen('word-import-detail', content, { bookId: target.bookId, title: bookTitle, section: 'overview' });
       await reader.load();
       return;
@@ -1496,7 +1496,7 @@ async function renderStartupProjection(
     return;
   }
   if (startup.state === 'committed-recovered') {
-    setStatus('已核对中断前的原子提交结果', 'success');
+    setStatus('已确认：中断前的导入已经完成', 'success');
     navigation.present(() => renderImported(startup.result, recoveryReturn));
     return;
   }
@@ -1936,7 +1936,7 @@ function renderContinuation(
     return;
   }
   if (continuation.state === 'committed-recovered') {
-    setStatus('已核对中断前的原子提交结果', 'success');
+    setStatus('已确认：中断前的导入已经完成', 'success');
     renderImported(continuation.result, recoveryReturn);
     return;
   }
@@ -2606,7 +2606,7 @@ async function renderProposalWorkspace(input: { manuscriptId: string; branchId: 
   const origin = screen.firstElementChild;
   let onDocument = false;
   try { onDocument = (await api.getManuscriptWindow({ manuscriptId: input.manuscriptId, branchId: input.branchId, cursor: null })).deliverable === 'production-document'; }
-  catch (error) { if (navigation.errorIsCurrent(error, route)) setStatus(rendererErrorMessage(error, '无法打开提案审阅工作区。'), 'error'); return; }
+  catch (error) { if (navigation.errorIsCurrent(error, route)) setStatus(rendererErrorMessage(error, '无法打开修改建议工作区。'), 'error'); return; }
   if (!route.isCurrent() || screen.firstElementChild !== origin) return;
   const content = panel(); content.dataset['bookId'] = bookId; content.classList.add('proposal-workspace');
   const surface = mountProposalWorkspace({ root: content, api: api, input, bookTitle, setStatus,
@@ -2900,7 +2900,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
   );
   if (projection.state === 'available' || (projection.taskIntent !== null && projection.checkpoint === null)) {
     const form = element('section', 'form-row task-authorization-form');
-    const label = element('label', undefined, '固定任务目标');
+    const label = element('label', undefined, '任务目标');
     label.htmlFor = 'j03-task-goal';
     const goal = element('input');
     goal.id = 'j03-task-goal';
@@ -3408,7 +3408,7 @@ function renderEditorWindow(
 ): void {
   if (productionDocument === undefined && initialWindow.deliverable === 'production-document') {
     void openEditorWindow(initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, reimport)
-      .catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法打开这份生产文档。'), 'error'));
+      .catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法打开这份衍生稿件。'), 'error'));
     return;
   }
   mountManuscriptScreen({

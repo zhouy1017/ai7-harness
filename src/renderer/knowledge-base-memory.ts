@@ -1,4 +1,5 @@
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
+import { localInstantLabel } from './plan-preview-labels.js';
 import type { EditorialLearningProjection, HouseReviewPreferenceProjection, LearningSignal, RendererApi } from '../shared/protocol.js';
 import { learningChoiceLabel, REVIEW_PREFERENCES_NOTE } from './quality-learning-labels.js';
 import { editorialPreferenceEditor, mountWordTrackedEditDetail } from './quality-learning.js';
@@ -89,9 +90,9 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       section.classList.add('review-preferences-ordinary');
       section.append(el('p', REVIEW_PREFERENCES_NOTE));
       const candidates = el('section', ''); candidates.dataset['memoryCandidates'] = '';
-      candidates.append(el('h4', '待你确认的偏好与记忆候选'));
+      candidates.append(el('h4', '待你确认的审阅偏好（AI 归纳）'));
       const active = el('section', ''); active.dataset['memoryPreferences'] = '';
-      active.append(el('h4', '已启用的审阅偏好与记忆'));
+      active.append(el('h4', '已启用的审阅偏好'));
       const category = (id: string): string => global!.categories.find((entry) => entry.categoryId === id)?.label ?? '其他编辑维度';
       const bookTitle = (id: string): string => global!.books.find((book) => book.bookId === id)?.title ?? page.signals.find((signal) => signal.source.bookId === id)?.bookTitle ?? '来源图书';
       for (const { current, usable, history, sources, nextHistoryOffset, nextSourceOffset } of page.items) {
@@ -115,7 +116,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         const titles = new Set((sources ?? []).map((source) => source.bookTitle));
         for (const source of [...current.positiveExamples, ...current.negativeExamples]) titles.add(bookTitle(source.bookId));
         for (const title of titles) lineage.append(el('p', `来自《${title}》`));
-        for (const version of history) lineage.append(el('p', `${version.recordedAt} · ${{ proposed: '待确认', active: '已启用', inactive: '已停用', frozen: '已冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]}`));
+        for (const version of history) lineage.append(el('p', `${localInstantLabel(version.recordedAt)} · ${{ proposed: '待确认', active: '已启用', inactive: '已停用', frozen: '已冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]}`));
         if (history.length === 0) lineage.append(el('p', current.recordedAt));
         if (nextHistoryOffset != null) lineage.append(action('更早历史', () => {
           void api.inspectEditorialLearning({ signalOffset, itemOffset, detailItemId: current.itemId, historyOffset: nextHistoryOffset })
@@ -155,12 +156,12 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         if (preference.bookId !== null) sourceTitles.add(bookTitle(preference.bookId));
         for (const title of sourceTitles) lineage.append(el('p', `来自《${title}》`));
         const changes = global.directives.filter((entry) => entry.directiveId === preference.itemId || entry.targets.some((pin) => pin.itemId === preference.itemId));
-        for (const entry of changes) lineage.append(el('p', `${entry.recordedAt} · ${entry.operation === 'deactivate' ? '已停用' : entry.operation === 'supervise' ? entry.effect === 'freeze' ? '已冻结' : '学习方向已更新' : '已启用'}`));
+        for (const entry of changes) lineage.append(el('p', `${localInstantLabel(entry.recordedAt)} · ${entry.operation === 'deactivate' ? '已停用' : entry.operation === 'supervise' ? entry.effect === 'freeze' ? '已冻结' : '学习方向已更新' : '已启用'}`));
         if (changes.length === 0) lineage.append(el('p', '尚无单独的偏好变更记录。'));
         controls.append(lineage); item.append(controls); active.append(item);
       }
       if (candidates.querySelector('article') !== null) section.append(candidates);
-      if (active.querySelector('article') === null) active.append(el('p', '尚无已启用的审阅偏好与记忆。'));
+      if (active.querySelector('article') === null) active.append(el('p', '尚无已启用的审阅偏好。'));
       section.append(active);
       if (page.nextItemOffset !== null) section.append(action('更多记忆', () => {
         itemOffset = page.nextItemOffset!;
@@ -172,7 +173,8 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       const curation = page.curation;
       const panel = el('details', ''); panel.append(el('summary', '空闲时整理学习记录'), el('p', curation.disclosure));
       panel.append(el('p', curation.envelope === null ? '尚未设置模型整理范围；现有学习记录只保留在本机。'
-        : `已预留 ${curation.passesUsed} / ${curation.envelope.budget.maxPasses} 次整理，${curation.reservedTokens} / ${curation.envelope.budget.totalTokens} tokens。重启不重置；不确定的发送也保留预算。`));
+        : technicalWords(`已预留 ${curation.passesUsed} / ${curation.envelope.budget.maxPasses} 次整理，${curation.reservedTokens} / ${curation.envelope.budget.totalTokens} tokens。重启不重置；不确定的发送也保留预算。`,
+          `已预留 ${curation.passesUsed} / ${curation.envelope.budget.maxPasses} 次整理。重启不重置；不确定的发送也保留用量。`)));
       for (const entry of curation.recentRuns) panel.append(el('p', entry.summary));
       if (curation.available) {
         const form = el('form', '');
@@ -214,7 +216,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         lineage.append(el('p', technicalWords(`图书 ${source.bookId} · 标记 ${source.markId ?? '无'} · 决定 ${source.decisionId} · 修订 ${source.revisionId} · 日志 ${source.journalSequence} · 原因版本 ${source.reasonRevision}`)));
       }
       for (const source of sources ?? []) lineage.append(el('p', technicalWords(`来源 ${source.sourceKey} · 图书 ${source.source.bookId} · ${source.admission.kind === 'automatic' ? '默认本机准入' : `编辑准入 ${source.admission.decisionId}`} · ${source.sourceKind === undefined ? `决定 ${source.source.decisionId}` : source.sourceKind === 'manual-edit-journal' ? '手动修改观察' : 'Word 修改样本'}`)));
-      for (const version of history) lineage.append(el('p', `${technicalWords(`v${version.ordinal}`)} · ${{ proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]} · ${version.recordedAt}`));
+      for (const version of history) lineage.append(el('p', `${technicalWords(`v${version.ordinal} · `)}${{ proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]} · ${localInstantLabel(version.recordedAt)}`));
       if (nextHistoryOffset != null) lineage.append(action('更早版本', () => {
         void api.inspectEditorialLearning({ signalOffset, itemOffset, detailItemId: current.itemId, historyOffset: nextHistoryOffset })
           .then((next) => { page = next; paint(); }).catch(() => { status.textContent = '无法读取更早版本。'; });
@@ -271,7 +273,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
     if (page.signals.length === 0) section.append(el('p', '尚无符合准入的学习信号。'));
     for (const signal of page.signals) {
       const row = el('article', ''); row.className = 'learning-material'; row.dataset['learningSignal'] = signal.signalId;
-      row.append(el('p', `《${signal.bookTitle}》 · ${SIGNAL_KIND_LABELS[signal.kind]} · ${signal.recordedAt}`),
+      row.append(el('p', `《${signal.bookTitle}》 · ${SIGNAL_KIND_LABELS[signal.kind]} · ${localInstantLabel(signal.recordedAt)}`),
         el('p', `作者：${signal.attribution.authors.join('、') || '未记录'} · 责编：${signal.attribution.editors.join('、') || '未记录'} · ${signalStandingLabel(signal)}`));
       if (signal.kind === 'word-tracked-edit') {
         row.append(el('p', 'Word 修改对已在本机保留；尚未用于编辑记忆、审阅偏好或模型任务。'));
@@ -326,34 +328,35 @@ export function renderHouseReviewPreference(root: HTMLElement, projection: House
   root.replaceChildren();
   const section = el('section', '');
   section.dataset['houseReviewPreference'] = '';
-  section.append(el('h3', '本社审阅偏好'), el('p', '已判定反馈形成的偏好，供后续审阅参考；不改变审阅规范或编辑定稿。'), el('p', projection.basis));
-  const update = el('button', '更新本社审阅偏好');
+  // The house preference record is the developer layer's (mountReviewPreferences shows it only there), so its words are too.
+  section.append(el('h3', technicalWords('本社审阅偏好', '审阅偏好')), el('p', '已判定反馈形成的偏好，供后续审阅参考；不改变审阅规范或编辑定稿。'), el('p', projection.basis));
+  const update = el('button', technicalWords('更新本社审阅偏好', '更新审阅偏好'));
   update.type = 'button';
   const status = el('p', announce ?? '');
   status.setAttribute('role', 'status');
   update.addEventListener('click', () => {
     update.disabled = true;
-    status.textContent = '正在更新本社审阅偏好…';
+    status.textContent = technicalWords('正在更新本社审阅偏好…', '正在更新审阅偏好…');
     void api.rebuildHouseReviewPreference().then((next) => {
       const changed = next.current?.versionId !== projection.current?.versionId;
-      renderHouseReviewPreference(root, next, api, changed ? `已更新为本社审阅偏好 v${next.current!.ordinal}。` : '本社审阅偏好没有变化。');
+      renderHouseReviewPreference(root, next, api, changed ? technicalWords(`已更新为本社审阅偏好 v${next.current!.ordinal}。`, '审阅偏好已更新。') : technicalWords('本社审阅偏好没有变化。', '审阅偏好没有变化。'));
       // The new rendering's own button keeps the keyboard where the editor left it.
       root.querySelector<HTMLButtonElement>('[data-house-review-preference] button')?.focus();
     }).catch(() => {
       update.disabled = false;
-      status.textContent = '无法更新本社审阅偏好，请稍后重试。';
+      status.textContent = technicalWords('无法更新本社审阅偏好，请稍后重试。', '无法更新审阅偏好，请稍后重试。');
     });
   });
   section.append(update, status);
-  if (projection.current === null || projection.current.lines.length === 0) section.append(el('p', '尚无符合学习准入的审阅反馈。'));
+  if (projection.current === null || projection.current.lines.length === 0) section.append(el('p', technicalWords('尚无符合学习准入的审阅反馈。', '尚无可用于学习的审阅反馈。')));
   if (projection.current !== null) {
     const version = projection.current;
-    section.append(el('h4', `本社审阅偏好 ${technicalWords(`v${version.ordinal}`)}`), el('p', `来源：${version.sourceCount} 条已判定反馈 · ${version.recordedAt}`));
+    section.append(el('h4', technicalWords(`本社审阅偏好 v${version.ordinal}`, '审阅偏好')), el('p', `来源：${version.sourceCount} 条已判定反馈 · ${localInstantLabel(version.recordedAt)}`));
     const lines = el('ul', '');
     for (const line of version.lines) {
       const item = el('li', line.text);
       const bookTitle = line.bookId === null ? null : line.sources.find((source) => source.bookId === line.bookId)?.bookTitle ?? null;
-      item.append(el('p', `学习准入：${learningChoiceLabel(line.bookId === null ? 'house' : 'book')}${bookTitle === null ? '' : `《${bookTitle}》`}`));
+      item.append(el('p', `${technicalWords('学习准入', '可用于学习')}：${learningChoiceLabel(line.bookId === null ? 'house' : 'book')}${bookTitle === null ? '' : `《${bookTitle}》`}`));
       const books = new Map<string, Set<string>>();
       const authors = new Map<string, Set<string>>();
       const editors = new Map<string, Set<string>>();
@@ -372,7 +375,7 @@ export function renderHouseReviewPreference(root: HTMLElement, projection: House
   }
   const history = el('details', '');
   history.append(el('summary', '版本历史'));
-  for (const version of [...projection.history].reverse()) history.append(el('p', `${technicalWords(`v${version.ordinal}`)} · ${version.sourceCount} 条反馈 · ${version.recordedAt}`));
+  for (const version of [...projection.history].reverse()) history.append(el('p', `${technicalWords(`v${version.ordinal} · `)}${version.sourceCount} 条反馈 · ${localInstantLabel(version.recordedAt)}`));
   section.append(history);
   root.append(section);
 }

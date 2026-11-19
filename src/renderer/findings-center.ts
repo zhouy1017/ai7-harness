@@ -4,10 +4,12 @@ import { filterChoices, listPosition, stateTerm, type StateTone } from './compon
 import { createButton } from './components/controls.js';
 import type { BookFindingProjection, BookFindingsProjection } from '../shared/protocol.js';
 import { FINDINGS_CENTER_WORDS } from './findings-center-labels.js';
+import { serviceWords } from './service-wording.js';
+import { houseAnnotationWords } from './editorial-mark-labels.js';
 
+// One status vocabulary on the three finding lists (Issue #1531): the review page's, the 批注栏's and 待办汇总's.
 const STATUS_TONES: Readonly<Record<string, StateTone>> = {
-  '未覆盖': 'attention', '待复核': 'attention',
-  '待处理': 'progress', '已处理': 'good', '已忽略': 'neutral',
+  '未覆盖': 'attention', '待处理': 'progress', '已处理': 'good', '已忽略': 'neutral',
 };
 
 export function mountFindingsCenter(root: HTMLElement, read: (offset: number) => Promise<BookFindingsProjection>, open: (item: BookFindingProjection) => void,
@@ -95,12 +97,13 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
             const row = document.createElement('article'); row.dataset['findingId'] = item.id; row.dataset['findingKind'] = item.target.kind;
             row.className = 'finding-row';
             const pills = document.createElement('div'); pills.className = 'finding-pills';
-            pills.append(stateTerm(item.status, STATUS_TONES[item.status] ?? 'neutral'), stateTerm(item.severity, item.severity === '必须处理' ? 'attention' : 'neutral'));
+            pills.append(stateTerm(item.status, item.target.kind === 'risk' ? 'attention' : STATUS_TONES[item.status] ?? 'neutral'), stateTerm(item.severity, item.severity === '必须处理' ? 'attention' : 'neutral'));
             const words = document.createElement('div'); words.className = 'finding-body';
-            const body = document.createElement('p'); body.textContent = item.summary;
+            // A review finding's note is the model's or the house list's record; a gap's reason is the service's (Issue #1531).
+            const body = document.createElement('p'); body.textContent = item.target.kind === 'gap' ? serviceWords(item.summary) : houseAnnotationWords(item.summary);
             const why = document.createElement('p'); why.className = 'finding-why'; why.textContent = `来自${item.categoryLabel}。`;
             const loc = document.createElement('p'); loc.className = 'finding-location';
-            loc.textContent = item.suggestion?.quote ?? (item.target.kind === 'gap' ? `第 ${item.target.unitOrdinal} 个阅读单元` : item.target.kind === 'risk' ? '评估中的风险项' : '稿件中的审阅标记');
+            loc.textContent = item.suggestion?.quote ?? (item.target.kind === 'gap' ? `正文第 ${item.target.unitOrdinal} 部分` : item.target.kind === 'risk' ? '评估中的风险项' : '稿件中的审阅标记');
             words.append(body, why, loc);
             const rowActions = document.createElement('div'); rowActions.className = 'finding-actions';
             const link = createButton(); link.type = 'button'; link.textContent = FINDINGS_CENTER_WORDS.open; link.addEventListener('click', () => open(item));

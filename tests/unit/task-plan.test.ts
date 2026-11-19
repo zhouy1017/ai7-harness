@@ -296,7 +296,7 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
 
   it('says why 暂停 and 改计划重做 are not offered, and that the analysis leaves nothing committed', () => {
     expect(RUN_CONTROL_PAUSE_REASON).toBe('这项任务现在没有在运行，不能暂停；可以取消它');
-    expect(RUN_CONTROL_REDO_REASON).toBe('先暂停，再改计划重做');
+    expect(RUN_CONTROL_REDO_REASON).toBe('先暂停，再重新开始');
     // The redo Task's own sentence (Issue #422, S76c): what it carries, and what it reads again.
     expect(redoGoalSentence({ reused: 6, recomputed: 2, invalidated: 2, bypassed: 0 })).toBe('改计划重做：沿用已读完的 6 个阅读范围，接着读其余 2 个');
     // Carrying none — the first baseline again, or an update the Run kept nothing of — it starts from the beginning.

@@ -61,12 +61,12 @@ const WRITING_SEND = '不发送任何内容：写作任务目前只在不连接�
 const WRITING_NOT_DO = '不改稿件；不照抄范例；不交付、不发送；草稿由你在稿件编辑面上修改后才用。';
 // Issue #432 (S84b): 快速开始 under the 宣传文章's writing 默认执行规则 — a rule covers one house type (#701 review P2-1): none at
 // first, then the one set from the settled plan.
-const WRITING_QUICK_PICK_TYPE = '选好类型后显示：快速开始按这一类文档的默认执行规则开始。';
+const WRITING_QUICK_PICK_TYPE = '选好类型后显示：快速开始按这一类衍生稿件的默认执行规则开始。';
 const WRITING_QUICK_START_REASON = '这本书还没有「写作任务 · 宣传文章」的默认执行规则：先看计划，可以在完整计划里设为快速开始默认。';
 const WRITING_RULE_PATTERN = 'writing:promotion-article';
 const WRITING_RULE_NAME = '写作任务 · 宣传文章 · 第 1 版';
 const WRITING_QUICK_NOTE = `按默认执行规则「${WRITING_RULE_NAME}」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。`;
-const WRITING_RULE_LEAD = '以后在「交付物」的新建文档里选下面「适用于」这一类文档、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。';
+const WRITING_RULE_LEAD = '以后在「交付物」的新建衍生稿件里选下面「适用于」这一类衍生稿件、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。';
 // Issue #428: J-07's last Task — a 评论文章 that lists one 资料库 item under 允许参考. The item is a plain-text file of the Journey's
 // own words, never a manuscript, put into 资料库 through 放入资料…'s picker, set to the house and kept out of learning; the plan
 // pins it at its Material Index build and the Run reads it there. Its words, the 评论文章's request and its draft are the authored
@@ -1288,7 +1288,7 @@ async function main() {
         designate instanceof HTMLButtonElement && designate.disabled && designate.getAttribute('aria-label') === '设为发稿版本…' && reason?.textContent === '先保存里程碑版本' &&
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
         block.querySelector('.publication-change-notice') === null &&
-        window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 生产文档' &&
+        window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 衍生稿件' &&
         // New documents are made on 稿件 (Issue #1403): a technical card offers no way of making one, only 本书不做.
         Array.from(window.__j07.documents().querySelectorAll('li.production-document-card')).every((card) =>
           card.dataset.documentState === 'none' && card.querySelector('[data-document-action="create"], [data-document-action="blank"], [data-document-action="import"]') === null &&
@@ -1784,7 +1784,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const block = window.__j07.documents();
       const cards = Array.from(block.querySelectorAll('li.production-document-card'));
-      return block.querySelector(':scope > h3')?.firstChild?.textContent === '交付 · 生产文档' && block.dataset.documentSources === '1' &&
+      return block.querySelector(':scope > h3')?.firstChild?.textContent === '交付 · 衍生稿件' && block.dataset.documentSources === '1' &&
         JSON.stringify(cards.map((card) => card.dataset.documentTypeId + ':' + card.querySelector('h4')?.textContent + ':' + card.dataset.documentState)) === ${JSON.stringify(JSON.stringify(DOCUMENT_TYPES.map(([typeId, label]) => `${typeId}:${label}:none`)))} &&
         // New documents are made on 稿件 (Issue #1403): the technical card keeps 本书不做 and no way of making one.
         cards.every((card) => card.querySelector('.document-state-none')?.textContent === '尚未创建' &&
@@ -1818,7 +1818,7 @@ async function main() {
         meta: Array.from(shell?.querySelectorAll('.editor-meta > span') ?? []).some((item) => item.textContent === '当前版本 版本 1'),
         lens: lens?.querySelector(':scope > .section-label')?.textContent === '工作流程',
         // Since S66c (Issue #415) the workflow opens the column: 下一项需要处理 and 阶段, then 版本与交付 and the materials.
-        sections: JSON.stringify(Array.from(lens?.querySelectorAll('h3') ?? []).map((item) => item.firstChild?.textContent)) === '["下一项需要处理","阶段","版本与交付","这份文档的材料"]',
+        sections: JSON.stringify(Array.from(lens?.querySelectorAll('h3') ?? []).map((item) => item.firstChild?.textContent)) === '["下一项需要处理","阶段","版本与交付","这份衍生稿件的材料"]',
         versions: JSON.stringify(versions) === '["1:true"]',
         materials: lens?.querySelector('.document-materials .document-materials-empty')?.textContent === '暂无材料，任务简报、引语台账、事实核查记录与范例会列在这里。',
         // Issue #547: how its material was read, standing in the column rather than only in the notice that opened it.
@@ -2257,7 +2257,7 @@ async function main() {
       return v1.dataset.packageCurrent === 'true' && (line?.textContent ?? '').startsWith('v1 · 图书交付包已准备 · 暂无导出记录') &&
         line.querySelector('.package-current-mark')?.textContent === '当前' && document.activeElement === line &&
         (v1.querySelector('.package-version-meta')?.textContent ?? '').startsWith(${JSON.stringify(`用途：${PACKAGE_PURPOSE} · `)}) &&
-        v1.querySelector('.package-version-summary')?.textContent === ${JSON.stringify(`发稿版本「${FIRST.label}」 · r1 · 生产文档 1 份 · 本书不做 4 类 · 审阅报告 0 份 · 评估记录 1 份 · 审稿意见 0 份`)} &&
+        v1.querySelector('.package-version-summary')?.textContent === ${JSON.stringify(`发稿版本「${FIRST.label}」 · r1 · 衍生稿件 1 份 · 本书不做 4 类 · 审阅报告 0 份 · 评估记录 1 份 · 审稿意见 0 份`)} &&
         window.__j07.pkg().dataset.packageChanged === 'false';
     })()`, 'package-v1-listed');
     requireJourney(JSON.stringify((await readdir(exportsRoot)).sort()) === exportsBefore, 'package-writes-no-file');
@@ -2712,14 +2712,14 @@ async function main() {
     requireJourney(exemplars?.books?.length === 1 && exemplars.nextCursor === null && exemplarBook.bookId === bookId && exemplarBook.withdrawn === true &&
       exemplarBook.publicationOrdinal === exemplarDesignation.ordinal &&
       exemplarPage[0]?.designation?.startsWith(`第 ${exemplarBook.publicationOrdinal} 次设为发稿版本于 `) === true &&
-      exemplarPage[0].designation.endsWith(' · 已在 AI7 内撤回；之后交付的文档，另设发稿版本后才归入') && exemplarPage[0].more === true &&
+      exemplarPage[0].designation.endsWith(' · 已在 AI7 内撤回；之后交付的衍生稿件，另设发稿版本后才归入') && exemplarPage[0].more === true &&
       exemplarNews?.typeLabel === '新闻稿' && exemplarNews.eligibility === 'house-only' &&
       exemplarNews.earlierVersions.length === 1 && exemplarPage.length === 1 && exemplarPage[0].bookId === bookId && exemplarPage[0].title === (exemplarNews.title && exemplarNews.title !== exemplarNews.typeLabel ? exemplarNews.title : `《${EXCERPT.title}》新闻稿`) &&
       exemplarPage[0].attribution === '作者：未填写 · 责编：未填写' && exemplarPage[0].items.length === exemplarBook.exemplars.length &&
       exemplarPage[0].items[0][0] === 'news-release' && exemplarPage[0].items[0][1] === String(exemplarNews.version) &&
       exemplarPage[0].items[0][2].startsWith(`来自《${EXCERPT.title}》（作者：未填写 · 责编：未填写） · 版本 ${exemplarNews.version} · 交付给`) &&
       exemplarPage[0].items[0][2].includes(` · 此前还交付过版本 ${exemplarNews.earlierVersions[0]}`) &&
-      exemplarPage[0].items[0][3] === '工作文档 · 新闻稿' && exemplarPage[0].items[0][4] === '学习准入：仅本社' &&
+      exemplarPage[0].items[0][3] === '衍生稿件 · 新闻稿' && exemplarPage[0].items[0][4] === '是否可用于学习：仅本社' &&
       // This Book has no 审稿意见; earlier Books can now be imported through the KB.
       exemplarBook.readersReports.length === 0 && exemplarPage[0].readersReports === 0 &&
       JSON.stringify(exemplarPage[0].later) === JSON.stringify([]),
@@ -2861,7 +2861,7 @@ async function main() {
     const readyConnection = await renderer.evaluate(READ_CONNECTION);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference ?? '') && readyConnection?.credentialOperationState === 'ready', 'writing-model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除凭据', 'writing-model-remove');
+    await click(renderer, '移除密钥', 'writing-model-remove');
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus === 'setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'writing-model-removed');
     credentialRemoved = true;
@@ -2872,7 +2872,7 @@ async function main() {
     // 写作 lives on 稿件 since Issue #1403: the Book opened on its manuscript is where it begins.
 
     at('writing-sheet');
-    // 新建文档 · 写作任务 under 交付 · 生产文档: 新建文档… opens the sheet in place — the five house types with none chosen, what AI7
+    // 新建衍生稿件 · 写作任务 under 交付 · 衍生稿件: 新建衍生稿件… opens the sheet in place — the five house types with none chosen, what AI7
     // will reference (each part the Book does not have says so, the 范例 once a type is chosen), the four consequence rows and
     // 快速开始 waiting, with why, for a writing 默认执行规则 (S84b).
     const READ_WRITING = `(() => {
@@ -3089,8 +3089,8 @@ async function main() {
     await openDerivativePanel(renderer, { title: '评论文章', typeId: WRITING_LIBRARY_REQUEST.typeId, mode: 'writing' }, 'writing-library-new');
     const librarySheet = await readWriting((page) => page.open, 'writing-library-sheet');
     const libraryBox = await renderer.evaluate(`(() => { const box = document.querySelector(${JSON.stringify(`[data-screen="editor"] .writing-task input[type="checkbox"][data-writing-material="${libraryMaterialId}"]`)}); return box instanceof HTMLInputElement ? [box.checked, box.disabled, box.labels?.[0]?.textContent ?? null, document.querySelectorAll('[data-screen="editor"] .writing-task input[data-writing-material]').length] : null; })()`);
-    requireJourney(librarySheet.references[3] === `${WRITING_MATERIALS_STATEMENT}《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 社级资料` &&
-      JSON.stringify(libraryBox) === JSON.stringify([false, false, `《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 社级资料`, 1]), 'writing-library-offered', [librarySheet.references, libraryBox]);
+    requireJourney(librarySheet.references[3] === `${WRITING_MATERIALS_STATEMENT}《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 本社资料` &&
+      JSON.stringify(libraryBox) === JSON.stringify([false, false, `《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 本社资料`, 1]), 'writing-library-offered', [librarySheet.references, libraryBox]);
     await assertRenderer(renderer, `(() => { const radio = document.querySelector('[data-screen="editor"] .writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_LIBRARY_REQUEST.typeId)}]'); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, 'writing-library-type');
     await assertRenderer(renderer, `(() => { const box = document.querySelector(${JSON.stringify(`[data-screen="editor"] .writing-task input[data-writing-material="${libraryMaterialId}"]`)}); if (!(box instanceof HTMLInputElement) || box.disabled || box.checked) return false; box.click(); return box.checked; })()`, 'writing-library-tick');
     await fill(renderer, '[data-screen="editor"] .writing-task [data-writing-field="audience"]', WRITING_LIBRARY_REQUEST.audience, 'writing-library-audience');

@@ -18,9 +18,9 @@ export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: st
 }
 function progressLine(item: TaskOverviewItemProjection): string {
   const usage = item.usage === null ? '' : ` · 用时 ${Math.max(1, Math.round(item.usage.elapsed / 60000))} 分钟 · 约 ${item.usage.calls} 次调用`;
-  if (item.state === 'queued') return item.attention.state === 'analysis-waiting-network' ? '等待联网' : item.attention.state === 'analysis-waiting-connection' ? '等待模型连接' : item.attention.state === 'analysis-waiting-admission' ? '等待开始前检查' : item.queuePosition === null ? '等待运行名额' : `第 ${item.queuePosition} 位 · 前面 ${item.queuePosition - 1} 项${item.eta === null ? '' : ` · 预计 ≈ ${Math.ceil(item.eta / 60000)} 分钟后开始`}`;
+  if (item.state === 'queued') return item.attention.state === 'analysis-waiting-network' ? '等待联网' : item.attention.state === 'analysis-waiting-connection' ? '等待模型连接' : item.attention.state === 'analysis-waiting-admission' ? '等待开始前检查' : item.queuePosition === null ? '排队中' : `第 ${item.queuePosition} 位 · 前面 ${item.queuePosition - 1} 项${item.eta === null ? '' : ` · 预计 ≈ ${Math.ceil(item.eta / 60000)} 分钟后开始`}`;
   if (item.state === 'waiting') return globalAttentionReason(item.attention);
-  if (item.state === 'paused') return item.attention.facts.resumeFailure ?? `你 ${new Date(item.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 暂停${item.progress ? technicalWords(` · 已完成 ${item.progress.done} / ${item.progress.total}`, ` · 已完成约 ${item.progress.total === 0 ? 0 : Math.floor((item.progress.done / item.progress.total) * 100)}%`) : ''} · 可续行`;
+  if (item.state === 'paused') return item.attention.facts.resumeFailure ?? `你 ${new Date(item.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 暂停${item.progress ? technicalWords(` · 已完成 ${item.progress.done} / ${item.progress.total}`, ` · 已完成约 ${item.progress.total === 0 ? 0 : Math.floor((item.progress.done / item.progress.total) * 100)}%`) : ''} · 可继续`;
   if (item.state === 'completed') return `已有结果${usage}`;
   if (item.state === 'cancelled') return `已取消 · ${item.result ? '保留已有结果' : '没有形成结果'}${usage}`;
   if (item.state === 'stopped') return `已停止 · 可查看运行${usage}`;
@@ -44,8 +44,8 @@ export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: T
   else if (item.state === 'queued') { if (item.queuePosition !== null) { add('上移', 'up'); add('置顶', 'top'); } add('取消等待', 'cancel'); }
   else if (item.attention.state === 'draft-unfinished') add('继续编辑草稿', 'answer');
   else if (item.state === 'waiting') add(item.nextAction === 'answer-clarification' || item.taskKind === '对话' ? '回答' : '处理', 'answer');
-  else if (item.state === 'paused' && item.attention.state !== 'analysis-pausing') { add('续行', 'resume'); if (item.target.kind !== 'dialogue') add('改计划重做', 'redo'); }
-  else if (item.state !== 'paused') { add('查看结果', 'result'); add('再做一次', 'again'); }
+  else if (item.state === 'paused' && item.attention.state !== 'analysis-pausing') { add('继续', 'resume'); if (item.target.kind !== 'dialogue') add('重新开始', 'redo'); }
+  else if (item.state !== 'paused') { add('查看结果', 'result'); add('重新开始', 'again'); }
   if (item.selection) add('跳到所选文字', 'jump');
   const more = el('details', 'task-overview-more'); more.append(el('summary', undefined, '更多'));
   const menu = menuPanel(); more.append(menu);
@@ -159,7 +159,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
       else if (item.target.kind === 'dialogue') { await dialogueAction(item, action === 'pause' ? 'stopDialogueAnswer' : 'continueDialogueAnswer'); }
       else if (item.plan?.ref) await call(item, item.plan.kind === 'baseline-analysis' ? action === 'pause' ? 'pauseBaselineAnalysisRun' : 'resumeBaselineAnalysisRun' : 'controlTaskRun', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : { ...item.plan, action });
       if ((action === 'up' || action === 'top') && item.runRecordId && item.queuePosition !== null) showToast('队列顺序已更新。', { action: { label: '撤销', run: () => void perform(async () => { await options.api.reorderQueuedRun({ runRecordId: item.runRecordId!, position: item.queuePosition! }); }) } });
-      else if (action === 'pause' || action === 'resume') showToast(action === 'pause' ? '任务已暂停。' : '任务已续行。', { action: { label: '撤销', run: () => act(item, action === 'pause' ? 'resume' : 'pause') } });
+      else if (action === 'pause' || action === 'resume') showToast(action === 'pause' ? '任务已暂停。' : '任务已继续。', { action: { label: '撤销', run: () => act(item, action === 'pause' ? 'resume' : 'pause') } });
     });
   }
   async function answerOnCard(item: TaskOverviewItemProjection): Promise<void> {

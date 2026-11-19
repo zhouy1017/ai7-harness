@@ -153,7 +153,7 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
   });
 
   it('names the attempted action beside its refusal', () => {
-    expect(blockedActionLine('返回图书工作概览')).toBe('本地写入中断，当前更改尚未持久保存：暂不能执行「返回图书工作概览」。请先重试写入，或复制受影响内容。');
+    expect(blockedActionLine('返回图书工作概览')).toBe('本地写入中断，修改还没有保存：暂不能执行「返回图书工作概览」。请先重试写入，或复制受影响内容。');
     expect(blockedActionLine(null)).toContain('这项操作');
   });
 

@@ -998,7 +998,7 @@ async function main() {
     const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference) && readyConnection?.credentialOperationState === 'ready', 'model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除凭据', 'model-remove');
+    await click(renderer, '移除密钥', 'model-remove');
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     credentialRemoved = true;
@@ -1061,7 +1061,7 @@ async function main() {
     await writeHold(FIRST_HOLD + 1);
     const paused = await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-paused', 'panel-paused', 120_000);
     requireJourney(cardsOf(paused, 'running')[0].pill === '已暂停' &&
-      JSON.stringify(cardsOf(paused, 'running')[0].actions) === JSON.stringify([['resume', '续行', 'enabled'], ['redo', '改计划重做', 'enabled']]),
+      JSON.stringify(cardsOf(paused, 'running')[0].actions) === JSON.stringify([['resume', '继续', 'enabled'], ['redo', '重新开始', 'enabled']]),
     'panel-paused-card', paused);
 
     at('panel-resume');
@@ -1096,7 +1096,7 @@ async function main() {
     await writeHold(SAMPLE1_UNITS);
     const done = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-completed' && statesOf(panel, 'running').length === 0, 'panel-completed', 180_000);
     const doneCard = cardsOf(done, 'recent')[0];
-    requireJourney(doneCard.pill === '已完成' && doneCard.reason.startsWith('已有结果 · 用时 ') && JSON.stringify(doneCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '再做一次', 'enabled']]),
+    requireJourney(doneCard.pill === '已完成' && doneCard.reason.startsWith('已有结果 · 用时 ') && JSON.stringify(doneCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新开始', 'enabled']]),
     'panel-completed-card', done);
 
     at('panel-compose-update');
@@ -1123,7 +1123,7 @@ async function main() {
     const cancelled = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-cancelled,analysis-completed' && statesOf(panel, 'running').length === 0, 'panel-cancelled-card', 60_000);
     const cancelledCard = cardsOf(cancelled, 'recent')[0];
     requireJourney(cancelledCard.pill === '已取消' && cancelledCard.reason.startsWith('已取消 · 保留已有结果') &&
-      JSON.stringify(cancelledCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '再做一次', 'enabled']]) && cancelled.scope === '这本书 · 2 项',
+      JSON.stringify(cancelledCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新开始', 'enabled']]) && cancelled.scope === '这本书 · 2 项',
     'panel-cancelled-card-words', cancelled);
 
     at('result-window');
@@ -1442,7 +1442,7 @@ async function main() {
     // In 最近完成 the card says 已回答 and offers 回答 and 打开对话 (TASK-044); 回答 shows the latest answer in the window.
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'dialogue-to-panel');
     const answeredPanel = await waitForPanel(renderer, (panel) => cardsOf(panel, 'recent')[0]?.state === 'dialogue-answered', 'dialogue-answered-card');
-    requireJourney(JSON.stringify(cardsOf(answeredPanel, 'recent')[0].actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '再做一次', 'enabled']]) &&
+    requireJourney(JSON.stringify(cardsOf(answeredPanel, 'recent')[0].actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新开始', 'enabled']]) &&
       cardsOf(answeredPanel, 'recent')[0].pill === '已完成', 'dialogue-answered-card-words', answeredPanel);
     await cardAction(renderer, 'dialogue-answered', 'answer', 'dialogue-answer-open');
     await waitFor(renderer, `(() => { const win = document.querySelector('.task-result-window'); return win?.dataset.taskResult === 'ready' && win.dataset.taskResultKind === 'dialogue' && win.querySelector('.task-result-dialogue-answer')?.textContent === ${JSON.stringify(ANSWER_FIRST + ANSWER_SECOND + ANSWER_TAIL)} && win.querySelector('[data-dialogue-state]')?.textContent === '回答完成'; })()`, 'dialogue-answer-window', 30_000);
@@ -1633,7 +1633,7 @@ async function main() {
       offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' &&
       // #1401: a first 事实核查 may read just this selection, so it is offered beside the other range reviews.
       offered.get('review:factual-review') === '审阅这段 · 「事实核查」' && composer.submit === '开始任务' &&
-      composer.note === '任务只针对所选段落，按包含它的阅读范围读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。',
+      composer.note === '任务只针对所选段落，按包含它的部分读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。',
     'selection-task-composer-words', composer);
 
     at('selection-task-review-prepare');
@@ -1670,7 +1670,7 @@ async function main() {
     at('selection-task-review-run');
     const reviewedPanel = await waitForPanel(renderer, (panel) => cardsOf(panel, 'recent')[0]?.state === 'review-completed', 'selection-task-review-completed', 60_000);
     const reviewedCard = cardsOf(reviewedPanel, 'recent')[0];
-    requireJourney(reviewedCard.title === '审阅 · 第 1 次 · 所选段落' && JSON.stringify(reviewedCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '再做一次', 'enabled'], ['jump', '跳到所选文字', 'enabled']]), 'selection-task-review-completed-words', reviewedCard);
+    requireJourney(reviewedCard.title === '审阅 · 第 1 次 · 所选段落' && JSON.stringify(reviewedCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新开始', 'enabled'], ['jump', '跳到所选文字', 'enabled']]), 'selection-task-review-completed-words', reviewedCard);
     const reviewedFindings = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: ${JSON.stringify(selectionRun.reviewRunId)} }).then((workspace) => workspace.run.findings.map((finding) => [finding.blockId, finding.markId !== null]))`);
     requireJourney(Array.isArray(reviewedFindings) && reviewedFindings.length > 0 && reviewedFindings.every(([blockId, marked]) => blockId === taskBlock && marked), 'selection-task-review-in-paragraph', reviewedFindings);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-review-close');

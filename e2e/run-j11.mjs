@@ -68,6 +68,13 @@ const SECOND = Object.freeze({ title: '人员旅程乙' });
 const PEOPLE = Object.freeze({ authors: '周一、吴二', editors: '郑三', relatedRole: 'proofreader', relatedName: '王四' });
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const THIRD = Object.freeze({ title: '评估旅程丙' });
+/** Today as ordinary mode writes a day (`localDayLabel`): the records this Journey begins carry it (Issue #1531). */
+const todayLabel = () => { const now = new Date(); return `${now.getMonth() + 1} 月 ${now.getDate()} 日`; };
+/** A version row without its order within a minute: a version begun in the same minute adds it to its neighbours (#1531). */
+const untold = (row) => (row ?? '').replace(/ · 这一分钟的第 \d+ 份/u, '');
+/** An open 评估报告's day: today, with its time when the list reads times (#1531 review S7). */
+const ofToday = (heading) => heading === todayLabel() || (heading ?? '').startsWith(`${todayLabel()} `);
+
 /**
  * The J-04 model adapter's fixture: 按我的评分重写评语's authored units and words for 第 15 版 (Issue #429, S81b2), layered over
  * 审稿意见's authored units and five sections from 第 14 版定稿 (S81c), over AI7 初评's authored units and synthesis — with its
@@ -111,11 +118,11 @@ const DRAFT_FILE = '评估旅程丙 · 审稿意见 · 给作者的修改意见 
 const READERS_REPORT_HEADINGS = ['总体评价', '主要优点', '主要问题', '修改建议', '结论'];
 /** AI7 初评's scores and lines as the authored fixture gives them, item by item (Issue #429, S81b1). */
 const AI7_ITEM_LINES = [
-  ['literary-quality', 'sufficient', '文学品质与作者声音：AI7 初评 16.5 / 20 · 依据充分度 充分（引用 19 个段落，分布在 8 个阅读范围）'],
-  ['theme-and-context', 'fair', '主题、价值与社会文化语境：AI7 初评 15 / 20 · 依据充分度 一般（引用 6 个段落，分布在 3 个阅读范围）'],
-  ['structure-and-coherence', 'sufficient', '结构、叙事逻辑与连贯：AI7 初评 15.5 / 20 · 依据充分度 充分（引用 16 个段落，分布在 8 个阅读范围）'],
-  ['chinese-language', 'sufficient', '中文语言与表达：AI7 初评 14 / 20 · 依据充分度 充分（引用 9 个段落，分布在 7 个阅读范围）'],
-  ['readers-and-market', 'insufficient', '读者与市场潜力：AI7 初评 12 / 20 · 依据充分度 不足（没有引用段落）'],
+  ['literary-quality', 'sufficient', '文学品质与作者声音：评估报告 16.5 / 20 · 依据充分度 充分（引用 19 个段落，分布在 8 个阅读范围）'],
+  ['theme-and-context', 'fair', '主题、价值与社会文化语境：评估报告 15 / 20 · 依据充分度 一般（引用 6 个段落，分布在 3 个阅读范围）'],
+  ['structure-and-coherence', 'sufficient', '结构、叙事逻辑与连贯：评估报告 15.5 / 20 · 依据充分度 充分（引用 16 个段落，分布在 8 个阅读范围）'],
+  ['chinese-language', 'sufficient', '中文语言与表达：评估报告 14 / 20 · 依据充分度 充分（引用 9 个段落，分布在 7 个阅读范围）'],
+  ['readers-and-market', 'insufficient', '读者与市场潜力：评估报告 12 / 20 · 依据充分度 不足（没有引用段落）'],
 ];
 /** 分析反馈's words the Journey writes: stand-ins of its own, never the manuscript's. */
 const ENTITY_CORRECTION = '（旅程示例）应分作两个人物';
@@ -131,7 +138,7 @@ const LEARNING_NOTE = '（旅程示例）只在这本书里参考';
 const FEEDBACK_HISTORY_NOTE = '这里只是记录你给过的反馈：不会催你补充原因，也不会把没有说明当作认可。';
 const THIRD_PEOPLE = Object.freeze({ authors: '冯五', editors: '郑三', laterEditors: '王六' });
 const LEARNING_BASIS = '本机学习默认开启：记录符合准入的处理与改写，供以后跨书参考；可随时关闭全局开关，或排除某本书、某条材料；明确排除或更窄范围立即优先；仅本机收集，不发送内容，也不训练基础模型。';
-const LEARNING_INFLUENCE = '纳入以后，它只可能在所选范围内帮 AI7 以后的建议更接近你的判断：不会改动稿件或它来自的记录，不会自动生效为规则，不会启用记忆，也不会被发送出去。';
+const LEARNING_INFLUENCE = '纳入以后，它只可能在所选范围内帮 AI7 以后的建议更接近你的判断：不会改动稿件或它来自的记录，不会自动生效为规则，不会启用审阅偏好，也不会被发送出去。';
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-11', 'browser-close-timeout');
 let location = 'entry';
@@ -1615,7 +1622,7 @@ async function main() {
     await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-start');
     const started = await readEvaluation(renderer, (page) => page.record !== null && page.focus === 'heading', 'evaluation-started');
     requireJourney(started.record.heading === '第 1 版 · 编辑评分中' && started.record.revision === '评估的是修订版 r1' &&
-      started.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分' && started.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
+      started.record.ai7 === '这一版不是从评估报告开始的：由你打分' && started.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
       JSON.stringify(started.record.items.map(([, legend, score]) => [legend, score])) === JSON.stringify(ITEM_LEGENDS.map((legend) => [legend, ''])) &&
       started.record.conclusions.every(([, checked]) => checked === false) && JSON.stringify(started.record.actions) === JSON.stringify(['保存修改', '定稿']) &&
       started.startReason === '第 1 版还没有定稿；定稿后才能重新评估。', 'evaluation-started-words', started);
@@ -1793,7 +1800,7 @@ async function main() {
     const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference) && readyConnection?.credentialOperationState === 'ready', 'feedback-model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除凭据', 'feedback-model-remove');
+    await click(renderer, '移除密钥', 'feedback-model-remove');
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'feedback-model-removed');
     credentialRemoved = true;
@@ -2079,11 +2086,12 @@ async function main() {
     const ordinaryReport = await evaluationMode(false, 'initial-evaluation-ordinary');
     // Ordinary mode cites paragraphs without the reading ranges they fall in (#1431 item 71).
     const ordinaryItems = AI7_ITEM_LINES.map(([itemId, sufficiency, line]) => [itemId, sufficiency, line.replace(/，分布在 \d+ 个阅读范围/u, '')]);
-    requireJourney(readReportView(ordinaryReport, ordinaryItems) && ordinaryReport.report.line === '第 1 次初评 · 总分 73 / 100 · 优秀' && ordinaryReport.report.technical === 0,
+    requireJourney(readReportView(ordinaryReport, ordinaryItems) && ordinaryReport.report.line === '最近一份评估报告 · 总分 73 / 100 · 优秀' && ordinaryReport.report.technical === 0,
       'initial-evaluation-ordinary-report', ordinaryReport);
     // 修改报告: the report becomes 第 14 版, begun from it past the unfinished 第 13 版, which stays as it was.
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'initial-evaluation-begin');
-    const ordinaryDraft = await readEvaluation(renderer, (page) => page.view === 'record' && page.record?.heading === '版本 · AI7 初稿', 'initial-evaluation-begun-ordinary');
+    // The record is begun in this run: its heading says today, as the app writes a day (Issue #1531, review S12).
+    const ordinaryDraft = await readEvaluation(renderer, (page) => page.view === 'record' && ofToday(page.record?.heading), 'initial-evaluation-begun-ordinary');
     requireJourney(ordinaryDraft.record.report === true && ordinaryDraft.report === null && ordinaryDraft.record.reportConclusion === 'AI7 建议的结论：修改后再议' &&
       ordinaryDraft.record.nextStep === (nextStep === null ? null : `下一步建议：${nextStep}`) &&
       JSON.stringify(ordinaryDraft.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)) && ordinaryDraft.record.ai7Comments === 0 &&
@@ -2091,7 +2099,7 @@ async function main() {
       ordinaryDraft.editReport === null && JSON.stringify(ordinaryDraft.record.actions) === JSON.stringify(['保存修改', '定稿']),
     'initial-evaluation-begun-ordinary-words', ordinaryDraft.record);
     const draft = await evaluationMode(true, 'initial-evaluation-developer');
-    requireJourney(draft.view === 'record' && draft.record.report === true && draft.record.heading === '第 14 版 · AI7 初稿' &&
+    requireJourney(draft.view === 'record' && draft.record.report === true && draft.record.heading === '第 14 版 · 评估报告' &&
       draft.record.ai7 === '这一版从 AI7 第 1 次初评开始（读的是修订版 r1）：AI7 的分数列在每一项旁边，记录保存的是你的评分' &&
       JSON.stringify(draft.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '15.5', '14', '12']) &&
       JSON.stringify(draft.record.ai7Items.map(([itemId, line, offered, ticked]) => [itemId, line, offered, ticked.length])) ===
@@ -2101,7 +2109,7 @@ async function main() {
       draft.record.ai7Unread === null &&
       JSON.stringify(draft.record.suggested) === JSON.stringify([null, 'AI7 建议', null, null]) &&
       draft.record.ai7Conclusion === null && JSON.stringify(draft.record.actions) === JSON.stringify(['保存修改', '定稿']) &&
-      draft.versions[0].startsWith('第 14 版 · AI7 初稿 · 修订版 r1 · 总分 73 / 100') && draft.versions[1].startsWith('第 13 版 · 编辑评分中'),
+      draft.versions[0].startsWith('第 14 版 · 评估报告 · 修订版 r1 · 总分 73 / 100') && draft.versions[1].startsWith('第 13 版 · 编辑评分中'),
     'initial-evaluation-draft-words', draft.record);
 
     at('evaluation-market');
@@ -2291,11 +2299,11 @@ async function main() {
     // The whole loop in ordinary mode (technicalLayerVisible=false): 修改报告 on the 定稿 report begins 第 15 版 from it; nothing is
     // changed yet, so there is nothing to regenerate from.
     const reportClosed = await evaluationMode(false, 'evaluation-rewrite-ordinary');
-    requireJourney(reportClosed.view === 'record' && reportClosed.record.heading === '版本 · 定稿' && reportClosed.editReport === '修改报告',
+    requireJourney(reportClosed.view === 'record' && reportClosed.record.heading.startsWith(`定稿 · ${todayLabel()} `) && reportClosed.editReport === '修改报告',
       'evaluation-rewrite-edit-offered', reportClosed);
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'evaluation-rewrite-begin');
-    const fifteenth = await readEvaluation(renderer, (page) => page.record?.heading === '版本 · AI7 初稿' && page.rewrite !== null, 'evaluation-rewrite-begun');
-    requireJourney(fifteenth.record.report === true && fifteenth.versions[0].startsWith('版本 · AI7 初稿') && fifteenth.versions[1] === reportClosed.versions[0] &&
+    const fifteenth = await readEvaluation(renderer, (page) => ofToday(page.record?.heading) && page.rewrite !== null, 'evaluation-rewrite-begun');
+    requireJourney(fifteenth.record.report === true && fifteenth.versions[0].startsWith(`评估报告 · ${todayLabel()} `) && untold(fifteenth.versions[1]) === untold(reportClosed.versions[0]) &&
       fifteenth.rewrite.reason === '先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。' &&
       JSON.stringify(fifteenth.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)) && fifteenth.record.verdict === '' &&
       JSON.stringify(fifteenth.market.lists) === JSON.stringify(MARKET_LISTS), 'evaluation-rewrite-begun-words', fifteenth);
@@ -2338,16 +2346,16 @@ async function main() {
     // The regenerated report waits beside the version's own (Issue #1407): every 评语, the 总评 with its next step, and the
     // strengths and problems; nothing is written into the version yet.
     const waiting = await readEvaluation(renderer, (page) => page.rewrite?.proposal !== null && page.rewrite?.proposal !== undefined, 'evaluation-rewrite-proposal-read');
-    requireJourney(waiting.rewrite.task === '按我的修改重新生成 · 版本 · 已完成' && waiting.rewrite.proposal.current === 'true' &&
+    requireJourney(waiting.rewrite.task === '按我的修改重新生成 · 已完成' && waiting.rewrite.proposal.current === 'true' &&
       waiting.rewrite.proposal.line === 'AI7 按你第 2 次保存的修改重新生成了评估报告（评语、总评、优点与问题），等你决定：采用后才记入这一版，分数与结论不变。' &&
       // How much it read, and each 评语's notes beside it (EVAL-006); nothing set aside.
-      waiting.rewrite.proposal.reading === 'AI7 这次重写读了全书。' && waiting.rewrite.proposal.withheld.length === 0 &&
+      waiting.rewrite.proposal.reading === 'AI7 这次重新生成读了全书。' && waiting.rewrite.proposal.withheld.length === 0 &&
       JSON.stringify(waiting.rewrite.proposal.evidence) === JSON.stringify([3, 2, 4, 3, 0, 0, 0, 0]) &&
       JSON.stringify(waiting.rewrite.proposal.pairs) === JSON.stringify([
-        ...AI7_COMMENTS.map(([itemId, comment], index) => [itemId, `现在：${comment}`, `重写：${REWRITTEN_COMMENTS[index]}`]),
-        [null, '现在：（还没有写）', `重写：${REWRITTEN_VERDICT}`],
-        [null, `现在：${waiting.record.strengths.join('；')}`, `重写：${REWRITTEN_STRENGTHS.join('；')}`],
-        [null, `现在：${waiting.record.weaknesses.join('；')}`, `重写：${REWRITTEN_WEAKNESSES.join('；')}`],
+        ...AI7_COMMENTS.map(([itemId, comment], index) => [itemId, `现在：${comment}`, `重新生成：${REWRITTEN_COMMENTS[index]}`]),
+        [null, '现在：（还没有写）', `重新生成：${REWRITTEN_VERDICT}`],
+        [null, `现在：${waiting.record.strengths.join('；')}`, `重新生成：${REWRITTEN_STRENGTHS.join('；')}`],
+        [null, `现在：${waiting.record.weaknesses.join('；')}`, `重新生成：${REWRITTEN_WEAKNESSES.join('；')}`],
       ]) && JSON.stringify(waiting.rewrite.proposal.lists) === JSON.stringify(['strengths', 'weaknesses']) && waiting.record.strengths.length > 0 &&
       JSON.stringify(waiting.rewrite.proposal.actions) === JSON.stringify([['rewrite-accept', '采用新版报告', false], ['rewrite-discard', '放弃', false]]) &&
       waiting.record.entries === '2' && JSON.stringify(waiting.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)),
@@ -2366,8 +2374,8 @@ async function main() {
       JSON.stringify(accepted.record.conclusions) === JSON.stringify(waiting.record.conclusions) &&
       JSON.stringify(accepted.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '13', '14', '10']) &&
       JSON.stringify(accepted.record.ai7Items.map(([, , , ticked]) => ticked)) === JSON.stringify([[], [], ['too-high'], [], ['insufficient-basis']]) &&
-      accepted.record.heading === '版本 · 编辑评分中' && accepted.record.report === true && accepted.rewrite.proposal === null &&
-      accepted.rewrite.decided === '上次重写已采用，分数不变。', 'evaluation-rewrite-accepted-words', accepted);
+      accepted.record.heading.startsWith(`编辑评分中（${todayLabel()} `) && accepted.record.heading.includes('开始）') && accepted.record.report === true && accepted.rewrite.proposal === null &&
+      accepted.rewrite.decided === '上次重新生成已采用，分数不变。', 'evaluation-rewrite-accepted-words', accepted);
     const acceptedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.entries, page.record.content.items.map((entry) => entry.score), page.rewrite.decided?.decision ?? null, page.record.content.strengths, page.record.content.weaknesses]))`);
     requireJourney(acceptedService === JSON.stringify([3, [16.5, 15, 13, 14, 10], 'accepted', REWRITTEN_STRENGTHS, REWRITTEN_WEAKNESSES]), 'evaluation-rewrite-accepted-service', acceptedService);
     at('evaluation-ai-lock');
@@ -2552,11 +2560,11 @@ async function main() {
     'learning-card-words', learningCard);
 
     at('learning-decide');
-    // 纳入出版社经验 says its house-wide consequence beside it before anything is recorded, 仅纳入当前图书 the Book's; with the
+    // 纳入本社经验 says its house-wide consequence beside it before anything is recorded, 仅纳入当前图书 the Book's; with the
     // editor's note, 记录学习准入决定 records the Book, and the row reads 已决定 with the focus back on 查看….
     await tick(renderer, `${learningRow('proposal-decision')} .learning-choices input[value="house"]`, 'learning-choose-house');
     const houseCard = await readLearning(renderer, (page) => typeof page.card?.consequence === 'string', 'learning-house-consequence');
-    requireJourney(houseCard.card.consequence === '纳入出版社经验：全社以后的图书都可能从它学习。' && houseCard.card.record === 'enabled', 'learning-house-words', houseCard.card);
+    requireJourney(houseCard.card.consequence === '纳入本社经验：本社以后的图书都可能从它学习。' && houseCard.card.record === 'enabled', 'learning-house-words', houseCard.card);
     await tick(renderer, `${learningRow('proposal-decision')} .learning-choices input[value="book"]`, 'learning-choose-book');
     const bookCard = await readLearning(renderer, (page) => page.card?.consequence?.startsWith('仅纳入当前图书') === true, 'learning-book-consequence');
     requireJourney(bookCard.card.consequence === `仅纳入当前图书：它只在《${THIRD.title}》里帮 AI7 学习。`, 'learning-book-words', bookCard.card);
@@ -3114,7 +3122,7 @@ async function main() {
     await fill(renderer, '#learning-audit-query', '分页原因3', 'learning-audit-query');
     await choose(renderer, '#learning-audit-filter-standing', 'house', 'learning-audit-filter-house');
     const auditSearched = await readAudit(renderer, (page) => page.rows.length === 1, 'learning-audit-searched');
-    requireJourney(auditSearched.rows[0][0] === auditHouse && auditSearched.rows[0][2] === '纳入出版社经验', 'learning-audit-searched-words', auditSearched);
+    requireJourney(auditSearched.rows[0][0] === auditHouse && auditSearched.rows[0][2] === '纳入本社经验', 'learning-audit-searched-words', auditSearched);
     await choose(renderer, '#learning-audit-filter-kind', 'review-disposition', 'learning-audit-filter-kind');
     const auditNone = await readAudit(renderer, (page) => page.rows.length === 0 && page.none !== null, 'learning-audit-none');
     requireJourney(auditNone.none === '没有符合的学习材料。', 'learning-audit-none-words', auditNone);
@@ -3225,7 +3233,7 @@ async function main() {
     await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="stop"]', 'learning-audit-stale-stop');
     // The material moved after the page read it: nothing is appended, and the explorer reads the chain as it stands.
     const refused = await readAudit(renderer, (page) => page.view === 'lineage' && page.busy === false && page.lineage?.decisions.length === 4 && page.lineage?.standing === 'house', 'learning-audit-stale-read');
-    requireJourney(refused.preview === null && refused.lineage.decisions[0][2] === '纳入出版社经验', 'learning-audit-stale-words', refused);
+    requireJourney(refused.preview === null && refused.lineage.decisions[0][2] === '纳入本社经验', 'learning-audit-stale-words', refused);
     const staleService = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => read.decisions.map((entry) => entry.choice).join('>'))`);
     requireJourney(staleService === 'book>excluded>book>house', 'learning-audit-stale-service', staleService);
 
@@ -3242,7 +3250,7 @@ async function main() {
     await clickSelector(renderer, `${auditRow(auditFirst)} [data-learning-audit-action="open"]`, 'learning-audit-restart-open');
     const restarted = await readAudit(renderer, (page) => page.lineage?.key === auditFirst, 'learning-audit-restart-lineage');
     requireJourney(JSON.stringify(restarted.lineage.decisions.map(([state, via, choice]) => [state, via, choice])) === JSON.stringify([
-      ['current', 'learning-eligibility', '纳入出版社经验'], ['superseded', 'learning-eligibility', '仅纳入当前图书'],
+      ['current', 'learning-eligibility', '纳入本社经验'], ['superseded', 'learning-eligibility', '仅纳入当前图书'],
       ['superseded', 'learning-audit', '明确排除'], ['superseded', 'learning-eligibility', '仅纳入当前图书'],
     ]), 'learning-audit-restart-words', restarted);
     const auditAfter = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => JSON.stringify(read))`);
@@ -3262,7 +3270,7 @@ async function main() {
     const keyboardStopped = await readAudit(renderer, (page) => page.lineage?.decisions.length === 5 && JSON.stringify(page.focus) === JSON.stringify([auditFirst, 'H4', false]), 'learning-audit-keyboard-preview');
     requireJourney(keyboardStopped.preview === null && keyboardStopped.lineage.standing === 'excluded' &&
       JSON.stringify(keyboardStopped.lineage.decisions[0]) === JSON.stringify(['current', 'learning-audit', '明确排除', '现在的决定 · 在学习回溯中停止今后使用']) &&
-      JSON.stringify(keyboardStopped.lineage.decisions[1].slice(0, 3)) === JSON.stringify(['superseded', 'learning-eligibility', '纳入出版社经验']) &&
+      JSON.stringify(keyboardStopped.lineage.decisions[1].slice(0, 3)) === JSON.stringify(['superseded', 'learning-eligibility', '纳入本社经验']) &&
       JSON.stringify(keyboardStopped.lineage.actions) === JSON.stringify(['reinclude', 'back']), 'learning-audit-keyboard-stopped-words', keyboardStopped);
     const keyboardService = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => [read.standing, read.decisions.map((entry) => entry.choice).join('>')])`);
     requireJourney(JSON.stringify(keyboardService) === JSON.stringify(['excluded', 'book>excluded>book>house>excluded']), 'learning-audit-keyboard-records-one-exclusion', keyboardService);
@@ -3336,7 +3344,7 @@ async function main() {
     // 第 16 版 is seeded from 第 14 版定稿 — its scores, not its conclusion — says in its own words which version it skipped, compares
     // with 第 14 版, and the list keeps 第 15 版 named among the unreadable.
     const skippedVersion = await readEvaluation(renderer, (page) => page.record?.heading === '第 16 版 · 编辑评分中', 'evaluation-damaged-skipped');
-    requireJourney(skippedVersion.record.skipped === '这一版跳过了已损坏的第 15 版，从第 14 版定稿重新评估。' && skippedVersion.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分' &&
+    requireJourney(skippedVersion.record.skipped === '这一版跳过了已损坏的第 15 版，从第 14 版定稿重新评估。' && skippedVersion.record.ai7 === '这一版不是从评估报告开始的：由你打分' &&
       skippedVersion.record.comparison?.[0] === '与第 14 版相比' && JSON.stringify(skippedVersion.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '15.5', '14', '10']) &&
       skippedVersion.record.conclusions.every(([, checked]) => checked === false) &&
       skippedVersion.unreadable === '第 15 版评估记录已损坏，无法显示；其他版本照常可用。' && skippedVersion.startReason === '第 16 版还没有定稿；定稿后才能重新评估。',
@@ -3421,7 +3429,7 @@ async function main() {
     requireJourney(JSON.stringify(fresh.initial.actions) === JSON.stringify([['start-initial', '生成评估报告', false], ['prepare-initial', '先看计划', false]]), `${name}-prepare-offered`, fresh.initial);
     await runInitialEvaluation(name);
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', `${name}-begin`);
-    const begun = await readEvaluation(renderer, (page) => page.record?.heading === '第 1 版 · AI7 初稿', `${name}-draft`);
+    const begun = await readEvaluation(renderer, (page) => page.record?.heading === '第 1 版 · 评估报告', `${name}-draft`);
     requireJourney(begun.record.calibration === null && JSON.stringify(begun.record.items.map(([, , score]) => score)) === JSON.stringify(RAW_SCORES), `${name}-raw-start`, begun.record);
     // Two departures from AI7's 初评: 读者与市场潜力 12 → 10 and 文学品质与作者声音 16.5 → 17.
     await fill(renderer, `${item('readers-and-market')} [data-evaluation-field="score"]`, '10', `${name}-readers`);
@@ -3440,11 +3448,11 @@ async function main() {
     // 初评开始 on 校准样书1 starts at the calibrated scores, each line keeping AI7's raw score, no 调分原因 offered for a score that
     // stays where the version started it, the risks carried untouched, no conclusion chosen.
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'calibrated-start');
-    const calibratedDraft = await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · AI7 初稿', 'calibrated-draft');
+    const calibratedDraft = await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 评估报告', 'calibrated-draft');
     const calibratedLine = (index, after) => ai7Line(index).replace(' · 依据充分度', ` · 校准后 ${after} / 20 · 依据充分度`);
     requireJourney(JSON.stringify(calibratedDraft.record.items.map(([, , score]) => score)) === JSON.stringify(['17', '15', '15.5', '14', '10']) &&
       calibratedDraft.record.total === '总分 71.5 / 100 · 优秀' &&
-      calibratedDraft.record.calibration === 'AI7 的初评分数已按本社校准（依据 1 本书的定稿评估）：调整了 2 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分' &&
+      calibratedDraft.record.calibration === '评估报告的分数已按本社校准（依据 1 本书的定稿评估）：调整了 2 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分' &&
       calibratedDraft.record.ai7Items[0][1] === calibratedLine(0, '17') && calibratedDraft.record.ai7Items[4][1] === calibratedLine(4, '10') &&
       calibratedDraft.record.ai7Items[1][1] === ai7Line(1) && calibratedDraft.record.ai7Items[3][1] === ai7Line(3) &&
       JSON.stringify(calibratedDraft.record.ai7Items.map(([, , offered]) => offered)) === JSON.stringify([false, false, false, false, false]) &&
@@ -3484,7 +3492,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'calibration-off-open');
     await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.heading === '第 2 版 · 定稿', 'calibration-off-ready');
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'calibration-off-start');
-    const rawAgain = await readEvaluation(renderer, (page) => page.record?.heading === '第 3 版 · AI7 初稿', 'calibration-off-draft');
+    const rawAgain = await readEvaluation(renderer, (page) => page.record?.heading === '第 3 版 · 评估报告', 'calibration-off-draft');
     requireJourney(rawAgain.record.calibration === null && JSON.stringify(rawAgain.record.items.map(([, , score]) => score)) === JSON.stringify(RAW_SCORES) &&
       rawAgain.record.ai7Items[0][1] === ai7Line(0) && rawAgain.record.ai7Items[4][1] === ai7Line(4), 'calibration-off-raw', rawAgain.record);
     const onAgain = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((before) => window.ai7.setEvaluationPreferences({ expectedEntries: before.preferenceEntries, predictionEnabled: before.prediction.enabled, calibrationEnabled: true })).then((answer) => JSON.stringify([answer.calibration.enabled, answer.calibration.active, answer.calibration.offset?.basisBooks ?? null, answer.preferenceEntries]))`);
@@ -3645,7 +3653,7 @@ async function main() {
         await choose(renderer, '#feedback-filter-origin', 'analysis-feedback', 'ordinary-history-filter-source');
         await waitFor(renderer, `document.querySelector('#feedback-filter-origin')?.disabled===false && Array.from(document.querySelectorAll('[data-entry-id]')).every(row=>row.dataset.feedbackOrigin==='analysis-feedback')`, 'ordinary-history-filtered');
         await clickSelector(renderer, '#quality-tab-preferences', 'ordinary-preference-remount');
-        await waitFor(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]');const history=row?.querySelector('details');return row?.textContent.includes('已停用') && history?.textContent.includes('来自《') && /[0-9]{4}-[0-9]{2}-[0-9]{2}T/u.test(history.textContent); })()`, 'ordinary-preference-retained-source-history');
+        await waitFor(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]');const history=row?.querySelector('details');return row?.textContent.includes('已停用') && history?.textContent.includes('来自《') && /[0-9]+ 月 [0-9]+ 日 [0-9]{2}:[0-9]{2}/u.test(history.textContent) && !/[0-9]{4}-[0-9]{2}-[0-9]{2}T/u.test(history.textContent); })()`, 'ordinary-preference-retained-source-history');
         await qualityMode(true, 'ordinary-memory-restore'); await openMemory('ordinary-memory-developer');
       }
       return itemId;
@@ -3776,11 +3784,11 @@ async function main() {
     // The editor widens it to the house; that choice, not the default, is what 记录 records.
     await tick(renderer, '.learning-reinclude input[value="house"]', 'word-audit-reinclude-house');
     const wordHouseChosen = await readAudit(renderer, (page) => JSON.stringify(page.reinclude?.choices) === JSON.stringify([['book', false], ['house', true]]), 'word-audit-reinclude-chosen');
-    requireJourney(wordHouseChosen.reinclude.record === true && wordHouseChosen.reinclude.consequence === '纳入出版社经验：全社以后的图书都可能从它学习。',
+    requireJourney(wordHouseChosen.reinclude.record === true && wordHouseChosen.reinclude.consequence === '纳入本社经验：本社以后的图书都可能从它学习。',
       'word-audit-reinclude-house-words', wordHouseChosen.reinclude);
     await clickSelector(renderer, '.learning-reinclude [data-learning-audit-action="reinclude-record"]', 'word-audit-reinclude-record');
     await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent === '学习准入决定已记录。'`, 'word-audit-reinclude-status');
-    const wordHistory = JSON.stringify([['current', '纳入出版社经验'], ['superseded', '明确排除']]);
+    const wordHistory = JSON.stringify([['current', '纳入本社经验'], ['superseded', '明确排除']]);
     // An explicit house re-inclusion is a human decision; the standing line must not call it the default.
     const wordDecidedLine = "document.querySelector('.learning-lineage')?.textContent.includes('当前按人工决定纳入本机学习') && !document.querySelector('.learning-lineage')?.textContent.includes('没有人工纳入决定')";
     const wordRestored = await readAudit(renderer, (page) => page.lineage?.decisions.length === 2 && page.reinclude === null, 'word-audit-reincluded');

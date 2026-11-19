@@ -42,7 +42,7 @@ export function packageNotReadyLine(unmet: ReadonlyArray<string>): string {
 
 /** The content moved on since the newest version (BUNDLE-004). */
 export function packageChangedLine(label: string): string {
-  return technicalWords(`内容与图书交付包 ${label} 不同：再次准备会生成新的版本，${label} 保持不变。`, '稿件已更新，可重新准备交付包。');
+  return technicalWords(`内容与图书交付包 ${label} 不同：再次准备会生成新的版本，${label} 保持不变。`, '稿件已更新，可以为新内容准备交付包。');
 }
 
 /** `v2 · 图书交付包已准备 · 暂无导出记录` (DPKG-011): the prepared state beside its derived export history. */
@@ -92,7 +92,7 @@ export function packageExportHeading(label: string): string {
 export const PACKAGE_EXPORT_FILES_LABEL = '写入所选文件夹的文件';
 
 /** The two switches of a package's files (EXP-023): the manuscript's and the documents' marks, never 备注. */
-export const PACKAGE_EXPORT_OPTIONS_NOTE = '这两项只改变写出的 DOCX 文件，不改变稿件、文档和上面的标记；备注从不随交付包导出。';
+export const PACKAGE_EXPORT_OPTIONS_NOTE = '这两项只改变写出的 DOCX 文件，不改变稿件、衍生稿件和上面的标记；备注从不随交付包导出。';
 
 /** Each file's own Export Fidelity Review (EXP-007), open by itself when something in it is not written as it was. */
 export function packageExportFidelitySummary(degraded: boolean): string {

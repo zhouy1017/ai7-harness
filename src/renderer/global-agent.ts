@@ -1,4 +1,5 @@
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { localInstantLabel } from './plan-preview-labels.js';
 import { type GlobalAgentDialogueProjection, type GlobalAgentProcedure, type GlobalAgentProjection, type GlobalAgentRendererApi, type GlobalAgentScopeInput, type GlobalMemoryItem, type GlobalAgentSourceCandidate, type PrepareGlobalAgentTurnInput, type RecordLearningSupervisionInput } from '../shared/protocol.js';
 import { globalAgentAnswerStatus, shellDestinationLabel } from './shell-labels.js';
 import { CONFIGURED_RUNTIME_MODEL_LABELS } from '../shared/provider-configuration.generated.js';
@@ -29,7 +30,7 @@ function providerLabel(provider: { route: string; model: string }): string {
   return `${channel === null ? '模型服务' : MODEL_SERVICE_ROUTE_BINDINGS[channel].providerLabel} · ${model}`;
 }
 const TOOL_LABELS: Readonly<Record<string, string>> = {
-  retrieve: '检索跨书与记忆', exact_fetch: '读取精确原文', read_procedure: '读取工序定义', propose_learning_supervision: '提出学习监督建议',
+  retrieve: '检索跨书与审阅偏好', exact_fetch: '读取精确原文', read_procedure: '读取工序定义', propose_learning_supervision: '提出学习监督建议',
 };
 const EFFECT_LABELS = { guide: '引导方向', freeze: '冻结规则', correct: '纠正偏好' } as const;
 function toolResultSummary(tool: string, result: string | null): string {
@@ -57,7 +58,7 @@ export function mountGlobalAgent(options: {
   root.className = 'panel global-agent';
   root.dataset['globalAgent'] = 'destination';
   const heading = el('header'); heading.className = 'global-agent-heading';
-  heading.append(el('h2', shellDestinationLabel('global-agent')), el('p', '讨论审阅习惯、参考选入的图书与工序，或管理本社记忆。'));
+  heading.append(el('h2', shellDestinationLabel('global-agent')), el('p', '讨论审阅习惯、参考选入的图书与工序，或管理审阅偏好。'));
   root.append(heading);
   const state = el('p');
   state.className = 'global-agent-status';
@@ -65,7 +66,7 @@ export function mountGlobalAgent(options: {
   state.dataset['globalAgentPolicy'] = 'state';
   const items = el('fieldset');
   items.className = 'global-agent-sources';
-  items.append(el('legend', '本社审阅偏好与记忆'), el('p', '勾选后用于提问或管理。'));
+  items.append(el('legend', '审阅偏好'), el('p', '勾选后用于提问或管理。'));
   const list = el('div');
   list.className = 'global-agent-choice-list';
   items.append(list);
@@ -85,27 +86,27 @@ export function mountGlobalAgent(options: {
   const book = el('select');
   const effect = el('select');
   effect.dataset['globalAgentEffect'] = 'select';
-  for (const [value, label] of [['guide', '指导后续学习'], ['freeze', '冻结所选记忆'], ['correct', '用指令修正所选记忆']]) {
+  for (const [value, label] of [['guide', '指导后续学习'], ['freeze', '冻结所选审阅偏好'], ['correct', '用指令修正所选审阅偏好']]) {
     const option = el('option', label); option.value = value!; effect.append(option);
   }
   const text = el('textarea');
   text.maxLength = 400;
   text.rows = 3;
   text.dataset['globalAgentText'] = 'input';
-  const save = el('button', '新建记忆');
+  const save = el('button', '新建审阅偏好');
   save.type = 'submit';
   save.className = 'btn ' + ('secondary');
   save.dataset['globalAgentSave'] = 'submit';
   const effectField = field('监督作用', effect);
   const bookField = field('图书', book);
-  form.append(el('h3', '管理所选记忆'), field('操作', operation), field('作用范围', scope), field('审阅类别', category), bookField,
-    field('记忆内容 / 监督指令 · 最多 200 字', text), effectField,
-    el('p', '勾选「引用范围」里的记忆后管理。'), save);
+  form.append(el('h3', '管理所选审阅偏好'), field('操作', operation), field('作用范围', scope), field('审阅类别', category), bookField,
+    field('审阅偏好内容 / 监督指令 · 最多 200 字', text), effectField,
+    el('p', '勾选「引用范围」里的审阅偏好后管理。'), save);
   const directives = el('section');
   directives.className = 'global-agent-directives';
   const history = el('section');
   history.className = 'global-agent-history';
-  history.append(el('h3', '全域对话历史'));
+  history.append(el('h3', '对话历史'));
   const historyList = el('div');
   historyList.className = 'global-agent-history-list';
   const answer = el('section');
@@ -171,7 +172,7 @@ export function mountGlobalAgent(options: {
           el('p', submission.question), ...submission.sources.map((entry) => {
             const candidate = current?.sourceCandidates?.find((source) => source.itemId === entry.itemId && source.revisionId === entry.revisionId);
             const row = el('div'); row.className = 'global-agent-source-card';
-            row.append(el('h4', candidate?.title ?? '已选记忆'), el('p', entry.text), technical(`条目：${entry.itemId}`, `版本：${entry.revisionId}`));
+            row.append(el('h4', candidate?.title ?? '已选审阅偏好'), el('p', entry.text), technical(`条目：${entry.itemId}`, `版本：${entry.revisionId}`));
             return row;
           }), technical(`回答：${submission.attemptId}`));
         if (submission.kept !== null) submittedContent.append(el('p', `接着回答时保留的内容：${submission.kept}`));
@@ -186,7 +187,7 @@ export function mountGlobalAgent(options: {
         ...(dialogue.toolCalls ?? []).map((call) => {
           const card = el('article'); card.className = 'global-agent-tool-card';
           card.append(el('h4', TOOL_LABELS[call.tool] ?? '本机工具'),
-            el('p', call.tool === 'retrieve' ? '在所选图书与记忆中查找相关内容。' : call.tool === 'exact_fetch' ? '读取检索结果对应的原文。' : call.tool === 'read_procedure' ? '读取选入工序的说明与阶段。' : technicalWords('整理可由你确认的学习监督建议。', '整理可由你采用的审阅偏好建议。')),
+            el('p', call.tool === 'retrieve' ? '在所选图书与审阅偏好中查找相关内容。' : call.tool === 'exact_fetch' ? '读取检索结果对应的原文。' : call.tool === 'read_procedure' ? '读取选入工序的说明与阶段。' : technicalWords('整理可由你确认的学习监督建议。', '整理可由你采用的审阅偏好建议。')),
             el('p', call.outcome === 'returned' ? toolResultSummary(call.tool, call.result) : call.outcome === 'refused' ? '未能读取，请检查所选范围。' : '正在读取所选范围…'),
             technical(`工具：${call.tool}`, `参数：${call.arguments}`, `结果：${call.result ?? '等待返回'}`, `回答：${call.attemptId}`, `调用：${call.callId}`));
           return card;
@@ -225,7 +226,7 @@ export function mountGlobalAgent(options: {
   const ask = el('button', '发送问题'); ask.type = 'submit'; ask.className = 'btn ' + ('primary'); ask.disabled = true; question.disabled = true;
   const previewButton = el('button', '查看将发送的内容'); previewButton.type = 'button'; previewButton.className = 'btn ' + ('secondary'); previewButton.disabled = true;
   const scopeList = el('fieldset'); scopeList.className = 'global-agent-scope';
-  scopeList.append(el('legend', '参考图书与工序'), el('p', '勾选后可检索与读取这些图书和工序；未选时只讨论问题与所选记忆。'));
+  scopeList.append(el('legend', '参考图书与工序'), el('p', '勾选后可检索与读取这些图书和工序；未选时只讨论问题与所选审阅偏好。'));
   const scopeBooks = el('div'); scopeBooks.className = 'global-agent-choice-list';
   const scopeProcedures = el('div'); scopeProcedures.className = 'global-agent-choice-list'; scopeList.append(scopeBooks, scopeProcedures);
   const scopedBooks = new Set<string>();
@@ -293,12 +294,12 @@ export function mountGlobalAgent(options: {
       const prepared = await options.api.prepareGlobalAgentTurn(askInput());
       if (!root.isConnected || generation !== previewGeneration) return;
       disclosure.replaceChildren(el('h3', '将发送的内容'), el('p', providerLabel(prepared.provider)), el('p', prepared.question),
-        el('p', prepared.textProcessing === 'qualified-original-fields' ? '发送问题和已选记忆的正文；不读取备注或记忆的原文例证。' : '已过滤本社人员姓名；不发送备注、内部记录或记忆的原文例证。'));
+        el('p', prepared.textProcessing === 'qualified-original-fields' ? '发送问题和已选审阅偏好的正文；不读取备注或审阅偏好的原文例证。' : '已过滤本社人员姓名；不发送备注、内部记录或审阅偏好的原文例证。'));
       if (prepared.scope !== undefined) disclosure.append(
         el('p', `可用工具：${prepared.scope.tools.map((tool) => TOOL_LABELS[tool] ?? '本机工具').join('、')}`),
         el('p', `图书：${prepared.scope.books.map((entry) => entry.title).join('、') || '未选'}`),
-        el('p', `工序：${prepared.scope.procedures.map((entry) => `${entry.title} ${technicalWords(`第 ${entry.version} 版`, '版本')}`).join('、') || '未选'}`));
-      if (prepared.sources.length === 0) disclosure.append(el('p', '本次没有选用记忆。'));
+        el('p', `工序：${prepared.scope.procedures.map((entry) => `${entry.title}${technicalWords(` 第 ${entry.version} 版`)}`).join('、') || '未选'}`));
+      if (prepared.sources.length === 0) disclosure.append(el('p', '本次没有选用审阅偏好。'));
       for (const entry of prepared.sources) {
         const row = el('article'); row.className = 'global-agent-source-card';
         const remove = el('button', '本次移除'); remove.type = 'button'; remove.className = 'btn ' + ('quiet');
@@ -328,7 +329,7 @@ export function mountGlobalAgent(options: {
     void sendTurn(askInput());
   });
   const questionActions = el('div'); questionActions.className = 'global-agent-actions'; questionActions.append(ask, previewButton, habits);
-  questionForm.append(field('关于记忆与学习方向的问题', question), questionActions, disclosure);
+  questionForm.append(field('关于审阅偏好与学习方向的问题', question), questionActions, disclosure);
   questionForm.addEventListener('submit', (event) => {
     event.preventDefault();
     if (!ask.disabled) void sendTurn(askInput());
@@ -356,7 +357,7 @@ export function mountGlobalAgent(options: {
     });
     return details;
   };
-  pills.append(pill('引用范围', 'scope', items, scopeList), pill('记忆与治理', 'governance', form), pill('全局指令', 'directives', directives));
+  pills.append(pill('引用范围', 'scope', items, scopeList), pill('审阅偏好与治理', 'governance', form), pill('全局指令', 'directives', directives));
   root.addEventListener('pointerdown', (event) => {
     if (!(event.target instanceof Node) || pills.contains(event.target)) return;
     for (const details of pills.querySelectorAll<HTMLDetailsElement>('details.global-agent-pill[open]')) details.open = false;
@@ -392,7 +393,7 @@ export function mountGlobalAgent(options: {
     // 工序与规则 inspected here; a version enters the turn only when explicitly checked.
     scopeProcedures.replaceChildren(...(projection.procedures ?? []).map((entry) => {
       const row = el('details'); row.className = 'global-agent-procedure'; row.dataset['globalAgentProcedure'] = entry.procedureId;
-      row.append(el('summary', `工序 · ${entry.title} · ${technicalWords(`第 ${entry.version} 版`, '版本')}`), el('p', entry.editorInstruction || '没有编辑说明。'),
+      row.append(el('summary', `工序 · ${entry.title}${technicalWords(` · 第 ${entry.version} 版`)}`), el('p', entry.editorInstruction || '没有编辑说明。'),
         el('p', `阶段：${entry.stages.map((stage) => stage.label).join(' → ')}`));
       if (projection.scopedDialogueState === 'available') {
         const checkbox = el('input'); checkbox.type = 'checkbox'; checkbox.dataset['globalAgentScopeProcedure'] = entry.procedureId;
@@ -413,11 +414,11 @@ export function mountGlobalAgent(options: {
       if (next === undefined) selectedSources.delete(id); else selectedSources.set(id, next);
     }
     invalidatePreview();
-    state.textContent = projection.dialogueState === 'available' ? '可以提问 · 只参考你选入的来源；记忆管理在本机单独记录。' : `暂时无法提问 · ${projection.explanation}`;
+    state.textContent = projection.dialogueState === 'available' ? '可以提问 · 只参考你选入的来源；审阅偏好的管理在本机单独记录。' : `暂时无法提问 · ${projection.explanation}`;
     list.replaceChildren();
     const candidates = projection.sourceCandidates ?? [];
     const ids = new Set([...projection.items.map((item) => item.itemId), ...candidates.map((item) => item.itemId)]);
-    if (ids.size === 0) list.append(el('p', '还没有记忆。可以新建一条本社审阅偏好。'));
+    if (ids.size === 0) list.append(el('p', '还没有审阅偏好。可以新建一条。'));
     for (const id of ids) {
       const item = projection.items.find((item) => item.itemId === id);
       const source = candidates.find((entry) => entry.itemId === id);
@@ -432,7 +433,7 @@ export function mountGlobalAgent(options: {
         } else { selected.delete(id); selectedSources.delete(id); }
         invalidatePreview();
       });
-      const title = source?.title ?? (item?.kind === 'memory' ? '编辑记忆' : '审阅偏好');
+      const title = source?.title ?? '审阅偏好';
       const categoryLabel = projection.categories.find((entry) => entry.categoryId === item?.categoryId)?.label;
       const stateLabel = item === undefined ? '学习监督' : { proposed: '待接受', active: '已启用', frozen: '已冻结', inactive: '已停用' }[item.state];
       const row = el('article'); row.className = 'global-agent-source-card';
@@ -446,7 +447,7 @@ export function mountGlobalAgent(options: {
     if (projection.categories.some((entry) => entry.categoryId === previousCategory)) category.value = previousCategory;
     if (projection.books.some((entry) => entry.bookId === previousBook)) book.value = previousBook;
     directives.replaceChildren(el('h3', '学习监督与治理记录'));
-    for (const directive of projection.directives) directives.append(el('p', `${directive.ordinal} · ${directive.text || '停用所选记忆'} · ${directive.recordedAt}`));
+    for (const directive of projection.directives) directives.append(el('p', `${directive.ordinal} · ${directive.text || '停用所选审阅偏好'} · ${localInstantLabel(directive.recordedAt)}`));
     historyList.replaceChildren();
     for (const dialogue of projection.history) {
       const open = el('button', dialogue.question ?? '查看全域对话'); open.type = 'button'; open.className = 'btn ' + ('quiet global-agent-history-entry');
@@ -476,9 +477,9 @@ export function mountGlobalAgent(options: {
     void options.api.recordLearningSupervision(input).then((projection) => {
       if (!root.isConnected) return;
       render(projection); text.value = '';
-      options.setStatus('已在本机记录，后续使用遵守新的监督与记忆状态。', 'success');
+      options.setStatus('已在本机记录，后续使用遵守新的监督与审阅偏好状态。', 'success');
     }).catch((error: unknown) => {
-      if (root.isConnected) options.setStatus(options.errorMessage(error, '记忆治理未能记录。'), 'error');
+      if (root.isConnected) options.setStatus(options.errorMessage(error, '审阅偏好的治理未能记录。'), 'error');
     }).finally(() => { busy = false; for (const control of controls) control.disabled = false; });
   });
   update();

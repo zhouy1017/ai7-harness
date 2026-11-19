@@ -559,7 +559,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
         card.append(technicalDetails('custom-dimension-facts',
           el('dt', undefined, '维度'), el('dd', 'technical-identity', `${dimension.dimensionId} · ${dimension.kind}`),
           ...dimension.versions.flatMap((version) => [
-            el('dt', undefined, `${technicalWords(`第 ${version.version} 版`, '版本')}`),
+            el('dt', undefined, technicalWords(`第 ${version.version} 版`, localInstantLabel(version.createdAt))),
             el('dd', 'technical-identity', `${version.versionId} · ${version.documentDigest} · ${localInstantLabel(version.createdAt)}`),
           ])));
       }

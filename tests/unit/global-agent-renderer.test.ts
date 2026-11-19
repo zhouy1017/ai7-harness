@@ -101,7 +101,7 @@ it('localizes tool results and supervision effects and preserves selections on p
   const turn = { ...dialogue(), toolCalls: [{ attemptId: 'internal-attempt-id', callId: 'call', tool: 'retrieve', arguments: '{"query":"原始参数"}', outcome: 'returned' as const, result: '[{},{}]' }],
     supervisionProposals: [{ attemptId: 'internal-attempt-id', callId: 'proposal', input: { operation: 'supervise' as const, targets: [PIN], scope: { kind: 'house' as const }, categoryId: 'typos-and-usage', text: '谨慎归纳。', effect: 'freeze' as const } }] };
   const { root, find, choose, api, submit, setProjection } = harness(turn, true); await settle();
-  expect(find('[data-global-agent-tool-calls]').textContent).toContain('检索跨书与记忆');
+  expect(find('[data-global-agent-tool-calls]').textContent).toContain('检索跨书与审阅偏好');
   expect(find('[data-global-agent-tool-calls]').textContent).toContain('返回 2 条结果');
   expect(find('[data-global-agent-proposals]').textContent).toContain('冻结规则');
   expect(find('[data-global-agent-tool-calls] pre').closest('details')?.hasAttribute('open')).toBe(false);

@@ -1,3 +1,4 @@
+import { serviceWords, stateWords } from './service-wording.js';
 import { LEDGER_TASK_LAUNCH_KINDS } from '../shared/runtime-execution-config.js';
 import { createLaunchBarPresentation, launchBudgetControl, mountLaunchBar, type LaunchBar, type TaskLaunchOperation, type TaskLaunchRequest } from './components/launch-bar.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
@@ -49,7 +50,7 @@ import {
   TASK_BAR_CANCEL_CONFIRM,
   TASK_BAR_CANCEL_FAILED,
   TASK_BAR_CANCEL_IMPACT_HEADING,
-  TASK_BAR_UNCONFIRMED_HEADING,
+  taskBarUnconfirmedHeading,
   taskBarUnconfirmedUnit,
   TASK_BAR_VIEW_UNCONFIRMED,
   unconfirmedHeading,
@@ -845,7 +846,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     pill.dataset['pillTone'] = tone.tone;
     pill.dataset['pillShape'] = tone.shape;
     pill.dataset['busy'] = String(['running', 'pausing', 'cancelling'].includes(next.state.key));
-    pill.textContent = next.runOutcome?.label ?? next.state.label;
+    pill.textContent = serviceWords(next.runOutcome?.label ?? next.state.label);
     const active = document.activeElement;
     const restore = active instanceof HTMLElement && (body.contains(active) || bar.contains(active)) ? active.dataset['taskDrawerControl'] ?? null : null;
     paintQuestions(next);
@@ -890,7 +891,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (plan?.ref !== next.ref || root.hidden) return;
       const item = overview.groups.flatMap((group) => group.items).find((item) => item.bookId === next.bookId && item.plan?.ref === next.ref);
       footer.hidden = false;
-      footer.replaceChildren(document.createTextNode(`已记录 · ${item?.queuePosition == null ? '等待运行名额' : `排在第 ${item.queuePosition} 位`} · `));
+      footer.replaceChildren(document.createTextNode(`已记录 · ${item?.queuePosition == null ? '排队中' : `排在第 ${item.queuePosition} 位`} · `));
       const link = control('查看任务总览', 'quiet', 'overview'); link.addEventListener('click', () => options.openTaskOverview?.()); footer.append(link);
     });
     if (interrupted) disableAll();
@@ -1090,7 +1091,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const asked = request;
     if (current === null || current.unconfirmed?.digest !== digest || !beginWork()) return;
     for (const button of body.querySelectorAll<HTMLButtonElement>('.task-plan-unconfirmed button')) button.disabled = true;
-    options.setStatus('正在记下保留为缺口…', 'busy');
+    options.setStatus('正在记下…', 'busy');
     try {
       await api.resolveUnconfirmedOutcomes({ kind: current.kind, ref: current.ref, digest });
       unconfirmedRecordShown = false;
@@ -1315,7 +1316,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const committed = committedEdit(entry);
       const shown = shownEdit(next, entry.id, committed);
       if (shown === 'removed') item.classList.add('task-plan-item-removed');
-      item.append(el('span', 'task-plan-adaptation', entry.label));
+      item.append(el('span', 'task-plan-adaptation', serviceWords(entry.label)));
       if (entry.removable || entry.movable) item.append(...adaptationControls(next, entry, committed, shown));
       if (shown === 'ask-first') asked.push(item);
       else adaptations.append(item);
@@ -1371,7 +1372,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       row.append(line);
     }
     if (!rule.canSet || rule.planEnvelopeDigest === null) {
-      row.append(unavailable(TASK_PLAN_DEFAULT_RULE, 'default-rule', rule.reason ?? TASK_PLAN_DEFAULT_RULE_FAILED));
+      row.append(unavailable(TASK_PLAN_DEFAULT_RULE, 'default-rule', serviceWords(rule.reason) ?? TASK_PLAN_DEFAULT_RULE_FAILED));
       section.append(row);
       return section;
     }
@@ -1379,7 +1380,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const open = control(TASK_PLAN_DEFAULT_RULE, 'secondary', 'default-rule');
     const binds = el('dl', 'task-plan-facts task-plan-default-rule-binds');
     for (const row of rule.binds) {
-      const value = el('dd', undefined, row.value);
+      const value = el('dd', undefined, serviceWords(row.value));
       value.dataset['defaultRuleBind'] = row.label;
       binds.append(el('dt', undefined, row.label), value);
     }
@@ -1490,7 +1491,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       status.tabIndex = -1;
       parts.push(status);
     } else if (technicalLayerVisible) {
-      const state = el('span', 'state-term task-bar-state', next.state.label);
+      const state = el('span', 'state-term task-bar-state', stateWords(next.state));
       state.dataset['pillTone'] = TASK_PLAN_STATE_PILLS[next.state.key].tone;
       parts.push(state);
     }
@@ -2080,7 +2081,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       assuranceBuffers.delete(editKey(current));
       if (budgetForm?.key === editKey(current)) budgetForm = null;
       const ordinal = typeof updated.planVersion === 'number' ? updated.planVersion : updated.planVersion?.ordinal;
-      options.setStatus(`计划已更新为${technicalWords(`第 ${ordinal ?? '?'} 版`, '版本')}。`, 'success');
+      options.setStatus(technicalWords(`计划已更新为第 ${ordinal ?? '?'} 版。`, '计划已更新。'), 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
       // 保存并开始 (Issue #1431 item 40): the version just written starts in the same click, through the one start path.
@@ -2178,7 +2179,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       }
       // The status line names the event, never a state the Run will leave (V2-UX-LIVE-004): the bar shows the state. A
       // start waiting for a place is recorded, and nothing has begun (CONC-007).
-      options.setStatus(current.kind === 'fixed-task' ? '已记录授权 · 未派发' : recordOnly ? '已记录运行；派发前会被阻止' : queued ? TASK_BAR_QUEUED_STATUS : '已开始任务', 'success');
+      options.setStatus(current.kind === 'fixed-task' ? technicalWords('已记录授权 · 未派发', '已记录 · 没有开始') : recordOnly ? technicalWords('已记录运行；派发前会被阻止', '已记录 · 现在没有可用的模型服务，没有开始') : queued ? TASK_BAR_QUEUED_STATUS : '已开始任务', 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
@@ -2313,7 +2314,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const redo = current?.redo ?? null;
     if (current === null || redo === null || !beginWork()) return;
     redoPending = null;
-    options.setStatus('正在准备改计划重做的新任务…', 'busy');
+    options.setStatus('正在准备重新开始的新任务…', 'busy');
     let prepared: string | null = null;
     try {
       if (current.custom !== undefined && !('kind' in redo.prepare)) {
@@ -2324,7 +2325,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           : await api.prepareBaselineAnalysis({ goal: redo.prepare.goal, update: redo.prepare.update, reconfirm: false, redoOf: redo.prepare.redoOf });
         const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
         if (completed.state === 'cancelled') {
-          options.setStatus('改计划重做的准备已取消；这次运行保持已取消。', 'success');
+          options.setStatus('重新开始的准备已取消；这次运行保持已取消。', 'success');
           return;
         }
         if (completed.result === null) throw new Error(TASK_BAR_REDO_FAILED);
@@ -2358,7 +2359,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const asked = request;
     const again = current?.reprepare ?? null;
     if (current === null || again === null || !beginWork()) return;
-    options.setStatus('正在重新准备这项任务…', 'busy');
+    options.setStatus('正在另做一份计划…', 'busy');
     let prepared: string | null = null;
     try {
       if (current.custom !== undefined) {
@@ -2367,7 +2368,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         const initial = await api.prepareBaselineAnalysis({ goal: again.prepare.goal, update: again.prepare.update, reconfirm: false, redoOf: null });
         const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
         if (completed.state === 'cancelled') {
-          options.setStatus('重新准备已取消；这项任务保持原样。', 'success');
+          options.setStatus('另做一份计划已取消；这项任务保持原样。', 'success');
           return;
         }
         if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
@@ -2391,7 +2392,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const section = el('section', 'task-bar-unconfirmed');
     section.id = UNCONFIRMED_ID;
     section.setAttribute('role', 'group');
-    const heading = el('h4', undefined, TASK_BAR_UNCONFIRMED_HEADING);
+    const heading = el('h4', undefined, taskBarUnconfirmedHeading());
     heading.id = uid('unconfirmed');
     heading.tabIndex = -1;
     // Named as the bar's controls are, so a repaint while the editor reads the list keeps focus on it.
@@ -2623,14 +2624,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const current = plan;
     const asked = request;
     if (current === null || current.runControl === null || !beginWork()) return;
-    options.setStatus('正在续行…', 'busy');
+    options.setStatus('正在继续…', 'busy');
     try {
       const result = await controlRun(current, 'resume');
       const stopReason = current.runControl.stopReason;
       const repeated = stopReason !== undefined
         && result.runRecordId === current.runControl.runRecordId
         && (result.stopReason === stopReason || await observeImmediateResumeStop(current, stopReason));
-      const status = stopReason === undefined ? { message: '已续行，从已保存的进度接着读。', tone: 'success' as const }
+      const status = stopReason === undefined ? { message: '已继续，从已保存的进度接着读。', tone: 'success' as const }
         : taskBarResumeOutcome(stopReason, repeated);
       options.setStatus(status.message, status.tone);
       focusBar = true;

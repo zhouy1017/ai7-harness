@@ -189,10 +189,10 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
       const service = backend.backendId.slice('search-'.length);
       const source = projection.routeChoice.routes.find((route) => route.route.startsWith(`${service}-`))?.connection;
       if (source != null) {
-        const reuse = button(`复用${source.connectionName}模型凭据`, 'secondary', async () => {
+        const reuse = button(`复用${source.connectionName}模型密钥`, 'secondary', async () => {
           reuse.disabled = true;
-          try { render(await api.saveSearchBackendCredential({ backendId: backend.backendId, reuseModelCredential: true })); setStatus('模型渠道凭据已同步到联网检索。', 'success'); }
-          catch (error) { reuse.disabled = source.credentialOperationState !== 'ready'; setStatus(errorMessage(error, '无法同步模型渠道凭据。'), 'error'); }
+          try { render(await api.saveSearchBackendCredential({ backendId: backend.backendId, reuseModelCredential: true })); setStatus('模型渠道密钥已同步到联网检索。', 'success'); }
+          catch (error) { reuse.disabled = source.credentialOperationState !== 'ready'; setStatus(errorMessage(error, '无法同步模型渠道密钥。'), 'error'); }
         });
         reuse.dataset['action'] = 'reuse-model-credential'; reuse.disabled = source.credentialOperationState !== 'ready';
         actions.append(reuse);

@@ -35,10 +35,16 @@ export async function setLaunchBudget(renderer, waitFor, root, value, name) {
   await renderer.send('Input.insertText', { text: value });
 }
 
-/** True when the bar's popover is shown, has a size, and lies inside the window (a closed popover has a zero rect). */
+/**
+ * True when the bar's popover is shown, has a size, lies inside the window (a closed popover has a zero rect) and stands clear
+ * of its own summary. The panel is placed again when content arriving after it opened changes its size (#1531, J-13): until
+ * then it may lie over the summary that closes it, and a press aimed there would land on the panel.
+ */
 export function popoverShownInside(panelExpression) {
   return `(() => {const panel=${panelExpression};if(!panel||!panel.matches(':popover-open'))return false;const r=panel.getBoundingClientRect();
-    return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&document.documentElement.scrollWidth<=innerWidth;})()`;
+    const summary=panel.parentElement?.querySelector(':scope > summary');const s=summary?.getBoundingClientRect();
+    const clear=!s||r.bottom<=s.top||r.top>=s.bottom||r.right<=s.left||r.left>=s.right;
+    return clear&&r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&document.documentElement.scrollWidth<=innerWidth;})()`;
 }
 
 /**

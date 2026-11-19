@@ -1109,7 +1109,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='审阅偏好已打开' && document.querySelector('[data-learning-enabled]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-quality-loaded');
     await assertRenderer(primary, `!document.querySelector('#persistence-status')?.textContent.includes('该页在开发者模式下显示') && !document.body.textContent.includes('该页在开发者模式下显示')`, 'ordinary-quality-no-shelved-notice');
     // #1521: AI 助手 is in the sidebar, so the page's footer button to it is gone in ordinary mode.
-    await assertRenderer(primary, `!Array.from(document.querySelectorAll('[data-screen="quality-learning"] button'), (node) => node.textContent).includes('全域对话历史')`, 'ordinary-quality-no-global-history-button');
+    await assertRenderer(primary, `!Array.from(document.querySelectorAll('[data-screen="quality-learning"] button'), (node) => node.textContent).includes('对话历史')`, 'ordinary-quality-no-global-history-button');
     // #1408: an editor's own rule is an active rule the moment it is saved. Ordinary mode, public synthetic text; the rule is
     // created, edited as the same rule, then stopped, so this stage leaves no active preference behind.
     const preferenceText = 'J12 合成偏好：保留有意使用的短句。';
@@ -1130,7 +1130,7 @@ async function main() {
       const save=Array.from(form.querySelectorAll('button')).find(node=>node.textContent==='新增并启用偏好');
       return Boolean(category&&scope&&text&&save)&&save.type==='submit'&&!save.disabled&&text.required&&text.value===''&&
         Array.from(category.options).some(option=>option.value==='style-and-format')&&
-        scope.options[0].value===''&&scope.options[0].textContent==='全社'&&
+        scope.options[0].value===''&&scope.options[0].textContent==='本社'&&
         Array.from(scope.options).slice(1).every(option=>option.textContent.startsWith('本书：《'));
     })()`, 'ordinary-preference-editor-shape');
     await assertRenderer(primary, `(() => {
@@ -1985,7 +1985,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'data-storage-open-settings-hub');
     await click(primary, '数据与存储', 'data-storage-open');
     await waitFor(primary, `document.querySelector('[data-screen="data-storage"]')`, 'data-storage-ready');
-    await assertRenderer(primary, `(() => { const view=document.querySelector('.data-storage-summary'); return view?.dataset.platform===${JSON.stringify(process.platform === 'win32' ? 'windows' : 'macos')} && view.dataset.runtimeForm==='source-checkout' && view.dataset.channel==='source-checkout' && [...view.querySelectorAll('dt')].find((term)=>term.textContent==='分发渠道')?.nextElementSibling?.textContent==='源码检出' &&view.dataset.footprintMaximumEntries==='128' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(dataRoot)} && view.textContent.includes('产品数据位置') && view.textContent.includes('凭据与产品数据分开') && view.textContent.includes(${JSON.stringify(process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串')}) && !Object.keys(window.ai7).some((key)=>key.toLowerCase().includes('path')); })()`, 'truthful-data-location');
+    await assertRenderer(primary, `(() => { const view=document.querySelector('.data-storage-summary'); return view?.dataset.platform===${JSON.stringify(process.platform === 'win32' ? 'windows' : 'macos')} && view.dataset.runtimeForm==='source-checkout' && view.dataset.channel==='source-checkout' && [...view.querySelectorAll('dt')].find((term)=>term.textContent==='分发渠道')?.nextElementSibling?.textContent==='源码检出' &&view.dataset.footprintMaximumEntries==='128' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(dataRoot)} && view.textContent.includes('产品数据位置') && view.textContent.includes('密钥与产品数据分开') && view.textContent.includes(${JSON.stringify(process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串')}) && !Object.keys(window.ai7).some((key)=>key.toLowerCase().includes('path')); })()`, 'truthful-data-location');
     // 版本 (Issue #433, S85a; DSTO-016): the software version and the Data Version apart. The same software reopened the data
     // after the restart, so the store keeps its one version record and has seen no software update.
     const packageVersion = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8')).version;
@@ -2112,7 +2112,7 @@ async function main() {
     await click(primary, '保存并获取模型', 'model-credential-save');
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'model-credential-ready');
     // #1304: development-ci never performs account discovery; saving succeeds while discovery reports its failure.
-    await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('凭据已保存，但无法获取模型列表：模型服务不可达，请检查网络或网络代理设置') && document.querySelector('.model-service-technical:is(:not([open]), [hidden]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')`, 'model-save-discovery-failure-visible');
+    await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('密钥已保存，但无法获取模型列表：模型服务不可达，请检查网络或网络代理设置') && document.querySelector('.model-service-technical:is(:not([open]), [hidden]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')`, 'model-save-discovery-failure-visible');
     await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.type==='password' && input.autocomplete==='off' && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-secret-not-redisplayed');
     // The one flow (Issue #1215) offers the saved channel's model to both roles, already the choice both hold: nothing to apply.
     await assertRenderer(primary, `(() => {
@@ -2439,7 +2439,7 @@ async function main() {
     const replacementCatalogue = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform').models.map(model=>model.modelId).sort().join(','))`);
     await fill(primary, '#main-editorial-credential', secretTwo, 'model-credential-replacement');
     await click(primary, '保存并获取模型', 'model-credential-replace');
-    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('#main-editorial-credential')?.value==='' && document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('凭据已保存，但无法获取模型列表：模型服务不可达，请检查网络或网络代理设置') && document.querySelector('.model-service-technical:is(:not([open]), [hidden]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]') && document.querySelector('.model-service-settings')?.dataset.providerTransmissionCount==='0'`, 'model-replacement-ready');
+    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('#main-editorial-credential')?.value==='' && document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('密钥已保存，但无法获取模型列表：模型服务不可达，请检查网络或网络代理设置') && document.querySelector('.model-service-technical:is(:not([open]), [hidden]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]') && document.querySelector('.model-service-settings')?.dataset.providerTransmissionCount==='0'`, 'model-replacement-ready');
     requireJourney(replacementCatalogue.split(',').includes('deepseek-flash') && await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform').models.map(model=>model.modelId).sort().join(',')===${JSON.stringify(replacementCatalogue)})`), 'model-replacement-catalogue-retained');
     const replacedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(
@@ -2696,7 +2696,7 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-remove-open-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-remove-open-settings-hub');
     await waitFor(primary, `document.querySelector('[data-credential-state="ready"]')`, 'model-remove-ready');
-    await click(primary, '移除凭据', 'model-remove');
+    await click(primary, '移除密钥', 'model-remove');
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     const removedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(

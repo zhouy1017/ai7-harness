@@ -25,7 +25,7 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 //
 // Concurrent Book work (Issue #49, plan slice S14; ADR 0021, V2-UX-CONC-001 to 009) follows in the same launch, with
 // J-10's unit hold holding each Run's reading range in flight: a third Book is made from the same input; 甲's first
-// baseline and 丙's execute at once, and 乙's range update, started while both places are taken, waits as 等待运行名额 —
+// baseline and 丙's execute at once, and 乙's range update, started while both places are taken, waits as 排队中 —
 // recorded, nothing sent — in the Task Drawer, on ②A and in 待我处理, which lists the three by Book and counts none.
 // A second Book window opens through 工作概览 → 打开另一本图书 (Issue #632): both windows show the same attention
 // items, words and count, and follow 甲 pausing and 乙 starting without taking the main window's manuscript focus.
@@ -69,8 +69,9 @@ const GROUP_LABELS = Object.freeze(['异常与结果待确认', '等待你的决
 const REASON_BLOCKED = '模型服务当前不可用，任务尚未开始。';
 // A start waiting on the instance's concurrency governor (Issue #49, S14; CONC-007), in 待我处理's words and the bar's
 // (`src/renderer/task-drawer-labels.ts`), pinned there by their unit suites.
+// Read in developer mode (the service's words, #1531 last look S8); ordinary mode reads 「排队中，轮到后自动开始。」.
 const REASON_WAITING_CAPACITY = '正在等运行名额，轮到后自动开始。';
-const QUEUED_NOTE = '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
+const QUEUED_NOTE = '排队中：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
 // 后台处理登记's words (`src/service/background-analysis-enrollments.ts`, `src/renderer/background-analysis-labels.ts`), pinned
 // there by `tests/unit/background-analysis.test.ts`.
 const BACKGROUND_CURRENT_LINE = '现在：分析结果与当前稿件一致，没有要做的。';
@@ -78,8 +79,8 @@ const BACKGROUND_REVOKED_LINE = '现在：已撤销：不会再开始新的后�
 /** Issue #864: the ceiling 登记 requires in this Journey, its words before and after, and 暂停's line. */
 const BACKGROUND_CEILING_TOKENS = 300000;
 const BACKGROUND_CEILING_REQUIRED = '登记时由你设定 · 必填；书系或全部图书按书平分';
-const BACKGROUND_CEILING_FIRST = '请先填写预算上限。';
-const BACKGROUND_PAUSED_LINE = '现在：已暂停：续行之前不会开始新的后台分析；已经开始的运行照常进行。';
+const BACKGROUND_CEILING_FIRST = '请先填写用量上限。';
+const BACKGROUND_PAUSED_LINE = '现在：已暂停：继续之前不会开始新的后台分析；已经开始的运行照常进行。';
 const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
 /**
  * The quiet period this Journey's launch sets for 后台处理登记 (`--j09-background-quiet-ms`, development-ci and J-09 only; #713
@@ -997,7 +998,7 @@ async function main() {
     const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference) && readyConnection?.credentialOperationState === 'ready', 'model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除凭据', 'model-remove');
+    await click(renderer, '移除密钥', 'model-remove');
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     credentialRemoved = true;
@@ -1076,7 +1077,7 @@ async function main() {
     requireJourney(exceptions.length === 1 && blockedItem?.itemId === `analysis:${blockedA.taskIntent.taskIntentId}` && blockedItem.state === 'analysis-blocked' &&
       blockedItem.blocked === 'true' && blockedItem.target === 'analysis' && blockedItem.bookId === bookA && blockedItem.book === `《${FIRST.title}》` &&
       blockedItem.object === '基线分析 · 首次基线分析' && blockedItem.openName === `查看运行 · 《${FIRST.title}》 · 基线分析 · 首次基线分析` &&
-      blockedItem.pill === '派发前已阻止' && blockedItem.shape === 'diamond' && blockedItem.reason === REASON_BLOCKED &&
+      blockedItem.pill === '没有开始' && blockedItem.shape === 'diamond' && blockedItem.reason === REASON_BLOCKED &&
       blockedItem.next === '查看运行' && (blockedItem.time ?? '').startsWith('记录于 ') && blockedItem.technical === false,
     'blocked-run-item', blockedItem);
     requireJourney(decisions.length === 0, 'no-preapproval-decision');
@@ -1215,18 +1216,18 @@ async function main() {
 
     at('concurrent-queued-run');
     // 乙's range update, reconfirmed and started while 甲 and 丙 hold both places: its start is recorded and waits for a
-    // place — 等待运行名额 in the bar, with why and its 取消, and on ②A — and nothing of it is sent.
+    // place — 排队中 in the bar, with why and its 取消, and on ②A — and nothing of it is sent.
     await toLibrary(renderer, 'concurrent-b');
     await openAnalysisOf(renderer, bookB, 'concurrent-b-workspace');
     await prepareRange(renderer, 8, 'concurrent-b-range');
     const pendingTaskB = await launchTaskFromBar(renderer, waitFor, 'concurrent-b-start');
     await waitForBar(renderer, {
-      state: 'queued', pill: '等待运行名额', status: '等待运行名额', note: QUEUED_NOTE,
+      state: 'queued', pill: '排队中', status: '排队中', note: QUEUED_NOTE,
       actions: [['cancel-wait', '取消', 'enabled'], ['run-link', '查看运行', 'enabled']],
     }, 'concurrent-b-queued-bar', 30_000);
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='queued' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='等待运行名额'`, 'concurrent-b-queued-card', 30_000);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='queued' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='排队中'`, 'concurrent-b-queued-card', 30_000);
     const queuedB = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(queuedB?.bookId === bookB && queuedB.state === 'queued' && queuedB.stateLabel === '等待运行名额' &&
+    requireJourney(queuedB?.bookId === bookB && queuedB.state === 'queued' && queuedB.stateLabel === '排队中' &&
       queuedB.taskIntent?.taskIntentId === pendingTaskB && queuedB.run?.state === 'authorized' &&
       JSON.stringify(queuedB.run.transitions.map((transition) => transition.state)) === '["authorized"]' && (queuedB.run.progress ?? null) === null &&
       (queuedB.run.attempt ?? null) === null,
@@ -1234,13 +1235,13 @@ async function main() {
     const runB = queuedB.run.runRecordId;
 
     at('j14-queued-forced-colors');
-    // Without colour 等待运行名额 keeps its pill's hollow ring, as every wait before a Run begins.
+    // Without colour 排队中 keeps its pill's hollow ring, as every wait before a Run begins.
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
-    await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const pill=document.querySelector('#task-drawer .task-drawer-pill'); return pill instanceof HTMLElement && pill.textContent==='等待运行名额' && pill.dataset.pillShape==='ring' && getComputedStyle(pill, '::before').content !== 'none'; })()`, 'queued-pill-without-colour');
+    await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const pill=document.querySelector('#task-drawer .task-drawer-pill'); return pill instanceof HTMLElement && pill.textContent==='排队中' && pill.dataset.pillShape==='ring' && getComputedStyle(pill, '::before').content !== 'none'; })()`, 'queued-pill-without-colour');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
 
     at('concurrent-attention');
-    // 待我处理 lists the three under 运行中与已暂停, each by its own Book — 甲 and 丙 运行中, 乙 等待运行名额 with why —
+    // 待我处理 lists the three under 运行中与已暂停, each by its own Book — 甲 and 丙 运行中, 乙 排队中 with why —
     // counts none of them, and has nothing waiting for the editor.
     await openAttention(renderer, 'concurrent-attention');
     const concurrentService = await renderer.evaluate(READ_SERVICE);
@@ -1254,7 +1255,7 @@ async function main() {
       itemOf(bookA)?.state === 'analysis-running' && itemOf(bookA).book === `《${FIRST.title}》` &&
       itemOf(bookC)?.state === 'analysis-running' && itemOf(bookC).book === `《${THIRD.title}》` &&
       queuedItem?.state === 'analysis-waiting-capacity' && queuedItem.book === `《${SECOND.title}》` && queuedItem.itemId === `analysis:${pendingTaskB}` &&
-      queuedItem.pill === '等待运行名额' && queuedItem.shape === 'ring' && queuedItem.reason === REASON_WAITING_CAPACITY && queuedItem.blocked === 'false' &&
+      queuedItem.pill === '排队中' && queuedItem.shape === 'ring' && queuedItem.reason === REASON_WAITING_CAPACITY && queuedItem.blocked === 'false' &&
       queuedItem.next === '查看运行' && !concurrentPage.groups.some((group) => group.key === 'exceptions' || group.key === 'decisions'),
     'concurrent-attention-by-book', concurrentPage?.groups?.map((group) => ({ key: group.key, items: group.items.map((item) => [item.book, item.state, item.pill]) })));
     await waitFor(renderer, `document.querySelector('#global-attention-entry')?.dataset.attentionCount==='0' && document.querySelector('#global-attention-entry .global-attention-badge')?.hidden===true`, 'concurrent-count-zero', 30_000);
@@ -1367,7 +1368,7 @@ async function main() {
     requireJourney(Number.isSafeInteger(beforeAccept?.journalSequence) && beforeAccept.applied === false, 'apply-c-suggestion-wrote-no-text', beforeAccept);
     await openMarkCard(renderer, 'change-suggestion', markable, 'apply-c-card');
     await assertRenderer(renderer, `window.__j09.act('accept-and-apply')`, 'apply-c-accept');
-    await waitFor(renderer, `window.__j09.card()?.querySelector('[data-mark-state]')?.textContent === '已应用' && window.__j09.markText('change-suggestion', ${JSON.stringify(markable)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j09.status().includes('已应用这条修改建议')`, 'apply-c-applied', 30_000);
+    await waitFor(renderer, `window.__j09.card()?.querySelector('[data-mark-state]')?.textContent === '已接受' && window.__j09.markText('change-suggestion', ${JSON.stringify(markable)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j09.status().includes('已接受这条修改建议')`, 'apply-c-applied', 30_000);
     const afterApply = await renderer.evaluate(`${READ_WINDOW_C}.then((page) => ({ revisionId: page.revisionId, journalSequence: page.journalSequence, applied: page.blocks.find((block) => block.blockId === ${JSON.stringify(markable)})?.text.includes(${JSON.stringify(APPLIED_TEXT)}) === true }))`);
     requireJourney(afterApply.journalSequence === beforeAccept.journalSequence + 1 && afterApply.applied === true,
       'apply-c-wrote-once', { beforeMark: beforeMark.journalSequence, beforeAccept: beforeAccept.journalSequence, after: afterApply.journalSequence, applied: afterApply.applied });
@@ -1546,7 +1547,7 @@ async function main() {
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='paused' && document.activeElement===document.querySelector('[data-background-action="resume"]')`, 'background-paused', 30_000);
     const pausedBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(pausedBlock.pill === '已暂停' && pausedBlock.nextLine === BACKGROUND_PAUSED_LINE && pausedBlock.history.length === 2 && pausedBlock.startedLines.length === 1 &&
-      JSON.stringify(pausedBlock.actions) === JSON.stringify([['resume', '续行', 'enabled'], ['revoke', '撤销登记', 'enabled']]),
+      JSON.stringify(pausedBlock.actions) === JSON.stringify([['resume', '继续', 'enabled'], ['revoke', '撤销登记', 'enabled']]),
     'background-paused-read', pausedBlock);
     const pausedService = await renderer.evaluate(`window.ai7.inspectBackgroundAnalysisEnrollment()`);
     requireJourney(pausedService?.state === 'paused' && pausedService.enrollment?.ordinal === 1 && pausedService.hold?.canResume === true &&
@@ -1569,7 +1570,7 @@ async function main() {
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='revoked'`, 'background-revoked', 30_000);
     // The result is announced where every success is (the polite toast; #persistence-status shows only busy and error lines).
     const revokeAnnounced = await renderer.evaluate(`({ toast: document.querySelector('[data-toast]')?.textContent ?? null, tone: document.querySelector('[data-toast]')?.dataset.tone ?? null, hidden: document.querySelector('[data-toast]')?.hidden ?? null, status: document.querySelector('#persistence-status')?.textContent ?? null })`);
-    requireJourney(revokeAnnounced?.toast === '已撤销后台处理登记：AI7 不再为这本书开始新的后台分析；已经开始的运行照常进行，可以在它的计划里暂停或取消；已有的结果、运行记录、已经发送的内容和这份登记的历史都保留，不会撤回或改写' &&
+    requireJourney(revokeAnnounced?.toast === '已关闭空闲时自动更新分析：AI7 不再为这本书开始新的后台分析；已经开始的运行照常进行，可以在它的计划里暂停或取消；已有的结果、运行记录、已经发送的内容和这份登记的历史都保留，不会撤回或改写' &&
       revokeAnnounced.tone === 'success' && revokeAnnounced.hidden === false, 'background-revoke-consequences', revokeAnnounced);
     const revokedBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(revokedBlock.pill === '已撤销' && revokedBlock.nextLine === BACKGROUND_REVOKED_LINE && revokedBlock.history.length === 4 &&

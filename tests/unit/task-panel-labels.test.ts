@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { setTechnicalLayerVisible, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import * as labels from '../../src/renderer/task-panel-labels.js';
 import { composeOptions } from '../../src/renderer/task-panel.js';
 import type {
@@ -90,6 +91,18 @@ describe('发起全书任务', () => {
       [false, '另一项任务正在运行', null],
       [false, '另一项任务正在运行', null],
     ]);
+  });
+});
+
+describe('the analysis card’s reason (Issue #1531, review B1 a)', () => {
+  it('says why nothing can start in the words of the editor', () => {
+    const was = technicalLayerVisible;
+    setTechnicalLayerVisible(false);
+    onTestFinished(() => setTechnicalLayerVisible(was));
+    const blocked = { actions: { canPrepare: false, canAuthorize: false, canReconfirmPlan: false }, updateControls: { blockedByActiveRun: true,
+      blockedReason: '有一项分析任务在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。',
+      actions: Object.fromEntries(['sync-current', 'reanalyze-range', 'reanalyze-book'].map((mode) => [mode, { mode, label: mode, goal: mode, meaning: mode, available: true, unavailableReason: null, expected: null }])) } } as unknown as BaselineAnalysisProjection;
+    expect(composeOptions(blocked).map((option) => option.reason)).toEqual(Array(2).fill('有一项分析任务在排队；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。'));
   });
 });
 

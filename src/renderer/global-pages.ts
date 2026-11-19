@@ -1,6 +1,6 @@
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 
-import { technicalLayerVisible, technicalDisclosure } from './technical-layer.js';
+import { technicalLayerVisible, technicalDisclosure, technicalWords } from './technical-layer.js';
 
 import type { BookTaskItemProjection, BookWorkbenchRoute, BookWorkOverviewProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, GlobalAttentionTarget, ImportCommitProjection, ManuscriptReimportCommitProjection, ImportStartupProjection, ManuscriptWindowProjection, ResolvedBookWorkbenchRoute, TaskPlanKind } from '../shared/protocol.js';
 
@@ -231,22 +231,22 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
         if (!navigationRoute.isCurrent()) return;
         const receipt = await api.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'settled' });
         if (!navigationRoute.isCurrent()) return;
-        const labels = { applied: '已应用', 'not-applied': '未应用', confirming: '正在确认应用结果', unresolved: '结果待确认' } as const;
+        const labels = { applied: '已接受', 'not-applied': '未写入稿件', confirming: '正在确认修改是否生效', unresolved: '修改是否生效待确认' } as const;
         const content = panel(); const heading = element('h2', undefined, labels[receipt.state]); const reason = element('p', undefined, receipt.reason);
         heading.dataset['applyReceiptState'] = receipt.state; content.append(heading, reason);
         // The raw receipt is diagnostics only (Issue #1431 item 103), gated like the proposal workspace's.
-        const details = element('details'); const full = element('pre', undefined, JSON.stringify(receipt, null, 2)); details.append(element('summary', undefined, '查看完整凭据'), full);
+        const details = element('details'); const full = element('pre', undefined, JSON.stringify(receipt, null, 2)); details.append(element('summary', undefined, technicalWords('查看完整凭据')), full);
         if (technicalLayerVisible) content.append(technicalDisclosure(details));
         // EREC-005: the editor's re-check reads the authoritative records by the same Effect identity; it dispatches nothing.
         if (receipt.state === 'unresolved') {
-          const recheck = button('重新核对应用结果', 'primary', async () => {
+          const recheck = button('重新核对修改结果', 'primary', async () => {
             const next = await api.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'recheck' });
             heading.textContent = labels[next.state]; heading.dataset['applyReceiptState'] = next.state; reason.textContent = next.reason; full.textContent = JSON.stringify(next, null, 2);
             if (next.state !== 'unresolved') recheck.remove();
           });
           content.append(recheck);
         }
-        content.append(button('在稿件中查看', 'secondary', async () => { const current = navigation.begin(); const opened = await api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null }); if (current.isCurrent()) await openEditorWindow(opened, route.bookTitle); }), button('返回提案', 'secondary', () => renderProposalWorkspace({ manuscriptId: target.manuscriptId, branchId: target.branchId, resultId: null }, target.bookId, route.bookTitle)));
+        content.append(button('在稿件中查看', 'secondary', async () => { const current = navigation.begin(); const opened = await api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null }); if (current.isCurrent()) await openEditorWindow(opened, route.bookTitle); }), button('返回修改建议', 'secondary', () => renderProposalWorkspace({ manuscriptId: target.manuscriptId, branchId: target.branchId, resultId: null }, target.bookId, route.bookTitle)));
         replaceScreen('apply-receipt', content, { bookId: target.bookId, title: route.bookTitle, section: 'review' });
       });
       return;

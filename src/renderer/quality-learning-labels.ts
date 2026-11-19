@@ -27,7 +27,7 @@ export const LEARNING_NO_DECISION = '还没有决定。';
 export const LEARNING_CHANGED_NOTE = '这条材料在你决定之后改过：原来的决定不再适用于现在的内容，但仍留在记录里。';
 /** What a decision here does and does not do (LEARN-009, LEARN-010), said once on every card. */
 export const LEARNING_INFLUENCE =
-  '纳入以后，它只可能在所选范围内帮 AI7 以后的建议更接近你的判断：不会改动稿件或它来自的记录，不会自动生效为规则，不会启用记忆，也不会被发送出去。';
+  '纳入以后，它只可能在所选范围内帮 AI7 以后的建议更接近你的判断：不会改动稿件或它来自的记录，不会自动生效为规则，不会启用审阅偏好，也不会被发送出去。';
 /** `纳入当前书系` waits for Series (Issue #63, S28): shown, and saying why it is not there (LEARN-005). */
 export const LEARNING_SERIES = '纳入当前书系';
 export const LEARNING_SERIES_UNAVAILABLE = '还没有书系：书系接通后，才能把材料纳入书系。';
@@ -61,7 +61,7 @@ export const LEARNING_STATE_LABELS: Readonly<Record<LearningMaterialState, strin
 /** The choices in their fixed order, none selected; `仅纳入当前图书` is the recommendation, never the default (LEARN-004). */
 export const LEARNING_CHOICES: ReadonlyArray<{ readonly choice: LearningEligibilityChoice; readonly label: string }> = [
   { choice: 'book', label: '仅纳入当前图书' },
-  { choice: 'house', label: '纳入出版社经验' },
+  { choice: 'house', label: '纳入本社经验' },
   { choice: 'excluded', label: '明确排除' },
   { choice: 'deferred', label: '稍后决定' },
 ];
@@ -83,7 +83,7 @@ export function learningChoiceConsequence(choice: LearningEligibilityChoice, boo
     case 'book':
       return `仅纳入当前图书：它只在《${bookTitle}》里帮 AI7 学习。`;
     case 'house':
-      return '纳入出版社经验：全社以后的图书都可能从它学习。';
+      return '纳入本社经验：本社以后的图书都可能从它学习。';
     case 'excluded':
       return '明确排除：它不会用来学习；它来自的反馈与改动仍原样保留。';
     case 'deferred':

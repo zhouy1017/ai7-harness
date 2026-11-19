@@ -1,4 +1,6 @@
+import { localDayTimeLabel } from '../shared/report-wording.js';
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
+import { serviceWords } from './service-wording.js';
 import { REVIEW_SYNTHESIS_PLAN_LINE } from '../shared/review-synthesis-wording.js';
 import {
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
@@ -106,7 +108,7 @@ export const REVIEW_ACTION_LABELS = {
   'batch-prepare': '接受并应用全部',
   'batch-confirm': '确认应用',
   'batch-cancel': '取消',
-  'batch-reprepare': '重新准备应用',
+  'batch-reprepare': '另做一份预览',
   'batch-undo': '撤销本批应用',
   'all-categories': '全部类别',
   'export-version': '导出报告',
@@ -236,7 +238,7 @@ export function reviewRunLine(summary: Pick<ReviewRunSummaryProjection, 'label' 
 }
 
 export function reviewRunReportLine(reportVersion: number | null): string {
-  return reportVersion === null ? '尚未生成报告' : `报告${technicalWords(`第 ${reportVersion} 版`, '版本')}`;
+  return reportVersion === null ? '尚未生成报告' : `报告${technicalWords(`第 ${reportVersion} 版`, '已生成')}`;
 }
 
 export function reviewRunsTruncatedLine(listed: number): string {
@@ -359,6 +361,11 @@ export const REVIEW_STAGE_LABELS: Readonly<Record<'units' | 'cross-unit-reductio
  * settled, what it found; otherwise its state's own detail. `now` is the reader's clock, for the elapsed time.
  */
 export function reviewCategoryProgressLine(category: Pick<ReviewRunCategoryProjection, 'state' | 'stateLabel' | 'detail' | 'progress' | 'findingsCount' | 'excludedCount'>, now: number): string {
+  // The category's state and detail are the service's, recorded with the Run; they read in the table's words here (Issue #1531).
+  return serviceWords(reviewCategoryProgressWords(category, now));
+}
+
+function reviewCategoryProgressWords(category: Pick<ReviewRunCategoryProjection, 'state' | 'stateLabel' | 'detail' | 'progress' | 'findingsCount' | 'excludedCount'>, now: number): string {
   const facts = category.progress;
   if (category.state === 'running' && facts !== null) {
     const elapsedMs = facts.currentUnitStartedAt === null ? null : now - Date.parse(facts.currentUnitStartedAt);
@@ -370,7 +377,7 @@ export function reviewCategoryProgressLine(category: Pick<ReviewRunCategoryProje
       ...(elapsedMs === null ? [] : [`本步已用时 ${elapsedLabel(elapsedMs)}`]),
     ].join(' · ') : [
       REVIEW_STAGE_LABELS[facts.stage],
-      `已读完 ${facts.unitsSettled} / ${facts.unitsTotal} 个阅读范围`,
+      technicalWords(`已读完 ${facts.unitsSettled} / ${facts.unitsTotal} 个阅读范围`),
       ...(facts.currentUnitOrdinal === null ? [] : [`正在读第 ${facts.currentUnitOrdinal} 个`]),
       ...(elapsedMs === null ? [] : [`本步已用时 ${elapsedLabel(elapsedMs)}`]),
       ...(facts.attemptState === null ? [] : [attemptStateLabel(facts.attemptState)]),
@@ -401,8 +408,8 @@ export function reviewLiveLine(runLabel: string, category: Pick<ReviewRunCategor
   if (category === null) return `${runLabel}审阅`;
   const facts = category.progress;
   return facts === null
-    ? `${runLabel}审阅 · ${category.label} · ${category.stateLabel}`
-    : `${runLabel}审阅 · ${category.label} · ${technicalWords(`已读完 ${facts.unitsSettled} / ${facts.unitsTotal} 个阅读范围`,
+    ? `${runLabel}审阅 · ${category.label} · ${serviceWords(category.stateLabel)}`
+    : `${runLabel}审阅 · ${category.label} · ${technicalWords(technicalWords(`已读完 ${facts.unitsSettled} / ${facts.unitsTotal} 个阅读范围`),
       `已完成约 ${facts.unitsTotal === 0 ? 0 : Math.floor((facts.unitsSettled / facts.unitsTotal) * 100)}%`)}`;
 }
 
@@ -494,7 +501,7 @@ export function reviewIgnoreReasonCount(reason: string): string {
 
 export const REVIEW_BATCH_ALL_OR_NONE = '确认后一次写入稿件：全部写入，或一条也不写。';
 export const REVIEW_BATCH_NOTHING = '没有可以一起应用的修改建议：本类待处理、原文未变的修改建议已经都处理过了。';
-export const REVIEW_BATCH_REFUSED = '稿件没有改动。请重新准备应用：原文已变的修改建议不会再列入。';
+export const REVIEW_BATCH_REFUSED = '稿件没有改动。请另做一份预览：原文已变的修改建议不会再列入。';
 
 /** The write scope stated before 确认应用, exactly as the strip will send it. */
 export function reviewBatchScopeLine(count: number): string {
@@ -533,12 +540,8 @@ export function reviewRunMetaLine(scopeLabel: string, revisionLabel: string): st
 
 /** 审阅页首的时间到分 (Issue #1524 6.4): the header dates read to the minute, never to the second. */
 export function reviewMinuteLabel(iso: string): string {
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return iso;
-  return at.toLocaleString('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  });
+  // The one day-and-time form of ordinary mode (Issue #1531, review S7).
+  return localDayTimeLabel(iso);
 }
 
 export function reviewCreatedLine(localInstant: string): string {
@@ -560,8 +563,8 @@ export const REVIEW_STATUS_LINES = {
   continued: '已继续审阅。',
   continueFailed: '无法继续这次审阅。',
   applying: '正在应用到稿件…',
-  applied: '已应用这条修改建议。',
-  appliedRecovered: '已应用这条修改建议。写入结果已从记录确认。',
+  applied: '已接受这条修改建议。',
+  appliedRecovered: '已接受这条修改建议。写入结果已从记录确认。',
   notApplied: '这次应用没有写入稿件。',
   applyUnknown: '无法确认这次应用的结果；请刷新审阅后查看。',
   markingHandled: '正在标记为已处理…',
@@ -624,18 +627,18 @@ export const REVIEW_ENTER_KEY_NAME = '回到原文（审阅卡片有焦点时）
  */
 export const REVIEW_SCOPE_STOP_NOTE = '这次审阅所依据的书系材料已排除在书系检索之外，它在下一次读取前停下了。已经写到稿件上的发现和已形成的结果都保持原样，已经发给模型服务的内容无法收回。只能修改计划并重新授权，或取消任务；不能继续审阅、重试或改用别的材料。';
 /** A Run stopped because a material behind its pinned 本社审阅偏好 version was 停止今后使用 (Issue #912; LAUD-008). */
-export const REVIEW_INFLUENCE_STOP_NOTE = '这次审阅参考的本社审阅偏好中有学习材料已停止今后使用，它在下一次读取前停下了。已经写到稿件上的发现和已形成的结果都保持原样，已经发给模型服务的内容无法收回。只能重新执行（不含该影响），或取消任务；不能继续审阅或重试。';
+export const REVIEW_INFLUENCE_STOP_NOTE = '这次审阅参考的审阅偏好中有学习材料已停止今后使用，它在下一次读取前停下了。已经写到稿件上的发现和已形成的结果都保持原样，已经发给模型服务的内容无法收回。只能重新执行（不含该影响），或取消任务；不能继续审阅或重试。';
 /** 为什么会影响这个结果 (Issue #912; LAUD-004): the version each category read, and the materials behind it. */
 export const REVIEW_INFLUENCE_HEADING = '为什么会影响这个结果';
-export const REVIEW_INFLUENCE_NOTE = '本社审阅偏好只供参考，不是规则或事实证据；这里列出本次读取的版本和来源反馈，可打开来源链查看后续影响。';
+export const REVIEW_INFLUENCE_NOTE = '审阅偏好只供参考，不是规则或事实证据；这里列出本次读取的版本和来源反馈，可打开来源链查看后续影响。';
 
 export function reviewInfluenceLine(entry: { readonly categoryLabel: string; readonly ordinal: number; readonly sourceCount: number }): string {
-  return `${entry.categoryLabel}：参考本社审阅偏好 v${entry.ordinal}（来源：${entry.sourceCount} 条已判定反馈）`;
+  return `${entry.categoryLabel}：参考审阅偏好${technicalWords(` v${entry.ordinal}`)}（来源：${entry.sourceCount} 条已判定反馈）`;
 }
 
 /** One material behind a version, by its Book and kind; one 停止今后使用 since says so, and when. */
 export function reviewInfluenceMaterialLine(material: { readonly bookTitle: string; readonly withdrawnAt: string | null; readonly provenanceAvailability?: 'available' | 'unavailable' }, kindLabel: string, instant: (iso: string) => string): string {
-  return `《${material.bookTitle}》 · ${kindLabel}${material.provenanceAvailability === 'unavailable' ? ' · 原社记忆来源在本社不可用' : ''}${material.withdrawnAt === null ? '' : ` · ${instant(material.withdrawnAt)} 已停止今后使用`}`;
+  return `《${material.bookTitle}》 · ${kindLabel}${material.provenanceAvailability === 'unavailable' ? ' · 原社审阅偏好的来源在本社不可用' : ''}${material.withdrawnAt === null ? '' : ` · ${instant(material.withdrawnAt)} 已停止今后使用`}`;
 }
 
 export function reviewInfluenceMore(count: number): string {
@@ -667,7 +670,7 @@ export function reviewBatchAppliedLine(count: number, recovered: boolean): strin
 }
 
 export function reviewReportGeneratedLine(version: number): string {
-  return `已生成审阅报告${technicalWords(`第 ${version} 版`, '版本')}。`;
+  return `已生成审阅报告${technicalWords(`第 ${version} 版`)}。`;
 }
 
 // ---- entry points ----------------------------------------------------------------------------------

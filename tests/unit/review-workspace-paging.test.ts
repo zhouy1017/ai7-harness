@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { reviewWorkspacePage, reviewWorkspaceWire } from '../../src/service/task-plan.js';
 import { mountReviewWorkspace, type MountReviewWorkspaceOptions, type ReviewWorkspaceSurface } from '../../src/renderer/review-workspace.js';
-import { technicalDisclosure } from '../../src/renderer/technical-layer.js';
+import { setTechnicalLayerVisible, technicalDisclosure, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type { RendererApi, ReviewReportRecord, ReviewWorkspaceProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
@@ -410,6 +410,25 @@ describe('a failed page of a review list (#1592 re-check)', () => {
     decide({ card: { status: 'open', suggestion: null } }); await flush();
     expect(view.inspectReviewWorkspace).toHaveBeenCalledTimes(1);
     expect(more(view.root, MUST).disabled).toBe(false);
+  });
+
+  it('draws a category waiting for its place, and the report row of one, in the words of the editor (Issue #1531)', async () => {
+    const was = technicalLayerVisible;
+    setTechnicalLayerVisible(false);
+    onTestFinished(() => setTechnicalLayerVisible(was));
+    const full = workspace(1, 1, 'running');
+    const run = full.run!;
+    const category = { categoryId: 'typos-and-usage', label: '错别字与用法', position: 1, output: 'change-suggestion', riskPointsOnly: false, batchApply: true,
+      basis: { categoryId: 'typos-and-usage', executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '审阅', version: '1' } },
+      taskIntentId: null, planEnvelopeDigest: DIGEST, modeLabel: null, plan: null, progress: null, findingsCount: 0, excludedCount: 0, state: 'waiting', stateLabel: '等待运行名额',
+      detail: '运行名额已满：等待运行名额的任务先开始，有名额空出时这一类接着审；在此之前这一类什么都没有发送。' };
+    const record = { ...run.report!.record, overview: { title: '概览表' as const, rows: [{ categoryId: 'typos-and-usage', label: '错别字与用法', state: 'waiting' as const, stateLabel: '等待运行名额', counts: COUNTS }] } };
+    const view = mount({ full: { ...full, run: { ...run, categories: [category], report: { ...run.report!, record } } } as ReviewWorkspaceProjection, budget: 120 * 1024 }); await flush();
+    const pill = view.root.querySelector('li[data-review-category="typos-and-usage"]');
+    expect(pill?.textContent).toContain('排队中');
+    const row = view.root.querySelector('tr[data-review-category="typos-and-usage"]');
+    expect(row?.textContent).toContain('排队中');
+    expect(`${pill?.textContent}${row?.textContent}`).not.toContain('运行名额');
   });
 
   it('is not said beside the list of a Run opened afterwards', async () => {

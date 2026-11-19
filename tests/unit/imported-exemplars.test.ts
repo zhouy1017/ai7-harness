@@ -121,7 +121,7 @@ describe('earlier-Book exemplar import form', () => {
     expect(view.type.disabled).toBe(false);
     expect(view.type.value).toBe('');
     expect(view.type.children.map((option) => option.value)).toEqual(['', 'news-release', 'promotion-article']);
-    expect(view.type.children[0]!.textContent).toBe('请选择文档类型');
+    expect(view.type.children[0]!.textContent).toBe('请选择衍生稿件类型');
     expect(view.submit.disabled).toBe(true);
     await view.submitNow();
     expect(view.imported()).toBeNull();

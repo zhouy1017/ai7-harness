@@ -54,7 +54,7 @@ const RENDERER_TARGET_QUERY_ABANDONED = new Error('renderer-target query abandon
 // (src/shared/protocol.ts MAX_EDIT_GRAPHEMES) that says how many entries a buffered run of text lands as.
 const PROTECTION_HEADLINE = '更改尚未保存';
 const PROTECTION_READ_ONLY_HEADLINE = '已暂停编辑，更改尚未保存';
-const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有未持久保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
+const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有还没有保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
 const PENDING_BUFFER_REFUSED = '尚待确认的编辑已达到单次安全上限，这次输入未被接收；请等待写入确认后分段输入。';
 const JOURNAL_EDIT_GRAPHEMES = 256;
 const PROTECTION_CJK_BASE = 0x7000;

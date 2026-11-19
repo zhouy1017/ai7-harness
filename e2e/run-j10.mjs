@@ -98,7 +98,7 @@ const EIGHTH_BOOK = Object.freeze({ title: '归纳结果待确认旅程' });
 const REDUCTION_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-reduction-unknown';
 const UNCONFIRMED_REASON = '回答未完整传回，处理与计费结果待确认，AI7 没有自动重发。';
 // Only a step is listed, so the statement names no later re-send (#763 review).
-const UNCONFIRMED_STATEMENT = '回答未传全，处理与计费未知，缺口未重发；保留只记确认。';
+const UNCONFIRMED_STATEMENT = '回答未传全，处理与计费未知，未完成的部分未重发；保留只记确认。';
 /** The fourth Book's launch: unit 2 fails for good, and unit 5's first attempt fails retry-safe (Issue #422, S76d). */
 const TRANSIENT_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 /** Five ranges may settle before the fourth Book's Run is held: 1 to 4 do, 5 asks, 6 settles, and 7 is in flight. */
@@ -115,12 +115,12 @@ const RESUMED_HOLD = 5;
 const THIRD_HOLD = 1;
 // The drawer's own words (`src/renderer/task-drawer-labels.ts` and `src/service/task-plan.ts`), pinned there by
 // their unit suites.
-const REDO_REASON = '先暂停，再改计划重做';
+const REDO_REASON = '先暂停，再重新开始';
 const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步会被中止，此后不会再发送任何内容';
 const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存';
 const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
 const RESUMABLE_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
-const SHUTDOWN_STATEMENT = 'AI7 关闭时正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
+const SHUTDOWN_STATEMENT = 'AI7 关闭时正在运行；已读完的部分都已保存。继续时从下一部分接着读，在此之前不会发送任何内容。';
 const THIRD_PAUSED_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
 /** 改计划重做's summary on the third Book, paused with two ranges kept (Issue #422, S76c). */
 const REDO_SUMMARY = Object.freeze([
@@ -485,15 +485,15 @@ function runningWith(settled) {
 /** The bar of a Run under way (AUTH-010): 暂停 and 取消任务 act on it, 改计划重做 says it waits for 暂停. */
 const RUNNING_ACTIONS = Object.freeze([
   ['pause', '暂停', 'enabled', null],
-  ['cancel-run', '停止任务', 'enabled', null],
-  ['redo', '改计划重做', 'disabled', REDO_REASON],
+  ['cancel-run', '取消任务', 'enabled', null],
+  ['redo', '重新开始', 'disabled', REDO_REASON],
   ['run-link', '查看运行', 'enabled', null],
 ]);
 /** The bar of a stopped Run that can go on (CONT-015): 续行 first, then 取消任务, 改计划重做 and the way to the Run. */
 const STOPPED_ACTIONS = Object.freeze([
-  ['resume', '续行', 'enabled', null],
-  ['cancel-run', '停止任务', 'enabled', null],
-  ['redo', '改计划重做', 'enabled', null],
+  ['resume', '继续', 'enabled', null],
+  ['cancel-run', '取消任务', 'enabled', null],
+  ['redo', '重新开始', 'enabled', null],
   ['run-link', '查看运行', 'enabled', null],
 ]);
 
@@ -823,7 +823,7 @@ async function main() {
     const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference) && readyConnection?.credentialOperationState === 'ready', 'model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除凭据', 'model-remove');
+    await click(renderer, '移除密钥', 'model-remove');
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     credentialRemoved = true;
@@ -1021,7 +1021,7 @@ async function main() {
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanState==='cancelled-after-start' && drawer.querySelector('.task-drawer-pill')?.textContent==='已取消' && drawer.querySelector('.task-bar-status')?.textContent==='已取消' && drawer.querySelector('.task-plan-activity')===null; })()`, 'cancelled-shown', 60_000);
     const cancelledDrawer = await renderer.evaluate(READ_DRAWER);
     // 改计划重做 is offered beside the way to the Run, now that it has stopped (Issue #422, S76c).
-    requireJourney(JSON.stringify(cancelledDrawer?.actions) === JSON.stringify([['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]]) && cancelledDrawer.note === null, 'cancelled-bar', cancelledDrawer);
+    requireJourney(JSON.stringify(cancelledDrawer?.actions) === JSON.stringify([['redo', '重新开始', 'enabled', null], ['run-link', '查看运行', 'enabled', null]]) && cancelledDrawer.note === null, 'cancelled-bar', cancelledDrawer);
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='cancelled' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='已取消'`, 'cancelled-card-label', 30_000);
 
     at('partial-revision-kept');
@@ -1136,10 +1136,10 @@ async function main() {
     const resumableAttention = await attentionNames(renderer, secondBookId, 'analysis-resumable');
     requireJourney(resumableAttention.named, 'resumable-in-attention', resumableAttention.groups);
     await openAnalysisOf(renderer, secondBookId, 'relaunched-analysis');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可续行'`, 'resumable-card-label', 30_000);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可继续'`, 'resumable-card-label', 30_000);
     const resumable = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const resumableAttempt = resumable?.run?.attempt;
-    requireJourney(resumable?.bookId === secondBookId && resumable.state === 'resumable' && resumable.stateLabel === '任务已中断 · 可续行' &&
+    requireJourney(resumable?.bookId === secondBookId && resumable.state === 'resumable' && resumable.stateLabel === '任务已中断 · 可继续' &&
       resumable.run?.state === 'resumable' && resumable.run.runRecordId === beforeClose.run.runRecordId &&
       JSON.stringify(resumable.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'resumable']) &&
       UUID_PATTERN.test(resumableAttempt?.attemptId ?? '') && JSON.stringify(resumableAttempt.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2]) &&
@@ -1147,7 +1147,7 @@ async function main() {
     'resumable-record', { state: resumable?.state, run: resumable?.run?.state, transitions: resumable?.run?.transitions?.map((transition) => transition.state), spans: resumableAttempt?.spans?.map((span) => span.unitOrdinal) });
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'resumable-open-plan');
     // This Run has never continued: explain shutdown without inventing a previous continuation time (#1309).
-    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行', statement: SHUTDOWN_STATEMENT, note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
+    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可继续', status: '任务已中断 · AI7 关闭时正在运行', statement: SHUTDOWN_STATEMENT, note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
     // Nothing was sent since AI7 opened again.
     await new Promise((settle) => setTimeout(settle, 1_000));
     const stillStopped = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1205,8 +1205,8 @@ async function main() {
     await waitFor(renderer, `document.activeElement !== null && document.activeElement === document.querySelector('#task-drawer-redo-summary h4')`, 'redo-summary-focused', 10_000);
     const redoSummary = await renderer.evaluate(READ_DRAWER);
     const thirdPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(thirdIntentId)} })`);
-    requireJourney(redoSummary?.redo?.heading === '改计划重做摘要' && JSON.stringify(redoSummary.redo.lines) === JSON.stringify(REDO_SUMMARY) &&
-      JSON.stringify(thirdPlan?.redo?.summary) === JSON.stringify(REDO_SUMMARY) && redoSummary.redo.confirm === '确认改计划重做' && redoSummary.redo.keep === '先不重做' &&
+    requireJourney(redoSummary?.redo?.heading === '重新开始摘要' && JSON.stringify(redoSummary.redo.lines) === JSON.stringify(REDO_SUMMARY) &&
+      JSON.stringify(thirdPlan?.redo?.summary) === JSON.stringify(REDO_SUMMARY) && redoSummary.redo.confirm === '确认重新开始' && redoSummary.redo.keep === '先不重做' &&
       redoSummary.impact === null,
     'redo-summary', redoSummary?.redo ?? null);
     const unrecordedRedo = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1316,7 +1316,7 @@ async function main() {
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='awaiting-clarification')`, 'run-waits', 60_000);
     await waitForBar(renderer, {
       state: 'awaiting-clarification', pill: SCOPE_WAITING, status: '等你回答', note: '已读完 7 / 8 个阅读范围；1 个问题等你回答，回答后接着做',
-      actions: [['cancel-run', '停止任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
+      actions: [['cancel-run', '取消任务', 'enabled', null], ['redo', '重新开始', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
     }, 'waiting-bar', 30_000);
     const waitingRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(waitingRun?.state === 'awaiting-clarification' && waitingRun.stateLabel === SCOPE_WAITING &&
@@ -1409,10 +1409,10 @@ async function main() {
       item.itemId === `analysis:${held.taskIntent.taskIntentId}` && item.book?.bookId === held.bookId && item.state === 'analysis-resumable') === true),
     'answered-restart-holders-stopped');
     await openAnalysisOf(renderer, fourthBookId, 'answered-restart');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可续行'`, 'answered-restart-card');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可继续'`, 'answered-restart-card');
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'answered-restart-plan');
     await waitForBar(renderer, {
-      state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行',
+      state: 'resumable', pill: '任务已中断 · 可继续', status: '任务已中断 · AI7 关闭时正在运行',
       statement: SHUTDOWN_STATEMENT,
       note: '已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分', actions: STOPPED_ACTIONS,
     }, 'answered-restart-bar');
@@ -1603,7 +1603,7 @@ async function main() {
 
     at('account-limit-stop');
     // 开始任务: ranges 1 to 3 are read, and the model service refuses the fourth on the account's limit. The Run stops at that
-    // boundary — 模型服务账户限额 in its own words, never 任务已中断 · 可续行's — keeping three ranges and holding nothing:
+    // boundary — 模型服务账户限额 in its own words, never 任务已中断 · 可继续's — keeping three ranges and holding nothing:
     // 处理模型服务 and 续行, beside 取消任务, 改计划重做 and 查看运行; ②A's card says the same, and 待我处理 holds it as an
     // exception whose next step is 处理模型服务.
     await openAnalysisOf(renderer, sixthBookId, 'sixth-analysis');
@@ -1613,7 +1613,7 @@ async function main() {
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(sixthIntentId)} && analysis.run?.state==='resumable')`, 'account-limit-stopped', 180_000);
     await waitForBar(renderer, {
       state: 'account-limit', pill: '模型服务账户限额', status: '模型服务账户限额', note: ACCOUNT_LIMIT_NOTE,
-      actions: [['connect', '处理模型服务', 'enabled', null], ['resume', '续行', 'enabled', null], ['cancel-run', '停止任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
+      actions: [['connect', '处理模型服务', 'enabled', null], ['resume', '继续', 'enabled', null], ['cancel-run', '取消任务', 'enabled', null], ['redo', '重新开始', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
     }, 'account-limit-bar', 30_000);
     const limited = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(limited?.state === 'resumable' && limited.stateLabel === '模型服务账户限额' && limited.run?.stateLabel === '模型服务账户限额' &&
@@ -1761,7 +1761,7 @@ async function main() {
     'unknown-unit-gap-with-revision-and-outcome');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed h4')?.textContent==='该单元结果未知' && document.querySelector('#task-drawer [data-task-drawer-control="resume"]')===null && document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')===null`, 'unknown-unit-ui', 30_000);
     // #1310: the range explanation separates changed text from a failed reread.
-    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed .attention-note')?.textContent==='回答未传全，处理与计费未知，缺口未重发；保留只记确认；原文已改不再列出，上次重读失败仍待确认。'`, 'unknown-unit-explanation');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed .attention-note')?.textContent==='回答未传全，处理与计费未知，未完成的部分未重发；保留只记确认；原文已改不再列出，上次重读失败仍待确认。'`, 'unknown-unit-explanation');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="view-unconfirmed-record"]', 'unknown-unit-view');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed li')?.textContent==='第 4 个阅读范围 · 请求已发出 · 回答没有完整传回'`, 'unknown-unit-listed', 30_000);
     const completedAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
@@ -1890,7 +1890,7 @@ async function main() {
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='review-run'||drawer.dataset.taskPlanRef!==${JSON.stringify(reviewRef)})return false; const button=drawer.querySelector('[data-task-drawer-control="cancel-run"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'review-controls-cancel-ready');
 
     at('review-controls-cancel-impact');
-    await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.textContent==='停止任务'`, 'review-controls-stop-wording');
+    await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.textContent==='取消任务'`, 'review-controls-stop-wording');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="cancel-run"]', 'review-controls-impact');
     await waitFor(renderer, `document.querySelector('#task-drawer-cancel-impact') && document.querySelector('#task-drawer [data-task-drawer-control="confirm-cancel-run"]')?.textContent==='确认取消任务'`, 'review-controls-confirm-wording');
     // The Run still runs with one part of several read: the drawer's bar is filled in proportion, neither empty nor whole (its width

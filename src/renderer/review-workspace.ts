@@ -1,4 +1,6 @@
 import { triageKeyAction } from './triage-keys.js';
+import { houseAnnotationWords } from './editorial-mark-labels.js';
+import { serviceWords } from './service-wording.js';
 import { clearReviewReturn } from './review-return.js';
 import { navigation, rendererApi } from './navigation-generation.js';
 import { createLaunchBarPresentation, syncLaunchModelSettings } from './components/launch-bar.js';
@@ -1636,7 +1638,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     );
     // A category that cannot go ahead says so here too: it is what the one approval would be refused for.
     for (const category of run.categories) {
-      if (category.detail !== null) section.append(el('p', 'attention-note', `${category.label}：${category.detail}`));
+      if (category.detail !== null) section.append(el('p', 'attention-note', `${category.label}：${serviceWords(category.detail)}`));
     }
     const actions = el('div', 'button-row review-plan-actions');
     const open = actionButton('view-plan', 'primary', () => options.openPlan(run.reviewRunId), TASK_PLAN_OPEN_START);
@@ -1726,7 +1728,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** 为什么会影响这个结果 (Issue #912; LAUD-004): each category's 本社审阅偏好 version and the materials behind it, closed until asked. */
   function renderInfluence(run: ReviewRunProjection): HTMLElement {
     const details = el('details', 'review-influence');
-    details.append(el('summary', undefined, `${REVIEW_INFLUENCE_HEADING} · 本社审阅偏好仅供参考`));
+    details.append(el('summary', undefined, `${REVIEW_INFLUENCE_HEADING} · 审阅偏好仅供参考`));
     for (const entry of run.influence) {
       const group = el('div', 'review-influence-category');
       group.dataset['categoryId'] = entry.categoryId;
@@ -1766,7 +1768,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (category.progress !== null) item.dataset['reviewProgress'] = `${category.progress.unitsSettled}/${category.progress.unitsTotal}`;
       item.append(
         el('span', 'review-progress-label', category.label),
-        pillElement(category.stateLabel, REVIEW_CATEGORY_STATE_PILLS[category.state]),
+        pillElement(serviceWords(category.stateLabel), REVIEW_CATEGORY_STATE_PILLS[category.state]),
         el('span', 'review-progress-detail', reviewCategoryProgressLine(category, now)),
       );
       list.append(item);
@@ -2133,7 +2135,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const main = el('div', 'review-finding-main');
     main.append(heading, el('blockquote', 'review-finding-quote', reviewQuote(finding.quote)));
     if (finding.replacement !== null) main.append(el('p', 'review-finding-replacement', reviewReplacementLine(finding.replacement)));
-    main.append(el('p', 'review-finding-note', finding.note));
+    main.append(el('p', 'review-finding-note', houseAnnotationWords(finding.note)));
     const referencedRules = findingReferencedRules(finding);
     if (referencedRules !== null) main.append(referencedRules);
     if (finding.clauseRefs.length === 0) main.append(el('p', 'review-finding-basis', reviewBasisWords(category.basis)));
@@ -2148,7 +2150,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const sources = attached.length > 0 || category.categoryId !== 'factual-review' || retained === undefined ? null : findingResearchLines(retained, finding, localInstantLabel);
     if (showEvidence && attached.length > 0) main.append(findingEvidenceList(attached, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
     if (showEvidence) for (const line of sources ?? []) main.append(el('p', 'review-finding-source', line));
-    if (finding.status !== 'pending') main.append(el('p', 'review-finding-status-detail', finding.statusDetail));
+    // The settled detail says what the pill does not; a detail that only repeats it is left out (review N9).
+    const settledDetail = serviceWords(finding.statusDetail);
+    if (finding.status !== 'pending' && settledDetail !== serviceWords(finding.statusLabel)) main.append(el('p', 'review-finding-status-detail', settledDetail));
     if (finding.ignoreReason !== null) main.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
     if (finding.historicalMarker !== null) main.append(el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker));
     const actions = renderFindingActions(run, finding);
@@ -2495,7 +2499,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       tr.dataset['reviewCategory'] = row.categoryId;
       const name = el('th', undefined, row.label);
       name.scope = 'row';
-      const state = el('td', undefined, row.stateLabel);
+      const state = el('td', undefined, serviceWords(row.stateLabel));
       state.dataset['label'] = REVIEW_REPORT_OVERVIEW_COLUMNS[1];
       const counts = el('td', undefined, reviewCountsLine(row.counts));
       counts.dataset['label'] = REVIEW_REPORT_OVERVIEW_COLUMNS[2];
@@ -2571,7 +2575,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       part('category-summaries', record.categorySummaries.title, summaries),
       part('appendix', record.appendix.title, appendix, options.technicalDetails(
         'review-facts',
-        el('dt', undefined, '报告'), el('dd', 'technical-identity', `${report.reportId} · ${technicalWords(`第 ${report.version} 版`, '版本')} · ${report.digest}`),
+        el('dt', undefined, '报告'), el('dd', 'technical-identity', technicalWords(`${report.reportId} · 第 ${report.version} 版 · ${report.digest}`)),
         el('dt', undefined, '生成时刻'), el('dd', 'technical-identity', report.generatedAt),
         el('dt', undefined, '审阅配置'), el('dd', 'technical-identity', `${record.appendix.configuration.schema} · ${record.appendix.configuration.version} · ${record.appendix.configuration.digest}`),
         ...record.appendix.categories.flatMap((category) => [
@@ -3225,7 +3229,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         const versionLabel = el('label', 'review-field');
         versionSelect.dataset['reviewField'] = 'procedure-version';
         const procedureId = state.procedure.procedureId;
-        state.procedure.eligibleVersions.forEach((version, index) => versionSelect.append(new Option(sheetProcedureVersionOption(version.version, index === 0), version.versionId)));
+        state.procedure.eligibleVersions.forEach((version, index) => versionSelect.append(new Option(sheetProcedureVersionOption(version.version, index === 0, index), version.versionId)));
         versionSelect.value = selection.versionId ?? '';
         versionSelect.addEventListener('change', () => void chooseProcedure(state, procedureId, versionSelect.value));
         versionLabel.append(el('span', undefined, SHEET_PROCEDURE_VERSION_LABEL), versionSelect);
@@ -3243,7 +3247,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const categoryLegend = el('legend', undefined, REVIEW_CATEGORY_LEGEND);
     if (state.definition !== null) {
       const labels = state.definition.categoryIds.map((categoryId) => workspace.categories.find((entry) => entry.categoryId === categoryId)?.label ?? categoryId);
-      const line = el('span', 'review-sheet-definition', `按工序《${state.definition.title}》${technicalWords(`第 ${state.definition.pin.version} 版`, '版本')}依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
+      const line = el('span', 'review-sheet-definition', `按工序《${state.definition.title}》${technicalWords(`第 ${state.definition.pin.version} 版`)}依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
       line.dataset['procedureDefinition'] = `${state.definition.pin.procedureId}@${state.definition.pin.version}`;
       form.append(line);
     }
@@ -3403,9 +3407,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
 
     const assurance = el('fieldset', 'review-evidence-assurance');
-    assurance.append(el('legend', undefined, '证据保证级别'));
+    assurance.append(el('legend', undefined, '核查力度'));
     const assuranceSelect = el('select'); assuranceSelect.dataset['reviewField'] = 'evidenceAssuranceLevel';
-    assuranceSelect.setAttribute('aria-label', '证据保证级别');
+    assuranceSelect.setAttribute('aria-label', '核查力度');
     for (const level of EVIDENCE_ASSURANCE_LEVELS) {
       const option = el('option', undefined, EVIDENCE_ASSURANCE_LEVEL_LABELS[level]); option.value = level; assuranceSelect.append(option);
     }

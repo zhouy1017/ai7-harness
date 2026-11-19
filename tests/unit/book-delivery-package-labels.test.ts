@@ -63,7 +63,7 @@ describe('the words of 图书交付包', () => {
       documentUndelivered: '尚未交付',
       documentUnchosen: '未选入本包',
       documentNotice: '交付后有修改：可以再交付，也可以按交付过的版本打包。',
-      documentCreateRoute: '前往生产文档',
+      documentCreateRoute: '前往衍生稿件',
       documentDeliverRoute: '交付…',
       documentRedeliverRoute: '再交付…',
       noReviews: '暂无审阅记录',

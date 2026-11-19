@@ -19,23 +19,23 @@ import { publicationCharacterCount, publicationTextState } from './deliverables-
 
 // ---- 交付物's block ------------------------------------------------------------------------------------
 
-export const DOCUMENTS_HEADING = '交付 · 生产文档';
-export const DOCUMENTS_LEDE = '每一类生产文档有自己的版本，与稿件的发稿互不影响。';
+export const DOCUMENTS_HEADING = '交付 · 衍生稿件';
+export const DOCUMENTS_LEDE = '每一类衍生稿件有自己的版本，与稿件的发稿互不影响。';
 /** A type with no document yet. */
 export const DOCUMENT_STATE_NONE = '尚未创建';
 /** The type is `本书不做` for this Book. */
 export const DOCUMENT_STATE_NOT_FOR_THIS_BOOK = '本书不做';
 /** Beside `本书不做` when the type already has a document: nothing of it is removed. */
-export const DOCUMENT_KEPT_NOTE = '文档与它的版本都保留；恢复后照常处理。';
+export const DOCUMENT_KEPT_NOTE = '衍生稿件与它的版本都保留；恢复后照常处理。';
 /** The working text moved past the latest version. */
 export const DOCUMENT_CHANGED_SINCE_VERSION = '有修改尚未保存为版本';
 /** Why 从来源材料创建… cannot be offered: the Book holds no source material a document can start from. */
-export const DOCUMENT_NO_SOURCES = '暂无来源材料：可在这里导入文件，或新建空白文档。';
+export const DOCUMENT_NO_SOURCES = '暂无来源材料：可在这里导入文件，或新建空白的衍生稿件。';
 
 /** The label of every `data-document-action` the block and the document surface carry. */
 export const DOCUMENT_ACTION_LABELS = {
   create: '从来源材料创建…',
-  confirmCreate: '创建文档',
+  confirmCreate: '创建衍生稿件',
   cancel: '取消',
   open: '打开',
   notForThisBook: '本书不做',
@@ -50,7 +50,7 @@ export type DocumentAction = keyof typeof DOCUMENT_ACTION_LABELS;
 
 /** The create form: one material chosen from the Book's own, none preselected. */
 export const DOCUMENT_SOURCE_LEGEND = '选择来源材料';
-export const DOCUMENT_SOURCE_HINT = '文档的第一个版本就是这份材料的文字；材料本身不变。';
+export const DOCUMENT_SOURCE_HINT = '衍生稿件的第一个版本就是这份材料的文字；材料本身不变。';
 
 /** A material on the create form: its name, its format and when it was imported. */
 export function documentSourceLine(source: ProductionDocumentSourceProjection, importedAt: string): string {
@@ -63,7 +63,7 @@ export const DOCUMENT_DRAFTED_ORIGIN = '由写作任务起草 · 范例只参照
 /** The first line of a document's card: its latest version and the material it was made from. */
 export function documentCardLine(document: ProductionDocumentProjection): string {
   const latest = document.versions[0];
-  return `${latest === undefined ? '' : `${latest.label} · `}${document.origin.blank === true ? '空白文档' : document.origin.drafted ? DOCUMENT_DRAFTED_ORIGIN : `由「${document.origin.displayName}」创建`}`;
+  return `${latest === undefined ? '' : `${latest.label} · `}${document.origin.blank === true ? '空白的衍生稿件' : document.origin.drafted ? DOCUMENT_DRAFTED_ORIGIN : `由「${document.origin.displayName}」创建`}`;
 }
 
 /**
@@ -128,11 +128,11 @@ export function documentExportLabel(typeLabel: string, versionLabel: string): st
 }
 
 export const DOCUMENT_STATUS_LINES = {
-  creating: '正在从来源材料创建文档…',
+  creating: '正在从来源材料创建衍生稿件…',
   deciding: '正在记录…',
-  opening: '正在打开文档…',
-  openFailed: '无法打开文档。',
-  createFailed: '无法创建文档。',
+  opening: '正在打开衍生稿件…',
+  openFailed: '无法打开衍生稿件。',
+  createFailed: '无法创建衍生稿件。',
   decideFailed: '无法记录这个决定。',
   notForThisBook: '已标为本书不做',
   restored: '已恢复',
@@ -142,11 +142,11 @@ export const DOCUMENT_STATUS_LINES = {
   delivering: '正在记录交付…',
   deliverFailed: '无法记录这次交付。',
   // A recovery restore of a document (Issue #543 follow-up): its text is the chosen one, which no version holds yet.
-  recovered: '文档已恢复为所选的文字，尚未保存为版本。',
-  recoveredNotOpened: '文档已恢复为所选的文字，但没能打开；已回到稿件，可以从本书稿件里再打开它。',
-  recoveredNothingOpened: '文档已恢复为所选的文字，但文档和稿件都没能打开；可以再打开稿件。',
+  recovered: '衍生稿件已恢复为所选的文字，尚未保存为版本。',
+  recoveredNotOpened: '衍生稿件已恢复为所选的文字，但没能打开；已回到稿件，可以从本书稿件里再打开它。',
+  recoveredNothingOpened: '衍生稿件已恢复为所选的文字，但衍生稿件和稿件都没能打开；可以再打开稿件。',
   // The retry of 打开稿件 after both failed (Issue #582): the restore still stands, and the line says so.
-  recoveredRetryFailed: '文档已恢复为所选的文字，但稿件还是没能打开：',
+  recoveredRetryFailed: '衍生稿件已恢复为所选的文字，但稿件还是没能打开：',
 } as const;
 
 /**
@@ -188,17 +188,17 @@ export function documentVersionSavedLine(label: string): string {
 
 // ---- the document's surface (DELIV-002) -------------------------------------------------------------
 
-export const DOCUMENT_SURFACE_LABEL = '生产文档';
+export const DOCUMENT_SURFACE_LABEL = '衍生稿件';
 export const DOCUMENT_CURRENT_VERSION = '当前版本';
 export const DOCUMENT_LENS_LABEL = '工作流程';
 export const DOCUMENT_VERSIONS_HEADING = '版本与交付';
 /** Ordinary mode's lens (Issue #1405): the document's own saved versions, nothing of 交付. */
 export const DOCUMENT_VERSIONS_LIGHT_LABEL = '版本';
 export const DOCUMENT_VERSIONS_LIGHT_HEADING = '已保存的版本';
-export const DOCUMENT_VERSIONS_TRUNCATED = '更早的版本保留在文档的历史中。';
+export const DOCUMENT_VERSIONS_TRUNCATED = '更早的版本保留在衍生稿件的历史中。';
 /** The version the working text stands on. */
 export const DOCUMENT_VERSION_CURRENT_MARK = '当前';
-export const DOCUMENT_MATERIALS_HEADING = '这份文档的材料';
+export const DOCUMENT_MATERIALS_HEADING = '这份衍生稿件的材料';
 export const DOCUMENT_MATERIALS_EMPTY = '暂无材料，任务简报、引语台账、事实核查记录与范例会列在这里。';
 
 /** A version row: `版本 2 · 2026年9月24日 10:30`. */

@@ -32,7 +32,7 @@ export function mountKnowledgeBaseHome(root: HTMLElement, api: RendererApi, deve
       const page = await api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
       const changes = page.items.map(({ current }) => ({ title: current.title, at: current.recordedAt }))
         .sort((a, b) => b.at.localeCompare(a.at));
-      return { count: `${page.items.length}${page.nextItemOffset === null ? '' : '+'} 条`, latest: changes[0]?.title ?? '暂无记忆', changes };
+      return { count: `${page.items.length}${page.nextItemOffset === null ? '' : '+'} 条`, latest: changes[0]?.title ?? '暂无审阅偏好', changes };
     },
     exemplars: async () => {
       const page = await api.inspectExemplars();

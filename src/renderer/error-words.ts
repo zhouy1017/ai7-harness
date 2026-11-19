@@ -1,4 +1,5 @@
 import { researchUnavailableLine } from '../shared/research-status.js';
+import { serviceWords } from './service-wording.js';
 import { technicalWords } from './technical-layer.js';
 
 interface RendererErrorData {
@@ -42,7 +43,8 @@ function rawDetail(error: unknown): string | null {
  */
 export function rendererErrorMessage(error: unknown, fallback: string): string {
   const data = rendererErrorData(error);
-  if (data !== null && data.message !== '') return researchUnavailableLine(data.code, data.message);
+  // The service's message reads in the table's words in ordinary mode (Issue #1531); its code is untouched.
+  if (data !== null && data.message !== '') return researchUnavailableLine(data.code, serviceWords(data.message));
   if (data === null && error instanceof Error && isEditorSentence(error.message)) return error.message;
   const raw = rawDetail(error);
   return raw === null ? fallback : `${fallback}${technicalWords(`（${raw}）`)}`;

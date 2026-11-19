@@ -14,7 +14,7 @@ export const NOTIFICATION_LABELS = Object.freeze({
   outcomeWithGaps: '任务结果已记录，仍有未完成部分',
   indexing: '资料索引结果已记录',
   // No 待我处理 state is a committed Effect Receipt yet; the class keeps its own words for when one is.
-  effect: '应用凭据已记录',
+  effect: '修改结果已记录',
 });
 
 export type NotificationLabelKey = keyof typeof NOTIFICATION_LABELS;
@@ -102,9 +102,9 @@ export function awaySummaryLabel(finished: number, needing: number): string {
   return needing === 0 ? `你不在时，${finished} 项任务已完成` : `你不在时，${finished} 项任务已完成，${needing} 项需要你处理`;
 }
 
-/** The header's pill on every page. */
+/** The header's pill on every page: the tasks that need the editor, named as 待我处理 is (Issue #1531; the 批注栏 counts 待处理 marks). */
 export function attentionPillLabel(count: number): string {
-  return `待处理 ${count}`;
+  return `待我处理 ${count}`;
 }
 
 /** 设置 › 本机 › 通知 and the quiet completion notice (Issue #937). */

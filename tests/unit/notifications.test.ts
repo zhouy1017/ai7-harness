@@ -645,7 +645,7 @@ describe('a task that needs the editor (#1528)', () => {
       mountAttentionPill({ button: button as unknown as HTMLElement, reader: { subscribe: (next: typeof listener) => { listener = next; return () => {}; } } as never, open });
       listener({ kind: 'projection', projection: projection([item(), item({ itemId: 'two', group: 'exceptions', state: 'analysis-failed' })]) });
       expect(button.hidden).toBe(false);
-      expect(button.textContent).toBe('待处理 2');
+      expect(button.textContent).toBe('待我处理 2');
       listener({ kind: 'projection', projection: projection([]) });
       expect(button.hidden).toBe(true);
       listener({ kind: 'projection', projection: projection([item()]) });

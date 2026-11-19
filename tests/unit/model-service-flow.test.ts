@@ -416,7 +416,7 @@ describe('the one model-service flow', () => {
       const secret = page.querySelectorAll('input').find((input) => input.type === 'password')!;
       secret.value = 'synthetic-key'; secret.dispatchEvent({ type: 'input' });
       page.querySelector('.model-credential-form')!.dispatchEvent({ type: 'submit' });
-      await vi.waitFor(() => expect(setStatus).toHaveBeenLastCalledWith(`凭据已保存，但无法获取模型列表：${reason}`, 'error'));
+      await vi.waitFor(() => expect(setStatus).toHaveBeenLastCalledWith(`密钥已保存，但无法获取模型列表：${reason}`, 'error'));
       // The real visibility listener follows settings after role choices return to their original values.
       (document.body as unknown as MiniElement).dispatchEvent({ type: 'visibilitychange' });
       await vi.waitFor(() => expect(calls.refreshModelServiceModels).toHaveBeenCalledOnce());
@@ -440,7 +440,7 @@ describe('the one model-service flow', () => {
     const secret = node.querySelectorAll('input').find((input) => input.type === 'password')!;
     secret.value = 'synthetic-key'; secret.dispatchEvent({ type: 'input' });
     node.querySelector('form')!.dispatchEvent({ type: 'submit', preventDefault: () => undefined });
-    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('凭据已保存，但无法获取模型列表：模型服务拒绝了凭据', 'error'));
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('密钥已保存，但无法获取模型列表：模型服务拒绝了凭据', 'error'));
   });
 
   it.each([
@@ -564,7 +564,7 @@ describe('the one model-service flow', () => {
   it('tests the chosen model\'s connection on the existing path and states its declared capabilities', async () => {
     const { node, render, calls } = flow(settings(['opencode-go']));
     expect(node.textContent).toContain('能力：文本回答协议支持 · 流式协议支持 · 工具调用协议支持');
-    expect(node.textContent).toContain('尚未测试；保存凭据不等于连接成功');
+    expect(node.textContent).toContain('尚未测试；保存密钥不等于连接成功');
     button(node, 'test-flow-connection').click();
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
     expect(calls.testModelServiceConnection).toHaveBeenCalledWith({ route: 'opencode-go', modelId: 'deepseek-v4.1-flash', reasoningEffort: 'off' });

@@ -1,5 +1,7 @@
+import { serviceWords } from './service-wording.js';
 import { technicalWords } from './technical-layer.js';
 import { retainPollInteraction } from './poll-interaction.js';
+import { styleInput } from './components/controls.js';
 import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
 import { startPreparedTask } from './one-action-start.js';
 import { attentionSentence } from './global-attention-labels.js';
@@ -177,7 +179,7 @@ export function composeOptions(projection: Pick<BaselineAnalysisProjection, 'act
       label: entry.label,
       meaning: TASK_PANEL_COMPOSE_MEANINGS[mode],
       available,
-      reason: controls.blockedByActiveRun ? controls.blockedReason : entry.unavailableReason,
+      reason: serviceWords(controls.blockedByActiveRun ? controls.blockedReason : entry.unavailableReason),
       goal: entry.goal as BaselineAnalysisGoal,
       quick: quick === undefined
         ? { rule: null, reason: null }
@@ -716,7 +718,8 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     // The goal, in the editor's own words (TASK-001, 005).
     const goalLabel = el('label', 'task-composer-goal');
     const goalCaption = el('span', undefined, TASK_COMPOSER_GOAL_LABEL);
-    const goal = el('textarea');
+    // The shared control style and a caption above it (Issue #1531): the field has had no rule of its own since 0.7.2.
+    const goal = styleInput(el('textarea'));
     goal.rows = 3;
     goal.maxLength = MAX_TASK_INTENT_GOAL_LENGTH;
     goal.placeholder = `${TASK_COMPOSER_GOAL_PLACEHOLDER} 最多 ${MAX_TASK_INTENT_GOAL_LENGTH} 字`;
