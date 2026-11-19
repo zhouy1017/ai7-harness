@@ -331,3 +331,42 @@ it('places a launch popover above or below its whole bar, so a wrapped bar keeps
     Reflect.deleteProperty(proto, 'showPopover'); Reflect.deleteProperty(proto, 'hidePopover');
   }
 });
+
+it('keeps an open launch popover by its summary when a transition of the page moves the summary (#1526 follow-up)', () => {
+  // Narrowing a window with the Task Drawer docked: the page's padding transition moves 选项 after the resize event, from 3713 px to
+  // 323 px; the open options panel follows it when that transition ends, instead of staying where it was placed mid-way.
+  vi.stubGlobal('innerWidth', 1008); vi.stubGlobal('innerHeight', 681);
+  Object.assign(window, { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  const shown = new Set<unknown>();
+  const proto = Object.getPrototypeOf(document.createElement('div')) as Record<string, unknown>;
+  const own = Object.getOwnPropertyDescriptor(proto, 'matches')!;
+  Object.defineProperty(proto, 'showPopover', { configurable: true, value(this: unknown) { shown.add(this); } });
+  Object.defineProperty(proto, 'hidePopover', { configurable: true, value(this: unknown) { shown.delete(this); } });
+  Object.defineProperty(proto, 'matches', { configurable: true, value(this: unknown, selector: string) {
+    return selector === ':popover-open' ? shown.has(this) : (own.value as (s: string) => boolean).call(this, selector); } });
+  try {
+    const bar = createLaunchBarPresentation(document.createElement('span'), document.createElement('button'),
+      { title: '选项', content: document.createElement('div') }, null);
+    document.body.append(bar);
+    const box = (left: number, top: number, width: number, height: number) => ({ top, bottom: top + height, left, right: left + width, width, height });
+    let barTop = 3713;
+    const options = bar.querySelector<HTMLDetailsElement>('.task-launch-options')!;
+    const panel = options.querySelector<HTMLElement>('.task-launch-popover')!;
+    Object.assign(bar, { getBoundingClientRect: () => box(270, barTop, 400, 35) });
+    Object.assign(options.querySelector('summary')!, { getBoundingClientRect: () => box(470, barTop, 59, 35) });
+    Object.assign(panel, { getBoundingClientRect: () => {
+      const style = panel.style as unknown as Record<string, string>;
+      return box(Number.parseFloat(style['left'] || '0'), Number.parseFloat(style['top'] || '0'), 320, Math.min(200, Number.parseFloat(style['maxHeight'] || '200')));
+    } });
+    options.open = true; options.dispatchEvent({ type: 'toggle' } as never);
+    expect(panel.getBoundingClientRect().top).toBeGreaterThan(681);
+    barTop = 323;
+    document.body.dispatchEvent({ type: 'transitionend', bubbles: true } as never);
+    const placed = panel.getBoundingClientRect();
+    expect(placed.top).toBe(323 + 35 + 4);
+    expect(placed.bottom).toBeLessThanOrEqual(681);
+  } finally {
+    Object.defineProperty(proto, 'matches', own);
+    Reflect.deleteProperty(proto, 'showPopover'); Reflect.deleteProperty(proto, 'hidePopover');
+  }
+});

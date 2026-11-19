@@ -2429,6 +2429,10 @@ async function main() {
       for (const [width,height] of [[1280,800],[1008,681]]) {
         at(width===1280?'launch-options-wide':'launch-options-gate');
         await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        // With the Task Drawer docked the page makes room for it by a transition of its padding: once the new width has settled, the
+        // editor brings the bar back into view, and its open 选项 panel follows it.
+        await waitFor(renderer,`document.body.getAnimations().length===0`,`launch-options-settled-${width}`);
+        await renderer.evaluate(`document.querySelector('[data-task-launch-kind] .task-launch-options > summary')?.scrollIntoView({block:'center',behavior:'instant'})`);
         if (!(await renderer.evaluate(`document.querySelector('[data-task-launch-kind] .task-launch-options').open`))) await pointerClick(renderer,waitFor,'[data-task-launch-kind] .task-launch-options > summary','launch-options-open');
         await pointerClick(renderer,waitFor,'[data-task-launch-kind] [data-task-launch-option="sampling"]','launch-without-sampling');
         const retry='[data-task-launch-kind] [data-task-launch-option="retry"]';
