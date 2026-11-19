@@ -8,6 +8,8 @@ decides: how #1152 is implemented — the Owner's three directions of 2026-11-19
 
 # 0106 · Keep 字表与词表 as an importable library, and check 规范用语 against it
 
+> Amended by [ADR 0107 §2–§3](./0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md#2--unified-task-catalog-on-the-underlying-flash-service): model formatting in §3 (`standards-table-formatting`) runs on the unified **Underlying Flash Service** (`Underlying Flash Role` / `底层辅助角色` / `底层辅助模型（Flash）`) registered in R5-F1 ([#1608](https://github.com/zhouy1017/ai7-harness/issues/1608)).
+
 ## Context
 
 ### The Owner's directions (2026-11-19, verbatim)
@@ -80,8 +82,8 @@ The editor chooses a file under 知识库 › 字表与词表 › 导入字表�
 - a file already in the AI7 format;
 - a regular table: CSV, TSV, XLSX or a DOCX table whose header row names the fields above, and the two-column 「A——B」 layout of GF 1001-2001.
 
-**Formatted by the editor's model service, for anything else with text** (a PDF with a text layer, DOCX prose, TXT, HTML, an unrecognised spreadsheet). Under direction 3(a):
-- AI7 states the model service it will use, the size it will send and an estimate of usage, and starts only after the editor confirms;
+**Formatted by the Underlying Flash Service (`Underlying Flash Role` / `底层辅助角色`, [ADR 0107](./0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md)), for anything else with text** (a PDF with a text layer, DOCX prose, TXT, HTML, an unrecognised spreadsheet). Under direction 3(a) and ADR 0107:
+- AI7 states the Underlying Flash model service it will use (`standards-table-formatting`), the size it will send and an estimate of usage, and starts only after the editor confirms;
 - it sends only the imported file's text, in parts;
 - every entry the model returns must name its place in the file, and AI7 checks that its forms occur there; an entry that fails is listed as not recognised with its reason, never applied;
 - an entry the model marks as unsure, and an entry that conflicts with another in the same file, is held as 待确认;
@@ -182,7 +184,7 @@ Five slices join R5. The order is in the [development plan](../development/devel
 | Slice | What it delivers | Order |
 | --- | --- | --- |
 | R5-L1 | The final-shape relations in the 117 baseline. The pre-installed seed in the AI7 format, with content equal to `standard-data.json`. One install function, called by store creation and by the R5-6 converter. Inventory and merge class | On the train with R5-2, before R5-6 |
-| R5-L2 | Import and conversion: the AI7 format, regular tables, model formatting under §3, the conversion report, update with its difference, delete | After the train lands |
+| R5-L2 | Import and conversion: the AI7 format, regular tables, model formatting on the Underlying Flash Service (`standards-table-formatting`, [ADR 0107](./0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md), R5-F1) under §3, the conversion report, update with its difference, delete | After the train and R5-F1 land |
 | R5-L3 | 规范用语核查 reads pinned library versions (C01 / C02 / V01 v2, a new local plan version). Strength, disagreement and 「依据的字表已删除」 on cards. `local-plan/3` results resolve to pre-installed version 1 | After the train lands; beside R5-L2 |
 | R5-L4 | The 知识库 › 字表与词表 surface (§4, §5), including 恢复预装字表 | After R5-L2 and R5-L3 |
 | R5-L5 | The tables leave the program code: `standard-data.json` and the `tables.ts` constants are removed, the seed is the only copy, and the provenance owner moves to it | After R5-L3; before R5-7 |

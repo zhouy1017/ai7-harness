@@ -152,7 +152,7 @@ This maintained bilingual reference routes readers to target-qualified definitio
 | Implementation Assumption | 实现假设 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Run Source Scope | 任务运行来源范围 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Model Role | 模型角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Fast Interaction Role | 快速交互角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Underlying Flash Role | 底层辅助角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Main Editorial Role | 主编辑角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Difficult Escalation Role | 疑难升级角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Frontier Model Role | 前沿模型角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |

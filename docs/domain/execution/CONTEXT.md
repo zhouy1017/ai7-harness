@@ -268,13 +268,13 @@ A provider-independent function actually needed by a Task Intent, native DSH art
 _中文_: 模型角色
 _Avoid_: Model Provider, model name, Provider Binding
 
-**Fast Interaction Role**:
-The Model Role for quick interaction, low-risk candidate generation, and latency-sensitive assistance.
-_中文_: 快速交互角色
-_Avoid_: Cheap model, draft-only model, factual authority
+**Underlying Flash Role**:
+The Model Role for low-level, non-user-facing (or background/preprocessing) structured tasks whose reasoning process is not shown to the editor, whose difficulty lies within a lightweight Flash model's capability, and whose output is verified by deterministic code before taking effect — including unstructured standards-table and guideline-clause formatting (`standards-table-formatting`, `guideline-clause-formatting`), retrieval query expansion and candidate reranking (`retrieval-query-expansion`, `retrieval-rerank`), non-Chinese material translation (`material-translation`), background learning curation (`learning-curation`), and channel connection probes (`model-connection-test`) ([ADR 0107](../../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md); supersedes the historical `Fast Interaction Role` / `快速交互角色`).
+_中文_: 底层辅助角色
+_Avoid_: Fast Interaction Role (legacy alias), user-facing editorial dialogue or prose polishing, unverified free-form output, factual authority
 
 **Main Editorial Role**:
-The Model Role for Chinese long-form writing, editorial proposals, cross-source synthesis, factual research, and complex instruction following.
+The Model Role for user-facing editorial intelligence: Chinese long-form writing, Review Runs and cross-unit synthesis, Factual Verification, Baseline and Custom Manuscript Analysis, Initial Evaluation and Reader's Reports, Editorial and Global Agent Dialogue, manuscript prose polishing / scoped AI edits, and conflict suggestion regeneration ([ADR 0107](../../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md)).
 _中文_: 主编辑角色
 _Avoid_: Default model, editor, decision maker, factual authority
 
