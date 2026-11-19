@@ -2338,10 +2338,10 @@ async function main() {
       waiting.rewrite.proposal.reading === 'AI7 这次重新生成读了全书。' && waiting.rewrite.proposal.withheld.length === 0 &&
       JSON.stringify(waiting.rewrite.proposal.evidence) === JSON.stringify([3, 2, 4, 3, 0, 0, 0, 0]) &&
       JSON.stringify(waiting.rewrite.proposal.pairs) === JSON.stringify([
-        ...AI7_COMMENTS.map(([itemId, comment], index) => [itemId, `现在：${comment}`, `重写：${REWRITTEN_COMMENTS[index]}`]),
-        [null, '现在：（还没有写）', `重写：${REWRITTEN_VERDICT}`],
-        [null, `现在：${waiting.record.strengths.join('；')}`, `重写：${REWRITTEN_STRENGTHS.join('；')}`],
-        [null, `现在：${waiting.record.weaknesses.join('；')}`, `重写：${REWRITTEN_WEAKNESSES.join('；')}`],
+        ...AI7_COMMENTS.map(([itemId, comment], index) => [itemId, `现在：${comment}`, `重新生成：${REWRITTEN_COMMENTS[index]}`]),
+        [null, '现在：（还没有写）', `重新生成：${REWRITTEN_VERDICT}`],
+        [null, `现在：${waiting.record.strengths.join('；')}`, `重新生成：${REWRITTEN_STRENGTHS.join('；')}`],
+        [null, `现在：${waiting.record.weaknesses.join('；')}`, `重新生成：${REWRITTEN_WEAKNESSES.join('；')}`],
       ]) && JSON.stringify(waiting.rewrite.proposal.lists) === JSON.stringify(['strengths', 'weaknesses']) && waiting.record.strengths.length > 0 &&
       JSON.stringify(waiting.rewrite.proposal.actions) === JSON.stringify([['rewrite-accept', '采用新版报告', false], ['rewrite-discard', '放弃', false]]) &&
       waiting.record.entries === '2' && JSON.stringify(waiting.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)),

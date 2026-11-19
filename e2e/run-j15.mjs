@@ -1033,7 +1033,7 @@ async function main() {
     })()`, 'earlier-exemplar-grouped');
     await assertRenderer(renderer, `(() => { const select = document.querySelector('.exemplar-items select'); select.value='excluded'; return true; })()`, 'earlier-exemplar-exclude');
     await clickSelector(renderer, '.exemplar-items [data-exemplar-action="record-eligibility"]', 'earlier-exemplar-eligibility');
-    await waitFor(renderer, `document.querySelector('.exemplar-items li')?.textContent.includes('学习准入：明确排除')`, 'earlier-exemplar-excluded');
+    await waitFor(renderer, `document.querySelector('.exemplar-items li')?.textContent.includes('可用于学习：明确排除')`, 'earlier-exemplar-excluded');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'exemplar-type-filter');
     await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'exemplar-book-filter');
     await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="kind"]').dataset.value==='news-release' && document.querySelector('.exemplar-kind-badge').textContent==='衍生稿件 · 新闻稿'`, 'exemplar-combined-filters');
