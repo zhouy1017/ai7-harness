@@ -84,13 +84,13 @@ Measured targets, against the [#1557](https://github.com/zhouy1017/ai7-harness/i
 
 ### The 字表与词表 library (#1152, ADR 0106)
 
-The Owner's three directions of 2026-11-19 replace the hard-coded standards tables with a library in 知识库 › 字表与词表. An editor imports, updates, disables or deletes 字表 and 词表 there, and 规范用语核查 reads the enabled ones, pinned by version. A corrected or newer standard needs no program release. Only 《通用规范汉字表》, its 附表1 and GF 1001-2001 are pre-installed. Dictionary tables are imported by the house.
+The Owner's three directions of 2026-11-19 replace the hard-coded standards tables with a library in 知识库 › 字表与词表. An editor imports, updates, disables or deletes 字表 and 词表 there, and 规范用语核查 reads the enabled ones, pinned by version. A corrected or newer standard needs no program release. Pre-installed: 《通用规范汉字表》, its 附表1, GF 1001-2001 and, as the default 常用词表, 《现代汉语常用词表（第2版）》 (the Owner's later directions of the same day). Other dictionary tables are imported by the house.
 
 | Slice | What the editor can newly do | Order |
 | --- | --- | --- |
-| R5-L1 | (internal) The library's relations in the revision-117 baseline; the three pre-installed tables in every new and every upgraded store, with content equal to today's; inventory and merge class | On the train with R5-2; R5-6 calls its install function |
+| R5-L1 | (internal) The library's relations in the revision-117 baseline; the four pre-installed tables in every new and every upgraded store: the three national ones with content equal to today's, and the default 常用词表 (words and ranks); inventory and merge class | On the train with R5-2; R5-6 calls its install function |
 | R5-L2 | Import any table file: the AI7 format and regular tables convert directly; anything else with text is formatted by the Underlying Flash Service (`standards-table-formatting`, [ADR 0107](../adr/0107-rename-fast-interaction-to-underlying-flash-role-and-unify-low-level-model-services.md), R5-F1) after a usage estimate and confirmation, every entry traced to the file and doubtful rows held for confirmation; a new version shows what changed; delete removes the source and its data together | After the train and R5-F1 land |
-| R5-L3 | 规范用语核查 checks against the enabled tables, says each suggestion's strength (国家规范 / 辞书推荐 / 本社要求) and basis, shows disagreeing tables instead of choosing, and keeps past results readable with 「依据的字表已删除」 | After the train lands; beside R5-L2 |
+| R5-L3 | 规范用语核查 checks against the enabled tables, says each suggestion's strength (国家规范 / 辞书推荐 / 本社要求) and basis, shows disagreeing tables instead of choosing, notes a possibly uncommon spelling 「可能是不常用的写法，请核对」 from the 常用词表, and keeps past results readable with 「依据的字表已删除」 | After the train lands; beside R5-L2 |
 | R5-L4 | 知识库 › 字表与词表: one item per imported table with its conversion and application status, open to view, confirm and edit rows, 导入新版本, 删除, 恢复预装字表 | After R5-L2 and R5-L3 |
 | R5-L5 | (internal) The tables leave the program code; the pre-installed seed is their only copy | After R5-L3; before R5-7 |
 

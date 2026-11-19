@@ -364,7 +364,7 @@ The inheritance audit resolved the definition owners for these terms. They remai
 | Editor Note | Annotation / exported comment / Learning Material by default |
 | Review Run | Baseline Manuscript Analysis / one Task alone / Review Decision / Report alone |
 | Review Guideline Document | Policy Document / prompt fragment / Editorial Profile / one Book's style sheet |
-| Standards Table | 本社词表 (house literal risk list, H01) / Review Guideline Document / program constant / shipped dictionary |
+| Standards Table | 本社词表 (house literal risk list, H01) / Review Guideline Document / program constant |
 | Standard Usage Check | model review category 错别字与规范用语 / 本社词表 matching (H01) / compliance proof |
 | Finding Disposition | Proposal Decision / Review Decision / Effect Approval / dismissal of a projection |
 | Evaluation Record | Delivery Quality Metric / Review Decision / factual truth / Editorial Review findings |
