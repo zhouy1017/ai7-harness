@@ -117,7 +117,7 @@ function draftCard(extra: Record<string, unknown> = {}, listed: () => unknown[] 
   }) as unknown as Parameters<ReturnType<typeof createBaselineAnalysisCard>['renderBaselineAnalysis']>[1];
   Object.assign(window, { ai7: { inspectBaselineAnalysis: async () => reading(), inspectCustomAnalysisDimensions: async () => ({ dimensions: listed() }),
     saveCustomAnalysisDimension: vi.fn(), enableCustomAnalysisDimension: vi.fn(), stopCustomAnalysisDimension: vi.fn(), ...extra } });
-  const card = createBaselineAnalysisCard({ screen: root as unknown as HTMLElement, technicalDetails: details, taskDrawer: { refresh: vi.fn() }, setStatus: vi.fn(), rendererErrorMessage: () => '' } as unknown as Parameters<typeof createBaselineAnalysisCard>[0]);
+  const card = createBaselineAnalysisCard({ screen: root as unknown as HTMLElement, technicalDetails: details, taskDrawer: { refresh: vi.fn(), openLaunch: vi.fn() }, setStatus: vi.fn(), rendererErrorMessage: () => '' } as unknown as Parameters<typeof createBaselineAnalysisCard>[0]);
   const draw = (): void => card.renderBaselineAnalysis(root as unknown as HTMLElement, reading(), '公开合成书');
   return { root, draw, ticks: () => tick };
 }
