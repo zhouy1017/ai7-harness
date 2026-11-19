@@ -9,7 +9,7 @@ import { formatCalibrationOffset, formatPriceFen } from '../shared/evaluation-ca
 
 export const CALIBRATION_PAGE_TITLE = '评估校准与预测';
 /** True with the prediction switch on as off (Issue #430 review): AI7 predicts nothing unless the editor turns it on. */
-export const CALIBRATION_PAGE_LEDE = '这里的两个开关只影响 AI7 的初始评分与预测，不改你的评分；定价与首印由你录入，AI7 默认不预测。';
+export const CALIBRATION_PAGE_LEDE = '这里的两个开关只影响 AI 初始评分与预测，不改你的评分；定价与首印由你录入，AI7 默认不预测。';
 export const CALIBRATION_HEADING = '校准';
 /** The fold that holds each section's method sentences. */
 export const CALIBRATION_HOW = '怎么算的';

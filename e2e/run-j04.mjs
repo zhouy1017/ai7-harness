@@ -1,5 +1,5 @@
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
-import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, typeInto } from './ordinary-pages.mjs';
+import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
@@ -73,7 +73,9 @@ const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 
   'select-tab', 'go-history', 'go-chapters', 'quick-sync-current', 'quick-reanalyze-range', 'quick-reanalyze-book',
   'open-review', 'view-plan', 'open-feedback', 'record-feedback', 'cancel-feedback',
   // Synchronized delta with Issue #922 (slice 7f): the 自定义 tab's 运行, 查看计划 and each answer's quotation link.
-  'custom-run', 'custom-open-plan', 'custom-jump'];
+  'custom-run', 'custom-open-plan', 'custom-jump',
+  // #1543: 分析 › 自定义 offers writing a dimension in place.
+  'custom-create', 'custom-stop'];
 /** Every button on screen and in the drawer whose words name 授权: AUTH-002 keeps the word off every start (ADR 0077). */
 const AUTHORIZE_LABELED_BUTTONS = `Array.from(document.querySelectorAll('#screen button, #task-drawer button')).filter((button)=>/授权/u.test(button.textContent??'')).length`;
 /** The words the authorization bar says before every start (AUTH-003 as ADR 0077 revised it). */
@@ -3571,49 +3573,69 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'custom-launch-ready');
     const customBook = await importSample1(renderer, cancellation, true);
     at('custom-dimension-define');
-    // #1543: 分析 › 自定义 writes a dimension in place — no trip to 知识库 — at both window forms, with real presses and typing.
+    // #1543: 分析 › 自定义 writes a dimension in place — no trip to 知识库 — as an ordinary editor, at both window forms, with real
+    // presses and typing. At 1280×800 「单元开篇」 is created and enabled; at 1008×681 a second one is created, enabled and stopped on its
+    // card. In development mode 知识库 › 工序与规则 then still lists them and creates a third.
+    await setDeveloperMode(renderer, waitFor, false, 'custom-ordinary');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'custom-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'custom-library');
-    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(customBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'custom-open-book-first');
+    await pointerClick(renderer, waitFor, `button[data-book-id=${JSON.stringify(customBook.bookId)}]`, 'custom-open-book-first');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(customBook.bookId)}]')`, 'custom-manuscript-first', 120_000);
-    await openAnalysisDestination(renderer, 'custom-analysis-first');
+    await pointerClick(renderer, waitFor, SIDEBAR.section('analysis'), 'custom-analysis-first');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis .baseline-analysis-card')`, 'custom-analysis-first-destination');
     await pointerClick(renderer, waitFor, '.baseline-analysis-card [role="tab"][data-analysis-tab="custom"]', 'custom-tab-first');
     const customPanel = '.baseline-analysis-card [data-analysis-panel="custom"]';
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${customPanel} [data-custom-empty="no-dimension"]`)})`, 'custom-tab-empty');
     // The empty state no longer sends the editor to 知识库: it offers the one primary action, here.
     await assertRenderer(renderer, `(() => { const empty=document.querySelector(${JSON.stringify(`${customPanel} [data-custom-empty="no-dimension"]`)}); const create=empty?.querySelector('[data-custom-action="create"]'); return create?.textContent==='新建自定义分析维度…' && create.classList.contains('primary') && !empty.textContent.includes('知识库') && !empty.textContent.includes('工序与规则'); })()`, 'custom-tab-empty-offer');
+    const secondTitle = '人物出场';
     await atBothSizes(renderer, waitFor, 'custom-in-place', async (viewport) => {
-      const size = viewport === ORDINARY_VIEWPORTS[0] ? 'wide' : 'gate';
-      if (viewport === ORDINARY_VIEWPORTS[0]) {
-        await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-empty-row-${size}`);
-        await pointerClick(renderer, waitFor, `${customPanel} [data-custom-action="create"]`, `custom-create-${size}`);
-        await waitFor(renderer, `document.querySelector(${JSON.stringify(`${customPanel} [data-custom-form="new"]`)})`, `custom-form-${size}`);
-        await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-form-row-${size}`);
-        await typeInto(renderer, waitFor, `${customPanel} [data-custom-form="new"] input[name="title"]`, CUSTOM_DIMENSION_TITLE, `custom-title-${size}`);
-        await typeInto(renderer, waitFor, `${customPanel} [data-custom-form="new"] textarea[name="questionTemplate"]`, CUSTOM_DIMENSION_TEMPLATE, `custom-template-${size}`);
-        await pointerClick(renderer, waitFor, `${customPanel} [data-custom-form="new"] [data-custom-action="save"]`, `custom-save-${size}`);
-        await waitFor(renderer, `document.querySelector(${JSON.stringify(`${customPanel} .custom-dimension-card`)})?.querySelector('h3')?.textContent===${JSON.stringify(CUSTOM_DIMENSION_TITLE)} && !document.querySelector(${JSON.stringify(`${customPanel} [data-custom-form="new"]`)})`, `custom-card-${size}`);
-      } else {
-        // With a card on the page the offer stands above the list; opened and left again, nothing is written.
-        await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${customPanel} .custom-head [data-custom-action="create"]`)})?.classList.contains('secondary')===true`, `custom-offer-above-list-${size}`);
-        await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-list-row-${size}`);
-        await pointerClick(renderer, waitFor, `${customPanel} .custom-head [data-custom-action="create"]`, `custom-create-again-${size}`);
-        await waitFor(renderer, `document.querySelector(${JSON.stringify(`${customPanel} [data-custom-form="new"]`)})`, `custom-form-${size}`);
-        await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-form-row-${size}`);
-        await pointerClick(renderer, waitFor, `${customPanel} [data-custom-form="new"] [data-custom-action="cancel"]`, `custom-cancel-${size}`);
-        await waitFor(renderer, `!document.querySelector(${JSON.stringify(`${customPanel} [data-custom-form="new"]`)}) && document.querySelector(${JSON.stringify(`${customPanel} .custom-head [data-custom-action="create"]`)})`, `custom-form-closed-${size}`);
+      const first = viewport === ORDINARY_VIEWPORTS[0];
+      const size = first ? 'wide' : 'gate';
+      const title = first ? CUSTOM_DIMENSION_TITLE : secondTitle;
+      const offer = first ? `${customPanel} [data-custom-action="create"]` : `${customPanel} .custom-head [data-custom-action="create"]`;
+      await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-list-row-${size}`);
+      await pointerClick(renderer, waitFor, offer, `custom-create-${size}`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${customPanel} [data-custom-form="new"]`)}) && document.activeElement?.name==='title'`, `custom-form-${size}`);
+      await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-form-row-${size}`);
+      await typeInto(renderer, waitFor, `${customPanel} [data-custom-form="new"] input[name="title"]`, title, `custom-title-${size}`);
+      await typeInto(renderer, waitFor, `${customPanel} [data-custom-form="new"] textarea[name="questionTemplate"]`, first ? CUSTOM_DIMENSION_TEMPLATE : '本部分有哪些人物出场？', `custom-template-${size}`);
+      await pointerClick(renderer, waitFor, `${customPanel} [data-custom-form="new"] [data-custom-action="save"]`, `custom-save-${size}`);
+      // The card of what was just written is drawn, and holds the editor's place.
+      await waitFor(renderer, `!document.querySelector(${JSON.stringify(`${customPanel} [data-custom-form="new"]`)}) && document.activeElement?.matches('.custom-dimension-card') && document.activeElement.querySelector('h3')?.textContent===${JSON.stringify(title)}`, `custom-card-${size}`);
+      await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${customPanel} .custom-head [data-custom-action="create"]`)})?.classList.contains('secondary')===true && !/(?<!发稿)版本|AI7 初评/u.test(document.querySelector(${JSON.stringify(customPanel)}).textContent)`, `custom-offer-above-list-${size}`);
+      await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-card-row-${size}`);
+      if (!first) {
+        // 停用 on the card the editor is on, pressed, after the one question: the dimension never ran on this Book, so its card goes.
+        // The question is the app's own confirm; the Journey answers it yes and gives the window its own back.
+        await renderer.evaluate("window.__j04Confirm = window.confirm; window.__j04Asked = []; window.confirm = (question) => { window.__j04Asked.push(String(question)); return true; }");
+        await pointerClick(renderer, waitFor, `${customPanel} .custom-dimension-card:focus-within [data-custom-action="stop"]`, `custom-stop-${size}`);
+        await waitFor(renderer, `!Array.from(document.querySelectorAll(${JSON.stringify(`${customPanel} .custom-dimension-card`)})).some((node) => node.querySelector('h3')?.textContent===${JSON.stringify(secondTitle)})`, `custom-stopped-${size}`);
+        await waitFor(renderer, `(document.querySelector('[data-toast]')?.textContent ?? '').includes('已停用「${secondTitle}」')`, `custom-stopped-status-${size}`);
+        const asked = JSON.parse(await renderer.evaluate("(() => { const asked = window.__j04Asked; window.confirm = window.__j04Confirm; delete window.__j04Asked; delete window.__j04Confirm; return JSON.stringify(asked); })()"));
+        requireJourney(asked.length === 1 && asked[0].includes(secondTitle) && asked[0].includes('所有图书') && asked[0].includes('不能撤销'), `custom-stop-asked-${size}`, asked);
+        const stoppedService = await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: false }).then((page) => JSON.stringify(page.dimensions.filter((entry) => entry.title === ${JSON.stringify(secondTitle)}).map((entry) => [entry.enabledVersion, entry.versions[0].state])))`);
+        requireJourney(stoppedService === JSON.stringify([[null, 'stopped']]), `custom-stopped-service-${size}`, stoppedService);
       }
     });
-    // 知识库 › 工序与规则 still lists the house's dimensions, with what AI7 fixes beside the template.
+    await setDeveloperMode(renderer, waitFor, true, 'custom-developer');
+    // 知识库 › 工序与规则 still lists the house's dimensions, with what AI7 fixes beside the template, and still writes one.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'custom-knowledge-open');
     await click(renderer, '工序与规则', 'custom-knowledge-rules');
-    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='1' && document.querySelector('.knowledge-custom-dimensions .custom-dimension-version[data-version="1"]')?.dataset.versionState==='enabled'`, 'custom-saved');
+    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='2'`, 'custom-knowledge-two');
     await assertRenderer(renderer, `Array.from(document.querySelectorAll('.knowledge-custom-dimensions .custom-dimension-fixed li')).map((item)=>item.textContent).join('').includes('不打分') && document.querySelector('.knowledge-custom-dimensions')?.textContent.includes('名称只在本机显示，不会发送')`, 'custom-knowledge-fixed');
+    await pointerClick(renderer, waitFor, '.knowledge-custom-dimensions [data-custom-action="new"]', 'custom-new');
+    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions [data-custom-form="new"]')`, 'custom-new-form');
+    await typeInto(renderer, waitFor, '.knowledge-custom-dimensions [data-custom-form="new"] input[name="title"]', '开篇场景', 'custom-new-title');
+    await typeInto(renderer, waitFor, '.knowledge-custom-dimensions [data-custom-form="new"] textarea[name="questionTemplate"]', '本部分开篇写了什么场景？', 'custom-new-template');
+    await pointerClick(renderer, waitFor, '.knowledge-custom-dimensions [data-custom-form="new"] [data-custom-action="save"]', 'custom-save');
+    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='3' && Array.from(document.querySelectorAll('.knowledge-custom-dimensions .custom-dimension-version')).filter((node)=>node.dataset.versionState==='enabled').length===2`, 'custom-saved');
     const defined = await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: false })`);
-    const customDimension = defined?.dimensions?.[0];
-    requireJourney(defined?.dimensions?.length === 1 && customDimension.title === CUSTOM_DIMENSION_TITLE && customDimension.kind === `custom-analysis/${customDimension.dimensionId}` &&
+    const customDimension = defined?.dimensions?.find((entry) => entry.title === CUSTOM_DIMENSION_TITLE);
+    requireJourney(defined?.dimensions?.length === 3 && customDimension !== undefined && customDimension.kind === `custom-analysis/${customDimension.dimensionId}` &&
       customDimension.enabledVersion?.version === 1 && customDimension.versions[0].questionTemplate === CUSTOM_DIMENSION_TEMPLATE &&
-      customDimension.versions[0].supersedes === null && DIGEST_PATTERN.test(customDimension.versions[0].documentDigest), 'custom-defined', defined);
+      customDimension.versions[0].supersedes === null && DIGEST_PATTERN.test(customDimension.versions[0].documentDigest) &&
+      defined.dimensions.find((entry) => entry.title === secondTitle)?.versions[0].state === 'stopped', 'custom-defined', defined);
     cancellation.throwIfRequested();
 
     at('custom-dimension-run');
@@ -3631,8 +3653,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskLaunchKind==='custom-analysis'`, 'custom-launch-options');
     await assertRenderer(renderer, `(() => {const retry=document.querySelector('#task-drawer [data-task-launch-option="retry"]');if(!retry)return false;retry.value='never';retry.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'custom-withdraw-safe-retry');
     await launchTaskFromBar(renderer, waitFor, 'custom-analysis');
-    await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.latest !== null && value.dimensions[0]?.book?.taskState?.state === 'settled')`, 'custom-settled', 180_000);
-    const customTask = (await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: true })`)).dimensions[0].book.taskState;
+    await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => (([entry]) => entry?.book?.latest !== null && entry?.book?.taskState?.state === 'settled')(value.dimensions.filter((item) => item.dimensionId === ${JSON.stringify(customDimension.dimensionId)})))`, 'custom-settled', 180_000);
+    const customTask = (await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: true })`)).dimensions.find((item) => item.dimensionId === customDimension.dimensionId).book.taskState;
     // The plan it ran: the dimension's exact version as its procedure, and nothing sent here.
     const customPlanRecord = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(customTask.taskIntentId)} })`);
     requireJourney(customPlanRecord?.scope?.send === `不发送任何内容；实时运行时会一并发送该维度第 1 版的提问模板「${CUSTOM_DIMENSION_TEMPLATE}」` &&

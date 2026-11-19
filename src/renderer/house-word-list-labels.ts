@@ -18,8 +18,8 @@ export const HOUSE_RETRY_READ = '重新读取';
 export const HOUSE_PREVIOUS = '上一页';
 export const HOUSE_NEXT = '下一页';
 export const HOUSE_COLUMNS = ['词条', '说明', '启用'] as const;
-export const HOUSE_DRAFT_NOTE = '保存后成为最新词表；打开、编辑和保存词表都不会开始检查。';
-export const HOUSE_NOTE_LABEL = '说明（会随批注显示）';
+export const HOUSE_DRAFT_NOTE = '保存后成为最新词表；说明会随批注一起显示；打开、编辑和保存词表都不会开始检查。';
+export const HOUSE_READING = '正在读取本社词表…';
 export const HOUSE_PASTE_LABEL = '一次加入多条：一行一条，空行忽略';
 export const HOUSE_PASTE_ADD = '加入';
 export const HOUSE_PASTE_SAVE = '加入并保存';
@@ -35,12 +35,12 @@ export const HOUSE_SAVED_READ_PENDING = '本社词表已保存；读取未完成
 export const HOUSE_SAVED_READING = '本社词表已保存；正在读取词条。';
 
 /** `11 月 16 日 14:05`, with the year only when it is not this one. */
-export function houseSavedAt(iso: string, now: Date = new Date()): string {
+export function houseSavedAt(iso: string, now: Date = new Date(), seconds = false): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return iso;
   const pad = (value: number): string => String(value).padStart(2, '0');
   const year = at.getFullYear() === now.getFullYear() ? '' : `${at.getFullYear()} 年 `;
-  return `${year}${at.getMonth() + 1} 月 ${at.getDate()} 日 ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  return `${year}${at.getMonth() + 1} 月 ${at.getDate()} 日 ${pad(at.getHours())}:${pad(at.getMinutes())}${seconds ? `:${pad(at.getSeconds())}` : ''}`;
 }
 
 interface SavedVersion { readonly ordinal: number; readonly createdAt: string; readonly entryCount: number; readonly enabledCount: number }
@@ -55,9 +55,9 @@ export function houseEarlierLine(version: SavedVersion): string {
   return `这是 ${houseSavedAt(version.createdAt)}保存的词表，只能查看；${version.entryCount} 条，启用 ${version.enabledCount} 条。`;
 }
 
-/** One row of the earlier lists: named by date and time, with its entry count. */
+/** One row of the earlier lists: named by date and time to the second, so two saves close together never read the same. */
 export function houseHistoryLabel(version: Pick<SavedVersion, 'ordinal' | 'createdAt' | 'entryCount'>): string {
-  return `${houseSavedAt(version.createdAt)} · ${version.entryCount} 条${technicalWords(` · 第 ${version.ordinal} 版`)}`;
+  return `${houseSavedAt(version.createdAt, new Date(), true)} · ${version.entryCount} 条${technicalWords(` · 第 ${version.ordinal} 版`)}`;
 }
 
 export function houseSavedStatus(created: boolean, ordinal: number): string {

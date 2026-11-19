@@ -134,8 +134,8 @@ describe('本社词表 for an ordinary editor', () => {
       (miniDocument.body.querySelector('[data-house-field="literal"]') as MiniElement).dispatchEvent({ type: 'input' });
       await click('save');
       const rows = root.querySelectorAll('button').filter((node) => /^history-[0-9]+$/.test(node.dataset['houseAction'] ?? ''));
-      expect(rows).toHaveLength(2);
-      for (const row of rows) expect(row.textContent).toMatch(/月 \d+ 日 \d\d:\d\d · 3 条/u);
+      expect(rows).toHaveLength(1);
+      for (const row of rows) expect(row.textContent).toMatch(/月 [0-9]+ 日 [0-9]{2}:[0-9]{2}:[0-9]{2} · 3 条/u);
       expectOrdinaryWords(root.textContent);
     } finally { panel.destroy(); db.close(); }
   });
@@ -158,12 +158,12 @@ describe('分析 › 自定义 writes a dimension in place', () => {
 
   it('offers 新建自定义分析维度… in the empty state, opens the form there, and shows the new card once saved', async () => {
     let listed = none();
-    const pending = { ...enabled('人物出场').versions[0]!, state: 'pending-validation' as const, stateLabel: '待验证' };
-    const saved: CustomAnalysisDimensionsProjection = { ...none(), bookId: null, dimensions: [{ ...enabled('人物出场'), versions: [pending] }] };
+    // The service enables inside the same save: what it returns already lists the dimension as enabled.
+    const saved: CustomAnalysisDimensionsProjection = { ...none(), bookId: null, dimensions: [enabled('人物出场')] };
     const api = {
       inspectCustomAnalysisDimensions: vi.fn(async () => listed),
-      saveCustomAnalysisDimension: vi.fn(async () => saved),
-      enableCustomAnalysisDimension: vi.fn(async () => { listed = { ...none(), dimensions: [enabled('人物出场')] }; return listed; }),
+      saveCustomAnalysisDimension: vi.fn(async () => { listed = { ...none(), dimensions: [enabled('人物出场')] }; return saved; }),
+      enableCustomAnalysisDimension: vi.fn(),
       stopCustomAnalysisDimension: vi.fn(),
     };
     const panel = miniDocument.createElement('section'); miniDocument.body.append(panel);
@@ -182,35 +182,12 @@ describe('分析 › 自定义 writes a dimension in place', () => {
     form.dispatchEvent({ type: 'submit', preventDefault() {} });
     await settle();
     expect(api.saveCustomAnalysisDimension).toHaveBeenCalledWith({ dimensionId: null, title: '人物出场', questionTemplate: '本部分有哪些人物出场？' });
-    expect(api.enableCustomAnalysisDimension).toHaveBeenCalledWith({ versionId: 'v1' });
+    expect(api.enableCustomAnalysisDimension).not.toHaveBeenCalled();
     expect(panel.querySelector('[data-custom-form="new"]')).toBeNull();
     expect(panel.querySelector('.custom-dimension-card h3')?.textContent).toBe('人物出场');
     expect(setStatus).toHaveBeenLastCalledWith('已保存并启用「人物出场」，可在分析中运行。', 'success');
     // With a card on the page the offer stands above the list, as a secondary action.
     expect(panel.querySelector('.custom-head [data-custom-action="create"]')?.className).toContain('secondary');
-  });
-
-  it('writes onto the version it already saved when enabling was refused, never a second dimension', async () => {
-    const pending = { ...enabled('人物出场').versions[0]!, state: 'pending-validation' as const, stateLabel: '待验证' };
-    const saved: CustomAnalysisDimensionsProjection = { ...none(), bookId: null, dimensions: [{ ...enabled('人物出场'), versions: [pending] }] };
-    const api = {
-      inspectCustomAnalysisDimensions: vi.fn(async () => none()),
-      saveCustomAnalysisDimension: vi.fn(async () => saved),
-      enableCustomAnalysisDimension: vi.fn(async () => { throw new Error('refused'); }),
-      stopCustomAnalysisDimension: vi.fn(),
-    };
-    const panel = miniDocument.createElement('section'); miniDocument.body.append(panel);
-    mountCustomAnalysisTab(panel as unknown as HTMLElement, { bookId: BOOK, api, author: { api }, setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback, openLaunch: vi.fn(), openPlan: vi.fn(), jump: vi.fn() });
-    await settle();
-    (panel.querySelector('[data-custom-action="create"]') as MiniElement).click();
-    const form = panel.querySelector('[data-custom-form="new"]')!;
-    (form.querySelector('input') as MiniElement).value = '人物出场';
-    (form.querySelector('textarea') as MiniElement).value = '问？';
-    form.dispatchEvent({ type: 'submit', preventDefault() {} }); await settle();
-    // The form stays open; its next try names the dimension saved.
-    expect(panel.querySelector('[data-custom-form="new"]')).not.toBeNull();
-    form.dispatchEvent({ type: 'submit', preventDefault() {} }); await settle();
-    expect(api.saveCustomAnalysisDimension).toHaveBeenLastCalledWith({ dimensionId: '22222222-2222-4222-8222-222222222222', title: '人物出场', questionTemplate: '问？' });
   });
 
   it('cancelling closes the form and gives the offer back', async () => {
