@@ -14,16 +14,17 @@ import {
   backgroundCeilingTooLowReason, backgroundDriftReason, backgroundRunReportLines, backgroundScopeLabel, backgroundScopeMemberActiveReason,
   backgroundScopeMemberUnreadableReason,
 } from '../../src/service/background-analysis-enrollments.js';
-import { KNOWN_RAW, NOT_SHOWN, SERVICE_SENTENCE_RULES, backgroundSwitchWords, ordinaryServiceWords, serviceGoalWords, serviceWords, stateWords } from '../../src/renderer/service-wording.js';
+import { SERVICE_SENTENCE_RULES, backgroundSwitchWords, ordinaryServiceWords, serviceGoalWords, serviceWords, stateWords } from '../../src/renderer/service-wording.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { taskBarView, taskPlanLastEdit, taskPlanWording, TASK_BAR_WAITING_SLOT_NOTE } from '../../src/renderer/task-drawer-labels.js';
 import { rendererErrorMessage } from '../../src/renderer/error-words.js';
 import { taskPlanFixture } from '../support/task-plan-fixture.js';
+import { KNOWN_RAW, NOT_SHOWN } from './service-wording.buckets.js';
 
 // Issue #1531 (review N1–N3, B1): service-authored sentences are reworded for ordinary mode by whole-sentence rules only — a
 // title, a name, a heading, a destination, the editor's goal and a model's words never change. Every sentence with a banned
-// term in the eight modules the renderer shows stands, by its `file:line`, in exactly one place: a rule (its samples made by
-// the service's own functions), NOT_SHOWN or KNOWN_RAW (#1616). Synthetic sentences only.
+// term in the eight modules the renderer shows stands, by its file and text (never a line number), in exactly one place: a
+// rule (its samples made by the service's own functions), NOT_SHOWN or KNOWN_RAW (#1616). Synthetic sentences only.
 
 type Span = { kind: string; found: string };
 const banned = (text: string): string[] => (findTerms(text) as Span[]).filter((span) => span.kind === 'banned').map((span) => span.found);
@@ -32,16 +33,13 @@ const outside = (text: string): string => text.replace(/《[^》]*》|「[^」]*
 const MODULES = ['task-plan.ts', 'task-overview.ts', 'bounded-manuscript.ts', 'review/review-run-state.ts',
   'book-delivery-packages.ts', 'background-analysis-enrollments.ts', 'book-findings.ts', 'analysis/run-state.ts'];
 
-/** The fragments of string text the scan sees in one service file, by line. */
-const cache = new Map<string, string[][]>();
-function fragmentsOf(file: string): string[][] {
-  if (!cache.has(file)) {
-    cache.set(file, (maskSource(readFileSync(`src/service/${file}`, 'utf8')).text as string).split('\n')
-      .map((line) => line.split(/\s{3,}/u).map((text) => text.trim()).filter((text) => text !== '')));
-  }
-  return cache.get(file)!;
+/** One service file's source lines and, for each, the fragments of string text the scan sees there. */
+type Source = ReadonlyArray<{ readonly raw: string; readonly fragments: ReadonlyArray<string> }>;
+function sourceOf(text: string): Source {
+  const masked = (maskSource(text).text as string).split('\n');
+  return text.split('\n').map((raw, index) => ({ raw, fragments: (masked[index] ?? '').split(/\s{3,}/u).map((part) => part.trim()).filter((part) => part !== '') }));
 }
-const at = (key: string): string[] => { const [file, line] = key.split(':'); return fragmentsOf(file!)[Number(line) - 1] ?? []; };
+const read = (file: string): string => readFileSync(`src/service/${file}`, 'utf8');
 
 function block(position: number, kind: ManifestBlockInput['kind'], graphemes: number, text = '合成占位'): ManifestBlockInput {
   return { blockId: `b${String(position).padStart(4, '0')}`, position, kind, level: kind === 'heading' ? 1 : null, text, digest: 'a'.repeat(64), graphemes };
@@ -59,33 +57,34 @@ const where = (range: { startPosition: number; endPosition: number } | null): st
 const chars = (range: { startPosition: number; endPosition: number } | null): string => groupedCount(readRange(BLOCKS, range).graphemes);
 
 /**
- * Each family's samples, by its first line, made by the service's own functions; where the sentence is composed inside a plan
+ * The families' samples, by service file (`file#n`), made by the service's own functions — a family's samples are those of its
+ * file its shape matches; where the sentence is composed inside a plan
  * builder (an internal template), its variable parts come from the service's helpers and its text is checked against the
  * source line by the coverage test.
  */
 const PRODUCED: Readonly<Record<string, () => ReadonlyArray<string>>> = {
-  'task-plan.ts:330': () => [resendDisclosure([2, 3]), resendDisclosure([4])],
-  'task-plan.ts:338': () => [categoryResendDisclosure([{ category: '事实核查', units: [4] }, { category: '体例与格式', units: [1, 2] }])],
-  'task-plan.ts:413': () => [budgetCeilingLabel({ kind: 'tokens', maxTotalTokens: 80000 }), `任务运行预算上限：${groupedCount(240000)} tokens（2 类合计）`,
+  'task-plan.ts#1': () => [resendDisclosure([2, 3]), resendDisclosure([4])],
+  'task-plan.ts#2': () => [categoryResendDisclosure([{ category: '事实核查', units: [4] }, { category: '体例与格式', units: [1, 2] }])],
+  'task-plan.ts#3': () => [budgetCeilingLabel({ kind: 'tokens', maxTotalTokens: 80000 }), `任务运行预算上限：${groupedCount(240000)} tokens（2 类合计）`,
     `任务运行预算上限：${groupedCount(240000)} tokens；各成员的模型阶段按工序份额分用`],
-  'task-plan.ts:1043': () => [`《合成书》${where(null)} · ${chars(null)} 字 · 8 个阅读范围`,
+  'task-plan.ts#4': () => [`《合成书》${where(null)} · ${chars(null)} 字 · 8 个阅读范围`,
     `《合成书》${where({ startPosition: 2, endPosition: 4 })} · ${chars({ startPosition: 2, endPosition: 4 })} 字 · 重新分析 2 个阅读范围（${where({ startPosition: 3, endPosition: 4 })}），沿用 6 个`,
     `《合成书》${where({ startPosition: 2, endPosition: 6 })} · ${chars({ startPosition: 2, endPosition: 6 })} 字 · 重新分析 2 个阅读范围，沿用 6 个`],
-  'task-plan.ts:1048': () => [`所读阅读范围的稿件正文（${where({ startPosition: 3, endPosition: 4 })}），以及所选工序中的编辑任务说明和豁免规则`,
+  'task-plan.ts#5': () => [`所读阅读范围的稿件正文（${where({ startPosition: 3, endPosition: 4 })}），以及所选工序中的编辑任务说明和豁免规则`,
     '全书各阅读范围的稿件正文（8 个），以及汇总时各项依据的说明', '全书各阅读范围的稿件正文（8 个）与定稿的评估记录，以及汇总时各处段落的说明',
     '全书各阅读范围的稿件正文（8 个）、上面列出的参考材料——其中包括其他图书的范例原文与资料库资料原文——与你写的受众、渠道和要求，以及汇总时各处段落的说明',
     '全书各阅读范围的稿件正文（8 个）与这一版评估的评分和评语，以及汇总时各项依据的说明',
     `所读范围内的稿件正文（${where({ startPosition: 2, endPosition: 4 })}）和所选类别的规范条款，以及上面列出的资料库资料原文，以及本社审阅偏好的摘录`,
     `所读范围内的稿件正文（${where({ startPosition: 2, endPosition: 4 })}）和所选类别的规范条款，以及本社审阅偏好的摘录，以及本社审阅偏好 v2的摘录，发往 模型（tokens-pro）`],
-  'task-plan.ts:1055': () => ['逐章读取（重新读取 2 个阅读范围，沿用 6 个）', `逐章读取（重新读取 ${where({ startPosition: 3, endPosition: 4 })}，沿用其余 6 个阅读范围）`],
-  'task-plan.ts:1083': () => [`达到 ${groupedCount(80000)} tokens 后不再发送新的请求（8 个阅读范围）`],
-  'task-plan.ts:2696': () => [`至多 ${groupedCount(240000)} tokens（各成员按工序份额分用）`, `至多 ${groupedCount(240000)} tokens（2 类合计）`],
-  'task-plan.ts:1674': () => [writingReferenceLines({ synopsis: null, evaluation: { conclusion: '缺口在第二章', strengths: ['甲', '乙', '丙'], market: null },
+  'task-plan.ts#6': () => ['逐章读取（重新读取 2 个阅读范围，沿用 6 个）', `逐章读取（重新读取 ${where({ startPosition: 3, endPosition: 4 })}，沿用其余 6 个阅读范围）`],
+  'task-plan.ts#7': () => [`达到 ${groupedCount(80000)} tokens 后不再发送新的请求（8 个阅读范围）`],
+  'task-plan.ts#8': () => [`至多 ${groupedCount(240000)} tokens（各成员按工序份额分用）`, `至多 ${groupedCount(240000)} tokens（2 类合计）`],
+  'task-plan.ts#9': () => [writingReferenceLines({ synopsis: null, evaluation: { conclusion: '缺口在第二章', strengths: ['甲', '乙', '丙'], market: null },
     type: { label: '审稿意见' }, exemplars: [], book: { title: '合成书', authors: [], editors: [], series: [] }, audience: '编辑部', channel: '内部', requirements: null } as never)[1]!],
-  'task-plan.ts:1628': () => [writingMaterialReferenceLine({ source: { title: '出版社经验谈', characters: 3000 }, refusal: { code: 'OTHER' } } as never, true)],
-  'task-plan.ts:2038': () => [CLARIFICATION_WHY],
-  'task-plan.ts:2064': () => [clarificationQuestion(3)],
-  'task-plan.ts:2186': () => [
+  'task-plan.ts#10': () => [writingMaterialReferenceLine({ source: { title: '出版社经验谈', characters: 3000 }, refusal: { code: 'OTHER' } } as never, true)],
+  'task-plan.ts#11': () => [CLARIFICATION_WHY],
+  'task-plan.ts#12': () => [clarificationQuestion(3)],
+  'task-plan.ts#13': () => [
     ...baselineCancellationImpact(run('executing', progress()), update, null),
     ...baselineCancellationImpact(run('executing', progress()), null, null),
     ...baselineCancellationImpact(run('executing', progress({ currentUnitOrdinal: null })), null, null),
@@ -98,65 +97,88 @@ const PRODUCED: Readonly<Record<string, () => ReadonlyArray<string>>> = {
     ...baselineCancellationImpact(run('paused', null), null, { unitsSettled: 3, unitsTotal: 8, waiting: [], unconfirmed: [] }),
     ...baselineCancellationImpact(run('executing', null), null, null),
   ],
-  'task-plan.ts:2234': () => baselineCancellationImpact(run('executing', progress()), update, { unitsSettled: 5, unitsTotal: 10, bindingHolds: true,
+  'task-plan.ts#14': () => baselineCancellationImpact(run('executing', progress()), update, { unitsSettled: 5, unitsTotal: 10, bindingHolds: true,
     waiting: [{ unitOrdinal: 6, answered: false }, { unitOrdinal: 7, answered: true }], unconfirmed: [4] }).slice(0, 1),
-  'task-plan.ts:2235': () => baselineCancellationImpact(run('paused', null), null, { unitsSettled: 5, unitsTotal: 10, bindingHolds: true,
+  'task-plan.ts#15': () => baselineCancellationImpact(run('paused', null), null, { unitsSettled: 5, unitsTotal: 10, bindingHolds: true,
     waiting: [{ unitOrdinal: 6, answered: false }, { unitOrdinal: 7, answered: true }], unconfirmed: [4] }).slice(1),
-  'task-plan.ts:2333': () => [redoGoalSentence({ reused: 2, recomputed: 6, invalidated: 0, bypassed: 0 })],
-  'task-plan.ts:2382': () => ['然后准备一项新任务：沿用这 2 个阅读范围的结果，接着读其余 6 个；开始之前可以先改计划。',
+  'task-plan.ts#16': () => [redoGoalSentence({ reused: 2, recomputed: 6, invalidated: 0, bypassed: 0 })],
+  'task-plan.ts#17': () => ['然后准备一项新任务：沿用这 2 个阅读范围的结果，接着读其余 6 个；开始之前可以先改计划。',
     '然后准备一项新任务：沿用其中有结果的 2 个阅读范围，其余 6 个（含留下缺口的 1 个）重新读；开始之前可以先改计划。'],
-  'task-plan.ts:2389': () => ['这项任务会在这里停下并取消；它还没有读完任何阅读范围，不会形成结果集修订版。',
+  'task-plan.ts#18': () => ['这项任务会在这里停下并取消；它还没有读完任何阅读范围，不会形成结果集修订版。',
     '这项任务会在这里停下并取消；已读完的 3 个阅读范围保留在一份新的结果集修订版里，没读到的记为未尝试。',
     '这项任务会在这里停下并取消；执行绑定已经变化，已读完的 3 个阅读范围不能沿用，不会形成结果集修订版。'],
-  'task-plan.ts:2635': () => ['文字与表达：参考本社审阅偏好', '事实核查：参考本社审阅偏好 v2'],
-  'task-plan.ts:440': () => [defaultRuleBindingRows({ providerBinding: { providerId: 'opencode-go', modelId: 'tokens-pro', credentialReference: 'ref-1' },
+  'task-plan.ts#19': () => ['文字与表达：参考本社审阅偏好', '事实核查：参考本社审阅偏好 v2'],
+  'task-plan.ts#20': () => [defaultRuleBindingRows({ providerBinding: { providerId: 'opencode-go', modelId: 'tokens-pro', credentialReference: 'ref-1' },
     artifactPin: { identity: '基线分析', version: 'v1', sidecarRevision: 1 }, runBudgetCeiling: 'unset', outboundDataCategory: 'x', expectedOutcome: 'y' } as never)[0]!.value],
-  'analysis/run-state.ts:332': () => (['proxy-unreachable', 'model-service-unreachable', 'outcome-unknown', 'shutdown'] as const).map((why) => activeRunReason('resumable', undefined, why)),
-  'analysis/run-state.ts:334': () => [activeRunReason('authorized'), activeRunReason('authorized', 'review-run')],
-  'background-analysis-enrollments.ts:963': () => [backgroundCeilingTooLowReason(3)],
-  'background-analysis-enrollments.ts:979': () => [...backgroundRunReportLines({ ordinal: 1, scopeLabel: null, ceilingTokens: null, shareTokens: null, frozenTokens: null, usedTokens: 0, reached: false }),
+  'analysis/run-state.ts#1': () => (['proxy-unreachable', 'model-service-unreachable', 'outcome-unknown', 'shutdown'] as const).map((why) => activeRunReason('resumable', undefined, why)),
+  'analysis/run-state.ts#2': () => [activeRunReason('authorized'), activeRunReason('authorized', 'review-run')],
+  'background-analysis-enrollments.ts#1': () => [backgroundCeilingTooLowReason(3)],
+  'background-analysis-enrollments.ts#2': () => [...backgroundRunReportLines({ ordinal: 1, scopeLabel: null, ceilingTokens: null, shareTokens: null, frozenTokens: null, usedTokens: 0, reached: false }),
     ...backgroundRunReportLines({ ordinal: null, scopeLabel: null, ceilingTokens: null, shareTokens: null, frozenTokens: null, usedTokens: 0, reached: false })],
-  'background-analysis-enrollments.ts:982': () => [backgroundRunReportLines({ ordinal: 1, scopeLabel: backgroundScopeLabel('series', '乙', 3), ceilingTokens: 1000, shareTokens: 334, frozenTokens: null, usedTokens: 0, reached: false })[1]!,
+  'background-analysis-enrollments.ts#3': () => [backgroundRunReportLines({ ordinal: 1, scopeLabel: backgroundScopeLabel('series', '乙', 3), ceilingTokens: 1000, shareTokens: 334, frozenTokens: null, usedTokens: 0, reached: false })[1]!,
     backgroundRunReportLines({ ordinal: 1, scopeLabel: backgroundScopeLabel('book', '甲', 1), ceilingTokens: 1000, shareTokens: 1000, frozenTokens: null, usedTokens: 0, reached: false })[1]!],
-  'background-analysis-enrollments.ts:987': () => [backgroundRunReportLines({ ordinal: 1, scopeLabel: null, ceilingTokens: null, shareTokens: null, frozenTokens: 334, usedTokens: 334, reached: true })[1]!,
+  'background-analysis-enrollments.ts#4': () => [backgroundRunReportLines({ ordinal: 1, scopeLabel: null, ceilingTokens: null, shareTokens: null, frozenTokens: 334, usedTokens: 334, reached: true })[1]!,
     backgroundRunReportLines({ ordinal: 1, scopeLabel: null, ceilingTokens: null, shareTokens: null, frozenTokens: 334, usedTokens: 120, reached: false })[1]!],
-  'background-analysis-enrollments.ts:880': () => [backgroundDriftReason(['模型服务', '工序'])],
-  'background-analysis-enrollments.ts:953': () => [backgroundScopeMemberActiveReason('乙')],
-  'background-analysis-enrollments.ts:958': () => [backgroundScopeMemberUnreadableReason('乙')],
+  'background-analysis-enrollments.ts#5': () => [backgroundDriftReason(['模型服务', '工序'])],
+  'background-analysis-enrollments.ts#6': () => [backgroundScopeMemberActiveReason('乙')],
+  'background-analysis-enrollments.ts#7': () => [backgroundScopeMemberUnreadableReason('乙')],
 };
-const samplesOf = (rule: (typeof SERVICE_SENTENCE_RULES)[number]): ReadonlyArray<string> => rule.exact !== undefined ? [rule.exact] : PRODUCED[rule.lines[0]!]?.() ?? [];
+type Rule = (typeof SERVICE_SENTENCE_RULES)[number];
+const produced = (file: string): ReadonlyArray<string> => Object.entries(PRODUCED).filter(([name]) => name.split('#')[0] === file).flatMap(([, make]) => make());
+const samplesOf = (rule: Rule): ReadonlyArray<string> => rule.exact !== undefined ? [rule.exact] : produced(rule.file).filter((sample) => rule.family!.test(sample));
+const covers = (sample: string, text: string): boolean => text.split(/\s{2,}/u).every((piece) => sample.includes(piece));
+const nameOf = (rule: Rule): string => `${rule.file} ${rule.exact ?? String(rule.family)}`;
+
+/**
+ * Where each banned fragment of the eight modules stands (by file and text): a site an entry of NOT_SHOWN or KNOWN_RAW names
+ * by its text is that entry's; every other site must be a rule's. A line number is used for the message only.
+ */
+function placement(readFile: (file: string) => string): { misplaced: string[]; stale: string[] } {
+  const sources = new Map(MODULES.map((file) => [file, sourceOf(readFile(file))]));
+  const entries = [...NOT_SHOWN.map((entry) => ({ ...entry, bucket: 'NOT_SHOWN' })), ...KNOWN_RAW.map((entry) => ({ ...entry, bucket: 'KNOWN_RAW' }))];
+  const misplaced = MODULES.flatMap((file) => sources.get(file)!.flatMap(({ raw, fragments }, index) => fragments.filter((text) => banned(text).length > 0).map((text) => {
+    const named = entries.filter((entry) => entry.file === file && raw.includes(entry.text)).map((entry) => entry.bucket);
+    const exactly = SERVICE_SENTENCE_RULES.some((rule) => rule.file === file && rule.exact === text);
+    const ruled = SERVICE_SENTENCE_RULES.some((rule) => rule.file === file && samplesOf(rule).some((sample) => covers(sample, text)));
+    const owners = named.length > 0 ? [...named, ...(exactly ? ['an exact rule'] : [])] : ruled ? ['rule'] : [];
+    return owners.length === 1 ? null : `${file} (now line ${index + 1}) 「${text}」 in ${owners.length === 0 ? 'none' : owners.join(' and ')}`;
+  }))).filter((entry): entry is string => entry !== null);
+  const fragmentsIn = (file: string): ReadonlyArray<string> => (sources.get(file) ?? sourceOf(readFile(file))).flatMap((line) => line.fragments);
+  const stale = [
+    ...SERVICE_SENTENCE_RULES.filter((rule) => !fragmentsIn(rule.file).some((text) => rule.exact !== undefined ? text === rule.exact
+      : samplesOf(rule).some((sample) => covers(sample, text)))).map((rule) => `rule ${nameOf(rule)}`),
+    ...entries.filter((entry) => !(sources.get(entry.file) ?? []).some(({ raw, fragments }) => raw.includes(entry.text) && fragments.some((text) => banned(text).length > 0)))
+      .map((entry) => `${entry.bucket} ${entry.file} 「${entry.text}」`),
+  ];
+  return { misplaced, stale };
+}
 const wordsOf = (rule: (typeof SERVICE_SENTENCE_RULES)[number], sample: string): string => rule.underSwitch === true ? backgroundSwitchWords(sample) : ordinaryServiceWords(sample);
 
 beforeEach(() => setTechnicalLayerVisible(false));
 afterEach(() => setTechnicalLayerVisible(false));
 
 describe('the service-authored sentences of the eight modules', () => {
-  it('stand, by file:line, in exactly one of a rule, NOT_SHOWN and KNOWN_RAW — a new sentence or a stale key fails by file:line', () => {
-    const owners = (key: string, text: string): string[] => [
-      ...(SERVICE_SENTENCE_RULES.some((rule) => rule.lines.includes(key) && samplesOf(rule).some((sample) => text.split(/\s{2,}/u).every((piece) => sample.includes(piece)))) ? ['rule'] : []),
-      ...(NOT_SHOWN.some((entry) => entry.line === key) ? ['NOT_SHOWN'] : []),
-      ...(KNOWN_RAW.some((entry) => entry.line === key) ? ['KNOWN_RAW'] : []),
-    ];
-    const misplaced = MODULES.flatMap((file) => fragmentsOf(file).flatMap((line, index) => line.filter((text) => banned(text).length > 0)
-      .map((text) => ({ key: `${file}:${index + 1}`, text }))))
-      .map(({ key, text }) => ({ key, text, owners: owners(key, text) })).filter((entry) => entry.owners.length !== 1)
-      .map(({ key, text, owners: found }) => `${key} 「${text}」 in ${found.length === 0 ? 'none' : found.join(' and ')}`);
-    expect(misplaced).toEqual([]);
-    // A key whose line no longer holds what it names.
-    const stale = [
-      ...SERVICE_SENTENCE_RULES.flatMap((rule) => rule.lines.filter((key) => !at(key).some((text) => rule.exact !== undefined ? text === rule.exact
-        : samplesOf(rule).some((sample) => text.split(/\s{2,}/u).every((piece) => sample.includes(piece))))).map((key) => `rule ${key}`)),
-      ...[...NOT_SHOWN, ...KNOWN_RAW].filter((entry) => !at(entry.line).some((text) => banned(text).length > 0)).map((entry) => `key ${entry.line}`),
-    ];
-    expect(stale).toEqual([]);
+  it('stand, by file and text, in exactly one of a rule, NOT_SHOWN and KNOWN_RAW — a new sentence or a stale entry fails, named', () => {
+    expect(placement(read)).toEqual({ misplaced: [], stale: [] });
     expect(KNOWN_RAW.every((entry) => entry.issue === '#1616')).toBe(true);
   });
 
+  it('are placed without a line number: a line shift alone fails nothing', () => {
+    expect(placement((file) => `\n\n${read(file).replace(/\n/u, '\n\n')}`)).toEqual({ misplaced: [], stale: [] });
+  });
+
+  it('fail by name on a new sentence, and on an entry whose text has gone', () => {
+    const added = placement((file) => file === 'task-plan.ts' ? `${read(file)}\nexport const PROBE = '这项任务现在不能续行。';\n` : read(file));
+    expect(added.misplaced).toEqual([expect.stringMatching(/^task-plan\.ts \(now line \d+\) 「这项任务现在不能续行。」 in none$/u)]);
+    const gone = placement((file) => file === 'background-analysis-enrollments.ts' ? read(file).replace('后台处理登记前驱结构不兼容。', '前驱结构不兼容。') : read(file));
+    expect(gone.stale).toEqual(['KNOWN_RAW background-analysis-enrollments.ts 「后台处理登记前驱结构不兼容。」']);
+  });
+
   it('every family has samples the service made, and each reads in the table\'s words and differs from the service\'s', () => {
-    expect(SERVICE_SENTENCE_RULES.filter((rule) => samplesOf(rule).length === 0).map((rule) => rule.lines[0])).toEqual([]);
+    expect(SERVICE_SENTENCE_RULES.filter((rule) => samplesOf(rule).length === 0).map(nameOf)).toEqual([]);
     expect(SERVICE_SENTENCE_RULES.flatMap((rule) => samplesOf(rule).map((sample) => ({ rule, sample, words: wordsOf(rule, sample) })))
       .filter(({ sample, words }) => words === sample || banned(outside(words)).length > 0)
-      .map(({ rule, words }) => `${rule.lines[0]}: ${words}`)).toEqual([]);
+      .map(({ rule, words }) => `${nameOf(rule)}: ${words}`)).toEqual([]);
   });
 
   it('keep a title, a heading, a destination, a category, the editor\'s goal and a model\'s words exactly as they are (review N1, S4, B1 f)', () => {
