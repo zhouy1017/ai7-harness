@@ -289,3 +289,45 @@ it('keeps a launch popover open while focus leaves the window, and closes it whe
   start.dispatchEvent({ type: 'focusin', bubbles: true } as never);
   expect(details.open).toBe(false);
 });
+
+it('places a launch popover above or below its whole bar, so a wrapped bar keeps 选项 reachable under an open plan (#1526 follow-up)', () => {
+  // J-04 at 1280×800 with the Task Drawer docked beside the page: the update controls' bar is 447.8 px wide and wraps — 模型 · 选项 ·
+  // 开始 on the first row from 382.3 px, 先看计划 alone on the second down to 470.6 px. The plan panel is 520 × 367.5 px.
+  vi.stubGlobal('innerWidth', 1280); vi.stubGlobal('innerHeight', 800);
+  Object.assign(window, { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  const shown = new Set<unknown>();
+  const proto = Object.getPrototypeOf(document.createElement('div')) as Record<string, unknown>;
+  const own = Object.getOwnPropertyDescriptor(proto, 'matches')!;
+  Object.defineProperty(proto, 'showPopover', { configurable: true, value(this: unknown) { shown.add(this); } });
+  Object.defineProperty(proto, 'hidePopover', { configurable: true, value(this: unknown) { shown.delete(this); } });
+  Object.defineProperty(proto, 'matches', { configurable: true, value(this: unknown, selector: string) {
+    return selector === ':popover-open' ? shown.has(this) : (own.value as (s: string) => boolean).call(this, selector); } });
+  try {
+    const bar = createLaunchBarPresentation(document.createElement('span'), document.createElement('button'),
+      { title: '选项', content: document.createElement('div') }, document.createElement('div'));
+    document.body.append(bar);
+    const box = (left: number, top: number, width: number, height: number) => ({ top, bottom: top + height, left, right: left + width, width, height });
+    const plan = bar.querySelector<HTMLDetailsElement>('.task-launch-estimate')!;
+    const panel = plan.querySelector<HTMLElement>('.task-launch-popover')!;
+    const options = box(470.2, 382.3, 58.8, 35.2);
+    Object.assign(bar, { getBoundingClientRect: () => box(270.6, 382.3, 447.8, 88.3) });
+    Object.assign(bar.querySelector('.task-launch-options summary')!, { getBoundingClientRect: () => options });
+    Object.assign(plan.querySelector('summary')!, { getBoundingClientRect: () => box(270.6, 423.9, 112.8, 46.8) });
+    Object.assign(panel, { getBoundingClientRect: () => {
+      const style = panel.style as unknown as Record<string, string>;
+      const height = Math.min(367.5, Number.parseFloat(style['maxHeight'] || '367.5'));
+      return box(Number.parseFloat(style['left'] || '0'), Number.parseFloat(style['top'] || '0'), 520, height);
+    } });
+    plan.open = true; plan.dispatchEvent({ type: 'toggle' } as never);
+    const placed = panel.getBoundingClientRect();
+    expect(shown.has(panel)).toBe(true);
+    // Above the whole bar (there is room for all of it there): neither row is under it, so 选项 stays pressable.
+    expect(placed.bottom).toBeLessThanOrEqual(382.3);
+    expect(placed.bottom <= options.top || placed.top >= options.bottom).toBe(true);
+    expect(placed.height).toBe(367.5);
+    expect(placed.left).toBe(270.6);
+  } finally {
+    Object.defineProperty(proto, 'matches', own);
+    Reflect.deleteProperty(proto, 'showPopover'); Reflect.deleteProperty(proto, 'hidePopover');
+  }
+});
