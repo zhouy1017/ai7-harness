@@ -106,7 +106,8 @@ export function localFixtureRegisteredProfile(kind: string | null, purpose: stri
  *
  * An entry the fixture converter wrote from a Provider Test Ledger capture (Issue #808) additionally carries its `capture`:
  * the item that captured it, which subject it answers (a unit, the reduction, a sampling turn, the reflection, or a
- * synthesis or dialogue turn the adapter already answers), the route, endpoint, request shape and model, the stage's own
+ * synthesis or dialogue turn the adapter already answers; a tool-turn continuation of a unit sits under the digest of its whole
+ * carried exchange, Issue #1598), the route, endpoint, request shape and model, the stage's own
  * prompt contract and the enclosing task's, when, the digests of the exact provider request and response, the development
  * validation it belonged to, and the captured identity each placeholder stands for. Nothing is keyed by it: the deterministic
  * adapter only declines an entry whose recorded enclosing task contract is not the one it answers for, and an entry without
@@ -127,7 +128,7 @@ const CAPTURE_KEYS = [
 ] as const;
 const CAPTURE_SUBJECTS = ['unit', 'reduction', 'sampling', 'reflection', 'factual-unit', 'review-unit', 'evaluation-unit', 'readers-unit', 'rewrite-unit', 'writing-unit', 'task-synthesis', 'dialogue', 'editorial-polish', 'conflict-regenerate'] as const;
 const CAPTURE_ITEM_PATTERN = /^[A-Za-z0-9]+\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
-const CAPTURE_PLACEHOLDER_PATTERN = /^\{\{(?:block:[1-9][0-9]{0,3}|unit:[1-9][0-9]{0,3}:block:[1-9][0-9]{0,3}|ref:[1-9][0-9]{0,3}|sample-block:[1-9][0-9]{0,3})\}\}$/u;
+const CAPTURE_PLACEHOLDER_PATTERN = /^\{\{(?:block:[1-9][0-9]{0,3}|unit:[1-9][0-9]{0,3}:block:[1-9][0-9]{0,3}|ref:[1-9][0-9]{0,3}|sample-block:[1-9][0-9]{0,3}|tool-id:[1-9][0-9]{0,3})\}\}$/u;
 const CAPTURE_IDENTITY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
 const MAX_IDENTITY_MAP = 4_096;
 /** The keys a fixture may carry beside the seven it must; every other key is still refused. */
@@ -453,7 +454,7 @@ export function parseModelFixture(value: unknown): ModelFixture {
       requireFixture(!/blk_[0-9a-f]{24}/u.test(serializedResponse) && placeholders.every((placeholder) =>
         capture.identityMap.some((mapping) => mapping.placeholder === placeholder)), '夹具条目的响应标识未经映射。');
       requireFixture(capture.identityMap.every((mapping) => serializedResponse.includes(mapping.placeholder) &&
-        (unitSubject ? /^\{\{block:/u.test(mapping.placeholder)
+        (unitSubject ? /^\{\{(?:block|tool-id):/u.test(mapping.placeholder)
           : capture.subject === 'reduction' ? /^\{\{unit:/u.test(mapping.placeholder)
             : capture.subject === 'sampling' && /^\{\{(?:ref|sample-block):/u.test(mapping.placeholder))), '夹具条目的标识映射与捕获契约不一致。');
     }

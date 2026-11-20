@@ -149,34 +149,60 @@ export interface ReplayTally {
   readonly answeredContracts: Set<string>;
 }
 
+interface WireMessage {
+  role: string;
+  content: string | null;
+  tool_call_id?: string;
+  tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+}
+
+/** One chat-completions wire message as the assembled message DSH hands the adapter: user text, assistant tool calls, or a tool result. */
+function assembledMessageOf(message: WireMessage): { role: string; content: ReadonlyArray<Record<string, unknown>>; source: Record<string, unknown> } {
+  if (message.role === 'assistant' && message.tool_calls !== undefined) {
+    return { role: 'assistant', source: { kind: 'model' }, content: [...(message.content === null || message.content === '' ? [] : [{ type: 'text', text: message.content }]),
+      ...message.tool_calls.map((call) => ({ type: 'tool-call', id: call.id, name: call.function.name, arguments: call.function.arguments }))] };
+  }
+  if (message.role === 'tool') {
+    return { role: 'user', source: { kind: 'tool', callId: message.tool_call_id }, content: [{ type: 'tool-result', toolCallId: message.tool_call_id,
+      content: [{ type: 'text', text: message.content ?? '' }], isError: false }] };
+  }
+  return { role: message.role, source: { kind: message.role === 'assistant' ? 'model' : message.role }, content: [{ type: 'text', text: message.content ?? '' }] };
+}
+
 /**
  * The developer-live replay transport. Each request is handed to the product's deterministic adapter, one per fixture and task
  * contract the captures name (the adapter answers a captured entry only under the contract it was captured in), and the first
  * answer is returned in the route's JSON shape. An unmatched request answers HTTP 500, which the Run records as a gap; a
- * captured 结果待确认 answers a truncated body, which the Run records as outcome unknown.
+ * captured 结果待确认 answers a truncated body, which the Run records as outcome unknown. A recorded tool call is answered as
+ * `message.tool_calls`, and the continuation the product sends after running its own tool (Issue #1598) is read back from the
+ * wire into the assembled messages the adapter keys it by.
  */
 export function replayTransport(fixtures: ReadonlyArray<ResolvedModelFixture>, tally: ReplayTally): typeof fetch {
   const adapters = fixtures.flatMap((fixture) => [...new Set([...fixture.entries.values()].flatMap((entry) => entry.capture?.taskPromptContractDigest ?? []))]
     .map((digest) => ({ digest, adapter: new Ai7LocalDeterministicAdapter(fixture, digest, REPLAY_CODES, { sourceDigest: SAMPLE1_PUBLIC_SAMPLEBOOK.sha256 }) })));
   return (async (_url: string | URL | Request, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body)) as { model: string; messages: Array<{ role: string; content: string }> };
-    const messages = body.messages.map((message) => ({ role: message.role, content: [{ type: 'text', text: message.content }] }));
+    const body = JSON.parse(String(init?.body)) as { model: string; messages: Array<WireMessage> };
+    const messages = body.messages.map(assembledMessageOf);
     for (const { digest, adapter } of adapters) {
       let text = '';
+      const toolCalls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> = [];
       let usage = { inputTokens: 0, outputTokens: 0 };
       let failure: { code: string } | null = null;
       const options = { provider: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL, messages } as unknown as Parameters<Ai7LocalDeterministicAdapter['stream']>[0];
       for await (const chunk of adapter.stream(options) as AsyncIterable<StreamChunk>) {
         if (chunk.type === 'text-delta') text += chunk.text;
+        else if (chunk.type === 'block-end' && chunk.block.type === 'tool-call') toolCalls.push({ id: chunk.block.id, type: 'function', function: { name: chunk.block.name, arguments: chunk.block.arguments } });
         else if (chunk.type === 'usage') usage = { inputTokens: chunk.usage.inputTokens ?? 0, outputTokens: chunk.usage.outputTokens ?? 0 };
-        else if (chunk.type === 'finish' && chunk.reason.kind !== 'stop') failure = { code: 'failure' in chunk.reason && chunk.reason.failure !== undefined ? chunk.reason.failure.code : 'UNKNOWN' };
+        else if (chunk.type === 'finish' && chunk.reason.kind !== 'stop' && chunk.reason.kind !== 'tool-calls') failure = { code: 'failure' in chunk.reason && chunk.reason.failure !== undefined ? chunk.reason.failure.code : 'UNKNOWN' };
       }
       if (failure?.code === AI7_FAILURE_CODES.FIXTURE_MISMATCH) continue;
       if (failure?.code === AI7_FAILURE_CODES.OUTCOME_UNKNOWN) return new Response('{', { status: 200 });
       if (failure !== null) return new Response(JSON.stringify({ error: { message: 'replayed failure' } }), { status: failure.code === 'QUOTA_EXCEEDED' ? 429 : 500 });
       tally.answered += 1;
       tally.answeredContracts.add(digest);
-      return new Response(JSON.stringify({ model: body.model, choices: [{ message: { content: text, reasoning_content: '回放。' }, finish_reason: 'stop' }],
+      const calling = toolCalls.length > 0;
+      return new Response(JSON.stringify({ model: body.model, choices: [{ message: { content: calling ? null : text, reasoning_content: '回放。', ...(calling ? { tool_calls: toolCalls } : {}) },
+        finish_reason: calling ? 'tool_calls' : 'stop' }],
         usage: { prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens } }), { status: 200 });
     }
     tally.unmatched += 1;

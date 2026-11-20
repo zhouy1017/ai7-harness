@@ -274,6 +274,37 @@ export function unitContentDigest(ownBlockTexts) {
   return sha256Hex(ownBlockTexts.join('\n'));
 }
 
+// --- Duplicated from src/service/provider/tool-turn-digest.ts (Issue #1598; tests/unit/generate-model-fixture.test.ts checks it) ---
+const TOOL_TURN_DIGEST_SCHEMA = 'ai7.model-fixture.tool-turn/1';
+const IDENTITY_TOKEN = /(?<![A-Za-z0-9_-])(?:blk_[0-9a-f]{24}|[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_-])/gu;
+
+/** The exchange with every per-import identity renamed by first appearance: the unit's own blocks `{{block:N}}`, the rest `{{tool-id:K}}`. */
+export function normalizeToolExchange(rounds, ownBlockIds) {
+  const names = new Map(ownBlockIds.map((id, index) => [id, `{{block:${index + 1}}}`]));
+  const foreign = [];
+  const rename = (text) => text.replace(IDENTITY_TOKEN, (identity) => {
+    let name = names.get(identity);
+    if (name === undefined) { foreign.push(identity); name = `{{tool-id:${foreign.length}}}`; names.set(identity, name); }
+    return name;
+  });
+  const canonicalArguments = (raw) => { try { return canonicalJson(JSON.parse(raw)); } catch { return raw; } };
+  return {
+    rounds: rounds.map((round) => ({
+      calls: round.calls.map((call) => ({ name: call.name, arguments: rename(canonicalArguments(call.arguments)) })),
+      results: round.calls.map((call) => {
+        const result = round.results.find((candidate) => candidate.callId === call.id);
+        return { text: rename(result.text), isError: result.isError };
+      }),
+    })),
+    foreign,
+  };
+}
+
+/** The key of a tool-turn continuation: the unit's request digest and its whole normalized exchange. */
+export function toolTurnRequestDigest(unitRequestDigest, normalized) {
+  return sha256Hex(canonicalJson({ schema: TOOL_TURN_DIGEST_SCHEMA, unitRequestDigest, rounds: normalized.rounds }));
+}
+
 // --- Arguments --------------------------------------------------------------------------------
 
 const ARGUMENT_KEYS = ['--from-cache', '--cache-root', '--identity', '--description', '--out'];
@@ -969,6 +1000,48 @@ export function parseCachedRequest(requestBody, promptContractDigest, structured
   }
   refuse(body !== null && typeof body === 'object' && !Array.isArray(body) && Array.isArray(body.messages) && body.messages.length > 0,
     'FIXTURE_GEN/request-shape-unsupported', '缓存条目不是 openai-chat-completions 请求体。');
+  // A tool-turn continuation (Issue #1598) carries the unit's own request and, after its last user message, the tool exchange so far.
+  const lastUser = body.messages.findLastIndex((message) => message !== null && typeof message === 'object' && message.role === 'user');
+  const rounds = lastUser === -1 ? [] : parseToolExchange(body.messages.slice(lastUser + 1));
+  const base = parseUnitRequest(rounds.length === 0 ? body : { ...body, messages: body.messages.slice(0, lastUser + 1) }, promptContractDigest, structuredStageContractDigest);
+  if (rounds.length === 0) return base;
+  refuse(base.unitOrdinal > 0 && base.ownBlockTexts.length > 0 && base.identities.every(({ placeholder }) => placeholder.startsWith('{{block:')),
+    'FIXTURE_GEN/request-shape-unsupported', '工具回合只支持分析单元。');
+  const normalized = normalizeToolExchange(rounds, base.identities.map(({ identity }) => identity));
+  return {
+    ...base,
+    requestDigest: toolTurnRequestDigest(base.requestDigest, normalized),
+    contentDigest: null,
+    // What the exchange carried may hold manuscript text and takes part in the echo scan; nothing of it is written to a fixture.
+    carriedBlockTexts: [...base.carriedBlockTexts, ...rounds.flatMap((round) => round.results.map((result) => result.text))],
+    identities: [...base.identities, ...normalized.foreign.map((identity, index) => ({ placeholder: `{{tool-id:${index + 1}}}`, identity }))],
+  };
+}
+
+/** The assistant tool calls and `tool` results after the last user message, as rounds; every call needs exactly one result. */
+function parseToolExchange(tail) {
+  const rounds = [];
+  for (const message of tail) {
+    refuse(message !== null && typeof message === 'object' && !Array.isArray(message), 'FIXTURE_GEN/request-shape-unsupported', '请求体中的消息缺少角色。');
+    if (message.role === 'assistant') {
+      refuse(Array.isArray(message.tool_calls) && message.tool_calls.length > 0 && message.tool_calls.every((call) => call !== null && typeof call === 'object' &&
+        call.type === 'function' && typeof call.id === 'string' && call.function !== null && typeof call.function === 'object' &&
+        typeof call.function.name === 'string' && typeof call.function.arguments === 'string'),
+      'FIXTURE_GEN/request-shape-unsupported', '最后一条 user 消息之后只支持带工具调用的助手消息与工具结果。');
+      rounds.push({ calls: message.tool_calls.map((call) => ({ id: call.id, name: call.function.name, arguments: call.function.arguments })), results: [] });
+    } else {
+      const text = message.role === 'tool' && typeof message.tool_call_id === 'string' ? chatMessageText(message.content) : null;
+      refuse(text !== null && rounds.length > 0, 'FIXTURE_GEN/request-shape-unsupported', '最后一条 user 消息之后只支持带工具调用的助手消息与工具结果。');
+      // The chat-completions wire carries no error flag, so none is recorded; the replay rebuilds the same wire.
+      rounds.at(-1).results.push({ callId: message.tool_call_id, text, isError: false });
+    }
+  }
+  refuse(rounds.every((round) => round.results.length === round.calls.length && round.calls.every((call) => round.results.filter((result) => result.callId === call.id).length === 1)),
+    'FIXTURE_GEN/request-shape-unsupported', '工具调用与工具结果不一一对应。');
+  return rounds;
+}
+
+function parseUnitRequest(body, promptContractDigest, structuredStageContractDigest) {
   let unitMessage = null;
   let unitMessageIndex = -1;
   const carriedMessages = [];
@@ -1258,6 +1331,35 @@ export function redactUnitResultText(text, ownBlockTexts, carriedBlockTexts = ow
 // --- The response -----------------------------------------------------------------------------
 
 /**
+ * A model answer that is tool calls (Issue #1598): each call's name and JSON arguments, the identities its arguments name remapped
+ * to the placeholders the adapter fills from the request it answers. An identity no request named refuses, as does an argument that
+ * echoes carried manuscript text outside proved sample1. The model's reasoning beside the calls is not kept.
+ */
+function mapToolCalls(message, usage, request) {
+  const carried = request.carriedBlockTexts ?? [];
+  refuse(message.content === null || message.content === undefined || message.content === '', 'FIXTURE_GEN/response-shape-unsupported', '带工具调用的回答同时含有正文，夹具无法如实回放。');
+  refuse(message.tool_calls.length <= 5, 'FIXTURE_GEN/response-shape-unsupported', '一次回答的工具调用超出夹具边界。');
+  const calls = message.tool_calls.map((call) => {
+    refuse(call !== null && typeof call === 'object' && call.type === 'function' && call.function !== null && typeof call.function === 'object' &&
+      /^[a-z][a-z_]{0,63}$/u.test(call.function.name) && typeof call.function.arguments === 'string', 'FIXTURE_GEN/response-shape-unsupported', '工具调用的形态无效。');
+    let parsed;
+    try { parsed = JSON.parse(call.function.arguments); } catch { parsed = null; }
+    refuse(parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed), 'FIXTURE_GEN/response-shape-unsupported', '工具调用的参数不是 JSON 对象。');
+    refuse(call.function.arguments.match(PLACEHOLDER_SHAPE) === null, 'FIXTURE_GEN/identity-unmapped', '原始工具参数已含有占位符形式的文字，回放无法与捕获区分。');
+    const remapped = remapIdentities(JSON.stringify(parsed), request.identities);
+    refuse(remapped.match(IDENTITY_TOKEN) === null, 'FIXTURE_GEN/identity-unmapped', '工具参数含有请求中没有的标识。');
+    const args = JSON.parse(remapped);
+    if (request.sample1Verified !== true) {
+      const echo = findManuscriptEcho(args, carried);
+      refuse(echo === null, 'FIXTURE_GEN/manuscript-echo', `工具参数 ${echo?.path} 与请求内容仍有 ${echo?.runLength} 个字符重合。`);
+    }
+    refuse(Buffer.byteLength(canonicalJson(args)) <= 4096, 'FIXTURE_GEN/response-shape-unsupported', '工具调用参数超出夹具边界。');
+    return { name: call.function.name, arguments: args };
+  });
+  return { kind: 'tool-calls', calls, usage };
+}
+
+/**
  * One cached result as a fixture response. A limit is a limit whichever way the ledger and the
  * status say so; any other non-200 becomes an adapter failure named after its status; and a 200 must
  * actually carry a result, with the usage the ceiling is measured against. Absent usage refuses
@@ -1276,13 +1378,15 @@ export function mapCachedResponse(entry, selection, ownBlockTexts, request = { i
     'FIXTURE_GEN/response-shape-unsupported', '缓存条目的响应不是 openai-chat-completions 结果。');
   const message = response.choices[0] === undefined ? undefined : response.choices[0].message;
   const text = message === null || typeof message !== 'object' ? undefined : message.content;
-  refuse(typeof text === 'string' && text.length > 0,
+  const calling = message !== null && typeof message === 'object' && Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+  refuse(calling || (typeof text === 'string' && text.length > 0),
     'FIXTURE_GEN/response-shape-unsupported', '缓存条目的响应不含 choices[0].message.content 文本。');
   const usage = response.usage;
   const inputTokens = usage === null || typeof usage !== 'object' ? undefined : usage.prompt_tokens;
   const outputTokens = usage === null || typeof usage !== 'object' ? undefined : usage.completion_tokens;
   refuse(Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isSafeInteger(outputTokens) && outputTokens >= 0,
     'FIXTURE_GEN/usage-absent', '缓存条目的响应不含可用的 usage 计数。');
+  if (calling) return mapToolCalls(message, { inputTokens, outputTokens }, request);
   // A placeholder the model itself wrote would be filled on replay like one the converter wrote, and the replay would no
   // longer say what the capture said; so every placeholder in a fixture must be one this conversion put there.
   refuse(text.match(PLACEHOLDER_SHAPE) === null, 'FIXTURE_GEN/identity-unmapped', '原始响应已含有占位符形式的文字，回放无法与捕获区分。');
