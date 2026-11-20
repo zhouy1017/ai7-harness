@@ -168,8 +168,6 @@ async function emitFixture(path: string, contents: string, encoding: 'utf8'): Pr
   if (regenerating) await writeFile(path, contents, encoding);
 }
 let additions = 0;
-/** The entries the current pass asked for (every add() of it, new or not): the emitted set is what the closing pass requested. */
-let passKeys = new Set<string>();
 
 function refreshRepeatedFinding(entry: ModelFixtureEntry): ModelFixtureEntry {
   if (entry.response.kind !== 'unit-result') return entry;
@@ -184,7 +182,6 @@ function refreshRepeatedFinding(entry: ModelFixtureEntry): ModelFixtureEntry {
 function add(entry: ModelFixtureEntry, group: number, order: string): void {
   entry = refreshRepeatedFinding(entry);
   const key = fixtureEntryKey(entry.unitOrdinal, entry.requestDigest);
-  passKeys.add(key);
   if (order.startsWith('j16')) {
     j16SharedKeys.add(key);
     if (!entries.has(key)) j16Keys.add(key);
@@ -273,6 +270,25 @@ const REFLECTION_TEXT = JSON.stringify({
     { suggestion: '稿件变化后优先只审改动过的单元，未改动的已审单元按血缘复用即可。', basis: '账目记录了本次提交、复用与未进入范围的单元数，复用单元不产生模型用量。' },
   ],
 });
+
+/** A committed entry no harvested Run requests must be exactly the answer the generator authors for its kind: nothing else may be kept. */
+function expectKeptAnswer(entry: ModelFixtureEntry): void {
+  const where = 'kept entry ' + entry.requestDigest.slice(0, 12);
+  expect(entry.unitOrdinal, where).toBe(0);
+  expect(entry.response.kind, where).toBe('unit-result');
+  const response = entry.response as { kind: 'unit-result'; text: string; usage: { inputTokens: number; outputTokens: number } };
+  const schema = (JSON.parse(response.text) as { schema?: string }).schema;
+  if (schema === 'ai7.analysis.run-report-reflection-result/1') {
+    expect(response, where).toEqual({ kind: 'unit-result', text: REFLECTION_TEXT, usage: { inputTokens: 900, outputTokens: 210 } });
+    return;
+  }
+  expect(schema, where + ' is neither a reflection nor an assurance-sampling answer').toBe('ai7.analysis.assurance-sampling-result/1');
+  const listed = (JSON.parse(response.text) as { dispositions: unknown[] }).dispositions.length;
+  expect(listed, where).toBeGreaterThan(0);
+  expect(response.text, where).toBe(JSON.stringify({ schema, dispositions: Array.from({ length: listed }, (_, index) => ({ ref: '{{ref:' + (index + 1) + '}}', disposition: '成立', reason: SAMPLING_REASON })) }));
+  const unit = (response.usage.inputTokens - 1600) / 30;
+  expect(Number.isInteger(unit) && unit >= 1 && unit <= 8 && response.usage.outputTokens === 40 + listed * 60, where + ' usage').toBe(true);
+}
 
 function harvest(categoryIndex: number, definition: AnalysisKindDefinition, settled: ReviewCategoryProjection, label: string, store: EditorialStore, variant: string): { closed: boolean } {
   const revision = settled.resultSetRevision!;
@@ -628,42 +644,57 @@ it('generates the authored review fixture without unreachable committed entries'
   await requireExactSample1(roots.codeRoot);
   const predecessor = parseModelFixture(JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', 'sample1-review-authored.json'), 'utf8')));
   predecessor.entries.forEach((entry, index) => add(entry, -2, String(index).padStart(5, '0')));
-  const predecessorKeys = new Set(passKeys);
   const base = await loadModelFixture(resolve(FIXTURE_PATH, '..'), FIXTURE_BASE);
   for (const [key, entry] of base.entries) if (!fixture.entries.has(key)) fixture.entries.set(key, entry);
-  // The ordinary run is a fixed-point check of the committed fixture C: the real path is driven ONCE with C's entries served
-  // from the start, and the pass must then re-emit exactly C. It proves what the full derivation proves —
-  //   - every entry is a deterministic function of the authored inputs and of the responses to EARLIER requests (a request
-  //     digest hashes the earlier responses: unit requests, then assurance sampling, then the run report's reflection), so
-  //     the requests form a dependency DAG and the closure of the predecessor and base under derivation is unique;
-  //   - the emitted files are built only from the entries this pass requests through add() (passKeys) — the entries seeded
-  //     here reach the fixture the real path reads, never the emitted set — so an entry of C that no closed run asks for is
-  //     not emitted, a requested entry C lacks is emitted, and an answer of C that differs from the derived one is replaced;
-  //     the byte comparison with the committed files at the end then fails for a stale, missing, altered or re-keyed entry;
-  //   - the pass closing means no request went unanswered.
-  // The full derivation emits the same set: its closing pass requests exactly the entries of C (an answer an earlier pass
-  // derived while others were missing is not requested by the closed run and is not written). So C = emit(derive(C)): C is a
-  // fixed point of the derivation and holds nothing else, and by the uniqueness of the closure it is the entry set the full
-  // derivation reaches from the predecessor.
+  // The ordinary run checks the committed fixture C in ONE pass: the real path is driven once with C's entries served from the
+  // start, and every file the pass emits must then equal the committed one byte for byte. Every entry a harvested Run requests
+  // is derived through add() from the authored inputs and the responses to EARLIER requests (a request digest hashes earlier
+  // responses: unit requests, then assurance sampling, then the run report's reflection), so the entries form a dependency DAG
+  // and the closure from the predecessor and base is unique. The emitted files are built from the entries this pass derived,
+  // not from the entries seeded here (those only reach the fixture the real path reads), so a derived entry C lacks is
+  // emitted, an answer of C that differs from the derived one is replaced, and the comparison fails for a missing, altered or
+  // re-keyed one. What the pass proves: every entry a harvested Run requests is byte-identical to the committed one, nothing
+  // it derives is missing from C, and the Runs close (`closed` covers the harvested Runs only; Runs that `runReviewSynthesis`
+  // drives are not harvested, and their unit-0 requests are answered from the seeded entries).
+  // What it cannot derive: the entries of C that no harvested Run requests in the closing pass — run-report reflections and
+  // assurance-sampling answers that only an earlier pass of the full derivation, or a Run that is not harvested, asks for.
+  // They are kept as they are, and each must be exactly the answer the generator authors for its kind (`expectKeptAnswer`).
+  // Only the switch run (AI7_FULL_REVIEW_FIXTURE_DERIVATION=1) pins their membership, and which file a Run shared with J-16
+  // lands in, which depends on the order the full derivation first adds an entry in.
+  const committedEntries = new Map<string, readonly ModelFixtureEntry[]>();
   if (!fullDerivation) {
     for (const name of [FIXTURE_IDENTITY, 'sample1-agent-workspace-cross-chapter']) {
       const committed = parseModelFixture(JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', `${name}.json`), 'utf8')));
+      committedEntries.set(name, committed.entries);
       for (const entry of committed.entries) fixture.entries.set(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest), entry);
     }
   }
   let closed = false;
   for (let index = 0; index < (fullDerivation ? 6 : 1) && !closed; index += 1) {
     additions = 0;
-    passKeys = new Set(predecessorKeys);
     closed = await pass();
     // eslint-disable-next-line no-console
     console.log(`pass ${index + 1}: +${additions} entries, all closed: ${closed}`);
     if (fullDerivation && additions > 0) closed = false;
   }
   expect(closed).toBe(true);
-  // Only what the closing pass requested (and the predecessor's authored answers) is written: an answer that an earlier pass
-  // derived while others were still missing is requested by no closed run and is not kept.
-  const ordered = [...entries.entries()].filter(([key]) => passKeys.has(key)).map(([, labelled]) => labelled).sort((left, right) => left.group - right.group || (left.order < right.order ? -1 : left.order > right.order ? 1 : 0));
+  // One pass: the committed entries no harvested Run requested stay, after checking each (see the comment above).
+  const kept = new Map<string, Array<{ unitOrdinal: number; requestDigest: string; response: ModelFixtureEntry['response'] }>>();
+  if (!fullDerivation) {
+    const predecessorWorkspace = new Set((JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', 'sample1-agent-workspace.json'), 'utf8')).entries as ModelFixtureEntry[])
+      .map((entry) => fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, entry.attempt ?? null)));
+    for (const [name, committed] of committedEntries) {
+      const list = [];
+      for (const entry of committed) {
+        if (entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest))) continue;
+        if (name !== FIXTURE_IDENTITY && predecessorWorkspace.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, entry.attempt ?? null))) continue;
+        expectKeptAnswer(entry);
+        list.push({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response });
+      }
+      kept.set(name, list);
+    }
+  }
+  const ordered = [...entries.values()].sort((left, right) => left.group - right.group || (left.order < right.order ? -1 : left.order > right.order ? 1 : 0));
   const body = {
     schema: 'ai7.model-fixture/1',
     identity: FIXTURE_IDENTITY,
@@ -676,7 +707,7 @@ it('generates the authored review fixture without unreachable committed entries'
     provider: 'ai7-local-deterministic',
     model: 'ai7-deterministic-fixture',
     entries: ordered.filter(({ entry, order }) => !j16Keys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)) && !base.entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)))
-      .map(({ entry }) => ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })),
+      .map(({ entry }) => ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })).concat(kept.get(FIXTURE_IDENTITY) ?? []),
   };
   await emitFixture(FIXTURE_PATH, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
   // The predecessor already reaches the loader's depth ceiling. Current controls share its baseline,
@@ -693,7 +724,7 @@ it('generates the authored review fixture without unreachable committed entries'
     identity: 'sample1-agent-workspace-cross-chapter',
     description: 'Current J-16 authored successor: preserves every Agent workspace/dialogue answer and adds exact plot review, one bounded synthesis and assurance for its synthetically edited first-paragraph selection.',
     entries: [...workspace.entries, ...ordered.filter(({ entry }) => j16SharedKeys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest))).map(({ entry }) =>
-      ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response }))],
+      ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })), ...(kept.get('sample1-agent-workspace-cross-chapter') ?? [])],
   }, null, 2)}\n`, 'utf8');
 
   // Refresh every authored successor/control request that shares a generated unit. Captured recordings stay untouched.
