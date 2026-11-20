@@ -982,7 +982,10 @@ async function main() {
       await waitFor(onboardingPage, `innerWidth===${width} && innerHeight===${height}`, `first-run-help-size-${width}`);
       await firstRunClick(onboardingPage, '[data-onboarding-help]');
       await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, `first-run-help-opened-${width}`);
-      await assertRenderer(onboardingPage, `(() => { const heading=document.querySelector('[data-help-section="first-review"] h4'); const box=heading.getBoundingClientRect(); const steps=Array.from(document.querySelectorAll('[data-help-step]')); return document.activeElement===heading && box.top>=0 && box.bottom<=innerHeight && steps.length===5 && steps.every((step)=>{ const b=step.getBoundingClientRect(); return b.left>=0 && b.right<=innerWidth; }) && document.querySelectorAll('[data-help-step-go]').length===2 && document.querySelectorAll('[data-help-step-needs-book]').length===3; })()`, `first-run-help-section-${width}`);
+      await assertRenderer(onboardingPage, `document.activeElement===document.querySelector('[data-help-section="first-review"] h4')`, `first-run-help-heading-focused-${width}`);
+      await assertRenderer(onboardingPage, `(() => { const box=document.querySelector('[data-help-section="first-review"] h4').getBoundingClientRect(); return box.top>=0 && box.bottom<=innerHeight; })()`, `first-run-help-heading-in-view-${width}`);
+      await assertRenderer(onboardingPage, `(() => { const steps=Array.from(document.querySelectorAll('[data-help-step]')); return steps.length===5 && steps.every((step)=>{ const b=step.getBoundingClientRect(); return b.left>=0 && b.right<=innerWidth; }); })()`, `first-run-help-steps-inside-${width}`);
+      await assertRenderer(onboardingPage, `document.querySelectorAll('[data-help-step-go]').length===2 && document.querySelectorAll('[data-help-step-needs-book]').length===3`, `first-run-help-no-book-steps-${width}`);
       await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
       await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, `first-run-help-returned-${width}`);
     }
