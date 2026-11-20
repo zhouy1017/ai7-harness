@@ -64,6 +64,7 @@ import {
 } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { sample1Seed } from '../support/sample1-seed.js';
 import { LITERARY_EXPRESSION, PLOT_CONSISTENCY, STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { makeJ13Series } from '../support/series-consistency.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
@@ -108,6 +109,10 @@ afterEach(async () => {
   await roots.dispose();
 });
 
+// Cases whose first act is the import start from a copy of one imported sample1 store (#1621); a case that imports a second Book,
+// reopens a store or tests the import itself keeps `importSample1Book` or a plain `open`.
+const seeded = sample1Seed({ title: 'L2 sample1 审阅记录', connectionName: 'L2 主编辑连接' });
+
 interface Session {
   readonly store: EditorialStore;
   readonly owner: BaselineAnalysisExecutionOwner;
@@ -115,6 +120,8 @@ interface Session {
   readonly fixture: ResolvedModelFixture;
   readonly responseEntries?: Map<string, ModelFixtureEntry>;
   readonly capture?: ReturnType<typeof capturedOrdinaryExecution>;
+  /** The data root was copied from the sample1 seed: `importBook` hands back its Book instead of importing. */
+  readonly seeded?: boolean;
 }
 
 interface Book {
@@ -123,8 +130,9 @@ interface Book {
   readonly branchId: string;
 }
 
-async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner, reviewVersion?: 1 | 2): Promise<Session> {
+async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner, reviewVersion?: 1 | 2, seed = false): Promise<Session> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, fixtureIdentity);
+  if (seed) (await seeded()).place(roots.dataRoot);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -135,7 +143,7 @@ async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExe
   });
   const executionOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner === undefined ? executionOwner : owner(executionOwner));
-  return { store, owner: executionOwner, driver, fixture };
+  return { store, owner: executionOwner, driver, fixture, seeded: seed };
 }
 
 /** The service entry's own shutdown order: the loop stops first, the owner interrupts, the loop records it. */
@@ -147,6 +155,7 @@ async function close(session: Session): Promise<void> {
 }
 
 async function importBook(session: Session): Promise<Book> {
+  if (session.seeded) { const { book } = await seeded(); return { bookId: book.bookId, manuscriptId: book.manuscriptId, branchId: book.branchId }; }
   await requireExactSample1(roots.codeRoot);
   const imported = await importSample1Book(session.store, roots.codeRoot, 'L2 sample1 审阅记录');
   await pinEditorialWorkspaceProfileRevision2(session.store, imported.bookId);
@@ -154,13 +163,13 @@ async function importBook(session: Session): Promise<Book> {
   return { bookId: imported.bookId, manuscriptId: imported.manuscriptId, branchId: imported.branchId };
 }
 
-async function withSession(fixtureIdentity: string, body: (session: Session) => Promise<void>): Promise<void> {
-  const session = await open(fixtureIdentity);
+async function withSession(fixtureIdentity: string, body: (session: Session) => Promise<void>, seed = false): Promise<void> {
+  const session = await open(fixtureIdentity, undefined, undefined, seed);
   try { await body(session); } finally { await close(session); }
 }
 
 async function withBook(fixtureIdentity: string, body: (session: Session, book: Book) => Promise<void>): Promise<void> {
-  await withSession(fixtureIdentity, async (session) => { await body(session, await importBook(session)); });
+  await withSession(fixtureIdentity, async (session) => { await body(session, await importBook(session)); }, true);
 }
 
 /** Dynamic retry stimuli are ordinary transport bytes, never mutations under an admitted fixture hash. */
@@ -168,6 +177,7 @@ async function withCapturedReviewBook(body: (session: Session, book: Book) => Pr
   controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}): Promise<void> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-contract-v2-controls');
   const responseEntries = new Map(fixture.entries);
+  (await seeded()).place(roots.dataRoot);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
@@ -184,7 +194,7 @@ async function withCapturedReviewBook(body: (session: Session, book: Book) => Pr
     return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
   }, controls);
   launchPolicy = capture.policy;
-  const session = { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture, responseEntries };
+  const session = { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture, responseEntries, seeded: true };
   try { await body(session, await importBook(session)); } finally { await close(session); }
 }
 
@@ -521,7 +531,7 @@ function standBlocks(session: Session, book: Book, moves: ReadonlyArray<readonly
 
 async function stopBetweenCategories(): Promise<{ book: Book; reviewRunId: string }> {
   let gated = null as GatedOwner | null;
-  const first = await open('sample1-review-cross-chapter-authored', (inner) => { gated = new GatedOwner(inner, 3); return gated; });
+  const first = await open('sample1-review-cross-chapter-authored', (inner) => { gated = new GatedOwner(inner, 3); return gated; }, undefined, true);
   let book: Book;
   let reviewRunId: string;
   try {
@@ -550,7 +560,7 @@ async function stopBetweenCategories(): Promise<{ book: Book; reviewRunId: strin
 }
 
 async function plantStoppedCategory(book: Book | undefined, planted: 'authorized' | 'admitted' | 'executing') {
-  const first = await open('sample1-review-cross-chapter-authored');
+  const first = await open('sample1-review-cross-chapter-authored', undefined, undefined, true);
   try {
     book ??= await importBook(first);
     const prepared = prepare(first, book, [TYPOS], WHOLE);
@@ -690,7 +700,7 @@ async function arrangePreferenceJudgments(session: Session, book: Book): Promise
 
 describe('a Review Run over the real store on exact sample1', () => {
   it('keeps change-plan redo independent of the previous series selection', async () => {
-    const session = await openLayeredSelection();
+    const session = await openLayeredSelection({}, true);
     try {
       const book = await importBook(session);
       const seriesId = makeJ13Series(session.store, book.bookId);
@@ -895,7 +905,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('retries one invalid v2 envelope, keeps valid siblings, and persists the visible rejected finding without a mark (#1084)', async () => {
-    const session = await open('sample1-review-contract-v2-controls');
+    const session = await open('sample1-review-contract-v2-controls', undefined, undefined, true);
     const book = await importBook(session);
     let runId = '';
     try {
@@ -1579,7 +1589,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(ledger.chainRevisionsRead).toBe(6);
       for (let read = 0; read < 5; read += 1) workspace(first, book);
       expect(ledger.chainRevisionsRead).toBe(6);
-    });
+    }, true);
     // Opened again, the first read walks the chain cold — six reads, one a revision — and the poll's reads walk no more.
     await withSession('sample1-review-cross-chapter-authored', async (second) => {
       const ledger = second.store.reviewCategoryLedger(definition);
@@ -1606,7 +1616,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const synced = prepare(first, book, [TYPOS], CHANGED);
       expect(synced.categories[0]!.plan).toMatchObject({ recomputed: 2, unreviewed: 0 });
       reviewRunId = synced.reviewRunId;
-    });
+    }, true);
     // The 全书's revision record is damaged beside the closed store: its coverage manifest no longer matches the digest it names.
     withDatabase((db) => {
       db.exec('DROP TRIGGER analysis_result_set_revisions_no_update');
@@ -1761,7 +1771,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('keeps going when one category cannot be dispatched, and ends that ledger Run instead of leaving it authorized', async () => {
-    const session = await open('sample1-review-cross-chapter-authored', (inner) => new RefusingFirstDispatch(inner));
+    const session = await open('sample1-review-cross-chapter-authored', (inner) => new RefusingFirstDispatch(inner), undefined, true);
     try {
       const book = await importBook(session);
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
@@ -1813,7 +1823,7 @@ describe('a Review Run over the real store on exact sample1', () => {
 
   it('records an approval while full, names a category that waits for a place of the governor 等待运行名额, and drops it once the category has one (Issue #632)', async () => {
     let taken = null as PlacesTakenOwner | null;
-    const session = await open('sample1-review-cross-chapter-authored', (inner) => { taken = new PlacesTakenOwner(inner); return taken; });
+    const session = await open('sample1-review-cross-chapter-authored', (inner) => { taken = new PlacesTakenOwner(inner); return taken; }, undefined, true);
     try {
       const book = await importBook(session);
       const prepared = prepare(session, book, [TYPOS, STYLE], WHOLE);
@@ -1845,7 +1855,7 @@ describe('a Review Run over the real store on exact sample1', () => {
 
   it('records a category the owner interrupted on shutdown as interrupted, and 继续审阅 goes on with the rest', async () => {
     let gated = null as GatedOwner | null;
-    const first = await open('sample1-review-cross-chapter-authored', (inner) => { gated = new GatedOwner(inner, 2); return gated; });
+    const first = await open('sample1-review-cross-chapter-authored', (inner) => { gated = new GatedOwner(inner, 2); return gated; }, undefined, true);
     let book: Book;
     let reviewRunId: string;
     try {
@@ -1890,7 +1900,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       handOff.ledger.recordRunState(handOff.runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
       handOff.ledger.recordRunState(handOff.runRecordId, 'executing', { detail: '正在执行。' });
       steps.recordDispatch(reviewRunId, TYPOS, handOff.runRecordId);
-    });
+    }, true);
 
     await withSession('sample1-review-cross-chapter-authored', async (second) => {
       const partial = workspace(second, book, reviewRunId).run!;
@@ -2326,8 +2336,9 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
 
 const SERIES = 'series-consistency';
 /** Selection/procedure business coverage uses one actual ordinary Store; local review/2 and Series/1 remain separate. */
-async function openLayeredSelection(controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}): Promise<Session> {
+async function openLayeredSelection(controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, seed = false): Promise<Session> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored'); // unchanged response bytes, not an admission pin
+  if (seed) (await seeded()).place(roots.dataRoot);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
@@ -2349,7 +2360,7 @@ async function openLayeredSelection(controls: Parameters<typeof capturedOrdinary
     return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
   }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id), ...controls });
   launchPolicy = capture.policy;
-  return { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture };
+  return { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture, seeded: seed };
 }
 
 /** 先看计划 from a Captured Procedure version (ADR 0087 §4): the pin the sheet — or the selection composer — carries. */
@@ -2363,7 +2374,7 @@ function preparePinned(session: Session, book: Book, categoryIds: ReadonlyArray<
 
 
 async function withSelectionProcedures(body: (session: Session, book: Book, context: Awaited<ReturnType<typeof selectionProcedures>>) => Promise<void>): Promise<void> {
-  const session = await openLayeredSelection();
+  const session = await openLayeredSelection({}, true);
   try {
     const book = await importBook(session);
     await body(session, book, await selectionProcedures(session, book));
@@ -2741,16 +2752,16 @@ describe('one-step review launch (#1455)', () => {
 });
 
 
-async function openLaunchedLifecycle(scope: 'development-ci' | 'ordinary-production', wrap?: (owner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner): Promise<Session> {
-  if (scope === 'development-ci') return open('sample1-review-cross-chapter-authored', wrap);
-  const session = await openLayeredSelection();
+async function openLaunchedLifecycle(scope: 'development-ci' | 'ordinary-production', wrap?: (owner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner, seed = false): Promise<Session> {
+  if (scope === 'development-ci') return open('sample1-review-cross-chapter-authored', wrap, undefined, seed);
+  const session = await openLayeredSelection({}, seed);
   return wrap === undefined ? session : { ...session, driver: new ReviewRunDriver(session.store.reviewRunDriveSteps, wrap(session.owner)) };
 }
 
 describe.each(['development-ci', 'ordinary-production'] as const)('%s launched review lifecycle regressions (#1455)', scope => {
   it.each(['cancel', 'pause'] as const)('keeps undispatched categories free when the first category is %s', async (action) => {
     let gated: GatedOwner | null = null;
-    const session = await openLaunchedLifecycle(scope, inner => (gated = new GatedOwner(inner, 2)));
+    const session = await openLaunchedLifecycle(scope, inner => (gated = new GatedOwner(inner, 2)), true);
     try {
       const book = await importBook(session);
       const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE };
@@ -2780,7 +2791,7 @@ describe.each(['development-ci', 'ordinary-production'] as const)('%s launched r
 
   it('cancels a launched run after restart and immediately launches an undispatched category again', async () => {
     let book!: Book, reviewRunId!: string;
-    const first = await openLaunchedLifecycle(scope);
+    const first = await openLaunchedLifecycle(scope, undefined, true);
     try {
       book = await importBook(first);
       reviewRunId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
@@ -2827,7 +2838,7 @@ it('transmits a non-default channel and model with effort and stamps its card, r
 
 
 it('reconnects an offline ordinary review with every category on its launched model after defaults change (#1455)', async () => {
-  const session = await openLayeredSelection();
+  const session = await openLayeredSelection({}, true);
   try {
     const book = await importBook(session), defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
     const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
@@ -2862,7 +2873,7 @@ it('reconnects an offline ordinary review with every category on its launched mo
 });
 
 it('cancels an offline ordinary review before any category starts and immediately relaunches them (#1455)', async () => {
-  const session = await openLayeredSelection();
+  const session = await openLayeredSelection({}, true);
   try {
     const book = await importBook(session);
     const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
@@ -2880,7 +2891,7 @@ it('cancels an offline ordinary review before any category starts and immediatel
 });
 
 it('continues an ordinary launched review after its running ledger view is evicted from the bounded cache (#1455)', async () => {
-  const session = await openLayeredSelection();
+  const session = await openLayeredSelection({}, true);
   const gated = new GatedOwner(session.owner, 2), driver = new ReviewRunDriver(session.store.reviewRunDriveSteps, gated);
   try {
     const book = await importBook(session);
@@ -2914,7 +2925,7 @@ it('replays a committed launch after restart and drives it once without a second
     book = await importBook(session);
     reviewRunId = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId, categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
     // The process closes after commit, before it could acknowledge or start the driver.
-  });
+  }, true);
   await withSession('sample1-review-cross-chapter-authored', async session => {
     const input = { bookId: book.bookId, clientCommandId, categoryIds: [TYPOS, STYLE], scope: WHOLE };
     const repeated = session.store.launchReviewRun(input, launchPolicy);
@@ -2935,7 +2946,7 @@ it('replays a shutdown-interrupted ordinary review without resending its ended c
   let checkpointHeld = false;
   const first = await openLayeredSelection({ unitHold: async settled => {
     if (settled > 0 && !checkpointHeld) { checkpointHeld = true; reached(); await gate; }
-  } });
+  } }, true);
   const book = await importBook(first);
   const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE, PLOT], scope: WHOLE,
     executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
@@ -2972,7 +2983,7 @@ it('replays a shutdown-interrupted ordinary review without resending its ended c
 
 it('launches historical model-free baseline leads offline without a credential or waiting candidate (#1455)', async () => {
   // Explicitly reconstruct the retained v1 category owner; current v2 plot review remains model-backed.
-  const session = await open('sample1-review-cross-chapter-authored', undefined, 1);
+  const session = await open('sample1-review-cross-chapter-authored', undefined, 1, true);
   try {
     const book = await importBook(session); await runBaseline(session, book);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null);

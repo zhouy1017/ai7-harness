@@ -27,6 +27,7 @@ import { beginRewriteAsJ11, EVALUATION_REWRITE_FIXTURE_IDENTITY } from '../suppo
 import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { sample1Seed, type Sample1Seed } from '../support/sample1-seed.js';
 import { WRITING_FIXTURE_IDENTITY, WRITING_REQUEST } from '../support/writing-task.js';
 import { READERS_REPORT_FIXTURE_IDENTITY } from '../support/readers-report.js';
 
@@ -51,6 +52,9 @@ let policy: LaunchPolicyProjection;
 let capture: ReturnType<typeof capturedOrdinaryExecution> | undefined;
 let setupOwner: BaselineAnalysisExecutionOwner | undefined;
 let dimensionId: string | undefined;
+// Every case starts from a copy of one imported sample1 store (#1621); the case's first `book()` is that Book and a second Book is imported.
+const seeded = sample1Seed({ title: 'sample1 任务派发', connectionName: null });
+let placedBook: Sample1Seed['book'] | null = null;
 
 beforeEach(async () => {
   dimensionId = undefined;
@@ -58,6 +62,9 @@ beforeEach(async () => {
   governor = new ModelRequestGovernor();
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
   const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), EVALUATION_REWRITE_FIXTURE_IDENTITY);
+  const seed = await seeded();
+  seed.place(roots.dataRoot);
+  placedBook = seed.book;
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false,
@@ -334,11 +341,17 @@ afterEach(async () => {
   store?.markCleanShutdown(); store?.close();
   await roots?.dispose();
   capture = undefined; setupOwner = undefined;
+  // A seeded Book no case took would be a Book the case never had before the seed.
+  expect(placedBook).toBeNull();
 });
 
 async function book(kind: Kind, instruction = false) {
-  const imported = await importSample1Book(store, roots.codeRoot, 'sample1 任务派发');
-  await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
+  let imported = placedBook;
+  placedBook = null;
+  if (imported === null) {
+    imported = await importSample1Book(store, roots.codeRoot, 'sample1 任务派发');
+    await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
+  }
   let recordId = '';
   if (kind === 'evaluation-rewrite' || kind === 'readers-report') {
     if (store.getModelServiceConnection() === null) recordMissingCredentialConnection(store, '初评本地检查');
