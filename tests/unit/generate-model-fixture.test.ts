@@ -820,6 +820,15 @@ describe('generate-model-fixture over the namespaced cache (Issue #808)', () => 
     expect(await absent(join(root, 'out.json'))).toBe(true);
   });
 
+  it('converts no identity replay: a fixture comes only from the capture it names (#1585)', async () => {
+    await capture(root, reductionMessage(), '{}', 'first-baseline/reduction');
+    const lines = await tool.readLedgerLines(root);
+    const replayed = { ...lines[0]!, itemId: 'S40/first-baseline/2', outcome: 'replayed', requestDigest: 'e'.repeat(64),
+      validation: { ...(lines[0]!.validation as object), decision: 'identity-replay', evidence: ['S40/first-baseline/1'] } };
+    expect(() => tool.resolveLedgerSelection([...lines, replayed], 'S40/first-baseline/2')).toThrowError(/FIXTURE_GEN\/capture-unproven/u);
+    expect(() => tool.resolveLedgerSelection([...lines, replayed], 'S40/first-baseline/1')).not.toThrow();
+  });
+
   it('says a capture cached before #808 is legacy, with no route, endpoint or request shape recorded', async () => {
     await buildCache(root);
     const entry = parseModelFixture(await tool.generateModelFixture(request(ITEM_ID))).entries[0]!;

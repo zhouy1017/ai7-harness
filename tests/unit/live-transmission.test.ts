@@ -109,6 +109,20 @@ function refusalLines(cache: ProviderResultCache): Array<[string | undefined, Re
     .map((line) => [line.validation?.refusal, line.validation?.evidence]);
 }
 
+/** A unit answer citing one block, as a baseline unit result cites its source ranges. */
+function answerCiting(blockId: string): unknown {
+  return { choices: [{ message: { content: JSON.stringify({ sourceRanges: [{ blockId, fromGrapheme: null, toGrapheme: null }] }) } }], usage: { prompt_tokens: 3, completion_tokens: 2 } };
+}
+
+/** Answers every unit by citing the first block its message lists. */
+function echoFetch(calls: string[]): LiveModelFetch {
+  return async (_url, init) => {
+    calls.push(init.body);
+    const cited = /blk_[0-9a-f]{24}/u.exec(init.body)![0];
+    return { status: 200, json: async () => answerCiting(cited) };
+  };
+}
+
 const dropped = (calls: string[]): LiveModelFetch => async (_url, init) => {
   calls.push(init.body);
   return { status: 200, json: async () => { throw new Error('socket hang up'); } };
@@ -175,28 +189,139 @@ describe('transmitOnce under development validation', () => {
     expect(new Set(modelLines(cache).filter((line) => line.outcome === 'transmitted').map((line) => line.cacheKey)).size).toBe(variants.length);
   });
 
-  it('refuses the same question asked again with newly minted identities, whatever purpose or delta it is filed under', async () => {
+  it('replays the same question asked with newly minted identities, mapped onto them, and keeps the capture untouched (#1585)', async () => {
+    const cache = await opened();
+    const calls: string[] = [];
+    await call(cache, echoFetch(calls), unitBody(BLOCK_A, '雨落在旧城。'));
+    const [capture] = modelLines(cache);
+    const entryPath = join(root, PROVIDER_CACHE_DIRECTORY, `${capture!.cacheKey}.json`);
+    const kept = await readFile(entryPath, 'utf8');
+    // Send claims only: an item reservation file (`item-…`) is how every replay and refusal numbers its line.
+    const sendClaims = async () => (await readdir(join(root, PROVIDER_CLAIM_DIRECTORY))).filter((name) => !name.startsWith('item-'));
+    const claims = await sendClaims();
+    // Another import of the same text under another purpose and case: only the block identity is new.
+    const renamed: DevelopmentValidationIntent = { family: 'evaluation', case: 'sample1-final-only', delta: null };
+    const replayed = await call(cache, echoFetch(calls), unitBody(BLOCK_B, '雨落在旧城。'), { intent: renamed, step: 'evaluation/unit-1' });
+    expect(replayed.replayed).toBe(true);
+    expect(await replayed.json()).toEqual(answerCiting(BLOCK_B));
+    expect(calls).toHaveLength(1);
+    expect(modelLines(cache)[1]).toMatchObject({
+      outcome: 'replayed', usage: { inputTokens: 3, outputTokens: 2 }, incurredUsage: { inputTokens: 0, outputTokens: 0 },
+      capturedAt: JSON.parse(kept).transmittedAt, validation: { family: 'evaluation', decision: 'identity-replay', evidence: ['S40/first-baseline/1'] },
+    });
+    // The capture keeps its bytes and its identity; a replay claims nothing; a restarted reader replays it again.
+    expect(await readFile(entryPath, 'utf8')).toBe(kept);
+    expect(await sendClaims()).toEqual(claims);
+    const restarted = await opened();
+    expect((await call(restarted, echoFetch(calls), unitBody(BLOCK_B, '雨落在旧城。'))).replayed).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(restarted.lines.filter(isModelCallLine).map((line) => line.validation?.decision)).toEqual(['first-capture', 'identity-replay', 'identity-replay']);
+    expect(await readFile(entryPath, 'utf8')).toBe(kept);
+    expect(await sendClaims()).toEqual(claims);
+  });
+
+  it('replays across each minted slot alone and never across one changed byte beside it (#1585)', async () => {
+    const cache = await opened();
+    const calls: string[] = [];
+    const reflection = (run: string, accounting = '{"units":8}') => JSON.stringify({ model: 'deepseek-v4-flash', messages: [{ role: 'user', content: `运行反思 ${run} · 账目摘要 ${'f'.repeat(64)}
+${accounting}` }] });
+    const sampling = (ref: string, tier = '高') => JSON.stringify({ model: 'deepseek-v4-flash', messages: [{ role: 'user', content: `保证抽样 1/7 · 单元摘要 ${'c'.repeat(64)} · 抽样摘要 ${'d'.repeat(64)}
+[${BLOCK_A}] (paragraph) 雨落在旧城。
+以下为需要复核的发现：
+- [${ref}]（${tier}）雨写成了雪` }] });
+    const cases: Array<[string, string, string, string]> = [
+      ['first-baseline/unit-1', unitBody(BLOCK_A, '雨落在旧城。'), unitBody(BLOCK_B, '雨落在旧城。'), unitBody(BLOCK_B, '雨落在旧城！')],
+      ['first-baseline/reflection', reflection('run-a'), reflection('run-b'), reflection('run-b', '{"units":9}')],
+      ['first-baseline/sampling-1-unit-1', sampling('fnd-a'), sampling('fnd-b'), sampling('fnd-b', '中')],
+    ];
+    for (const [step, captured, minted, edited] of cases) {
+      await call(cache, modelFetch(calls), captured, { step });
+      expect((await call(cache, modelFetch(calls), minted, { step })).replayed, step).toBe(true);
+      expect(await refusal(call(cache, modelFetch(calls), edited, { step })), step).toMatch(/^PROVIDER_VALIDATION_(?:SIMILAR_EVIDENCE|EVIDENCE_EXISTS)$/u);
+    }
+    expect(calls).toHaveLength(cases.length);
+  });
+
+  it('keeps header digests exact and refuses, sending nothing, what it cannot map safely (#1585)', async () => {
     const cache = await opened();
     const calls: string[] = [];
     await call(cache, modelFetch(calls), unitBody(BLOCK_A, '雨落在旧城。'));
-    const reimported = unitBody(BLOCK_B, '雨落在旧城。', 'e');
-    expect(await refusal(call(cache, modelFetch(calls), reimported))).toBe('PROVIDER_VALIDATION_EVIDENCE_EXISTS');
-    const renamed: DevelopmentValidationIntent = { family: 'baseline-analysis', case: 'sample1-reimported', delta: { kind: 'input', rationale: 'fresh-import-of-sample' } };
-    expect(await refusal(call(cache, modelFetch(calls), reimported, { intent: renamed, step: 'reanalyze-book/unit-1' }))).toBe('PROVIDER_VALIDATION_EVIDENCE_EXISTS');
-    const runIdentity = JSON.stringify({ model: 'deepseek-v4-flash', messages: [{ role: 'user', content: `运行反思 ${randomUUID()} · 账目摘要 ${'f'.repeat(64)}` }] });
-    await call(cache, modelFetch(calls), runIdentity, { step: 'first-baseline/reflection' });
-    const anotherRun = runIdentity.replace(/运行反思 [0-9a-f-]{36}/u, `运行反思 ${randomUUID()}`);
-    expect(await refusal(call(cache, modelFetch(calls), anotherRun, { step: 'reanalyze-book/reflection' }))).toBe('PROVIDER_VALIDATION_EVIDENCE_EXISTS');
-    expect(calls).toHaveLength(2);
-    expect(modelLines(cache)).toHaveLength(2);
-    // Each refusal is on the ledger, sent nothing, and names the capture that answers it.
+    // A header digest is identity-free and covers positions the body does not carry, so it is never normalised.
+    expect(await refusal(call(cache, modelFetch(calls), unitBody(BLOCK_B, '雨落在旧城。', 'e')))).toBe('PROVIDER_VALIDATION_EVIDENCE_EXISTS');
+    // An answer echoing a minted Run identity cannot be rewritten safely: the old-semantic match still refuses.
+    const reflection = (run: string) => JSON.stringify({ model: 'deepseek-v4-flash', messages: [{ role: 'user', content: `运行反思 ${run} · 账目摘要 ${'f'.repeat(64)}` }] });
+    const echo: LiveModelFetch = async (_url, init) => {
+      calls.push(init.body);
+      return { status: 200, json: async () => ({ choices: [{ message: { content: '本次运行 run-a 的账目完整。' } }], usage: { prompt_tokens: 3, completion_tokens: 2 } }) };
+    };
+    await call(cache, echo, reflection('run-a'), { step: 'first-baseline/reflection' });
+    expect(await refusal(call(cache, echo, reflection('run-b'), { step: 'first-baseline/reflection' }))).toBe('PROVIDER_VALIDATION_EVIDENCE_EXISTS');
+    // So can a sampling answer that repeats the old finding handle: a factual `fnd_…` handle is a hash over its block identity.
+    const sampling = (blockId: string, ref: string) => JSON.stringify({ model: 'deepseek-v4-flash', messages: [{ role: 'user', content: `保证抽样 1/7 · 单元摘要 ${'c'.repeat(64)} · 抽样摘要 ${'d'.repeat(64)}
+[${blockId}] (paragraph) 雨落在旧城。
+以下为需要复核的发现：
+- [${ref}]（高）雨写成了雪` }] });
+    const handle = (seed: string) => `fnd_${seed.repeat(24)}`;
+    const echoRef: LiveModelFetch = async (_url, init) => {
+      calls.push(init.body);
+      return { status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ dispositions: [{ ref: handle('1'), disposition: '成立' }] }) } }], usage: { prompt_tokens: 3, completion_tokens: 2 } }) };
+    };
+    await call(cache, echoRef, sampling(BLOCK_A, handle('1')), { step: 'first-baseline/sampling-1-unit-1' });
+    expect(await refusal(call(cache, echoRef, sampling(BLOCK_B, handle('2')), { step: 'first-baseline/sampling-1-unit-1' }))).toBe('PROVIDER_VALIDATION_EVIDENCE_EXISTS');
+    // Another model is another generation: the minted variant is sent as a configuration delta, never replayed.
+    await call(cache, modelFetch(calls), unitBody(BLOCK_B, '雨落在旧城。'), { model: 'deepseek-v4.1-flash' });
+    expect(calls).toHaveLength(4);
+    expect(modelLines(cache).map((line) => line.validation!.decision)).toEqual(['first-capture', 'first-capture', 'first-capture', 'config-delta']);
     expect(refusalLines(cache)).toEqual([
       ['PROVIDER_VALIDATION_EVIDENCE_EXISTS', ['S40/first-baseline/1']],
-      ['PROVIDER_VALIDATION_EVIDENCE_EXISTS', ['S40/first-baseline/1']],
-      ['PROVIDER_VALIDATION_EVIDENCE_EXISTS', ['S40/first-baseline/4']],
+      ['PROVIDER_VALIDATION_EVIDENCE_EXISTS', ['S40/first-baseline/3']],
+      ['PROVIDER_VALIDATION_EVIDENCE_EXISTS', ['S40/first-baseline/5']],
     ]);
-    expect(cache.lines.filter(isModelCallLine).filter((line) => line.outcome === 'refused').every((line) =>
-      line.usage === null && line.status === null && line.incurredUsage?.inputTokens === 0)).toBe(true);
+    // A refusal sent nothing and incurred nothing.
+    for (const line of cache.lines.filter(isModelCallLine).filter((entry) => entry.outcome === 'refused')) {
+      expect(line).toMatchObject({ status: null, usage: null, incurredUsage: { inputTokens: 0, outputTokens: 0 } });
+    }
+  });
+
+  it('replays an identity-only repeat under a launch that declares an input delta, and sends a changed text as that delta (#1585)', async () => {
+    const cache = await opened();
+    const calls: string[] = [];
+    const evaluationUnit = (blockId: string, text: string) => JSON.stringify({ model: 'deepseek-v4-flash', messages: [{ role: 'user', content: `评估单元 1/8 · 单元摘要 ${'c'.repeat(64)}
+[${blockId}] (paragraph) ${text}` }] });
+    const step = 'evaluation-first/unit-1';
+    await call(cache, echoFetch(calls), evaluationUnit(BLOCK_A, '雨落在旧城。'), { step });
+    const finalOnly: DevelopmentValidationIntent = { family: 'editorial-evidence', case: 'sample1-final-only', delta: { kind: 'input', rationale: 'final-synthesis-with-frozen-synopsis' } };
+    const replayed = await call(cache, echoFetch(calls), evaluationUnit(BLOCK_B, '雨落在旧城。'), { intent: finalOnly, step });
+    expect(replayed.replayed).toBe(true);
+    expect(await replayed.json()).toEqual(answerCiting(BLOCK_B));
+    expect(calls).toHaveLength(1);
+    expect((await call(cache, echoFetch(calls), evaluationUnit(BLOCK_B, '雪落在旧城。'), { intent: finalOnly, step })).replayed).toBeUndefined();
+    expect(calls).toHaveLength(2);
+    expect(modelLines(cache).map((line) => [line.validation!.decision, line.validation!.evidence, line.incurredUsage])).toEqual([
+      ['first-capture', [], { inputTokens: 3, outputTokens: 2 }],
+      ['identity-replay', ['S40/first-baseline/1'], { inputTokens: 0, outputTokens: 0 }],
+      ['input-delta', ['S40/first-baseline/1'], { inputTokens: 3, outputTokens: 2 }],
+    ]);
+  });
+
+  it('normalises each slot only where its builder emits it: a manuscript line shaped like a finding line stays exact (#1585)', async () => {
+    const cache = await opened();
+    const calls: string[] = [];
+    // A block's text may hold a soft line break, so a continuation line is raw manuscript text, even with the header digest equal.
+    const evaluationUnit = (note: string) => JSON.stringify({ model: 'deepseek-v4-flash', messages: [{ role: 'user', content: `评估单元 1/8 · 单元摘要 ${'c'.repeat(64)}
+[${BLOCK_A}] (paragraph) 参见：
+${note}` }] });
+    const sampling = (note: string) => JSON.stringify({ model: 'deepseek-v4-flash', messages: [{ role: 'user', content: `保证抽样 1/7 · 单元摘要 ${'c'.repeat(64)} · 抽样摘要 ${'d'.repeat(64)}
+[${BLOCK_A}] (paragraph) 参见：
+${note}
+以下为需要复核的发现：
+- [1]（高）雨写成了雪` }] });
+    for (const [step, body] of [['evaluation-first/unit-1', evaluationUnit], ['first-baseline/sampling-1-unit-1', sampling]] as const) {
+      await call(cache, modelFetch(calls), body('- [12]（美）某著'), { step });
+      expect(await refusal(call(cache, modelFetch(calls), body('- [13]（美）某著'), { step })), step).toMatch(/^PROVIDER_VALIDATION_(?:SIMILAR_EVIDENCE|EVIDENCE_EXISTS)$/u);
+    }
+    expect(calls).toHaveLength(2);
+    expect(modelLines(cache).every((line) => line.outcome === 'transmitted')).toBe(true);
   });
 
   it('refuses similar evidence for the same purpose and step unless an input delta is declared, and records what it rests on', async () => {
