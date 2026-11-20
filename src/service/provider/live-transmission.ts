@@ -22,6 +22,7 @@ import {
   type ProviderValidationRecord,
 } from './provider-result-cache.js';
 import type { ResearchSnapshot, ResearchSnapshotCache } from './research-snapshot-cache.js';
+import { identityRemap, remapResponse } from './identity-replay.js';
 
 /**
  * The once-only live transmission (ADR 0067, ADR 0070, ADR 0089), shared by every path that sends to a model or a platform tool
@@ -79,8 +80,9 @@ function itemList(lines: ReadonlyArray<{ readonly itemId: string }>): string {
 
 /**
  * Decide one development validation call against verified capture provenance and the current ledger.
- * Exact requests replay only under their original namespace and active generation. Equivalent or
- * similar validation selects prior evidence, never another input's response. A substantive declared
+ * Exact requests replay only under their original namespace and active generation; the same request
+ * asked with other minted identities replays its capture mapped onto them (Issue #1585). Similar
+ * validation selects prior evidence, never another input's response. A substantive declared
  * delta permits new evidence; a possibly billed request instead needs a necessary retry reason and a
  * stopped sender. Claims are never moved out from under an active process: each attempt exclusively
  * creates the fixed successor of the attempt it observed. Original and incurred usage remain distinct.
@@ -146,7 +148,8 @@ export async function transmitOnce(
     if (exact.state === 'corrupt') {
       throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN', '缓存证据无法核实；未重新发送可能已经计费的请求。', []);
     }
-    const evidence = await cache.validEvidence();
+    const captures = await cache.validCaptures();
+    const evidence = captures.map(({ line }) => line);
     const claim = await cache.readClaim(claimKey);
     if (exact.state === 'present' && exact.entry.streamedAnswer?.complete !== false && exact.entry.generation === generation && !retiredCapture(cache, exact.entry)) {
       const recorded = evidence.some((line) => line.itemId === exact.entry.itemId && line.cacheKey === cacheKey);
@@ -163,7 +166,17 @@ export async function transmitOnce(
           '旧证据没有可核实的路由、端点和请求格式，不能当作当前配置的答案或新请求许可；请核查并明确作废后再验证。', items(captured));
       }
     }
-    // 2. The same question asked again under the same configuration.
+    // 2. The same question asked again under the same configuration. Asked with newly minted identities only, the newest such
+    // capture answers it, mapped onto this request in memory (Issue #1585); its entry is never touched. One it cannot map
+    // safely still refuses: nothing is sent for a question the evidence already answers.
+    for (const capture of captures.filter(({ line }) => line.generation === generation).reverse()) {
+      if (capture.entry.streamedAnswer?.complete === false) continue;
+      const remap = identityRemap(capture.entry.requestBody, init.body);
+      const response = remap === null ? null : remapResponse(capture.entry.response, remap);
+      if (response === null) continue;
+      return replay(cache, item, model, requestDigest, identity, { ...capture.entry, response },
+        decided('identity-replay', [capture.line.itemId]), null);
+    }
     const repeated = evidence.filter((line) => line.generation === generation && line.semanticDigest === identity.semanticDigest);
     if (repeated.length > 0) {
       throw await refusal('PROVIDER_VALIDATION_EVIDENCE_EXISTS',
