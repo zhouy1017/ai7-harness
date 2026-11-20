@@ -32,7 +32,15 @@ import { READERS_REPORT_FIXTURE_IDENTITY } from '../support/readers-report.js';
 
 // The cases of the former tests/service/task-dispatch-launch.test.ts, moved verbatim (#1621) so that the callers in
 // tests/service/task-dispatch-*.test.ts can run its subjects as files of their own.
-export function taskDispatchSuite(): void {
+/** The subjects the cases are split into, one test file each (#1621); a subject registers only its own cases. */
+export type TaskDispatchSubject = 'synopsis-context' | 'one-step-analysis' | 'one-step-evaluations' | 'lifecycle';
+const ONE_STEP_KINDS: Record<TaskDispatchSubject, ReadonlyArray<'baseline-analysis' | 'custom-analysis' | 'writing' | 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite'>> = {
+  'synopsis-context': [], lifecycle: [],
+  'one-step-analysis': ['baseline-analysis', 'custom-analysis', 'writing'],
+  'one-step-evaluations': ['initial-evaluation', 'readers-report', 'evaluation-rewrite'],
+};
+
+export function taskDispatchSuite(subject: TaskDispatchSubject): void {
 // D4: the six ordinary drawer starts use real stores and SampleBook input. No task is dispatched to a provider here.
 const KINDS = ['baseline-analysis', 'custom-analysis', 'writing', 'initial-evaluation', 'readers-report', 'evaluation-rewrite'] as const;
 type Kind = typeof KINDS[number];
@@ -108,7 +116,7 @@ function verifySynopsisRequest(launched: LaunchedTask, closed: Awaited<ReturnTyp
   expect(message).not.toContain(facts.baselineSynopsisContext!.revisionId);
 }
 
-describe('frozen baseline chapter context on ordinary downstream final steps (#1500)', () => {
+if (subject === 'synopsis-context') describe('frozen baseline chapter context on ordinary downstream final steps (#1500)', () => {
   it.each(SYNOPSIS_KINDS.flatMap(kind => ['matching', 'absent', 'other-revision'].map(baseline => ({ kind, baseline }))))(
     '$kind sends chapter context only at synthesis with $baseline baseline; preview equals frozen (#1500)', async ({ kind, baseline }) => {
       const target = await book(kind), { schedule, closed } = await synopsisSchedule(kind);
@@ -577,7 +585,7 @@ function expectVanishedSelectionRefused(target: LaunchBook): void {
   expect(store.getManuscriptWindow(target.manuscriptId, target.branchId, null).workingDigest).toBe(moved.workingDigest);
 }
 
-describe.each(KINDS)('%s one-step launch', (kind) => {
+if (ONE_STEP_KINDS[subject].length > 0) describe.each(ONE_STEP_KINDS[subject])('%s one-step launch', (kind) => {
   it('refuses the preview while a same-kind task is active instead of describing an unavailable launch', async () => {
     const target=await book(kind, true);ordinary();
     command(kind,target,{reasoningEffort:'high'},randomUUID(),false,undefined,'when-online')();
@@ -865,6 +873,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
   });
 });
 
+if (subject === 'lifecycle') {
 it('labels a legacy prepared-and-authorized result from its producing plan without a launch snapshot', async () => {
   const target = await book('baseline-analysis'), answer = await lifecycleAnswers('baseline-analysis');
   ordinary(request=>answer(request, store.baselineAnalysisLedger.definition));
@@ -1042,4 +1051,5 @@ describe.each([...KINDS.map(kind => ({ kind, references: 'none' })),
     } finally { db.close(); }
   });
 });
+}
 }
