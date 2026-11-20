@@ -983,9 +983,8 @@ async function main() {
       await firstRunClick(onboardingPage, '[data-onboarding-help]');
       await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, `first-run-help-opened-${width}`);
       await assertRenderer(onboardingPage, `document.activeElement===document.querySelector('[data-help-section="first-review"] h4')`, `first-run-help-heading-focused-${width}`);
-      const helpGeo = await onboardingPage.evaluate(`(() => { const h=document.querySelector('[data-help-section="first-review"] h4'); const b=h.getBoundingClientRect(); const s=document.scrollingElement; return JSON.stringify({top:Math.round(b.top),bottom:Math.round(b.bottom),ih:innerHeight,iw:innerWidth,sy:Math.round(scrollY),sh:s.scrollHeight,ch:s.clientHeight}); })()`);
-      const helpBox = JSON.parse(helpGeo);
-      requireJourney(helpBox.top >= 0 && helpBox.bottom <= helpBox.ih, `first-run-help-heading-in-view-${width}-${helpGeo.replace(/[^0-9a-z:,-]/gu, '')}`);
+      // scrollIntoView lands on a rounded offset: a fraction of a pixel either side still counts as in view.
+      await assertRenderer(onboardingPage, `(() => { const box=document.querySelector('[data-help-section="first-review"] h4').getBoundingClientRect(); return box.top>=-1 && box.bottom<=innerHeight+1; })()`, `first-run-help-heading-in-view-${width}`);
       await assertRenderer(onboardingPage, `(() => { const steps=Array.from(document.querySelectorAll('[data-help-step]')); return steps.length===5 && steps.every((step)=>{ const b=step.getBoundingClientRect(); return b.left>=0 && b.right<=innerWidth; }); })()`, `first-run-help-steps-inside-${width}`);
       await assertRenderer(onboardingPage, `document.querySelectorAll('[data-help-step-go]').length===2 && document.querySelectorAll('[data-help-step-needs-book]').length===3`, `first-run-help-no-book-steps-${width}`);
       await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
@@ -1047,7 +1046,9 @@ async function main() {
       await pressF1(onboardingPage);
       await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, name);
     };
-    await assertRenderer(onboardingPage, `(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); if(!(editor instanceof HTMLElement))return false; editor.focus(); return true; })()`, 'first-review-help-focus-manuscript');
+    // A real pointer press inside the manuscript puts the caret there; only then is F1 pressed.
+    await firstRunClick(onboardingPage, '[data-testid="manuscript-editor"]');
+    await assertRenderer(onboardingPage, `document.querySelector('[data-testid="manuscript-editor"]')?.contains(document.activeElement)===true`, 'first-review-help-focus-manuscript');
     await helpFromManuscript('first-review-help-f1');
     await assertRenderer(onboardingPage, `document.querySelectorAll('[data-help-step-go]').length===5 && !document.querySelector('[data-help-step-needs-book]')`, 'first-review-help-book-steps');
     await firstRunClick(onboardingPage, '[data-help-step-go="review"]');
@@ -1061,13 +1062,14 @@ async function main() {
     await waitFor(onboardingPage, `document.querySelector('[data-screen="book-deliverables"]')`, 'first-review-help-export');
     await helpFromManuscript('first-review-help-f1-deliverables');
     await firstRunClick(onboardingPage, '[data-help-step-go="import"]');
-    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"]')`, 'first-review-help-import');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] button[data-book-id="${sampleBook.bookId}"]')`, 'first-review-help-import');
     await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
     await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-review-help-reopened-manuscript');
     await helpFromManuscript('first-review-help-f1-model');
     await firstRunClick(onboardingPage, '[data-help-step-go="model"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"]')`, 'first-review-help-model');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] button[data-book-id="${sampleBook.bookId}"]')`, 'first-review-help-model-library');
     await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
     await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-review-help-returned-manuscript');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-book-section="overview"]');

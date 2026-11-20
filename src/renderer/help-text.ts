@@ -35,7 +35,7 @@ export const FIRST_REVIEW_HEADING = '第一次审稿';
 function firstReviewSection(): HelpSection {
   return {
     heading: FIRST_REVIEW_HEADING,
-    paragraphs: ['按这五步审完第一本稿子；每一步的按钮会直接带你过去。'],
+    paragraphs: ['按这五步审完第一本稿件；点每一步的按钮直接过去，需要先打开图书的步骤会先告诉你。'],
     steps: [
       { key: 'model', title: '连接模型服务', sentence: `在「${SHELL_SETTINGS.label}」选好模型服务并填入密钥，AI 审阅才能开始。`, button: '设置模型服务', command: 'nav.settings', needsBook: false },
       { key: 'import', title: '导入稿件', sentence: `在「${destinationLabel('library')}」点「导入稿件」，选择本机的 DOCX 文件。`, button: `打开${destinationLabel('library')}`, command: 'nav.library', needsBook: false },

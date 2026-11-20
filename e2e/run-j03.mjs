@@ -429,7 +429,7 @@ async function runSettingsPages(renderer, cancellation) {
   await pressKey(renderer, F1_KEY);
   await waitFor(renderer, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, 'help-f1-opened');
   await assertRenderer(renderer, `document.querySelectorAll('[data-help-step]').length===5 && document.querySelectorAll('[data-help-step-go]').length===2 && document.querySelectorAll('[data-help-step-needs-book]').length===3`, 'help-f1-no-book-steps');
-  await click(renderer, '键盘与无障碍', 'help-f1-back-keyboard');
+  await pointerClick(renderer, waitFor, '.settings-navigation [data-settings-nav="keyboard"]', 'help-f1-back-keyboard');
   await waitFor(renderer, `document.querySelector('[data-screen="keyboard"] [data-keyboard-command="nav.series"]')`, 'help-f1-keyboard-ready');
 
   // Q1: the shared command registry is reachable from the palette, and its added shortcuts are listed here.
