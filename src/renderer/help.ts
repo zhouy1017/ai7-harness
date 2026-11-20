@@ -4,7 +4,7 @@ import type { DataVersionProjection } from '../shared/protocol.js';
 import { SERVICE_PROTOCOL_VERSION } from '../shared/protocol.js';
 import licensesDocument from './third-party-licenses.generated.json' with { type: 'json' };
 import {
-  HELP_ABOUT_FAILED, HELP_ABOUT_HEADING, HELP_ABOUT_LOADING, HELP_BACK, HELP_BREADCRUMB, HELP_LICENSE_EMPTY,
+  HELP_ABOUT_FAILED, HELP_ABOUT_HEADING, HELP_ABOUT_LOADING, HELP_LICENSE_EMPTY,
   HELP_LICENSE_FIELD_LICENSE, HELP_LICENSE_FIELD_SOURCE, HELP_LICENSE_FILTER_LABEL, HELP_LICENSE_FILTER_PLACEHOLDER,
   HELP_LICENSE_NO_SOURCE, HELP_LICENSE_LOCAL_NOTE, HELP_LEDE, HELP_TABS, HELP_TABS_LABEL, HELP_TITLE, helpAboutLine,
   helpLicenseCount, type HelpTab,
@@ -40,7 +40,6 @@ export interface HelpSurfaceOptions {
   readonly root: HTMLElement;
   /** Reads the software version and the Data Version exactly as 设置 › 数据与存储 does. */
   readonly loadVersions: () => Promise<Pick<DataVersionProjection, 'softwareVersion' | 'dataVersion' | 'frozen'>>;
-  readonly back: () => void;
   readonly modeChanged?: () => void;
   readonly licenses?: ReadonlyArray<ThirdPartyLicense>;
   readonly protocolVersion?: number;
@@ -88,7 +87,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   const protocolVersion = options.protocolVersion ?? SERVICE_PROTOCOL_VERSION;
 
   root.classList.add('help');
-  root.append(el('p', 'section-label', HELP_BREADCRUMB), el('h2', undefined, HELP_TITLE), el('p', 'lede', HELP_LEDE));
+  root.append(el('h2', undefined, HELP_TITLE), el('p', 'lede', HELP_LEDE));
 
   // 关于: the same two versions 设置 › 数据与存储 shows, plus the service protocol this build speaks.
   const about = el('section', 'source-card help-about');
@@ -226,12 +225,6 @@ export function mountHelp(options: HelpSurfaceOptions): void {
 
   root.append(tabs, usagePanel, privacyPanel, licensesPanel);
 
-  const back = el('div', 'button-row');
-  const backButton = el('button', 'quiet', HELP_BACK);
-  backButton.type = 'button';
-  backButton.addEventListener('click', options.back);
-  back.append(backButton);
-  root.append(back);
 
   select('usage', false);
   filterLicenses();

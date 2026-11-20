@@ -61,7 +61,7 @@ function activeRunWords(kind: string): { readonly task: string; readonly next: s
 }
 
 /** A queued Run's own words (Issue #49, S14; CONC-007): what it waits for, and that nothing has begun. */
-export const RUN_QUEUED_LABEL = '等待运行名额' as const;
+export const RUN_QUEUED_LABEL = '排队中' as const;
 
 /** A start the editor deferred to idle time (Issue #1089; ADR 0095 §3): authorized, holding no place until quiet. */
 export const RUN_WAITING_IDLE_LABEL = '等待空闲' as const;
@@ -111,7 +111,7 @@ export const RUN_STATE_LABELS: Record<BaselineAnalysisRunState, string> = {
   admitted: '已进入调度器',
   executing: '正在执行分析单元',
   completed: '已完成',
-  'completed-with-gaps': '已完成 · 保留缺口',
+  'completed-with-gaps': '已完成 · 有未完成的部分',
   failed: '运行失败',
   interrupted: '运行已中断',
   'awaiting-connectivity': '等待网络 · 未启动',
@@ -119,7 +119,7 @@ export const RUN_STATE_LABELS: Record<BaselineAnalysisRunState, string> = {
   cancelling: '正在取消',
   pausing: '正在暂停',
   paused: '已暂停',
-  resumable: '任务已中断 · 可续行',
+  resumable: '任务已中断 · 可继续',
   'awaiting-clarification': '任务等待你的说明',
 };
 

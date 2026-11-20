@@ -45,16 +45,16 @@ const document: ProductionDocumentProjection = {
 
 describe('the words of 交付 · 生产文档', () => {
   it('names the block, a card\'s states and every action in the specification\'s words', () => {
-    expect(labels.DOCUMENTS_HEADING).toBe('交付 · 生产文档');
-    expect(labels.DOCUMENTS_LEDE).toBe('每一类生产文档有自己的版本，与稿件的发稿互不影响。');
+    expect(labels.DOCUMENTS_HEADING).toBe('交付 · 衍生稿件');
+    expect(labels.DOCUMENTS_LEDE).toBe('每一类衍生稿件有自己的版本，与稿件的发稿互不影响。');
     expect(labels.DOCUMENT_STATE_NONE).toBe('尚未创建');
     expect(labels.DOCUMENT_STATE_NOT_FOR_THIS_BOOK).toBe('本书不做');
-    expect(labels.DOCUMENT_KEPT_NOTE).toBe('文档与它的版本都保留；恢复后照常处理。');
+    expect(labels.DOCUMENT_KEPT_NOTE).toBe('衍生稿件与它的版本都保留；恢复后照常处理。');
     expect(labels.DOCUMENT_CHANGED_SINCE_VERSION).toBe('有修改尚未保存为版本');
-    expect(labels.DOCUMENT_NO_SOURCES).toBe('暂无来源材料：可在这里导入文件，或新建空白文档。');
+    expect(labels.DOCUMENT_NO_SOURCES).toBe('暂无来源材料：可在这里导入文件，或新建空白的衍生稿件。');
     expect(labels.DOCUMENT_ACTION_LABELS).toEqual({
       create: '从来源材料创建…',
-      confirmCreate: '创建文档',
+      confirmCreate: '创建衍生稿件',
       cancel: '取消',
       open: '打开',
       notForThisBook: '本书不做',
@@ -95,7 +95,7 @@ describe('the words of 交付 · 生产文档', () => {
     expect(labels.DOCUMENT_LENS_LABEL).toBe('工作流程');
     expect(labels.DOCUMENT_VERSIONS_HEADING).toBe('版本与交付');
     expect([labels.DOCUMENT_VERSIONS_LIGHT_LABEL, labels.DOCUMENT_VERSIONS_LIGHT_HEADING]).toEqual(['版本', '已保存的版本']);
-    expect(labels.DOCUMENT_MATERIALS_HEADING).toBe('这份文档的材料');
+    expect(labels.DOCUMENT_MATERIALS_HEADING).toBe('这份衍生稿件的材料');
     expect(labels.DOCUMENT_MATERIALS_EMPTY).toBe('暂无材料，任务简报、引语台账、事实核查记录与范例会列在这里。');
     for (const words of surface) {
       expect(words).not.toMatch(/里程碑|签发|发稿/u);

@@ -1,4 +1,6 @@
+import { serviceWords } from './service-wording.js';
 import type { TaskLaunchRequest } from './task-drawer.js';
+import { reportResult } from './notifications.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import type {
   DefaultExecutionRuleReference,
@@ -142,6 +144,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   // The types whose draft this surface opens by itself once written (Issue #1403): the editor began their AI 写作 here. Each
   // remembers the draft already waiting when it began, so only the new one opens.
   const autoOpen = new Map<string, string | null>();
+  /** Sheets whose 先看计划 was opened: their start leaves 打开草稿 to the editor, as 0.7.2's plan-first start did. */
+  const planShown = new WeakSet<object>();
   const awaitDraft = (typeId: string): void => {
     autoOpen.set(typeId, projection?.types.find((type) => type.typeId === typeId)?.drafted?.revisionId ?? null);
   };
@@ -186,6 +190,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       : active instanceof HTMLInputElement && active.name === 'writing-type' ? `input[name="writing-type"][value="${CSS.escape(active.value)}"]`
       : active.dataset['writingMaterial'] !== undefined ? `[data-writing-material="${CSS.escape(active.dataset['writingMaterial'])}"]`
       : null);
+    const existingSheet = section.querySelector<HTMLDialogElement>('dialog.writing-task-sheet');
     section.replaceChildren();
     section.dataset['writingState'] = page.task?.state ?? 'none';
     const draftedCount = page.types.filter((type) => type.drafted !== null).length;
@@ -242,13 +247,15 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     } else if (sheet === null) {
       const opener = action(WRITING_ACTIONS.open, 'secondary', 'new', () => {
         sheet = newSheet(null);
-        paint('legend');
+        paint('[data-writing-field="title"]');
       });
       opener.disabled = busy || page.unavailable !== null;
       opener.setAttribute('aria-expanded', 'false');
       section.append(opener);
     } else {
-      section.append(sheetNode(page, sheet));
+      const surface = sheetNode(page, sheet, existingSheet);
+      section.append(surface);
+      if (!surface.open) surface.show();
     }
     if (keep !== null) section.querySelector<HTMLElement>(keep)?.focus();
     // 创建后直接打开 (Issue #1403): a draft the editor began here is made a document under its title and opened.
@@ -271,7 +278,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   }
 
   /** The sheet: types, references, the editor's words, the four rows, and 先看计划 / 快速开始 / 取消. */
-  function sheetNode(page: WritingTaskProjection, state: Sheet): HTMLElement {
+  function sheetNode(page: WritingTaskProjection, state: Sheet, existing: HTMLDialogElement | null): HTMLDialogElement {
     const form = el('form', 'writing-sheet');
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
@@ -320,7 +327,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       label.htmlFor = id;
       wrapper.append(input, label);
       if (!type.prepare.allowed) {
-        const reason = el('span', 'writing-type-reason', type.prepare.reason);
+        const reason = el('span', 'writing-type-reason', serviceWords(type.prepare.reason));
         reason.id = uid('reason');
         input.setAttribute('aria-describedby', reason.id);
         label.append(reason);
@@ -371,26 +378,43 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       form.append(problem);
     }
     const row = el('div', 'button-row');
-    const plan = action('查看计划', 'secondary', 'plan', () => void prepare(null));
-    const start = action('开始写作', 'primary', 'start', () => void prepare(null, true));
-    plan.disabled = busy || page.unavailable !== null;
-    start.disabled = plan.disabled;
-    plan.setAttribute('aria-controls', 'task-drawer');
     const cancel = action(WRITING_ACTIONS.cancel, 'quiet', 'cancel', () => {
       sheet = null;
       paint('[data-writing-action="new"]');
     });
     cancel.disabled = busy;
-    row.append(start, plan, cancel);
+    options.openLaunch({ bookId: page.bookId, operation: 'launchWritingTask', title: '写作', mount: row, inputEvents: form, lifetime: state,
+      startDisabled: busy || page.unavailable !== null,
+      input: { typeId: state.typeId ?? '', audience: state.audience, channel: state.channel,
+        requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds] },
+      readInput: () => ({ typeId: state.typeId ?? '', audience: state.audience, channel: state.channel,
+        requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds] }),
+      beforeLaunch: async () => await prepare(null, true, true) === true,
+      onStarted: () => { const typeId = state.typeId; if (sheet === state) { sheet = null; paint(null); } if (typeId !== null && !planShown.has(state)) awaitDraft(typeId); }
+    });
+    const estimate = row.querySelector<HTMLDetailsElement>('.task-launch-estimate');
+    if (estimate !== null && estimate.dataset['writingPlanWatched'] === undefined) {
+      estimate.dataset['writingPlanWatched'] = '';
+      estimate.addEventListener('toggle', () => { if (estimate.open) planShown.add(state); });
+    }
+    row.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-writing-action', 'start');
+    row.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-writing-action', 'plan');
+    row.append(cancel);
     form.append(row);
-    const surface = createSheet('writing-task-sheet');
+    const surface = existing ?? createSheet('writing-task-sheet');
     const title = el('h3', undefined, '写作任务');
     title.id = uid('sheet-title');
     surface.setAttribute('aria-labelledby', title.id);
     sheetContent(surface, title, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== row), row, form);
-    surface.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
-    surface.addEventListener('close', () => { if (!busy) { sheet = null; paint('[data-writing-action="new"]'); } });
-    surface.open = true;
+    if (existing === null) {
+      surface.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
+      surface.addEventListener('close', () => {
+        if (!busy) {
+          sheet = null;
+          paint(document.activeElement === document.body || surface.contains(document.activeElement) ? '[data-writing-action="new"]' : null);
+        }
+      });
+    }
     return surface;
   }
 
@@ -464,12 +488,12 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
    * would start it; whatever would make the start differ from the rule leaves the Task at its plan, open in the drawer with the
    * reason beside the bar, and nothing recorded.
    */
-  async function prepare(rule: DefaultExecutionRuleReference | null, openDraftOnStart = false): Promise<void> {
+  async function prepare(rule: DefaultExecutionRuleReference | null, openDraftOnStart = false, validationOnly = false): Promise<boolean | void> {
     if (busy || sheet === null || projection === null) return;
     const state = sheet;
     if (state.typeId === null) {
       state.problem = WRITING_PICK_TYPE;
-      paint('legend');
+      paint('[data-writing-field="title"]');
       return;
     }
     const tooLong = (['audience', 'channel', 'requirements'] as const)
@@ -482,6 +506,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     const title = state.title.trim();
     if (title !== '') rememberedTitles.set(titleKey(projection.bookId, state.typeId), title);
     else rememberedTitles.delete(titleKey(projection.bookId, state.typeId));
+    if (validationOnly) return true;
     if (rule === null) {
       const typeId = state.typeId;
       options.openLaunch({ bookId: projection.bookId, operation: 'launchWritingTask', title: '写作', input: {
@@ -529,7 +554,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       if (planEnvelopeDigest === null) {
         // A quick start whose preparation froze no plan stops at it, and says so (#701 review P3-5).
         const note = taskPlanQuickStartFellBack([WRITING_STATUS.quickNoPlan]);
-        options.setStatus(note);
+        reportResult(options.setStatus, note);
         paint(null);
         options.openPlan(ref, note);
         return;
@@ -575,7 +600,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       return;
     }
     const note = taskPlanQuickStartFellBack(result.reasons);
-    options.setStatus(note);
+    reportResult(options.setStatus, note);
     options.openPlan(ref, note);
   }
 
@@ -606,7 +631,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     refresh,
     open: (typeId, title) => {
       sheet = newSheet(typeId, title);
-      if (projection !== null) paint('legend');
+      if (projection !== null) paint('[data-writing-field="title"]');
       else refresh();
     },
     destroy: () => {

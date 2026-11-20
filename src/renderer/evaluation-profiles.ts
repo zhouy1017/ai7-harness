@@ -5,7 +5,7 @@ import {
   evaluationBandLine, evaluationItemLegend, evaluationProfilePill, evaluationProfileUse,
 } from './evaluation-labels.js';
 
-export const PROFILE_PROSPECTIVE = '新版本只用于之后准备的初评和新建的评估，已有记录保留当时的方案。';
+export const PROFILE_PROSPECTIVE = '新版本只用于之后准备的评估报告和新建的评估，已有记录保留当时的方案。';
 export const PROFILE_CALIBRATION = '改名或修改说明保留该项的校准依据；移除的项不再用于新评估，新增的项等待自己的调分依据；项数变化时原有项的校准偏移按新的满分折算。';
 export const PROFILE_ITEM_COUNT = '评分项数需要能把 100 分平均分成整数：1、2、4、5 或 10 项。';
 export function profileEditInput(profile: EvaluationProfileProjection): SaveEvaluationProfileInput {

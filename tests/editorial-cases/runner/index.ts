@@ -1,15 +1,18 @@
-import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { cp, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { resolveSourceCheckoutLaunchPolicy } from '../../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../../src/service/provider/model-fixture.js';
 import type { LaunchPolicyProjection } from '../../../src/shared/protocol.js';
 import { withRuleFor } from '../../support/policy-rules.js';
 import { type EditorialCase, validateCase } from './case-file.js';
 import { runPolishCase } from './run-polish.js';
-import { runReviewCase } from './run-review.js';
+import { chapterScope, observeReviewRun, runReviewCase } from './run-review.js';
 import { clarificationRun, finalizedNewsRelease, sample1DerivedLibraryItem } from './run-setups.js';
 import { initialEvaluationCase, readersReportCase, writingDraftCase } from './run-structural.js';
-import { createCaseRoots, deterministicOwner, developerLiveReplayOwner, importManuscript, openStore, type ReplayTally } from './session.js';
+import { createCaseRoots, deterministicOwner, developerLiveReplayOwner, type ImportedBook, importManuscript, openStore, type ReplayTally, workingBlocks } from './session.js';
 import { resolveTextAnchors } from './text-cases.js';
 
 /**
@@ -38,9 +41,10 @@ export interface CaseMetrics {
   readonly title: string;
   readonly manuscript: string;
   readonly measuredPass: EditorialCase['measuredPass'];
+  readonly pass?: string;
   readonly evidence: {
     readonly fixtures: ReadonlyArray<{ identity: string; sha256: string; provenance: string }>;
-    readonly binding: 'deterministic' | 'developer-live-replay';
+    readonly binding: 'deterministic' | 'developer-live-replay' | 'developer-live-store-copy';
     readonly captures: ReadonlyArray<CaptureSummary>;
     readonly model: string | null;
     readonly route: string | null;
@@ -124,10 +128,8 @@ export async function runEditorialCase(request: RunCaseRequest): Promise<CaseMet
   const { codeRoot, fixturesRoot, testCase } = request;
   const started = Date.now();
   const tally: ReplayTally = { answered: 0, unmatched: 0, answeredContracts: new Set() };
-  const base = {
-    id: testCase.id, kind: testCase.kind, title: testCase.title,
-    manuscript: testCase.manuscript.source === 'sample1' ? 'sample1' : testCase.manuscript.id, measuredPass: testCase.measuredPass,
-  };
+  if (testCase.replay.route === 'score-only') throw new Error(`EDITORIAL_CASE/score-only: ${testCase.id}`);
+  const base = caseBase(testCase);
   const concernsTotal = testCase.expectedConcerns.length;
   const checksTotal = testCase.falsePositiveChecks.length;
   if (testCase.kind === 'clarification') {
@@ -158,7 +160,7 @@ export async function runEditorialCase(request: RunCaseRequest): Promise<CaseMet
     };
   }
 
-  const fixture = await loadModelFixture(fixturesRoot, testCase.fixture);
+  const fixture = await loadModelFixture(fixturesRoot, testCase.fixture!);
   const basis = typeof testCase.input.evaluationFixture === 'string' ? await loadModelFixture(fixturesRoot, testCase.input.evaluationFixture) : null;
   const fixtures = basis === null ? [fixture] : [basis, fixture];
   const deterministic = testCase.replay.route === 'deterministic';
@@ -225,5 +227,126 @@ export async function runEditorialCase(request: RunCaseRequest): Promise<CaseMet
     store.markCleanShutdown();
     store.close();
     await roots.dispose();
+  }
+}
+
+function caseBase(testCase: EditorialCase) {
+  return {
+    id: testCase.id, kind: testCase.kind, title: testCase.title,
+    manuscript: testCase.manuscript.source === 'sample1' ? 'sample1' : testCase.manuscript.source === 'synthetic' ? testCase.manuscript.id : testCase.manuscript.file,
+    measuredPass: testCase.measuredPass,
+    ...(testCase.pass === undefined ? {} : { pass: testCase.pass }),
+  };
+}
+
+/**
+ * A score-only case's references checked without any Run (#1074): its exact ADR 0091 file is imported into a disposable product,
+ * the chapter rule must resolve to the case's chapter titles and every false-positive check must stand exactly once in its
+ * paragraph inside that range. Returns counts and positions only.
+ */
+export async function checkScoreOnlyCase(request: { readonly codeRoot: string; readonly testCase: EditorialCase }): Promise<{
+  id: string; chapterRange: { startPosition: number; endPosition: number }; checks: number;
+}> {
+  const { codeRoot, testCase } = request;
+  if (testCase.replay.route !== 'score-only') throw new Error(`EDITORIAL_CASE/not-score-only: ${testCase.id}`);
+  const roots = await createCaseRoots();
+  const store = await openStore(roots, codeRoot, null);
+  try {
+    const book = await importManuscript(store, codeRoot, roots, testCase.manuscript, testCase.bookTitle);
+    const range = chapterScope(store, book, testCase);
+    const resolution = resolveTextAnchors(store, book, testCase);
+    for (const check of resolution.checks) {
+      if (check.paragraph < range.startPosition || check.paragraph > range.endPosition) throw new Error(`EDITORIAL_CASE/check-outside-range: ${testCase.id}/${check.id}`);
+    }
+    return { id: testCase.id, chapterRange: { startPosition: range.startPosition, endPosition: range.endPosition }, checks: resolution.checks.length };
+  } finally {
+    store.markCleanShutdown();
+    store.close();
+    await roots.dispose();
+  }
+}
+
+/** The Book's text as content only — kind, level and a digest of each block's words, in order — never its block identities. */
+function contentSequence(store: Awaited<ReturnType<typeof openStore>>, book: ImportedBook): string {
+  return createHash('sha256').update(JSON.stringify(workingBlocks(store, book).map((block) =>
+    [block.kind, block.level, createHash('sha256').update(block.text).digest('hex')]))).digest('hex');
+}
+
+/** A fresh import of the case's exact file in a disposable product: its content sequence and its journal position. */
+async function freshImport(codeRoot: string, testCase: EditorialCase): Promise<{ content: string; journalSequence: number }> {
+  const roots = await createCaseRoots();
+  const store = await openStore(roots, codeRoot, null);
+  try {
+    const book = await importManuscript(store, codeRoot, roots, testCase.manuscript, testCase.bookTitle);
+    return { content: contentSequence(store, book), journalSequence: store.getManuscriptWindow(book.manuscriptId, book.branchId, null).journalSequence };
+  } finally {
+    store.markCleanShutdown();
+    store.close();
+    await roots.dispose();
+  }
+}
+
+/**
+ * Score a score-only case (#1074) on the developer-live Run it was made in. The data root is never opened: it is copied into a
+ * disposable directory first (the caller has already refused every `fetch`; the product must have stopped before the copy). The
+ * Run is bound to the case before anything is scored, and any mismatch refuses:
+ * - the copy holds exactly one Book with a primary Manuscript and exactly one Review Run;
+ * - that Run is a 选章 Run whose range is the case's chapters and whose categories are exactly the case's;
+ * - that Run has settled (the completed state);
+ * - the Book is unedited: its content sequence equals a fresh import of the exact file, the journal has not moved since that
+ *   import, and the working state is the one the Run was prepared on (its working digest names block identities, which differ
+ *   between imports, so it is compared with the copy's own working state, not with the fresh import's).
+ * The same scoring, simulated editor, Apply and reversal as a replayed case then run on the copy, which is deleted. Counts, states
+ * and identities only.
+ */
+export async function scoreEditorialCase(request: { readonly codeRoot: string; readonly testCase: EditorialCase; readonly dataRoot: string }): Promise<CaseMetrics> {
+  const { codeRoot, testCase } = request;
+  if (testCase.replay.route !== 'score-only') throw new Error(`EDITORIAL_CASE/not-score-only: ${testCase.id}`);
+  const started = Date.now();
+  const parent = await mkdtemp(join(await realpath(tmpdir()), 'ai7-editorial-score-'));
+  const copy = join(parent, 'data');
+  await cp(request.dataRoot, copy, { recursive: true, errorOnExist: true });
+  const caseRoots = await createCaseRoots();
+  let store: Awaited<ReturnType<typeof openStore>> | null = null;
+  try {
+    const database = new DatabaseSync(join(copy, 'store', 'ai7.sqlite'), { readOnly: true });
+    const books = database.prepare("SELECT b.book_id, m.manuscript_id FROM books b JOIN manuscripts m ON m.book_id = b.book_id AND m.role = 'primary'").all() as Array<{ book_id: string; manuscript_id: string }>;
+    const runCount = books.length !== 1 ? 0 : Number((database.prepare('SELECT COUNT(*) n FROM review_runs WHERE book_id = ?').get(books[0]!.book_id) as { n: number }).n);
+    database.close();
+    if (books.length !== 1) throw new Error(`EDITORIAL_CASE/score-book-ambiguous: ${testCase.id}`);
+    store = await openStore({ ...caseRoots, dataRoot: copy }, codeRoot, null);
+    const latest = store.inspectReviewWorkspace(books[0]!.book_id, null).run;
+    if (latest === null || latest === undefined) throw new Error(`EDITORIAL_CASE/score-run-absent: ${testCase.id}`);
+    const book: ImportedBook = { bookId: books[0]!.book_id, manuscriptId: latest.manuscript.manuscriptId, branchId: latest.manuscript.branchId, revisionId: latest.manuscript.revisionId };
+    if (book.manuscriptId !== books[0]!.manuscript_id) throw new Error(`EDITORIAL_CASE/score-manuscript-mismatch: ${testCase.id}`);
+    if (runCount !== 1) throw new Error(`EDITORIAL_CASE/score-runs-ambiguous: ${testCase.id}`);
+    const range = chapterScope(store, book, testCase);
+    const categories = [...(testCase.input.categories as ReadonlyArray<string>)].sort();
+    if (latest.scope.kind !== 'chapters' || latest.scope.selectedRange?.startPosition !== range.startPosition || latest.scope.selectedRange?.endPosition !== range.endPosition ||
+      JSON.stringify(latest.categories.map((category) => category.categoryId).sort()) !== JSON.stringify(categories)) throw new Error(`EDITORIAL_CASE/score-run-not-case: ${testCase.id}`);
+    const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+    const fresh = await freshImport(codeRoot, testCase);
+    if (contentSequence(store, book) !== fresh.content || window.journalSequence !== fresh.journalSequence ||
+      latest.manuscript.journalSequence !== fresh.journalSequence || latest.manuscript.workingDigest !== window.workingDigest) throw new Error(`EDITORIAL_CASE/score-book-edited: ${testCase.id}`);
+    // Only a completed Run is evidence: a prepared, running, partial, failed or cancelled Run would read as "few changes".
+    if (latest.state !== 'settled') throw new Error(`EDITORIAL_CASE/score-run-unsettled: ${testCase.id}`);
+    const resolution = resolveTextAnchors(store, book, testCase);
+    const observed = await observeReviewRun(store, book, latest.reviewRunId, testCase, resolution, copy);
+    return {
+      ...caseBase(testCase),
+      evidence: { fixtures: [], binding: 'developer-live-store-copy', captures: [], model: null, route: null, taskContracts: [], capturedFrom: null, capturedTo: null,
+        recordedUsage: { requests: 0, inputTokens: 0, outputTokens: 0 }, replayContracts: [], contractsAgree: null },
+      outcome: { ...observed.outcome, chapterRange: { startPosition: range.startPosition, endPosition: range.endPosition } }, findings: { ...observed.findings },
+      concerns: { total: 0, ...observed.concerns }, checks: { total: testCase.falsePositiveChecks.length, ...observed.checks },
+      effort: { ...observed.effort }, delivery: null,
+      result: { ...observed.defect879, changesToOriginal: observed.changesToOriginal,
+        run: { reviewRunId: latest.reviewRunId, ordinal: latest.ordinal, state: latest.state, runCount } },
+      replay: { answered: 0, unmatched: 0, elapsedMs: Date.now() - started },
+    };
+  } finally {
+    store?.markCleanShutdown();
+    store?.close();
+    await caseRoots.dispose();
+    await rm(parent, { recursive: true, force: true, maxRetries: 5 });
   }
 }

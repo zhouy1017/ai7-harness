@@ -79,16 +79,17 @@ describe('②A › 自定义', () => {
     expect(api.inspectCustomAnalysisDimensions).toHaveBeenCalledWith({ forBook: true });
     expect(panel.dataset['customAnalysis']).toBe('ready');
     expect(panel.querySelector('[data-custom-empty="no-dimension"]')?.textContent).toContain(CUSTOM_TAB_EMPTY);
+    // Without a place to write one the tab only says so; the in-place offer is tested with the other 1543 surfaces.
     expect(panel.querySelectorAll('button')).toHaveLength(0);
+    expect(panel.querySelector('[data-custom-empty="no-dimension"]')?.textContent).not.toContain('知识库');
   });
 
   it('opens the start bar for an enabled dimension without preparing a Task', async () => {
     const { panel, options } = mountTab(projection([dimension({ taskState: null, latest: null, unavailableReason: null })]));
     await settle();
-    const run = panel.querySelector(`[data-dimension-id="${DIMENSION}"] [data-analysis-action="custom-run"]`) as MiniElement;
-    run.click();
+
     await settle();
-    expect(options.openLaunch).toHaveBeenCalledWith({ bookId: bookId(), operation: 'launchCustomAnalysis', title: '自定义分析', input: { dimensionId: DIMENSION, update: null } });
+    expect(options.openLaunch).toHaveBeenCalledWith(expect.objectContaining({ bookId: bookId(), operation: 'launchCustomAnalysis', title: '自定义分析', input: { dimensionId: DIMENSION, update: null } }));
     expect(options.openPlan).not.toHaveBeenCalled();
     expect(panel.querySelector('[data-custom-empty="not-run"]')?.textContent).toBe(CUSTOM_TAB_NOT_RUN);
   });
@@ -116,7 +117,6 @@ describe('②A › 自定义', () => {
     expect(panel.textContent).toContain(CUSTOM_TAB_FEEDBACK_NOTE);
     expectNoTechnicalText(panel);
     // A result that still reads the current manuscript is read again whole.
-    (panel.querySelector('[data-analysis-action="custom-run"]') as MiniElement).click();
     await settle();
     expect(options.openLaunch).toHaveBeenCalledWith(expect.objectContaining({ operation: 'launchCustomAnalysis', input: { dimensionId: DIMENSION, update: { mode: 'reanalyze-book', selectedRange: null } } }));
     (panel.querySelector('[data-analysis-action="custom-open-plan"]') as MiniElement).click();

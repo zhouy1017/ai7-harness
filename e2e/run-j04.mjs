@@ -1,5 +1,7 @@
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
-import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
+import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions } from './launch-task-bar.mjs';
+import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { commentsModelFilter } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -71,7 +73,9 @@ const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 
   'select-tab', 'go-history', 'go-chapters', 'quick-sync-current', 'quick-reanalyze-range', 'quick-reanalyze-book',
   'open-review', 'view-plan', 'open-feedback', 'record-feedback', 'cancel-feedback',
   // Synchronized delta with Issue #922 (slice 7f): the 自定义 tab's 运行, 查看计划 and each answer's quotation link.
-  'custom-run', 'custom-open-plan', 'custom-jump'];
+  'custom-run', 'custom-open-plan', 'custom-jump',
+  // #1543: 分析 › 自定义 offers writing a dimension in place.
+  'custom-create', 'custom-stop'];
 /** Every button on screen and in the drawer whose words name 授权: AUTH-002 keeps the word off every start (ADR 0077). */
 const AUTHORIZE_LABELED_BUTTONS = `Array.from(document.querySelectorAll('#screen button, #task-drawer button')).filter((button)=>/授权/u.test(button.textContent??'')).length`;
 /** The words the authorization bar says before every start (AUTH-003 as ADR 0077 revised it). */
@@ -108,7 +112,7 @@ const EXPORT_MEMBERS = [
 // apply or export member, so the two pins below hold them without an exception.
 const REVIEW_MEMBERS = ['inspectReviewWorkspace', 'prepareReviewRun', 'authorizeReviewRun', 'continueReviewRun',
   'recordReviewFindingDisposition', 'generateReviewReport', 'inspectReviewFindingOfMark'];
-const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every((button)=>${JSON.stringify(ANALYSIS_ACTIONS)}.includes(button.dataset.analysisAction))`;
+const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every((button)=>button.closest('.task-launch-bar')!==null||${JSON.stringify(ANALYSIS_ACTIONS)}.includes(button.dataset.analysisAction))`;
 /** The 分析 destination's own persistent actions, in the order it builds them (#406, V2-UX-LAYER-005). */
 /** ②A's tabs in the specification's order (editor-surfaces §3); 自定义 since Issue #922 (slice 7f; ADR 0090 item 4). */
 const ANALYSIS_TAB_LABELS = ['梗概', '人物与名称', '事件', '关系', '设定', '各章', '自定义', '历史与更新'];
@@ -226,6 +230,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-04' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -419,21 +424,22 @@ async function openAnalysisDestination(renderer, name) {
  * after launch the frozen plan remains readable. Quick starts retain the Default Execution Rule owner.
  */
 async function startUpdate(renderer, mode, label, name, launch = true) {
-  // The three modes live under 历史与更新, so the editor goes there first, as they would.
-  await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const tab=card?.querySelector('[role="tab"][data-analysis-tab="history"]'); if(!(tab instanceof HTMLButtonElement))return false; tab.click(); return tab.getAttribute('aria-selected')==='true' && !card.querySelector('[data-analysis-panel="history"]').hidden; })()`, `${name}-history-tab`);
-  // The mode's start and 先看计划 stand on its block at once (Issue #1410 item 15): no button only unfolds them.
   void label;
-  if (mode === 'reanalyze-range') await waitFor(renderer, `document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] [data-analysis-action="reanalyze-range"]')?.disabled===false`, `${name}-selected-plan-ready`);
-  await assertRenderer(renderer, `(() => {
-    const block=document.querySelector('.baseline-analysis-card [data-update-action=${JSON.stringify(mode)}]');
-    const quick=block?.querySelector('.analysis-actions [data-analysis-action=${JSON.stringify(`quick-${mode}`)}]');
-    const plan=block?.querySelector('.analysis-actions [data-analysis-action=${JSON.stringify(mode)}]');
-    if(!(quick instanceof HTMLButtonElement)||!(plan instanceof HTMLButtonElement)||block.querySelector('[data-analysis-action^="choose-"], .analysis-update-choice')!==null) return false;
-    const note=document.getElementById(quick.getAttribute('aria-describedby')??'');
-    if(quick.disabled||plan.disabled||plan.textContent!=='查看计划'||note!==null) return false;
-    plan.click();
-    return true;
-  })()`, name);
+  // The previous Run's 查看结果 window may have opened over the page when it finished; the editor closes it first.
+  if (await renderer.evaluate(`!!document.querySelector('.task-result-window')`)) await pointerClick(renderer, waitFor, '.task-result-window [data-task-result-action="close"]', `${name}-result-close`);
+  // Below 1120 px the Task Drawer overlays the page: when it covers the history tab, the editor closes it first.
+  const tabCovered = `(() => { const tab=document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]'); if(!tab)return false; tab.scrollIntoView({block:'center',behavior:'instant'}); const r=tab.getBoundingClientRect(); return !tab.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)) && !!document.querySelector('#task-drawer:not([hidden])')?.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)); })()`;
+  if (await renderer.evaluate(tabCovered)) {
+    // Only the overlay form is closed away: a docked drawer (the page made room for it) over the tab is a defect of the page.
+    requireJourney(await renderer.evaluate(`Number.parseFloat(getComputedStyle(document.body).paddingRight)===0`) === true, `${name}-docked-drawer-covers-tab`);
+    await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close`);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `${name}-drawer-closed`);
+  }
+  await pointerClick(renderer, waitFor, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab`);
+  const choice = `.baseline-analysis-card [data-analysis-action="${mode}"]`;
+  await waitFor(renderer, `document.querySelector(${JSON.stringify(choice)})?.disabled===false`, `${name}-selected-plan-ready`);
+  await pointerClick(renderer, waitFor, choice, `${name}-mode`);
+  await pointerClick(renderer, waitFor, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan`);
   if (!launch) return;
   await launchTaskFromBar(renderer, waitFor, name);
   await reviewAction(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', `${name}-read-full-plan`);
@@ -1171,8 +1177,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
-    await click(renderer, '模型服务', 'model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     at('model-settings-ready');
     cancellation.throwIfRequested();
@@ -1190,7 +1195,7 @@ async function main() {
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference) && readyConnection?.credentialOperationState === 'ready', 'model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
     cancellation.throwIfRequested();
-    await click(renderer, '移除凭据', 'model-remove');
+    await click(renderer, '移除密钥', 'model-remove');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     at('model-credential-removed');
     const missingConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
@@ -1237,7 +1242,7 @@ async function main() {
     await runJ14DarkPass({ renderer, journey: 'J-04', at, representative: '#screen[data-screen="book-analysis"] > .page-content', returnTo: SIDEBAR.section('analysis') });
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-analysis-after-dark-pass');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card[data-analysis-state="available"]')`, 'analysis-available');
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const goal=card?.querySelector('#j04-analysis-goal'); const start=card?.querySelector('[data-analysis-action="prepare"]'); return goal instanceof HTMLInputElement && goal.readOnly && goal.value===${JSON.stringify(TASK_GOAL)} && start instanceof HTMLButtonElement && !start.disabled && start.textContent==='查看计划' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'analysis-available-surface');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const goal=card?.querySelector('#j04-analysis-goal'); const start=card?.querySelector('[data-analysis-action="prepare"]'); return goal instanceof HTMLInputElement && goal.readOnly && goal.value===${JSON.stringify(TASK_GOAL)} && start instanceof HTMLButtonElement && !start.disabled && start.textContent==='先看计划' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'analysis-available-surface');
 
     at('j14-reflow-forced-colors');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
@@ -2426,17 +2431,21 @@ async function main() {
       for (const [width,height] of [[1280,800],[1008,681]]) {
         at(width===1280?'launch-options-wide':'launch-options-gate');
         await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
-        if (!(await renderer.evaluate(`document.querySelector('#task-drawer .task-launch-options').open`))) await pointerClick(renderer,waitFor,'#task-drawer .task-launch-options > summary','launch-options-open');
-        await pointerClick(renderer,waitFor,'#task-drawer [data-task-launch-option="sampling"]','launch-without-sampling');
-        const retry='#task-drawer [data-task-launch-option="retry"]';
+        // With the Task Drawer docked the page makes room for it by a transition of its padding: once the new width has settled, the
+        // editor brings the bar back into view, and its open 选项 panel follows it.
+        await waitFor(renderer,`document.body.getAnimations().length===0`,`launch-options-settled-${width}`);
+        await renderer.evaluate(`document.querySelector('[data-task-launch-kind] .task-launch-options > summary')?.scrollIntoView({block:'center',behavior:'instant'})`);
+        if (!(await renderer.evaluate(`document.querySelector('[data-task-launch-kind] .task-launch-options').open`))) await pointerClick(renderer,waitFor,'[data-task-launch-kind] .task-launch-options > summary','launch-options-open');
+        await pointerClick(renderer,waitFor,'[data-task-launch-kind] [data-task-launch-option="sampling"]','launch-without-sampling');
+        const retry='[data-task-launch-kind] [data-task-launch-option="retry"]';
         const chooseRetry=async value=>{
           const index=await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(retry)}).options).findIndex(option=>option.value===${JSON.stringify(value)})`);
           await pointerClick(renderer,waitFor,`${retry} + .ui-select-trigger`,'launch-retry-open');
           await pointerClick(renderer,waitFor,`${retry} ~ .ui-select-popover [data-index="${index}"]`,'launch-retry-option');
         };
         await chooseRetry('never');
-        requireJourney(await renderer.evaluate(`!document.querySelector('#task-drawer [data-task-launch-option="sampling"]').checked && document.querySelector('#task-drawer [data-task-launch-option="retry"]').value==='never'`),'launch-options-selected');
-        if(width===1280){await pointerClick(renderer,waitFor,'#task-drawer [data-task-launch-option="sampling"]','launch-restore-sampling');await chooseRetry('auto');}
+        requireJourney(await renderer.evaluate(`!document.querySelector('[data-task-launch-kind] [data-task-launch-option="sampling"]').checked && document.querySelector('[data-task-launch-kind] [data-task-launch-option="retry"]').value==='never'`),'launch-options-selected');
+        if(width===1280){await pointerClick(renderer,waitFor,'[data-task-launch-kind] [data-task-launch-option="sampling"]','launch-restore-sampling');await chooseRetry('auto');}
       }
     } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
     at('plan-revision-dispatch'); // This start freezes options in version 1; no ordinary prepared-plan revision exists.
@@ -2458,10 +2467,13 @@ async function main() {
     try {
       for(const [width,height] of [[1280,800],[1008,681]]) {
         await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
-        await waitFor(renderer, `(() => {if(innerWidth!==${width}||innerHeight!==${height})return false;const drawer=document.querySelector('#task-drawer'),options=drawer.querySelector('.task-launch-options'),timing=drawer.querySelector('[data-task-start-when]');options.open=true;const focus=timing.nextElementSibling?.matches('.ui-select-trigger')?timing.nextElementSibling:timing;focus.scrollIntoView({block:'center',behavior:'instant'});focus.focus({preventScroll:true});const rect=focus.getBoundingClientRect();return document.activeElement===focus && rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight && Array.from(timing.options).some(option=>option.value==='when-online'&&option.textContent==='联网后开始任务');})()`, `offline-launch-timing-${width}`).catch(async () => { requireJourney(false, `offline-launch-timing-${width}`, await renderer.evaluate(`(() => {const timing=document.querySelector('#task-drawer [data-task-start-when]'),focus=timing?.nextElementSibling?.matches('.ui-select-trigger')?timing.nextElementSibling:timing;return {viewport:[innerWidth,innerHeight],rect:focus?.getBoundingClientRect().toJSON(),focused:document.activeElement===focus,options:Array.from(timing?.options??[],option=>[option.value,option.textContent])};})()`)); });
+        await openLaunchOptions(renderer, waitFor, '[data-task-launch-kind]', `offline-options-${width}`);
+        await pointerClick(renderer, waitFor, '[data-task-launch-kind] [data-task-start-when] + .ui-select-trigger', `offline-timing-${width}`);
+        await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+        requireJourney(await renderer.evaluate(`(() => {const focus=document.activeElement,rect=focus.getBoundingClientRect();return rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight;})()`)===true, `offline-launch-timing-${width}`);
       }
     } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
-    await assertRenderer(renderer, `(() => {const timing=document.querySelector('#task-drawer [data-task-start-when]');timing.value='when-online';timing.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'offline-launch-choice');
+    await chooseLaunchOption(renderer, waitFor, '[data-task-launch-kind] [data-task-start-when]', 'when-online', 'offline-launch-choice');
     at('connectivity-start-when-online');
     const offlineIntent = await launchTaskFromBar(renderer, waitFor, 'offline-sync');
     const waitingDrawer = await drawerShowing(renderer,offlineIntent,'waiting','offline-sync-waiting');
@@ -2617,7 +2629,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${legacyBook.bookId}"]')`, 'legacy-plan-book-ready');
     await openAnalysisDestination(renderer, 'legacy-plan-analysis');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card [data-analysis-action="start"]')?.disabled===false`, 'legacy-plan-first-ready');
-    await reviewAction(renderer,'.baseline-analysis-card [data-analysis-action="start"]','legacy-plan-first');
+    await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-analysis-action="prepare"]','legacy-plan-first');
     await launchTaskFromBar(renderer,waitFor,'legacy-plan-first'); await settleLaunchedRun(renderer,'legacy-plan-first');
     await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-first-close');
     await startUpdate(renderer,'reanalyze-book','重新分析全书','legacy-plan-book-run'); await settleLaunchedRun(renderer,'legacy-plan-book-run');
@@ -2743,7 +2755,7 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'review-ready');
     // #1374: use the real persisted mode switch so this configuration regression exercises the ordinary UI branch.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-memory-ordinary-mode-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-memory-ordinary-mode-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'review-memory-ordinary-mode-settings-ready');
     await click(renderer, '帮助', 'review-memory-ordinary-mode-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true && document.querySelector('.help-developer-mode input')?.disabled===false`, 'review-memory-ordinary-mode-toggle-ready');
     await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'review-memory-ordinary-mode-toggle');
@@ -2779,13 +2791,13 @@ async function main() {
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].review-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot') && !document.querySelector('.review-filters select'); })()`, 'review-shared-nonmodal-sheet');
     // Nine model review categories plus the reversible local-only choice, remembered defaults and four pill scopes (#1374).
     // In ordinary mode the consequences are what it reads, sends and costs; 不会做 is the technical layer's (Issue #1413 cluster 4).
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===10 && boxes.filter(box=>box.checked).map(box=>box.value).join(',')==='typos-and-usage' && boxes.some(box=>box.value==='local-text-check'&&!box.checked&&!box.disabled) && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && JSON.stringify(Array.from(sheet.querySelectorAll('dl.review-consequences dt'),(dt)=>dt.textContent))==='["会读取","会发送","费用"]' && sheet.querySelector('[data-consequence="not-do"]')===null && sheet.querySelector('[data-consequence="cost"]')?.textContent.match(/约 [0-9]+ 次模型调用/u) && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('[data-review-action="prepare"]')?.textContent==='先看计划'; })()`, 'review-sheet-contract');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===10 && boxes.filter(box=>box.checked).map(box=>box.value).join(',')==='typos-and-usage' && boxes.some(box=>box.value==='local-text-check'&&!box.checked&&!box.disabled) && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && JSON.stringify(Array.from(sheet.querySelectorAll('dl.review-consequences dt'),(dt)=>dt.textContent))==='["会读取","会发送","费用"]' && sheet.querySelector('[data-consequence="not-do"]')===null && sheet.querySelector('[data-consequence="cost"]')?.textContent.match(/约 [0-9]+ 次模型调用/u) && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('.task-launch-estimate > summary')?.textContent==='先看计划' && sheet.querySelector('.task-launch-estimate [data-review-action="prepare"]')?.textContent==='更新计划'; })()`, 'review-sheet-contract');
 
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const before=sheet.querySelector('[data-consequence="cost"]').textContent; sheet.querySelector('input[value="style-and-format"]').click(); const after=sheet.querySelector('[data-consequence="cost"]').textContent; sheet.querySelector('input[value="style-and-format"]').click(); return before!==after && sheet.querySelector('.sheet-foot .review-sheet-procedure') && !sheet.querySelector('.review-materials') && !sheet.querySelector('.similar-materials') && [...sheet.querySelectorAll('.review-category-basis')].every(node=>!/第\s*[0-9]+\s*版|\bv[0-9]+|version/iu.test(node.textContent)); })()`, 'review-reactive-consequences');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=(id)=>sheet.querySelector('input[name="review-category"][value="'+id+'"]'); box('style-and-format').click(); const before=sheet.querySelector('[data-consequence="cost"]').textContent; const scope=(kind)=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]').click(); scope('changed'); if(!box('style-and-format').disabled||box('style-and-format').checked||sheet.querySelector('[data-consequence="cost"]').textContent===before)return false; scope('whole'); if(!box('typos-and-usage').checked||!box('style-and-format').checked)return false; box('local-text-check').click(); if(!box('style-and-format').disabled||box('style-and-format').checked)return false; box('local-text-check').click(); const kept=box('typos-and-usage').checked&&box('style-and-format').checked; box('style-and-format').click(); return kept; })()`, 'review-category-selection-round-trip');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const page=document.querySelector('#screen'); const scroll=document.querySelector('.content') ?? page; const before=scroll?.scrollTop; if(scroll)scroll.scrollTop=scroll.scrollHeight; const scrollable=!scroll || scroll.scrollHeight<=scroll.clientHeight || scroll.scrollTop!==before || before>0; sheet.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); return !sheet.open && scrollable && !page?.inert; })()`, 'review-sheet-escape-and-page');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-memory-development-restored-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-memory-development-restored-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'review-memory-development-restored-settings-ready');
     await click(renderer, '帮助', 'review-memory-development-restored-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && document.querySelector('.help-developer-mode input')?.disabled===false`, 'review-memory-development-restored-toggle-ready');
     await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'review-memory-development-restored-toggle');
@@ -2861,7 +2873,7 @@ async function main() {
       reviewed.run.findings.some((entry) => entry.categoryId === 'typos-and-usage' && entry.blockPosition !== null && entry.blockPosition <= SAMPLE1_UNIT_RANGES[0][1]),
     'review-v2-rejected-sibling');
     await assertRenderer(renderer, `document.querySelector('details.review-excluded')===null && document.querySelectorAll('article.review-finding').length>0`, 'review-v2-visible-excluded');
-    await assertRenderer(renderer, `document.querySelectorAll('ol.review-progress > li[data-category-state="settled"]').length===3 && document.querySelectorAll('section.review-group[data-review-category]').length>=2`, 'review-groups');
+    await assertRenderer(renderer, `document.querySelectorAll('ol.review-progress > li[data-category-state="settled"]').length===3 && Array.from(document.querySelectorAll('section.review-group[data-review-category]')).filter(group=>group.querySelector('article.review-finding')).length>=2`, 'review-groups');
     // The drawer beside ②B read the plan again as the Run moved; it now states the Run's end.
     const settledReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'settled', 'review-drawer-settled');
     requireJourney(settledReviewDrawer?.pill === '已完成' && settledReviewDrawer.drift === null && typeof settledReviewDrawer.technical.authorization === 'string' &&
@@ -2889,6 +2901,8 @@ async function main() {
     if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`))
       await pointerClick(renderer, waitFor, '[data-task-drawer-control="close"]', 'review-synthesis-close-drawer');
     await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'review-synthesis-settings-ready');
+    await pointerClick(renderer, waitFor, '.settings-navigation [data-settings-nav="help"]', 'review-synthesis-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-mode-ready');
     await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-ordinary');
     await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'review-synthesis-ordinary-ready');
@@ -2908,8 +2922,19 @@ async function main() {
           await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-collapse`);
           await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-collapsed`);
         }
-        const synthesisLayout = await renderer.evaluate(`(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect(),box=root?.getBoundingClientRect(),header=root?.querySelector('summary'),line=header?parseFloat(getComputedStyle(header).lineHeight):0,previous=root?.previousElementSibling,next=root?.nextElementSibling,baselineGap=previous&&next?Math.max(parseFloat(getComputedStyle(previous).marginBottom)||0,parseFloat(getComputedStyle(next).marginTop)||0):0,cost=previous&&next?next.getBoundingClientRect().top-previous.getBoundingClientRect().bottom-baselineGap:null;return {top:r?.top,bottom:r?.bottom,height:innerHeight,width:innerWidth,headerHeight:box?.height,headerCost:cost,withoutSummaryBottom:r&&cost!==null?r.bottom-cost:null,oneLine:!!header&&header.getBoundingClientRect().height<=line,ok:!!(root&&!root.open&&header.textContent.includes('组共性问题')&&!/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent))};})()`);
+        await renderer.evaluate(`scrollTo(0, 0)`);
+        await assertRenderer(renderer, `scrollY === 0`, `review-first-card-${viewport}-unscrolled`);
+        const synthesisLayout = await renderer.evaluate(`(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect(),box=root?.getBoundingClientRect(),header=root?.querySelector('summary'),line=header?parseFloat(getComputedStyle(header).lineHeight):0,previous=root?.previousElementSibling,next=root?.nextElementSibling,baselineGap=previous&&next?Math.max(parseFloat(getComputedStyle(previous).marginBottom)||0,parseFloat(getComputedStyle(next).marginTop)||0):0,cost=previous&&next?next.getBoundingClientRect().top-previous.getBoundingClientRect().bottom-baselineGap:null;return {top:r?.top,bottom:r?.bottom,cardWidth:r?.width,scrollY,height:innerHeight,width:innerWidth,headerHeight:box?.height,headerCost:cost,withoutSummaryBottom:r&&cost!==null?r.bottom-cost:null,oneLine:!!header&&header.getBoundingClientRect().height<=line,ok:!!(root&&!root.open&&header.textContent.includes('组共性问题')&&!/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent))};})()`);
         synthesisLayouts.push(synthesisLayout);
+        requireJourney(synthesisLayout.top <= synthesisLayout.height * .45 && synthesisLayout.bottom <= synthesisLayout.height,
+          `review-first-card-${viewport}-geometry`, synthesisLayout);
+        await pointerClick(renderer, waitFor, '.review-run > [data-review-action="view-plan"]', `review-first-card-${viewport}-open-drawer`);
+        await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`, `review-first-card-${viewport}-drawer`);
+        await renderer.evaluate(`scrollTo(0, 0)`);
+        await waitFor(renderer, `(async () => {const card=document.querySelector('article.review-finding'),width=card.getBoundingClientRect().width;await new Promise(requestAnimationFrame);const next=card.getBoundingClientRect().width;await new Promise(requestAnimationFrame);const padding=parseFloat(getComputedStyle(document.body).paddingRight),target=innerWidth>=1120?document.querySelector('#task-drawer').getBoundingClientRect().width:0;return scrollY===0&&Math.abs(width-next)<.1&&Math.abs(next-card.getBoundingClientRect().width)<.1&&Math.abs(padding-target)<1;})()`, `review-first-card-${viewport}-drawer-stable`);
+        const dockedLayout = await renderer.evaluate(`(() => {const card=document.querySelector('article.review-finding'),r=card.getBoundingClientRect(),main=card.querySelector('.review-finding-main').getBoundingClientRect(),actions=card.querySelector('.review-finding-actions').getBoundingClientRect();return {width:innerWidth,height:innerHeight,scrollY,docked:innerWidth>=1120,top:r.top,bottom:r.bottom,cardWidth:r.width,textWidth:main.width,actionsBelow:actions.top>=main.bottom};})()`);
+        requireJourney(dockedLayout.top <= dockedLayout.height * .45 && dockedLayout.bottom <= dockedLayout.height && dockedLayout.scrollY === 0 && dockedLayout.textWidth > Math.min(300, dockedLayout.cardWidth * .7) && (dockedLayout.docked ? dockedLayout.cardWidth < synthesisLayout.cardWidth - 1 && dockedLayout.actionsBelow : Math.abs(dockedLayout.cardWidth-synthesisLayout.cardWidth)<1), `review-first-card-${viewport}-${dockedLayout.docked ? 'docked' : 'overlay'}-geometry`, dockedLayout);
+        await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `review-first-card-${viewport}-close-drawer`);
         requireJourney(synthesisLayout.ok, `review-synthesis-${viewport}-compact-ordinary`, synthesisLayout);
         requireJourney(synthesisLayout.oneLine && synthesisLayout.headerCost > 0 && synthesisLayout.headerCost <= 48, `review-synthesis-${viewport}-header-bound`, synthesisLayout);
         await assertRenderer(renderer, `(() => {const meta=document.querySelector('.review-run > .review-run-heading > .review-run-meta'),basis=document.querySelector('article.review-finding .review-finding-basis');return !!(meta&&meta.getClientRects().length&&meta.firstChild.textContent.includes(${JSON.stringify(reviewed.run.scope.label.replaceAll('内容块', '段落'))})&&meta.firstChild.textContent.includes('创建于')&&!meta.closest('details')&&basis&&basis.getClientRects().length&&!basis.closest('details:not([open])'));})()`, `review-synthesis-${viewport}-base-metadata-basis`);
@@ -2925,13 +2950,18 @@ async function main() {
         await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-collapse`);
         await pressEnter(renderer);
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-keyboard-expand`);
-        for (let tab = 0; tab < 128 && !(await renderer.evaluate(`document.querySelector('article.review-finding').contains(document.activeElement)`)); tab += 1) await pressTab(renderer);
-        await assertRenderer(renderer, `(() => {const card=document.querySelector('article.review-finding'),active=document.activeElement,r=active?.getBoundingClientRect();return card.contains(active)&&r.top>=0&&r.bottom<=innerHeight;})()`, `review-synthesis-${viewport}-expanded-keyboard-card`);
+        // The card itself is a Tab stop since #1525 (A / R / Enter act on a focused card); Tab on to the first control inside it.
+        for (let tab = 0; tab < 128 && !(await renderer.evaluate(`(() => {const card=document.querySelector('article.review-finding');return card.contains(document.activeElement)&&document.activeElement!==card;})()`)); tab += 1) await pressTab(renderer);
+        await assertRenderer(renderer, `(() => {const card=document.querySelector('article.review-finding'),active=document.activeElement,r=active?.getBoundingClientRect();return card.contains(active)&&active!==card&&r.top>=0&&r.bottom<=innerHeight;})()`, `review-synthesis-${viewport}-expanded-keyboard-card`);
         await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-reset`);
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-access-reset-closed`);
         const citedFinding = reviewed.run.findings.find(finding => finding.findingId === synthesisEvidence.findingId);
         const hiddenSeverity = citedFinding?.severity === 'note' ? 'must' : 'note';
-        await pointerClick(renderer, waitFor, `[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]`, `review-synthesis-${viewport}-filter-away`);
+        // 审阅 keeps its filters for the Book across the sidebar return (#1525), so the second form may find the pill already pressed;
+        // pressing it again would only re-read the page under the steps that follow.
+        if (await renderer.evaluate(`document.querySelector('[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]')?.getAttribute('aria-pressed')!=='true'`)) {
+          await pointerClick(renderer, waitFor, `[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]`, `review-synthesis-${viewport}-filter-away`);
+        }
         await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${synthesisEvidence.findingId}"]')===null`, `review-synthesis-${viewport}-filtered-citation`);
         await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-expand`);
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-expanded`);
@@ -2951,7 +2981,8 @@ async function main() {
     }
     requireJourney(synthesisLayouts.every(layout => layout.oneLine && layout.headerCost > 0 && layout.headerCost <= 48), 'review-synthesis-base-layout-geometry', synthesisLayouts);
     await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-restore-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')!==null`, 'review-synthesis-restore-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')!==null`, 'review-synthesis-restore-settings-ready');
+    await pointerClick(renderer, waitFor, '.settings-navigation [data-settings-nav="help"]', 'review-synthesis-restore-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-restore-mode-ready');
     await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-restore-mode');
     await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'review-synthesis-restored-ready');
@@ -3030,7 +3061,8 @@ async function main() {
     const ignorable = afterBatch.run.findings.find((finding) => finding.categoryId === 'style-and-format' && finding.status === 'pending');
     requireJourney(ignorable !== undefined, 'review-ignorable');
     const ignoreReason = '体例由编辑部统一处理，这一处保留作者原样。';
-    await reviewAction(renderer, `article.review-finding[data-finding-id="${ignorable.findingId}"] [data-review-action="ignore"]`, 'review-ignore');
+    await pointerClick(renderer, waitFor, `article.review-finding[data-finding-id="${ignorable.findingId}"] .review-card-more > summary`, 'review-ignore-more');
+    await pointerClick(renderer, waitFor, `article.review-finding[data-finding-id="${ignorable.findingId}"] [data-review-action="ignore"]`, 'review-ignore');
     await assertRenderer(renderer, `(() => { const field=document.querySelector('article.review-finding[data-finding-id="${ignorable.findingId}"] textarea[data-review-field="ignore-reason"]'); if(!(field instanceof HTMLTextAreaElement))return false; field.value=${JSON.stringify(ignoreReason)}; field.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, 'review-ignore-reason');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${ignorable.findingId}"] [data-review-action="ignore-confirm"]`, 'review-ignore-confirm');
     await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${ignorable.findingId}"]')?.dataset.status==='ignored'`, 'review-ignored');
@@ -3049,7 +3081,7 @@ async function main() {
     }
     requireJourney(!remainingFindings.some((item) => item.id === ignorable.findingId) && remainingFindings.some((item) => item.target.kind === 'review'), 'book-findings-disposition-reflected');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'findings-poll-ordinary-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'findings-poll-ordinary-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'findings-poll-ordinary-settings-ready');
     await click(renderer, '帮助', 'findings-poll-ordinary-help');
     await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`, 'findings-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-reopen');
@@ -3065,7 +3097,7 @@ async function main() {
       await waitFor(renderer, `document.querySelector('.findings-filters')!==globalThis.__j04PollFindings && Number(document.querySelector('.findings-center').dataset.findingsTotal)===globalThis.__j04PollTotal-1 && document.activeElement===document.querySelector('[data-findings-filter="category"] [data-filter-value=""]')`, 'findings-filter-changed-poll-survival');
     }
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'findings-poll-developer-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'findings-poll-developer-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'findings-poll-developer-settings-ready');
     await click(renderer,'帮助','findings-poll-developer-help');
     await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`, 'findings-poll-developer-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'book-findings-return-review');
@@ -3076,7 +3108,7 @@ async function main() {
     // Issue #1174 (ADR 0095 §5): a /2 record adds 章节与类别统计 and 发现详单 between 必须处理的事项 and 各类别摘要.
     await reviewAction(renderer, '[data-review-action="generate-report"]', 'review-report-generate');
     await waitFor(renderer, `document.querySelector('section.review-report')?.dataset.reportVersion==='1'`, 'review-report-version');
-    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.firstChild?.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','章节与类别统计','发现详单','各类别摘要','附录']) && report.querySelector('table.review-report-statistics tbody tr:last-child th')?.textContent==='合计' && exporter instanceof HTMLElement && exporter.tagName==='SUMMARY' && exporter.textContent==='导出 ▾' && exporter.dataset.reportVersion==='1' && report.querySelector('[data-export-format-action="markdown"]')?.disabled===false; })()`, 'review-report-parts');
+    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.firstChild?.textContent); const exporter=document.querySelector('.review-header-export > summary'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','章节与类别统计','发现详单','各类别摘要','附录']) && report.querySelector('table.review-report-statistics tbody tr:last-child th')?.textContent==='合计' && exporter instanceof HTMLElement && exporter.tagName==='SUMMARY' && exporter.textContent==='导出 ▾' && exporter.dataset.reportVersion==='1' && document.querySelector('.review-header-export [data-export-format-action="markdown"]')?.disabled===false; })()`, 'review-report-parts');
 
     await assertRenderer(renderer, `(() => {const summary=document.querySelector('section.review-report .review-synthesis');return summary?.dataset.synthesisState==='completed' && summary.textContent.includes('总体评价：') && summary.textContent.includes('[e1]') && summary.textContent.includes('「');})()`, 'review-report-synthesis-evidence');
 
@@ -3090,10 +3122,35 @@ async function main() {
     const runHeading = await renderer.evaluate(`document.querySelector('section.review-run .review-run-heading h4')?.textContent ?? ''`);
     requireJourney(/^第 \d+ 次审阅$/u.test(runHeading ?? ''), 'report-export-run-heading', runHeading);
     const reportLabel = `审阅报告 · ${runHeading} · 第 1 版`;
-    await assertRenderer(renderer, `document.querySelector('section.review-report [data-review-action="export"]')?.getAttribute('aria-label')===${JSON.stringify(`导出「${reportLabel}」…`)} && ${reportCard}===null`, 'report-export-named');
-    await assertRenderer(renderer, `(() => { const menu=document.querySelector('section.review-report [data-export-menu]'); menu.querySelector('summary').click(); return menu.open; })()`, 'report-format-menu');
-    await reviewAction(renderer, 'section.review-report [data-export-format-action="markdown"]', 'report-export-open');
-    await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created'`, 'report-export-written', 60_000);
+    await assertRenderer(renderer, `document.querySelector('.review-header-export > summary')?.getAttribute('aria-label')===${JSON.stringify(`导出「${reportLabel}」…`)} && ${reportCard}===null`, 'report-export-named');
+    const exportNativeViewport = await renderer.evaluate(`({width:innerWidth,height:innerHeight})`);
+    try {
+      for (const [width,height,form] of [[1280,800,'wide'],[1008,681,'gate']]) {
+        at(`review-report-export-${form}`);
+        await renderer.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+        await waitFor(renderer, `innerWidth===${width}&&innerHeight===${height}`, `report-export-${form}-viewport`);
+        await pointerClick(renderer, waitFor, '.review-header-export > summary', `report-header-export-menu-${form}`);
+        await waitFor(renderer, `document.querySelector('.review-header-export').open===true`, `report-header-menu-open-${form}`);
+        if (width === 1280) {
+          // The Save-dialog answer is single-use per launch: the wide form makes the one real export, the gate form only proves the menu is reachable.
+          await pointerClick(renderer, waitFor, '.review-header-export [data-export-format-action="markdown"]', `report-export-open-${form}`);
+          await assertRenderer(renderer, `document.querySelector('.review-header-export').open===false`, `report-header-menu-closed-${form}`);
+          await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created'`, `report-export-written-${form}`, 60_000);
+          await pointerClick(renderer, waitFor, 'section.review-report .review-report-export-slot [data-export-action="close"]', `report-export-close-${form}`);
+          await waitFor(renderer, `${reportCard}===null && document.activeElement===document.querySelector('.review-header-export > summary')`, `report-export-closed-focus-returns-${form}`, 10_000);
+        } else {
+          // The menu controls place the panel in the toggle task after the click: measure once it has settled, as pointerClick does.
+          await renderer.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+          const menuReach = await renderer.evaluate(`(() => {const button=document.querySelector('.review-header-export [data-export-format-action="markdown"]'),r=button.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2),panel=button.closest('.export-menu-body')?.getBoundingClientRect(),summary=document.querySelector('.review-header-export > summary').getBoundingClientRect();return {width:innerWidth,height:innerHeight,scrollY,left:r.left,top:r.top,right:r.right,bottom:r.bottom,hit:hit?.tagName+'.'+hit?.className,contains:button.contains(hit),disabled:button.disabled,panel:panel&&{left:panel.left,top:panel.top,right:panel.right,bottom:panel.bottom},summary:{left:summary.left,top:summary.top,right:summary.right,bottom:summary.bottom},details:(box=>({left:box.left,right:box.right,width:box.width,display:getComputedStyle(document.querySelector('.review-header-export')).display}))(document.querySelector('.review-header-export').getBoundingClientRect()),heading:(box=>({left:box.left,right:box.right,width:box.width}))(document.querySelector('.review-run-heading').getBoundingClientRect()),root:{scrollWidth:document.documentElement.scrollWidth},style:(panel=>{const c=getComputedStyle(panel),op=panel.offsetParent?.getBoundingClientRect();return {position:c.position,left:c.left,right:c.right,top:c.top,transform:c.transform,width:c.width,parent:panel.offsetParent?.className,parentRect:op&&{left:op.left,right:op.right},animations:panel.getAnimations().length,className:panel.className,tag:panel.parentElement.tagName};})(document.querySelector('.review-header-export .export-menu-body, .review-header-export .ui-menu-panel'))};})()`);
+          requireJourney(menuReach.width > 0 && menuReach.left >= 0 && menuReach.top >= 0 && menuReach.right <= menuReach.width && menuReach.bottom <= menuReach.height && menuReach.contains && !menuReach.disabled, `report-export-menu-reachable-${form}`, menuReach);
+          await pointerClick(renderer, waitFor, '.review-header-export > summary', `report-header-export-menu-close-${form}`);
+          await waitFor(renderer, `document.querySelector('.review-header-export').open===false`, `report-header-menu-closed-${form}`);
+        }
+      }
+    } finally {
+      await renderer.send('Emulation.clearDeviceMetricsOverride');
+      await waitFor(renderer, `innerWidth===${exportNativeViewport.width}&&innerHeight===${exportNativeViewport.height}`, 'report-export-native-viewport');
+    }
     const reportMarkdown = await readFile(reportExportPath, 'utf8');
     const reportBlocks = reportMarkdown.slice(0, -1).split('\n\n');
     const overviewRows = await renderer.evaluate(`document.querySelectorAll('section.review-report table.review-report-table:not(.review-report-statistics) tbody tr').length`);
@@ -3110,8 +3167,6 @@ async function main() {
       findingHeadings.length === listedFindings && listedFindings > 0 && findingHeadings.every((block, index) => block.startsWith(`### 第 ${index + 1} 条 · `)),
     'report-export-file-reads-as-the-report', { blocks: reportBlocks.length, headings: reportBlocks.filter((block) => block.startsWith('#')).length, rows: overviewRows, statisticsRows, listedFindings });
     requireJourney(JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([REPORT_EXPORT_FILE]), 'report-export-folder-holds-one-file');
-    await reviewAction(renderer, 'section.review-report .review-report-export-slot [data-export-action="close"]', 'report-export-close');
-    await waitFor(renderer, `${reportCard}===null && document.activeElement===document.querySelector('section.review-report [data-review-action="export"]')`, 'report-export-closed-focus-returns', 10_000);
 
     at('review-coverage-moves');
     // The batch wrote the manuscript, so what those two categories read is no longer the current text and
@@ -3226,14 +3281,72 @@ async function main() {
     await waitFor(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(overlapFinding.blockId)}}});return page.blocks[1].blockId===${JSON.stringify(overlapFinding.blockId)} && page.blocks[1].text==='开头👩‍💻Ａ　Ｂ结尾' && page.blocks[0].text==='甲'.repeat(1200);})()`, 'overlap-reversal-restored-exactly');
     // The store commits before the renderer finishes its Apply refresh. As in J-05, wait for the
     // reopened suggestion before closing this browser, so the transition cannot race an active write.
-    await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-state]')?.textContent==='待你处理' && document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${overlapFinding.markId}"]')?.dataset.markStatus==='open'`, 'overlap-reversal-renderer-settled');
+    await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-state]')?.textContent==='待处理' && document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${overlapFinding.markId}"]')?.dataset.markStatus==='open'`, 'overlap-reversal-renderer-settled');
+
+    // #1506: 生成统合总结 on the overlap Book, whose summary its fixture leaves 暂缺. The offer row is clicked for real at both
+    // sizes; the one summary-only request is the stage's own bytes, so this fixture answers it as it answered the stage
+    // (FIXTURE_MISMATCH): the Run reads 暂缺 again, its findings unchanged and the offer back. Completion, the summary's model
+    // mark and its travel through export and merge are proven by tests/service/review-synthesis-only.test.ts.
+    at('review-synthesis-only');
+    await openReviewDestination(renderer, 'synthesis-only-review');
+    if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`))
+      await pointerClick(renderer, waitFor, '[data-task-drawer-control="close"]', 'synthesis-only-close-drawer');
+    await waitFor(renderer, `document.querySelector('details.review-synthesis')?.dataset.synthesisState==='missing' && document.querySelector('.review-synthesis-generate [data-review-action="generate-synthesis"]')!==null`, 'synthesis-only-offered');
+    const synthesisOnlyBefore = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
+    requireJourney(synthesisOnlyBefore.reviewRunId === overlapReviewed.run.reviewRunId && synthesisOnlyBefore.synthesis?.canGenerate === true &&
+      synthesisOnlyBefore.synthesis.summary === null && synthesisOnlyBefore.findings.length === 1, 'synthesis-only-eligible', { synthesis: synthesisOnlyBefore.synthesis?.state });
+    const synthesisOnlyRequests = () => {
+      const db = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const row = db.prepare("SELECT json_extract(summary_json, '$.attempt.category.task.taskIntentId') task FROM review_run_synthesis WHERE review_run_id=?").get(overlapReviewed.run.reviewRunId);
+        if (typeof row?.task !== 'string') return { task: null, runs: 0, sent: null, events: [] };
+        // The fixture route records no request admission; the Run's own outcome counts every request it made.
+        const runs = db.prepare('SELECT count(*) n FROM analysis_run_records WHERE task_intent_id=?').get(row.task).n;
+        const outcome = db.prepare('SELECT canonical_json FROM analysis_task_outcomes WHERE task_intent_id=?').get(row.task);
+        const stages = typeof outcome?.canonical_json === 'string' ? JSON.parse(outcome.canonical_json).report?.usagePerStage : undefined;
+        const sent = stages === undefined || stages === null ? null : Object.values(stages).reduce((sum, stage) => sum + (typeof stage?.requests === 'number' ? stage.requests : 0), 0);
+        const events = db.prepare(`SELECT state FROM review_run_category_events WHERE review_run_id=? AND category_id='run-synthesis'
+          AND json_extract(canonical_json, '$.synthesisAttempt')=? ORDER BY sequence`).all(overlapReviewed.run.reviewRunId, row.task).map(entry => entry.state);
+        return { task: row.task, runs: Number(runs), sent, events };
+      } finally { db.close(); }
+    };
+    requireJourney(synthesisOnlyRequests().task === null, 'synthesis-only-none-before');
+    const synthesisOnlyViewport = await renderer.evaluate(`({width: innerWidth, height: innerHeight})`);
+    try {
+      for (const [width, height, viewport] of [[1280, 800, 'wide'], [1008, 681, 'gate']]) {
+        at(`review-synthesis-only-${viewport}`);
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await waitFor(renderer, `innerWidth===${width} && innerHeight===${height}`, `synthesis-only-${viewport}-viewport`);
+        await pointerClick(renderer, waitFor, '.review-synthesis-generate details.dispatch-chooser > summary', `synthesis-only-${viewport}-chooser-open`);
+        await waitFor(renderer, `document.querySelector('.review-synthesis-generate details.dispatch-chooser')?.open===true`, `synthesis-only-${viewport}-chooser-opened`);
+        await assertRenderer(renderer, `(() => {const panel=document.querySelector('.review-synthesis-generate .dispatch-chooser-panel');if(panel.hidden)return true;const r=panel.getBoundingClientRect();return r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;})()`, `synthesis-only-${viewport}-chooser-in-window`);
+        await pointerClick(renderer, waitFor, '.review-synthesis-generate details.dispatch-chooser > summary', `synthesis-only-${viewport}-chooser-close`);
+        await waitFor(renderer, `document.querySelector('.review-synthesis-generate details.dispatch-chooser')?.open===false`, `synthesis-only-${viewport}-chooser-closed`);
+        await assertRenderer(renderer, `(() => {const row=document.querySelector('.review-synthesis-generate'),r=row.getBoundingClientRect();return r.width>0&&r.left>=0&&r.right<=innerWidth&&!/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(row.textContent);})()`, `synthesis-only-${viewport}-row-fits`);
+      }
+      // The one request, at the gate size the hosted runner uses.
+      await pointerClick(renderer, waitFor, '.review-synthesis-generate [data-review-action="generate-synthesis"]', 'synthesis-only-generate');
+      await waitFor(renderer, `(() => {const state=document.querySelector('details.review-synthesis')?.dataset.synthesisState;return state==='missing' && document.querySelector('.review-synthesis-generate [data-review-action="generate-synthesis"]')?.disabled===false;})()`, 'synthesis-only-settled', 120_000);
+      await waitFor(renderer, `(async () => (await window.ai7.inspectReviewWorkspace()).run?.state==='settled')()`, 'synthesis-only-run-settled', 60_000);
+    } finally {
+      await renderer.send('Emulation.clearDeviceMetricsOverride');
+      await waitFor(renderer, `innerWidth===${synthesisOnlyViewport.width} && innerHeight===${synthesisOnlyViewport.height}`, 'synthesis-only-native-viewport');
+    }
+    const synthesisOnlySent = synthesisOnlyRequests();
+    const synthesisOnlyAfter = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
+    requireJourney(synthesisOnlySent.task !== null && synthesisOnlySent.runs === 1 && synthesisOnlySent.sent === 1 &&
+      synthesisOnlySent.events.filter(state => state === 'dispatched').length === 1 && ['materialized', 'failed'].includes(synthesisOnlySent.events.at(-1)),
+      'synthesis-only-sent-once', synthesisOnlySent);
+    requireJourney(synthesisOnlyAfter.synthesis?.state === 'missing' && synthesisOnlyAfter.synthesis.canGenerate === true && synthesisOnlyAfter.state === 'settled' &&
+      JSON.stringify(synthesisOnlyAfter.findings) === JSON.stringify(synthesisOnlyBefore.findings), 'synthesis-only-findings-unchanged', { synthesis: synthesisOnlyAfter.synthesis?.state, state: synthesisOnlyAfter.state });
 
     at('review-report-docx-one-step');
     // Issue #1430: 导出审阅报告（DOCX） in 审阅's header is one click — the Book's report is recorded, this launch's Save
     // answer is the destination, the file is written and the toast names where. The runner opens the DOCX: the title block,
     // the four parts, the statistics table and the one finding's banner above its four-row table.
     await openReviewDestination(renderer, 'docx-report-review');
-    await reviewAction(renderer, '.review-workspace-heading [data-review-action="export-docx-report"]', 'docx-report-export');
+    await pointerClick(renderer, waitFor, '.review-header-export > summary', 'docx-report-menu');
+    await pointerClick(renderer, waitFor, '.review-header-export [data-review-action="export-docx-report"]', 'docx-report-export');
     await waitFor(renderer, `Array.from(document.querySelectorAll('[data-toast]')).some((toast)=>toast.textContent.includes(${JSON.stringify(`审阅报告已导出至 ${bookReportExportPath}`)}))`, 'docx-report-exported-toast', 60_000);
     const bookReportXml = strFromU8(unzipSync(await readFile(bookReportExportPath))['word/document.xml']);
     const bookReportTables = bookReportXml.match(/<w:tbl>.*?<\/w:tbl>/gsu) ?? [];
@@ -3319,7 +3432,7 @@ async function main() {
       sourced?.states.factualVerification === '证据不足' && sourced.sourceCounts.checked === 0 && lens.run?.plannedLevel === 'standard' && lens.run.disclosure === null,
     'factual-lens-results', { total: lens?.total, counts: lens?.counts });
     await assertRenderer(renderer, `(() => { const row=document.querySelector('.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]'); return row?.dataset.outcome==='证据不足' && JSON.stringify(Array.from(row.querySelectorAll('[data-state-term]')).map((cell)=>cell.dataset.stateTerm))===JSON.stringify(['引文完整性','断言支持','事实核查']); })()`, 'factual-lens-columns');
-    await assertRenderer(renderer, `(() => { const group=document.querySelector('section.review-group[data-review-category="factual-review"]'); const rows=Array.from(group.querySelectorAll('.fact-lens-row')); return rows.length>0 && group.querySelectorAll(':scope > article.review-finding').length===0 && rows.every(row=>row.querySelectorAll('.review-finding-quote').length===1); })()`, 'factual-results-not-duplicated');
+    await assertRenderer(renderer, `(() => { const group=document.querySelector('section.review-group[data-review-category="factual-review"]'); const rows=Array.from(group.querySelectorAll('.fact-lens-row')); return rows.length>0 && group.querySelectorAll(':scope > details.review-category-fold > article.review-finding').length===0 && rows.every(row=>row.querySelectorAll('.review-finding-quote').length===1); })()`, 'factual-results-not-duplicated');
     at('factual-card-evidence');
     // Synchronized delta with Issue #1174 (ADR 0095 §5): the finding's card lists the sources the Evidence Workspace holds for its
     // result, none excluded here — each with its note and, for a web source, its address; a candidate is never quoted. Its mark
@@ -3398,7 +3511,7 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'factual-range-launch-ready');
     const rangeBook = await importSample1(renderer, cancellation, true);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'factual-range-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'factual-range-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'factual-range-settings-ready');
     await click(renderer, '帮助', 'factual-range-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'factual-range-toggle-ready');
     await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement))return false; if(toggle.checked)toggle.click(); return true; })()`, 'factual-range-ordinary');
@@ -3449,7 +3562,7 @@ async function main() {
     cancellation.throwIfRequested();
 
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'factual-range-restore-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'factual-range-restore-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'factual-range-restore-ready');
     await click(renderer, '帮助', 'factual-range-restore-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'factual-range-restore-toggle');
     await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement))return false; if(!toggle.checked)toggle.click(); return true; })()`, 'factual-range-restore-development');
@@ -3458,7 +3571,7 @@ async function main() {
     // ---- 自定义分析维度 (Issue #922, slice 7f; ADR 0090 item 4) ----
     // Synchronized delta with Issue #922: a fresh, unedited sample1 Book on the provider-free `sample1-custom-analysis-authored`
     // fixture, layered on `sample1-baseline-happy`, running the dimension before any baseline on this Book and reading the one
-    // synthetic dimension 「单元开篇」 the fixture answers. The dimension is written in 知识库 › 工序与规则 and run from ②A through
+    // synthetic dimension 「单元开篇」 the fixture answers. The dimension is written in place in ②A › 自定义 (#1543) and run from ②A through
     // the ordinary plan and 开始任务; nothing reaches a network.
     at('custom-dimension-define');
     await closeOwnedBrowser();
@@ -3468,22 +3581,69 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'custom-launch-ready');
     const customBook = await importSample1(renderer, cancellation, true);
     at('custom-dimension-define');
+    // #1543: 分析 › 自定义 writes a dimension in place — no trip to 知识库 — as an ordinary editor, at both window forms, with real
+    // presses and typing. At 1280×800 「单元开篇」 is created and enabled; at 1008×681 a second one is created, enabled and stopped on its
+    // card. In development mode 知识库 › 工序与规则 then still lists them and creates a third.
+    await setDeveloperMode(renderer, waitFor, false, 'custom-ordinary');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'custom-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'custom-library');
+    await pointerClick(renderer, waitFor, `button[data-book-id=${JSON.stringify(customBook.bookId)}]`, 'custom-open-book-first');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(customBook.bookId)}]')`, 'custom-manuscript-first', 120_000);
+    await pointerClick(renderer, waitFor, SIDEBAR.section('analysis'), 'custom-analysis-first');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis .baseline-analysis-card')`, 'custom-analysis-first-destination');
+    await pointerClick(renderer, waitFor, '.baseline-analysis-card [role="tab"][data-analysis-tab="custom"]', 'custom-tab-first');
+    const customPanel = '.baseline-analysis-card [data-analysis-panel="custom"]';
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${customPanel} [data-custom-empty="no-dimension"]`)})`, 'custom-tab-empty');
+    // The empty state no longer sends the editor to 知识库: it offers the one primary action, here.
+    await assertRenderer(renderer, `(() => { const empty=document.querySelector(${JSON.stringify(`${customPanel} [data-custom-empty="no-dimension"]`)}); const create=empty?.querySelector('[data-custom-action="create"]'); return create?.textContent==='新建自定义分析维度…' && create.classList.contains('primary') && !empty.textContent.includes('知识库') && !empty.textContent.includes('工序与规则'); })()`, 'custom-tab-empty-offer');
+    const secondTitle = '人物出场';
+    await atBothSizes(renderer, waitFor, 'custom-in-place', async (viewport) => {
+      const first = viewport === ORDINARY_VIEWPORTS[0];
+      const size = first ? 'wide' : 'gate';
+      const title = first ? CUSTOM_DIMENSION_TITLE : secondTitle;
+      const offer = first ? `${customPanel} [data-custom-action="create"]` : `${customPanel} .custom-head [data-custom-action="create"]`;
+      await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-list-row-${size}`);
+      await pointerClick(renderer, waitFor, offer, `custom-create-${size}`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${customPanel} [data-custom-form="new"]`)}) && document.activeElement?.name==='title'`, `custom-form-${size}`);
+      await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-form-row-${size}`);
+      await typeInto(renderer, waitFor, `${customPanel} [data-custom-form="new"] input[name="title"]`, title, `custom-title-${size}`);
+      await typeInto(renderer, waitFor, `${customPanel} [data-custom-form="new"] textarea[name="questionTemplate"]`, first ? CUSTOM_DIMENSION_TEMPLATE : '本部分有哪些人物出场？', `custom-template-${size}`);
+      await pointerClick(renderer, waitFor, `${customPanel} [data-custom-form="new"] [data-custom-action="save"]`, `custom-save-${size}`);
+      // The card of what was just written is drawn, and holds the editor's place.
+      await waitFor(renderer, `!document.querySelector(${JSON.stringify(`${customPanel} [data-custom-form="new"]`)}) && document.activeElement?.matches('.custom-dimension-card') && document.activeElement.querySelector('h3')?.textContent===${JSON.stringify(title)}`, `custom-card-${size}`);
+      await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${customPanel} .custom-head [data-custom-action="create"]`)})?.classList.contains('secondary')===true && !/(?<!发稿)版本|AI7 初评/u.test(document.querySelector(${JSON.stringify(customPanel)}).textContent)`, `custom-offer-above-list-${size}`);
+      await assertRenderer(renderer, buttonRowsAtOneEdge(customPanel), `custom-card-row-${size}`);
+      if (!first) {
+        // 停用 on the card the editor is on, pressed, after the one question: the dimension never ran on this Book, so its card goes.
+        // The question is the app's own confirm; the Journey answers it yes and gives the window its own back.
+        await renderer.evaluate("window.__j04Confirm = window.confirm; window.__j04Asked = []; window.confirm = (question) => { window.__j04Asked.push(String(question)); return true; }");
+        await pointerClick(renderer, waitFor, `${customPanel} .custom-dimension-card:focus-within [data-custom-action="stop"]`, `custom-stop-${size}`);
+        await waitFor(renderer, `!Array.from(document.querySelectorAll(${JSON.stringify(`${customPanel} .custom-dimension-card`)})).some((node) => node.querySelector('h3')?.textContent===${JSON.stringify(secondTitle)})`, `custom-stopped-${size}`);
+        await waitFor(renderer, `(document.querySelector('[data-toast]')?.textContent ?? '').includes('已停用「${secondTitle}」')`, `custom-stopped-status-${size}`);
+        const asked = JSON.parse(await renderer.evaluate("(() => { const asked = window.__j04Asked; window.confirm = window.__j04Confirm; delete window.__j04Asked; delete window.__j04Confirm; return JSON.stringify(asked); })()"));
+        requireJourney(asked.length === 1 && asked[0].includes(secondTitle) && asked[0].includes('所有图书') && asked[0].includes('不能撤销'), `custom-stop-asked-${size}`, asked);
+        const stoppedService = await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: false }).then((page) => JSON.stringify(page.dimensions.filter((entry) => entry.title === ${JSON.stringify(secondTitle)}).map((entry) => [entry.enabledVersion, entry.versions[0].state])))`);
+        requireJourney(stoppedService === JSON.stringify([[null, 'stopped']]), `custom-stopped-service-${size}`, stoppedService);
+      }
+    });
+    await setDeveloperMode(renderer, waitFor, true, 'custom-developer');
+    // 知识库 › 工序与规则 still lists the house's dimensions, with what AI7 fixes beside the template, and still writes one.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'custom-knowledge-open');
     await click(renderer, '工序与规则', 'custom-knowledge-rules');
-    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='0' && document.querySelector('.knowledge-custom-dimensions .custom-dimensions-empty')?.textContent==='还没有自定义分析维度。'`, 'custom-knowledge-empty');
-    // AI7's fixed answer schema and Authority Ceiling are stated beside the template the editor writes.
+    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='2'`, 'custom-knowledge-two');
     await assertRenderer(renderer, `Array.from(document.querySelectorAll('.knowledge-custom-dimensions .custom-dimension-fixed li')).map((item)=>item.textContent).join('').includes('不打分') && document.querySelector('.knowledge-custom-dimensions')?.textContent.includes('名称只在本机显示，不会发送')`, 'custom-knowledge-fixed');
-    await reviewAction(renderer, '.knowledge-custom-dimensions [data-custom-action="new"]', 'custom-new');
-    await assertRenderer(renderer, `(() => { const form=document.querySelector('.knowledge-custom-dimensions [data-custom-form="new"]'); const title=form?.querySelector('input[name="title"]'); const template=form?.querySelector('textarea[name="questionTemplate"]'); if(!(title instanceof HTMLInputElement)||!(template instanceof HTMLTextAreaElement))return false; title.value=${JSON.stringify(CUSTOM_DIMENSION_TITLE)}; template.value=${JSON.stringify(CUSTOM_DIMENSION_TEMPLATE)}; const save=form.querySelector('[data-custom-action="save"]'); if(!(save instanceof HTMLButtonElement))return false; save.click(); return true; })()`, 'custom-save');
-    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='1' && document.querySelector('.knowledge-custom-dimensions .custom-dimension-version[data-version="1"]')?.dataset.versionState==='enabled'`, 'custom-saved');
-    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions .custom-dimension-version[data-version="1"]')?.dataset.versionState==='enabled'`, 'custom-enabled');
+    await pointerClick(renderer, waitFor, '.knowledge-custom-dimensions [data-custom-action="new"]', 'custom-new');
+    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions [data-custom-form="new"]')`, 'custom-new-form');
+    await typeInto(renderer, waitFor, '.knowledge-custom-dimensions [data-custom-form="new"] input[name="title"]', '开篇场景', 'custom-new-title');
+    await typeInto(renderer, waitFor, '.knowledge-custom-dimensions [data-custom-form="new"] textarea[name="questionTemplate"]', '本部分开篇写了什么场景？', 'custom-new-template');
+    await pointerClick(renderer, waitFor, '.knowledge-custom-dimensions [data-custom-form="new"] [data-custom-action="save"]', 'custom-save');
+    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='3' && Array.from(document.querySelectorAll('.knowledge-custom-dimensions .custom-dimension-version')).filter((node)=>node.dataset.versionState==='enabled').length===2`, 'custom-saved');
     const defined = await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: false })`);
-    const customDimension = defined?.dimensions?.[0];
-    requireJourney(defined?.dimensions?.length === 1 && customDimension.title === CUSTOM_DIMENSION_TITLE && customDimension.kind === `custom-analysis/${customDimension.dimensionId}` &&
+    const customDimension = defined?.dimensions?.find((entry) => entry.title === CUSTOM_DIMENSION_TITLE);
+    requireJourney(defined?.dimensions?.length === 3 && customDimension !== undefined && customDimension.kind === `custom-analysis/${customDimension.dimensionId}` &&
       customDimension.enabledVersion?.version === 1 && customDimension.versions[0].questionTemplate === CUSTOM_DIMENSION_TEMPLATE &&
-      customDimension.versions[0].supersedes === null && DIGEST_PATTERN.test(customDimension.versions[0].documentDigest), 'custom-defined', defined);
+      customDimension.versions[0].supersedes === null && DIGEST_PATTERN.test(customDimension.versions[0].documentDigest) &&
+      defined.dimensions.find((entry) => entry.title === secondTitle)?.versions[0].state === 'stopped', 'custom-defined', defined);
     cancellation.throwIfRequested();
 
     at('custom-dimension-run');
@@ -3497,12 +3657,15 @@ async function main() {
     const dimensionCard = `.baseline-analysis-card [data-analysis-panel="custom"] .custom-dimension-card[data-dimension-id=${JSON.stringify(customDimension.dimensionId)}]`;
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${dimensionCard} [data-custom-empty="not-run"]`)})?.textContent==='尚未运行' && document.querySelector(${JSON.stringify(`${dimensionCard} [data-analysis-action="custom-run"]`)})?.disabled===false`, 'custom-tab-not-run');
     // 运行 runs in one step (Issue #1410 item 13): the plan is prepared and started at once; 查看计划 stays beside the result.
-    await reviewAction(renderer, `${dimensionCard} [data-analysis-action="custom-run"]`, 'custom-run');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskLaunchKind==='custom-analysis'`, 'custom-launch-options');
-    await assertRenderer(renderer, `(() => {const retry=document.querySelector('#task-drawer [data-task-launch-option="retry"]');if(!retry)return false;retry.value='never';retry.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'custom-withdraw-safe-retry');
-    await launchTaskFromBar(renderer, waitFor, 'custom-analysis');
-    await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.latest !== null && value.dimensions[0]?.book?.taskState?.state === 'settled')`, 'custom-settled', 180_000);
-    const customTask = (await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: true })`)).dimensions[0].book.taskState;
+    await pointerClick(renderer, waitFor, `${dimensionCard} [data-analysis-action="custom-preview"]`, 'custom-run');
+    // Since #1543 the tab shows a card per enabled dimension, each with its own bar: every step here is this dimension's bar.
+    const dimensionBar = `${dimensionCard} [data-task-launch-kind]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(dimensionBar)})?.dataset.taskLaunchKind==='custom-analysis'`, 'custom-launch-options');
+    await openLaunchOptions(renderer, waitFor, dimensionBar, 'custom-launch-options-open');
+    await chooseLaunchOption(renderer, waitFor, `${dimensionBar} [data-task-launch-option="retry"]`, 'never', 'custom-withdraw-safe-retry');
+    await launchTaskFromBar(renderer, waitFor, 'custom-analysis', undefined, [], null, dimensionBar);
+    await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => (([entry]) => entry?.book?.latest !== null && entry?.book?.taskState?.state === 'settled')(value.dimensions.filter((item) => item.dimensionId === ${JSON.stringify(customDimension.dimensionId)})))`, 'custom-settled', 180_000);
+    const customTask = (await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: true })`)).dimensions.find((item) => item.dimensionId === customDimension.dimensionId).book.taskState;
     // The plan it ran: the dimension's exact version as its procedure, and nothing sent here.
     const customPlanRecord = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(customTask.taskIntentId)} })`);
     requireJourney(customPlanRecord?.scope?.send === `不发送任何内容；实时运行时会一并发送该维度第 1 版的提问模板「${CUSTOM_DIMENSION_TEMPLATE}」` &&
@@ -3857,8 +4020,7 @@ async function main() {
     at('dispatch-model-choice');
     // The fixture remains local. Chosen binding → actual card attribution is proved by captured ordinary L2 transport.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'dispatch-choice-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'dispatch-choice-settings-ready');
-    await click(renderer, '模型服务', 'dispatch-choice-models');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'dispatch-choice-settings-ready');
     await waitFor(renderer, `document.querySelector('#main-editorial-credential')`, 'dispatch-choice-credential');
     await renderer.evaluate(`document.querySelector('[data-model-channel="${readyConnection.binding.providerId}"] input').click()`);
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -3915,7 +4077,7 @@ async function main() {
         if(width===1008) {
           await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','dispatch-plan-close');
           await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'dispatch-plan-settings');
-          await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'dispatch-plan-settings-ready');
+          await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'dispatch-plan-settings-ready');
           await click(renderer,'帮助','dispatch-plan-help');
           await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input||input.disabled)return false;if(input.checked)input.click();return document.documentElement.dataset.technicalLayerVisible==='false';})()`,'dispatch-plan-ordinary');
           await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('library')),'dispatch-plan-library');
@@ -3929,6 +4091,20 @@ async function main() {
             await reviewAction(renderer,'[data-review-action="view-plan"]',`dispatch-plan-open-${planWidth}`);
             await waitFor(renderer,`document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(reviewRunId)}`,`dispatch-plan-read-${planWidth}`);
             await assertRenderer(renderer,`(() => {const drawer=document.querySelector('#task-drawer'),text=drawer.innerText;return document.documentElement.dataset.technicalLayerVisible==='false' && !/[0-9a-f]{8}-[0-9a-f-]{27}/iu.test(text) && !/https?:\\/\\//u.test(text) && !drawer.querySelector('[data-task-drawer-control="start"],[data-task-drawer-control="update-plan"]');})()`,`dispatch-plan-editorial-only-${planWidth}`);
+            // 状态卡 (Issue #1527): the finished Task in ordinary mode is its result in one sentence, how long it took, the model it ran on and
+            // 查看结果 — at the wide window and at the Gate's. 查看结果 opens the result, and closing it brings the drawer back on the same Task.
+            at('task-status-finished');
+            await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-run-view-${planWidth}`);
+            await waitFor(renderer,statusCardExpression({ ended: true, model: chosenLabel }),`task-status-finished-card-${planWidth}`,30_000);
+            // The card's own controls, by pointer: 查看计划 and 运行 go to the plan and back, and 查看结果 opens the result.
+            await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="full-link"]',`task-status-finished-plan-${planWidth}`);
+            await waitFor(renderer,planViewExpression({ running: false }),`task-status-finished-plan-view-${planWidth}`,30_000);
+            await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-back-to-run-${planWidth}`);
+            await waitFor(renderer,statusCardExpression({ ended: true, model: chosenLabel }),`task-status-finished-card-again-${planWidth}`,30_000);
+            await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="view-result"]',`task-status-finished-result-${planWidth}`);
+            await waitFor(renderer,`document.querySelector('.task-result-window [data-task-result-action="close"]') && document.querySelector('#task-drawer')?.hidden===true`,`task-status-finished-result-open-${planWidth}`);
+            await pointerClick(renderer,waitFor,'.task-result-window [data-task-result-action="close"]',`task-status-finished-result-close-${planWidth}`);
+            await waitFor(renderer,`document.querySelector('#task-drawer')?.hidden===false && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(reviewRunId)} && document.querySelector('.task-result-window')===null`,`task-status-finished-back-${planWidth}`);
             await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]',`dispatch-plan-close-${planWidth}`);
           }
           await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});

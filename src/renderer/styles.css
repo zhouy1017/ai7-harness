@@ -134,7 +134,7 @@ button:focus-visible, input:focus-visible {
    header above the screen. The page makes room for the sidebar as it does for the Task Drawer on the right; below 760 px,
    or when the editor collapses it, the sidebar shows SVG icons and Book initials, and
    the name stays the row's accessible name. */
-:root { --sidebar-width: 14rem; --sidebar-icons-width: 56px; }
+:root { --sidebar-full-width: 14rem; --sidebar-width: var(--sidebar-full-width); --sidebar-icons-width: 56px; }
 :root[data-sidebar="icons"] { --sidebar-width: var(--sidebar-icons-width); }
 body { padding-left: var(--sidebar-width); }
 .app-sidebar { position: fixed; z-index: 25; top: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: .4rem; width: var(--sidebar-width); padding: .5rem .55rem; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; border-right: 1px solid var(--boundary); background: var(--shell); color: var(--text); }
@@ -210,7 +210,7 @@ body { padding-left: var(--sidebar-width); }
 .locality[data-processing-state="sending"]::before { color: var(--status-progress); }
 .locality[data-processing-state="waiting-network"]::before { color: var(--status-attention); }
 
-/* 设置 (editor-surfaces §8.6): the three groups, one row per page; a row not yet available says 即将提供. */
+/* 设置 (editor-surfaces §8.6): a navigation of the three groups beside the page; a page's options are rows (#1522). */
 .settings-layout { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 1.8rem; align-items: start; }
 .settings-layout > :last-child { min-width: 0; }
 .settings-navigation { position: sticky; top: 1rem; display: grid; gap: .4rem; }
@@ -218,9 +218,6 @@ body { padding-left: var(--sidebar-width); }
 .settings-navigation h3 { margin: .8rem .6rem .3rem; font-size: .78rem; color: var(--text-subdued); }
 .settings-navigation .btn { justify-content: flex-start; text-align: left; padding: .35rem .6rem; min-height: 32px; }
 .settings-navigation [aria-current="page"] { background: var(--selection); color: var(--selection-text); }
-.settings-group { margin-top: 1.3rem; }
-.settings-group h3 { margin: 0 0 .5rem; }
-.settings-rows { display: grid; margin: 0; padding: 0; list-style: none; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 1.2rem; min-height: 56px; padding: .75rem 0; border: 0; border-bottom: 1px solid var(--boundary); background: transparent; }
 .settings-row-copy { min-width: 0; }
 .settings-row .secondary { flex: none; min-width: 4.5rem; }
@@ -234,7 +231,6 @@ body { padding-left: var(--sidebar-width); }
   .settings-navigation section { display: flex; flex-wrap: wrap; align-items: center; }
   .settings-navigation h3 { margin: .3rem; }
 }
-.settings-coming-soon { padding: .1rem .55rem; border: 1px dashed var(--boundary-strong); border-radius: 999px; color: var(--text-subdued); font-size: .82rem; font-weight: 700; }
 [data-developer-only="true"]::after { content: "开发者"; display: inline-flex; margin-left: .55rem; padding: .08rem .45rem; border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface); color: var(--text-subdued); font-size: .72rem; font-weight: 700; vertical-align: middle; }
 .library-home { display: grid; grid-template-columns: 1.3fr .7fr; gap: 1.5rem 3rem; align-items: center; }
 
@@ -369,6 +365,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .analysis-update-action h5 { margin: 0; font-size: .95rem; }
 .analysis-update-action p { margin: .45rem 0 0; overflow-wrap: anywhere; }
 .analysis-update-action[data-update-available="false"] { opacity: .85; }
+/* The mode the bar's start will run is the pressed one (#1526). */
+.analysis-update-action button[aria-pressed="true"] { color: var(--selection-text); background: var(--selection); border-color: var(--selection-boundary); font-weight: 800; opacity: 1; }
 .analysis-update-expected { font-weight: 800; }
 .analysis-range-options { margin: .6rem 0 0; padding: .6rem .8rem; border: 1px solid var(--boundary); border-radius: 9px; min-width: 0; }
 .analysis-range-options legend { font-weight: 800; padding: 0 .3rem; }
@@ -433,7 +431,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-influence-materials li[data-withdrawn="true"] { color: var(--status-attention); }
 .learning-lineage-signals, .learning-lineage-tasks { margin: 0; padding-left: 1.2rem; }
 .learning-lineage-signals li, .learning-lineage-tasks li { overflow-wrap: anywhere; }
-.review-progress { display: grid; gap: .45rem; margin: .55rem 0 0; padding-left: 1.4rem; }
+.review-progress { display: grid; align-content: start; gap: .45rem; margin: .55rem 0 0; padding-left: 1.4rem; }
 .review-progress > li { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
 .review-progress-label { font-weight: 800; }
 .review-progress-detail { flex-basis: 100%; color: var(--text-subdued); font-size: .9rem; }
@@ -472,6 +470,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-batch-scope { margin: 0; font-weight: 800; }
 .review-batch-items { margin: .45rem 0 0; padding-left: 1.4rem; line-height: 1.7; }
 .review-report-versions, .review-report-list { margin: .55rem 0 0; padding-left: 1.4rem; line-height: 1.65; }
+/* A list read in part (Issue #1592): how much is shown, 显示更多, and a failed page said beside it. */
+.review-part-paging { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; margin: .45rem 0 0; font-size: .86rem; color: var(--text-subdued); }
+.review-page-failed { flex-basis: 100%; color: var(--status-blocked); font-weight: 700; }
+.review-chapter-page { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
 .review-report-part { margin-top: .8rem; }
 .review-report-table { width: 100%; margin-top: .45rem; border-collapse: collapse; font-size: .9rem; }
 .review-report-table th, .review-report-table td { padding: .35rem .5rem; border-bottom: 1px solid var(--boundary); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
@@ -548,10 +550,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
    its shape and whose blocked work has a heavier left rule beside its words; every line wraps, none scrolls. */
 .global-attention-findings-note { margin-top: -.8rem; }
 .global-attention-host { display: grid; gap: 1rem; margin-top: 1rem; }
-.global-attention-group { min-width: 0; padding: 1rem 1.15rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); overflow-wrap: anywhere; }
+.global-attention-group { min-width: 0; padding: 0; overflow-wrap: anywhere; }
 .global-attention-group-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem .8rem; margin: 0; font-size: 1.12rem; }
 .global-attention-group-count { color: var(--text-subdued); font-size: .9rem; font-weight: 700; }
-.global-attention-empty { margin: .55rem 0 0; color: var(--text-subdued); }
+.global-attention-none { display: grid; justify-items: start; gap: .6rem; }
+.global-attention-none p, .global-attention-loading { margin: 0; color: var(--text-subdued); }
 .global-attention-items { display: grid; gap: .7rem; margin: .8rem 0 0; padding: 0; list-style: none; }
 .global-attention-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .3rem .9rem; min-width: 0; padding: .75rem .9rem; border: 1px solid var(--boundary); border-left: 4px solid var(--boundary); border-radius: 10px; background: var(--surface); }
 .global-attention-item[data-attention-blocked="true"] { border-left: 6px solid var(--status-blocked); }
@@ -575,9 +578,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-overview-filter-label { min-width: 3rem; color: var(--text-subdued); font-weight: 700; }
 .task-overview-filter[aria-pressed="true"] { border-color: var(--action-text); background: var(--status-progress-surface); }
 .task-overview-groups { display: grid; gap: 1rem; }
-.task-overview-group { padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
+/* A group is a heading over its cards, not a box around them (#1522). */
+.task-overview-group { padding: 0; }
 .task-overview-group-heading { margin: 0; font-size: 1.08rem; }
-.task-overview-empty { margin: .6rem 0 0; color: var(--text-subdued); }
+.task-overview-empty, .task-overview-none { margin: .6rem 0 0; color: var(--text-subdued); }
 .task-overview-items { display: grid; gap: .6rem; margin-top: .7rem; }
 .task-overview-card { display:flex; align-items:center; gap:16px; position:relative; padding:14px 16px; border:1px solid var(--boundary); border-radius:10px; background:var(--surface); cursor:pointer; min-width:0; width:100%; max-width:100%; box-sizing:border-box; }
 .task-overview-card:hover { border-color: var(--action-text); }
@@ -693,15 +697,16 @@ button:disabled { cursor: not-allowed; opacity: .5; }
    beside the central destination. Below 1120 px it lies over the page (§0.3: 所有面都要在 1120 px 以下把右侧辅助面
    改为覆盖抽屉); at 1120 px and wider the page makes room for it, so the manuscript stays visible beside the plan.
    It never scrolls sideways, its header and footer stay in view, and its content wraps at 200% zoom. */
-:root { --task-drawer-width: 500px; }
+:root { --task-drawer-width: 500px; --manuscript-min-measure: 28; }
 .task-drawer { position: fixed; z-index: 30; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; width: min(var(--task-drawer-width), calc(100vw - 1rem)); min-width: 0; border-left: 1px solid var(--boundary); background: var(--surface); color: var(--text); box-shadow: -18px 0 40px var(--shadow); overflow-wrap: anywhere; }
 .task-drawer[hidden] { display: none; }
-/* An ordinary launch keeps its initiating form until success; its start controls sit in front of that sheet. */
-.task-drawer[data-task-drawer-view="launch"] { z-index: 61; }
-body:has(.task-drawer[data-task-drawer-view="launch"]:not([hidden])) #task-drawer-separator { z-index: 62; }
-@media (min-width: 1120px) {
+:root:is([data-right-column="wide"], [data-right-column="icons"]) {
   body[data-task-drawer="open"] { padding-right: var(--task-drawer-width); }
   .task-drawer { width: var(--task-drawer-width); box-shadow: none; }
+}
+@media (min-width: 1120px) {
+  :root:not([data-right-column]) body[data-task-drawer="open"] { padding-right: var(--task-drawer-width); }
+  :root:not([data-right-column]) .task-drawer { box-shadow: none; }
 }
 .task-drawer-head { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .5rem; padding: .55rem .8rem; border-bottom: 1px solid var(--boundary); background: var(--surface-subdued); }
 .task-drawer-identity { display: grid; gap: .2rem; min-width: 0; justify-items: start; }
@@ -785,6 +790,15 @@ body:has(.task-drawer[data-task-drawer-view="launch"]:not([hidden])) #task-drawe
 .task-plan-activity[data-task-plan-activity="cancelling"] { border-color: var(--status-attention); background: var(--status-attention-surface); }
 .task-plan-activity-title { margin: 0; font-size: .95rem; }
 .task-plan-activity .attention-note { margin: 0; }
+/* 状态卡 (Issue #1527): ordinary mode's 运行 view of a started Task — a bar, two lines, the way to the result and to the plan. */
+.task-status-card { display: grid; gap: .45rem; padding: .75rem .85rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface-subdued); }
+.task-status-card p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.task-status-card p[hidden], .task-status-card [hidden] { display: none; }
+.task-status-sentence { font-weight: 800; }
+.task-status-line, .task-status-model { color: var(--text-subdued); font-size: .9rem; font-variant-numeric: tabular-nums; }
+.task-status-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
+.task-status-actions .task-plan-full-link { margin-top: 0; }
+.task-drawer-title { overflow-wrap: anywhere; }
 .task-bar-cancel-impact { display: grid; gap: .45rem; padding: .75rem; border: 1px solid var(--status-attention); border-radius: 10px; background: var(--surface); }
 .task-bar-cancel-impact h4 { margin: 0; }
 .task-bar-cancel-impact h4:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -875,6 +889,13 @@ body:has(.task-drawer[data-task-drawer-view="launch"]:not([hidden])) #task-drawe
 .custom-row-unit { font-size: .85em; opacity: .75; }
 .custom-anchor { justify-self: start; text-align: start; }
 .custom-anchor-unlocated { opacity: .75; }
+.custom-head, .custom-create, .custom-body { display: grid; gap: .7rem; min-width: 0; }
+.custom-head:empty, .custom-create:empty, .custom-body:empty { display: none; }
+.custom-head .button-row, .custom-empty .button-row { margin-top: 0; }
+.custom-empty { display: grid; gap: .7rem; }
+.custom-empty p { margin: 0; }
+.custom-dimension-fixed-fold > summary { cursor: pointer; color: var(--text-subdued); font-size: .86rem; font-weight: 700; }
+.custom-dimension-fixed-fold > p { margin: .35rem 0 0; }
 .captured-procedure-state-stopped { border: 1px dotted currentColor; }
 .captured-procedure-validation { display: grid; gap: .45rem; padding: .8rem; border: 2px solid var(--boundary-strong); border-radius: 10px; background: var(--surface-subdued); }
 .captured-procedure-validation h5, .captured-procedure-validation h6 { margin: 0; }
@@ -1030,6 +1051,7 @@ body:has(.task-drawer[data-task-drawer-view="launch"]:not([hidden])) #task-drawe
 .series-member-heading { justify-content: space-between; }
 .series-member-title { margin: 0; }
 .series-member-people, .series-consistency { margin: .4rem 0 0; }
+.series-consistency-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 .8rem; }
 .series-add-chooser { display: grid; gap: .4rem; min-width: 0; margin: 0; padding: .8rem 1rem; border: 1px solid var(--boundary); border-radius: 12px; }
 .series-add-choice { display: flex; align-items: center; gap: .45rem; }
 .series-preview { display: grid; gap: .6rem; min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
@@ -1088,6 +1110,11 @@ body:has(.task-drawer[data-task-drawer-view="launch"]:not([hidden])) #task-drawe
 .calibration-form { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem .8rem; }
 .calibration-field { display: grid; gap: .25rem; min-width: 0; }
 .calibration-field input { width: 9rem; max-width: 100%; box-sizing: border-box; font: inherit; }
+.calibration-lede { margin: 0; }
+.calibration-how > summary { cursor: pointer; color: var(--text-subdued); font-size: .86rem; font-weight: 700; }
+.calibration-how > p { margin: .45rem 0 0; }
+.calibration-offset-list { margin: .3rem 0 0; padding-left: 1.2rem; }
+.calibration-offset:empty { display: none; }
 .publication-actuals-row { align-items: center; }
 /* 质量与学习 › 反馈历史 (S26c): filter before paging; group by Book, origin, day or Editorial Dimension. */
 .feedback-history { display: grid; gap: .8rem; }
@@ -1637,14 +1664,24 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .manuscript-comments-heading { height: 34px; min-height: 34px; box-sizing: border-box; flex-shrink: 0; display: flex; align-items: center; gap: .2rem; padding: .15rem .4rem; border-bottom: 1px solid var(--boundary); }
 .manuscript-comments-heading button { height: 28px; box-sizing: border-box; line-height: 20px; min-height: 28px; padding: .15rem .2rem; white-space: nowrap; font-size: .7rem; }
 .manuscript-comments-heading > strong { font-size: .8rem; white-space: nowrap; }
-.manuscript-comments-heading .editorial-mark-filter-chips { flex: 1; flex-wrap: nowrap; gap: .1rem; margin: 0; }
-.manuscript-comments-heading .editorial-mark-filter-chips button { border: 0; border-radius: 4px; padding: .15rem .2rem; }
+/* The Book's pending count and 上一条 / 下一条待处理 (Issue #1523). */
+.manuscript-comments-book-pending { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .7rem; color: var(--text-subdued); font-variant-numeric: tabular-nums; }
+.manuscript-comments-heading .manuscript-comments-step { min-width: 24px; width: 24px; padding: 0; }
+/* A compact 修改建议's 接受 and 拒绝 take their own room at the end of its preview line on hover and focus; the card keeps its height. */
+.editorial-mark-compact-line { display: flex; align-items: center; gap: .3rem; min-width: 0; margin: .2rem 0 0; }
+.editorial-mark-compact-line > .editorial-mark-compact-preview { flex: 1; min-width: 0; margin: 0; }
+.editorial-mark-card[data-expanded="true"] > .editorial-mark-compact-line { display: none; }
+.editorial-mark-quick-actions { display: none; flex: none; gap: .25rem; }
+.manuscript-comments-card[data-expanded="false"]:is(:hover, :focus-within) .editorial-mark-quick-actions { display: flex; }
+.editorial-mark-quick-actions .btn { min-height: 20px; height: 20px; padding: 0 .4rem; font-size: .7rem; line-height: 18px; }
+/* 下一条待处理 offered once a pointer decision reached the page's end (Issue #1523). */
+.manuscript-comments-heading .manuscript-comments-step[data-offered="true"] { color: var(--action-primary-text); background: var(--action-primary); }
 .manuscript-comments-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .manuscript-comments-canvas { position: relative; min-height: 100%; margin-inline: 8px; }
 .manuscript-comments-card { position: absolute; left: 0; right: 0; overflow-wrap: anywhere; border-radius: 10px; }
 .manuscript-comments-card > .editorial-mark-card { position: static; width: 100%; box-sizing: border-box; padding: .6rem .7rem; box-shadow: 0 2px 8px var(--shadow); }
-.manuscript-comments-card[data-selected="true"] { outline: 2px solid var(--category-accent); outline-offset: -2px; }
-.manuscript-comments-card[data-hovered="true"]:not([data-selected="true"]) { outline: 1px solid var(--category-accent); }
+.manuscript-comments-card[data-selected="true"] { outline: 2px solid var(--category-accent, var(--focus)); outline-offset: -2px; }
+.manuscript-comments-card[data-hovered="true"]:not([data-selected="true"]) { outline: 1px solid var(--category-accent, var(--focus)); }
 .manuscript-comments-reply { padding: .6rem; background: var(--surface); border: 1px solid var(--boundary); }
 .manuscript-comments-reply textarea { width: 100%; box-sizing: border-box; resize: vertical; }
 .manuscript-comments-problem { color: var(--status-blocked); margin: .2rem 0; }
@@ -1654,22 +1691,19 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .manuscript-comments-leaders circle { fill: var(--category-accent); }
 .ProseMirror .editorial-mark.manuscript-comments-anchor[data-mark-category]:not(.editorial-mark-personal-highlight),
 .ProseMirror .editorial-mark-point.manuscript-comments-anchor[data-mark-category] { background-color: var(--category-fill); border-bottom: 3px solid var(--category-accent); }
-.ProseMirror [data-comment-hovered="true"] { outline: 1px solid var(--category-accent); }
+.ProseMirror [data-comment-hovered="true"] { outline: 1px solid var(--category-accent, var(--focus)); }
 @media (forced-colors: active) {
   .manuscript-comments-card[data-selected="true"] { outline-color: Highlight; }
   .manuscript-comments-leaders path { stroke: Highlight; }
   .manuscript-comments-leaders circle { fill: Highlight; }
 }
-@media (min-width: 1120px) {
-  .editor-workspace:has(> .manuscript-comments-pane:not([hidden])) { grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 340px) 4.75rem; grid-template-rows: minmax(0, 1fr); }
-}
-@media (max-width: 1119px) {
-  .manuscript-comments-leaders { z-index: 9; }
-  .editor-workspace > .manuscript-comments-pane { position: absolute; grid-area: auto; z-index: 8; inset: 0 4.75rem 0 auto; width: min(340px, calc(100% - 4.75rem)); }
-}
-@media (max-width: 760px) {
-  .editor-workspace > .manuscript-comments-pane { right: 3.4rem; width: min(340px, calc(100% - 3.4rem)); }
-}
+.editor-workspace:has(> .manuscript-comments-pane:not([hidden])) { grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 340px) 4.75rem; }
+:root[data-right-column="overlay"] .manuscript-comments-leaders { z-index: 9; }
+/* Only the supporting columns overlay; the permanent rail (also an aside) keeps its grid place. A document keeps its lens
+   beside the text at the lens's narrowest width while the 批注栏 overlays it; with 导航 open the lens lies below the text. */
+:root[data-right-column="overlay"] .editor-workspace.document-workspace:has(> .manuscript-comments-pane:not([hidden])) { grid-template-columns: minmax(0, 1fr) 14rem 4.75rem; }
+:root[data-right-column="overlay"] .editor-workspace:has(> :is(.manuscript-comments-pane, .manuscript-navigator):not([hidden])) { grid-template-columns: minmax(0, 1fr) 4.75rem; }
+:root[data-right-column="overlay"] .editor-workspace > :is(.manuscript-comments-pane, .manuscript-navigator):not([hidden]) { position: absolute; grid-area: auto; z-index: 8; inset: 0 4.75rem 0 auto; width: clamp(300px, 26vw, 340px); }
 :root[data-focus-mode="on"] .manuscript-comments-pane, :root[data-focus-mode="on"] .manuscript-comments-leaders { display: none !important; }
 .editor-workspace:has(> .manuscript-navigator:not([hidden])) { grid-template-columns: minmax(0, 1fr) var(--supporting-effective-width) 4.75rem; }
 .manuscript-surface { position: relative; grid-column: 1; grid-row: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
@@ -1785,6 +1819,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 /* ADR 0092: the former min(70vh, 760px) is a floor, so the pane is never shorter than before; it grows into the viewport height left after a 15rem header allowance, up to 960px. A context header taller than 15rem can still leave a small page scroll. */
 /* The text keeps the editor's own column (VIEW-004, about 72ch by default), centred with breathing room on both sides. */
 .editor-window { position: relative; flex: 1 1 0; min-height: 0; overflow: auto; padding: clamp(1.5rem, 3vw, 2.5rem) clamp(1.5rem, 4vw, 3.5rem); background: var(--manuscript); }
+:root:is([data-right-column="wide"], [data-right-column="icons"], [data-right-column="overlay"]) .editor-window { padding-inline: 1.25rem; }
 /* Manuscript reading typography (Issue #951; VIEW-004/005): the face, size, leading, column and alignment come from the local
    reading preferences as custom properties, with the former values as the fallback. The column counts fullwidth characters. */
 .ProseMirror {
@@ -1830,12 +1865,13 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editor-shell[data-applied-marks="hidden"] .ProseMirror .editorial-mark-applied-badge { display: none; }
 .editor-shell[data-applied-marks="hidden"] .ProseMirror .editorial-mark-change-suggestion[data-mark-status="applied"] { background: transparent; border-bottom-color: transparent; }
 .editor-shell[data-applied-marks="hidden"] .ProseMirror [data-block-id][data-mark-line="applied"] { border-left-color: transparent; }
-.manuscript-comments-card.editorial-mark-card-active { outline: 2px solid var(--category-accent); outline-offset: -2px; }
+.manuscript-comments-card.editorial-mark-card-active { outline: 2px solid var(--category-accent, var(--focus)); outline-offset: -2px; }
 /* 阅读与修订模式 (Issue #1411): the mode pill says which mode the text is in. */
 .editor-input-mode-toggle { white-space: nowrap; }
 .inline-track-del { color: var(--status-blocked); text-decoration: line-through; background: var(--status-blocked-surface); user-select: none; }
 .inline-track-ins { color: var(--status-attention); text-decoration: underline; text-underline-offset: .18em; background: var(--status-attention-surface); }
-.paragraph-revision-bar { border-inline-start: 3px solid var(--status-attention); padding-inline-start: 8px; }
+/* The same 12.4 px as a plain paragraph's 2 px line and .65rem: a first revision does not move the text (Issue #1523). */
+.paragraph-revision-bar { border-inline-start: 3px solid var(--status-attention); padding-inline-start: calc(.65rem - 1px); }
 .inline-track-del[data-mark-filtered-out="true"], .inline-track-ins[data-mark-filtered-out="true"] { opacity: .2; }
 .editor-input-mode-toggle[data-input-mode="direct-edit"] { color: var(--status-blocked); border-color: currentColor; }
 .ProseMirror .editorial-mark[data-mark-anchor="drifted"] { background: transparent; border-bottom-style: dashed; border-bottom-width: 2px; }
@@ -1948,10 +1984,29 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editor-identities { margin: 0; padding: .8rem 1.25rem; border-top: 1px solid var(--boundary); background: var(--surface-subdued); }
 .editor-identities summary { cursor: pointer; font-weight: 700; }
 
-.status-bar { position: relative; flex: none; z-index: 20; width: fit-content; max-width: calc(100% - 1.5rem); margin: .65rem auto; padding: .4rem .85rem; border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface); color: var(--text-subdued); font-size: .86rem; overflow-wrap: anywhere; }
+.status-bar { position: fixed; z-index: 40; bottom: calc(var(--bottom-controls, 0px) + .45rem); left: calc(var(--sidebar-width) + .75rem); right: calc(var(--status-area-right, 0px) + .75rem); display: flex; align-items: flex-start; gap: .4rem; width: fit-content; margin: 0 auto; padding: .3rem .85rem; box-shadow: 0 4px 20px var(--shadow); border: 1px solid var(--boundary); border-radius: 1rem; background: var(--surface); color: var(--text-subdued); font-size: .86rem; line-height: 1.45; overflow-wrap: anywhere; }
+/* A long message wraps to at most four lines and scrolls inside the bar beyond that; × stays in view beside it. */
+.status-line { min-width: 0; max-height: calc(4 * 1.45em); overflow-y: auto; scrollbar-width: thin; }
+.status-bar > .status-dismiss { flex: none; }
 .status-bar[data-tone="busy"] { color: var(--status-attention); }
 .status-bar[data-tone="success"] { color: var(--status-good); }
 .status-bar[data-tone="error"] { color: var(--status-blocked); }
+/* #1519: the bar is an overlay at the bottom of the content area, never in the page flow: it reserves nothing while hidden and
+   changes no element's height when it appears. It stands above the page's bottom controls (`--bottom-controls`, published by
+   `followBottomControls`) and between the sidebar and the Task Drawer, docked or overlaying; on the manuscript it keeps to the
+   text column (`--status-area-right`). Only while it shows does a scrolling page get the padding that lets its last line be
+   scrolled clear of it; the manuscript keeps its height and its text pane gets that padding instead. */
+body[data-task-drawer="open"] .status-bar { right: max(calc(min(var(--task-drawer-width), 100vw - 1rem) + .75rem), calc(var(--status-area-right, 0px) + .75rem)); }
+:root[data-focus-mode="on"] .status-bar { left: .75rem; }
+/* Until it has been placed above the page's bottom controls the bar takes no pointer and shows nothing (it stays in the
+   accessibility tree, so its words are still said): a press in that instant reaches the control under it, never the ×. Its
+   position, the scroll padding and the space above a sticky bar then take effect together. */
+:root:not([data-status-bar="shown"]) .status-bar { opacity: 0; pointer-events: none; }
+:root[data-status-bar="shown"] body:not(:has(#screen[data-screen="editor"])) { padding-bottom: calc(var(--status-bar-height, 0px) + 1rem); }
+/* A sticky action bar takes the bar's height as space above itself, so at the page's end the bar stands in that space and the
+   control just above the sticky bar is not under it. */
+:root[data-status-bar="shown"] #screen :is(.commit-bar, .workbench-actions, .task-overview-confirm) { margin-top: calc(1.4rem + var(--status-bar-height, 0px) + .45rem); }
+:root[data-status-bar="shown"] .editor-window { padding-bottom: calc(clamp(1.5rem, 3vw, 2.5rem) + var(--status-bar-height, 0px) + var(--bottom-controls, 0px)); }
 .error-panel { border-color: var(--status-blocked); background: var(--status-blocked-surface); }
 
 @media (max-width: 960px) {
@@ -2042,7 +2097,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
   .book-people-related,
   .task-panel-compose, .task-panel-count, .task-card, .task-result-window, .task-result-bar, .task-result-foot, .return-chip,
   .dialogue-attempt, .dialogue-convert,
-  .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
+  .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact, .task-status-card,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
   .global-attention-group, .global-attention-item,
@@ -2075,7 +2130,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
   .app-sidebar .global-attention-entry, .sidebar-link { color: LinkText; background: Canvas; border-color: transparent; forced-color-adjust: none; }
   .sidebar-link[aria-current="page"] { outline: 2px solid Highlight; outline-offset: -2px; border-color: CanvasText; box-shadow: none; }
   .sidebar-pin, .sidebar-toggle { color: ButtonText; background: ButtonFace; border: 1px solid ButtonText; forced-color-adjust: auto; }
-  .settings-row, .settings-coming-soon { color: CanvasText; background: Canvas; border-color: CanvasText; }
+  .settings-row { color: CanvasText; background: Canvas; border-color: CanvasText; }
   .global-attention-badge { color: CanvasText; background: Canvas; border: 2px solid CanvasText; forced-color-adjust: none; }
   .global-attention-item { border-left: 2px solid CanvasText; }
   .global-attention-item[data-attention-blocked="true"] { border-left: 6px solid CanvasText; }
@@ -2452,7 +2507,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 :root[data-density="compact"] .screen { margin-top: 1.1rem; }
 :root[data-density="compact"] .page-content { padding: clamp(1rem, 2vw, 1.6rem); }
 :root[data-density="compact"] .navigator-section { gap: .35rem; padding: .55rem 0; }
-:root[data-density="compact"] .search-results, :root[data-density="compact"] .settings-rows { gap: .3rem; }
+:root[data-density="compact"] .search-results { gap: .3rem; }
 :root[data-density="compact"] .search-result, :root[data-density="compact"] .settings-row { padding: .35rem .5rem; }
 :root[data-density="compact"] .editor-toolbar { padding: .6rem 1rem; }
 :root[data-density="compact"] .editor-meta { gap: .3rem .7rem; margin-top: .2rem; }
@@ -2659,6 +2714,15 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .toast { position: fixed; z-index: 100; left: 50%; top: 3.4rem; transform: translateX(-50%); display: flex; align-items: center; gap: .65rem; max-width: min(42rem, calc(100vw - 2rem)); padding: .6rem 1rem; border: 1px solid var(--boundary-strong); border-radius: 999px; box-shadow: 0 4px 20px var(--shadow); color: var(--shell); background: var(--text); font-size: .82rem; }
 .toast .btn { color: inherit; }
 .toast[hidden], .status-bar[hidden] { display: none; }
+/* A task that needs the editor (#1528): its own notice, not the transient capsule; it stays until closed and never takes focus. */
+/* Below the drawer, the menus and the sheets, so none of their controls is covered; one line below the quiet toast, which shares the top edge. */
+.attention-toast { position: fixed; z-index: 20; right: 1rem; top: 6.8rem; display: flex; align-items: center; gap: .5rem; max-width: min(26rem, calc(100vw - 2rem)); padding: .5rem .6rem .5rem 1rem; border: 1px solid var(--boundary-strong); border-radius: 12px; box-shadow: 0 4px 20px var(--shadow); color: var(--shell); background: var(--text); font-size: .82rem; }
+body[data-task-drawer="open"] .attention-toast { right: calc(min(var(--task-drawer-width), 100vw - 1rem) + 1rem); }
+.attention-toast { pointer-events: none; }
+.attention-toast .btn { color: inherit; flex: none; pointer-events: auto; }
+.attention-toast[hidden] { display: none; }
+.attention-pill { flex: none; border-radius: 999px; font-weight: 800; border: 1px solid var(--boundary-strong); background: var(--surface); color: var(--action-text); }
+.attention-pill[hidden] { display: none; }
 .status-dismiss::before { content: '×'; font-size: 1rem; }
 @media (max-width: 760px) { .edge-entries .edge-label { display: none; } .edge-entries .btn { width: 36px; min-height: 36px; } .sheet { width: calc(100vw - 1rem); } }
 @media (prefers-reduced-motion: reduce) { :root { --motion-fast: 0ms; --motion-base: 0ms; --motion-slow: 0ms; } }
@@ -2701,10 +2765,9 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .task-overview-card-title { display:flex; gap:6px; align-items:center; flex-wrap:nowrap; }
 .task-overview-card-title strong { overflow:hidden; text-overflow:ellipsis; }
 .task-overview-card-actions { position:static; display:flex; align-items:center; gap:4px; flex-shrink:0; flex-wrap:wrap; max-width:100%; justify-content:flex-end; }
-.task-overview-card:focus { outline:2px solid var(--accent); outline-offset:2px; }
+.task-overview-card:focus { outline:2px solid var(--focus); outline-offset:2px; }
 .task-overview-more { position:relative; }
-.task-overview-more > summary { cursor:pointer; opacity:0; }
-.task-overview-card:hover .task-overview-more > summary, .task-overview-card:focus-within .task-overview-more > summary { opacity:1; }
+.task-overview-more > summary { cursor:pointer; }
 .task-overview-more[open] { z-index:4; }
 .task-overview-more[open] > button { display:block; background:var(--surface); }
 .task-overview-more > button { white-space:nowrap; }
@@ -2770,7 +2833,7 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .export-menu > summary { cursor: pointer; list-style: none; padding: .4rem .65rem; }
 .export-menu[open] { background: var(--surface); border: 1px solid var(--boundary); border-radius: 8px; }
 .export-menu-body { position: absolute; top: 100%; right: 0; z-index: 60; min-width: 13rem; padding: .5rem; border: 1px solid var(--boundary); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px var(--shadow); }
-.export-menu-body > :is(button, details) { display: block; margin: .25rem; }
+.export-menu-body > :is(button, details) { display: block; margin: .25rem 0; }
 .export-menu-options .export-option { display: flex; gap: .4rem; padding: .25rem; }
 .global-attention-item[data-read="true"] .global-attention-object { font-weight: 400; }
 .task-card-answer { grid-column: 1 / -1; padding: .75rem; }
@@ -2897,7 +2960,6 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 :is(.ui-menu-panel, .view-menu-list, .editor-save-menu-body, .sidebar-book-menu, .editorial-mark-menu, .export-menu-body) { overflow-y: auto; overscroll-behavior: contain; max-height: min(320px, calc(100vh - 16px)); }
 :is(.ui-menu-panel, .view-menu-list, .sidebar-book-menu, .export-menu-body) .btn, .editorial-mark-menu .editorial-mark-menu-item { display: flex; align-items: center; width: 100%; min-height: 32px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-weight: 400; }
 :is(.ui-menu-panel, .view-menu-list, .sidebar-book-menu, .export-menu-body) .btn:hover:not(:disabled), :is(.ui-menu-panel, .view-menu-list, .sidebar-book-menu, .export-menu-body) .btn:focus-visible { background: var(--surface-subdued); }
-.task-overview-more[open] > summary { opacity: 1; }
 @keyframes ui-menu-enter { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { :is(.ui-select-popover, .ui-menu-panel, .view-menu-list, .editor-save-menu-body, .sidebar-book-menu, .editorial-mark-menu, .export-menu-body) { animation: none; scroll-behavior: auto; } }
 html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-menu-list, .editor-save-menu-body, .sidebar-book-menu, .editorial-mark-menu, .export-menu-body) { animation: none; scroll-behavior: auto; }
@@ -2939,9 +3001,9 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-finding.is-split > .review-finding-main { grid-column: 1; min-width: 0; }
 .review-finding.is-split > .review-finding-actions { grid-column: 2; margin-top: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: .35rem; }
 .review-finding.is-split > :not(.review-finding-heading):not(.review-finding-main):not(.review-finding-actions) { grid-column: 1 / -1; }
-@media (max-width: 760px) {
-  .review-finding.is-split { grid-template-columns: minmax(0, 1fr); }
-  .review-finding.is-split > .review-finding-actions { grid-column: 1; flex-wrap: wrap; }
+@container review-finding (max-width: 720px) {
+  .review-finding.is-split > .review-finding-main { grid-column: 1 / -1; }
+  .review-finding.is-split > .review-finding-actions { grid-column: 1 / -1; flex-wrap: wrap; margin-top: .35rem; }
 }
 
 /* BEGIN Issue #1429: semantic mark categories and persistent comments filters. */
@@ -3122,3 +3184,99 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-synthesis > summary::before { content: '▸'; }
 .review-synthesis[open] > summary::before { content: '▾'; }
 .review-synthesis-preview { display: inline; flex: 1; min-width: 0; }
+
+/* One compact launch bar in page sections and sheet feet (#1526). */
+.task-launch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; min-width: 0; position: relative; }
+.task-launch-bar > details { min-width: 0; }
+.task-launch-bar > details > summary { cursor: pointer; padding: .4rem .5rem; border-radius: .3rem; }
+.task-launch-popover { position: fixed; inset: auto; box-sizing: border-box; width: min(520px, calc(100vw - 1rem)); max-height: min(540px, calc(100vh - 2rem)); overflow: auto; padding: 1rem; margin: 0; border: 1px solid var(--boundary); border-radius: .5rem; background: var(--surface); color: var(--text); box-shadow: 0 8px 30px var(--shadow); }
+.task-launch-popover:not([popover]) { position: absolute; bottom: 100%; z-index: 65; }
+.task-launch-option-rows, .task-launch-references { display: grid; gap: .8rem; }
+.task-launch-option-rows > label { display: grid; gap: .3rem; }
+.task-launch-option-rows small { display: block; color: var(--muted); }
+.task-launch-references:empty { display: none; }
+.task-launch-bar + .task-bar-refusal:empty { display: none; }
+.task-launch-bar ~ p { margin: .3rem 0; font-size: .85em; }
+/* Review results: a compact header and filters leave the findings in view. */
+.review-workspace-card:has(.review-run-leading) { margin-top: .4rem; padding: .6rem .8rem; }
+.review-run-leading { margin-top: 0; padding-top: 0; border-top: 0; }
+.review-run-leading > .review-run-heading { justify-content: flex-start; gap: .3rem .5rem; font-size: .84rem; }
+.review-run-leading > .review-run-heading h4 { font: inherit; font-weight: 700; }
+.review-run-leading .review-run-meta, .review-run-leading .review-new-actions { margin: 0; }
+.review-run-leading .review-history-fold { flex: 0 0 auto; order: 0; position: relative; }
+.review-run-leading .review-history-fold[open] { flex-basis: 100%; order: 2; }
+.review-run-leading .review-new-actions { margin-left: auto; }
+/* Category frames already separate findings; no second padded divider above them. The .3rem gap keeps the header row apart from the filters and collapses into the synthesis box's margin. */
+.review-run-leading > .review-results { margin-top: .3rem; padding-top: 0; border-top: 0; }
+.review-run-leading .review-filters { margin-top: 0; gap: .3rem .5rem; align-items: center; }
+.review-run-leading .review-filter { display: flex; align-items: center; gap: .3rem; }
+.review-run-leading .review-filter:has(select) { max-width: 15rem; }
+.review-run-leading .review-group { margin-top: .35rem; padding: .35rem .5rem; }
+.review-category-fold > summary { cursor: pointer; }
+.review-category-fold > summary .review-group-heading { display: inline-flex; width: calc(100% - 1.5rem); }
+.review-card-more { position: relative; }
+.review-card-more > summary { cursor: pointer; padding: .15rem .65rem; }
+.review-finding { container: review-finding / inline-size; }
+
+.review-filters > :is(.review-filtered, .review-no-findings) { font-size: .86rem; color: var(--text-subdued); }
+
+.review-category-fold > article.review-finding:first-of-type { margin-top: .35rem; }
+
+/* The menu controls place the panel from its width while it still sits in the narrow header box; a content-sized panel keeps that width right, so the panel stays inside a 1008 px window. */
+.review-header-export > .export-menu-body { width: max-content; max-width: calc(100vw - 16px); }
+
+.dialogue-follow-up { display: grid; gap: .5rem; margin-top: 1rem; }
+.dialogue-follow-up textarea { width: 100%; box-sizing: border-box; }
+.dialogue-attempt:not([open]) > summary { flex-wrap: nowrap; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-menu-options { border-top: 1px solid var(--boundary); padding-top: .5rem; display: grid; gap: .5rem; }
+
+.dialogue-citation.btn { display: inline; min-height: 0; min-width: 0; height: auto; padding: 0 .15em; vertical-align: baseline; font: inherit; line-height: inherit; }
+.dialogue-attempt > summary::before { content: "▸"; flex: none; }
+.dialogue-attempt[open] > summary::before { content: "▾"; }
+.dialogue .ui-disclosure-menu { position: relative; }
+.dialogue .ui-disclosure-menu > summary { cursor: pointer; list-style: none; padding: .4rem .65rem; }
+.dialogue .ui-disclosure-menu > summary::-webkit-details-marker { display: none; }
+
+/* Shared controls and viewport-bounded menu contents (#1520). */
+.ui-input { box-sizing: border-box; min-width: 0; max-width: 100%; padding: .5rem .65rem; border: 1px solid var(--boundary-strong); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+.task-composer-goal { display: grid; gap: .35rem; }
+.task-composer-goal textarea { width: 100%; resize: vertical; }
+.ui-checkbox { appearance: none; width: 1.1rem; height: 1.1rem; flex: none; border: 1px solid var(--boundary-strong); border-radius: 4px; background: var(--surface); vertical-align: middle; cursor: pointer; }
+.ui-checkbox:checked { background: var(--action-primary); border-color: var(--action-primary); }
+.ui-checkbox:checked::after { content: '✓'; display: block; color: var(--surface); text-align: center; line-height: 1rem; }
+.ui-input:focus-visible, .ui-checkbox:focus-visible, .settings-switch input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ui-input:disabled, .ui-checkbox:disabled, .settings-switch input:disabled { opacity: .5; cursor: default; }
+.settings-switch input { appearance: none; position: relative; border: 1px solid var(--boundary-strong); border-radius: 1rem; background: var(--surface-subdued); }
+.settings-switch input::after { content: ''; position: absolute; top: 2px; left: 2px; width: .8rem; height: .8rem; border-radius: 50%; background: var(--text-subdued); }
+.settings-switch input:checked { background: var(--action-primary); }
+.settings-switch input:checked::after { left: calc(100% - .8rem - 2px); background: var(--surface); }
+button.danger { color: var(--status-blocked); border-color: var(--status-blocked); background: var(--status-blocked-surface); }
+button.danger:hover { box-shadow: inset 0 0 0 1px var(--status-blocked); }
+:is(.ui-menu-panel, .view-menu-list, .editor-save-menu-body, .export-menu-body, .editing-protection-options) { box-sizing: border-box; max-width: calc(100vw - 16px); }
+:is(.editor-save-menu-body, .editing-protection-options) { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+:is(.editor-save-menu-body, .editing-protection-options) :is(input, textarea, select, fieldset, label, details, .button-row) { box-sizing: border-box; min-width: 0; max-width: 100%; }
+.editing-protection-host { min-width: 0; }
+.editing-protection { flex-wrap: nowrap; gap: .3rem; padding: 0; border: 0; background: transparent; white-space: nowrap; }
+.editing-protection-headline { font-size: .8rem; }
+.editing-protection[data-protection-read-only]:not([data-protection-read-only="none"]) { border: 0; }
+.editing-protection-options .editing-protection-facts { display: grid; gap: .5rem; }
+.editing-protection-options .button-row { flex-wrap: wrap; }
+
+/* 本社词表 (#1543): the word list as a page of 知识库 and in the review sheet — rows in three columns, one primary action per state. */
+.house-word-list { display: grid; gap: .8rem; min-width: 0; }
+.house-word-list p { margin: 0; overflow-wrap: anywhere; }
+.house-rows, .house-entries { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.house-row { display: grid; grid-template-columns: minmax(7rem, 1fr) minmax(10rem, 2fr) 9rem; gap: .5rem .75rem; align-items: start; min-width: 0; }
+.house-row-head { color: var(--text-subdued); font-size: .86rem; font-weight: 700; }
+.house-row textarea { width: 100%; min-height: 2.4rem; resize: vertical; }
+.house-row-tail { display: inline-flex; align-items: center; gap: .6rem; min-height: 2.4rem; }
+.house-row-tail input { margin: 0; }
+.house-word-list .button-row { margin-top: 0; }
+.house-history > summary { cursor: pointer; color: var(--text-subdued); font-weight: 700; }
+.house-history > .btn { display: block; margin-top: .35rem; text-align: start; }
+.house-paste { display: grid; gap: .3rem; }
+.house-paste textarea { width: 100%; min-height: 5rem; resize: vertical; }
+@media (max-width: 44rem) {
+  .house-row { grid-template-columns: minmax(0, 1fr); }
+  .house-row-head { display: none; }
+}

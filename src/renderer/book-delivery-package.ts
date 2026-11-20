@@ -1,4 +1,5 @@
 import { stateTerm, windowStep } from './components/controls.js';
+import { reportResult } from './notifications.js';
 import { identityWords, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import {
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
@@ -76,6 +77,7 @@ import {
 } from './manuscript-export-labels.js';
 import { renderExportFidelity } from './manuscript-export.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { serviceWords } from './service-wording.js';
 
 /** 含批注 and 含修改建议（作为修订）, in S64's order, both on until the editor turns one off (EXP-023). */
 const PACKAGE_EXPORT_OPTION_ORDER: ReadonlyArray<keyof BookDeliveryPackageExportOptions> = ['includeAnnotations', 'includeSuggestions'];
@@ -217,12 +219,12 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   }
 
   /**
-   * 随书稿件 (Issue #1405): every derivative document by its type and title, ticked to go into the package at the saved version
+   * 衍生稿件 (Issue #1405, named in #1531): every derivative document by its type and title, ticked to go into the package at the saved version
    * chosen beside it — newest first, the latest offered — with no Delivery Record and no workflow phase asked for.
    */
   function renderDocumentChoices(next: BookDeliveryPackageProjection): HTMLElement {
     const block = el('section', 'package-documents');
-    block.append(el('h4', undefined, '随书稿件'));
+    block.append(el('h4', undefined, '衍生稿件'));
     if (next.documents.length === 0) {
       block.append(el('p', 'field-note', '本书还没有衍生稿件；可在「稿件」选项卡新建或导入。'));
       return block;
@@ -380,7 +382,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       const item = el('li');
       item.dataset['itemKind'] = entry.kind;
       const label = el('span', 'package-item-label', entry.label);
-      if (entry.detail !== null) label.append(' · ', el('span', 'package-item-detail', entry.detail));
+      // The manifest's detail is recorded with the package; its raw times read as local times where it is shown (Issue #1531).
+      if (entry.detail !== null) label.append(' · ', el('span', 'package-item-detail', serviceWords(entry.detail).replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu, (at) => localInstantLabel(at))));
       item.append(label);
       list.append(item);
     }
@@ -488,7 +491,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       const actions = el('div', 'button-row compact-actions');
       actions.append(direct, open);
       line.append(' · ', el('span', 'package-version-meta', packageVersionMeta(version.purpose, localInstantLabel(version.preparedAt))));
-      item.append(line, el('p', 'package-version-summary', version.summary));
+      // The summary names the 发稿版本 with its revision label (the service's words); ordinary mode reads it without (Issue #1531).
+      item.append(line, el('p', 'package-version-summary', technicalWords(version.summary, version.summary.replace(/ · r\d+(?= · )/u, ''))));
       if (version.exports.length > 0) item.append(renderHistory(version));
       item.append(actions);
       if (exporting !== null && exporting.packageVersionId === version.packageVersionId) item.append(renderExport(exporting));
@@ -866,7 +870,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       if (chosen.outcome === 'cancelled') {
         current.phase = current.prepared === null ? 'ready' : 'prepared';
         draw('export-choose');
-        options.setStatus(PACKAGE_EXPORT_STATUS_LINES.cancelled);
+        reportResult(options.setStatus, PACKAGE_EXPORT_STATUS_LINES.cancelled);
         return;
       }
       if (chosen.export.packageVersionId !== current.packageVersionId) throw new Error(PACKAGE_EXPORT_STATUS_LINES.chooseFailed);
@@ -929,7 +933,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
           exporting = null;
           exportTicket += 1;
           draw({ opener: current.packageVersionId });
-          options.setStatus(PACKAGE_EXPORT_STATUS_LINES.closed);
+          reportResult(options.setStatus, PACKAGE_EXPORT_STATUS_LINES.closed);
         } else if (current.phase === 'writing') {
           options.setStatus('文件已开始写入，正在等待导出结果。', 'busy');
         }
@@ -942,7 +946,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     exporting = null;
     exportTicket += 1;
     draw({ opener: current.packageVersionId });
-    if (announce) options.setStatus(PACKAGE_EXPORT_STATUS_LINES.closed);
+    if (announce) reportResult(options.setStatus, PACKAGE_EXPORT_STATUS_LINES.closed);
   }
 
   async function revealExport(preparationId: string): Promise<void> {

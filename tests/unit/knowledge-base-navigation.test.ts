@@ -34,7 +34,9 @@ it.each(['knowledge','quality'])('keeps the ordinary developer-only redirect not
  vi.stubGlobal('window',{ai7:{inspectGlobalAgent:async()=>({categories:[],books:[],items:[]}),inspectEditorialLearning:async()=>({enabled:true,controlEntries:0,items:[],signals:[],excludedBooks:[],excludedMaterials:[],nextItemOffset:null}),inspectHouseReviewPreference:async()=>({current:null,history:[]})}});
  const page=navigation();
  if(surface==='knowledge')await page.renderKnowledgeBase('rules');else await page.renderQualityLearning('learning');
- expect(page.setStatus).toHaveBeenLastCalledWith('该页在开发者模式下显示');
+ // The redirect is a result the editor should see once: a toast, with no line in the bar (the status call only ends a busy line).
+ expect(page.setStatus).toHaveBeenLastCalledWith('');
+ expect(miniDocument.body.querySelector('[data-toast]')?.textContent).toBe('该页在开发者模式下显示');
 });
 
 it.each(['guidelines', 'library'] as const)('returns a direct %s entry to its Book surface', async (tab) => {
@@ -131,7 +133,7 @@ it('shows each same-type document title directly and refreshes a renamed title i
   expect(Array.from(page.root.querySelectorAll('.exemplar-title'), (node) => node.textContent))
     .toEqual(['春季发布会新闻稿', '秋季发布会新闻稿', '《春季图书》审稿意见 · 给作者的修改意见']);
   expect(page.root.querySelector('.knowledge-file-more')).toBeNull();
-  expect(page.root.querySelector('.exemplar-kind-badge')?.textContent).toBe('工作文档 · 新闻稿');
+  expect(page.root.querySelector('.exemplar-kind-badge')?.textContent).toBe('衍生稿件 · 新闻稿');
   expect(page.root.querySelector('.exemplar-context')?.textContent).toContain('来自《春季图书》（作者：作者甲 · 责编：责编乙）');
   inspect.mockResolvedValueOnce({ books: [{ ...sampleBook, exemplars: [{ ...sampleExemplar, title: '更名后的新闻稿' }] }], nextCursor: null });
   await page.renderKnowledgeBase('exemplars');
@@ -209,7 +211,7 @@ it('defaults ordinary quality to preferences and shares its controls with the kn
   expect(page.root.querySelector('[id="quality-tab-preferences"]')!.getAttribute('aria-selected')).toBe('true');
   expect(Array.from(page.root.querySelectorAll('[role="tab"]'), (tab) => tab.textContent)).toEqual(['审阅偏好', '反馈记录']);
   expect(page.root.querySelector('[data-learning-enabled]')).not.toBeNull();
-  expect(Array.from(page.root.querySelectorAll('button'), (node) => node.textContent)).not.toContain('全域对话历史');
+  expect(Array.from(page.root.querySelectorAll('button'), (node) => node.textContent)).not.toContain('对话历史');
   page.root.querySelector<HTMLButtonElement>('[id="quality-tab-feedback"]')!.click();
   for (let i = 0; i < 4; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   expect(page.root.querySelector('[id="feedback-filter-book"]')).not.toBeNull();

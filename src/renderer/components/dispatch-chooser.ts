@@ -8,7 +8,7 @@ import { modelServiceRuntimeBinding } from '../../shared/protocol/model-service.
 export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-interaction'; changed(config: RuntimeExecutionConfig): void }) {
   const element = document.createElement('details'); element.className = 'dispatch-chooser';
   const summary = document.createElement('summary'); summary.textContent = '模型 加载中 ▾';
-  const panel = document.createElement('div'); panel.className = 'dispatch-chooser-panel';
+  const panel = document.createElement('div'); panel.className = 'dispatch-chooser-panel'; panel.tabIndex = -1;
   // The native top layer escapes scrolling start bars and composers without widening their overflow.
   const topLayer = typeof panel.showPopover === 'function';
   if (topLayer) panel.setAttribute('popover', 'manual');
@@ -76,7 +76,17 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
     const index = choices.findIndex(choice => choice.config.modelConnectionId === defaultChoice.modelConnectionId && choice.config.modelId === defaultChoice.modelId);
     models.selectedIndex = index; paint(defaultChoice.reasoningEffort); options.changed({});
   });
-  element.addEventListener('keydown', event => { if (event.key === 'Escape') { dismiss(); summary.focus(); } });
+  element.addEventListener('focusout', event => {
+    if (event.relatedTarget !== null && event.relatedTarget !== undefined) {
+      if (!element.contains(event.relatedTarget as Node)) dismiss();
+      return;
+    }
+    // A sheet reattaches this same chooser and restores its focus synchronously.
+    const settled = (): void => { if (element.isConnected && !element.contains(document.activeElement)) dismiss(); };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(settled));
+    else queueMicrotask(settled);
+  });
+  element.addEventListener('keydown', event => { if (event.key === 'Escape' && element.open) { event.preventDefault(); event.stopPropagation(); dismiss(); summary.focus(); } });
   return {
     element,
     /** Moving a chooser into a rebuilt sheet dismisses its native popover while retaining the details state. */

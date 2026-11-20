@@ -18,7 +18,6 @@ export interface DataStorageOptions {
   readonly element: <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => HTMLElementTagNameMap[K];
   readonly button: (label: string, className: 'primary' | 'secondary' | 'quiet', action: () => void | Promise<void>) => HTMLButtonElement;
   readonly rendererErrorMessage: (error: unknown, fallback: string) => string;
-  readonly returnToOrigin: () => Promise<void>;
   readonly initializeStartup: () => Promise<void>;
   readonly technicalDetails: (gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>) => HTMLElement;
   readonly replaceScreen: (state: string, content: HTMLElement, place?: ShellPlace | null) => void;
@@ -27,7 +26,7 @@ export interface DataStorageOptions {
 /** 数据与存储, moved verbatim from the shell (Issue #1235). */
 export function createDataStorage(options: DataStorageOptions) {
   const {
-    setStatus, panel, element, button, rendererErrorMessage, initializeStartup, returnToOrigin, technicalDetails, replaceScreen,
+    setStatus, panel, element, button, rendererErrorMessage, initializeStartup, technicalDetails, replaceScreen,
   } = options;
 
   async function renderDataAndStorage(): Promise<void> {
@@ -44,7 +43,6 @@ export function createDataStorage(options: DataStorageOptions) {
       content.dataset['footprintComplete'] = String(projection.footprint.complete);
       content.dataset['footprintMaximumEntries'] = String(projection.footprint.maximumEntries);
       content.append(
-        element('p', 'section-label', '设置 · 数据与存储'),
         element('h2', undefined, '数据与存储摘要'),
         element('p', 'lede', '查看位置不会更改存储、导出内容或授予文件系统权限。'),
       );
@@ -73,7 +71,7 @@ export function createDataStorage(options: DataStorageOptions) {
       if (projection.dataLocationException !== null) summary.dataset['dataLocationException'] = projection.dataLocationException;
       const credentials = element('section', 'review-section');
       credentials.append(
-        element('h3', undefined, '凭据与产品数据分开'),
+        element('h3', undefined, '密钥与产品数据分开'),
         element('p', undefined, `${projection.separationLabel.replace(/。$/u, '')}；系统保护位置：${projection.protectedSecretStoreLabel}。`),
       );
       const reveal = button('查看数据位置', 'secondary', async () => {
@@ -95,8 +93,6 @@ export function createDataStorage(options: DataStorageOptions) {
       const revealRow = element('div', 'button-row');
       revealRow.append(reveal);
       summary.append(revealRow);
-      const actions = element('div', 'button-row');
-      actions.append(button('返回', 'quiet', () => void returnToOrigin()));
       // 版本 (Issue #433, S85a; DSTO-016): the software version and the Data Version apart, read from the store.
       const versions = element('section', 'source-card data-version');
       versions.append(element('h3', undefined, `${DATA_VERSION_HEADING} · 正在读取…`));
@@ -106,7 +102,7 @@ export function createDataStorage(options: DataStorageOptions) {
       const databaseImport = element('section', 'source-card');
       // 定期自动备份 (Issue #434, S86b; DSTO-018): the switch, off by default, and the backups kept beside the data.
       const scheduledBackup = element('section', 'source-card');
-      content.append(summary, credentials, ...(technicalLayerVisible ? [versions] : []), databaseExport, databaseImport, scheduledBackup, actions);
+      content.append(summary, credentials, ...(technicalLayerVisible ? [versions] : []), databaseExport, databaseImport, scheduledBackup);
       mountDatabaseExport({ root: databaseExport, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
       mountDatabaseImport({ root: databaseImport, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
       mountScheduledBackup({ root: scheduledBackup, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });

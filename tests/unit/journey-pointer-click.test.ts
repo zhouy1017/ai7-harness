@@ -6,21 +6,21 @@ import { resolve } from 'node:path';
 type Renderer = { evaluate(expression: string): Promise<unknown>; send(method: string, input: { type: string; x: number; y: number }): Promise<void> };
 type WaitFor = (renderer: Renderer, expression: string, name: string) => Promise<void>;
 const { pointerClick, pointerElementDescription, pointerFailureDetail } = await import(pathToFileURL(resolve('e2e/dispatch-chooser.mjs')).href) as {
-  pointerClick(renderer: Renderer, waitFor: WaitFor, selector: string, name: string): Promise<void>;
+  pointerClick(renderer: Renderer, waitFor: WaitFor, selector: string, name: string, options?: { rest?: boolean }): Promise<void>;
   pointerElementDescription(node: unknown): unknown;
   pointerFailureDetail(value: unknown): unknown;
 };
 
-function scene({ covered = false, moveOnPress = false, neverSettles = false } = {}) {
-  let frame = 0, pressed = false;
+function scene({ covered = false, moveOnPress = false, neverSettles = false, moveOnHover = false } = {}) {
+  let frame = 0, pressed = false, hovered = false;
   const events: { type: string; frame: number; x: number }[] = [];
-  const left = () => moveOnPress && pressed ? 900 : neverSettles ? 640 + frame * 5 : [640, 650, 700, 770][Math.min(frame, 3)]!;
+  const left = () => moveOnPress && pressed || moveOnHover && hovered ? 900 : neverSettles ? 640 + frame * 5 : [640, 650, 700, 770][Math.min(frame, 3)]!;
   const node = { tagName: 'SUMMARY', id: 'summary-toggle', className: 'summary', getAttributeNames: () => ['data-toggle'], scrollIntoView() {}, getBoundingClientRect: () => ({ left: left(), top: 300, right: left() + 110, bottom: 334, width: 110, height: 34 }), contains: (other: unknown) => other === node };
   const blocker = { tagName: 'DIV', id: 'sticky-bar', className: 'sticky overlay', getAttributeNames: () => ['data-overlay'], get textContent(): never { throw new Error('Text must never be read'); }, getAttribute(): never { throw new Error('Attribute values must never be read'); } };
   const document = { querySelector: () => node, elementFromPoint: (x: number) => covered ? blocker : x >= left() && x <= left() + 110 ? node : null };
   const renderer: Renderer = {
     evaluate: async expression => await Function('document', 'requestAnimationFrame', 'innerWidth', 'innerHeight', `return (${expression})`)(document, (callback: () => void) => queueMicrotask(() => { frame++; callback(); }), 1280, 800),
-    send: async (_method, input) => { events.push({ type: input.type, frame, x: input.x }); if (input.type === 'mousePressed') pressed = true; },
+    send: async (_method, input) => { events.push({ type: input.type, frame, x: input.x }); if (input.type === 'mousePressed') pressed = true; if (input.type === 'mouseMoved') hovered = true; },
   };
   const waitFor: WaitFor = async (target, expression, name) => {
     for (let attempt = 0; attempt < 10; attempt++) if (await target.evaluate(expression)) return;
@@ -47,6 +47,13 @@ it('still refuses a target that moves after the press', async () => {
   const target = scene({ moveOnPress: true });
   await expect(pointerClick(target.renderer, target.waitFor, 'button', 'attention-item')).rejects.toThrow('attention-item-target-moved-after-press');
   expect(target.events.map(event => event.type)).toEqual(['mousePressed']);
+});
+
+it('rests the pointer on a target the page moves before the press, follows it, and presses it once (#1526)', async () => {
+  const target = scene({ moveOnHover: true });
+  await pointerClick(target.renderer, target.waitFor, 'button', 'view-plan', { rest: true });
+  expect(target.events.map(event => event.type)).toEqual(['mouseMoved', 'mouseMoved', 'mousePressed', 'mouseReleased']);
+  expect(target.events.slice(1).every(event => event.x === 955)).toBe(true);
 });
 
 it('makes the J-11 caller await a false asynchronous actionability predicate', async () => {

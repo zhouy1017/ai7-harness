@@ -1,3 +1,4 @@
+import { createLaunchBarPresentation, syncLaunchModelSettings } from './components/launch-bar.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import type { PreferenceValues } from '../shared/preferences.js';
@@ -36,17 +37,24 @@ export const SCOPED_AI_EDIT_WORDS = {
   placeholder: '例如：把这几段改得更紧凑，保留核心数据',
   submit: '让 AI 修改',
   cancel: '取消',
-  note: '只有修改范围内、未锁定的文字会被改动；其余段落保持原样。改动会作为已应用的修订卡片留在稿件里，可以逐段撤销。',
+  note: '只有修改范围内、未锁定的文字会被改动；其余段落保持原样。改动会写入稿件并留下修订卡片，可以逐段撤销。',
   requesting: '正在让 AI 修改…',
   empty: '请写下修改要求。',
   tooLong: `修改要求最多 ${MAX_SCOPED_AI_EDIT_INSTRUCTION_CHARACTERS} 个字。`,
   failed: 'AI 局部修改没有完成。',
-  unreadable: '暂时读不到这次修改的结果；已应用的修改仍在稿件里。',
+  unreadable: '暂时读不到这次修改的结果；已写入的修改仍在稿件里。',
   lockFailed: '锁定没有保存。',
   locked: (count: number) => `已锁定 ${count} 段：AI 修改时保持原样`,
   unlocked: (count: number) => `已解锁 ${count} 段`,
   sectionLocked: '已锁定本节：AI 修改时保持原样',
   sectionUnlocked: '已解锁本节',
+} as const;
+
+/** The toolbar's 让 AI 修改… names the scope its composer opens on (Issue #1523): the selection, the caret's section or the text. */
+export const SCOPED_AI_EDIT_ENTRY_LABELS = {
+  selected: '让 AI 修改所选…',
+  section: '让 AI 修改本节…',
+  document: '让 AI 修改全文…',
 } as const;
 
 /** How long the composer waits before reading a request again. */
@@ -199,7 +207,8 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
   instruction.placeholder = SCOPED_AI_EDIT_WORDS.placeholder;
   instruction.dataset['scopedAiEdit'] = 'instruction';
   field.append(instruction);
-  form.append(field, el('small', 'muted', SCOPED_AI_EDIT_WORDS.note));
+  form.append(field);
+  const planStatement = el('p', 'field-note', SCOPED_AI_EDIT_WORDS.note);
   const actions = el('div', 'button-row');
   const submit = el('button', 'btn primary', SCOPED_AI_EDIT_WORDS.submit);
   submit.type = 'submit';
@@ -218,8 +227,8 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
     rememberedChoice = Object.keys(executionConfig).length > 0;
     if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value['model.favourites'] : {}, executionConfig);
     else chooser.unavailable();
-  }).catch(() => chooser.unavailable());
-  actions.append(chooser.element, submit, cancel);
+  }).catch(() => chooser.unavailable()).finally(() => { const bar = actions.querySelector<HTMLElement>('.task-launch-bar'); if (!closed && bar !== null) syncLaunchModelSettings(bar); });
+  actions.append(createLaunchBarPresentation(chooser.element, submit, null, planStatement), cancel);
   form.append(actions);
   let closed = false;
   const close = (): void => {

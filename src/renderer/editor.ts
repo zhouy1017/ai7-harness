@@ -21,7 +21,7 @@ import {
   type AtRiskExtent,
   type ProtectionView,
 } from './editor-protection.js';
-import { PENDING_BUFFER_REFUSED, PROTECTION_BUFFER_REFUSED, protectionAckMismatchLine, atRiskLocation, readOnlyLine, type ProtectionCause, type ProtectionReadOnlyReason } from './editor-protection-labels.js';
+import { protectionFailureReason, PENDING_BUFFER_REFUSED, PROTECTION_BUFFER_REFUSED, protectionAckMismatchLine, atRiskLocation, readOnlyLine, type ProtectionCause, type ProtectionReadOnlyReason } from './editor-protection-labels.js';
 import {
   MAX_BLOCK_CODE_UNITS,
   MAX_BLOCK_GRAPHEMES,
@@ -132,7 +132,8 @@ interface MountOptions {
   flushJournalEdit(input: JournalEditInput, action: object): ReturnType<RendererApi['flushJournalEdit']>;
   readManuscriptImageChunk?: RendererApi['readManuscriptImageChunk'];
   onStateChange(state: EditorUiState): void;
-  onAnnouncement(message: string, tone: 'busy' | 'success' | 'error'): void;
+  /** An autosave line has no tone: it is the live region's text only, neither a toast nor a bar. */
+  onAnnouncement(message: string, tone?: 'busy' | 'success' | 'error'): void;
   onCommand(command: 'search' | 'replace' | 'undo' | 'redo' | 'previous-window' | 'next-window'): void;
   /** A different window was loaded: anything anchored to the blocks that were on screen is gone. */
   onWindowLoaded?(): void;
@@ -976,7 +977,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         retryPrepared = prepared;
         saving = true;
         announceState();
-        options.onAnnouncement(technicalWords('正在自动写入修订日志；可继续编辑当前窗口。', '正在保存…'), 'busy');
+        options.onAnnouncement(technicalWords('正在自动写入修订日志；可继续编辑当前窗口。', '正在保存…'));
         try {
           const ack = await options.flushJournalEdit(prepared.input, editAction);
           requireAcknowledgement(
@@ -1022,14 +1023,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           ownershipBlocked = error instanceof BookOwnershipFailure;
           // The journal did not acknowledge: Editing Protection Mode (DUR-001). A moved target stops replay (DUR-007).
           enterProtection(interrupted ? 'service-stopped' : classifyJournalFailure(error) === 'drift' ? 'drift' : 'journal-unavailable');
-          options.onAnnouncement(
-            interrupted
-              ? '本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。'
-              : error instanceof Error
-                ? `本地写入中断；未确认修改仍保留。${error.message}`
-                : '本地写入中断；未确认修改仍保留，请重试。',
-            'error',
-          );
+          // Only the specific cause belongs beside the persistent protection banner.
+          options.onAnnouncement(protectionFailureReason(error), 'error');
           break;
         }
       }
@@ -1037,7 +1032,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       settleProtection();
       announceState();
       if (lastCompletion && !retryRequired && changedBlocks(view.state.doc).length === 0) {
-        options.onAnnouncement(technicalWords(lastCompletion, '已保存'), 'success');
+        options.onAnnouncement(technicalWords(lastCompletion, '已保存'));
       }
     })().catch((error: unknown) => {
       saving = false;
@@ -1045,12 +1040,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       // Nothing the editor can bind exactly: input pauses, and the content stays for 复制受影响内容 (DUR-007).
       enterProtection(interrupted ? 'service-stopped' : 'drift');
       announceState();
-      options.onAnnouncement(
-        error instanceof Error
-          ? `本地写入中断；未确认修改仍保留。${error.message}`
-          : '本地写入中断；未确认修改仍保留，请重试。',
-        'error',
-      );
+      options.onAnnouncement(protectionFailureReason(error), 'error');
     }).finally(() => {
       flushPromise = undefined;
     });
@@ -1395,7 +1385,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       enterProtection('service-stopped');
       applyEditableState();
       announceState();
-      options.onAnnouncement('本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。', 'error');
+      options.onAnnouncement('本地业务服务已中断。', 'error');
     },
     destroy: () => {
       options.scrollContainer.removeEventListener('scrollend', endSmoothJump);

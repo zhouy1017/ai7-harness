@@ -14,7 +14,7 @@ import { localInstantLabel } from './plan-preview-labels.js';
 import { stateTerm } from './components/controls.js';
 import { mountSeriesKnowledge } from './series-knowledge.js';
 import { mountSeriesExclusions } from './series-exclusions.js';
-import { technicalLayerVisible } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import {
   BOOK_SERIES_HEADING,
   BOOK_SERIES_HISTORY,
@@ -46,7 +46,11 @@ import {
   SERIES_PREVIEW_ACTION,
   SERIES_REFRESH,
   SERIES_REMOVE_OPEN,
+  SERIES_REVIEW_OPEN,
+  SERIES_LEDE,
+  SERIES_PURPOSE,
   SERIES_SCOPE_NOTE,
+  SERIES_TITLE,
   SERIES_STATUS,
   SERIES_UNCHANGED_LABEL,
   bookSeriesChangeLine,
@@ -146,6 +150,11 @@ export interface MountSeriesListOptions {
 }
 
 /** 书系: every Series by name with its member count, and 新建书系 in place. */
+/** 书系's page head: the name once (the header says it; this is the page's label) and one sentence on what a Series is for. */
+export function seriesListHead(): HTMLElement[] {
+  return [el('h2', 'visually-hidden', SERIES_TITLE), el('p', 'field-note series-lede', technicalWords(SERIES_LEDE, SERIES_PURPOSE))];
+}
+
 export function mountSeriesList(options: MountSeriesListOptions): { load(): Promise<void> } {
   const { root, api, setStatus, errorMessage } = options;
   root.classList.add('series-list-page');
@@ -311,6 +320,8 @@ export interface MountSeriesOptions {
     'previewSeriesExclusion' | 'recordSeriesExclusion'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
+  /** 去审阅 on a member whose 书系一致性 can be reviewed: that Book's 新建审阅 with 书系一致性 chosen. */
+  readonly reviewMember?: (bookId: string, title: string) => void;
 }
 
 /**
@@ -476,7 +487,14 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       consistency.append(stateTerm(reviewed, member.seriesConsistencyReview === null ? 'neutral' : 'good'), ' · ',
         stateTerm(availability, available ? 'good' : 'attention'));
       if (!available) consistency.append(el('span', 'series-consistency-detail', `：${member.seriesConsistencyUnavailableReason}`));
-      row.append(heading, people, consistency);
+      const line = el('div', 'series-consistency-line');
+      line.append(consistency);
+      if (available && options.reviewMember !== undefined) {
+        const review = action(SERIES_REVIEW_OPEN, 'quiet', 'review-open', () => options.reviewMember?.(member.bookId, member.title));
+        review.setAttribute('aria-label', `去审阅：《${member.title}》的书系一致性`);
+        line.append(review);
+      }
+      row.append(heading, people, line);
       list.append(row);
     }
     return list;

@@ -7,6 +7,8 @@ export const EDITORIAL_CASE_SCHEMA = 'ai7.editorial-case/1';
 export const EDITORIAL_CASE_KINDS = ['review', 'polish', 'initial-evaluation', 'readers-report', 'writing-draft', 'clarification', 'cross-deliverable', 'material-review'] as const;
 export type EditorialCaseKind = (typeof EDITORIAL_CASE_KINDS)[number];
 export const MEASURED_PASS_KINDS = ['review', 'polish', 'initial-evaluation', 'readers-report', 'writing-draft'] as const;
+/** The four ADR 0091 Public SampleBooks a score-only case may name (exact files under `SampleBooks/`). */
+export const SCORE_ONLY_SAMPLEBOOKS = ['luxun-zhaohua-xishi.docx', 'luxun-nahan.docx', 'liue-laocan-youji.docx', 'wujingzi-rulin-waishi.docx'] as const;
 
 export interface TextConcern {
   readonly id: string;
@@ -45,13 +47,20 @@ export interface EditorialCase {
   readonly id: string;
   readonly kind: EditorialCaseKind;
   readonly title: string;
-  readonly manuscript: { readonly source: 'sample1' } | { readonly source: 'synthetic'; readonly id: string };
+  readonly manuscript: { readonly source: 'sample1' } | { readonly source: 'synthetic'; readonly id: string }
+    | { readonly source: 'public-samplebook'; readonly file: (typeof SCORE_ONLY_SAMPLEBOOKS)[number] };
   readonly bookTitle: string;
   readonly input: Readonly<Record<string, unknown>>;
-  readonly fixture: string;
+  /** `null` only for a score-only case, whose evidence is a developer-live store outside the repository (#1074). */
+  readonly fixture: string | null;
   readonly measuredPass: (typeof MEASURED_PASS_KINDS)[number] | null;
-  /** How the fixture replays: the deterministic route, or the developer-live owner with or without the v14 model-question wrapper. */
-  readonly replay: { readonly route: 'deterministic' } | { readonly route: 'developer-live'; readonly modelQuestions: boolean };
+  /** The measured pass a case belongs to when it is not the 2026-10 one (`YYYY-MM`, #1074); absent for 2026-10 and earlier. */
+  readonly pass?: string;
+  /**
+   * How the fixture replays: the deterministic route, or the developer-live owner with or without the v14 model-question wrapper.
+   * `score-only` (#1074): no fixture exists; the case scores a copy of the developer-live data root its Run was made in.
+   */
+  readonly replay: { readonly route: 'deterministic' } | { readonly route: 'developer-live'; readonly modelQuestions: boolean } | { readonly route: 'score-only' };
   readonly expectedConcerns: ReadonlyArray<TextConcern & StructuralConcern>;
   readonly falsePositiveChecks: ReadonlyArray<TextCheck & StructuralConcern>;
   readonly observations: { readonly acceptance: string; readonly rework: string };
@@ -78,16 +87,36 @@ export function validateCase(value: unknown, fileId: string): EditorialCase {
   require(typeof value.bookTitle === 'string' && value.bookTitle.length > 0 && value.bookTitle.length <= 120, id, 'bookTitle');
   const manuscript = value.manuscript;
   require(isRecord(manuscript) && (manuscript.source === 'sample1' ||
-    (manuscript.source === 'synthetic' && typeof manuscript.id === 'string')), id, 'manuscript');
+    (manuscript.source === 'synthetic' && typeof manuscript.id === 'string') ||
+    (manuscript.source === 'public-samplebook' && (SCORE_ONLY_SAMPLEBOOKS as ReadonlyArray<unknown>).includes(manuscript.file))), id, 'manuscript');
   require(isRecord(value.input), id, 'input');
-  require(typeof value.fixture === 'string' && ID.test(value.fixture), id, 'fixture');
-  require(value.measuredPass === null || (MEASURED_PASS_KINDS as ReadonlyArray<unknown>).includes(value.measuredPass), id, 'measuredPass');
   const replay = value.replay;
-  require(isRecord(replay) && (replay.route === 'deterministic' || (replay.route === 'developer-live' && typeof replay.modelQuestions === 'boolean')), id, 'replay');
-  require(manuscript.source === 'sample1' || replay.route === 'deterministic', id, 'replay');
+  require(isRecord(replay) && (replay.route === 'deterministic' || replay.route === 'score-only' ||
+    (replay.route === 'developer-live' && typeof replay.modelQuestions === 'boolean')), id, 'replay');
+  const scoreOnly = replay.route === 'score-only';
+  // A score-only case is a review of one of the four ADR 0091 books over a chapter range, and nothing else is score-only.
+  require(scoreOnly === (manuscript.source === 'public-samplebook'), id, 'replay');
+  require(manuscript.source === 'sample1' || replay.route !== 'developer-live', id, 'replay');
+  require(scoreOnly ? value.fixture === null : typeof value.fixture === 'string' && ID.test(value.fixture), id, 'fixture');
+  require(value.measuredPass === null || (MEASURED_PASS_KINDS as ReadonlyArray<unknown>).includes(value.measuredPass), id, 'measuredPass');
+  require(value.pass === undefined || (typeof value.pass === 'string' && /^[0-9]{4}-[0-9]{2}$/u.test(value.pass) && value.measuredPass !== null), id, 'pass');
+  if (scoreOnly) {
+    require(value.kind === 'review', id, 'kind');
+    const scope = value.input.scope;
+    const chapters = isRecord(scope) ? scope.chapters : undefined;
+    require(isRecord(chapters) && Number.isSafeInteger(chapters.from) && Number.isSafeInteger(chapters.to) &&
+      (chapters.from as number) > 0 && (chapters.to as number) >= (chapters.from as number), id, 'input/scope');
+    const titles = value.input.chapterTitles;
+    require(Array.isArray(titles) && titles.length === (chapters.to as number) - (chapters.from as number) + 1 &&
+      titles.every((title) => typeof title === 'string' && title.length > 0), id, 'input/chapterTitles');
+    const residue = value.input.conversionResidue;
+    require(residue === undefined || (isRecord(residue) && Object.keys(residue).length === 2 && typeof residue.from === 'string' &&
+      typeof residue.to === 'string' && residue.from.length === 1 && residue.to.length === 1 && residue.from !== residue.to), id, 'input/conversionResidue');
+  }
   for (const field of ['expectedConcerns', 'falsePositiveChecks'] as const) {
     const list = value[field];
-    require(Array.isArray(list) && (field === 'falsePositiveChecks' || list.length > 0), id, field);
+    // Without a fixture or a planted defect there is no reference concern on the four books (Commander, #1074): checks only.
+    require(Array.isArray(list) && (field === 'falsePositiveChecks' ? list.length > 0 || !scoreOnly : scoreOnly ? list.length === 0 : list.length > 0), id, field);
     const seen = new Set<string>();
     for (const entry of list) {
       require(isRecord(entry) && typeof entry.id === 'string' && ID.test(entry.id) && !seen.has(entry.id), id, `${field}/id`);

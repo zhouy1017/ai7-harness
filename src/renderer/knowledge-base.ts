@@ -1,4 +1,6 @@
+import { serviceWords } from './service-wording.js';
 import { rendererApi } from './navigation-generation.js';
+import { reportResult } from './notifications.js';
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { mountKnowledgeBaseHome } from './knowledge-base-home.js';
 import { filterChoices, stateTerm } from './components/controls.js';
@@ -21,6 +23,7 @@ import { FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS, LEARNING_HEADING, LE
 import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, exemplarAttribution, exemplarDesignation, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TAB_VIEWS, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, visibleKnowledgeBaseTabs, type KnowledgeBaseTab } from './knowledge-base-labels.js';
 import { mountCapturedProcedures } from './captured-procedures.js';
 import { mountCustomAnalysisDimensions } from './custom-analysis.js';
+import { mountHouseWordList } from './house-word-list.js';
 import { mountImportedSkills } from './imported-skills.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import type { ShellPlace } from './shell.js';
@@ -71,12 +74,12 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       const home = element('div', 'knowledge-home');
       const back = element('div', 'button-row');
       back.append(button('返回', 'quiet', () => void returnToOrigin()));
-      content.append(element('h2', undefined, KNOWLEDGE_BASE_TITLE), home, back);
+      content.append(element('h2', 'visually-hidden', KNOWLEDGE_BASE_TITLE), home, back);
       replaceScreen('knowledge-base', content);
       const page = navigation.read(content);
       options.rememberReturn(content, () => renderKnowledgeBase());
       await mountKnowledgeBaseHome(home, rendererApi, technicalLayerVisible, (category) => void renderKnowledgeBase(category, true));
-      if (page.isCurrent()) setStatus(notice ?? '知识库已打开');
+      if (page.isCurrent()) { if (notice === undefined) setStatus('知识库已打开'); else reportResult(setStatus, notice); }
       return;
     }
     if (!technicalLayerVisible && knowledgeBaseTabView(tab).developerOnly === true) {
@@ -149,6 +152,14 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       }
       return;
     }
+    // 本社词表 (Issue #1543): the house's own words, edited here as a page; the review sheet mounts the same editor.
+    if (tab === 'house-words') {
+      const editor = mountHouseWordList({ root: panelNode, api: rendererApi, setStatus: (message, tone) => { if (page.isCurrent()) setStatus(message, tone); } });
+      await editor.load();
+      // A refused read says so itself and stands; only a read that went through is reported as opened.
+      if (page.isCurrent() && !editor.failed()) setStatus('本社词表已打开');
+      return;
+    }
     if (tab !== 'guidelines') {
       setStatus(`${knowledgeBaseTabView(tab).label}已打开`);
       return;
@@ -204,7 +215,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         books.set(book.bookId, book.bookTitle);
         for (const entry of [...book.exemplars, ...book.readersReports]) {
           const kind = exemplarKindFilter(entry);
-          kinds.set(kind, kind === 'readers-report' ? '审稿意见' : `工作文档 · ${entry.typeLabel}`);
+          kinds.set(kind, kind === 'readers-report' ? '审稿意见' : `衍生稿件 · ${entry.typeLabel}`);
         }
       }
       toolbar.replaceChildren();
@@ -252,7 +263,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         for (const exemplar of exemplars) {
           const item = element('li', 'exemplar-entry');
           const actions = element('div', 'exemplar-actions');
-          actions.append(stateTerm(`学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}`));
+          actions.append(stateTerm(`是否可用于学习：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}`));
           if (exemplar.imported) actions.append(exemplarEligibility(surface, exemplar));
           const heading = element('div', 'exemplar-heading');
           const badge = stateTerm(exemplarKind(exemplar)); badge.classList.add('exemplar-kind-badge');
@@ -316,7 +327,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     for (const entry of book.readersReports) {
       const item = element('li', 'exemplar-entry');
       const actions = element('div', 'exemplar-actions');
-      actions.append(stateTerm(`学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[entry.eligibility]}`));
+      actions.append(stateTerm(`是否可用于学习：${EXEMPLAR_ELIGIBILITY_LABELS[entry.eligibility]}`));
       const heading = element('div', 'exemplar-heading');
       const badge = stateTerm(exemplarKind(entry)); badge.classList.add('exemplar-kind-badge');
       heading.append(badge, element('strong', 'exemplar-title', exemplarTitle(book, entry)), actions);
@@ -411,12 +422,11 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       back.append(all);
     }
     // AI 助手 is in the sidebar; the developer layer keeps this way in as well (#1521).
-    if (technicalLayerVisible) back.append(button('全域对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
+    if (technicalLayerVisible) back.append(button('对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
     back.append(button('返回', 'quiet', () => void returnToOrigin()));
     if (returnToReview !== null) back.prepend(button('返回原审阅', 'quiet', returnToReview));
     content.append(
-      element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${heading}`),
-      element('h2', undefined, QUALITY_LEARNING_TITLE),
+      element('h2', 'visually-hidden', QUALITY_LEARNING_TITLE),
       element('p', 'field-note', QUALITY_LEARNING_LEDE),
       tabs,
       section,
@@ -440,7 +450,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const metrics = element('div'); section.append(metrics);
         await mountEditQualitySignals(metrics, rendererApi);
       }
-      if (page.isCurrent()) setStatus(notice ?? status.opened);
+      if (page.isCurrent()) { if (notice === undefined) setStatus(status.opened); else reportResult(setStatus, notice); }
     } catch (error) {
       if (!page.isCurrent()) return;
       setStatus(rendererErrorMessage(error, status.unavailable), 'error');
@@ -490,7 +500,6 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     back.append(button('返回', 'quiet', () => void returnToOrigin()));
     const holds = element('p', 'lede knowledge-holds', view.holds);
     content.append(
-      element('p', 'section-label', `${KNOWLEDGE_BASE_TITLE} · ${view.label}`),
       element('h2', undefined, view.label),
       tabs,
       holds,
@@ -605,13 +614,13 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       summary.dataset['ruleAction'] = 'view';
       const binds = element('dl', 'default-rule-binds');
       for (const row of rule.binds) {
-        const value = element('dd', undefined, row.value);
+        const value = element('dd', undefined, serviceWords(row.value));
         value.dataset['ruleBind'] = row.label;
         binds.append(element('dt', undefined, row.label), value);
       }
       view.append(summary, binds, technicalDetails('default-rule-facts',
         element('dt', undefined, '规则'), element('dd', 'technical-identity', `${rule.ruleId} · ${rule.taskKind} · ${rule.pattern}`),
-        element('dt', undefined, '规则版本'), element('dd', 'technical-identity', `${technicalWords(`第 ${rule.ordinal} 版`, '版本')} · ${rule.ruleVersionId}`),
+        element('dt', undefined, '规则版本'), element('dd', 'technical-identity', technicalWords(`第 ${rule.ordinal} 版 · ${rule.ruleVersionId}`)),
         element('dt', undefined, '设定时查看的计划'), element('dd', 'technical-identity', `${rule.sourceTaskIntentId} · ${rule.sourcePlanEnvelopeDigest}`)));
       heading.append(element('span', undefined, set));
       card.append(heading, element('p', undefined, rule.does), view);

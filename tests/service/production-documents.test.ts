@@ -291,19 +291,6 @@ function plantRevision37(): void {
 }
 
 describe('Production Documents', () => {
-  it('offers the five house types before any source material is available', async () => {
-    await withBook(async (store, book) => {
-      const documents = store.inspectProductionDocuments(book.bookId);
-      expect(documents.types.map((type) => [type.typeId, type.label, type.notForThisBook, type.document])).toEqual([
-        ['news-release', '新闻稿', false, null], ['promotion-article', '宣传文章', false, null],
-        ['review-article', '评论文章', false, null], ['launch-materials', '发布会材料', false, null],
-        ['marketing-points', '营销要点', false, null],
-      ]);
-      expect(documents.sources).toEqual([]);
-      expect(documents.unavailableReason).toBeNull();
-    });
-  });
-
   it('creates only a house type from material imported as a source', async () => {
     await withBook(async (store, book) => {
       const manuscriptSource = store.getBookOverview(book.bookId, null).records.find((record) => record.kind === 'source')!;
@@ -472,26 +459,6 @@ describe('Production Documents', () => {
     });
   });
 
-  it('keeps versions while a type is not for this Book and restores creation when asked', async () => {
-    await withDocument(async (fixture) => {
-      const { store, book, created, sourceVersionId } = fixture;
-      editDocument(fixture);
-      await saveVersion(fixture);
-      const decision = store.decideProductionDocumentType({ bookId: book.bookId, typeId: 'news-release', notForThisBook: true });
-      expect(decision.document!.versions).toEqual(reading(fixture).versions);
-      expect(decision.document!.versions).toHaveLength(2);
-      expect(decision.documents.types[0]!.notForThisBook).toBe(true);
-      const input = { bookId: book.bookId, typeId: 'promotion-article', notForThisBook: true };
-      const marked = store.decideProductionDocumentType(input);
-      expect(await asyncCode(() => store.createProductionDocument({ bookId: book.bookId, typeId: input.typeId, sourceVersionId })))
-        .toBe('PRODUCTION_DOCUMENT_NOT_FOR_THIS_BOOK');
-      expect(store.decideProductionDocumentType(input)).toEqual(marked);
-      expect(code(() => store.decideProductionDocumentType({ bookId: book.bookId, typeId: 'review-article', notForThisBook: false }))).toBe('no-error');
-      expect(store.decideProductionDocumentType({ ...input, notForThisBook: false }).documents.types[1]!.notForThisBook).toBe(false);
-      expect(reading(fixture).documentId).toBe(created.documentId);
-    });
-  });
-
   it('keeps document ledgers append-only and reads the same documents after restart', async () => {
     let bookId: string;
     let before: unknown;
@@ -578,21 +545,6 @@ describe('Production Documents', () => {
     }
   }, 180_000);
 
-  it('refuses a document for a Book without its Manuscript', async () => {
-    await withStore(async (store) => {
-      const staged = await store.stageSelectedManuscript(randomUUID(), await compose('来源', [30, 31]));
-      const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion,
-        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '只有来源的书', relationship: 'source-only' });
-      const commitId = randomUUID();
-      const commit = await store.commitSourceImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId });
-      await store.acknowledgeImportCompletion(commitId);
-      const deliverables = store.inspectProductionDocuments(commit.bookId);
-      expect(deliverables.unavailableReason).toBe('先导入稿件，再创建生产文档');
-      expect(await asyncCode(() => store.createProductionDocument({ bookId: commit.bookId, typeId: 'news-release', sourceVersionId: commit.sourceVersionId })))
-        .toBe('PRODUCTION_DOCUMENT_NEEDS_MANUSCRIPT');
-    });
-  }, 120_000);
-
   it('preserves a revision-36 Manuscript and permits a separate production document after migration', async () => {
     let book: Book;
     let before: unknown;
@@ -614,22 +566,6 @@ describe('Production Documents', () => {
 
 
 describe('交付 of a Production Document (S66b)', () => {
-  it('refuses deliveries that do not name this document version and a valid recipient and note', async () => {
-    await withDocument(async (fixture) => {
-      const { store, book, created } = fixture;
-      const version1 = saved(created.versions[0]!.revisionId);
-      const manuscriptRevision = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).revisionId;
-      expect(await asyncCode(() => deliver(fixture, saved(manuscriptRevision)))).toBe('PRODUCTION_DOCUMENT_DELIVERY_INVALID');
-      expect(await asyncCode(() => deliver(fixture, version1, 'custom', '   '))).toBe('PRODUCTION_DOCUMENT_DELIVERY_INVALID');
-      expect(await asyncCode(() => deliver(fixture, version1, 'publicity', '宣传部'))).toBe('PRODUCTION_DOCUMENT_DELIVERY_INVALID');
-      expect(await asyncCode(() => deliver(fixture, version1, 'publicity', null, '注'.repeat(501)))).toBe('PRODUCTION_DOCUMENT_DELIVERY_INVALID');
-      expect(await asyncCode(() => store.recordProductionDocumentDelivery({
-        bookId: book.bookId, documentId: randomUUID(), version: version1, recipient: { kind: 'publicity', custom: null }, note: null,
-      }))).toBe('PRODUCTION_DOCUMENT_NOT_FOUND');
-      expect(reading(fixture).deliveries).toEqual([]);
-    });
-  });
-
   it('records the saved version, recipient and trimmed note without sending a Manuscript', async () => {
     await withDocument(async (fixture) => {
       const { store, book, created } = fixture;

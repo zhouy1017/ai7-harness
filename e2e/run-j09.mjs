@@ -1,4 +1,7 @@
-import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { pointerClick } from './dispatch-chooser.mjs';
+import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
+import { attentionNoticeClearsMenu, attentionNoticeHolds, closeTaskDrawer, pressQuietResult, READ_CARET } from './attention-notice.mjs';
+import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -22,7 +25,7 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 //
 // Concurrent Book work (Issue #49, plan slice S14; ADR 0021, V2-UX-CONC-001 to 009) follows in the same launch, with
 // J-10's unit hold holding each Run's reading range in flight: a third Book is made from the same input; 甲's first
-// baseline and 丙's execute at once, and 乙's range update, started while both places are taken, waits as 等待运行名额 —
+// baseline and 丙's execute at once, and 乙's range update, started while both places are taken, waits as 排队中 —
 // recorded, nothing sent — in the Task Drawer, on ②A and in 待我处理, which lists the three by Book and counts none.
 // A second Book window opens through 工作概览 → 打开另一本图书 (Issue #632): both windows show the same attention
 // items, words and count, and follow 甲 pausing and 乙 starting without taking the main window's manuscript focus.
@@ -61,15 +64,14 @@ const SAMPLE1_UNITS = 8;
 /** The 修改建议 the editor applies on 丙 while its Run holds a range in flight (Issue #632): six graphemes, replaced by synthetic words. */
 const APPLY_RANGE = Object.freeze([20, 26]);
 const APPLIED_TEXT = '〔并行应用〕';
-const GROUP_ORDER = Object.freeze(['exceptions', 'decisions', 'active', 'recent']);
 const GROUP_LABELS = Object.freeze(['异常与结果待确认', '等待你的决定', '运行中与已暂停', '最近完成']);
 // The screen's own words (`src/renderer/global-attention-labels.ts`), pinned there by its unit suite.
 const REASON_BLOCKED = '模型服务当前不可用，任务尚未开始。';
-const ACTIVE_EMPTY = '没有正在运行或中途停止的任务。';
 // A start waiting on the instance's concurrency governor (Issue #49, S14; CONC-007), in 待我处理's words and the bar's
 // (`src/renderer/task-drawer-labels.ts`), pinned there by their unit suites.
+// Read in developer mode (the service's words, #1531 last look S8); ordinary mode reads 「排队中，轮到后自动开始。」.
 const REASON_WAITING_CAPACITY = '正在等运行名额，轮到后自动开始。';
-const QUEUED_NOTE = '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
+const QUEUED_NOTE = '排队中：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
 // 后台处理登记's words (`src/service/background-analysis-enrollments.ts`, `src/renderer/background-analysis-labels.ts`), pinned
 // there by `tests/unit/background-analysis.test.ts`.
 const BACKGROUND_CURRENT_LINE = '现在：分析结果与当前稿件一致，没有要做的。';
@@ -77,8 +79,8 @@ const BACKGROUND_REVOKED_LINE = '现在：已撤销：不会再开始新的后�
 /** Issue #864: the ceiling 登记 requires in this Journey, its words before and after, and 暂停's line. */
 const BACKGROUND_CEILING_TOKENS = 300000;
 const BACKGROUND_CEILING_REQUIRED = '登记时由你设定 · 必填；书系或全部图书按书平分';
-const BACKGROUND_CEILING_FIRST = '请先填写预算上限。';
-const BACKGROUND_PAUSED_LINE = '现在：已暂停：续行之前不会开始新的后台分析；已经开始的运行照常进行。';
+const BACKGROUND_CEILING_FIRST = '请先填写用量上限。';
+const BACKGROUND_PAUSED_LINE = '现在：已暂停：继续之前不会开始新的后台分析；已经开始的运行照常进行。';
 const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
 /**
  * The quiet period this Journey's launch sets for 后台处理登记 (`--j09-background-quiet-ms`, development-ci and J-09 only; #713
@@ -123,6 +125,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-09' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -490,10 +493,10 @@ async function startFirstBaseline(renderer, readiness, name, from = 'available')
  * ways to begin, and 先看计划 prepares the Task (the quick start waits for a Default Execution Rule).
  */
 async function prepareRange(renderer, unitOrdinal, name) {
-  await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const tab=card?.querySelector('[role="tab"][data-analysis-tab="history"]'); if(!(tab instanceof HTMLButtonElement))return false; tab.click(); return tab.getAttribute('aria-selected')==='true'; })()`, `${name}-history-tab`);
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-${unitOrdinal}'); if(!(radio instanceof HTMLInputElement)||radio.disabled)return false; if(!radio.checked)radio.click(); return radio.checked; })()`, `${name}-range`);
-  // 查看计划 stands on the mode's block at once (Issue #1410 item 15): no button only unfolds it.
-  await assertRenderer(renderer, `(() => { const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]'); const plan=block?.querySelector('.analysis-actions [data-analysis-action="reanalyze-range"]'); if(!(plan instanceof HTMLButtonElement)||plan.disabled||plan.textContent!=='查看计划')return false; plan.click(); return true; })()`, `${name}-plan-first`);
+  await pointerClick(renderer, waitFor, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab`);
+  await pointerClick(renderer, waitFor, `.baseline-analysis-card #analysis-range-${unitOrdinal}`, `${name}-range`);
+  await pointerClick(renderer, waitFor, '.baseline-analysis-card [data-analysis-action="reanalyze-range"]', `${name}-mode`);
+  await pointerClick(renderer, waitFor, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan-first`);
 }
 
 /** 书库 from wherever the window is: the header's 待我处理, then its 返回图书列表. */
@@ -624,7 +627,7 @@ async function openAttention(renderer, name) {
   await waitAttentionPainted(renderer, name);
 }
 async function waitAttentionPainted(renderer, name) {
-  await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host')?.dataset.attentionCount !== undefined && document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4`, `${name}-painted`);
+  await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host')?.dataset.attentionCount !== undefined`, `${name}-painted`);
 }
 
 /** The page as an editor reads it: each group's key, heading, count line, empty line, and each item's words. */
@@ -660,11 +663,11 @@ const READ_PAGE = `(() => {
   };
 })()`;
 
-/** The service's own answer, reduced to what the page is checked against. */
+/** The service's own answer, reduced to what the page is checked against: the groups the page draws are the ones that hold an item (#1522). */
 const READ_SERVICE = `window.ai7.inspectGlobalAttention().then((projection) => ({
   count: projection.actionableCount,
   running: projection.running,
-  groups: projection.groups.map((group) => ({ key: group.key, total: group.total, items: group.items.map((item) => ({ itemId: item.itemId, state: item.state, nextStep: item.nextStep, target: item.target, bookId: item.book.bookId, title: item.book.title })) })),
+  groups: projection.groups.filter((group) => group.total > 0).map((group) => ({ key: group.key, total: group.total, items: group.items.map((item) => ({ itemId: item.itemId, state: item.state, nextStep: item.nextStep, target: item.target, bookId: item.book.bookId, title: item.book.title })) })),
 }))`;
 
 /** Compare both rendered views with the same authoritative answer, allowing an in-flight refresh to finish. */
@@ -958,6 +961,18 @@ async function main() {
     // 待我处理 sits in the shell's sidebar of every window, with no number while nothing needs the editor.
     await waitFor(renderer, `(() => { const entry=document.querySelector('#app-sidebar .sidebar-destinations #global-attention-entry[data-nav-destination="attention"]'); const badge=entry?.querySelector('.global-attention-badge'); return entry instanceof HTMLButtonElement && !entry.disabled && entry.querySelector('.global-attention-entry-label')?.textContent==='待我处理' && entry.dataset.attentionCount==='0' && badge instanceof HTMLElement && badge.hidden && entry.getAttribute('aria-label')==='待我处理'; })()`, 'entry-without-a-number');
 
+    at('task-overview-empty');
+    // With no task the 任务 page is one sentence: no box per empty group, no second title, no 「› 全局」 in the header (#1522); at both Gate window sizes.
+    for (const [overviewWidth, overviewHeight] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width: overviewWidth, height: overviewHeight, deviceScaleFactor: 1, mobile: false });
+      await pointerClick(renderer, waitFor, SIDEBAR.destination('tasks'), `overview-empty-entry-${overviewWidth}`);
+      await waitFor(renderer, `innerWidth === ${overviewWidth} && innerHeight === ${overviewHeight} && document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')?.disabled===false`, `overview-empty-ready-${overviewWidth}`);
+      await assertRenderer(renderer, `(() => { const page = document.querySelector('[data-screen="task-overview"]'); const none = page.querySelector('.task-overview-none'); const rect = none?.getBoundingClientRect(); const position = document.querySelector('#context-position'); return document.querySelector('#context-title')?.textContent === '任务' && position.hidden === true && getComputedStyle(position).display === 'none' && page.querySelectorAll('.task-overview-group').length === 0 && none?.textContent === '现在没有任务，可以用上面的「发起任务」开始一项。' && rect.width > 0 && rect.right <= innerWidth && rect.bottom <= innerHeight && rect.top < innerHeight / 2 && !page.querySelector('h1:not(.visually-hidden)'); })()`, `overview-empty-sentence-${overviewWidth}`);
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('library'), 'overview-empty-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'overview-empty-library-ready');
+
     at('first-book-import');
     const bookA = await importSample1(renderer, FIRST.title, false, 'first-import');
 
@@ -968,8 +983,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
-    await click(renderer, '模型服务', 'model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -984,11 +998,11 @@ async function main() {
     const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference) && readyConnection?.credentialOperationState === 'ready', 'model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除凭据', 'model-remove');
+    await click(renderer, '移除密钥', 'model-remove');
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     credentialRemoved = true;
-    await click(renderer, '返回', 'model-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-back');
 
     at('first-book-blocked-run');
     // Nothing can execute a Run in this launch: 开始任务 records it, and it is blocked before dispatch.
@@ -1037,17 +1051,18 @@ async function main() {
     await waitFor(renderer, `(() => { const page=${READ_PAGE}; return page.count===${JSON.stringify(String(service?.count))} && JSON.stringify(page.groups.map((group)=>group.items.map((item)=>item.itemId)))===${JSON.stringify(serviceIds)}; })()`, 'attention-page-current', 30_000);
     const page = await renderer.evaluate(READ_PAGE);
     const pageGroups = page?.groups ?? [];
-    const exceptions = pageGroups[0]?.items ?? [];
-    const decisions = pageGroups[1]?.items ?? [];
-    const recent = pageGroups[3]?.items ?? [];
-    // The four groups in their fixed order, each keeping its heading; 运行中与已暂停 says it is empty; and every
-    // item's identities wait one deliberate step below its words, in a closed 查看技术详情.
-    requireJourney(JSON.stringify(pageGroups.map((group) => group.key)) === JSON.stringify(GROUP_ORDER) &&
-      JSON.stringify(pageGroups.map((group) => group.heading)) === JSON.stringify(GROUP_LABELS) &&
-      JSON.stringify(pageGroups.map((group) => group.counted)) === '["true","true","false","false"]' &&
-      pageGroups[2].items.length === 0 && pageGroups[2].empty === ACTIVE_EMPTY && pageGroups[2].countLine === '' &&
+    const groupOf = (key) => pageGroups.find((group) => group.key === key);
+    const exceptions = groupOf('exceptions')?.items ?? [];
+    const decisions = groupOf('decisions')?.items ?? [];
+    const recent = groupOf('recent')?.items ?? [];
+    // Only the groups that hold an item are drawn, in their fixed order, each keeping its heading; the two with nothing in them are
+    // absent and not read as empty; and every item's identities wait one deliberate step below its words, in a closed 查看技术详情.
+    requireJourney(JSON.stringify(pageGroups.map((group) => group.key)) === JSON.stringify(['exceptions', 'recent']) &&
+      JSON.stringify(pageGroups.map((group) => group.heading)) === JSON.stringify([GROUP_LABELS[0], GROUP_LABELS[3]]) &&
+      JSON.stringify(pageGroups.map((group) => group.counted)) === '["true","false"]' &&
+      groupOf('decisions') === undefined && groupOf('active') === undefined && pageGroups.every((group) => group.empty === null) &&
       pageGroups.every((group) => group.items.every((entry) => entry.technical === false)),
-    'four-groups-in-order', pageGroups.map((group) => ({ key: group.key, heading: group.heading, items: group.items.length, empty: group.empty })));
+    'groups-with-items-in-order', pageGroups.map((group) => ({ key: group.key, heading: group.heading, items: group.items.length, empty: group.empty })));
     // 异常与结果待确认: the first Book's Run, blocked before dispatch — its Book, object, exact state, reason and step.
     const blockedItem = exceptions[0];
     await assertRenderer(renderer, `Array.from(document.querySelectorAll('.global-attention-item')).every((item) => {
@@ -1062,7 +1077,7 @@ async function main() {
     requireJourney(exceptions.length === 1 && blockedItem?.itemId === `analysis:${blockedA.taskIntent.taskIntentId}` && blockedItem.state === 'analysis-blocked' &&
       blockedItem.blocked === 'true' && blockedItem.target === 'analysis' && blockedItem.bookId === bookA && blockedItem.book === `《${FIRST.title}》` &&
       blockedItem.object === '基线分析 · 首次基线分析' && blockedItem.openName === `查看运行 · 《${FIRST.title}》 · 基线分析 · 首次基线分析` &&
-      blockedItem.pill === '派发前已阻止' && blockedItem.shape === 'diamond' && blockedItem.reason === REASON_BLOCKED &&
+      blockedItem.pill === '没有开始' && blockedItem.shape === 'diamond' && blockedItem.reason === REASON_BLOCKED &&
       blockedItem.next === '查看运行' && (blockedItem.time ?? '').startsWith('记录于 ') && blockedItem.technical === false,
     'blocked-run-item', blockedItem);
     requireJourney(decisions.length === 0, 'no-preapproval-decision');
@@ -1076,15 +1091,15 @@ async function main() {
     // The page is the service's answer, item for item.
     requireJourney(service?.count === 1 && service.running === false &&
       JSON.stringify(service.groups.map((group) => group.items.map((item) => item.itemId))) === JSON.stringify(pageGroups.map((group) => group.items.map((item) => item.itemId))) &&
-      service.groups[0].items[0].nextStep === 'view-run' && service.groups[1].items.length === 0,
+      service.groups[0].items[0].nextStep === 'view-run' && !service.groups.some((group) => group.key === 'decisions'),
     'page-is-the-service-answer', service);
     // Nothing here grants anything: no 待审批 or 批准, no control carries 授权, and no item claims a pause.
     await assertRenderer(renderer, `(() => { const screen=document.querySelector('[data-screen="global-attention"]'); const text=screen?.textContent??''; return !/待审批|批准/u.test(text) && !Array.from(screen.querySelectorAll('button')).some((button)=>/授权/u.test(button.textContent??'')) && !Array.from(screen.querySelectorAll('.global-attention-pill')).some((pill)=>/已暂停/u.test(pill.textContent??'')); })()`, 'no-authority-words');
 
     at('attention-count');
     // The number is the first two groups' and no other: this launch has one blocked Run.
-    requireJourney(page.count === '1' && pageGroups[0].countLine === '1 项需要你处理' && pageGroups[1].countLine === '' &&
-      pageGroups[3].countLine === '1 项' && Number(pageGroups[0].total) + Number(pageGroups[1].total) === Number(page.count), 'count-is-the-first-two-groups', page);
+    requireJourney(page.count === '1' && groupOf('exceptions').countLine === '1 项需要你处理' && groupOf('decisions') === undefined &&
+      groupOf('recent').countLine === '1 项' && Number(groupOf('exceptions').total) === Number(page.count), 'count-is-the-first-two-groups', page);
     await waitFor(renderer, `document.querySelector('#global-attention-entry')?.dataset.attentionCount==='1' && document.querySelector('#global-attention-entry .global-attention-badge')?.textContent==='1' && document.querySelector('#global-attention-entry')?.getAttribute('aria-label')==='待我处理，1 项需要你处理'`, 'entry-count-one', 30_000);
 
     at('attention-writes-nothing');
@@ -1127,11 +1142,11 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(blockedA.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='blocked'`, 'keyboard-item-opened', 30_000);
 
     at('j14-attention-zoom-200-reflow');
-    // At 200% the header, the four groups and every item reflow into the width: nothing scrolls sideways.
+    // At 200% the header, the two groups that hold an item and every item reflow into the width: nothing scrolls sideways.
     await openAttention(renderer, 'zoom');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('header.context-header'), ...document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group, [data-screen="global-attention"] li.global-attention-item')]; return parts.length === 7 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && ${SIDEBAR_ICONS_ONLY} && document.querySelector('#global-attention-entry').getBoundingClientRect().width > 0; })()`, 'reflow-at-200', 10_000);
+    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('header.context-header'), ...document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group, [data-screen="global-attention"] li.global-attention-item')]; return parts.length === 5 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && ${SIDEBAR_ICONS_ONLY} && document.querySelector('#global-attention-entry').getBoundingClientRect().width > 0; })()`, 'reflow-at-200', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
 
@@ -1201,18 +1216,18 @@ async function main() {
 
     at('concurrent-queued-run');
     // 乙's range update, reconfirmed and started while 甲 and 丙 hold both places: its start is recorded and waits for a
-    // place — 等待运行名额 in the bar, with why and its 取消, and on ②A — and nothing of it is sent.
+    // place — 排队中 in the bar, with why and its 取消, and on ②A — and nothing of it is sent.
     await toLibrary(renderer, 'concurrent-b');
     await openAnalysisOf(renderer, bookB, 'concurrent-b-workspace');
     await prepareRange(renderer, 8, 'concurrent-b-range');
     const pendingTaskB = await launchTaskFromBar(renderer, waitFor, 'concurrent-b-start');
     await waitForBar(renderer, {
-      state: 'queued', pill: '等待运行名额', status: '等待运行名额', note: QUEUED_NOTE,
+      state: 'queued', pill: '排队中', status: '排队中', note: QUEUED_NOTE,
       actions: [['cancel-wait', '取消', 'enabled'], ['run-link', '查看运行', 'enabled']],
     }, 'concurrent-b-queued-bar', 30_000);
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='queued' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='等待运行名额'`, 'concurrent-b-queued-card', 30_000);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='queued' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='排队中'`, 'concurrent-b-queued-card', 30_000);
     const queuedB = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(queuedB?.bookId === bookB && queuedB.state === 'queued' && queuedB.stateLabel === '等待运行名额' &&
+    requireJourney(queuedB?.bookId === bookB && queuedB.state === 'queued' && queuedB.stateLabel === '排队中' &&
       queuedB.taskIntent?.taskIntentId === pendingTaskB && queuedB.run?.state === 'authorized' &&
       JSON.stringify(queuedB.run.transitions.map((transition) => transition.state)) === '["authorized"]' && (queuedB.run.progress ?? null) === null &&
       (queuedB.run.attempt ?? null) === null,
@@ -1220,28 +1235,28 @@ async function main() {
     const runB = queuedB.run.runRecordId;
 
     at('j14-queued-forced-colors');
-    // Without colour 等待运行名额 keeps its pill's hollow ring, as every wait before a Run begins.
+    // Without colour 排队中 keeps its pill's hollow ring, as every wait before a Run begins.
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
-    await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const pill=document.querySelector('#task-drawer .task-drawer-pill'); return pill instanceof HTMLElement && pill.textContent==='等待运行名额' && pill.dataset.pillShape==='ring' && getComputedStyle(pill, '::before').content !== 'none'; })()`, 'queued-pill-without-colour');
+    await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const pill=document.querySelector('#task-drawer .task-drawer-pill'); return pill instanceof HTMLElement && pill.textContent==='排队中' && pill.dataset.pillShape==='ring' && getComputedStyle(pill, '::before').content !== 'none'; })()`, 'queued-pill-without-colour');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
 
     at('concurrent-attention');
-    // 待我处理 lists the three under 运行中与已暂停, each by its own Book — 甲 and 丙 运行中, 乙 等待运行名额 with why —
+    // 待我处理 lists the three under 运行中与已暂停, each by its own Book — 甲 and 丙 运行中, 乙 排队中 with why —
     // counts none of them, and has nothing waiting for the editor.
     await openAttention(renderer, 'concurrent-attention');
     const concurrentService = await renderer.evaluate(READ_SERVICE);
     const concurrentIds = JSON.stringify(concurrentService?.groups?.map((group) => group.items.map((item) => item.itemId)) ?? null);
     await waitFor(renderer, `(() => { const page=${READ_PAGE}; return JSON.stringify(page.groups.map((group)=>group.items.map((item)=>item.itemId)))===${JSON.stringify(concurrentIds)}; })()`, 'concurrent-page-current', 30_000);
     const concurrentPage = await renderer.evaluate(READ_PAGE);
-    const activeItems = concurrentPage?.groups?.[2]?.items ?? [];
+    const activeItems = concurrentPage?.groups?.find((group) => group.key === 'active')?.items ?? [];
     const itemOf = (bookId) => activeItems.find((item) => item.bookId === bookId) ?? null;
     const queuedItem = itemOf(bookB);
     requireJourney(concurrentService?.count === 0 && concurrentService.running === true && concurrentPage.count === '0' && activeItems.length === 3 &&
       itemOf(bookA)?.state === 'analysis-running' && itemOf(bookA).book === `《${FIRST.title}》` &&
       itemOf(bookC)?.state === 'analysis-running' && itemOf(bookC).book === `《${THIRD.title}》` &&
       queuedItem?.state === 'analysis-waiting-capacity' && queuedItem.book === `《${SECOND.title}》` && queuedItem.itemId === `analysis:${pendingTaskB}` &&
-      queuedItem.pill === '等待运行名额' && queuedItem.shape === 'ring' && queuedItem.reason === REASON_WAITING_CAPACITY && queuedItem.blocked === 'false' &&
-      queuedItem.next === '查看运行' && concurrentPage.groups[0].items.length === 0 && concurrentPage.groups[1].items.length === 0,
+      queuedItem.pill === '排队中' && queuedItem.shape === 'ring' && queuedItem.reason === REASON_WAITING_CAPACITY && queuedItem.blocked === 'false' &&
+      queuedItem.next === '查看运行' && !concurrentPage.groups.some((group) => group.key === 'exceptions' || group.key === 'decisions'),
     'concurrent-attention-by-book', concurrentPage?.groups?.map((group) => ({ key: group.key, items: group.items.map((item) => [item.book, item.state, item.pill]) })));
     await waitFor(renderer, `document.querySelector('#global-attention-entry')?.dataset.attentionCount==='0' && document.querySelector('#global-attention-entry .global-attention-badge')?.hidden===true`, 'concurrent-count-zero', 30_000);
 
@@ -1353,7 +1368,7 @@ async function main() {
     requireJourney(Number.isSafeInteger(beforeAccept?.journalSequence) && beforeAccept.applied === false, 'apply-c-suggestion-wrote-no-text', beforeAccept);
     await openMarkCard(renderer, 'change-suggestion', markable, 'apply-c-card');
     await assertRenderer(renderer, `window.__j09.act('accept-and-apply')`, 'apply-c-accept');
-    await waitFor(renderer, `window.__j09.card()?.querySelector('[data-mark-state]')?.textContent === '已应用' && window.__j09.markText('change-suggestion', ${JSON.stringify(markable)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j09.status().includes('已应用这条修改建议')`, 'apply-c-applied', 30_000);
+    await waitFor(renderer, `window.__j09.card()?.querySelector('[data-mark-state]')?.textContent === '已接受' && window.__j09.markText('change-suggestion', ${JSON.stringify(markable)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j09.status().includes('已接受这条修改建议')`, 'apply-c-applied', 30_000);
     const afterApply = await renderer.evaluate(`${READ_WINDOW_C}.then((page) => ({ revisionId: page.revisionId, journalSequence: page.journalSequence, applied: page.blocks.find((block) => block.blockId === ${JSON.stringify(markable)})?.text.includes(${JSON.stringify(APPLIED_TEXT)}) === true }))`);
     requireJourney(afterApply.journalSequence === beforeAccept.journalSequence + 1 && afterApply.applied === true,
       'apply-c-wrote-once', { beforeMark: beforeMark.journalSequence, beforeAccept: beforeAccept.journalSequence, after: afterApply.journalSequence, applied: afterApply.applied });
@@ -1532,7 +1547,7 @@ async function main() {
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='paused' && document.activeElement===document.querySelector('[data-background-action="resume"]')`, 'background-paused', 30_000);
     const pausedBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(pausedBlock.pill === '已暂停' && pausedBlock.nextLine === BACKGROUND_PAUSED_LINE && pausedBlock.history.length === 2 && pausedBlock.startedLines.length === 1 &&
-      JSON.stringify(pausedBlock.actions) === JSON.stringify([['resume', '续行', 'enabled'], ['revoke', '撤销登记', 'enabled']]),
+      JSON.stringify(pausedBlock.actions) === JSON.stringify([['resume', '继续', 'enabled'], ['revoke', '撤销登记', 'enabled']]),
     'background-paused-read', pausedBlock);
     const pausedService = await renderer.evaluate(`window.ai7.inspectBackgroundAnalysisEnrollment()`);
     requireJourney(pausedService?.state === 'paused' && pausedService.enrollment?.ordinal === 1 && pausedService.hold?.canResume === true &&
@@ -1555,7 +1570,7 @@ async function main() {
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='revoked'`, 'background-revoked', 30_000);
     // The result is announced where every success is (the polite toast; #persistence-status shows only busy and error lines).
     const revokeAnnounced = await renderer.evaluate(`({ toast: document.querySelector('[data-toast]')?.textContent ?? null, tone: document.querySelector('[data-toast]')?.dataset.tone ?? null, hidden: document.querySelector('[data-toast]')?.hidden ?? null, status: document.querySelector('#persistence-status')?.textContent ?? null })`);
-    requireJourney(revokeAnnounced?.toast === '已撤销后台处理登记：AI7 不再为这本书开始新的后台分析；已经开始的运行照常进行，可以在它的计划里暂停或取消；已有的结果、运行记录、已经发送的内容和这份登记的历史都保留，不会撤回或改写' &&
+    requireJourney(revokeAnnounced?.toast === '已关闭空闲时自动更新分析：AI7 不再为这本书开始新的后台分析；已经开始的运行照常进行，可以在它的计划里暂停或取消；已有的结果、运行记录、已经发送的内容和这份登记的历史都保留，不会撤回或改写' &&
       revokeAnnounced.tone === 'success' && revokeAnnounced.hidden === false, 'background-revoke-consequences', revokeAnnounced);
     const revokedBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(revokedBlock.pill === '已撤销' && revokedBlock.nextLine === BACKGROUND_REVOKED_LINE && revokedBlock.history.length === 4 &&
@@ -1586,7 +1601,7 @@ async function main() {
     at('idle-start-choice');
     await writeFile(holdPath, '0', 'utf8');
     await prepareRange(renderer, 1, 'idle-range');
-    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, 'idle-plan-ready');
+    await waitFor(renderer, `document.querySelector('[data-task-launch-kind] [data-task-drawer-control="launch"]')?.disabled===false`, 'idle-plan-ready');
     // An edit on another Book is saved before this launch; this Book's current manuscript is pinned only at start.
     await toLibrary(renderer, 'idle-cross-book-edit');
     await openManuscriptOf(renderer, bookC, 'idle-cross-book-edit');
@@ -1594,8 +1609,9 @@ async function main() {
     await toLibrary(renderer, 'idle-start-return');
     await openAnalysisOf(renderer, bookB, 'idle-start-return');
     await prepareRange(renderer, 1, 'idle-return-range');
-    await waitFor(renderer, `document.querySelector('#task-drawer select[data-task-start-when]')`, 'idle-choice-visible');
-    await assertRenderer(renderer, `(() => { const options=document.querySelector('#task-drawer .task-launch-options');options.open=true;const budget=options.querySelector('[data-task-launch-option="budget"]');budget.value='100000';budget.dispatchEvent(new Event('input',{bubbles:true}));const timing=options.querySelector('[data-task-start-when]');timing.value='idle';timing.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'idle-choice-explicit');
+    await waitFor(renderer, `document.querySelector('[data-task-launch-kind] select[data-task-start-when]')`, 'idle-choice-visible');
+    await setLaunchBudget(renderer, waitFor, '[data-task-launch-kind]', '100000', 'idle-budget');
+    await chooseLaunchOption(renderer, waitFor, '[data-task-launch-kind] [data-task-start-when]', 'idle', 'idle-choice-explicit');
     await launchTaskFromBar(renderer, waitFor, 'idle-authorize');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-bar-status')?.textContent==='等待空闲'`, 'idle-waits');
     const idleWaiting = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
@@ -1644,6 +1660,31 @@ async function main() {
       await openAnalysisOf(renderer, foregroundBook, 'idle-foreground-cancel');
       await renderer.evaluate(`window.ai7.cancelBaselineAnalysisRun({taskIntentId:${JSON.stringify(foregroundTask)}})`);
     }
+    // #1528: the editor is on another page of Book B when its Run finishes: the completion's 查看结果 opens the result there,
+    // in place, by way of no global page.
+    at('idle-result-in-place');
+    await toLibrary(renderer, 'idle-result-library');
+    await openManuscriptOf(renderer, bookB, 'idle-result-manuscript');
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    try {
+      await renderer.evaluate(`(() => { window.__j09Screens = []; const screen = document.querySelector('#screen'); new MutationObserver(() => { const now = screen.dataset.screen; if (now !== window.__j09Screens.at(-1)) window.__j09Screens.push(now); }).observe(screen, { attributes: true, attributeFilter: ['data-screen'] }); return true; })()`);
+      await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
+      try {
+        await pressQuietResult(renderer, waitFor, 'idle-result-notice');
+      } catch (error) {
+        // Say whether the Run finished: a missing toast is then the notice's, not the Run's.
+        if (!String(error?.message ?? error).includes('idle-result-notice-raised')) throw error;
+        const finished = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((reading)=>reading.run?.runRecordId===${JSON.stringify(idleRunId)} && reading.state==='settled')`).catch(() => false);
+        requireJourney(false, finished ? 'idle-result-run-finished-without-toast' : 'idle-result-run-not-finished');
+      }
+      await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')`, 'idle-result-opened', 60_000);
+      const visited = await renderer.evaluate('window.__j09Screens');
+      requireJourney(Array.isArray(visited) && !visited.includes('task-overview') && !visited.includes('global-attention') && visited.at(-1) === 'book-analysis', 'idle-result-in-place', visited);
+      const route = await renderer.evaluate('window.ai7.getBookWorkbenchRoute()');
+      requireJourney((route?.bookId ?? null) === bookB, 'idle-result-same-book', route);
+    } finally {
+      await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+    }
     await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
     await toLibrary(renderer, 'idle-resume-b');
     await openAnalysisOf(renderer, bookB, 'idle-resume-b');
@@ -1672,13 +1713,24 @@ async function main() {
     }
     await writeFile(holdPath, '1', 'utf8');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-ordinary-settings');
-    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'overview-poll-ordinary-settings-ready');
+    await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'overview-poll-ordinary-settings-ready');
     await click(renderer,'帮助','overview-poll-ordinary-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'overview-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'overview-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')?.disabled===false`, 'overview-ready');
-    await clickSelector(renderer, '[data-task-overview-start]', 'overview-sheet');
-    const selectOverviewBooks = async (ids) => assertRenderer(renderer, `(() => { const ids=${JSON.stringify(ids)}; const sheet=document.querySelector('.task-overview-sheet'); for(const input of sheet.querySelectorAll('input[type="checkbox"][value]')) input.checked=ids.includes(input.value); return ids.every(id=>sheet.querySelector('input[value="'+id+'"]')?.checked); })()`, 'overview-sheet-books');
+    await pointerClick(renderer, waitFor, '[data-task-overview-start]', 'overview-sheet');
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('.task-overview-sheet'); return sheet?.open && sheet.contains(document.activeElement) && document.activeElement!==sheet; })()`, 'overview-sheet-focus');
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await waitFor(renderer, `!document.querySelector('.task-overview-sheet')?.open && document.activeElement?.matches('[data-task-overview-start]')`, 'overview-sheet-focus-return');
+    await pointerClick(renderer, waitFor, '[data-task-overview-start]', 'overview-sheet-reopen');
+    // The sheet opens with no Book ticked on this page (#1522), and each tick is a real press that the button's count follows.
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('.task-overview-sheet'); return sheet?.open===true && sheet.querySelectorAll('input[type="checkbox"]:checked').length===0 && document.querySelector('[data-task-overview-enqueue]')?.textContent==='加入队列（0 本）'; })()`, 'overview-sheet-none-ticked');
+    const selectOverviewBooks = async (ids) => {
+      const toggle = await renderer.evaluate(`Array.from(document.querySelectorAll('.task-overview-sheet input[type="checkbox"][value]')).filter((input) => input.checked !== ${JSON.stringify(ids)}.includes(input.value)).map((input) => input.value)`);
+      for (const id of toggle) await pointerClick(renderer, waitFor, `.task-overview-sheet input[value="${id}"]`, 'overview-sheet-book');
+      await assertRenderer(renderer, `(() => { const ids=${JSON.stringify(ids)}; const sheet=document.querySelector('.task-overview-sheet'); return sheet.querySelectorAll('input[type="checkbox"]:checked').length===ids.length && ids.every(id=>sheet.querySelector('input[value="'+id+'"]')?.checked) && document.querySelector('[data-task-overview-enqueue]')?.textContent==='加入队列（'+ids.length+' 本）'; })()`, 'overview-sheet-books');
+    };
     await selectOverviewBooks(overviewBooks.slice(0, 2));
     await clickSelector(renderer, '[data-task-overview-enqueue]', 'overview-add-two');
     await waitFor(renderer, `document.querySelector('.task-overview-sheet')?.open === true && document.querySelector('[data-task-overview-added]')?.textContent === '已加入 2 项'`, 'overview-sheet-stays-open', 60000);
@@ -1700,6 +1752,18 @@ async function main() {
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.filter(i=>${JSON.stringify(overviewBooks.slice(0,2))}.includes(i.bookId)).every(i=>i.progress?.done===1))()`, 'overview-two-held', 60000);
     // #1375: release two real reading units; both changed cards must keep More and summary focus in ordinary mode.
     const pollOverviewSelector=`.task-overview-card[data-task-item="${overviewIds[0]}"]`;
+    for (const [width, height] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      const summarySelector = `${pollOverviewSelector} .task-overview-more > summary`;
+      await pointerClick(renderer, waitFor, summarySelector, 'overview-ordinary-menu-open');
+      await assertRenderer(renderer, `(() => {
+        const panel = document.querySelector(${JSON.stringify(pollOverviewSelector)}).querySelector('.ui-menu-panel');
+        const box = panel.getBoundingClientRect(), minimum = parseFloat(getComputedStyle(panel).minWidth);
+        return innerWidth === ${width} && innerHeight === ${height} && minimum > 0 && box.width >= minimum && box.right <= innerWidth && box.left >= 0;
+      })()`, 'overview-ordinary-menu-geometry');
+      await pointerClick(renderer, waitFor, summarySelector, 'overview-ordinary-menu-close');
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
     await assertRenderer(renderer,`(() => {const card=document.querySelector(${JSON.stringify(pollOverviewSelector)}),more=card.querySelector('.task-overview-more');more.open=true;more.querySelector('summary').focus();return document.documentElement.dataset.technicalLayerVisible==='false';})()`,'overview-more-poll-open');
     for(const done of [2,3]) {
       await renderer.evaluate(`globalThis.__j09PollCard=document.querySelector(${JSON.stringify(pollOverviewSelector)})`);
@@ -1720,11 +1784,22 @@ async function main() {
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])}))()`, 'overview-first-resumed');
     await overviewAction(overviewIds[2], 'resume');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])} && i.queuePosition===1))()`, 'overview-third-requeued');
-    await clickSelector(renderer, '[data-task-overview-start]', 'overview-fourth-sheet');
-    await selectOverviewBooks([overviewBooks[3]]);
-    await clickSelector(renderer, '[data-task-overview-enqueue]', 'overview-add-fourth');
+    // #1522: with more than six Books the 图书 filter is a list. Chosen by the keyboard, it leaves focus on the list's control, and the
+    // page must keep repainting while focus rests there: a task started now appears under the filter without the editor moving.
+    const filterTrigger = '.task-overview-filters select[aria-label="图书"] + .ui-select-trigger';
+    const filterIndex = await renderer.evaluate(`Array.from(document.querySelector('.task-overview-filters select[aria-label="图书"]').options).findIndex((option) => option.value === ${JSON.stringify(overviewBooks[3])})`);
+    requireJourney(filterIndex > 0, 'overview-filter-lists-the-book', { filterIndex });
+    await pointerClick(renderer, waitFor, filterTrigger, 'overview-filter-open');
+    for (let step = 0; step < filterIndex; step += 1) await press(renderer, 'ArrowDown');
+    await press(renderer, 'Enter');
+    await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === ${JSON.stringify(overviewBooks[3])} && document.activeElement?.matches('.task-overview-filters .ui-select-trigger') && document.querySelectorAll('.task-overview-card').length === 0`, 'overview-filter-chosen-by-key');
+    await renderer.evaluate(`window.ai7.startQuickTasks({ tasks: [{ bookId: ${JSON.stringify(overviewBooks[3])}, procedureId: 'baseline-analysis' }] })`);
+    await waitFor(renderer, `document.querySelectorAll('.task-overview-card').length === 1 && document.activeElement?.matches('.task-overview-filters .ui-select-trigger')`, 'overview-repaints-with-focus-on-the-filter', 60000);
+    await press(renderer, 'ArrowDown');
+    for (let step = 0; step < filterIndex; step += 1) await press(renderer, 'ArrowUp');
+    await press(renderer, 'Enter');
+    await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === 'all' && document.querySelectorAll('.task-overview-card').length > 1`, 'overview-filter-back-to-all');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items.some(i=>i.bookId===${JSON.stringify(overviewBooks[3])} && i.queuePosition===2))()`, 'overview-fourth-second', 60000);
-    await clickSelector(renderer, '.task-overview-sheet .sheet-foot button:last-child', 'overview-fourth-sheet-close');
     overview = await overviewReading(); const fourth = overviewItem(overviewBooks[3]);
     await overviewAction(fourth.itemId, 'top');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items[0]?.itemId===${JSON.stringify(fourth.itemId)})()`, 'overview-fourth-top');
@@ -1734,12 +1809,55 @@ async function main() {
     await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(fourth.itemId)}) && p.groups.find(g=>g.key==='queued').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])} && i.queuePosition===1); })()`, 'overview-fourth-before-third', 60000);
     await overviewAction(fourth.itemId, 'run');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"]') && document.querySelector('#task-drawer')?.hidden===false && Math.abs(document.querySelector('#task-drawer').getBoundingClientRect().width-500)<2`, 'overview-drawer-stays-on-page');
+    // 状态卡 (Issue #1527): the Run under way in ordinary mode is one card — its bar, stage and time, 暂停 and 取消任务 — at the wide window and at the Gate's.
+    at('task-status-running');
+    for (const [statusWidth, statusHeight] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width: statusWidth, height: statusHeight, deviceScaleFactor: 1, mobile: false });
+      await waitFor(renderer, statusCardExpression({ ended: false }), `task-status-running-${statusWidth}`, 30_000);
+      // The card's own controls, by pointer: 查看计划 opens the plan with the Run's activity, 运行 comes back, and 暂停 and 停止任务 are there to press.
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="full-link"]', `task-status-running-plan-${statusWidth}`);
+      await waitFor(renderer, planViewExpression({ running: true }), `task-status-running-plan-view-${statusWidth}`, 30_000);
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-mode="compact"]', `task-status-running-back-to-run-${statusWidth}`);
+      await waitFor(renderer, statusCardExpression({ ended: false }), `task-status-running-card-again-${statusWidth}`, 30_000);
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
     await press(renderer, 'Escape');
     await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.filter(g=>g.key==='running'||g.key==='queued').every(g=>g.items.every(i=>!${JSON.stringify(overviewBooks)}.includes(i.bookId))))()`, 'overview-released-completions', 120000);
+    // 状态卡 of a task that finished (Issue #1527): its result in one sentence, its 处理用时 from the Run Report, 查看结果 — opened from the
+    // overview card's 更多 menu by pointer, at the wide window and at the Gate's.
+    at('task-status-finished-overview');
+    // A finished task is listed under the id of its recorded outcome, not under the id it had while it ran: find it by its Book.
+    const findFinished = `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='recent').items.find(i=>i.bookId===${JSON.stringify(overviewBooks[3])} && i.state==='completed')?.itemId ?? null)()`;
+    await waitFor(renderer, findFinished, 'task-status-finished-recorded', 60000);
+    const finishedItemId = await renderer.evaluate(findFinished);
+    // The product opens the result of a task that just finished while its editor is on this page (a completion notice), one window for each finished
+    // task and a little after each; let those arrive and close them by pointer, so the stage starts from the page and not from a window the completions chose.
+    for (let quiet = 0; quiet < 6;) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 500));
+      if (await renderer.evaluate(`document.querySelector('.task-result-window') !== null`)) {
+        quiet = 0;
+        await pointerClick(renderer, waitFor, '.task-result-window [data-task-result-action="close"]', 'task-status-finished-auto-result-close');
+        await waitFor(renderer, `document.querySelector('.task-result-window') === null`, 'task-status-finished-auto-result-closed');
+      } else quiet += 1;
+    }
+    const finishedCard = `.task-overview-card[data-task-item="${finishedItemId}"]`;
+    for (const [statusWidth, statusHeight] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width: statusWidth, height: statusHeight, deviceScaleFactor: 1, mobile: false });
+      await pointerClick(renderer, waitFor, `${finishedCard} .task-overview-more > summary`, `task-status-finished-menu-${statusWidth}`);
+      await pointerClick(renderer, waitFor, `${finishedCard} [data-task-action="run"]`, `task-status-finished-open-${statusWidth}`);
+      await waitFor(renderer, statusCardExpression({ ended: true, processed: true }), `task-status-finished-card-${statusWidth}`, 30_000);
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="full-link"]', `task-status-finished-plan-${statusWidth}`);
+      await waitFor(renderer, planViewExpression({ running: false }), `task-status-finished-plan-view-${statusWidth}`, 30_000);
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-mode="compact"]', `task-status-finished-back-to-run-${statusWidth}`);
+      await waitFor(renderer, statusCardExpression({ ended: true, processed: true }), `task-status-finished-card-again-${statusWidth}`, 30_000);
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `task-status-finished-close-${statusWidth}`);
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `task-status-finished-closed-${statusWidth}`);
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-developer-settings');
-    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'overview-poll-developer-settings-ready');
+    await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'overview-poll-developer-settings-ready');
     await click(renderer,'帮助','overview-poll-developer-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`,'overview-poll-developer-mode');
 
@@ -1754,8 +1872,43 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-question-library');
     await openAnalysisOf(renderer, questionBook, 'model-question-analysis');
     const beforeQuestion = await readSettledAttention(renderer);
-    const recentBeforeQuestion = beforeQuestion.groups.find((group) => group.key === 'recent').items.map((item) => item.itemId);
+    const recentBeforeQuestion = (beforeQuestion.groups.find((group) => group.key === 'recent')?.items ?? []).map((item) => item.itemId);
+    // #1528: the Run is held at its first range while the editor goes to the manuscript and puts the caret in its text; the
+    // question then comes, and its notice stands at both window sizes without moving the caret or the focus.
+    at('model-question-notice');
+    await writeFile(holdPath, '0', 'utf8');
     await startFirstBaseline(renderer, 'ready', 'model-question-baseline');
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    try {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'model-question-manuscript-entry');
+      await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]')`, 'model-question-manuscript');
+      // At 1008 px the drawer the start left open overlays the text: closed by pointer, as an editor going on to type would.
+      await closeTaskDrawer(renderer, waitFor, 'model-question');
+      // The editor returned to the window: a summary of what the earlier stages left may be showing. It is closed first, so that
+      // the next notice is the question's, and so that the caret below is read after everything that could move it.
+      if (await renderer.evaluate(`document.querySelector('[data-attention-toast]')?.hidden === false`)) {
+        await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'model-question-summary-close');
+        await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'model-question-summary-closed');
+      }
+      await pointerClick(renderer, waitFor, '[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]', 'model-question-caret');
+      const caret = await renderer.evaluate(READ_CARET);
+      requireJourney(caret.focused === true && caret.block !== null, 'model-question-caret-placed', caret);
+      await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
+      await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='awaiting-clarification')`, 'model-question-asked', 120_000);
+      const asked = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.flatMap((group) => group.items).find((entry) => entry.book.bookId === ${JSON.stringify(questionBook)} && entry.state === 'analysis-clarification')?.book.title ?? null)`);
+      requireJourney(typeof asked === 'string', 'model-question-asked-item');
+      await attentionNoticeHolds(renderer, waitFor, requireJourney, 'model-question-notice', `《${asked}》分析在等你回答`, caret);
+      // Over an open menu at 1008 px the notice covers none of its controls (it stands below menus and sheets).
+      await attentionNoticeClearsMenu(renderer, waitFor, requireJourney, 'model-question-notice-menu');
+      // 去处理, pressed with the pointer, opens the question where it is answered — this Book's 分析 with the drawer on the Run — and the notice goes.
+      await pointerClick(renderer, waitFor, '[data-attention-toast-action]', 'model-question-notice-go');
+      await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true && document.querySelector('#screen')?.dataset.screen === 'book-analysis' && document.querySelector('#task-drawer')?.dataset.taskDrawer === 'open' && document.querySelector('.task-plan-clarification-question')`, 'model-question-notice-opened', 30_000);
+      const route = await renderer.evaluate('window.ai7.getBookWorkbenchRoute()');
+      requireJourney((route?.bookId ?? null) === questionBook, 'model-question-notice-same-book', route);
+    } finally {
+      await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+    }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), 'model-question-analysis-return');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='awaiting-clarification'`, 'model-question-waits', 120_000);
     const questionRun = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
     const questionTask = questionRun.taskIntent.taskIntentId;
@@ -1770,7 +1923,7 @@ async function main() {
     const questionPage = await renderer.evaluate(READ_PAGE);
     const shownQuestion = questionPage.groups.find((group) => group.key === 'decisions').items.find((item) => item.itemId === questionItem?.itemId);
     requireJourney(questionItem?.state === 'analysis-clarification' && questionItem.nextStep === 'answer-clarification' && shownQuestion?.blocked === 'true' &&
-      JSON.stringify(questionAttention.groups.find((group) => group.key === 'recent').items.map((item) => item.itemId)) === JSON.stringify(recentBeforeQuestion), 'model-question-decision-and-completed-counts');
+      JSON.stringify((questionAttention.groups.find((group) => group.key === 'recent')?.items ?? []).map((item) => item.itemId)) === JSON.stringify(recentBeforeQuestion), 'model-question-decision-and-completed-counts');
     await openItem(renderer, questionItem.itemId, 'model-question-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('.task-plan-clarification-question')?.textContent==='本范围按哪个阅读重点处理？'`, 'model-question-drawer', 30_000);
     const questionPlan = await renderer.evaluate(`window.ai7.taskOverviewCall({operation:'inspectTaskPlan',bookId:${JSON.stringify(questionBook)},input:{kind:'baseline-analysis',ref:${JSON.stringify(questionTask)}}})`);
@@ -1786,7 +1939,43 @@ async function main() {
     requireJourney(questionDone.resultSetRevision?.units.filter((unit) => unit.state === 'closed').length === SAMPLE1_UNITS && questionDone.run?.attempt?.spans.length === SAMPLE1_UNITS + 1, 'model-question-one-follow-up');
     await openAttention(renderer, 'model-question-answered-attention');
     const answeredAttention = await readSettledAttention(renderer);
-    requireJourney(!answeredAttention.groups.find((group) => group.key === 'decisions').items.some((item) => item.itemId === questionItem.itemId), 'model-question-item-removed');
+    requireJourney(!(answeredAttention.groups.find((group) => group.key === 'decisions')?.items ?? []).some((item) => item.itemId === questionItem.itemId), 'model-question-item-removed');
+
+    at('model-question-second-notice');
+    // #1528: a second raise — another Book's question while the editor types in its manuscript — is closed with × by the real
+    // pointer: the notice goes and the caret and the focus stay in the manuscript.
+    await closeOwnedBrowser();
+    await writeFile(holdPath, '0', 'utf8');
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'second-question-ready');
+    const secondQuestionBook = await importSample1(renderer, '模型提问旅程乙', true, 'second-question-import');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'second-question-library');
+    await openAnalysisOf(renderer, secondQuestionBook, 'second-question-analysis');
+    await startFirstBaseline(renderer, 'ready', 'second-question-baseline');
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    try {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'second-question-manuscript-entry');
+      await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]')`, 'second-question-manuscript');
+      // At 1008 px the drawer the start left open overlays the text: closed by pointer, as an editor going on to type would.
+      await closeTaskDrawer(renderer, waitFor, 'second-question');
+      if (await renderer.evaluate(`document.querySelector('[data-attention-toast]')?.hidden === false`)) {
+        await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'second-question-summary-close');
+        await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'second-question-summary-closed');
+      }
+      await pointerClick(renderer, waitFor, '[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]', 'second-question-caret');
+      const secondCaret = await renderer.evaluate(READ_CARET);
+      requireJourney(secondCaret.focused === true && secondCaret.block !== null, 'second-question-caret-placed', secondCaret);
+      await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
+      await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='awaiting-clarification')`, 'second-question-asked', 120_000);
+      const secondAsked = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.flatMap((group) => group.items).find((entry) => entry.book.bookId === ${JSON.stringify(secondQuestionBook)} && entry.state === 'analysis-clarification')?.book.title ?? null)`);
+      requireJourney(typeof secondAsked === 'string', 'second-question-asked-item');
+      await attentionNoticeHolds(renderer, waitFor, requireJourney, 'second-question-notice', `《${secondAsked}》分析在等你回答`, secondCaret);
+      await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'second-question-notice-close');
+      await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'second-question-notice-closed');
+      requireJourney(JSON.stringify(await renderer.evaluate(READ_CARET)) === JSON.stringify(secondCaret), 'second-question-close-keeps-caret', secondCaret);
+    } finally {
+      await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+    }
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

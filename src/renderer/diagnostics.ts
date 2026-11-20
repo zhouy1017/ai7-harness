@@ -2,7 +2,7 @@ import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js
 import type { DiagnosticsApi } from '../main/diagnostics.js';
 import {
   CRASH_KIND_FALLBACK, CRASH_KIND_LABELS, CRASH_LIST_EMPTY, CRASH_LIST_FAILED, CRASH_LIST_HEADING, CRASH_LIST_LOADING,
-  CRASH_RECORD_VIEW, DIAGNOSTICS_ACTION_FAILED, DIAGNOSTICS_BACK, DIAGNOSTICS_BREADCRUMB, DIAGNOSTICS_BUNDLE_ACTION,
+  CRASH_RECORD_VIEW, DIAGNOSTICS_ACTION_FAILED, DIAGNOSTICS_BUNDLE_ACTION,
   DIAGNOSTICS_BUNDLE_CANCELLED, DIAGNOSTICS_BUNDLE_SAVED, DIAGNOSTICS_EXCLUSIONS, DIAGNOSTICS_LOCATION_ACTION,
   DIAGNOSTICS_LOCATION_REQUESTED, DIAGNOSTICS_TITLE,
 } from './diagnostics-labels.js';
@@ -14,8 +14,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLEl
   return node;
 }
 
-export function mountDiagnostics(root: HTMLElement, api: DiagnosticsApi, back: () => void): void {
-  root.append(el('p', DIAGNOSTICS_BREADCRUMB), el('h2', DIAGNOSTICS_TITLE), el('p', DIAGNOSTICS_EXCLUSIONS));
+export function mountDiagnostics(root: HTMLElement, api: DiagnosticsApi): void {
+  root.append(el('h2', DIAGNOSTICS_TITLE), el('p', DIAGNOSTICS_EXCLUSIONS));
   const actions = el('div', '');
   actions.className = 'button-row';
   const status = el('p', '');
@@ -39,7 +39,7 @@ export function mountDiagnostics(root: HTMLElement, api: DiagnosticsApi, back: (
     const result = await api.revealDiagnosticsLocation();
     root.dataset['revealState'] = result.state;
     status.textContent = DIAGNOSTICS_LOCATION_REQUESTED;
-  }), action(DIAGNOSTICS_BACK, back));
+  }));
   const heading = el('h3', CRASH_LIST_HEADING);
   heading.tabIndex = -1;
   root.append(actions, heading, status);

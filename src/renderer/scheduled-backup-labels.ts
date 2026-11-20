@@ -12,7 +12,7 @@ import { exportBytesLabel } from './manuscript-export-labels.js';
  */
 
 export const SCHEDULED_BACKUP_HEADING = '定期自动备份';
-export const SCHEDULED_BACKUP_LEDE = '打开后每天在本机备份并保留 14 天，不含模型服务凭据且不加密；关闭后不再备份，已有备份保留到期。';
+export const SCHEDULED_BACKUP_LEDE = '打开后每天在本机备份并保留 14 天，不含模型服务密钥且不加密；关闭后不再备份，已有备份保留到期。';
 export const SCHEDULED_BACKUP_SWITCH = '定期自动备份';
 export const SCHEDULED_BACKUP_LOCATION = '备份位置';
 export const SCHEDULED_BACKUP_NONE = '还没有备份。';

@@ -21,7 +21,9 @@ import { STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.
 import { generateSyntheticManuscript, SYNTHETIC_MANUSCRIPT_IDS } from '../editorial-cases/synthetic-manuscripts.mjs';
 import { validateCase } from '../editorial-cases/runner/case-file.js';
 import { classifyFinding, locateOnce, simulatedEditor, structuralMet, type TextAnchor } from '../editorial-cases/runner/scoring.js';
-import { createCaseRoots, importManuscript, openStore } from '../editorial-cases/runner/session.js';
+import { createCaseRoots, type ImportedBook, importManuscript, openStore, workingBlocks } from '../editorial-cases/runner/session.js';
+import { chapterScope, countChangesToOriginal } from '../editorial-cases/runner/run-review.js';
+import { randomUUID } from 'node:crypto';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -111,8 +113,90 @@ describe('the case set', () => {
     }
     expect(cases.filter((entry) => entry.manuscript.source === 'synthetic').map((entry) => (entry.manuscript as { id: string }).id).sort()).toEqual([...SYNTHETIC_MANUSCRIPT_IDS].sort());
     for (const entry of cases) {
-      expect(entry.expectedConcerns.length, entry.id).toBeGreaterThan(0);
+      // #1074: a score-only case reviews an unedited ADR 0091 book, so it has checks and no planted concern.
+      expect(entry.expectedConcerns.length > 0, entry.id).toBe(entry.replay.route !== 'score-only');
       expect(entry.falsePositiveChecks.length, entry.id).toBeGreaterThan(0);
+    }
+    expect(cases.filter((entry) => entry.replay.route === 'score-only').map((entry) => (entry.manuscript as { file: string }).file).sort())
+      .toEqual(['liue-laocan-youji.docx', 'luxun-nahan.docx', 'luxun-zhaohua-xishi.docx', 'wujingzi-rulin-waishi.docx']);
+  });
+
+  it('counts every located finding on an unedited original as a change to it, with 著→着-only suggestions and trap hits apart', () => {
+    const findings = [
+      { key: 'suggestion', categoryId: 'typos-and-usage', quote: '一个字', replacement: '一些字' },
+      { key: 'annotation', categoryId: 'style-and-format', quote: '一处', replacement: null },
+      { key: 'trap', categoryId: 'typos-and-usage', quote: '那里', replacement: '哪里' },
+      { key: 'residue', categoryId: 'typos-and-usage', quote: '看著他', replacement: '看着他' },
+      { key: 'residue-and-more', categoryId: 'style-and-format', quote: '看著他', replacement: '看着她' },
+      { key: 'other-category', categoryId: 'literary-expression', quote: '字', replacement: '词' },
+    ];
+    const counted = countChangesToOriginal(findings, ['typos-and-usage', 'style-and-format'], { from: '著', to: '着' }, new Set(['trap']));
+    expect(counted).toEqual({ counted: 5, suggestions: 4, annotations: 1, variantResidue: 1, trapHits: 1, byCategory: {
+      'typos-and-usage': { suggestions: 3, annotations: 0, variantResidue: 1, trapHits: 1 },
+      'style-and-format': { suggestions: 1, annotations: 1, variantResidue: 0, trapHits: 0 },
+    } });
+    expect(counted.suggestions + counted.annotations).toBe(counted.counted);
+    // 《呐喊》 declares no residue: the same suggestion is an ordinary change to the original.
+    expect(countChangesToOriginal(findings, ['typos-and-usage', 'style-and-format'], null, new Set(['trap'])).variantResidue).toBe(0);
+  });
+
+  it('resolves every score-only chapter rule and check on the product import, and scores only the settled Run of its case', async () => {
+    const references = spawnSync(process.execPath, [join(ROOT, 'tools', 'editorial-evidence.mjs'), '--check-references'],
+      { cwd: ROOT, encoding: 'utf8', timeout: 120_000, windowsHide: true });
+    expect(references.status, references.stderr).toBe(0);
+    expect(references.stdout.split('\n').filter((line) => line.startsWith('EDITORIAL_EVIDENCE/references/')).map((line) => line.replace(/ paragraphs=\S+/u, ''))).toEqual([
+      'EDITORIAL_EVIDENCE/references/review-laocan-youji-two-chapters checks=3',
+      'EDITORIAL_EVIDENCE/references/review-nahan-two-chapters checks=3',
+      'EDITORIAL_EVIDENCE/references/review-rulin-waishi-two-chapters checks=3',
+      'EDITORIAL_EVIDENCE/references/review-zhaohua-xishi-two-chapters checks=3',
+    ]);
+    // Each refusal of the Run-to-case binding, on a disposable 朝花夕拾 store prepared through the product (nothing is driven).
+    const testCase = validateCase(JSON.parse(await readFile(join(CASES, 'review-zhaohua-xishi-two-chapters.json'), 'utf8')), 'review-zhaohua-xishi-two-chapters');
+    const policy = await resolveSourceCheckoutLaunchPolicy(ROOT);
+    const scoreRefusal = async (setup: (store: EditorialStore, book: ImportedBook) => void): Promise<string> => {
+      const roots = await createCaseRoots();
+      try {
+        const store = await openStore(roots, ROOT, null);
+        try { setup(store, await importManuscript(store, ROOT, roots, testCase.manuscript, testCase.bookTitle)); } finally { store.markCleanShutdown(); store.close(); }
+        const scored = spawnSync(process.execPath, [join(ROOT, 'tools', 'editorial-evidence.mjs'), '--score', roots.dataRoot,
+          '--case', testCase.id, '--out', roots.inputRoot], { cwd: ROOT, encoding: 'utf8', timeout: 120_000, windowsHide: true });
+        expect(scored.status).toBe(1);
+        return /EDITORIAL_CASE\/[a-z-]+/u.exec(scored.stderr)?.[0] ?? scored.stderr.slice(0, 200);
+      } finally { await roots.dispose(); }
+    };
+    const prepare = (store: EditorialStore, book: ImportedBook, categories: ReadonlyArray<string>, scope: Parameters<EditorialStore['createReviewRunPreparationWork']>[2]) => {
+      let work = store.createReviewRunPreparationWork(book.bookId, categories, scope, policy, null, []);
+      while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+      expect(work.projection!.run!.state).toBe('prepared');
+    };
+    const categories = testCase.input.categories as ReadonlyArray<string>;
+    const chapters = (store: EditorialStore, book: ImportedBook) => chapterScope(store, book, testCase).scope;
+    expect(await scoreRefusal(() => {})).toBe('EDITORIAL_CASE/score-run-absent');
+    expect(await scoreRefusal((store, book) => prepare(store, book, categories, { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }))).toBe('EDITORIAL_CASE/score-run-not-case');
+    expect(await scoreRefusal((store, book) => prepare(store, book, [...categories, 'style-and-format'], chapters(store, book)))).toBe('EDITORIAL_CASE/score-run-not-case');
+    expect(await scoreRefusal((store, book) => { prepare(store, book, categories, chapters(store, book)); prepare(store, book, categories, chapters(store, book)); })).toBe('EDITORIAL_CASE/score-runs-ambiguous');
+    expect(await scoreRefusal((store, book) => {
+      prepare(store, book, categories, chapters(store, book));
+      const block = workingBlocks(store, book).find((candidate) => candidate.position === chapterScope(store, book, testCase).startPosition + 1)!;
+      const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: block.blockId });
+      const current = window.blocks.find((candidate) => candidate.blockId === block.blockId)!;
+      store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+        windowStartBlockId: window.blocks[0]!.blockId, expectedJournalSequence: window.journalSequence,
+        blockId: block.blockId, baseBlockDigest: current.digest, fromGrapheme: 0, toGrapheme: 0, insertText: '一' });
+    })).toBe('EDITORIAL_CASE/score-book-edited');
+    // Every binding check passes on a never-driven Run, which must not read as "no changes to the original".
+    expect(await scoreRefusal((store, book) => prepare(store, book, categories, chapters(store, book)))).toBe('EDITORIAL_CASE/score-run-unsettled');
+  }, 240_000);
+
+  it('re-measures sample1 in 2026-11 against exactly the 2026-10 references (#1074)', async () => {
+    for (const category of ['typos', 'style', 'literary']) {
+      const read = async (id: string) => JSON.parse(await readFile(join(CASES, `${id}.json`), 'utf8')) as Record<string, unknown>;
+      const before = await read(`review-${category}-sample1`);
+      const after = await read(`review-${category}-sample1-remeasure`);
+      for (const field of ['kind', 'manuscript', 'bookTitle', 'input', 'measuredPass', 'replay', 'expectedConcerns', 'falsePositiveChecks', 'observations']) {
+        expect(after[field], `${category}/${field}`).toEqual(before[field]);
+      }
+      expect([after.fixture, after.pass]).toEqual(['sample1-recorded-v2-editorial-quality-review', '2026-11']);
     }
   });
 
@@ -173,6 +257,10 @@ describe('the harness', () => {
       expect(report.cases.find((entry) => entry.id === 'review-typos-sample1')!.concerns.unmeasured).toEqual(['s1-missing-ta']);
       expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'measured-pass')).toMatchObject({
         cases: 3, concerns: 11, matched: 6, missed: 4, unmeasured: 1, raisedButExcluded: 0, falsePositiveChecks: 1,
+      });
+      // #1074: the 2026-11 pass, replayed from the 38 convertible captures; the tool-using units are unmeasured gaps (#1598).
+      expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'measured-pass-2026-11')).toMatchObject({
+        cases: 3, concerns: 11, matched: 9, missed: 1, unmeasured: 1, raisedButExcluded: 0, falsePositiveChecks: 1,
       });
       expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'authored')).toMatchObject({
         cases: 2, concerns: 13, matched: 11, missed: 2, falsePositiveChecks: 2,

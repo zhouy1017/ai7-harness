@@ -48,11 +48,11 @@ export function wordIntakeRefusalLabel(code: WordIntakeRefusalCode): string { re
 
 /** ADR 0094 §5's two tracked-change import modes, by the names the import confirmation commits. */
 export const WORD_IMPORT_MODE_NAMES: Readonly<Record<WordTrackedChangesChoice['mode'], string>> = {
-  suggestions: '转为 AI7 修订建议',
+  suggestions: '转为 AI7 修改建议',
   get 'accepted-baseline'() { return technicalWords('直接并入正文 · 定稿基线', '导入修订后的正文'); },
 };
 
-/** The choice as offered before preparation: 转为 AI7 修订建议 is recommended and the default. */
+/** The choice as offered before preparation: 转为 AI7 修改建议 is recommended and the default. */
 export function wordImportModeOption(mode: WordTrackedChangesChoice['mode']): string {
   return mode === 'suggestions' ? `${WORD_IMPORT_MODE_NAMES.suggestions} · 推荐` : WORD_IMPORT_MODE_NAMES[mode];
 }
@@ -196,3 +196,12 @@ export function fidelityOutcomeLabel(outcome: ImportFidelityOutcome): string {
     ? technicalWords('含已接受的降级 · 原文件随来源版本保留', '含已接受的格式变化，原文件已保留')
     : technicalWords('完整保留 · 原文件随来源版本保留', '原文件完整保留');
 }
+
+export const WORD_IMPORT_CONSEQUENCES = {
+  suggestions: '以修改前的正文导入，可精确对应的文字修改转为待处理的修改建议，结构修改作为关联原文件的批注保留。',
+  'accepted-baseline': '以接受全部修订后的正文导入，原始修订留在原文件中。',
+} as const;
+export function unsupportedWordImportText(count: number): string {
+  return `此文件含暂不支持的 Word 修订，不能作为首份稿件导入；定位到 ${count} 处。请在 Word 中接受或拒绝全部修订后重新保存，再导入；也可以将此文件保留为来源材料。`;
+}
+export const WORD_IMPORT_REASONS = '查看原因';

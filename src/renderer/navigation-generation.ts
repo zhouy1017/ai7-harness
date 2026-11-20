@@ -20,13 +20,16 @@ export class NavigationGeneration {
     return { isCurrent: () => intent === this.intent };
   }
 
-  commit(destination: string | symbol = Symbol(), bookId: string | null = null): void {
-    if (destination !== this.destination) {
+  /** Answers whether this is another destination; a repaint of the one on screen is not. */
+  commit(destination: string | symbol = Symbol(), bookId: string | null = null): boolean {
+    const changed = destination !== this.destination;
+    if (changed) {
       this.intent += 1;
       this.page += 1;
       this.destination = destination;
     }
     this.bookId = bookId;
+    return changed;
   }
 
   read(root: HTMLElement): NavigationCheckpoint {
@@ -61,6 +64,17 @@ export class NavigationGeneration {
 }
 
 export const navigation = new NavigationGeneration();
+
+/** The one permission for a late answer to move focus: never from inside the Task Drawer, a sheet such as
+ * the command palette, or a dialog. The page still paints; the editor keeps working where they are. */
+export function focusAfterLoad(target: HTMLElement, options?: FocusOptions): void {
+  const active = document.activeElement;
+  const overlay = active instanceof HTMLElement && active !== target ? active.closest<HTMLElement>('dialog, [role="dialog"], .task-drawer') : null;
+  // The drawer also marks the shell; only its own root, while open, is an overlay.
+  const open = overlay !== null && (overlay.tagName === 'DIALOG' ? (overlay as HTMLDialogElement).open
+    : !overlay.matches('.task-drawer') || overlay.dataset['taskDrawer'] === 'open');
+  if (!open) target.focus(options);
+}
 
 export class BookHeldElsewhereError extends Error {
   constructor() { super('这本书已在另一个窗口打开。'); }
@@ -98,7 +112,7 @@ const BOOK_OWNERSHIP_CALLS = new Set<keyof RendererApi>([
   'createEditorialMark', 'createProductionDocument', 'createReadersReportDraft', 'createWritingDraft',
   'decideEvaluationRewrite', 'decideProductionDocumentType', 'deferRecovery', 'designatePublicationVersion',
   'discardAgentWorkspaceProposals', 'dismissReplacementPreview', 'editBaselineAnalysisPlan', 'enableEditorialWorkspaceProfile',
-  'enrollBackgroundAnalysis', 'flushJournalEdit', 'freezeReplacement', 'generateReviewReport',
+  'enrollBackgroundAnalysis', 'flushJournalEdit', 'freezeReplacement', 'generateReviewReport', 'generateReviewSynthesis',
   'getAnalysisRevisionOverview', 'getAnalysisRevisionUnits', 'getAnalysisRunReportRows', 'getBaselineAnalysisPage',
   'getBaselineAnalysisRangePlan', 'getBookOverview', 'getBookWorkbenchRoute', 'getCoverageManifestUnits',
   'getEditorialMarkCard', 'getHistoricalRevision', 'getImportStartup', 'getManuscriptApplyOutcome',
@@ -136,7 +150,7 @@ const BOOK_OWNERSHIP_CALLS = new Set<keyof RendererApi>([
   'controlTaskRun', 'editTaskPlan', 'stopDialogueAnswer', 'continueDialogueAnswer', 'regenerateDialogueAnswer',
   'saveProductionDocumentType', 'deleteProductionDocumentType', 'reorderProductionDocumentTypes',
   'approveBookDeliveryPackageArchiveExport', 'approveBookDeliveryPackageExport',
-  'cancelBookDeliveryPackageArchiveExport', 'cancelBookDeliveryPackageExport', 'inspectHouseWordList', 'saveHouseWordList',
+  'cancelBookDeliveryPackageArchiveExport', 'cancelBookDeliveryPackageExport',
 ]);
 
 /** One boundary for the capability-revoking leave and subsequent Book-scoped calls.
@@ -153,6 +167,8 @@ export function reconcileBookWorkbenchApi<Api extends RendererApi>(raw: Api, she
   let held: string | null = null;
   let failure: BookOwnershipFailure | null = null;
   let recovered = Promise.withResolvers<void>();
+  // The Book on screen whose paused readers wait on `recovered`; null while none wait.
+  let paused: string | null = null;
   const attemptedActions = new WeakSet<object>();
   const wrappers = new Map<PropertyKey, unknown>();
   const settled = async (): Promise<void> => {
@@ -188,6 +204,7 @@ export function reconcileBookWorkbenchApi<Api extends RendererApi>(raw: Api, she
     try { await reconcile(leave); clearFailure(); }
     catch (error) {
       retryRequired = true;
+      if (paused !== shell.bookOnScreen()) { recovered = Promise.withResolvers<void>(); paused = shell.bookOnScreen(); }
       const next = new BookOwnershipFailure(error, recovered.promise);
       if (failure?.message !== next.message) { failure = next; shell.failed(failure, retry); }
       throw failure;
@@ -196,14 +213,19 @@ export function reconcileBookWorkbenchApi<Api extends RendererApi>(raw: Api, she
   const clearFailure = (): void => {
     retryRequired = false;
     failure = null;
+    const onScreen = shell.bookOnScreen();
+    // An open of another Book whose page never arrives leaves the page on screen without its Book:
+    // its paused readers and its notice wait for the recovery that page reaches next.
+    if (paused !== null && paused === onScreen && held !== onScreen) return;
     // An old Book's paused readers must not resume against a different Book.
-    if (held === shell.bookOnScreen()) recovered.resolve();
+    if (held === onScreen && (paused === null || paused === onScreen)) recovered.resolve();
     recovered = Promise.withResolvers<void>();
+    paused = null;
     shell.recovered?.();
   };
   const retry = (): Promise<void> => {
     if (pending !== null) return settled();
-    if (!retryRequired) return Promise.resolve();
+    if (!retryRequired && paused === null) return Promise.resolve();
     return tracked(recover());
   };
   const api = new Proxy({ ...raw }, {

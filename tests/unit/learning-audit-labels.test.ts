@@ -47,7 +47,7 @@ describe('学习回溯 words', () => {
     expect(Object.values(LEARNING_AUDIT_FILTERS)).toEqual(['搜索', '图书', '书系', '类型', '准入状态', '起始日期', '截止日期']);
     expect(LEARNING_AUDIT_FILTERS_LATER).toContain('记忆候选、已启用记忆、后续使用和历史影响');
     expect(LEARNING_AUDIT_STANDINGS.map((standing) => LEARNING_AUDIT_STANDING_LABELS[standing])).toEqual([
-      '待定', '改过 · 需要重新决定', '稍后决定', '仅纳入当前图书', '纳入出版社经验', '明确排除',
+      '待定', '改过 · 需要重新决定', '稍后决定', '仅纳入当前图书', '纳入本社经验', '明确排除',
     ]);
     expect(LEARNING_AUDIT_UNUSED).toBe('尚未被任何任务使用');
     expect(learningAuditBookHeading({ title: '回溯之书', materialCount: 3 })).toBe('《回溯之书》 · 3 条');
@@ -67,7 +67,7 @@ describe('学习回溯 words', () => {
   it('states the remediation preview in its four groups, and each item left out with why', () => {
     expect(LEARNING_REMEDIATION_GROUPS.map((entry) => entry.label)).toEqual(['未来使用', '正在运行', '候选或已启用记忆', '已完成历史']);
     expect(learningRemediationFuture(2, 'book', '回溯之书')).toBe('2 条学习材料今后不再可用于学习（原来是仅纳入《回溯之书》）；它们会显示为明确排除。');
-    expect(learningRemediationFuture(1, 'house', '回溯之书')).toContain('原来是纳入出版社经验');
+    expect(learningRemediationFuture(1, 'house', '回溯之书')).toContain('原来是纳入本社经验');
     expect(learningRemediationFuture(0, null, '回溯之书')).toBe('所选材料中没有可以停止今后使用的。');
     expect(learningRemediationCompleted(3)).toContain('此前的 3 个准入决定，都原样保留');
     expect(Object.keys(LEARNING_REMEDIATION_LEFT_OUT).sort()).toEqual(['changed', 'different-kind', 'different-scope', 'duplicate', 'not-found', 'not-included']);
@@ -140,7 +140,7 @@ describe('学习回溯 words', () => {
     expect(learningRemediationCompleted(2, { completed: 1, completedNamed: ['甲'] })).toBe(
       '1 个已完成的审阅任务参考过它们，会标上「此结果参考的学习材料后来停止今后使用」：甲。这些结果、发现和报告都不会改写，标记也不表示结果有错；它们来自的反馈与改动，以及此前的 2 个准入决定，都原样保留。');
     expect(learningRemediationFuture(1, 'house', '回溯之书', { currentVersion: 3, linesAffected: 2 })).toBe(
-      '1 条学习材料今后不再可用于学习（原来是纳入出版社经验）；它们会显示为明确排除。本社审阅偏好 v3 中有 2 行出自它们，记录后会生成不含它们的新版本，之后的审阅只读新版本。');
+      '1 条学习材料今后不再可用于学习（原来是纳入本社经验）；它们会显示为明确排除。本社审阅偏好 v3 中有 2 行出自它们，记录后会生成不含它们的新版本，之后的审阅只读新版本。');
   });
 
   it('names explicit editorial memory that references a material, and keeps the empty wording when none does (Issue #1082)', () => {

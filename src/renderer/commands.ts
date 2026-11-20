@@ -78,6 +78,9 @@ export const COMMANDS: readonly CommandDefinition[] = [
   { id: 'view.openTasks', name: COMMAND_NAMES['view.openTasks'], group: 'view', context: 'book', defaults: both('F7') },
   // 专注模式 (Issue #951, wave 12 slice 12a; ED-004): the manuscript's view command; Esc and the header's restore control leave it too.
   { id: 'view.comments', name: COMMAND_NAMES['view.comments'], group: 'view', context: 'manuscript', defaults: both('F9') },
+  // 上一条 / 下一条待处理 (Issue #1523): the 批注栏 header's two steps, beyond the loaded page too.
+  { id: 'view.previousPending', name: COMMAND_NAMES['view.previousPending'], group: 'view', context: 'manuscript', defaults: { win32: 'Alt+ArrowUp', darwin: 'Mod+Alt+ArrowUp' } },
+  { id: 'view.nextPending', name: COMMAND_NAMES['view.nextPending'], group: 'view', context: 'manuscript', defaults: { win32: 'Alt+ArrowDown', darwin: 'Mod+Alt+ArrowDown' } },
   { id: 'view.focusMode', name: COMMAND_NAMES['view.focusMode'], group: 'view', context: 'manuscript', defaults: both('F8') },
 ];
 
@@ -486,6 +489,8 @@ export interface CommandDispatcherOptions {
 
 export interface CommandDispatcher {
   execute(id: string): void;
+  /** Whether a handler stands for the command on the screen now. */
+  has(id: string): boolean;
   /** Handlers by command id; a command with no handler on the current screen does nothing. */
   register(handlers: Readonly<Record<string, CommandHandler>>): () => void;
   /** The listener for the window's `keydown`. */
@@ -522,6 +527,7 @@ export function createCommandDispatcher(options: CommandDispatcherOptions): Comm
 
   return {
     execute: run,
+    has: (id) => handlers.has(id),
     register(next) {
       const ids = Object.keys(next);
       for (const id of ids) handlers.set(id, next[id]!);

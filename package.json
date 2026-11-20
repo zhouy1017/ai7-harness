@@ -1,6 +1,6 @@
 {
   "name": "ai7-harness",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "ai7": {
     "dataVersion": 1
   },
@@ -37,7 +37,8 @@
     "e2e:repeat": "node e2e/repeat.mjs",
     "generate:licenses": "node tools/generate-licenses.mjs",
     "evidence:replay": "node tools/editorial-evidence.mjs --replay fixtures",
-    "package": "node tools/package.mjs"
+    "package": "node tools/package.mjs",
+    "test:domain": "vitest run tests/unit/domain"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.1",

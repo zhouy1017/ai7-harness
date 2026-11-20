@@ -18,7 +18,7 @@ export const QUICK_REVISE_NOTE = '修改会留下一张「编辑修订」卡片�
 export const EDITOR_REVISION_RATIONALE = '编辑修订';
 export const QUICK_REVISE_UNCHANGED = '文字没有改动；没有记录修订。';
 export const QUICK_REVISE_TOO_MANY_LINES = '改后的行数多于所选的段数；跨段修改请每段一行，或在单段内修改。';
-export const QUICK_REVISE_APPLIED = '已应用修订；正文已更新，修订卡片可撤销。';
+export const QUICK_REVISE_APPLIED = '修订已写入正文，修订卡片可撤销。';
 export const REVERSE_REVISION_LABEL = '撤销本次修改';
 export const REVERSE_REVISION_DONE = '已撤销本次修改；原文已写回稿件。';
 

@@ -19,7 +19,7 @@ import { renderFidelityReview } from './import-fidelity.js';
 import { STRUCTURE_CHOICE_REQUIRED, renderStructureReview } from './import-structure.js';
 import { bookChoiceWords } from './technical-layer-labels.js';
 import {
-  wordIntakeRefusalLabel,
+  wordIntakeRefusalLabel, WORD_IMPORT_CONSEQUENCES, unsupportedWordImportText, WORD_IMPORT_REASONS,
   wordImportModeOption,
   reimportFidelityHeading,
   WORD_IMPORT_MODE_NAMES,
@@ -108,9 +108,9 @@ export function createImportReview(options: ImportReviewOptions) {
     const groupHeading = element('legend', undefined, 'Word 修订导入方式');
     group.append(groupHeading);
     if (projection.compatibility === 'unsupported') {
-      group.append(element('p', undefined, `此文件含当前不支持的修订结构，不能作为首份稿件导入；定位到 ${projection.locationCount} 处，完整原始文件仍留在本机暂存中，来源材料继续按原有导入边界处理。`));
+      group.append(element('p', undefined, unsupportedWordImportText(projection.locationCount)));
       const reasons = element('ul'); for (const code of projection.reasonCodes) reasons.append(element('li', undefined, wordIntakeRefusalLabel(code)));
-      group.append(reasons);
+      const details = element('details'); details.append(element('summary', undefined, WORD_IMPORT_REASONS), reasons); group.append(details);
       return { elements: [group], choice: () => undefined, allowed: () => false,
         bind: (control) => { control.disabled = true; }, setBusy: () => undefined };
     }
@@ -126,7 +126,8 @@ export function createImportReview(options: ImportReviewOptions) {
     for (const mode of ['suggestions', 'accepted-baseline'] as const) {
       const line = element('label', 'choice'); const input = element('input'); input.type = 'radio';
       input.name = `word-import-mode-${staged.draftId}`; input.value = mode; input.dataset['wordImportMode'] = mode;
-      line.append(input, element('span', undefined, wordImportModeOption(mode))); group.append(line); modes.push({ input, mode });
+      line.append(input, element('span', undefined, wordImportModeOption(mode)));
+      line.append(element('span', 'field-note', WORD_IMPORT_CONSEQUENCES[mode])); group.append(line); modes.push({ input, mode });
       input.addEventListener('change', () => { if (!input.checked || busy) return;
         selected = { ...selected, mode, acceptedBaselineConfirmed: mode === 'accepted-baseline' }; changed(); });
     }
@@ -146,7 +147,7 @@ export function createImportReview(options: ImportReviewOptions) {
       learning.checked = selected.learnFromEdits; learning.disabled = busy;
       const reading = projection.readings[selected.mode === 'suggestions' ? 'rejected' : 'accepted'];
       notice.textContent = !reading.usable ? reading.blockCount === 0
-        ? selected.mode === 'suggestions' ? technicalWords('撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文 · 定稿基线」。', '撤销修订后没有可编辑的正文；可以改为「导入修订后的正文」。')
+        ? selected.mode === 'suggestions' ? technicalWords('撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修改建议」准备；仍可明确选择并确认「直接并入正文 · 定稿基线」。', '撤销修订后没有可编辑的正文；可以改为「导入修订后的正文」。')
           : technicalWords('接受修订后没有可编辑的非空稿件，不能建立该基线。', '接受修订后没有可编辑的正文。')
         : technicalWords('所选阅读超出当前支持边界，不能准备；可选择另一项可用阅读。', '暂不支持按这种方式导入，请选择另一种方式。')
         : technicalWords('最终保真、导入方式及本机保留范围随导入记录保存，可按需查看导入详情。', '');
@@ -1236,7 +1237,7 @@ export function createImportReview(options: ImportReviewOptions) {
           }
           const result = completed.result;
           if (completed.kind !== 'reimport-commit' || result === null || !('reimportRecordId' in result)) {
-            throw new Error('重新导入提交任务未返回完成凭据。');
+            throw new Error('重新导入提交任务未返回完成记录。');
           }
           await presentImportCompletion(result, recoveryReturn, follow);
         } catch (error) {
@@ -1289,7 +1290,7 @@ export function createImportReview(options: ImportReviewOptions) {
         element('p', undefined, choice.learnFromEdits ? technicalWords('已允许按当前本机学习设置保留符合准入的原始修改对。', '允许学习这些修改。') : technicalWords('本次不保留学习修改对；来源、稿件对应和导入标记仍会保留。', '不学习这些修改。')));
       if (review.wordLearning !== undefined && technicalLayerVisible) word.append(element('p', undefined,
         `当前全局学习${review.wordLearning.globalEnabled ? '开启' : '关闭'}；本书${review.wordLearning.bookExcluded ? '已被排除' : '未被排除'}。` +
-        `此次按当前设置可保留 ${review.wordLearning.eligibleSampleCount} / ${review.wordLearning.sourceTemplateCount} 条原始修改对，尚未用于编辑记忆、审阅偏好或模型任务。`));
+        `此次按当前设置可保留 ${review.wordLearning.eligibleSampleCount} / ${review.wordLearning.sourceTemplateCount} 条原始修改对，尚未用于审阅偏好或模型任务。`));
       content.append(word);
     }
     const identity = element('section', 'source-card');

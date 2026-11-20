@@ -12,7 +12,7 @@ import { BANNED, BY_HAND, STAYS } from './words-table.mjs';
 // regular expressions, and drops the first argument of `technicalWords(…)` (developer-mode text).
 // What it cannot see: a term split by concatenation ('待' + '处理'), by an interpolation or by a line break inside a template.
 // What it reports falsely: a longer word that contains a term (「连续行走」 holds 续行), developer-only screens and branches,
-// identifiers and data keys spelled as strings, and sentences that quote a banned word.
+// and sentences that quote a banned word. A literal that is one ASCII word (`'tokens'`, a data key) is never text.
 // An unreadable file or folder is named with its error code and skipped: nothing the scan meets changes the exit code.
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DEFAULT_TARGETS = ['src/renderer', 'src/shared/report-wording.ts'];
@@ -21,6 +21,7 @@ const TEXT = new Set(['.html']);
 const REGEX_AFTER_CHARACTER = new Set('(,=:[!&|?{};+-*%<>~^');
 const REGEX_AFTER_WORD = new Set(['return', 'typeof', 'case', 'in', 'of', 'void', 'delete', 'throw', 'else', 'do']);
 const WORD_CHARACTER = /[A-Za-z0-9_$]/u;
+const ASCII_KEY = /^[A-Za-z0-9_$.:/-]+$/u;
 
 /**
  * Keeps only what an editor can read in source code: the characters of string and template-literal text. Everything else
@@ -37,6 +38,7 @@ export function maskSource(source) {
   let previous = ''; // the last significant character of code
   let word = ''; // the identifier being read
   let lastWord = ''; // the identifier just before, while only blanks have come since
+  let literalStart = -1; // where the text of a quoted literal began, while it has had no `${`
   for (let i = 0; i < source.length; i += 1) {
     const ch = source[i];
     const next = source[i + 1];
@@ -45,8 +47,12 @@ export function maskSource(source) {
     if (mode === 'sq' || mode === 'dq' || mode === 'tpl') {
       const quote = mode === 'sq' ? "'" : mode === 'dq' ? '"' : '`';
       if (ch === '\\') { i += next === '\r' && source[i + 2] === '\n' ? 2 : 1; continue; }
-      if (ch === quote) { mode = 'code'; previous = ch; lastWord = ''; continue; }
-      if (mode === 'tpl' && ch === '$' && next === '{') { stack.push({ template: true }); mode = 'code'; previous = '{'; lastWord = ''; i += 1; continue; }
+      if (ch === quote) {
+        // A literal that is one ASCII word (`'tokens'`, `'data-key'`) is a key or an identifier, never a sentence (Issue #1531).
+        if (literalStart >= 0 && ASCII_KEY.test(source.slice(literalStart, i))) for (let at = literalStart; at < i; at += 1) out[at] = ' ';
+        mode = 'code'; previous = ch; lastWord = ''; literalStart = -1; continue;
+      }
+      if (mode === 'tpl' && ch === '$' && next === '{') { literalStart = -1; stack.push({ template: true }); mode = 'code'; previous = '{'; lastWord = ''; i += 1; continue; }
       if (ch === '\n' && mode !== 'tpl') { lostSync = true; mode = 'code'; continue; }
       if (exempt === 0) out[i] = ch;
       continue;
@@ -65,9 +71,9 @@ export function maskSource(source) {
     if (/\s/u.test(ch)) continue;
     if (ch === '/' && next === '/') { mode = 'line'; i += 1; continue; }
     if (ch === '/' && next === '*') { mode = 'block'; i += 1; continue; }
-    if (ch === "'") { mode = 'sq'; continue; }
-    if (ch === '"') { mode = 'dq'; continue; }
-    if (ch === '`') { mode = 'tpl'; continue; }
+    if (ch === "'") { mode = 'sq'; literalStart = i + 1; continue; }
+    if (ch === '"') { mode = 'dq'; literalStart = i + 1; continue; }
+    if (ch === '`') { mode = 'tpl'; literalStart = i + 1; continue; }
     if (ch === '/' && (previous === '' || REGEX_AFTER_CHARACTER.has(previous) || REGEX_AFTER_WORD.has(lastWord))) { mode = 'regex'; continue; }
     if (ch === '(') {
       const call = lastWord === 'technicalWords';

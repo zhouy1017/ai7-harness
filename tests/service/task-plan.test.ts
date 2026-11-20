@@ -368,7 +368,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       // waits for a place — 等待运行名额, with 取消 — whatever else runs; nothing refuses it for a busy instance.
       const authorized = store.authorizeBaselineAnalysis(bookId, first.taskIntent!.taskIntentId, firstPlan.start.planEnvelopeDigest!);
       expect(authorized.projection.state).toBe('queued');
-      expect(plan(store, bookId, 'baseline-analysis').state).toEqual({ key: 'queued', label: '等待运行名额' });
+      expect(plan(store, bookId, 'baseline-analysis').state).toEqual({ key: 'queued', label: '排队中' });
       owner.admitAndDispatch(authorized.dispatchRunRecordId!);
       // The same start again is its own authorization, answered as it always was.
       expect(store.authorizeBaselineAnalysis(bookId, first.taskIntent!.taskIntentId, first.planEnvelope!.digest).dispatchRunRecordId).toBeNull();
@@ -554,7 +554,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       expect(authorized.dispatchRunRecordId).toBeNull();
       expect(authorized.projection.state).toBe('authorized-blocked');
       const recorded = plan(store, bookId, 'baseline-analysis');
-      expect(recorded.state).toEqual({ key: 'blocked', label: '派发前已阻止' });
+      expect(recorded.state).toEqual({ key: 'blocked', label: '没有开始' });
       expect(recorded.start.readiness).toBe('started');
     } finally {
       store.close();

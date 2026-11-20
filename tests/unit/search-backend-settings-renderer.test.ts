@@ -122,7 +122,7 @@ describe('the direct-search candidate in 联网检索', () => {
     const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus, errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
     node.querySelector('[data-action="reuse-model-credential"]')!.click(); await settle();
     expect(api.saveSearchBackendCredential).toHaveBeenCalledWith({ backendId: 'search-deepseek', reuseModelCredential: true });
-    expect(setStatus).toHaveBeenCalledWith('模型渠道凭据已同步到联网检索。', 'success');
+    expect(setStatus).toHaveBeenCalledWith('模型渠道密钥已同步到联网检索。', 'success');
   });
   it('saves an ordinary search key, selects and tests its backend, then removes the key (#1370)', async () => {
     setTechnicalLayerVisible(false);

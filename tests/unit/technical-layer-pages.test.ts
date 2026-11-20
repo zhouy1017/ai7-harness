@@ -52,7 +52,7 @@ it('scans the Journey import review, prepared review plan and populated Series u
     while (!prepared.done) prepared = store.advanceReviewRunPreparationWork(prepared.workId!);
     const plan = store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: prepared.projection!.run!.reviewRunId });
     const drawer = mountTaskDrawer({ root, shell: document.body, api: { inspectTaskPlan: async () => plan, inspectReviewWorkspace: async () => prepared.projection! }, technicalDetails,
-      errorMessage, errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onRecorded: vi.fn() } as unknown as MountTaskDrawerOptions);
+      errorMessage, errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onClose: vi.fn(), onRecorded: vi.fn() } as unknown as MountTaskDrawerOptions);
     drawer.open({ bookId: book.bookId, kind: 'review-run', ref: plan.ref }, () => null); await settle();
     expect(root.querySelector('.task-plan-full')).not.toBeNull();
     expect(root.textContent).toContain('确定性检查'); scan(root); drawer.close(false);
@@ -72,7 +72,7 @@ it('scans the settled baseline, historical revision, plan versions and update co
     inspectAnalysisFeedback: vi.fn(async () => { throw new Error('unused feedback'); }),
   } });
   const card = createBaselineAnalysisCard({ screen: root, technicalDetails, rendererErrorMessage: errorMessage,
-    setStatus: vi.fn(), taskDrawer: { refresh: vi.fn() } as unknown as ReturnType<typeof mountTaskDrawer>,
+    setStatus: vi.fn(), taskDrawer: { refresh: vi.fn(), openLaunch: vi.fn() } as unknown as ReturnType<typeof mountTaskDrawer>,
     taskPlanOpenButton: () => document.createElement('button'), awaitServiceJob: vi.fn(), jumpToManuscript: vi.fn(),
     leaveReturnChip: vi.fn(), openEditorWindow: vi.fn(), openTaskPlan: vi.fn(), quickStartStartedLine: () => '', renderBookReview: vi.fn() });
   card.renderBaselineAnalysis(root, projection, '公开样书'); await settle();

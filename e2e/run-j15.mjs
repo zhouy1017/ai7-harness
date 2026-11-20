@@ -1,4 +1,6 @@
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
+import { pointerClick } from './dispatch-chooser.mjs';
+import { HOUSE_DRAFT_MEASURE, ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, pressEscape, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -51,6 +53,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-15' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -204,7 +207,7 @@ async function createEmptyBook(renderer, title) {
 const HOUSE_GUIDELINE_NAME = '本社文字规范.txt';
 const HOUSE_GUIDELINE = ['本社文字规范（J-15）', '', '1. 指出错字、别字、多字与漏字，给出改正后的文字。', '2. 指出成分残缺与搭配不当，给出通顺的改法。',
   '3. 数字与标点按本社体例手册统一，', '体例手册未写到的，按国家现行规范。', '4. 专名在全书前后写法一致。', '5. 引文与原文核对后再改，不凭记忆改动。'].join('\n');
-const KNOWLEDGE_TABS = ['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '外部来源留存'];
+const KNOWLEDGE_TABS = ['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '本社词表', '外部来源留存'];
 const GUIDELINE_TITLES = ['文字规范条款', '体例条款', '线索条款', '事实核查契约', '引用与学术规范条款', '出版风险提示条款', '表达改进条款'];
 // 事实核查契约 remains fixed; current plot-consistency reads clauses as well as pinned baseline leads (#1167).
 const GUIDELINE_FIXED = new Map([
@@ -528,7 +531,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'knowledge-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'knowledge-landing');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-open');
-    await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelectorAll('[data-knowledge-category]').length===7`, 'knowledge-category-home');
+    await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelectorAll('[data-knowledge-category]').length===8`, 'knowledge-category-home');
     await assertRenderer(renderer, `document.querySelectorAll('.guideline-card, .library-material').length===0 && document.querySelector('.knowledge-recent') !== null`, 'knowledge-home-has-no-files');
     await click(renderer, '审阅规范文件', 'knowledge-open-category');
     const opened = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-guidelines-ready');
@@ -998,7 +1001,7 @@ async function main() {
     renderer = await waitForRenderer(manager, 'earlier-exemplar-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'earlier-exemplar-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'exemplar-ordinary-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'exemplar-ordinary-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'exemplar-ordinary-settings-ready');
     await click(renderer, '帮助', 'exemplar-ordinary-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'exemplar-mode-ready');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'; })()`, 'exemplar-ordinary-mode');
@@ -1013,7 +1016,7 @@ async function main() {
     await click(renderer, '选择文件', 'earlier-exemplar-file');
     await waitFor(renderer, `document.querySelector('.exemplar-import-form select')?.disabled===false`, 'earlier-exemplar-preview');
     // No type is preselected and 导入范例 waits for the editor's choice (Issue #778); the choice is made as the editor makes it.
-    await assertRenderer(renderer, `(() => { const form = document.querySelector('.exemplar-import-form'); const select = form?.querySelector('select'); const submit = Array.from(form?.querySelectorAll('button') ?? []).find((button) => button.textContent === '导入范例'); return select?.value === '' && select.options[0]?.textContent === '请选择文档类型' && submit?.disabled === true; })()`, 'earlier-exemplar-type-unchosen');
+    await assertRenderer(renderer, `(() => { const form = document.querySelector('.exemplar-import-form'); const select = form?.querySelector('select'); const submit = Array.from(form?.querySelectorAll('button') ?? []).find((button) => button.textContent === '导入范例'); return select?.value === '' && select.options[0]?.textContent === '请选择衍生稿件类型' && submit?.disabled === true; })()`, 'earlier-exemplar-type-unchosen');
     await assertRenderer(renderer, `(() => { const select = document.querySelector('.exemplar-import-form select'); select.value='news-release'; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value==='news-release'; })()`, 'earlier-exemplar-type');
     await waitFor(renderer, `Array.from(document.querySelectorAll('.exemplar-import-form button')).find((button) => button.textContent === '导入范例')?.disabled === false`, 'earlier-exemplar-type-chosen');
     await click(renderer, '导入范例', 'earlier-exemplar-confirm');
@@ -1021,7 +1024,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card = document.querySelector('.exemplar-book');
       return card.querySelector('.exemplar-title')?.textContent==='《以前出版的测试图书》新闻稿' &&
-        card.querySelector('.exemplar-kind-badge')?.textContent==='工作文档 · 新闻稿' &&
+        card.querySelector('.exemplar-kind-badge')?.textContent==='衍生稿件 · 新闻稿' &&
         card.querySelector('.exemplar-context')?.textContent.startsWith('来自《以前出版的测试图书》') &&
         !card.querySelector('.knowledge-file-more') &&
         card.querySelector('.exemplar-attribution')?.textContent==='作者：测试作者 · 责编：测试责编' &&
@@ -1030,14 +1033,14 @@ async function main() {
     })()`, 'earlier-exemplar-grouped');
     await assertRenderer(renderer, `(() => { const select = document.querySelector('.exemplar-items select'); select.value='excluded'; return true; })()`, 'earlier-exemplar-exclude');
     await clickSelector(renderer, '.exemplar-items [data-exemplar-action="record-eligibility"]', 'earlier-exemplar-eligibility');
-    await waitFor(renderer, `document.querySelector('.exemplar-items li')?.textContent.includes('学习准入：明确排除')`, 'earlier-exemplar-excluded');
+    await waitFor(renderer, `document.querySelector('.exemplar-items li')?.textContent.includes('是否可用于学习：明确排除')`, 'earlier-exemplar-excluded');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'exemplar-type-filter');
     await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'exemplar-book-filter');
-    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="kind"]').dataset.value==='news-release' && document.querySelector('.exemplar-kind-badge').textContent==='工作文档 · 新闻稿'`, 'exemplar-combined-filters');
+    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="kind"]').dataset.value==='news-release' && document.querySelector('.exemplar-kind-badge').textContent==='衍生稿件 · 新闻稿'`, 'exemplar-combined-filters');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value=""]', 'exemplar-type-return');
     await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="book"]').dataset.value!==''`, 'exemplar-book-selection-survives');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'exemplar-restore-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'exemplar-restore-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'exemplar-restore-settings-ready');
     await click(renderer, '帮助', 'exemplar-restore-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'exemplar-restore-mode-ready');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(!input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='true' && localStorage.getItem('ai7.technicalLayerVisible')==='true'; })()`, 'exemplar-restore-developer');
@@ -1197,6 +1200,82 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${wordSignal.source.bookId}"] [data-testid="manuscript-editor"] > [data-block-id]')`, 'word-lineage-restart-book-ready');
     const wordAfter = await renderer.evaluate(wordRead);
     requireJourney(JSON.stringify(wordAfter)===JSON.stringify(wordBefore), 'word-lineage-and-full-source-survive-restart');
+
+    // ---- 本社词表 (Issue #1543): a category of 知识库, written there and chosen from the review sheet ------------------------
+    at('knowledge-house-words');
+    // As an ordinary editor, from the Book's 审阅, at both window forms, each writing with real presses and typed input. At 1280×800 the
+    // list is created with two entries and saved; at 1008×681 it is read back, edited, given a third entry and saved. At both forms the
+    // sheet offers the list as a choice and its own editor, opened by pointer, keeps one top edge per row of buttons.
+    const houseWords = ['合成词甲', '合成词乙', '合成词丙'];
+    await setDeveloperMode(renderer, waitFor, false, 'house-words-ordinary');
+    await pointerClick(renderer, waitFor, SIDEBAR.section('review'), 'house-words-book-review');
+    await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'house-words-review-ready');
+    await atBothSizes(renderer, waitFor, 'house-words', async (viewport) => {
+      const first = viewport === ORDINARY_VIEWPORTS[0];
+      const size = first ? 'wide' : 'gate';
+      const panel = '[data-house-word-list="panel"]';
+      const measureDraft = async (name) => {
+        const measured = await renderer.evaluate(HOUSE_DRAFT_MEASURE);
+        requireJourney(measured.ok === true, name, measured);
+      };
+      await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), `house-words-open-${size}`);
+      await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelector('[data-knowledge-category="house-words"]')`, `house-words-home-${size}`);
+      await pointerClick(renderer, waitFor, '[data-knowledge-category="house-words"]', `house-words-card-${size}`);
+      await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='house-words' && document.querySelector(${JSON.stringify(`${panel}[data-house-state="${first ? 'empty' : 'saved'}"]`)})`, `house-words-page-${size}`);
+      if (first) {
+        await assertRenderer(renderer, `(() => { const panel = document.querySelector('${panel}'); const buttons = Array.from(panel.querySelectorAll('button')); return buttons.length === 1 && buttons[0].textContent === '创建词表' && buttons[0].classList.contains('primary') && !panel.querySelector('details') && panel.textContent.includes('还没有保存本社词表'); })()`, `house-words-empty-${size}`);
+        await assertRenderer(renderer, buttonRowsAtOneEdge(panel), `house-words-empty-row-${size}`);
+        await pointerClick(renderer, waitFor, `${panel} [data-house-action="edit"]`, `house-words-create-${size}`);
+        await waitFor(renderer, `document.querySelector('${panel}[data-house-state="draft"]') && document.activeElement?.dataset.houseAction==='add'`, `house-words-draft-${size}`);
+        await pointerClick(renderer, waitFor, `${panel} [data-house-action="add"]`, `house-words-add-first-${size}`);
+        await waitFor(renderer, `document.activeElement===document.querySelector('[data-house-entry-row="1"] [data-house-field="literal"]')`, `house-words-row-one-${size}`);
+        await typeInto(renderer, waitFor, '[data-house-entry-row="1"] [data-house-field="literal"]', houseWords[0], `house-words-literal-one-${size}`);
+        await typeInto(renderer, waitFor, '[data-house-entry-row="1"] [data-house-field="note"]', '合成说明甲', `house-words-note-one-${size}`);
+        await pointerClick(renderer, waitFor, `${panel} [data-house-action="add"]`, `house-words-add-second-${size}`);
+        await waitFor(renderer, `document.activeElement===document.querySelector('[data-house-entry-row="2"] [data-house-field="literal"]')`, `house-words-row-two-${size}`);
+        await typeInto(renderer, waitFor, '[data-house-entry-row="2"] [data-house-field="literal"]', houseWords[1], `house-words-literal-two-${size}`);
+      } else {
+        await assertRenderer(renderer, `(() => { const panel = document.querySelector('${panel}'); return panel.textContent.includes(${JSON.stringify(houseWords[0])}) && panel.textContent.includes(${JSON.stringify(houseWords[1])}) && panel.textContent.includes('2 条，启用 2 条') && !panel.querySelector('.house-history'); })()`, `house-words-read-${size}`);
+        await assertRenderer(renderer, buttonRowsAtOneEdge(panel), `house-words-read-row-${size}`);
+        await pointerClick(renderer, waitFor, `${panel} [data-house-action="edit"]`, `house-words-edit-${size}`);
+        await waitFor(renderer, `document.querySelector('${panel}[data-house-state="draft"]') && document.activeElement===document.querySelector('[data-house-entry-row="1"] [data-house-field="literal"]')`, `house-words-edit-rows-${size}`);
+        await pointerClick(renderer, waitFor, `${panel} [data-house-action="add"]`, `house-words-add-third-${size}`);
+        await waitFor(renderer, `document.activeElement===document.querySelector('[data-house-entry-row="3"] [data-house-field="literal"]')`, `house-words-row-three-${size}`);
+        await typeInto(renderer, waitFor, '[data-house-entry-row="3"] [data-house-field="literal"]', houseWords[2], `house-words-literal-three-${size}`);
+      }
+      await measureDraft(`house-words-draft-columns-${size}`);
+      await assertRenderer(renderer, buttonRowsAtOneEdge(panel), `house-words-draft-row-${size}`);
+      await assertRenderer(renderer, `Array.from(document.querySelectorAll('${panel} button.primary')).map((button) => button.textContent).join()==='保存'`, `house-words-draft-primary-${size}`);
+      await pointerClick(renderer, waitFor, `${panel} [data-house-action="save"]`, `house-words-save-${size}`);
+      const count = first ? 2 : 3;
+      await waitFor(renderer, `document.querySelector('${panel}[data-house-state="saved"]')?.textContent.includes('${count} 条，启用 ${count} 条') && document.activeElement?.dataset.houseAction==='edit'`, `house-words-saved-${size}`);
+      const houseSaved = await renderer.evaluate(`window.ai7.inspectHouseWordList({ versionId: null, entryOffset: 0, historyOffset: 0 }).then((page) => JSON.stringify([page.selected?.entryCount, page.selected?.enabledCount, page.entries.map((entry) => entry.literal)]))`);
+      requireJourney(houseSaved === JSON.stringify([count, count, houseWords.slice(0, count)]), `house-words-saved-service-${size}`, houseSaved);
+      // Back to the review the editor came from: the sheet offers the saved list, and the editor inside it is the same component.
+      await pointerClick(renderer, waitFor, '.knowledge-base > .button-row > button:last-child', `house-words-back-${size}`);
+      await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, `house-words-review-again-${size}`);
+      // 本地文字检查 sits under 更多: opened by pointer, as the editor does.
+      await pointerClick(renderer, waitFor, '.review-new-actions .review-more > summary', `house-words-more-${size}`);
+      await pointerClick(renderer, waitFor, '[data-review-action="new-local-check"]', `house-words-sheet-${size}`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('dialog.review-sheet [data-local-house-word-list]')?.disabled===false`, `house-words-selectable-${size}`);
+      await assertRenderer(renderer, `(() => { const sheet = document.querySelector('dialog.review-sheet'); const text = sheet.textContent; return text.includes('本社词表') && text.includes('${count} 条启用') && !text.includes('本社自用词表') && !text.includes('本社敏感词表') && Array.from(sheet.querySelectorAll('summary')).some((summary) => summary.textContent === '编辑本社词表'); })()`, `house-words-sheet-words-${size}`);
+      await pointerClick(renderer, waitFor, 'dialog.review-sheet [data-local-house-word-list]', `house-words-choose-${size}`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-local-house-word-list]')?.checked===true`, `house-words-chosen-${size}`);
+      await pointerClick(renderer, waitFor, 'dialog.review-sheet [data-local-house-word-list]', `house-words-unchoose-${size}`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-local-house-word-list]')?.checked===false`, `house-words-unchosen-${size}`);
+      // The editor in the sheet is opened by pointer, reads the list, and its buttons keep one top edge there too.
+      await pointerClick(renderer, waitFor, `dialog.review-sheet details:has(${panel}) > summary`, `house-words-sheet-editor-${size}`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet ${panel}[data-house-state="saved"]')?.textContent.includes('${count} 条，启用 ${count} 条')`, `house-words-sheet-editor-read-${size}`);
+      await assertRenderer(renderer, buttonRowsAtOneEdge(`dialog.review-sheet ${panel}`), `house-words-sheet-row-${size}`);
+      await pointerClick(renderer, waitFor, `dialog.review-sheet ${panel} [data-house-action="edit"]`, `house-words-sheet-edit-${size}`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet ${panel}[data-house-state="draft"]')`, `house-words-sheet-draft-${size}`);
+      await assertRenderer(renderer, buttonRowsAtOneEdge(`dialog.review-sheet ${panel}`), `house-words-sheet-draft-row-${size}`);
+      await pointerClick(renderer, waitFor, `dialog.review-sheet ${panel} [data-house-action="discard"]`, `house-words-sheet-discard-${size}`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet ${panel}[data-house-state="saved"]')`, `house-words-sheet-discarded-${size}`);
+      await pressEscape(renderer);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open!==true`, `house-words-sheet-closed-${size}`);
+    });
+    await setDeveloperMode(renderer, waitFor, true, 'house-words-developer');
 
     // Select an editable deterministic version, execute the admitted public Book offline, then capture the completed Run.
     at('knowledge-procedures');

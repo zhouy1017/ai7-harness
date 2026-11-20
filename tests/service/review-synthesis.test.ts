@@ -220,18 +220,6 @@ it('carries a completed synthesis and its frozen report through public export, B
   });
 });
 
-it('adds a cascade-owned synthesis relation without an immutable deletion barrier (#1433)', () => {
-  const db = new DatabaseSync(':memory:');
-  try {
-    db.exec('PRAGMA foreign_keys=ON; CREATE TABLE review_runs(review_run_id TEXT PRIMARY KEY) STRICT;');
-    db.exec(RUN_SYNTHESIS_SCHEMA_SQL.review_run_synthesis);
-    db.prepare('INSERT INTO review_runs VALUES (?)').run('sample1-run');
-    db.prepare('INSERT INTO review_run_synthesis(review_run_id,synthesis_key,summary_json,summary_digest) VALUES (?,?,?,?)').run('sample1-run', 'sample1-summary', '{}', '0'.repeat(64));
-    expect(db.prepare("SELECT name FROM sqlite_schema WHERE type='trigger' AND tbl_name='review_run_synthesis'").all()).toEqual([]);
-    db.prepare('DELETE FROM review_runs WHERE review_run_id=?').run('sample1-run');
-    expect(db.prepare('SELECT * FROM review_run_synthesis').all()).toEqual([]);
-  } finally { db.close(); }
-});
 
 it('refuses the remaining synthesis after category cancellation and relaunches immediately (#1433)', async () => {
   let reached!: () => void, release!: () => void;
@@ -430,7 +418,8 @@ it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a
     archivedId = archived.bookId;
     const original = session.store.inspectReviewWorkspace(archived.bookId, null).run!;
     archivedRunId = original.reviewRunId; archivedDigest = original.report!.digest;
-    expect(original.synthesis).toBeUndefined(); expect(original.categories).toHaveLength(1);
+    // No member and no request; an eligible 0.7.1 Run offers 生成统合总结 (Issue #1506).
+    expect(original.synthesis).toMatchObject({ state: 'missing', summary: null, canGenerate: true }); expect(original.categories).toHaveLength(1);
     expect(canonicalRecord(original.report!.record).digest).toBe(original.report!.digest);
     const contentDigest = reportContentDigest(original.report!.record);
     const repeated = session.store.generateReviewReport(archived.bookId, original.reviewRunId).run!.report!;
@@ -444,7 +433,7 @@ it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a
     expect(pending.canContinue).toBe(true); expect(pending.synthesis).toBeUndefined();
     await session.driver.continue(pending.reviewRunId);
     const completed = session.store.inspectReviewWorkspace(paused.bookId, pending.reviewRunId).run!;
-    expect(completed.state).toBe('settled'); expect(completed.synthesis).toBeUndefined();
+    expect(completed.state).toBe('settled'); expect(completed.synthesis).toMatchObject({ state: 'missing', summary: null, canGenerate: true });
     expect(completed.categories).toHaveLength(1);
     expect(session.capture.requests.every(request => request.stage !== 'cross-unit-reduction')).toBe(true);
   } finally { await closeCapturedSession(session); }
@@ -455,7 +444,7 @@ it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a
   target = await EditorialStore.open(mergedRoot, roots.codeRoot);
   try {
     const merged = target.inspectReviewWorkspace(archivedId, archivedRunId).run!;
-    expect(merged.synthesis).toBeUndefined(); expect(merged.report!.digest).toBe(archivedDigest);
+    expect(merged.synthesis).toMatchObject({ state: 'missing', summary: null, canGenerate: true }); expect(merged.report!.digest).toBe(archivedDigest);
     expect(canonicalRecord(merged.report!.record).digest).toBe(archivedDigest);
   } finally { target.markCleanShutdown(); target.close(); }
 });

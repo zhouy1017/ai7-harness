@@ -76,14 +76,14 @@ export function validateHouseEntries(value: unknown, persisted = false): asserts
   for (let index = 0; index < value.length; index++) {
     const row = index + 1; const entry: unknown = value[index];
     houseRequire(record(entry) && keys(entry, ['entryId', 'literal', 'note', 'enabled']), 'HOUSE_ENTRY_INVALID', `第${row}行的字段无效。`, row);
-    houseRequire(entry.entryId === null && !persisted || typeof entry.entryId === 'string' && UUID.test(entry.entryId), 'HOUSE_ENTRY_ID_INVALID', `第${row}行的词条身份无效。`, row);
+    houseRequire(entry.entryId === null && !persisted || typeof entry.entryId === 'string' && UUID.test(entry.entryId), 'HOUSE_ENTRY_ID_INVALID', `第${row}行的词条已失效，请重新载入词表。`, row);
     houseRequire(typeof entry.literal === 'string' && entry.literal.length > 0 && entry.literal.length <= MAX_HOUSE_BYTES && entry.literal.isWellFormed() &&
       entry.literal.trim() === entry.literal && !/[\p{Cc}\p{Zl}\p{Zp}]/u.test(entry.literal) && atMostGraphemes(entry.literal, 80),
     'HOUSE_LITERAL_INVALID', `第${row}行须为1至80字的字面词条，不能含换行、控制字符或首尾空白。`, row);
     houseRequire(typeof entry.note === 'string' && entry.note.length <= MAX_HOUSE_BYTES && entry.note.isWellFormed() &&
       !/[\p{Cc}]/u.test(entry.note.replace(/[\r\n\t]/gu, '')) && atMostGraphemes(entry.note, 200), 'HOUSE_NOTE_INVALID', `第${row}行的词条说明须为200字以内的纯文本。`, row);
     houseRequire(typeof entry.enabled === 'boolean', 'HOUSE_ENTRY_INVALID', `第${row}行的启用状态无效。`, row);
-    houseRequire(!literals.has(entry.literal) && (entry.entryId === null || !ids.has(entry.entryId)), 'HOUSE_ENTRY_DUPLICATE', `第${row}行的词条或身份重复。`, row);
+    houseRequire(!literals.has(entry.literal) && (entry.entryId === null || !ids.has(entry.entryId)), 'HOUSE_ENTRY_DUPLICATE', `第${row}行的词条重复。`, row);
     literals.add(entry.literal); if (entry.entryId !== null) ids.add(entry.entryId);
     const placeholder = '00000000-0000-4000-8000-000000000000';
     const detail = houseAnnotationDetail({ entryId: entry.entryId ?? placeholder, literal: entry.literal, note: entry.note, enabled: entry.enabled },
@@ -96,20 +96,20 @@ export function validateSaveHouseWordListInput(value: unknown): asserts value is
   houseRequire(value.sourceKind === 'editor-entry' || value.sourceKind === 'editor-paste', 'HOUSE_SOURCE_INVALID', '请选择键入或粘贴词条。');
   const pin = value.expectedCurrent;
   houseRequire(pin === null || record(pin) && keys(pin, ['versionId', 'digest']) && typeof pin.versionId === 'string' && UUID.test(pin.versionId) &&
-    typeof pin.digest === 'string' && DIGEST.test(pin.digest), 'HOUSE_PIN_INVALID', '词表版本无效，请重新载入。');
+    typeof pin.digest === 'string' && DIGEST.test(pin.digest), 'HOUSE_PIN_INVALID', '词表已更新，请重新载入。');
   validateHouseEntries(value.entries);
-  houseRequire(houseUtf8Bytes(JSON.stringify(value)) <= MAX_HOUSE_BYTES, 'HOUSE_DOCUMENT_TOO_LARGE', '词表内容须在128KiB以内。');
+  houseRequire(houseUtf8Bytes(JSON.stringify(value)) <= MAX_HOUSE_BYTES, 'HOUSE_DOCUMENT_TOO_LARGE', '词表内容太长，请删减一些词条或说明。');
 }
 export function validateInspectHouseWordListInput(value: unknown): asserts value is InspectHouseWordListInput {
   houseRequire(record(value) && keys(value, ['versionId', 'entryOffset', 'historyOffset']) &&
     (value.versionId === null || typeof value.versionId === 'string' && UUID.test(value.versionId)) &&
     Number.isSafeInteger(value.entryOffset) && Number(value.entryOffset) >= 0 && Number.isSafeInteger(value.historyOffset) && Number(value.historyOffset) >= 0,
-  'HOUSE_PAGE_INVALID', '词表页码或版本无效。');
+  'HOUSE_PAGE_INVALID', '词表页码无效，请重新打开词表。');
 }
 export interface HousePastePreview { readonly entries: readonly HouseWordListDraftEntry[]; readonly errors: readonly { readonly row: number | null; readonly message: string }[] }
 /** A line is literal text, including metacharacters, URLs and JSON-looking text; nothing is evaluated or fetched. */
 export function previewHousePaste(text: string): HousePastePreview {
-  if (!text.isWellFormed() || text.length > MAX_HOUSE_BYTES || houseUtf8Bytes(text) > MAX_HOUSE_BYTES) return { entries: [], errors: [{ row: null, message: '粘贴文本须为128KiB以内的有效文本。' }] };
+  if (!text.isWellFormed() || text.length > MAX_HOUSE_BYTES || houseUtf8Bytes(text) > MAX_HOUSE_BYTES) return { entries: [], errors: [{ row: null, message: '粘贴的文字太长或含无法识别的字符，请缩短后再试。' }] };
   const entries: HouseWordListDraftEntry[] = []; const errors: { row: number | null; message: string }[] = []; const seen = new Set<string>();
   const lines = text.split(/\r\n|\n|\r/u);
   for (let index = 0; index < lines.length; index++) {

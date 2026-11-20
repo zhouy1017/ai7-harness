@@ -596,11 +596,11 @@ editing persistence
 │  ├─ 正在写入修订日志…
 │  ├─ 已写入修订日志
 │  └─ Editing Protection Mode
-│     ├─ 本地写入中断
-│     ├─ Last Durable Edit Boundary
-│     ├─ At-risk Edit Extent
+│     ├─ 保存中断 · 更改尚未保存 · 处理…
+│     ├─ 保护对话框：最近保存时间（Last Durable Edit Boundary）
+│     ├─ 保护对话框：受影响内容（At-risk Edit Extent）
 │     ├─ Bounded Edit Safety Buffer
-│     ├─ 自动重试 / 查看保护选项
+│     ├─ 保护对话框：自动重试 / 重试写入 / 复制受影响内容
 │     └─ Protective Read-only State at safety limit
 ├─ milestone relation
 │  ├─ 自里程碑版本「{标签}」后有修改
@@ -903,6 +903,7 @@ Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-sept
 ```text
 知识库
 ├─ 审阅规范文件 · versioned · numbered clauses findings cite · 选用 by Book with 可更新
+├─ 字表与词表 · ADR 0106 · one item per imported table · 规范字 / 字形对照 / 词形 / 常用词 · conversion and application status · 导入新版本 / 删除 · pinned by every 规范用语核查
 ├─ 评估方案 · items, shares, anchors, conclusion options
 ├─ 工序与规则 · expert 工序 by professional outcome · 快速开始 Default Execution Rules
 ├─ 社级编辑记忆 · attributed by author / editor
@@ -912,7 +913,7 @@ Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-sept
    └─ Material Index (资料库 and 外部来源留存) · 原件 · 元数据 · 提取全文 + 译文 · 分段与锚点 · 相似段落检索（向量）
 ```
 
-Books, Review Runs, Evaluation Records and Tasks select from `知识库` and snapshot the versions they use. The seven classes, the five-layer index and the automatic archiving of Exemplars follow [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) (KB-006 to 010).
+`字表与词表` is house-wide: every enabled table is offered to each Book's 规范用语核查, which pins the versions it used ([ADR 0106](../adr/0106-keep-standards-tables-as-an-importable-library-and-check-standard-usage-against-it.md)). Books, Review Runs, Evaluation Records and Tasks select from `知识库` and snapshot the versions they use. The seven classes, the five-layer index and the automatic archiving of Exemplars follow [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) (KB-006 to 010).
 
 ## Findings center
 

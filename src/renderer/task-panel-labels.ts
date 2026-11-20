@@ -99,8 +99,8 @@ export const REVIEW_RESULT_NOT_DONE = '没有修改稿件：发现作为标记�
 
 /** A reading range, by the heading the manuscript gives it when it has one. */
 export function taskResultRangeTitle(unitOrdinal: number, heading: string | null): string {
-  if (!technicalLayerVisible) return heading === null ? `正文第 ${unitOrdinal} 部分` : `「${heading}」`;
-  return heading === null ? `第 ${unitOrdinal} 个阅读范围` : `第 ${unitOrdinal} 个阅读范围 · 「${heading}」`;
+  return technicalWords(heading === null ? `第 ${unitOrdinal} 个阅读范围` : `第 ${unitOrdinal} 个阅读范围 · 「${heading}」`,
+    heading === null ? `正文第 ${unitOrdinal} 部分` : `「${heading}」`);
 }
 
 /** What the analysis made of one range: read, or not read and why (ANALYSIS-004). */
@@ -166,7 +166,7 @@ export const TASK_COMPOSER_OUTCOME_LABELS = {
   analysis: '稿件分析',
   review: '审阅（在稿件上标出发现）',
   factual: '事实核查',
-  writing: '写作任务（起草一份文档）',
+  writing: '写作任务（起草一份衍生稿件）',
 } as const;
 export const TASK_COMPOSER_TARGET_LEGEND = '要处理什么';
 export const TASK_COMPOSER_TARGET_LABELS = {
@@ -214,7 +214,7 @@ export const TASK_COMPOSER_ACTIONS = {
 /** What 准备任务 does (TASK-004): a durable draft, and nothing else. */
 export const TASK_COMPOSER_NOTE = '保存草稿不会读取稿件、调用模型或发送内容；准备计划后由你开始任务。';
 export function taskComposerDraftHeading(ordinal: number): string {
-  return `任务意图草稿 · ${technicalWords(`第 ${ordinal} 版`, '版本')}`;
+  return `任务意图草稿${technicalWords(` · 第 ${ordinal} 版`)}`;
 }
 export const TASK_COMPOSER_UNSAVED = '有未保存的修改。';
 export const TASK_COMPOSER_PROMOTE_SAVE_FIRST = '先保存修改，再准备计划。';
@@ -226,7 +226,7 @@ export const TASK_COMPOSER_RESOLUTION_CHOOSE = '有几种任务都合适，选�
 export const TASK_COMPOSER_WRITING_AUDIENCE = '受众';
 export const TASK_COMPOSER_WRITING_CHANNEL = '渠道';
 export const TASK_COMPOSER_PICK_CHOICE = '请先选一种任务。';
-export const TASK_COMPOSER_WRITING_FIELDS = '请写下这份文档的受众和渠道。';
+export const TASK_COMPOSER_WRITING_FIELDS = '请写下这份衍生稿件的受众和渠道。';
 /** A promoted draft is final: its Task is a normal prepared Task (AUTH-002). */
 export const TASK_COMPOSER_PROMOTED = '这份草稿已准备成任务：在任务计划里查看并开始。要改要求，请另起一份草稿。';
 export const TASK_COMPOSER_OPEN_PLAN = '查看计划';

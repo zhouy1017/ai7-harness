@@ -1,4 +1,5 @@
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
+import { localDayTimeLabel, localInstantLabel as fullInstantLabel } from '../shared/report-wording.js';
 import type {
   AnalysisAssuranceAxis,
   AnalysisCoverageAxis,
@@ -23,7 +24,7 @@ import type {
  * ceiling is what bounds a Run that can actually transmit.
  */
 export function runBudgetCeilingLabel(ceiling: RunBudgetCeilingState): string {
-  return ceiling === 'unset' ? '未设置任务预算上限' : `任务运行预算上限：${ceiling.maxTotalTokens} tokens`;
+  return ceiling === 'unset' ? '未设置任务预算上限' : technicalWords(`任务运行预算上限：${ceiling.maxTotalTokens} tokens`, '已设用量上限');
 }
 
 /**
@@ -94,8 +95,13 @@ export function launchPolicyIntegritySentence(label: LaunchPolicyProjection['pro
   return `当前${label.slice(0, separator)}范围保持${label.slice(separator + 1)}。`;
 }
 
-/** The Decision Layer's form of an instant (V2-UX-LAYER-004), shared with the exported 审阅报告 (Issue #500, S64b). */
-export { localInstantLabel } from '../shared/report-wording.js';
+/**
+ * The Decision Layer's form of an instant (V2-UX-LAYER-004). The exported 审阅报告 keeps the shared full form (Issue #500,
+ * S64b); ordinary mode reads the one day-and-time form of every page (Issue #1531, review S7), developer mode the full one.
+ */
+export function localInstantLabel(iso: string): string {
+  return technicalWords(fullInstantLabel(iso), localDayTimeLabel(iso));
+}
 
 /** How long the step in flight has been running, as `mm:ss`; hours carry into the minutes place. */
 export function elapsedLabel(elapsedMs: number): string {
@@ -150,7 +156,7 @@ export function analysisProvenanceSummary(
 ): string {
   const units = [...new Set(unitOrdinals)].sort((left, right) => left - right);
   const blocks = analysisBlockCountLabel(ranges);
-  return units.length === 0 ? blocks : `来自单元 ${units.join('、')} · ${blocks}`;
+  return units.length === 0 ? blocks : technicalWords(`来自单元 ${units.join('、')} · ${blocks}`, blocks);
 }
 
 /**
@@ -287,5 +293,6 @@ export const RUN_LIVENESS_STAGE_LABELS: Record<'units' | 'cross-unit-reduction' 
 
 /** The report's unit accounting as one sentence; every figure is the record's own count. */
 export function runReportUnitsSentence(units: RunReportUnitAccountingProjection): string {
-  return `共 ${units.submitted} 个阅读范围：沿用上一份 ${units.reused} 个，重新分析 ${units.recomputed} 个，其中 ${units.gaps} 个没有读成，${units.retried} 个安全重试过。`;
+  return technicalWords(`共 ${units.submitted} 个阅读范围：沿用上一份 ${units.reused} 个，重新分析 ${units.recomputed} 个，其中 ${units.gaps} 个没有读成，${units.retried} 个安全重试过。`,
+    `共 ${units.submitted} 个部分：沿用上一份 ${units.reused} 个，重新分析 ${units.recomputed} 个，其中 ${units.gaps} 个没有读成，${units.retried} 个安全重试过。`);
 }

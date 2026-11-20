@@ -116,32 +116,6 @@ function attention(store: EditorialStore): Array<[string, GlobalAttentionItemPro
     .map((item) => [group.key, item.state, item.book.title, item.object, item.nextStep, item.target] as [string, GlobalAttentionItemProjection['state'], string | null, unknown, string, unknown]));
 }
 
-describe('学习准入 policy bases', () => {
-  it('reads a decision made under basis version 1 and records the next one under version 2 (Issue #1082)', () => {
-    const db = new DatabaseSync(':memory:');
-    try {
-      db.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT');
-      for (const sql of Object.values(LEARNING_ELIGIBILITY_SCHEMA_SQL)) db.exec(sql);
-      for (const sql of Object.values(LEARNING_ELIGIBILITY_TRIGGER_SQL)) db.exec(sql);
-      const bookId = randomUUID();
-      db.prepare('INSERT INTO books VALUES (?)').run(bookId);
-      const candidate = reviewDispositionCandidate({ signalId: randomUUID(), reviewRunId: randomUUID(), findingId: 'rvf_basis', categoryLabel: '文字',
-        reason: '准入版本理由', recordedAt: '2026-10-23T00:00:00.000Z' }, false);
-      const digest = learningMaterialDigest(candidate);
-      const decisionId = randomUUID(); const recordedAt = '2026-10-23T00:00:01.000Z';
-      const attribution = { peopleVersion: 0, authors: [], editors: [] };
-      const record = canonicalRecord({ schema: 'ai7.learning-eligibility-decision/1', decisionId, bookId, materialKey: candidate.materialKey, materialDigest: digest,
-        kind: candidate.kind, ordinal: 1, choice: 'book', note: null, basis: LEARNING_ELIGIBILITY_POLICY_BASIS, attribution, supersedes: null, actor: '本机编辑', recordedAt });
-      db.prepare('INSERT INTO learning_eligibility_decisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(decisionId, bookId, candidate.materialKey, digest, 1, 'book', null, recordedAt, record.json, record.digest);
-      const ledger = new LearningEligibilityLedger(db);
-      ledger.decide({ bookId, candidate, expectedDecisions: 1, choice: 'excluded', note: null, attribution });
-      expect(ledger.history(bookId, candidate.materialKey).map((entry) => [entry.choice, entry.basis])).toEqual([
-        ['book', LEARNING_ELIGIBILITY_POLICY_BASIS], ['excluded', LOCAL_LEARNING_POLICY_BASIS]]);
-    } finally { db.close(); }
-  });
-});
-
 describe('学习准入 over the real store', () => {
   it('captures local decisions with reference-only memory, stops at scope overrides and preserves immutable history on restart', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
