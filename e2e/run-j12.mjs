@@ -983,7 +983,9 @@ async function main() {
       await firstRunClick(onboardingPage, '[data-onboarding-help]');
       await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, `first-run-help-opened-${width}`);
       await assertRenderer(onboardingPage, `document.activeElement===document.querySelector('[data-help-section="first-review"] h4')`, `first-run-help-heading-focused-${width}`);
-      await assertRenderer(onboardingPage, `(() => { const box=document.querySelector('[data-help-section="first-review"] h4').getBoundingClientRect(); return box.top>=0 && box.bottom<=innerHeight; })()`, `first-run-help-heading-in-view-${width}`);
+      const helpGeo = await onboardingPage.evaluate(`(() => { const h=document.querySelector('[data-help-section="first-review"] h4'); const b=h.getBoundingClientRect(); const s=document.scrollingElement; return JSON.stringify({top:Math.round(b.top),bottom:Math.round(b.bottom),ih:innerHeight,iw:innerWidth,sy:Math.round(scrollY),sh:s.scrollHeight,ch:s.clientHeight}); })()`);
+      const helpBox = JSON.parse(helpGeo);
+      requireJourney(helpBox.top >= 0 && helpBox.bottom <= helpBox.ih, `first-run-help-heading-in-view-${width}-${helpGeo.replace(/[^0-9a-z:,-]/gu, '')}`);
       await assertRenderer(onboardingPage, `(() => { const steps=Array.from(document.querySelectorAll('[data-help-step]')); return steps.length===5 && steps.every((step)=>{ const b=step.getBoundingClientRect(); return b.left>=0 && b.right<=innerWidth; }); })()`, `first-run-help-steps-inside-${width}`);
       await assertRenderer(onboardingPage, `document.querySelectorAll('[data-help-step-go]').length===2 && document.querySelectorAll('[data-help-step-needs-book]').length===3`, `first-run-help-no-book-steps-${width}`);
       await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
