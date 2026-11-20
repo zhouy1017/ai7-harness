@@ -1,7 +1,7 @@
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
-import { resolveEditorialMarkCategory } from '../shared/editorial-mark-category.js';
+import { editorialMarkFilterModel, resolveEditorialMarkCategory } from '../shared/editorial-mark-category.js';
 import { EditorialMemoryFacade } from './learning/memory-facade.js';
-import { historicalMarkModelLabels, markModelLabels, readMarkEvidence, recordedMarkModel, type MarkModelBinding } from './editorial-mark-source.js';
+import { frozenModelLabels, historicalMarkModelLabels, markModelLabels, readMarkEvidence, recordedMarkModel, type MarkModelBinding } from './editorial-mark-source.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { proposalReviewPosition } from './editorial-workspace-profile.js';
@@ -27,6 +27,8 @@ import {
   type EditorialMarkKind,
   type EditorialMarkSourceProjection,
   type EditorialMarkStatus,
+  type FindPendingMarkInput,
+  type PendingMarkPlace,
   type ManuscriptApplyProjection,
   type PersonalHighlightColor,
   type ProposalChangeType,
@@ -54,6 +56,7 @@ import {
 } from './proposal-conflicts.js';
 import { DecisionFeedbackLedger } from './decision-feedback.js';
 import { aiLocksOfWindow } from './ai-edit-locks.js';
+import { requireBounded } from './manuscript/bounded-kernel.js';
 
 /**
  * Editorial Marks and the Proposal Change Items behind 修改建议 (Issue #407, schema revision 22).
@@ -853,22 +856,37 @@ function anchorProjection(row: SqlRow): EditorialMarkAnchorProjection {
 /**
  * The marks standing in the window that starts at `startPosition`, in reading order. The window is
  * the manuscript window's own — `MAX_WINDOW_BLOCKS` working blocks — so a projection and the marks
- * it carries always describe the same blocks.
+ * it carries always describe the same blocks. A window holding more than `MAX_WINDOW_MARKS` carries its
+ * first page and `marksPage` (Issue #1604, the paging facts of #1592); `page` reads the page after an
+ * ordinal of that order, refused when the window's marks — their identities and order — changed since.
  */
 export function marksOfWindow(
   db: DatabaseSync,
   branchId: string,
   startPosition: number,
-): { marks: EditorialMarkAnchorProjection[]; marksTruncated: boolean } {
+  page?: { afterOrdinal: number; digest: string },
+): Pick<EditorialMarkCommandProjection, 'marks' | 'marksTruncated' | 'marksPage'> {
   if (!marksRelationExists(db)) return { marks: [], marksTruncated: false };
-  const rows = db.prepare(
-    `${anchorSelect(proposalConflictRelationsExist(db), db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() !== undefined)}
+  const from = `FROM editorial_marks em JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id
      WHERE em.branch_id = ? AND em.status IN ${LIVE_STATUSES} AND em.anchor_state IN ('exact', 'drifted')
        AND wb.position >= ? AND wb.position < ?
-     ORDER BY wb.position, em.from_grapheme, em.to_grapheme DESC, em.created_at, em.mark_id
-     LIMIT ?`,
-  ).all(branchId, startPosition, startPosition + MAX_WINDOW_BLOCKS, MAX_WINDOW_MARKS + 1) as SqlRow[];
-  return { marks: rows.slice(0, MAX_WINDOW_MARKS).map(anchorProjection), marksTruncated: rows.length > MAX_WINDOW_MARKS };
+     ORDER BY wb.position, em.from_grapheme, em.to_grapheme DESC, em.created_at, em.mark_id`;
+  const afterOrdinal = page?.afterOrdinal ?? 0;
+  const rows = db.prepare(
+    `${anchorSelect(proposalConflictRelationsExist(db), db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() !== undefined)}
+     ${from.slice(from.indexOf('WHERE'))}
+     LIMIT ? OFFSET ?`,
+  ).all(branchId, startPosition, startPosition + MAX_WINDOW_BLOCKS, MAX_WINDOW_MARKS + 1, afterOrdinal) as SqlRow[];
+  const marks = rows.slice(0, MAX_WINDOW_MARKS).map(anchorProjection);
+  if (page === undefined && rows.length <= MAX_WINDOW_MARKS) return { marks, marksTruncated: false };
+  const ids = (db.prepare(`SELECT em.mark_id ${from}`).all(branchId, startPosition, startPosition + MAX_WINDOW_BLOCKS) as SqlRow[]).map((row) => text(row.mark_id));
+  const digest = sha256(JSON.stringify(ids));
+  if (page !== undefined) {
+    requireBounded(page.digest === digest, 'WINDOW_MARKS_CHANGED', '这一段的建议、批注或备注有了变化，请重新打开这一段。');
+    requireBounded(afterOrdinal < ids.length, 'WINDOW_INVALID', '稿件位置无效。');
+  }
+  const nextOrdinal = afterOrdinal + marks.length < ids.length ? afterOrdinal + marks.length : null;
+  return { marks, marksTruncated: marks.length < ids.length, marksPage: { shown: marks.length, total: ids.length, nextOrdinal, digest } };
 }
 
 interface BranchState {
@@ -1328,6 +1346,53 @@ export class EditorialMarkStore {
     }
     if (input.kind === 'change-suggestion') this.#insertItem(markId, pinned, content.proposedText!, content.rationale, input.atomicGroupId, now);
     return markId;
+  }
+
+  /**
+   * 上一条 / 下一条待处理 under a filter (Issue #1604, review #1541 一·3): the Book's first open mark after (or before) `from`
+   * in the rail's set and reading order whose category and model pass, judged by the functions the 批注栏's filter uses.
+   */
+  findPending(input: FindPendingMarkInput): { mark: PendingMarkPlace | null } {
+    requireMark(UUID_PATTERN.test(input.manuscriptId) && UUID_PATTERN.test(input.branchId) && BLOCK_PATTERN.test(input.from.blockId), 'MARK_INVALID', '标记标识无效。');
+    const start = this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, input.from.blockId) as SqlRow | undefined;
+    requireMark(start !== undefined, 'MARK_BINDING_CHANGED', '稿件窗口已变化，请刷新后再试。');
+    const [compare, order] = input.direction === 'next' ? ['>', 'ASC'] : ['<', 'DESC'];
+    const open = `em.manuscript_id = ? AND em.branch_id = ? AND em.status = 'open' AND em.kind <> 'personal-highlight' AND em.anchor_state IN ('exact', 'drifted')`;
+    const binding = [input.manuscriptId, input.branchId];
+    // Thousands of marks share a few sources: each distinct one is judged once, here, and the query keeps only the marks it passes.
+    const tests: string[] = [], values: string[] = [];
+    if (input.categories.length > 0) {
+      const passing = (this.#db.prepare(`SELECT DISTINCT em.source_kind, em.source_origin, em.source_label FROM editorial_marks em WHERE ${open}`).all(...binding) as SqlRow[])
+        .filter((row) => input.categories.includes(resolveEditorialMarkCategory({ sourceKind: text(row.source_kind) as EditorialMarkSourceProjection['kind'],
+          sourceOrigin: nullableText(row.source_origin) as EditorialMarkSourceProjection['origin'], sourceLabel: nullableText(row.source_label) }).key));
+      tests.push(`EXISTS (SELECT 1 FROM json_each(?) j WHERE j.value ->> 0 IS em.source_kind AND j.value ->> 1 IS em.source_origin AND j.value ->> 2 IS em.source_label)`);
+      values.push(JSON.stringify(passing.map((row) => [row.source_kind, row.source_origin, row.source_label])));
+    }
+    // A model the frozen labels name alone is judged once per labels; any other AI7 mark is read as its card reads it.
+    const recorded = new Set<string>();
+    if (input.models.length > 0) {
+      const frozen = (this.#db.prepare(`SELECT DISTINCT ifnull(json_extract(em.basis_json, '$.source'), '') source FROM editorial_marks em
+        WHERE ${open} AND em.source_kind = 'ai7'`).all(...binding) as SqlRow[]).map((row) => text(row.source));
+      const kept = frozen.filter((source) => {
+        const named = source === '' ? null : frozenModelLabels(JSON.parse(source));
+        if (named === null) recorded.add(source);
+        return named === null || input.models.includes(editorialMarkFilterModel({ kind: 'ai7', ...named })!);
+      });
+      tests.push(`em.source_kind = 'ai7' AND ifnull(json_extract(em.basis_json, '$.source'), '') IN (SELECT value FROM json_each(?))`);
+      values.push(JSON.stringify(kept));
+    }
+    const rows = this.#db.prepare(
+      `SELECT em.mark_id, em.block_id, em.from_grapheme, ifnull(json_extract(em.basis_json, '$.source'), '') frozen_source FROM editorial_marks em
+       JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id
+       WHERE ${open} ${tests.map((test) => `AND ${test}`).join(' ')} AND (wb.position, em.from_grapheme, em.mark_id) ${compare} (?, ?, ?)
+       ORDER BY wb.position ${order}, em.from_grapheme ${order}, em.mark_id ${order}`,
+    ).iterate(...binding, ...values, integer(start.position), input.from.grapheme, input.from.markId ?? '') as Iterable<SqlRow>;
+    for (const row of rows) {
+      if (recorded.has(text(row.frozen_source))
+        && !input.models.includes(editorialMarkFilterModel({ kind: 'ai7', ...historicalMarkModelLabels(this.#db, text(row.mark_id)) })!)) continue;
+      return { mark: { markId: text(row.mark_id), blockId: text(row.block_id), fromGrapheme: integer(row.from_grapheme) } };
+    }
+    return { mark: null };
   }
 
   card(manuscriptId: string, branchId: string, markId: string): EditorialMarkCardProjection {

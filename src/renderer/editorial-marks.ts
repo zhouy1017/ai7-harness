@@ -1,5 +1,5 @@
 import { editorialMarkCardMoreOpen as moreOpen, renderEditorialMarkCard, settleEditorialMarkCard, setEditorialMarkCardExpanded } from './editorial-mark-card.js';
-import { EDITORIAL_MARK_CATEGORIES, type EditorialMarkCategoryKey } from '../shared/editorial-mark-category.js';
+import { EDITORIAL_MARK_CATEGORIES, editorialMarkFilterModel, type EditorialMarkCategoryKey } from '../shared/editorial-mark-category.js';
 import { matchesEditorialMarkFilter, type EditorialMarkFilter } from './editorial-mark-filter.js';
 import { windowStep } from './components/controls.js';
 import { showToast } from './components/toast.js';
@@ -68,7 +68,6 @@ import {
   REVERSAL_CORRECTION_LINE,
   SAFE_MERGE_LINE,
   markDriftNote,
-  markSourceMark,
   markIsHandled,
   markDisplayNote,
   markTimeLabel,
@@ -998,7 +997,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     const sources = new Set(comments.flatMap(mark => {
       const card = cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card;
-      return card?.source.kind === 'ai7' ? [markSourceMark(card.source)] : [];
+      const model = card === undefined ? null : editorialMarkFilterModel(card.source);
+      return model === null ? [] : [model];
     }));
     for (const source of new Set([...sources, ...markFilter.selectedModels])) {
       let button = modelButtons.get(source);

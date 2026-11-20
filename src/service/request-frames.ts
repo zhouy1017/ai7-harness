@@ -6,6 +6,7 @@ import { validStructureChoice } from '../shared/protocol/import-structure.js';
 import { CUSTOM_ANALYSIS_PREPARATION_PURPOSES, type CustomAnalysisPreparationPurpose } from '../shared/protocol/custom-analysis-redo.js';
 import { SEARCH_CANDIDATE_IDS } from '../shared/protocol/search-backends.js'; import { MODEL_SERVICE_ROUTES } from '../shared/protocol/model-service.js';
 import { MAX_SELECTION_SPAN_BLOCKS } from '../shared/selection-span.js';
+import { EDITORIAL_MARK_CATEGORIES } from '../shared/editorial-mark-category.js';
 import { MAX_AI_EDIT_LOCK_TARGETS, MAX_SCOPED_AI_EDIT_INSTRUCTION_CHARACTERS } from '../shared/protocol/scoped-edit.js';
 import { validateInspectHouseWordListInput, validateSaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
@@ -2433,6 +2434,24 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'findPendingMark': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'from', 'direction', 'categories', 'models'], tentativeId);
+      const from = input.from;
+      if (
+        !isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) ||
+        !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId) ||
+        !isRecord(from) || !hasExactKeys(from, ['blockId', 'grapheme', 'markId']) ||
+        !isBoundedString(from.blockId, 28) || !MARK_BLOCK_PATTERN.test(from.blockId) || !isSafeInteger(from.grapheme, -1) ||
+        !(from.markId === null || (isBoundedString(from.markId, 36) && UUID_PATTERN.test(from.markId))) ||
+        (input.direction !== 'next' && input.direction !== 'previous') ||
+        !Array.isArray(input.categories) || input.categories.length > 16 ||
+        !input.categories.every((key) => typeof key === 'string' && Object.hasOwn(EDITORIAL_MARK_CATEGORIES, key)) ||
+        !Array.isArray(input.models) || input.models.length > 64 || !input.models.every((model) => isBoundedString(model, 256))
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'inspectProposalWorkspace':
     case 'saveProposalDecisionDraft':
     case 'batchProposalDecisionDraft':
@@ -2627,13 +2646,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'getManuscriptWindowAt': {
-      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'target'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['manuscriptId', 'branchId', 'target'], ['marks'], tentativeId);
+      const marks = input.marks;
       if (
         !isBoundedString(input.manuscriptId, 36) ||
         !UUID_PATTERN.test(input.manuscriptId) ||
         !isBoundedString(input.branchId, 36) ||
         !UUID_PATTERN.test(input.branchId) ||
-        !isRecord(input.target)
+        !isRecord(input.target) ||
+        // A later page of the window's marks (Issue #1604): an ordinal of the window's order and the digest the window named.
+        (marks !== undefined && !(isRecord(marks) && hasExactKeys(marks, ['afterOrdinal', 'digest']) && isSafeInteger(marks.afterOrdinal) &&
+          isBoundedString(marks.digest, 64) && HEX_DIGEST_PATTERN.test(marks.digest)))
       ) {
         throw new ProtocolError(tentativeId);
       }

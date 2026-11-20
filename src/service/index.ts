@@ -1421,6 +1421,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.reverseAppliedChangeSuggestion(request.input) };
     case 'getManuscriptRail':
       return { id: request.id, ok: true, op: request.op, result: store.getManuscriptRail(request.input.manuscriptId, request.input.branchId) };
+    case 'findPendingMark':
+      return { id: request.id, ok: true, op: request.op, result: store.findPendingMark(request.input) };
     case 'inspectProposalWorkspace':
       return { id: request.id, ok: true, op: request.op, result: store.inspectProposalWorkspace(request.input) };
     case 'saveProposalDecisionDraft':
@@ -1465,7 +1467,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: store.getManuscriptWindowAt(request.input.manuscriptId, request.input.branchId, request.input.target),
+        result: store.getManuscriptWindowAt(request.input.manuscriptId, request.input.branchId, request.input.target, request.input.marks),
       };
     case 'getOutline':
       return {

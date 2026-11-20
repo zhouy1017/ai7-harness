@@ -112,7 +112,7 @@ const BOOK_OWNERSHIP_CALLS = new Set<keyof RendererApi>([
   'createEditorialMark', 'createProductionDocument', 'createReadersReportDraft', 'createWritingDraft',
   'decideEvaluationRewrite', 'decideProductionDocumentType', 'deferRecovery', 'designatePublicationVersion',
   'discardAgentWorkspaceProposals', 'dismissReplacementPreview', 'editBaselineAnalysisPlan', 'enableEditorialWorkspaceProfile',
-  'enrollBackgroundAnalysis', 'flushJournalEdit', 'freezeReplacement', 'generateReviewReport', 'generateReviewSynthesis',
+  'enrollBackgroundAnalysis', 'findPendingMark', 'flushJournalEdit', 'freezeReplacement', 'generateReviewReport', 'generateReviewSynthesis',
   'getAnalysisRevisionOverview', 'getAnalysisRevisionUnits', 'getAnalysisRunReportRows', 'getBaselineAnalysisPage',
   'getBaselineAnalysisRangePlan', 'getBookOverview', 'getBookWorkbenchRoute', 'getCoverageManifestUnits',
   'getEditorialMarkCard', 'getHistoricalRevision', 'getImportStartup', 'getManuscriptApplyOutcome',
