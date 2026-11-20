@@ -4,6 +4,8 @@
 
 规格：每个图标使用 **24 × 24 网格，单线描边 1.8，圆端点与圆连接**；`viewBox="0 0 24 24"`、`fill="none"`、`stroke="currentColor"`，正式界面显示为 18px（`src/renderer/styles.css` 的 `.icon`），在此尺寸下仍需可辨识。不要渐变、立体、阴影、文字充当图形或复杂装饰；各图标的视觉重量和留白一致。风格稿使用暖纸底色 `#f3f0ea`、单色赭色线条 `#7a3e28`，安静、清晰、克制，适合长时间阅读。
 
+请 Owner 按当前清单出一张风格稿：每个图标等尺寸、等间距排列（共 28 个 ID），每格下方标注对应 ID 与中文名称，便于核对。
+
 风格稿是视觉参考。矢量化时保留以下全部 ID，只替换 `src/renderer/components/icon-sprite.ts` 中的几何定义，不改变导航、状态、事件或持久化。
 
 ## 侧栏
@@ -54,4 +56,4 @@
 | `i-back` | 返回 · 向左箭头 |
 | `i-history` | 历史与恢复 · 回转时钟（保留；侧栏不再使用，#1521） |
 
-几何取自 [editor-surfaces §0.4](editor-surfaces.md#04-屏幕索引) 的 ②B 原型；右缘的 `i-nav` 与 `i-task` 取自 ① 原型。
+几何取自 [editor-surfaces §0.4](editor-surfaces.md#04-屏幕索引) 的 ②B 原型；右缘的 `i-nav` 与 `i-task` 取自 ① 原型。其余九个（`i-agent`、`i-workspace`、`i-comment`、`i-derivative`、`i-undo`、`i-redo`、`i-more`、`i-checklist`、`i-paragraph-analysis`）按上述规格绘制。
