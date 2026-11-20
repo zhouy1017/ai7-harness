@@ -67,8 +67,8 @@ Every editor action writes one **editor step** in its existing transaction: typi
 
 ### 2 · Split and join keep a mark's undo
 
-- **Moved whole:** a mark that moves whole with its words, and whose words did not change, keeps its anchor state across 分段 and 合段.
-- **Cut through:** a mark the caret cuts through becomes drifted, and so does a point mark exactly at the caret.
+- **Moved whole:** a mark that moves whole with its words, and whose words did not change, keeps its anchor state across 分段 and 合段. *Clarification of 2026-11-20 (Commander, reported to the Owner):* two kinds of mark still drift when they move, because their place cannot be trusted afterwards — the marks of a 就地编辑修订 session, which the session finds again by their offsets in the paragraph before the move, and the marks of a paragraph absorbed by a join whose boundary fuses two graphemes into one, where the joined paragraph is shorter than its two parts.
+- **Cut through:** a mark the caret cuts through becomes drifted, and so does a point mark exactly at the caret. *Clarification of 2026-11-20 (Commander, reported to the Owner):* a point at a caret that stands at the very start or end of the paragraph is not cut — one side is empty — so it keeps its state: at the start it moves with the words, at the end it stays.
 - **Moved targets:** reversing an Apply accepts a target that moved, when the original block reaches it through block lineage, whatever the status of the command groups.
 - **Touching pair from different paragraphs:** two touching reversal targets that came from different original paragraphs are refused, not reordered.
 
