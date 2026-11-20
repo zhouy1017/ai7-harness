@@ -1189,6 +1189,58 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
+    // #1553: ordinary mode keeps the conversation, its history and one fold of what a question may consult. The pills, the
+    // governance form, the directives, the sending preview and the habits summary are developer-only, and 学习回溯 waits until
+    // its page opens in ordinary mode (#1549). This stage stops the one preference it creates, so the fold's honest state is
+    // "nothing to include"; the live choice is proved on J-16's accepted preference above.
+    // The fold exists at mount; its list is written when the projection arrives, so wait for that sentence before asserting.
+    await waitFor(primary, `document.querySelector('[data-global-agent-fold="references"]')?.textContent.includes('还没有可加入提问的审阅偏好。')===true`, 'ordinary-agent-fold-ready');
+    const ordinaryAgentSurface = `(() => {
+      const root=document.querySelector('[data-global-agent="destination"]');
+      const fold=root?.querySelector('[data-global-agent-fold="references"]');
+      return root instanceof HTMLElement && fold instanceof HTMLDetailsElement && fold.open === false &&
+        fold.querySelector(':scope > summary')?.textContent === '参考哪些书和偏好 · 已选 0 本书、0 条偏好' &&
+        fold.textContent.includes('还没有可加入提问的审阅偏好。') &&
+        fold.querySelectorAll('.global-agent-sources input[type="checkbox"]').length === 0 &&
+        root.querySelectorAll('.global-agent-pill').length === 0 &&
+        root.querySelector('[data-global-agent-governance]') === null &&
+        root.querySelector('[data-global-agent-question-form] button[type="submit"]')?.textContent === '发送问题' &&
+        !Array.from(root.querySelectorAll('button'), (node) => node.textContent).some((text) => text === '查看将发送的内容' || text === '生成审阅习惯总结' || /学习回溯/u.test(text)) &&
+        !/治理|监督/u.test(root.textContent);
+    })()`;
+    await assertRenderer(primary, ordinaryAgentSurface, 'ordinary-agent-one-fold');
+    // A real pointer opens and closes the fold at both window sizes; its empty state is what the editor reads, not a dead row.
+    for (const [width, height] of [[1280, 800], [1008, 681]]) {
+      await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await waitFor(primary, `innerWidth===${width} && innerHeight===${height}`, 'ordinary-agent-fold-viewport');
+      for (const open of [true, false]) {
+        const point = await primary.evaluate(`(async () => {
+          const summary=document.querySelector('[data-global-agent-fold="references"] > summary');
+          if(!(summary instanceof HTMLElement))return null;
+          summary.scrollIntoView({block:'center',behavior:'instant'});
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          const box=summary.getBoundingClientRect();
+          const x=box.left+box.width/2, y=box.top+box.height/2;
+          return {x,y,visible:box.top>=document.querySelector('#context-header').getBoundingClientRect().bottom && box.bottom<=innerHeight &&
+            box.left>=0 && box.right<=innerWidth && document.elementFromPoint(x,y)?.closest('summary')===summary};
+        })()`);
+        requireJourney(point?.visible === true, 'ordinary-agent-fold-summary-visible');
+        await primary.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+        await primary.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+        await waitFor(primary, `document.querySelector('[data-global-agent-fold="references"]')?.open === ${open}`, 'ordinary-agent-fold-toggle');
+        if (open) {
+          await assertRenderer(primary, `(() => {
+            const fold=document.querySelector('[data-global-agent-fold="references"]');
+            const note=Array.from(fold?.querySelectorAll('p')??[]).find((node)=>node.textContent==='还没有可加入提问的审阅偏好。');
+            const box=note?.getBoundingClientRect();
+            return fold instanceof HTMLDetailsElement && note instanceof HTMLElement && box.width>0 && box.height>0 && box.top>=0 && box.bottom<=innerHeight &&
+              fold.querySelectorAll('.global-agent-sources input[type="checkbox"]').length === 0;
+          })()`, 'ordinary-agent-fold-empty-readable');
+        }
+      }
+    }
+    await primary.send('Emulation.clearDeviceMetricsOverride');
+    await primary.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo({top:0,left:0,behavior:'instant'}); })()`);
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-restore-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'technical-mode-restore-settings-ready');
     await click(primary, '帮助', 'technical-mode-restore-help');
@@ -1201,6 +1253,17 @@ async function main() {
 
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
+    // #1553: the developer layer keeps the three pills, the governance form, the directives, the sending preview and the
+    // 学习回溯 button, which is offered exactly because that page can be opened here.
+    await assertRenderer(primary, `(() => {
+      const root=document.querySelector('[data-global-agent="destination"]');
+      const buttons=Array.from(root?.querySelectorAll('button')??[], (node) => node.textContent);
+      return root instanceof HTMLElement && root.querySelector('[data-global-agent-fold]') === null &&
+        JSON.stringify(Array.from(root.querySelectorAll('.global-agent-pill'), (pill) => pill.dataset.globalAgentPill)) === JSON.stringify(['scope','governance','directives']) &&
+        root.querySelector('[data-global-agent-governance]') instanceof HTMLFormElement &&
+        root.querySelector('.global-agent-directives') instanceof HTMLElement &&
+        buttons.includes('查看将发送的内容') && buttons.includes('生成审阅习惯总结') && buttons.includes('学习回溯 · 停止今后使用');
+    })()`, 'developer-agent-pills-and-pages');
     await requireJourney(await primary.evaluate(`(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === ${directivesAfterPreference} && document.querySelector('#context-title')?.textContent === 'AI 助手'; })()`), 'global-agent-entry-no-work');
     await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='AI 助手' && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型')`, 'agent-header-title-and-processing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
