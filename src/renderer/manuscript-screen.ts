@@ -4,7 +4,7 @@ import { BookOwnershipFailure, sendJournalEdit } from './navigation-generation.j
 import { reviewReportExportButton } from './review-report-export.js';
 import { showTransientNotice } from './notifications.js';
 import { menuPanel } from './components/controls.js';
-import { icon, type IconId } from './components/icon-sprite.js';
+import { icon } from './components/icon-sprite.js';
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { createSaveMenu } from './save-menu.js';
 import { mountManuscriptExport } from './manuscript-export.js';
@@ -69,11 +69,6 @@ import type { mountTaskDrawer } from './task-drawer.js';
 import type { ShellPreferences } from './shell.js';
 import type { RendererApi } from '../shared/protocol.js';
 import type { CommandDispatcher } from './commands.js';
-
-/** The right edge's four entries and their own symbols (Issue #1554): 导航 · 分析 · 这本书的任务 · 批注. */
-export const EDGE_ENTRY_ICONS: Readonly<{ navigation: IconId; analysis: IconId; tasks: IconId; comments: IconId }> = Object.freeze({
-  navigation: 'i-nav', analysis: 'i-analysis', tasks: 'i-task', comments: 'i-comment',
-});
 
 export interface ManuscriptScreen {
   readonly bookId: string;
@@ -888,12 +883,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   function replaceComments(replacer: RightColumnReplacer): void { switchColumn(() => rightColumn.replaceComments(replacer)); }
   function restoreComments(replacer: RightColumnReplacer): void { switchColumn(() => rightColumn.restoreComments(replacer)); }
   const edgeEntries = element('div', 'edge-entries');
-  for (const [entry, id] of [
-    [navigationEntry, EDGE_ENTRY_ICONS.navigation],
-    [analysisEntry, EDGE_ENTRY_ICONS.analysis],
-    [tasksEntry, EDGE_ENTRY_ICONS.tasks],
-    [commentsEntry, EDGE_ENTRY_ICONS.comments],
-  ] as const) {
+  for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-paragraph-analysis'], [tasksEntry, 'i-task'], [commentsEntry, 'i-comment']] as const) {
     const label = element('span', 'edge-label', entry.textContent ?? '');
     const badge = element('span', 'edge-badge');
     badge.setAttribute('aria-hidden', 'true');

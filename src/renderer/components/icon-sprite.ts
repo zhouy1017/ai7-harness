@@ -1,9 +1,9 @@
 /** Exact symbol geometry from September prototypes ②B and ①, editor-surfaces §0.4.
- * The 17 A4 IDs are fixed; i-nav and i-task are the prototype's right-rail extensions. Issue #1413 cluster 2 gives every
- * entry its own symbol: i-agent (AI 助手), i-workspace (AI 改稿) and i-comment (批注); i-derivative (衍生稿件) is the one id added since.
- * Issue #1554 gives 更多图书 (i-more) and the sidebar's 任务 (i-checklist) their own symbols, so no two destinations share one.
+ * The 17 A4 IDs are fixed; i-nav and i-task are the prototype's right-rail extensions. Other ids were drawn to the brief's
+ * specification: i-agent (AI 助手), i-workspace (AI 改稿), i-comment (批注), i-derivative (衍生稿件, #1521), i-undo and i-redo,
+ * and — for Issue #1554 — i-more (更多图书), i-checklist (任务) and i-paragraph-analysis (当前段落的分析).
  */
-export const ICON_IDS = ['i-inbox', 'i-library', 'i-more', 'i-series', 'i-kb', 'i-learn', 'i-settings', 'i-ms', 'i-review', 'i-star', 'i-box', 'i-flag', 'i-analysis', 'i-source', 'i-overview', 'i-history', 'i-menu', 'i-back', 'i-nav', 'i-task', 'i-checklist', 'i-agent', 'i-workspace', 'i-comment', 'i-undo', 'i-redo', 'i-derivative'] as const;
+export const ICON_IDS = ['i-inbox', 'i-library', 'i-more', 'i-series', 'i-kb', 'i-learn', 'i-settings', 'i-ms', 'i-review', 'i-star', 'i-box', 'i-flag', 'i-analysis', 'i-paragraph-analysis', 'i-source', 'i-overview', 'i-history', 'i-menu', 'i-back', 'i-nav', 'i-task', 'i-checklist', 'i-agent', 'i-workspace', 'i-comment', 'i-undo', 'i-redo', 'i-derivative'] as const;
 export type IconId = (typeof ICON_IDS)[number];
 const SYMBOLS: Readonly<Record<IconId, ReadonlyArray<readonly [string, Readonly<Record<string, string>>]>>> = {
   "i-undo": [["path", {"d": "M4 9h10a6 6 0 010 12"}], ["path", {"d": "M9 4L4 9l5 5"}]],
@@ -21,6 +21,7 @@ const SYMBOLS: Readonly<Record<IconId, ReadonlyArray<readonly [string, Readonly<
   "i-box": [["path", {"d": "M3 8l9-4 9 4-9 4z"}], ["path", {"d": "M3 8v9l9 4 9-4V8"}], ["path", {"d": "M12 12v9"}]],
   "i-flag": [["path", {"d": "M5 21V4"}], ["path", {"d": "M5 4h12l-2 4 2 4H5"}]],
   "i-analysis": [["circle", {"cx": "12", "cy": "12", "r": "8"}], ["circle", {"cx": "12", "cy": "12", "r": "3"}], ["path", {"d": "M12 4v2M12 18v2M4 12h2M18 12h2"}]],
+  "i-paragraph-analysis": [["path", {"d": "M4 5h8"}], ["path", {"d": "M4 9h5"}], ["circle", {"cx": "15.5", "cy": "15.5", "r": "4.5"}], ["circle", {"cx": "15.5", "cy": "15.5", "r": "1.5"}]],
   "i-source": [["path", {"d": "M4 6h16v12H4z"}], ["path", {"d": "M8 10h8M8 14h5"}]],
   "i-overview": [["rect", {"x": "3", "y": "4", "width": "7", "height": "7", "rx": "1"}], ["rect", {"x": "14", "y": "4", "width": "7", "height": "7", "rx": "1"}], ["rect", {"x": "3", "y": "15", "width": "7", "height": "6", "rx": "1"}], ["rect", {"x": "14", "y": "15", "width": "7", "height": "6", "rx": "1"}]],
   "i-history": [["path", {"d": "M20 12a8 8 0 11-2.3-5.7"}], ["path", {"d": "M20 4v5h-5"}], ["path", {"d": "M12 8v4l3 2"}]],
