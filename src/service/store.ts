@@ -31,7 +31,7 @@ import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInpu
 import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } from '../shared/protocol/series.js';
 import { effectiveModelReasoningEffort, modelProfileFor } from './provider/model-profile.js';
 import { composeTaskOverview, estimateTaskStarts } from './task-overview.js';
-import { customAnalysisModeGoal, type LegacyModelRoleId, type ModelRoleId, type ModelRoleResolutionProjection } from '../shared/protocol.js';
+import { customAnalysisModeGoal, modelServiceRouteRefusal, type LegacyModelRoleId, type ModelRoleId, type ModelRoleResolutionProjection } from '../shared/protocol.js';
 import * as modelSearchSettings from './model-search-settings.js';
 import * as materialIndexOperations from './material-index-operations.js';
 import * as globalAgentOperations from './global-agent-operations.js';
@@ -1811,7 +1811,6 @@ export class EditorialStore {
       get getModelServiceRouteConnection() { return store.getModelServiceRouteConnection.bind(store); },
       get getSearchBackendConnections() { return store.getSearchBackendConnections.bind(store); },
       get modelServiceBinding() { return store.modelServiceBinding.bind(store); },
-      get selectRoleModel() { return store.selectRoleModel.bind(store); },
     };
   }
 
@@ -3094,8 +3093,10 @@ export class EditorialStore {
     let notice: string | undefined;
     if (remembered && Object.keys(override).length > 0) {
       const connection = modelSearchSettings.resolveModelRole(this.#modelSearchSettingsHost, role, { ...(override.modelConnectionId === undefined ? {} : { modelConnectionId: override.modelConnectionId }) }).connection;
+      // A remembered model the channel can no longer send (#1582) falls back like one no longer listed.
       if (connection?.credentialOperationState !== 'ready' || (override.modelId !== undefined &&
-          !this.getModelServiceModels(connection.binding.providerId).some(model => model.modelId === override.modelId))) {
+          (!this.getModelServiceModels(connection.binding.providerId).some(model => model.modelId === override.modelId) ||
+            modelServiceRouteRefusal(connection.binding.providerId, override.modelId, role === 'main-editorial' ? 'main' : 'fast') !== null))) {
         override = {};
         notice = '上次选择的模型已不可用，本次已使用角色默认模型。';
       }

@@ -34,9 +34,10 @@ export function modelTierOf(role: ModelRoleId): ModelTier {
 }
 
 /**
- * The role each task kind belongs to (ADR 0107 §1–§2). Kinds the ADR does not name take the role of their nearest named kind:
- * `material-index` and `review-reduction` run behind the scenes on the Pro tier (底层 Pro); `scoped-edit` is the 前台 Flash
- * scoped AI edit. A kind not listed here is a 前台 Pro kind (`editorial-review/*`, `custom-analysis/*`).
+ * The role each task kind belongs to (ADR 0107 §1–§2). Two kinds the ADR does not name run behind the scenes on the Pro tier,
+ * so they are 底层 Pro until R5-F1 decides: `material-index` and `review-reduction`. A kind not listed here is a 前台 Pro kind
+ * (`editorial-review/*`, `custom-analysis/*`, `writing`, …). No product code reads this map yet: every launch still names
+ * `Main Editorial Role` or `Fast Interaction Role`, and R5-F1 rewires each call site to its role.
  */
 export const MODEL_ROLE_OF_TASK_KIND: Readonly<Record<string, ModelRoleId>> = {
   'editorial-dialogue': 'foreground-flash',
@@ -47,13 +48,23 @@ export const MODEL_ROLE_OF_TASK_KIND: Readonly<Record<string, ModelRoleId>> = {
   'conflict-regenerate': 'foreground-flash',
   'material-translation': 'underlying-flash',
   'model-connection-test': 'underlying-flash',
+  'standards-table-formatting': 'underlying-flash',
+  'learning-sample-tidying': 'underlying-flash',
+  'retrieval-query-expansion': 'underlying-flash',
+  'retrieval-rerank': 'underlying-flash',
+  'guideline-clause-formatting': 'underlying-flash',
   'learning-curation': 'underlying-pro',
+  'learning-synthesis': 'underlying-pro',
   'material-index': 'underlying-pro',
   'review-reduction': 'underlying-pro',
 };
 
+/** The kinds ADR 0107 §1–§2 names that no launch-policy rule runs yet (R5-F1 and later slices add them). */
+export const MODEL_ROLE_KINDS_NOT_YET_LAUNCHED: ReadonlySet<string> = new Set(['standards-table-formatting', 'learning-sample-tidying',
+  'retrieval-query-expansion', 'retrieval-rerank', 'guideline-clause-formatting', 'learning-synthesis']);
+
 export function modelRoleOfTaskKind(kind: string): ModelRoleId {
-  return MODEL_ROLE_OF_TASK_KIND[kind] ?? 'foreground-pro';
+  return Object.hasOwn(MODEL_ROLE_OF_TASK_KIND, kind) ? MODEL_ROLE_OF_TASK_KIND[kind]! : 'foreground-pro';
 }
 
 /** What 设置 › 模型服务 names each role and what it is for (ADR 0107 §1). */

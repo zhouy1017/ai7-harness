@@ -81,7 +81,8 @@ async function open(): Promise<void> {
   if (connection?.credentialOperationState !== 'ready') connection = store.saveModelServiceConnection('合成全域对话连接', null, 'ready', binding.route);
   credentialReference = connection.credentialReference;
   store.selectModelServiceRoute(binding.route);
-  store.selectFastRoleModel(binding.route, binding.model);
+  // Only a Pro model is chosen (Issue #1620): every AI 助手 turn of this file runs on it through the Flash roles' cascade.
+  expect(store.getModelRoles().find((role) => role.roleId === 'foreground-flash')?.source).toBe('follows-foreground-pro');
   const selected = { ...binding, credentialReference };
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', selected, selected);
   store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
@@ -576,7 +577,24 @@ describe('v31 scoped Global Agent tools (#1171)', () => {
   }
   const propose = (text: string) => () => ({ name: 'propose_learning_supervision', args: { categoryId: 'typos-and-usage', scope: 'house', effect: 'guide', text } });
 
+  it('answers both AI 助手 kinds on the Pro model when only a Pro model is chosen (#1620)', async () => {
+    store.selectMainRoleModel(binding.route, 'glm-5.3');
+    const main = store.getConfiguredModelRoleBinding('main-editorial')!;
+    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toEqual(main);
+    policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, main);
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
+      live: { scope: 'ordinary-production', ...binding, model: main.model, credentialReference, runBudgetCeiling: 'unset' } });
+    const bookless = start();
+    await waitFor(() => inspect(bookless.dialogueId).attempts[0]?.state === 'completed');
+    const { ask, disclosure } = await scopedAsk();
+    scripted([]);
+    const { dialogue } = await settled(ask, disclosure.sha256);
+    expect(dialogue.attempts[0]!.state).toBe('completed');
+    expect(calls.map((call) => [call.url, JSON.parse(call.body).model])).toEqual([[binding.endpoint, 'glm-5.3'], [binding.endpoint, 'glm-5.3']]);
+  });
+
   it('answers both AI 助手 kinds on the Flash model when Pro and Flash are different models of one channel (#1620)', async () => {
+    store.selectFastRoleModel(binding.route, binding.model);
     store.selectMainRoleModel(binding.route, 'glm-5.3');
     const main = store.getConfiguredModelRoleBinding('main-editorial')!, flash = store.getConfiguredModelRoleBinding('fast-interaction')!;
     expect([main.model, flash.model]).toEqual(['glm-5.3', binding.model]);

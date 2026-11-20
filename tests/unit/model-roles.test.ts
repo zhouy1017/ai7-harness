@@ -4,7 +4,7 @@ import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { CONFIGURED_ALTERNATE_ROUTE_MODELS, CONFIGURED_RECOMMENDED_MODELS, CONFIGURED_RUNTIME_MODEL_TABLE } from '../../src/shared/provider-configuration.generated.js';
 import { GENERATED_MODEL_PROFILES, GENERATED_ROUTE_DISPOSITIONS } from '../../src/service/provider/provider-profiles.generated.js';
 import {
-  MODEL_ROLE_IDS, MODEL_ROUTE_NOT_SERVED_REASON, MODEL_SERVICE_CHANNELS, modelRoleIdOf, modelRoleOfTaskKind, modelServiceChannelOf,
+  MODEL_ROLE_IDS, MODEL_ROLE_KINDS_NOT_YET_LAUNCHED, MODEL_ROLE_OF_TASK_KIND, MODEL_ROUTE_NOT_SERVED_REASON, MODEL_SERVICE_CHANNELS, modelRoleIdOf, modelRoleOfTaskKind, modelServiceChannelOf,
   modelServiceRouteRefusal, modelServiceRuntimeBinding, modelTierOf, type ModelServiceRouteId,
 } from '../../src/shared/protocol.js';
 
@@ -23,10 +23,35 @@ describe('the role of each task kind (ADR 0107 §1–§2)', () => {
       .toEqual(['underlying-flash', 'underlying-flash', 'underlying-pro', 'foreground-pro']);
   });
 
-  it('reads current ids, legacy ids and recorded policy names, and nothing else', () => {
+  it('holds exactly the rows of ADR 0107 §1–§2 and the two kinds it does not name, kind by kind', () => {
+    expect(MODEL_ROLE_OF_TASK_KIND).toEqual({
+      // §1 前台 Flash
+      'editorial-dialogue': 'foreground-flash', 'global-agent-dialogue': 'foreground-flash', 'global-agent-scoped-dialogue': 'foreground-flash',
+      'editorial-polish': 'foreground-flash', 'scoped-edit': 'foreground-flash', 'conflict-regenerate': 'foreground-flash',
+      // §2 底层 Flash
+      'material-translation': 'underlying-flash', 'model-connection-test': 'underlying-flash', 'standards-table-formatting': 'underlying-flash',
+      'learning-sample-tidying': 'underlying-flash', 'retrieval-query-expansion': 'underlying-flash', 'retrieval-rerank': 'underlying-flash',
+      'guideline-clause-formatting': 'underlying-flash',
+      // §1 底层 Pro, and the two background Pro kinds the ADR does not name (R5-F1 confirms or moves them)
+      'learning-curation': 'underlying-pro', 'learning-synthesis': 'underlying-pro', 'material-index': 'underlying-pro', 'review-reduction': 'underlying-pro',
+    });
+    // §1 前台 Pro: every other kind, prototype names included.
+    expect(['writing', 'factual-review', 'factual-recheck', 'baseline-manuscript-analysis', 'evaluation', 'editorial-review/run-synthesis', 'constructor', 'toString']
+      .map(modelRoleOfTaskKind)).toEqual(Array(8).fill('foreground-pro'));
+    // The §2 kinds no rule runs yet are exactly the ones the launch policy does not name; scoped edit launches without a rule of its own.
+    const ruled = new Set([...defaults.ordinary, ...defaults.developer].flatMap((rule) => rule.taskKinds).concat('scoped-edit'));
+    expect(Object.keys(MODEL_ROLE_OF_TASK_KIND).filter((kind) => !ruled.has(kind)).sort()).toEqual([...MODEL_ROLE_KINDS_NOT_YET_LAUNCHED].sort());
+  });
+
+  it('reads current ids, every legacy id and recorded policy name, and nothing else', () => {
     expect(MODEL_ROLE_IDS.map(modelRoleIdOf)).toEqual([...MODEL_ROLE_IDS]);
-    expect(['main-editorial', 'fast-interaction', 'Main Editorial Role', 'Fast Interaction Role', 'Frontier Model Role', 'other', 3].map(modelRoleIdOf))
-      .toEqual(['foreground-pro', 'underlying-flash', 'foreground-pro', 'underlying-flash', 'underlying-pro', null, null]);
+    expect(Object.fromEntries(['main-editorial', 'Main Editorial Role', 'fast-interaction', 'Fast Interaction Role', 'difficult-escalation',
+      'Difficult Escalation Role', 'frontier', 'Frontier Model Role', 'other', 'constructor'].map((value) => [value, modelRoleIdOf(value)]))).toEqual({
+      'main-editorial': 'foreground-pro', 'Main Editorial Role': 'foreground-pro', 'fast-interaction': 'underlying-flash', 'Fast Interaction Role': 'underlying-flash',
+      'difficult-escalation': 'underlying-pro', 'Difficult Escalation Role': 'underlying-pro', frontier: 'underlying-pro', 'Frontier Model Role': 'underlying-pro',
+      other: null, constructor: null,
+    });
+    expect(modelRoleIdOf(3)).toBeNull();
   });
 });
 

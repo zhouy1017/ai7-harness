@@ -49,7 +49,6 @@ export interface ModelSearchSettingsHost {
   getModelServiceRouteConnection: (route: ModelServiceRouteId) => ModelServiceConnectionProjection | null;
   getSearchBackendConnections: () => import('../shared/protocol.js').SearchBackendConnectionProjection[];
   modelServiceBinding: (route: ModelServiceRouteId, modelId: string) => import('../shared/protocol.js').ModelServiceBindingProjection;
-  selectRoleModel: (route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string) => void;
 }
 
 export function getSearchBackendSettings(host: ModelSearchSettingsHost): import('../shared/protocol.js').SearchBackendSettingsProjection {
@@ -267,7 +266,8 @@ export function resolveModelRole(host: ModelSearchSettingsHost, role: ModelRoleI
     : source === 'flash-tier' ? chosenFlash : pro;
   // The channel's model takes its reviewed runtime record: the configured route (a Zen model's own Zen route), endpoint and slot.
   const model = connection === undefined ? null
-    : flash && (perTask || source === 'flash-tier') ? connection.fastBinding ?? connection.binding : connection.binding;
+    // A connection's Flash group is used only while it holds the editor's Flash choice — also for a per-Task choice naming it.
+    : flash && connection === chosenFlash && source === 'flash-tier' ? connection.fastBinding ?? connection.binding : connection.binding;
   const resolved = { roleId, source, connection: connection ?? null, model, refusal: null };
   if (connection === undefined || model === null || connection.credentialOperationState !== 'ready') return { ...resolved, binding: null };
   const execution = resolveRuntimeExecutionConfig({ modelConnectionId: connection.connectionId, modelId: model.modelId,

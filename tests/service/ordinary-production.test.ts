@@ -1457,6 +1457,25 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     }) as unknown as typeof fetch;
   }
 
+  it('translates 来源译文 on the Pro model when only a Pro model is chosen (#1620)', async () => {
+    const { store } = await openProductionStore();
+    store.saveModelServiceConnection('Pro only OpenAI', null, 'ready', 'openai-platform');
+    store.selectModelServiceRoute('openai-platform');
+    store.selectMainRoleModel('openai-platform', 'gpt-5.6-sol');
+    const main = store.getConfiguredModelRoleBinding('main-editorial')!;
+    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toEqual(main);
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, main);
+    const calls: Array<{ url: string; model: string; cap: number }> = [];
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: responsesTransport(calls, JSON.stringify({ schema: MATERIAL_TRANSLATION_RESULT_SCHEMA,
+        translations: [{ n: 1, text: '只选 Pro 的合成译文。' }] })) }, () => policy, () => main.credentialReference, { resolve: async () => 'public-synthetic-placeholder' }) });
+    try {
+      const result = await materialTranslator(owner, 'ordinary-production', () => 1).translate('b'.repeat(64), ['Public synthetic reference text for a Pro-only translation.'], 'pro-only');
+      expect(result.kind).toBe('translated');
+      expect(calls.map((call) => [call.url, call.model])).toEqual([[main.endpoint, 'gpt-5.6-sol']]);
+    } finally { owner.dispose(); }
+  });
+
   it('tests, independently selects both reviewed models, restarts and translates through the exact persisted composition', async () => {
     let { store } = await openProductionStore();
     const official = store.saveModelServiceConnection('Main official', null, 'ready', 'deepseek-open-platform');

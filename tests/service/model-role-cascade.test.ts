@@ -78,6 +78,21 @@ describe('the four Model Roles (Issue #1620)', () => {
     store.setModelServiceCredentialState(gemini.credentialReference, 'ready');
     expect(store.getModelRoles().find((role) => role.roleId === 'underlying-flash')).toMatchObject({ source: 'flash-tier', binding: { modelId: 'gemini-3.8-flash', reasoningEffort: 'low' } });
     expect(binding('fast-interaction')).toMatchObject({ route: 'google-gemini', model: 'gemini-3.8-flash', reasoningEffort: 'low' });
+    // Clearing a Flash choice held by another channel than Pro's clears it there.
+    store.clearFlashModel();
+    expect(store.getModelServiceConnections().map((connection) => connection.fastSelected)).toEqual([false, false]);
+    expect(store.getModelRoles().find((role) => role.roleId === 'foreground-flash')).toMatchObject({ source: 'follows-foreground-pro', binding: { providerId: 'anthropic-claude', modelId: 'claude-opus-5' } });
+    expect(binding('fast-interaction')).toEqual(binding('main-editorial'));
+  });
+
+  it('reads a per-Task choice naming a connection from its Flash model only while that connection holds the Flash choice', () => {
+    const claude = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+    store.selectMainRoleModel('anthropic-claude', 'claude-opus-5', 'high');
+    store.selectFastRoleModel('anthropic-claude', 'claude-haiku-4-5', 'low');
+    const perTask = () => store.getConfiguredModelRoleBinding('fast-interaction', { modelConnectionId: claude.connectionId });
+    expect(perTask()).toMatchObject({ model: 'claude-haiku-4-5', reasoningEffort: 'low' });
+    store.clearFlashModel();
+    expect(perTask()).toMatchObject({ model: 'claude-opus-5', reasoningEffort: 'high' });
   });
 
   it.each([['no Flash model is chosen', null], ['the Flash model is another model of the same channel', 'gpt-5.6-luna']] as const)(

@@ -394,6 +394,34 @@ it('runs polish, conflict regeneration and a scoped edit on the Pro model when n
 });
 
 
+it('falls back from a remembered per-Task model its channel can no longer send to the role default, with the notice (#1582)', async () => {
+  const go = store.saveModelServiceConnection('记住的选择', null, 'ready', 'opencode-go');
+  // The account catalogue lists the /responses model, so only #1582 rules it out.
+  store.cacheModelServiceModels(go, [{ modelId: 'deepseek-v4.1-flash', modelLabel: 'DeepSeek V4.1 Flash' }, { modelId: 'gpt-5.6-luna', modelLabel: 'GPT 5.6 Luna' }]);
+  const main = store.getConfiguredModelRoleBinding('main-editorial')!;
+  const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, main);
+  store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
+    live: { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: go.credentialReference, scope: 'ordinary-production', runBudgetCeiling: 'unset' } });
+  const calls: StubCall[] = [];
+  const runtime = { scope: 'ordinary-production' as const, nativeFetch: stubTransport(calls, () => SCOPED_EDIT_AUTHORED_ANSWER) };
+  const secretResolver = { resolve: async () => 'synthetic-remembered-placeholder' };
+  const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(runtime, () => policy, () => go.credentialReference, secretResolver) });
+  const fast = new FastRoleRequests(owner, store, () => new Date(), frozen => {
+    if (frozen === null) throw new Error('missing scoped binding');
+    return owner.fork(productionFastRoleRoutes(runtime, () => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', null, frozen),
+      () => frozen.credentialReference, secretResolver));
+  });
+  try {
+    const started = fast.scopedEdit(book.bookId, { ...scopedEditJourneyInput(store, book, store.inspectAiEditLocks(book).digest), clientCommandId: randomUUID(),
+      executionConfig: { modelConnectionId: go.connectionId, modelId: 'gpt-5.6-luna' }, rememberedChoice: true });
+    expect(JSON.stringify(started)).toContain('上次选择的模型已不可用，本次已使用角色默认模型。');
+    await fast.settled();
+    expect(fast.inspectScopedEdit(book.bookId, started.requestId).state).toBe('applied');
+    expect(calls.map((call) => JSON.parse(call.body).model)).toEqual([main.model]);
+  } finally { owner.dispose(); await fast.settled(); }
+});
+
+
 it('refuses at launch a stored model its channel cannot send, before any transport call (#1582)', async () => {
   const connection = store.saveModelServiceConnection('0.7.3 的选择', null, 'ready', 'opencode-go');
   store.close();
