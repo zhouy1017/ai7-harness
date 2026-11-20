@@ -92,7 +92,6 @@ import type {
   RecordSeriesExclusionInput,
   SeriesExclusionResultProjection,
   PriorWorkItemProjection,
-  ManuscriptWindowTarget,
   OutlineProjection,
   SearchResultsProjection,
   ReplacementDismissalProjection,
@@ -311,13 +310,13 @@ import type {
   SaveDeveloperProposalInput,
 } from './protocol/captured-procedures.js';
 
-import type { DurableHistoryProjection, JournalAcknowledgement, ManuscriptRailProjection, ManuscriptWindowProjection } from './protocol/manuscript-window.js';
+import type { DurableHistoryProjection, JournalAcknowledgement, ManuscriptRailProjection, ManuscriptWindowAtInput, ManuscriptWindowProjection } from './protocol/manuscript-window.js';
 import type {
   ApplyChangeSuggestionBatchInput, ApplyChangeSuggestionInput, ApplyReceiptProjection, BatchProposalDecisionDraftInput, CreateEditorialMarkInput,
-  EditorialMarkCardProjection, EditorialMarkCommandProjection, InspectApplyReceiptInput, ManuscriptApplyCommandProjection, ManuscriptApplyOutcomeProjection,
+  EditorialMarkCardProjection, EditorialMarkCommandProjection, FindPendingMarkInput, InspectApplyReceiptInput, ManuscriptApplyCommandProjection, ManuscriptApplyOutcomeProjection,
   PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordChangeSuggestionDecisionInput,
   RecordProposalDecisionFeedbackInput, RecordProposalDecisionInput, RecordProposalDecisionReasonInput, ReverseAppliedChangeSuggestionInput,
-  ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput, UpdateEditorialMarkInput,
+  PendingMarkPlace, ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput, UpdateEditorialMarkInput,
 } from './protocol/editorial-marks.js';
 import type {
   ProposalConflictBindingInput, ProposalConflictDraftSaveProjection, ProposalConflictKind, ProposalConflictProjection, ProposalConflictRegenerationProjection,
@@ -769,6 +768,7 @@ export const IPC_CHANNELS = {
   resolveProposalConflict: 'ai7:j06:resolve-proposal-conflict',
   regenerateProposalConflictUnit: 'ai7:j06:regenerate-proposal-conflict-unit',
   getManuscriptRail: 'ai7:j02:get-manuscript-rail',
+  findPendingMark: 'ai7:j05:find-pending-mark',
   runEditorClipboardCommand: 'ai7:j05:run-editor-clipboard-command',
   listPriorWork: 'ai7:j02:list-prior-work',
   getManuscriptWindowAt: 'ai7:j02:get-manuscript-window-at',
@@ -4892,6 +4892,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    */
   regenerateProposalConflictUnit: { input: RegenerateProposalConflictUnitInput; output: ProposalConflictRegenerationProjection };
   getManuscriptRail: { input: { manuscriptId: string; branchId: string }; output: ManuscriptRailProjection };
+  findPendingMark: { input: FindPendingMarkInput; output: { mark: PendingMarkPlace | null } };
   /**
    * Remember where the editor is, so the next entry into this Book returns there (V2-UX-RET-002).
    * The pair is the editor's own caret, in the window projection's vocabulary; what it answers is
@@ -4903,10 +4904,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     output: { state: 'recorded' };
   };
   listPriorWork: { input: Record<string, never>; output: ReadonlyArray<PriorWorkItemProjection> };
-  getManuscriptWindowAt: {
-    input: { manuscriptId: string; branchId: string; target: ManuscriptWindowTarget };
-    output: ManuscriptWindowProjection;
-  };
+  getManuscriptWindowAt: { input: ManuscriptWindowAtInput; output: ManuscriptWindowProjection };
   getOutline: {
     input: { manuscriptId: string; branchId: string; cursor: string | null };
     output: OutlineProjection;
@@ -5504,6 +5502,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   /** 基于当前稿件重新生成建议 for one conflict unit (Issue #842); it saves a Resolution Draft at most and writes no manuscript. */
   regenerateProposalConflictUnit(input: RegenerateProposalConflictUnitInput): Promise<ProposalConflictRegenerationProjection>;
   getManuscriptRail(input: ServiceOperationMap['getManuscriptRail']['input']): Promise<ManuscriptRailProjection>;
+  findPendingMark(input: FindPendingMarkInput): Promise<{ mark: PendingMarkPlace | null }>;
   /** Cut, copy or paste in the focused editor through the window itself; the page has no clipboard permission. */
   runEditorClipboardCommand(input: { command: EditorClipboardCommand }): Promise<{ state: 'done' }>;
   recordManuscriptEntryPosition(
