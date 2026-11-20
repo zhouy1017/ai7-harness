@@ -1049,35 +1049,69 @@ export function parseCachedRequest(requestBody, promptContractDigest, structured
 }
 
 /**
- * The decoded string values of a JSON text, or the text itself when it is not JSON: the words a result carries, without the
- * escapes (a quotation mark, a newline) that would split a quoted passage in its raw form.
+ * The decoded strings of a JSON text, object keys apart from values, or the text itself as the one value when it is not JSON: the
+ * words a result carries, without the escapes (a quotation mark, a newline) that would split a quoted passage in its raw form.
  */
-export function jsonStringLeaves(text) {
+function jsonStringsOf(text) {
   let parsed;
-  try { parsed = JSON.parse(text); } catch { return [text]; }
-  const leaves = [];
+  try { parsed = JSON.parse(text); } catch { return { keys: [], values: [text] }; }
+  const keys = [];
+  const values = [];
   const visit = (node) => {
-    if (typeof node === 'string') leaves.push(node);
+    if (typeof node === 'string') values.push(node);
     else if (Array.isArray(node)) node.forEach(visit);
-    else if (node !== null && typeof node === 'object') Object.values(node).forEach(visit);
+    else if (node !== null && typeof node === 'object') for (const [key, value] of Object.entries(node)) { keys.push(key); visit(value); }
   };
   visit(parsed);
-  return leaves;
+  return { keys, values };
+}
+
+/** The decoded string values of a JSON text, or the text itself when it is not JSON. */
+export function jsonStringLeaves(text) {
+  return jsonStringsOf(text).values;
 }
 
 const IDENTITY_WHOLE = /^(?:blk_[0-9a-f]{24}|[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/u;
-/** The fixed refusal words the product's local tools answer with (platform-tool-session.ts, retrieval error codes). */
-const PRODUCT_REFUSAL = /^(?:[A-Z][A-Z0-9_]{3,63}|检索未完成.*|本次尝试未准许该工具。|检索参数无效。|检索工具超出并行上限，或重复使用调用标识。|已达到运行预算上限。)$/u;
+/**
+ * The exact words the product's local tools answer with when they refuse or fail: the fixed texts `#executeLocal` returns
+ * (platform-tool-session.ts) and the codes of a `RetrievalError` (retrieval/index.ts). Only these whole strings count as the product's
+ * own; text that merely begins like one, or is shaped like a code, is not. tests/unit/tool-turn-fixtures.test.ts reads both source
+ * files and checks every constant they hold is in this set.
+ */
+const PRODUCT_REFUSALS = new Set([
+  '检索未完成',
+  '检索未完成：本单元的工具往返已达到熔断上限。',
+  '检索未完成：本单元的检索调用次数已用完，请使用已有结果。',
+  '检索未完成：结果超过字节上限。',
+  '本次尝试未准许该工具。',
+  '检索参数无效。',
+  '检索工具超出并行上限，或重复使用调用标识。',
+  '已达到运行预算上限。',
+  'RETRIEVAL_SOURCE_NOT_AUTHORIZED',
+  'RETRIEVAL_SOURCE_MOVED',
+  'MATERIAL_REFERENCE_UNAVAILABLE',
+]);
+/**
+ * The object keys of the product's retrieval results that are as long as a quotation (a candidate's `revisionOrIndexDigest`, an anchor's
+ * `segmentOrdinal`): fixed field names, never manuscript text. Any other key at that length must be proved like a value.
+ * tests/unit/tool-turn-fixtures.test.ts builds real results with the product's own index and checks they pass.
+ */
+const PRODUCT_RESULT_KEYS = new Set(['revisionOrIndexDigest', 'segmentOrdinal']);
 
 /**
  * Whether every word a carried tool result holds is exact sample1's: each string it carries that could be a quotation — at the echo
- * threshold or longer, not an identity, not a refusal the product writes — is a passage of a proved block. A result of any other text
- * (a pinned fact of an edited revision, a guideline clause) leaves the turn unproved, so the echo rule decides.
+ * threshold or longer — is a passage of a proved block, an identity, or (a value only) one of the product's own whole refusal texts
+ * or (a key only) one of its own result field names. That covers the object keys as well as the values, so foreign text cannot ride in
+ * as a key. A result of any other text (a pinned fact of an edited revision, a guideline clause) leaves the turn unproved, so the
+ * echo rule decides.
  */
 export function toolResultsAreSample1(resultTexts, blockTexts) {
   const blocks = blockTexts.map(collapseWhitespace);
-  return resultTexts.every((text) => jsonStringLeaves(text).every((leaf) => leaf.length < MANUSCRIPT_ECHO_THRESHOLD ||
-    IDENTITY_WHOLE.test(leaf) || PRODUCT_REFUSAL.test(leaf) || blocks.some((block) => block.includes(collapseWhitespace(leaf)))));
+  const proved = (text) => text.length < MANUSCRIPT_ECHO_THRESHOLD || IDENTITY_WHOLE.test(text) || blocks.some((block) => block.includes(collapseWhitespace(text)));
+  return resultTexts.every((text) => {
+    const { keys, values } = jsonStringsOf(text);
+    return values.every((value) => PRODUCT_REFUSALS.has(value) || proved(value)) && keys.every((key) => PRODUCT_RESULT_KEYS.has(key) || proved(key));
+  });
 }
 
 /** The assistant tool calls and `tool` results after the last user message, as rounds; every call needs exactly one result. */

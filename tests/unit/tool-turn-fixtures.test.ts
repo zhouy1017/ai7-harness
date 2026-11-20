@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
@@ -9,6 +10,7 @@ import { transmitOnce, type LiveModelFetch } from '../../src/service/provider/li
 import { fixtureToolResultDigest } from '../../src/service/provider/local-deterministic-adapter.js';
 import { fixtureEntryKey, parseModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ProviderResultCache } from '../../src/service/provider/provider-result-cache.js';
+import { RetrievalIndex, type RetrievalSource } from '../../src/service/retrieval/index.js';
 import { normalizeToolExchange, toolTurnRequestDigest, type ToolExchangeRound } from '../../src/service/provider/tool-turn-digest.js';
 import { replayTransport, type ReplayTally } from '../editorial-cases/runner/session.js';
 
@@ -21,6 +23,7 @@ type Tool = {
   generateModelFixture: (request: { selector: string; cacheRoot: string; identity: string; description: string; out: string }) => Promise<Record<string, unknown>>;
   normalizeToolExchange: (rounds: ReadonlyArray<ToolExchangeRound>, ownBlockIds: ReadonlyArray<string>) => unknown;
   toolTurnRequestDigest: (unitRequestDigest: string, normalized: unknown) => string;
+  toolResultsAreSample1: (resultTexts: ReadonlyArray<string>, blockTexts: ReadonlyArray<string>) => boolean;
 };
 // @ts-expect-error tools/*.mjs carry no declarations; the tool is exercised as the plain module it is.
 const tool = (await import('../../tools/generate-model-fixture.mjs')) as unknown as Tool;
@@ -259,6 +262,30 @@ describe('tool-turn fixtures (Issue #1598)', () => {
     }
     // A recorded fixture is answered by the exchange key: its capture-less entry under the result-bytes key is no fallback for a readable exchange.
     expect((await ask(replayOf(script(readable)), wireBody(FRESH_OWN, [readable]))).status).toBe(500);
+  });
+
+  it('proves a result by the whole refusal texts and field names of the product, read from its source, and nothing that merely resembles them', async () => {
+    const source = (path: string): string => readFileSync(resolve(path), 'utf8');
+    const refusals = [...source('src/service/provider/platform-tool-session.ts').matchAll(/refuse\('([^']+)'\)/gu)].map((match) => match[1]!);
+    const codes = [...source('src/service/retrieval/index.ts').match(/constructor\(readonly code: ([^)]+)\)/u)![1]!.matchAll(/'([A-Z_]+)'/gu)].map((match) => match[1]!);
+    expect(refusals).toContain('检索未完成：结果超过字节上限。');
+    expect(codes).toContain('RETRIEVAL_SOURCE_MOVED');
+    const foreign = '：来自另一份合成稿件的一段较长的文字，不在样书里。';
+    for (const text of [...refusals, ...codes]) {
+      expect(tool.toolResultsAreSample1([text], [])).toBe(true);
+      expect(tool.toolResultsAreSample1([`${text}${foreign}`], [])).toBe(false);
+    }
+    // The results the product's own index writes, for a manuscript and for a material: every field name and word in them is proved.
+    const own = (id: string, segment: { blockId?: string; segmentOrdinal?: number; text: string }, sourceKind: 'manuscript' | 'material'): RetrievalSource =>
+      ({ sourceKind, sourceId: id, digest: 'a'.repeat(64), read: () => ({ digest: 'a'.repeat(64), segments: [segment] }) });
+    const index = new RetrievalIndex([own('m1', { blockId: OWN[0]!, text: TEXTS[0]! }, 'manuscript'), own('m2', { segmentOrdinal: 1, text: TEXTS[1]! }, 'material')]);
+    const found = await index.retrieve('合成段落');
+    const results = [JSON.stringify(found), ...found.map((candidate) => JSON.stringify(index.exactFetch(candidate.candidateId))),
+      JSON.stringify(index.readBlocks(OWN[0]!, 0)), JSON.stringify(index.searchManuscript('合成段落', 'exact'))];
+    expect(results[0]).toContain('"revisionOrIndexDigest"');
+    expect(results[0]).toContain('"segmentOrdinal"');
+    expect(tool.toolResultsAreSample1(results, TEXTS)).toBe(true);
+    expect(tool.toolResultsAreSample1(results, [])).toBe(false);
   });
 
   it('replays from the first turn again after the exchange was cut short, on the same transport', async () => {
