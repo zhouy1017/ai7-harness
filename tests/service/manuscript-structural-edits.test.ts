@@ -68,14 +68,14 @@ const merge = (into: string, merged: string): ManuscriptWindowProjection => {
 const undo = (): void => { store.undoManuscript(book.manuscriptId, book.branchId, window().workingDigest); };
 const redo = (): void => { store.redoManuscript(book.manuscriptId, book.branchId, window().workingDigest); };
 
-function mark(blockId: string, from: number, to: number, kind: 'annotation' | 'change-suggestion'): string {
+function mark(blockId: string, from: number, to: number, kind: 'annotation' | 'change-suggestion', proposedText = '〔建议〕'): string {
   const now = window();
   const block = now.blocks.find((candidate) => candidate.blockId === blockId)!;
   return store.createEditorialMark({
     ...book, windowStartBlockId: now.blocks[0]!.blockId, clientMarkId: randomUUID(), baseRevisionId: now.revisionId,
     expectedJournalSequence: now.journalSequence, blockId, baseBlockDigest: block.digest, fromGrapheme: from, toGrapheme: to,
     selectedText: graphemesOf(block.text).slice(from, to).join(''), kind, highlightColor: null,
-    body: kind === 'annotation' ? '〔批注〕' : '', proposedText: kind === 'change-suggestion' ? '〔建议〕' : null, rationale: null,
+    body: kind === 'annotation' ? '〔批注〕' : '', proposedText: kind === 'change-suggestion' ? proposedText : null, rationale: null,
   }).markId;
 }
 
@@ -118,7 +118,7 @@ describe('Enter and Backspace as structural journal commands', () => {
     expect(window().blocks.find((block) => block.blockId === first.blockId)!.digest).toBe(first.digest);
   });
 
-  it('follows 批注 to their words, drifts what the caret cuts and every moved 修改建议, and 撤销 moves them back (ED-044)', () => {
+  it('follows every mark to its words with its state, drifts what the caret cuts, and 撤销 moves them back (ED-044, ADR 0105 §2)', () => {
     const target = paragraphs()[0]!;
     const head = mark(target.blockId, 2, 6, 'annotation');
     const cut = mark(target.blockId, 8, 14, 'annotation');
@@ -129,22 +129,117 @@ describe('Enter and Backspace as structural journal commands', () => {
     expect(markAt(head)).toEqual({ blockId: target.blockId, fromGrapheme: 2, toGrapheme: 6, anchorState: 'exact' });
     expect(markAt(cut)).toMatchObject({ blockId: target.blockId, anchorState: 'drifted' });
     expect(markAt(tail)).toEqual({ blockId: created, fromGrapheme: 4, toGrapheme: 8, anchorState: 'exact' });
-    expect(markAt(suggestion)).toEqual({ blockId: created, fromGrapheme: 10, toGrapheme: 14, anchorState: 'drifted' });
+    expect(markAt(suggestion)).toEqual({ blockId: created, fromGrapheme: 10, toGrapheme: 14, anchorState: 'exact' });
     undo();
     expect(markAt(tail)).toEqual({ blockId: target.blockId, fromGrapheme: 16, toGrapheme: 20, anchorState: 'exact' });
-    expect(markAt(suggestion)).toMatchObject({ blockId: target.blockId, fromGrapheme: 22, anchorState: 'drifted' });
+    expect(markAt(suggestion)).toEqual({ blockId: target.blockId, fromGrapheme: 22, toGrapheme: 26, anchorState: 'exact' });
+    expect(markAt(cut)).toMatchObject({ blockId: target.blockId, anchorState: 'drifted' });
   });
 
-  it('carries the absorbed paragraph’s 批注 into the merged one and drifts its 修改建议', () => {
+  it('carries the absorbed paragraph’s marks into the merged one with their state', () => {
     const [first, second] = adjacentParagraphs();
     const offset = graphemesOf(first.text).length;
     const note = mark(second.blockId, 3, 9, 'annotation');
     const suggestion = mark(second.blockId, 12, 16, 'change-suggestion');
     merge(first.blockId, second.blockId);
     expect(markAt(note)).toEqual({ blockId: first.blockId, fromGrapheme: offset + 3, toGrapheme: offset + 9, anchorState: 'exact' });
-    expect(markAt(suggestion)).toMatchObject({ blockId: first.blockId, fromGrapheme: offset + 12, anchorState: 'drifted' });
+    expect(markAt(suggestion)).toEqual({ blockId: first.blockId, fromGrapheme: offset + 12, toGrapheme: offset + 16, anchorState: 'exact' });
     undo();
     expect(markAt(note)).toEqual({ blockId: second.blockId, fromGrapheme: 3, toGrapheme: 9, anchorState: 'exact' });
+    expect(markAt(suggestion)).toEqual({ blockId: second.blockId, fromGrapheme: 12, toGrapheme: 16, anchorState: 'exact' });
+  });
+});
+
+describe('撤销本次修改 across 分段 and 合段 (ADR 0105 §2)', () => {
+  const binding = () => ({ ...book, windowStartBlockId: window().blocks[0]!.blockId });
+  const accepted = (blockId: string, from: number, to: number, proposed = '〔建议〕'): string => {
+    const markId = mark(blockId, from, to, 'change-suggestion', proposed);
+    store.applyChangeSuggestion({ ...binding(), markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+    return markId;
+  };
+  const reverse = (markId: string): string => code(() => store.reverseAppliedChangeSuggestion({ ...binding(), markId, clientEffectId: randomUUID() }));
+  const textOf = (blockId: string): string => window().blocks.find((block) => block.blockId === blockId)!.text;
+  const status = (markId: string): string => store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).status;
+
+  it('keeps a suggestion moved whole by 分段 exact, reverses it in the new paragraph, and again after joining back', () => {
+    const target = paragraphs()[0]!;
+    const once = accepted(target.blockId, 20, 24);
+    const created = newBlockId();
+    journal(target.blockId, 10, { kind: 'split', newBlockId: created });
+    expect(markAt(once)).toEqual({ blockId: created, fromGrapheme: 10, toGrapheme: 14, anchorState: 'exact' });
+    expect(reverse(once)).toBe('no-error');
+    expect(textOf(target.blockId) + textOf(created) === target.text).toBe(true);
+    expect(status(once)).toBe('open');
+    const again = accepted(created, 12, 16);
+    merge(target.blockId, created);
+    expect(markAt(again)).toMatchObject({ blockId: target.blockId, fromGrapheme: 22, anchorState: 'exact' });
+    expect(reverse(again)).toBe('no-error');
+    expect(textOf(target.blockId) === target.text).toBe(true);
+  });
+
+  it('keeps the absorbed paragraph’s suggestion exact through 合段 and a later 分段 elsewhere, and reverses it there', () => {
+    const [first, second] = adjacentParagraphs();
+    const offset = graphemesOf(first.text).length;
+    const joined = accepted(second.blockId, 12, 16);
+    merge(first.blockId, second.blockId);
+    expect(markAt(joined)).toEqual({ blockId: first.blockId, fromGrapheme: offset + 12, toGrapheme: offset + 16, anchorState: 'exact' });
+    const created = newBlockId();
+    journal(first.blockId, offset + 2, { kind: 'split', newBlockId: created });
+    expect(markAt(joined)).toEqual({ blockId: created, fromGrapheme: 10, toGrapheme: 14, anchorState: 'exact' });
+    expect(reverse(joined)).toBe('no-error');
+    expect(textOf(first.blockId) + textOf(created) === first.text + second.text).toBe(true);
+  });
+
+  it('drifts the accepted suggestion the caret cuts and the point at the caret, and reverses the one moved whole', () => {
+    const target = paragraphs()[0]!;
+    const cut = accepted(target.blockId, 4, 8);
+    const whole = accepted(target.blockId, 16, 20);
+    const point = accepted(target.blockId, 26, 28, '');
+    const created = newBlockId();
+    journal(target.blockId, 6, { kind: 'split', newBlockId: created });
+    expect(markAt(cut)).toMatchObject({ blockId: target.blockId, anchorState: 'drifted' });
+    expect(markAt(whole)).toEqual({ blockId: created, fromGrapheme: 10, toGrapheme: 14, anchorState: 'exact' });
+    expect(reverse(cut)).toBe('APPLY_TARGET_DRIFTED');
+    expect(reverse(whole)).toBe('no-error');
+    const at = markAt(point).fromGrapheme;
+    journal(created, at, { kind: 'split', newBlockId: newBlockId() });
+    expect(markAt(point)).toEqual({ blockId: created, fromGrapheme: at, toGrapheme: at, anchorState: 'drifted' });
+    const sequence = window().journalSequence;
+    expect(reverse(point)).toBe('APPLY_TARGET_DRIFTED');
+    expect(window().journalSequence).toBe(sequence);
+  });
+
+  it('reverses a suggestion moved by 分段 after a restart', async () => {
+    const target = paragraphs()[0]!;
+    const moved = accepted(target.blockId, 20, 24);
+    const created = newBlockId();
+    journal(target.blockId, 10, { kind: 'split', newBlockId: created });
+    store.markCleanShutdown();
+    store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(reverse(moved)).toBe('no-error');
+    expect(textOf(target.blockId) + textOf(created) === target.text).toBe(true);
+  });
+
+  it('refuses, writing nothing, the touching reversal of two applied deletions in two paragraphs joined into one; after 撤销 of the join both points drift', () => {
+    const [first, second] = adjacentParagraphs();
+    const length = graphemesOf(first.text).length;
+    // The original ranges meet by number — B's ends where A's starts — so only their paragraphs tell their order apart.
+    const end = mark(first.blockId, 2, length, 'change-suggestion', '');
+    const start = mark(second.blockId, 0, 2, 'change-suggestion', '');
+    store.applyChangeSuggestionBatch({ ...binding(), markIds: [end, start], clientEffectId: randomUUID() });
+    merge(first.blockId, second.blockId);
+    expect([markAt(end), markAt(start)].map((at) => [at.blockId, at.fromGrapheme, at.toGrapheme, at.anchorState]))
+      .toEqual([[first.blockId, 2, 2, 'exact'], [first.blockId, 2, 2, 'exact']]);
+    const before = window();
+    expect(reverse(end)).toBe('APPLY_TARGET_DRIFTED');
+    expect(reverse(start)).toBe('APPLY_TARGET_DRIFTED');
+    expect(window().journalSequence).toBe(before.journalSequence);
+    expect(textOf(first.blockId) === before.blocks.find((block) => block.blockId === first.blockId)!.text).toBe(true);
+    // Known narrow loss: the undone join is a split at the caret where both points sit, so both drift (R5-4 restores them).
+    undo();
+    expect([markAt(end).anchorState, markAt(start).anchorState]).toEqual(['drifted', 'drifted']);
+    expect(reverse(end)).toBe('APPLY_TARGET_DRIFTED');
   });
 });
 

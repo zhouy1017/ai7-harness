@@ -15,10 +15,10 @@ import { blockDigest, blockShapeFromDigest, memberPresenceColumns, recoveryComma
  * text. 撤销 and 重做 replay the group as one step. A heading can create a plain paragraph at its end; a single block's style
  * is an ordinary journal edit too (#1288). Multi-heading hierarchy changes and section moves stay with Structure Adjustment Mode (F-15).
  *
- * The marks of the two blocks (ED-044): a mark wholly before the caret stays; a 批注, 备注 or highlight wholly after it — or on
- * the absorbed paragraph — follows its words to the other block exactly; a mark across the caret stays on the first block as a
- * Drifted Manuscript Range, and so does every ranged 修改建议 the command moves, since its Proposal Change Item still names the
- * words where they stood. 撤销 moves the marks back and leaves a drifted one drifted.
+ * The marks of the two blocks (ED-044, ADR 0105 §2): a mark wholly before the caret stays; a mark wholly after it — or on the
+ * absorbed paragraph — follows its words to the other block with its anchor state, so an applied 修改建议 keeps its 撤销本次修改;
+ * a mark across the caret, or a point exactly at it, stays on the first block as a Drifted Manuscript Range. 撤销 and 重做 follow
+ * the same rules, and leave a drifted mark drifted.
  */
 
 /** The shift that lifts positions clear of the `UNIQUE(branch_id, position)` rows they pass while a block comes or goes. */
@@ -138,35 +138,42 @@ function joinWorking(
 
 const LIVE_MARKS = `status IN ('open', 'resolved', 'applied') AND anchor_state IN ('exact', 'drifted')`;
 
-/** A ranged 修改建议 the command moves no longer stands where its Proposal Change Item names its words (ED-044). */
-function movedState(row: SqlRow, drift: boolean): string {
-  return drift && asString(row.kind) === 'change-suggestion' && asString(row.pinned_text) !== '' ? 'drifted' : asString(row.anchor_state);
-}
-
-/** The marks of `fromBlockId` at or past grapheme `at` go to `toBlockId`; one across `at` stays, drifted. */
-function splitMarks(db: DatabaseSync, branchId: string, fromBlockId: string, toBlockId: string, at: number, sequence: number, drift: boolean): void {
-  const rows = db.prepare(`SELECT mark_id, kind, pinned_text, from_grapheme, to_grapheme, anchor_state FROM editorial_marks
+/**
+ * The marks of `fromBlockId` wholly past grapheme `at` go to `toBlockId` with their anchor state; one the caret cuts through, or
+ * a point exactly at it, whose side is ambiguous, stays, drifted.
+ */
+function splitMarks(db: DatabaseSync, branchId: string, fromBlockId: string, toBlockId: string, at: number, sequence: number): void {
+  const rows = db.prepare(`SELECT mark_id, from_grapheme, to_grapheme FROM editorial_marks
     WHERE branch_id = ? AND block_id = ? AND ${LIVE_MARKS}`).all(branchId, fromBlockId) as SqlRow[];
-  const update = db.prepare(`UPDATE editorial_marks SET block_id = ?, from_grapheme = ?, to_grapheme = ?, anchor_state = ?, followed_journal_sequence = ?
-    WHERE mark_id = ?`);
+  const update = db.prepare(`UPDATE editorial_marks SET block_id = ?, from_grapheme = ?, to_grapheme = ?, anchor_state = COALESCE(?, anchor_state),
+    followed_journal_sequence = ? WHERE mark_id = ?`);
   for (const row of rows) {
     const from = asNumber(row.from_grapheme);
     const to = asNumber(row.to_grapheme);
-    if (to <= at) continue;
-    if (from >= at) update.run(toBlockId, from - at, to - at, movedState(row, drift), sequence, asString(row.mark_id));
+    if (to < at || to === at && from < to) continue;
+    if (from >= at && to > at) update.run(toBlockId, from - at, to - at, null, sequence, asString(row.mark_id));
     else update.run(fromBlockId, from, at, 'drifted', sequence, asString(row.mark_id));
   }
 }
 
-/** Every mark of `fromBlockId` goes to `intoBlockId`, `offset` graphemes on. */
-function joinMarks(db: DatabaseSync, branchId: string, intoBlockId: string, fromBlockId: string, offset: number, sequence: number, drift: boolean): void {
-  const rows = db.prepare(`SELECT mark_id, kind, pinned_text, from_grapheme, to_grapheme, anchor_state FROM editorial_marks
-    WHERE branch_id = ? AND block_id = ? AND ${LIVE_MARKS}`).all(branchId, fromBlockId) as SqlRow[];
-  const update = db.prepare(`UPDATE editorial_marks SET block_id = ?, from_grapheme = ?, to_grapheme = ?, anchor_state = ?, followed_journal_sequence = ?
-    WHERE mark_id = ?`);
-  for (const row of rows) {
-    update.run(intoBlockId, asNumber(row.from_grapheme) + offset, asNumber(row.to_grapheme) + offset, movedState(row, drift), sequence, asString(row.mark_id));
-  }
+/** Every mark of `fromBlockId` goes to `intoBlockId`, `offset` graphemes on, with its anchor state: a join cuts no mark. */
+function joinMarks(db: DatabaseSync, branchId: string, intoBlockId: string, fromBlockId: string, offset: number, sequence: number): void {
+  db.prepare(`UPDATE editorial_marks SET block_id = ?, from_grapheme = from_grapheme + ?, to_grapheme = to_grapheme + ?, followed_journal_sequence = ?
+    WHERE branch_id = ? AND block_id = ? AND ${LIVE_MARKS}`).run(intoBlockId, offset, offset, sequence, branchId, fromBlockId);
+}
+
+/**
+ * Whether block lineage carries the words of `fromBlockId` into `toBlockId` (ADR 0105 §2): a split carries them into the new
+ * block, a merge into the block that absorbed them. Lineage rows are facts about the blocks whatever later became of their
+ * command groups, so no group status is read.
+ */
+export function blockReachesThroughLineage(db: DatabaseSync, fromBlockId: string, toBlockId: string): boolean {
+  return fromBlockId === toBlockId || db.prepare(`WITH RECURSIVE reached(block_id) AS (
+      SELECT ? UNION
+      SELECT l.block_id FROM reached r JOIN manuscript_block_lineage l ON l.related_block_id = r.block_id AND l.relation = 'split-from'
+      UNION
+      SELECT l.related_block_id FROM reached r JOIN manuscript_block_lineage l ON l.block_id = r.block_id AND l.relation = 'merged-into'
+    ) SELECT 1 FROM reached WHERE block_id = ? LIMIT 1`).get(fromBlockId, toBlockId) !== undefined;
 }
 
 const insertMember = (db: DatabaseSync, groupId: string, position: number, blockId: string, before: string | null, after: string | null,
@@ -208,7 +215,7 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
     const original = workingBlock(db, binding.branchId, input.blockId)!;
     const before = original.text;
     const { head, tail } = splitWorking(db, binding.branchId, input.blockId, structure.newBlockId, input.fromGrapheme, input.baseBlockDigest);
-    splitMarks(db, binding.branchId, input.blockId, structure.newBlockId, input.fromGrapheme, sequence, true);
+    splitMarks(db, binding.branchId, input.blockId, structure.newBlockId, input.fromGrapheme, sequence);
     insertMember(db, groupId, 1, input.blockId, before, head, original.kind as ManuscriptBlockKind, original.level);
     insertMember(db, groupId, 2, structure.newBlockId, null, tail);
     db.prepare("INSERT INTO manuscript_block_lineage(block_id, related_block_id, relation, command_group_id) VALUES (?, ?, 'split-from', ?)")
@@ -233,7 +240,7 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
     requireBounded(BLOCK_PATTERN.test(structure.mergedBlockId) && structure.mergedBlockId !== input.blockId, 'STRUCTURE_INVALID', '合并段落标识无效。');
     const { intoText, mergedText, joined } = joinWorking(db, binding.branchId, input.blockId, structure.mergedBlockId, input.baseBlockDigest, structure.mergedBlockDigest);
     requireBounded(graphemes(intoText).length === input.fromGrapheme, 'EDIT_RANGE_INVALID', '合并位置无效。');
-    joinMarks(db, binding.branchId, input.blockId, structure.mergedBlockId, input.fromGrapheme, sequence, true);
+    joinMarks(db, binding.branchId, input.blockId, structure.mergedBlockId, input.fromGrapheme, sequence);
     insertMember(db, groupId, 1, input.blockId, intoText, joined);
     insertMember(db, groupId, 2, structure.mergedBlockId, mergedText, null);
     db.prepare("INSERT INTO manuscript_block_lineage(block_id, related_block_id, relation, command_group_id) VALUES (?, ?, 'merged-into', ?)")
@@ -285,13 +292,13 @@ export function replayStructuralGroup(db: DatabaseSync, branchId: string, groupI
     const keptText = kind === 'split' ? asString(first.after_text) : asString(first.before_text);
     const at = graphemes(keptText).length;
     stale(() => splitWorking(db, branchId, firstId, secondId, at, kind === 'split' ? asString(first.before_digest) : asString(first.after_digest)));
-    splitMarks(db, branchId, firstId, secondId, at, sequence, action === 'redo');
+    splitMarks(db, branchId, firstId, secondId, at, sequence);
   } else {
     const intoDigest = kind === 'split' ? asString(first.after_digest) : asString(first.before_digest);
     const mergedDigest = kind === 'split' ? asString(second.after_digest) : asString(second.before_digest);
     let offset = 0;
     stale(() => { offset = graphemes(joinWorking(db, branchId, firstId, secondId, intoDigest, mergedDigest, kind === 'split').intoText).length; });
-    joinMarks(db, branchId, firstId, secondId, offset, sequence, action === 'redo');
+    joinMarks(db, branchId, firstId, secondId, offset, sequence);
   }
 }
 

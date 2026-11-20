@@ -28,7 +28,7 @@ import { withNoteReferences } from './manuscript/note-blocks.js';
 import type { ManuscriptSourceObjects } from './manuscript/source-objects.js';
 import { inlineRevisionBaseline, recordInlineEditorRevision, syncInlineEditorRevision } from './inline-editor-revisions.js';
 import { aiLocksOfWindow } from './ai-edit-locks.js';
-import { historyStale, isStructuralGroup, journalHasStructuralEdits, replayStructuralGroup, verifyStructuralReconstruction, writeStructuralEdit } from './manuscript/structural-edits.js';
+import { blockReachesThroughLineage, historyStale, isStructuralGroup, journalHasStructuralEdits, replayStructuralGroup, verifyStructuralReconstruction, writeStructuralEdit } from './manuscript/structural-edits.js';
 import { blockDigest, blockShapeFromDigest, CommandEvidenceReader, recoveryCommandEvidenceDigest, recoveryWorkingDigest, validateCommandHistoryGroup, type CommandEvidenceHeader, type CommandEvidenceMember } from './manuscript/command-history.js';
 export { BoundedStoreError, BoundedStoreFatalError } from './manuscript/bounded-kernel.js';
 export type { CommandEvidenceHeader, CommandEvidenceMember } from './manuscript/command-history.js';
@@ -5590,7 +5590,7 @@ export class BoundedManuscriptStore {
       requireBounded(inverses.length === 0 || inverses.length === targets.length &&
         inverses.every((target) => target.reversalOf!.effectId === reverseEffect) && new Set(inverses.map((target) => target.reversalOf!.itemId)).size === targets.length,
       'APPLY_INVALID', '撤销范围必须完整属于同一次应用。');
-      const originalRanges = new Map<number, { from: number; to: number }>();
+      const originalRanges = new Map<number, { from: number; start: string; end: string }>();
       targets.forEach((target, index) => {
         requireBounded(!this.sourceObjects?.isReadOnly(binding.revisionId, target.blockId), 'SOURCE_OBJECT_READ_ONLY', '表格为只读内容，导出时从原文件完整恢复。');
         if (target.reversalOf !== undefined) {
@@ -5598,11 +5598,11 @@ export class BoundedManuscriptStore {
             FROM manuscript_effect_targets t JOIN manuscript_effect_intents i ON i.effect_id = t.effect_id AND i.kind = 'apply'
             JOIN manuscript_effect_receipts r ON r.effect_id = i.effect_id
             WHERE t.effect_id = ? AND t.item_id = ? AND i.manuscript_id = ? AND i.branch_id = ?`).get(target.reversalOf.effectId, target.reversalOf.itemId, manuscriptId, branchId);
-          requireBounded(original !== undefined && original.block_id === target.blockId && original.target_count === targets.length &&
+          requireBounded(original !== undefined && blockReachesThroughLineage(this.#db, asString(original.block_id), target.blockId) && original.target_count === targets.length &&
             original.expected_text_digest === sha256(target.insertText) && original.replacement_text_digest === sha256(target.expectedText) &&
             this.#db.prepare('SELECT 1 FROM manuscript_effect_intents WHERE reverses_effect_id = ? LIMIT 1').get(target.reversalOf.effectId) === undefined,
           'APPLY_INVALID', '撤销范围或文字与原应用凭据不一致。');
-          originalRanges.set(index, { from: asNumber(original.from_grapheme), to: asNumber(original.to_grapheme) });
+          originalRanges.set(index, { from: asNumber(original.from_grapheme), start: `${asString(original.block_id)}:${asNumber(original.from_grapheme)}`, end: `${asString(original.block_id)}:${asNumber(original.to_grapheme)}` });
         }
         // An empty range is an insertion at that point — reversing an Apply that deleted its words: it
         // expects no text there and brings some.
@@ -5651,14 +5651,14 @@ export class BoundedManuscriptStore {
         const ordered = byBlock.get(blockId)!.sort((left, right) => left.fromGrapheme - right.fromGrapheme ||
           (originalRanges.get(left.index)?.from ?? 0) - (originalRanges.get(right.index)?.from ?? 0));
         ordered.forEach((target, index) => {
-          // Ordinary Apply never shares an insertion point. A complete committed inverse may use the
-          // original contiguous ranges to order touching targets, including adjacent deletions.
+          // Ordinary Apply never shares an insertion point. A complete committed inverse may use the original contiguous
+          // ranges of one original paragraph to order touching targets, including adjacent deletions (ADR 0105 §2).
           const previous = index === 0 ? undefined : ordered[index - 1]!;
           requireBounded(
             target.toGrapheme <= before.length &&
               (previous === undefined || previous.toGrapheme < target.fromGrapheme ||
                 (previous.toGrapheme === target.fromGrapheme && (previous.toGrapheme > previous.fromGrapheme && target.toGrapheme > target.fromGrapheme ||
-                  reverseEffect !== undefined && originalRanges.get(previous.index)!.to === originalRanges.get(target.index)!.from))) &&
+                  reverseEffect !== undefined && originalRanges.get(previous.index)!.end === originalRanges.get(target.index)!.start))) &&
               before.slice(target.fromGrapheme, target.toGrapheme).join('') === target.expectedText,
             'APPLY_TARGET_DRIFTED',
             '原文已变，本次应用没有写入稿件。',
