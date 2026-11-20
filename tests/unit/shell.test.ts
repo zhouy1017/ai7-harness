@@ -17,12 +17,15 @@ import {
   SHELL_BOOK_GROUPS,
   SHELL_DESTINATIONS,
   SHELL_LABELS,
+  SHELL_MORE_BOOKS_ICON,
   SHELL_SETTINGS,
   shellRecentStateLine,
   shellSectionGroupLabel,
   shellSectionLabel,
   globalAgentAnswerStatus,
 } from '../../src/renderer/shell-labels.js';
+import { ICON_IDS } from '../../src/renderer/components/icon-sprite.js';
+import { EDGE_ENTRY_ICONS } from '../../src/renderer/manuscript-screen.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type { DialogueAttemptProjection } from '../../src/shared/protocol.js';
 
@@ -73,6 +76,24 @@ describe('the sidebar', () => {
     const icons = SHELL_BOOK_GROUPS.flatMap((group) => group.sections.map((section) => section.icon));
     for (const icon of icons) expect(icon).toMatch(/^i-[a-z]+$/u);
     expect(new Set(icons).size).toBe(icons.length);
+  });
+
+  it('gives every sidebar row and right-edge entry its own symbol from the fixed set (#1554)', () => {
+    const bookLists = SHELL_BOOK_GROUPS.map((group) => group.sections.map((section) => section.icon));
+    bookLists[0]!.push(SHELL_AGENT_WORKSPACE_ROW.icon);
+    const lists: ReadonlyArray<ReadonlyArray<string>> = [
+      SHELL_DESTINATIONS.map((entry) => entry.icon),
+      ...bookLists,
+      [SHELL_SETTINGS.icon, SHELL_MORE_BOOKS_ICON],
+      Object.values(EDGE_ENTRY_ICONS),
+    ];
+    for (const ids of lists) {
+      for (const id of ids) expect(ICON_IDS).toContain(id);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
+    // The two destinations that shared a symbol before #1554 keep their own now.
+    expect(SHELL_DESTINATIONS.find((entry) => entry.key === 'tasks')!.icon).not.toBe(EDGE_ENTRY_ICONS.tasks);
+    expect(SHELL_MORE_BOOKS_ICON).not.toBe(SHELL_DESTINATIONS.find((entry) => entry.key === 'library')!.icon);
   });
 
   it('calls the AI row of a Book AI 改稿 for the editor and Agent 工作区 in the developer layer (#1521)', () => {

@@ -1,14 +1,16 @@
 /** Exact symbol geometry from September prototypes ②B and ①, editor-surfaces §0.4.
  * The 17 A4 IDs are fixed; i-nav and i-task are the prototype's right-rail extensions. Issue #1413 cluster 2 gives every
  * entry its own symbol: i-agent (AI 助手), i-workspace (AI 改稿) and i-comment (批注); i-derivative (衍生稿件) is the one id added since.
+ * Issue #1554 gives 更多图书 (i-more) and the sidebar's 任务 (i-checklist) their own symbols, so no two destinations share one.
  */
-export const ICON_IDS = ['i-inbox', 'i-library', 'i-series', 'i-kb', 'i-learn', 'i-settings', 'i-ms', 'i-review', 'i-star', 'i-box', 'i-flag', 'i-analysis', 'i-source', 'i-overview', 'i-history', 'i-menu', 'i-back', 'i-nav', 'i-task', 'i-agent', 'i-workspace', 'i-comment', 'i-undo', 'i-redo', 'i-derivative'] as const;
+export const ICON_IDS = ['i-inbox', 'i-library', 'i-more', 'i-series', 'i-kb', 'i-learn', 'i-settings', 'i-ms', 'i-review', 'i-star', 'i-box', 'i-flag', 'i-analysis', 'i-source', 'i-overview', 'i-history', 'i-menu', 'i-back', 'i-nav', 'i-task', 'i-checklist', 'i-agent', 'i-workspace', 'i-comment', 'i-undo', 'i-redo', 'i-derivative'] as const;
 export type IconId = (typeof ICON_IDS)[number];
 const SYMBOLS: Readonly<Record<IconId, ReadonlyArray<readonly [string, Readonly<Record<string, string>>]>>> = {
   "i-undo": [["path", {"d": "M4 9h10a6 6 0 010 12"}], ["path", {"d": "M9 4L4 9l5 5"}]],
   "i-redo": [["path", {"d": "M20 9H10a6 6 0 000 12"}], ["path", {"d": "M15 4l5 5-5 5"}]],
   "i-inbox": [["path", {"d": "M3 12l2.6-7h12.8L21 12v7H3z"}], ["path", {"d": "M3 12h5l1.5 3h5L16 12h5"}]],
   "i-library": [["rect", {"x": "3", "y": "4", "width": "4", "height": "16", "rx": "1"}], ["rect", {"x": "9.5", "y": "4", "width": "4", "height": "16", "rx": "1"}], ["path", {"d": "M16.2 4.6l3.9.9-3.3 14.5-3.9-.9z"}]],
+  "i-more": [["rect", {"x": "5.5", "y": "3.5", "width": "5.5", "height": "10", "rx": "1"}], ["rect", {"x": "13", "y": "3.5", "width": "5.5", "height": "10", "rx": "1"}], ["path", {"d": "M8 17.5l4 3 4-3"}]],
   "i-series": [["path", {"d": "M12 3l9 4.5-9 4.5-9-4.5z"}], ["path", {"d": "M3 12l9 4.5 9-4.5"}], ["path", {"d": "M3 16.5L12 21l9-4.5"}]],
   "i-kb": [["path", {"d": "M4 5.5A2.5 2.5 0 016.5 3H20v15H6.5A2.5 2.5 0 004 20.5z"}], ["path", {"d": "M4 20.5A2.5 2.5 0 016.5 18H20"}], ["path", {"d": "M9 7h7M9 11h7"}]],
   "i-learn": [["path", {"d": "M4 20v-8"}], ["path", {"d": "M10 20V5"}], ["path", {"d": "M16 20v-6"}], ["path", {"d": "M22 20V9"}], ["path", {"d": "M2 20h21"}]],
@@ -26,6 +28,7 @@ const SYMBOLS: Readonly<Record<IconId, ReadonlyArray<readonly [string, Readonly<
   "i-back": [["path", {"d": "M10 6l-6 6 6 6"}], ["path", {"d": "M4 12h16"}]],
   "i-nav": [["path", {"d": "M4 6h10"}], ["path", {"d": "M4 12h7"}], ["path", {"d": "M4 18h9"}], ["circle", {"cx": "17", "cy": "13.5", "r": "3.3"}], ["path", {"d": "M19.5 16L22 18.5"}]],
   "i-task": [["path", {"d": "M4 20l3.6-.9 10.2-10.2-2.7-2.7L4.9 16.4z"}], ["path", {"d": "M13.6 7.7l2.7 2.7"}], ["path", {"d": "M14 20h6"}]],
+  "i-checklist": [["path", {"d": "M4 6l1.5 1.5L8 5"}], ["path", {"d": "M11 6h9"}], ["path", {"d": "M4 12l1.5 1.5L8 11"}], ["path", {"d": "M11 12h9"}], ["path", {"d": "M4 18l1.5 1.5L8 17"}], ["path", {"d": "M11 18h9"}]],
   "i-agent": [["path", {"d": "M4 5h16v11H9l-4 3.5V16H4z"}], ["path", {"d": "M12 7.6l.9 1.9 1.9.9-1.9.9-.9 1.9-.9-1.9-1.9-.9 1.9-.9z"}]],
   "i-workspace": [["rect", {"x": "3", "y": "4", "width": "18", "height": "16", "rx": "2"}], ["path", {"d": "M3 9h18"}], ["path", {"d": "M10 9v11"}], ["circle", {"cx": "15.5", "cy": "14.5", "r": "1.6"}]],
   "i-derivative": [["path", {"d": "M8 4h8l3 3v10H8z"}], ["path", {"d": "M5 8v12h10"}], ["path", {"d": "M11 10h5M11 13h5"}]],
