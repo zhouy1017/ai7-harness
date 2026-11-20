@@ -3330,6 +3330,10 @@ async function main() {
     // The page is the ordinary one, so the heading is the document's title alone (the 版本 suffix is the technical layer's).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="promotion-article"] .document-title-heading')?.textContent === ${JSON.stringify(managementWritingTitle)}`, 'management-writing-open', 120_000);
     await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.some(doc=>doc.title===${JSON.stringify(managementWritingTitle)} && doc.origin.drafted===true))`, 'management-writing-drafted');
+    // The started task's drawer is open beside the draft; the editor closes it with its own control before using the page's menus.
+    await waitFor(renderer, `document.body.dataset.taskDrawer === 'open'`, 'management-writing-drawer-open');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'management-writing-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open' && document.body.getAnimations().length === 0`, 'management-writing-drawer-closed');
     at('derivatives-management-menus');
     // 导出 ▾ and ⋯ on a row: both open on a press, hold their entries inside the window at both sizes, and 设为定稿
     // turns the entry into 取消定稿.
