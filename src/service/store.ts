@@ -231,7 +231,7 @@ import {
   type ApplyChangeSuggestionBatchInput,
   type ApplyChangeSuggestionInput,
   type CreateEditorialMarkInput,
-  type EditorialMarkCardProjection,
+  type EditorialMarkCardProjection, type FindPendingMarkInput, type PendingMarkPlace,
   type EditorialMarkCommandProjection,
   type JournalAcknowledgement,
   type JournalEditInput,
@@ -1192,7 +1192,6 @@ export { StoreError,StoreFatalError,importedMarksRecord };
 
 export { boundedGraphemes } from './readers-reports.js';
 export { EVALUATION_PROFILE_UNKNOWN_ID,EVALUATION_PROFILE_UNKNOWN_TITLE,REVIEW_CATEGORY_CACHE_CAPACITY,type DraftPromotion,type LedgerTaskKind,type StoreControl } from './store-operation-support.js';
-
 
 const TOKEN_PATTERN = UUID_PATTERN;
 
@@ -8416,6 +8415,7 @@ export class EditorialStore {
   createEditorialMark(input: CreateEditorialMarkInput): EditorialMarkCommandProjection { return editorialMarkOperations.createEditorialMark(this.#editorialMarkOperationsHost, input); }
 
   getEditorialMarkCard(manuscriptId: string, branchId: string, markId: string): EditorialMarkCardProjection { return editorialMarkOperations.getEditorialMarkCard(this.#editorialMarkOperationsHost, manuscriptId, branchId, markId); }
+  findPendingMark(input: FindPendingMarkInput): { mark: PendingMarkPlace | null } { return editorialMarkOperations.findPendingMark(this.#editorialMarkOperationsHost, input); }
 
   updateEditorialMark(input: UpdateEditorialMarkInput): EditorialMarkCommandProjection { return editorialMarkOperations.updateEditorialMark(this.#editorialMarkOperationsHost, input); }
 
@@ -8589,7 +8589,7 @@ export class EditorialStore {
     return modelSearchSettings.recordModelConnectionTest(this.#modelSearchSettingsHost, connection, result);
   }
 
-  getManuscriptWindowAt(manuscriptId: string, branchId: string, target: ManuscriptWindowTarget): ManuscriptWindowProjection { return manuscriptOperations.getManuscriptWindowAt(this.#manuscriptOperationsHost, manuscriptId, branchId, target); }
+  getManuscriptWindowAt(manuscriptId: string, branchId: string, target: ManuscriptWindowTarget, marks?: { afterOrdinal: number; digest: string }): ManuscriptWindowProjection { return manuscriptOperations.getManuscriptWindowAt(this.#manuscriptOperationsHost, manuscriptId, branchId, target, marks); }
 
   getOutline(manuscriptId: string, branchId: string, cursor: string | null): OutlineProjection { return manuscriptOperations.getOutline(this.#manuscriptOperationsHost, manuscriptId, branchId, cursor); }
 

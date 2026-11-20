@@ -2788,12 +2788,12 @@ function renderDerivativesWorkspace(bookId: string, bookTitle: string): void {
   const surface = mountDerivativesWorkspace({ root: content, bookId, bookTitle, api: api,
     setStatus, errorMessage: rendererErrorMessage,
     openDocument: (doc, type, notice) => openProductionDocument(doc, type, bookTitle, notice),
+    writing: { awaitServiceJob, openLaunch: (request) => taskDrawer.openLaunch(request, () => null), openWritingPlan: (ref, note) => openTaskPlan(bookId, 'writing', ref, note) },
   });
   replaceScreen('book-derivatives', content, { bookId, title: bookTitle, section: 'derivatives' });
   derivativesSurface = surface;
   agentWorkspaceReturns.set(content, () => renderDerivativesWorkspace(bookId, bookTitle));
   surface.start();
-  setStatus('衍生稿件');
 }
 
 function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string }, focusPackageVersionId?: string): void {

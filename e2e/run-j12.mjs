@@ -1169,7 +1169,7 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
     await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===5 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、审阅偏好、范例、资料库、本社词表'`, 'ordinary-knowledge-five-categories');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
-    await waitFor(primary, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), node=>node.textContent).join('|')==='审阅偏好|反馈记录' && document.querySelector('#quality-tab-preferences')?.getAttribute('aria-selected')==='true'`, 'ordinary-quality-two-views');
+    await waitFor(primary, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), node=>node.textContent).join('|')==='审阅偏好|反馈记录|学习回溯' && document.querySelector('#quality-tab-preferences')?.getAttribute('aria-selected')==='true'`, 'ordinary-quality-three-views');
     await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='审阅偏好已打开' && document.querySelector('[data-learning-enabled]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-quality-loaded');
     await assertRenderer(primary, `!document.querySelector('#persistence-status')?.textContent.includes('该页在开发者模式下显示') && !document.body.textContent.includes('该页在开发者模式下显示')`, 'ordinary-quality-no-shelved-notice');
     // #1521: AI 助手 is in the sidebar, so the page's footer button to it is gone in ordinary mode.
@@ -1254,7 +1254,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
     // #1553: ordinary mode keeps the conversation, its history and one fold of what a question may consult. The pills, the
-    // governance form, the directives, the sending preview and the habits summary are developer-only, and 学习回溯 waits until
+    // governance form, the directives, the sending preview and the habits summary are developer-only; 学习回溯 is offered because
     // its page opens in ordinary mode (#1549). This stage stops the one preference it creates, so the fold's honest state is
     // "nothing to include"; the live choice is proved on J-16's accepted preference above.
     // The fold exists at mount; its list is written when the projection arrives, so wait for that sentence before asserting.
@@ -1269,7 +1269,8 @@ async function main() {
         root.querySelectorAll('.global-agent-pill').length === 0 &&
         root.querySelector('[data-global-agent-governance]') === null &&
         root.querySelector('[data-global-agent-question-form] button[type="submit"]')?.textContent === '发送问题' &&
-        !Array.from(root.querySelectorAll('button'), (node) => node.textContent).some((text) => text === '查看将发送的内容' || text === '生成审阅习惯总结' || /学习回溯/u.test(text)) &&
+        !Array.from(root.querySelectorAll('button'), (node) => node.textContent).some((text) => text === '查看将发送的内容' || text === '生成审阅习惯总结') &&
+        Array.from(root.querySelectorAll('button'), (node) => node.textContent).includes('学习回溯 · 停止今后使用') &&
         !/治理|监督/u.test(root.textContent);
     })()`;
     await assertRenderer(primary, ordinaryAgentSurface, 'ordinary-agent-one-fold');
@@ -1305,6 +1306,9 @@ async function main() {
     }
     await primary.send('Emulation.clearDeviceMetricsOverride');
     await primary.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo({top:0,left:0,behavior:'instant'}); })()`);
+    // #1549: the 学习回溯 button this page offers in ordinary mode opens that page, by a real pointer.
+    await pointerClick(primary, waitFor, '[data-global-agent-action="audit"]', 'ordinary-agent-audit-button');
+    await waitFor(primary, `document.querySelector('#quality-tab-audit')?.getAttribute('aria-selected')==='true' && document.querySelector('[data-screen="quality-learning"] .learning-audit[data-learning-audit-view="list"]') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'ordinary-agent-audit-opens');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-restore-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'technical-mode-restore-settings-ready');
     await click(primary, '帮助', 'technical-mode-restore-help');

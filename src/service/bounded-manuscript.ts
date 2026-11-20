@@ -4598,7 +4598,7 @@ export class BoundedManuscriptStore {
     return result;
   }
 
-  getWindow(manuscriptId: string, branchId: string, target: ManuscriptWindowTarget): ManuscriptWindowProjection {
+  getWindow(manuscriptId: string, branchId: string, target: ManuscriptWindowTarget, marks?: { afterOrdinal: number; digest: string }): ManuscriptWindowProjection {
     const binding = this.#binding(manuscriptId, branchId);
     let targetPosition = 1;
     let focusBlockId: string | null = null;
@@ -4700,7 +4700,7 @@ export class BoundedManuscriptStore {
         label: `${structure ? `${asString(structure.text)} · ` : ''}全稿 ${(proportion * 100).toFixed(3)}%`,
       },
       blocks,
-      ...marksOfWindow(this.#db, branchId, asNumber(first.position)),
+      ...marksOfWindow(this.#db, branchId, asNumber(first.position), marks),
       ...aiLocksOfWindow(this.#db, branchId, asNumber(first.position)),
       // A Production Document says so on every window of it, whichever way it was reached (Issue #415, S66).
       ...((this.#db.prepare('SELECT role FROM manuscripts WHERE manuscript_id = ?').get(manuscriptId) as SqlRow | undefined)?.role === 'production-document'

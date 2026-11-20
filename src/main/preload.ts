@@ -666,6 +666,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['regenerateProposalConflictUnit']['output']>(IPC_CHANNELS.regenerateProposalConflictUnit, input),
   getManuscriptRail: (input: ServiceOperationMap['getManuscriptRail']['input']) =>
     invoke<ServiceOperationMap['getManuscriptRail']['output']>(IPC_CHANNELS.getManuscriptRail, input),
+  findPendingMark: (input: ServiceOperationMap['findPendingMark']['input']) =>
+    invoke<ServiceOperationMap['findPendingMark']['output']>(IPC_CHANNELS.findPendingMark, input),
   runEditorClipboardCommand: (input: { command: EditorClipboardCommand }) =>
     invoke<{ state: 'done' }>(IPC_CHANNELS.runEditorClipboardCommand, input),
   recordManuscriptEntryPosition: (input: ServiceOperationMap['recordManuscriptEntryPosition']['input']) =>

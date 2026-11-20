@@ -354,6 +354,7 @@ export function mountGlobalAgent(options: {
   });
   const audit = el('button', '学习回溯 · 停止今后使用');
   audit.type = 'button';
+  audit.dataset['globalAgentAction'] = 'audit';
   audit.addEventListener('click', options.openAudit);
   audit.className = 'btn ' + ('quiet');
   // Issue #1413 cluster 7, refined by #1553: the dialogue, its history and one fold of what a question may consult are the

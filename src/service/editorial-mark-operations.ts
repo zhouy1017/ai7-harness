@@ -8,9 +8,11 @@ import type {
   EditorialMarkCardProjection,
   EditorialMarkCommandProjection,
   FactualCorrectionLineageProjection,
+  FindPendingMarkInput,
   InspectApplyReceiptInput,
   ManuscriptApplyCommandProjection,
   ManuscriptApplyOutcomeProjection,
+  PendingMarkPlace,
   PrepareReverseApplyInput,
   ProposalConflictBindingInput,
   ProposalConflictDraftSaveProjection,
@@ -76,6 +78,11 @@ export function getEditorialMarkCard(host: EditorialMarkOperationsHost, manuscri
   // A Correction Proposal's 修改建议 carries its factual lineage into 依据与核查 (Issue #901; CORR-012, EASSURE-012).
   const lineage = host.factualLineageOfMark(card.markId);
   return lineage === null ? card : { ...card, factualCorrection: lineage };
+}
+
+/** 上一条 / 下一条待处理 under a filter (Issue #1604): a read of the Book's open marks, outside any write. */
+export function findPendingMark(host: EditorialMarkOperationsHost, input: FindPendingMarkInput): { mark: PendingMarkPlace | null } {
+  return host.markCall(() => host.editorialMarks.findPending(input));
 }
 
 export function updateEditorialMark(host: EditorialMarkOperationsHost, input: UpdateEditorialMarkInput): EditorialMarkCommandProjection {

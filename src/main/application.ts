@@ -1794,12 +1794,12 @@ export function registerRendererHandlers(
       });
     }),
   );
-  ipcMain.handle(IPC_CHANNELS.getManuscriptRail, (event, input: ServiceOperationMap['getManuscriptRail']['input']) =>
+  for (const op of ['getManuscriptRail', 'findPendingMark'] as const) ipcMain.handle(IPC_CHANNELS[op], (event, input: ServiceOperationMap[typeof op]['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
       requireAuthority();
       requireManuscriptCapability(owned, input);
-      return service.call('getManuscriptRail', input);
+      return service.call(op, input as never);
     }),
   );
   // The selection menu's 文字处理 group. The page holds no clipboard permission, so the window that
