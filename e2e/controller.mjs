@@ -1670,6 +1670,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'learning-audit-restart',
     'j14-learning-audit-keyboard',
     'j14-learning-audit-reflow-forced-colors',
+    'learning-audit-ordinary',
     'evaluation-damaged-route',
     'evaluation-calibration-books',
     'evaluation-calibrated-start',

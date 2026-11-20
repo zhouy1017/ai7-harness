@@ -177,8 +177,8 @@ it('shows one 参考哪些书和偏好 fold in ordinary mode and sends the same 
   const labels = (view: typeof ordinary) => view.root.querySelectorAll('button').map((button) => button.textContent);
   expect(labels(ordinary)).not.toContain('查看将发送的内容');
   expect(labels(ordinary)).not.toContain('生成审阅习惯总结');
-  // 学习回溯 opens only where its page can be opened; on this branch that page is developer-only (#1549 opens it).
-  expect(labels(ordinary).some((text) => text?.includes('学习回溯'))).toBe(false);
+  // 学习回溯 opens only where its page can be opened; #1549 opens it in ordinary mode too.
+  expect(labels(ordinary).some((text) => text?.includes('学习回溯'))).toBe(true);
   // An adopted 学习监督 direction is a preference the editor carries, listed under ordinary words, not a governance record.
   const adoptedRow = ordinary.find('[data-source-item="supervision:dir-1"]');
   expect(adoptedRow.parentElement?.textContent).toBe('审阅偏好 · 已启用');
