@@ -3307,6 +3307,61 @@ async function main() {
     await clickSelector(renderer, '.learning-reinclude [data-learning-audit-action="reinclude-cancel"]', 'learning-audit-reflow-cancel');
     await readAudit(renderer, (page) => page.reinclude === null && page.lineage?.decisions.length === 5, 'learning-audit-reflow-closed');
 
+    // ---- 学习回溯 in ordinary mode (Issue #1549): the tab is there, a row nobody decided is decided in place, one in use is stopped ----
+    at('learning-audit-ordinary');
+    const auditMode = async (developer, name) => {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `${name}-settings-ready`);
+      await click(renderer, '帮助', `${name}-help`);
+      await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `${name}-switch-ready`);
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `${name}-switch`);
+      await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='${developer}'`, `${name}-applied`);
+    };
+    await auditMode(false, 'learning-audit-ordinary');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-audit-ordinary-quality');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), (node) => node.textContent).join('|') === '审阅偏好|反馈记录|学习回溯'`, 'learning-audit-ordinary-tabs');
+    await clickSelector(renderer, '#quality-tab-audit', 'learning-audit-ordinary-tab');
+    await readAudit(renderer, (page) => page.view === 'list', 'learning-audit-ordinary-list');
+    // Filters are dropdowns of the shared style, the search and date controls styled as the other pages' are, and all of it inside the window.
+    await choose(renderer, '#learning-audit-filter-standing', '', 'learning-audit-ordinary-standing-cleared');
+    await readAudit(renderer, (page) => page.view === 'list' && page.rows.length > 0, 'learning-audit-ordinary-standing-read');
+    await choose(renderer, '#learning-audit-filter-kind', '', 'learning-audit-ordinary-kind-cleared');
+    await fill(renderer, '#learning-audit-query', '分页原因5', 'learning-audit-ordinary-query');
+    await clickSelector(renderer, '[data-learning-audit-action="search"]', 'learning-audit-ordinary-search');
+    const ordinaryRow = await readAudit(renderer, (page) => page.rows.length === 1, 'learning-audit-ordinary-row');
+    const ordinaryKey = ordinaryRow.rows[0][0];
+    requireJourney(ordinaryRow.note !== null && !ordinaryRow.note.includes('授予') && ordinaryRow.rows[0][1] === 'pending' && ordinaryRow.rows[0][2] === '还没决定' && ordinaryRow.rows[0][4] === false, 'learning-audit-ordinary-row-words', ordinaryRow);
+    await assertRenderer(renderer, `(() => {
+      const root = document.querySelector('[data-screen="quality-learning"] .learning-audit');
+      const buttons = Array.from(root.querySelectorAll('li.learning-audit-material .learning-audit-decide button'), (node) => node.textContent);
+      const filters = Array.from(root.querySelectorAll('.learning-audit-filter .ui-select-trigger'));
+      const query = root.querySelector('#learning-audit-query');
+      const inside = [...filters, query, root.querySelector('#learning-audit-filter-from')].every((node) => { const box = node.getBoundingClientRect(); return box.width > 0 && box.left >= 0 && box.right <= innerWidth; });
+      return JSON.stringify(buttons) === JSON.stringify(['用于学习', '不用']) && root.querySelectorAll('.filter-choices').length === 0 && filters.length === 4 && inside &&
+        getComputedStyle(query).borderTopLeftRadius === '8px' && getComputedStyle(filters[0]).borderTopLeftRadius === '8px';
+    })()`, 'learning-audit-ordinary-filters-style');
+    await clickSelector(renderer, `${auditRow(ordinaryKey)} [data-learning-audit-action="decide-book"]`, 'learning-audit-ordinary-decide');
+    const decidedRow = await readAudit(renderer, (page) => page.rows.length === 1 && page.rows[0][1] === 'book', 'learning-audit-ordinary-decided');
+    requireJourney(decidedRow.rows[0][2] === '用于学习 · 仅本书' && decidedRow.rows[0][4] === true, 'learning-audit-ordinary-decided-words', decidedRow);
+    const decidedService = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(ordinaryKey)} }).then((read) => [read.standing, read.decisions.map((entry) => entry.choice).join('>')])`);
+    requireJourney(JSON.stringify(decidedService) === JSON.stringify(['book', 'book']), 'learning-audit-ordinary-decided-service', decidedService);
+    // The one in use is read as two parts and stopped from its explorer; nothing technical is drawn.
+    await clickSelector(renderer, `${auditRow(ordinaryKey)} [data-learning-audit-action="open"]`, 'learning-audit-ordinary-open');
+    await readAudit(renderer, (page) => page.lineage?.key === ordinaryKey, 'learning-audit-ordinary-lineage');
+    await assertRenderer(renderer, `(() => {
+      const lineage = document.querySelector('.learning-lineage');
+      const parts = Array.from(lineage.querySelectorAll('[data-lineage-part]'), (node) => node.dataset.lineagePart);
+      return JSON.stringify(parts) === JSON.stringify(['from', 'used']) && lineage.querySelector('.learning-audit-details') === null && lineage.querySelector('.learning-lineage-step[data-lineage-step]') === null &&
+        !/审计详情|\\bv[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}T|[0-9a-f]{32}/u.test(lineage.textContent);
+    })()`, 'learning-audit-ordinary-lineage-words');
+    await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="stop"]', 'learning-audit-ordinary-stop');
+    await waitFor(renderer, `${notice} === '已停止今后使用 1 条学习材料。'`, 'learning-audit-ordinary-stop-status');
+    await readAudit(renderer, (page) => page.lineage?.key === ordinaryKey && page.lineage.standing === 'excluded', 'learning-audit-ordinary-stopped');
+    await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="back"]', 'learning-audit-ordinary-back');
+    const stoppedRow = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 1 && page.rows[0][1] === 'excluded', 'learning-audit-ordinary-stopped-row');
+    requireJourney(stoppedRow.rows[0][2] === '不用于学习', 'learning-audit-ordinary-stopped-words', stoppedRow);
+    await auditMode(true, 'learning-audit-ordinary-restore');
+
     // ---- 从第 M 版重新评估 past a damaged latest version (Issue #726), and the house calibration offset (Issue #429, EVAL-011a) ----
     at('evaluation-damaged-route');
     // 评估旅程丙's latest version, 第 15 版 begun from AI7's 初评, is damaged on disk while the product is closed — one entry's digest

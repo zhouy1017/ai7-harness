@@ -209,7 +209,7 @@ it('defaults ordinary quality to preferences and shares its controls with the kn
   } });
   const page = navigation(); await page.renderQualityLearning();
   expect(page.root.querySelector('[id="quality-tab-preferences"]')!.getAttribute('aria-selected')).toBe('true');
-  expect(Array.from(page.root.querySelectorAll('[role="tab"]'), (tab) => tab.textContent)).toEqual(['审阅偏好', '反馈记录']);
+  expect(Array.from(page.root.querySelectorAll('[role="tab"]'), (tab) => tab.textContent)).toEqual(['审阅偏好', '反馈记录', '学习回溯']);
   expect(page.root.querySelector('[data-learning-enabled]')).not.toBeNull();
   expect(Array.from(page.root.querySelectorAll('button'), (node) => node.textContent)).not.toContain('对话历史');
   page.root.querySelector<HTMLButtonElement>('[id="quality-tab-feedback"]')!.click();

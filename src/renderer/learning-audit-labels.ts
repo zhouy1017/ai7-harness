@@ -77,6 +77,45 @@ export const LEARNING_AUDIT_STANDING_LABELS: Readonly<Record<LearningAuditStandi
   excluded: '明确排除',
 };
 
+/**
+ * What an editor reads in ordinary mode (Issue #1549, plan #1516 §5): one sentence on what AI7 learns from, the 状态 filter,
+ * and a row's standing as whether the material is used for learning. A material AI7 uses by default says so; developer mode
+ * keeps the words above.
+ */
+export const LEARNING_AUDIT_ORDINARY_NOTE =
+  'AI7 从你处理过的修改建议、分析反馈、审阅和直接修改里学习。每条材料用不用于学习，由你决定；停止今后使用不会删除任何记录。';
+export const LEARNING_AUDIT_ORDINARY_EMPTY = '还没有学习材料；你在修改建议、分析反馈和审阅里的处理与原因会留在这里。';
+export const LEARNING_AUDIT_ORDINARY_FILTERS = { ...LEARNING_AUDIT_FILTERS, standing: '状态' } as const;
+export const LEARNING_AUDIT_ORDINARY_STANDING_LABELS: Readonly<Record<LearningAuditStanding, string>> = {
+  pending: '还没决定',
+  changed: '改过，需要重新决定',
+  deferred: '稍后决定',
+  book: '用于学习 · 仅本书',
+  house: '用于学习 · 本社',
+  excluded: '不用于学习',
+};
+export const LEARNING_AUDIT_DEFAULT_USED = '默认用于学习';
+/** A row's standing as the page's mode words it: a pending material AI7 already uses by default reads as used. */
+export function learningAuditStandingLabel(entry: { readonly standing: LearningAuditStanding; readonly automaticAdmission?: { readonly choice: 'house' } | null }, ordinary: boolean): string {
+  if (!ordinary) return LEARNING_AUDIT_STANDING_LABELS[entry.standing];
+  return entry.standing === 'pending' && entry.automaticAdmission?.choice === 'house' ? LEARNING_AUDIT_DEFAULT_USED : LEARNING_AUDIT_ORDINARY_STANDING_LABELS[entry.standing];
+}
+/** Whether a row waits for the editor's decision here: undecided, changed or put off, and not used by default. */
+export function learningAuditAwaitsDecision(entry: { readonly standing: LearningAuditStanding; readonly automaticAdmission?: { readonly choice: 'house' } | null }): boolean {
+  return (entry.standing === 'pending' || entry.standing === 'changed' || entry.standing === 'deferred') && entry.automaticAdmission?.choice !== 'house';
+}
+/** The two choices a row waits on: the Book's own use, and none. */
+export const LEARNING_AUDIT_DECIDE = {
+  use: { choice: 'book', label: '用于学习' },
+  skip: { choice: 'excluded', label: '不用' },
+} as const;
+export function learningAuditDecideLabel(label: string, name: string): string {
+  return `${label}：${name}`;
+}
+export function learningAuditDecideTitle(choice: 'book' | 'excluded', bookTitle: string): string {
+  return choice === 'book' ? `只在《${bookTitle}》里用于学习` : '不用于学习；已有的记录仍保留';
+}
+
 /** A row's downstream-use summary (LAUD-001): no Task read it yet. */
 export const LEARNING_AUDIT_UNUSED = '尚未被任何任务使用';
 
@@ -166,6 +205,43 @@ export function learningLineageDecisionStatus(entry: Pick<LearningLineageDecisio
   if (entry.via === 'learning-audit') parts.push('在学习回溯中停止今后使用');
   return parts.join(' · ');
 }
+
+// ---- the lineage in ordinary mode (Issue #1549): two parts, 从哪来 and 用在哪; a part with nothing in it is not listed ------
+
+export const LEARNING_LINEAGE_ORDINARY_PARTS = { from: '从哪来', used: '用在哪' } as const;
+export const LEARNING_LINEAGE_ORDINARY_NO_DECISION = '还没有决定。';
+export function learningLineageOrdinaryHeading(originLabel: string): string {
+  return `学习材料：${originLabel}`;
+}
+/** A choice as an editor reads it: used for learning (where), or not used. */
+export const LEARNING_AUDIT_ORDINARY_CHOICE_LABELS = {
+  book: '用于学习 · 仅本书', house: '用于学习 · 本社', excluded: '不用于学习', deferred: '稍后决定',
+} as const;
+export function learningLineageOrdinaryDecisionLine(entry: Pick<LearningLineageDecisionProjection, 'choice' | 'recordedAt' | 'note'>, instant: (iso: string) => string): string {
+  return `${LEARNING_AUDIT_ORDINARY_CHOICE_LABELS[entry.choice]} · ${instant(entry.recordedAt)}${entry.note === null ? '' : ` · ${entry.note}`}`;
+}
+export function learningLineageOrdinarySignalLine(signal: Pick<LearningLineageSignalProjection, 'recordedAt' | 'current' | 'lines'>, instant: (iso: string) => string): string {
+  return `审阅偏好 · ${instant(signal.recordedAt)} · 其中 ${signal.lines} 行出自这条材料${signal.current ? ' · 现在在用' : ''}`;
+}
+export function learningLineageOrdinaryTaskLine(task: Pick<LearningLineageTaskProjection, 'label' | 'use' | 'marked'>): string {
+  return `${task.label} · ${LEARNING_LINEAGE_TASK_USE[task.use]}${task.marked ? ` · 已标上「${LEARNING_INFLUENCE_RESULT_MARKER}」` : ''}`;
+}
+export function learningLineageOrdinaryEarlier(count: number): string {
+  return `更早还有 ${count} 个决定，仍在记录里。`;
+}
+export function learningLineageOrdinaryCandidates(count: number): string {
+  return `${count} 条待接受的记忆引用了它，接受后才会使用。`;
+}
+export const LEARNING_LINEAGE_ORDINARY_REINCLUDE = '重新用于学习…';
+export const LEARNING_LINEAGE_ORDINARY_REINCLUDE_LEGEND = '用于学习的范围';
+export const LEARNING_LINEAGE_ORDINARY_REINCLUDE_NOTE = '会追加一个新的决定；之前的「不用」仍留在记录里。';
+export function learningAuditOrdinaryConsequence(choice: 'book' | 'house', bookTitle: string): string {
+  return choice === 'book' ? `用于学习 · 仅本书：它只在《${bookTitle}》里帮 AI7 学习。` : '用于学习 · 本社：本社以后的图书都可能从它学习。';
+}
+export function learningAuditOrdinaryOpenLabel(name: string): string {
+  return `查看来源与用途：${name}`;
+}
+export const LEARNING_AUDIT_ORDINARY_OPEN = '查看来源与用途…';
 
 // ---- 停止今后使用 and its 学习补救影响预览 (LAUD-006 to LAUD-011) ---------------------------------------------------------
 
@@ -314,6 +390,9 @@ export const LEARNING_AUDIT_STATUS = {
   reincluded: '学习准入决定已记录。',
   reincludeFailed: '无法记录这个决定。',
   invalidDates: '请填写有效日期，截止日期不能早于起始日期。',
+  deciding: '正在记录这个决定…',
+  decidedUse: '已用于学习。',
+  decidedSkip: '已设为不用于学习。',
 } as const;
 
 /**
