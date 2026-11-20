@@ -20,7 +20,7 @@ function mount(readFails: boolean) {
   const settings = createSettingsScreens({ setStatus: vi.fn(), panel: () => element('section'), element, button, replaceScreen: vi.fn(), api: {} as never,
     rendererErrorMessage: (_error, fallback) => fallback, screen: root, renderRunReport: vi.fn() as never, applyKeyboardBindings: vi.fn(), keyboardSettingsOff: undefined,
     renderModelServiceSettings: vi.fn(async () => undefined), renderDataAndStorage: vi.fn(async () => undefined), renderDiagnostics: vi.fn(),
-    appearance: {} as never, viewPreferences: {} as never });
+    appearance: {} as never, viewPreferences: {} as never, commands: { run: vi.fn(), usable: () => true } });
   vi.stubGlobal('window', { ai7: { getModelServiceSettings: async () => { throw new Error(readFails ? 'unreadable' : 'unused'); }, getPreferences: async () => ({ values: { 'model.favourites': [] } }) }, setInterval: () => 0, clearInterval: () => undefined });
   const modelService = createModelServiceSettings({ element, button, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(),
     rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (state, content) => root.replaceChildren(settings.settingsLayout(state, content)) });

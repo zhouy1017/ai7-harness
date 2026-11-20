@@ -11,9 +11,39 @@ import { visibleKnowledgeBaseTabs } from './knowledge-base-labels.js';
 import { visibleQualityLearningTabs } from './quality-learning-labels.js';
 import { MILESTONE_FORM_WORDS, PUBLICATION_ACTION_LABELS } from './deliverables-labels.js';
 
+/** One step of 第一次审稿: a sentence and the button that goes there, through the command the palette and F1 also use (#1548). */
+export interface HelpStep {
+  readonly key: 'model' | 'import' | 'review' | 'process' | 'export';
+  readonly title: string;
+  readonly sentence: string;
+  readonly button: string;
+  /** The registry command the button runs; a step that needs an open Book says so when there is none. */
+  readonly command: string;
+  readonly needsBook: boolean;
+}
+
 export interface HelpSection {
   readonly heading: string;
   readonly paragraphs: ReadonlyArray<string>;
+  /** Present on 第一次审稿 only: its five steps follow the paragraphs, each with its button. */
+  readonly steps?: ReadonlyArray<HelpStep>;
+}
+
+export const FIRST_REVIEW_HEADING = '第一次审稿';
+
+/** 第一次审稿: 连接模型服务 → 导入稿件 → 新建审阅 → 逐条处理建议 → 导出, each naming the exact screen it goes to. */
+function firstReviewSection(): HelpSection {
+  return {
+    heading: FIRST_REVIEW_HEADING,
+    paragraphs: ['按这五步审完第一本稿子；每一步的按钮会直接带你过去。'],
+    steps: [
+      { key: 'model', title: '连接模型服务', sentence: `在「${SHELL_SETTINGS.label}」选好模型服务并填入密钥，AI 审阅才能开始。`, button: '设置模型服务', command: 'nav.settings', needsBook: false },
+      { key: 'import', title: '导入稿件', sentence: `在「${destinationLabel('library')}」点「导入稿件」，选择本机的 DOCX 文件。`, button: `打开${destinationLabel('library')}`, command: 'nav.library', needsBook: false },
+      { key: 'review', title: '新建审阅', sentence: `打开这本书的「${sectionLabel('review')}」，新建审阅并选好要查的类别。`, button: '新建审阅', command: 'review.new', needsBook: true },
+      { key: 'process', title: '逐条处理建议', sentence: `在「${sectionLabel('findings')}」里逐条查看建议，要采纳就点「接受并应用」。`, button: `打开${sectionLabel('findings')}`, command: 'nav.book.findings', needsBook: true },
+      { key: 'export', title: '导出', sentence: `在「${sectionLabel('deliverables')}」找到要交付的稿件，点「导出…」生成文件。`, button: `打开${sectionLabel('deliverables')}`, command: 'nav.book.deliverables', needsBook: true },
+    ],
+  };
 }
 
 function destinationLabel(key: (typeof SHELL_DESTINATIONS)[number]['key']): string {
@@ -24,11 +54,12 @@ function sectionLabel(key: string): string {
   return SHELL_BOOK_GROUPS.flatMap((group) => group.sections).find((section) => section.key === key)!.label;
 }
 
-/** 使用帮助: seven short sections mirroring the destinations a reader works in. */
+/** 使用帮助: 第一次审稿, then seven short sections mirroring the destinations a reader works in. */
 export function helpUsageSections(developerMode: boolean): ReadonlyArray<HelpSection> {
   const knowledgeTabs = visibleKnowledgeBaseTabs(developerMode);
   const settingsRows = SETTINGS_HUB_GROUPS.flatMap((group) => group.rows.filter((row) => developerMode || row.developerOnly !== true));
   return Object.freeze([
+  firstReviewSection(),
   { heading: '书库与稿件导入', paragraphs: [
     `${destinationLabel('library')}是全部图书；点「新建图书」建空图书，点「导入稿件」导入文件。打开一本书会回到它上次的「${sectionLabel('manuscript')}」位置。`,
   ] },

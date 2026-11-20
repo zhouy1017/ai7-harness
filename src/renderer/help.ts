@@ -7,7 +7,7 @@ import {
   HELP_ABOUT_FAILED, HELP_ABOUT_HEADING, HELP_ABOUT_LOADING, HELP_LICENSE_EMPTY,
   HELP_LICENSE_FIELD_LICENSE, HELP_LICENSE_FIELD_SOURCE, HELP_LICENSE_FILTER_LABEL, HELP_LICENSE_FILTER_PLACEHOLDER,
   HELP_LICENSE_NO_SOURCE, HELP_LICENSE_LOCAL_NOTE, HELP_LEDE, HELP_TABS, HELP_TABS_LABEL, HELP_TITLE, helpAboutLine,
-  helpLicenseCount, type HelpTab,
+  helpLicenseCount, HELP_STEP_NEEDS_BOOK, type HelpTab,
 } from './help-labels.js';
 import { HELP_PRIVACY_SECTIONS, helpUsageSections, type HelpSection } from './help-text.js';
 import { dataVersionStateLine } from './data-version-labels.js';
@@ -36,11 +36,18 @@ export interface LicensesDocument {
 /** The committed list, imported as data; tools/generate-licenses.mjs owns it. */
 export const THIRD_PARTY_LICENSES: ReadonlyArray<ThirdPartyLicense> = (licensesDocument as LicensesDocument).packages;
 
+export interface HelpCommands {
+  readonly run: (commandId: string) => void;
+  readonly usable: (commandId: string) => boolean;
+}
+
 export interface HelpSurfaceOptions {
   readonly root: HTMLElement;
   /** Reads the software version and the Data Version exactly as 设置 › 数据与存储 does. */
   readonly loadVersions: () => Promise<Pick<DataVersionProjection, 'softwareVersion' | 'dataVersion' | 'frozen'>>;
   readonly modeChanged?: () => void;
+  /** What a step of 第一次审稿 presses: the registry command the palette and F1 run, and whether it has something to act on now. */
+  readonly commands?: HelpCommands;
   readonly licenses?: ReadonlyArray<ThirdPartyLicense>;
   readonly protocolVersion?: number;
 }
@@ -53,11 +60,42 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   return node;
 }
 
-function helpSection(section: HelpSection): HTMLElement {
+function helpSection(section: HelpSection, commands: HelpCommands | undefined): HTMLElement {
   const block = el('section', 'help-section');
-  block.append(el('h4', undefined, section.heading));
+  const heading = el('h4', undefined, section.heading);
+  block.append(heading);
   for (const paragraph of section.paragraphs) block.append(el('p', 'help-paragraph', paragraph));
+  if (section.steps !== undefined) {
+    block.dataset['helpSection'] = 'first-review';
+    heading.tabIndex = -1;
+    const steps = el('ol', 'help-steps');
+    for (const step of section.steps) {
+      const item = el('li', 'help-step');
+      item.dataset['helpStep'] = step.key;
+      item.append(el('strong', undefined, step.title), el('p', 'help-paragraph', step.sentence));
+      if (commands !== undefined && (!step.needsBook || commands.usable(step.command))) {
+        const go = el('button', 'secondary', step.button);
+        go.type = 'button';
+        go.dataset['helpStepGo'] = step.key;
+        go.addEventListener('click', () => commands.run(step.command));
+        item.append(go);
+      } else if (commands !== undefined) {
+        const note = el('p', 'field-note', HELP_STEP_NEEDS_BOOK);
+        note.dataset['helpStepNeedsBook'] = step.key;
+        item.append(note);
+      }
+      steps.append(item);
+    }
+    block.append(steps);
+  }
   return block;
+}
+
+/** 第一次审稿's heading, where the first-run card's 帮助 lands the focus. */
+export function focusFirstReview(root: ParentNode): void {
+  const heading = root.querySelector<HTMLElement>('[data-help-section="first-review"] h4');
+  heading?.focus();
+  heading?.scrollIntoView({ block: 'start' });
 }
 
 /** Shared one-step presentation preference in Settings Local and at the top of Help. */
@@ -135,7 +173,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   usagePanel.tabIndex = 0;
   usagePanel.setAttribute('aria-labelledby', 'help-tab-usage');
   usagePanel.append(el('h3', undefined, HELP_TABS[0]!.label));
-  for (const section of helpUsageSections(technicalLayerVisible)) usagePanel.append(helpSection(section));
+  for (const section of helpUsageSections(technicalLayerVisible)) usagePanel.append(helpSection(section, options.commands));
 
   const privacyPanel = el('section', 'help-panel');
   privacyPanel.id = 'help-panel-privacy';
@@ -143,7 +181,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   privacyPanel.tabIndex = 0;
   privacyPanel.setAttribute('aria-labelledby', 'help-tab-privacy');
   privacyPanel.append(el('h3', undefined, HELP_TABS[1]!.label));
-  for (const section of HELP_PRIVACY_SECTIONS) privacyPanel.append(helpSection(section));
+  for (const section of HELP_PRIVACY_SECTIONS) privacyPanel.append(helpSection(section, undefined));
 
   const licensesPanel = el('section', 'help-panel');
   licensesPanel.id = 'help-panel-licenses';

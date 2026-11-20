@@ -544,6 +544,13 @@ async function assertFirstRunGeometry(renderer, reviewExpected) {
   })()`) === true, 'first-run-card-geometry');
 }
 
+/** F1 as a real key press: 帮助 opens from any screen (#1548). */
+async function pressF1(renderer) {
+  const key = { key: 'F1', code: 'F1', windowsVirtualKeyCode: 112, nativeVirtualKeyCode: 112 };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+}
+
 async function firstRunClick(renderer, selector, label = null) {
   const point = await renderer.evaluate(`(async () => { const node=${label === null ? `document.querySelector(${JSON.stringify(selector)})` : `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(node=>node.textContent===${JSON.stringify(label)})`}; if(!node)return null; node.scrollIntoView({block:'center'}); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); const b=node.getBoundingClientRect(); return {x:b.left+b.width/2,y:b.top+b.height/2}; })()`);
   requireJourney(point !== null, 'first-run-pointer-target');
@@ -967,6 +974,27 @@ async function main() {
     await waitFor(onboardingPage, `document.querySelector('[data-import-target-choices]')`, 'first-run-import-step-opened');
     await firstRunClick(onboardingPage, 'button', '取消导入');
     await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, 'first-run-import-step-returned');
+    // #1548: the card's 帮助 opens 帮助 on 第一次审稿 with its heading focused and in view at both Gate window sizes; with no Book open
+    // the steps that act inside one say so; the model and import steps lead to their own pages.
+    at('first-run-help');
+    for (const [width,height] of [[1280,800],[1008,681]]) {
+      await onboardingPage.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+      await waitFor(onboardingPage, `innerWidth===${width} && innerHeight===${height}`, `first-run-help-size-${width}`);
+      await firstRunClick(onboardingPage, '[data-onboarding-help]');
+      await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, `first-run-help-opened-${width}`);
+      await assertRenderer(onboardingPage, `(() => { const heading=document.querySelector('[data-help-section="first-review"] h4'); const box=heading.getBoundingClientRect(); const steps=Array.from(document.querySelectorAll('[data-help-step]')); return document.activeElement===heading && box.top>=0 && box.bottom<=innerHeight && steps.length===5 && steps.every((step)=>{ const b=step.getBoundingClientRect(); return b.left>=0 && b.right<=innerWidth; }) && document.querySelectorAll('[data-help-step-go]').length===2 && document.querySelectorAll('[data-help-step-needs-book]').length===3; })()`, `first-run-help-section-${width}`);
+      await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+      await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, `first-run-help-returned-${width}`);
+    }
+    await onboardingPage.send('Emulation.clearDeviceMetricsOverride');
+    await firstRunClick(onboardingPage, '[data-onboarding-help]');
+    await firstRunClick(onboardingPage, '[data-help-step-go="model"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"]')`, 'first-run-help-model-step');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, 'first-run-help-model-returned');
+    await firstRunClick(onboardingPage, '[data-onboarding-help]');
+    await firstRunClick(onboardingPage, '[data-help-step-go="import"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'first-run-help-import-step');
     at('first-run-data-location-settings');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-settings]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'first-run-settings-ready');
@@ -1008,6 +1036,35 @@ async function main() {
     await onboardingPage.send('Emulation.clearDeviceMetricsOverride');
     await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
     await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-book-review-reopened-manuscript');
+    // #1548: F1 on the manuscript opens 帮助; with the Book open every step has its button and each lands on its destination.
+    at('first-review-help-book');
+    const helpFromManuscript = async (name) => {
+      await pressF1(onboardingPage);
+      await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, name);
+    };
+    await assertRenderer(onboardingPage, `(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); if(!(editor instanceof HTMLElement))return false; editor.focus(); return true; })()`, 'first-review-help-focus-manuscript');
+    await helpFromManuscript('first-review-help-f1');
+    await assertRenderer(onboardingPage, `document.querySelectorAll('[data-help-step-go]').length===5 && !document.querySelector('[data-help-step-needs-book]')`, 'first-review-help-book-steps');
+    await firstRunClick(onboardingPage, '[data-help-step-go="review"]');
+    await waitFor(onboardingPage, `document.querySelector('dialog.review-sheet')?.open===true`, 'first-review-help-review');
+    await firstRunClick(onboardingPage, '[data-review-action="close-sheet"]');
+    await helpFromManuscript('first-review-help-f1-again');
+    await firstRunClick(onboardingPage, '[data-help-step-go="process"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="book-findings"]')`, 'first-review-help-process');
+    await helpFromManuscript('first-review-help-f1-findings');
+    await firstRunClick(onboardingPage, '[data-help-step-go="export"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="book-deliverables"]')`, 'first-review-help-export');
+    await helpFromManuscript('first-review-help-f1-deliverables');
+    await firstRunClick(onboardingPage, '[data-help-step-go="import"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"]')`, 'first-review-help-import');
+    await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-review-help-reopened-manuscript');
+    await helpFromManuscript('first-review-help-f1-model');
+    await firstRunClick(onboardingPage, '[data-help-step-go="model"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"]')`, 'first-review-help-model');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-review-help-returned-manuscript');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-book-section="overview"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="book-overview"]')`, 'first-book-review-returned-overview');
     at('guided-strip');
