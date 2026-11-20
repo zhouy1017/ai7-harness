@@ -9,6 +9,7 @@ import { EditorialMarkStore, proposalChangeItemsShape } from '../../src/service/
 import { ImportedMarkError, createImportedMarks, stageImportedMarks } from '../../src/service/imported-marks.js';
 import { EditorialStore, StoreError, importedMarksRecord } from '../../src/service/store.js';
 import { IMPORT_RETENTION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { EditorialMarkAnchorProjection, ManuscriptBlockProjection } from '../../src/shared/protocol.js';
 import {
   ADMITTED_BASELINE_DOCX,
@@ -500,6 +501,32 @@ describe('a DOCX\'s comments and tracked changes enter the imported manuscript (
       expect(anchorOf(one.markId)).toEqual(['exact', 5, end, null]);
     });
   }, 180_000);
+
+  it.each(['start', 'end'] as const)('keeps a pending insertion at the %s of its paragraph exact through Enter there, and it still applies (ADR 0105 §2)', async (side) => {
+    await withStore(async (store) => {
+      const { commit, book, blockId, insertion, anchorOf, edit } = await insertionAtPoint(store);
+      expect([insertion.fromGrapheme, insertion.toGrapheme]).toEqual([20, 20]);
+      const length = () => graphemesOf(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks.find((block) => block.blockId === blockId)!.text).length;
+      // Everything before the point, or after it, is deleted, one journal edit's bound at a time.
+      if (side === 'start') edit(0, 20, ''); else while (length() > 20) edit(20, Math.min(length(), 20 + 256), '');
+      const at = side === 'start' ? 0 : 20;
+      expect(anchorOf()).toEqual(['exact', at, at]);
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const created = `blk_${randomUUID().replaceAll('-', '').slice(0, 24)}`;
+      store.flushJournalEdit({
+        clientEditId: randomUUID(), ...book, baseRevisionId: window.revisionId, blockId, windowStartBlockId: window.blocks[0]!.blockId,
+        baseBlockDigest: window.blocks.find((block) => block.blockId === blockId)!.digest, expectedJournalSequence: window.journalSequence,
+        fromGrapheme: at, toGrapheme: at, insertText: '', structure: { kind: 'split', newBlockId: created },
+      });
+      const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, insertion.markId);
+      expect([card.blockId, card.fromGrapheme, card.toGrapheme, card.anchorState]).toEqual([side === 'start' ? created : blockId, at, at, 'exact']);
+      store.applyChangeSuggestion({
+        ...book, windowStartBlockId: store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks[0]!.blockId,
+        markId: insertion.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null,
+      });
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, insertion.markId).status).toBe('applied');
+    });
+  });
 
   it('places an insertion among the words restored at its drifted point after undo (Issue #533)', async () => {
     const [original, words] = await Promise.all([graphemes(span(10)), read(span(11, 0, 5))]);

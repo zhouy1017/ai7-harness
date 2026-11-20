@@ -4,6 +4,7 @@ import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { BoundedManuscriptStore, ExactReplacementCommit, ExactReplacementTarget } from './bounded-manuscript.js';
 import { applyProjection, EditorialMarkError, editorialMarksShape, widenEditorialMarks, type EditorialMarkStore } from './editorial-marks.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
+import { inverseTargetsTouchInOrder, type InverseTarget } from './manuscript/structural-edits.js';
 import {
   MAX_MARK_BODY_CODE_UNITS,
   type ApplyChangeSuggestionBatchInput,
@@ -205,7 +206,7 @@ interface PlannedTarget {
   decision: { disposition: 'accepted' | 'accepted-with-edit' | 'withdrawn'; editedText: string | null; reason: string | null } | { existingDecisionId: string };
   standsAs: 'applied' | 'open';
 }
-type ReverseMember = ReturnType<EditorialMarkStore['suggestionTarget']> & { markId: string; originalBlockId: string; originalFrom: number; originalTo: number };
+type ReverseMember = ReturnType<EditorialMarkStore['suggestionTarget']> & InverseTarget & { markId: string };
 
 interface Binding {
   manuscriptId: string;
@@ -334,7 +335,7 @@ export class ManuscriptApplyStore {
       JOIN proposal_change_items p ON p.item_id = t.item_id WHERE t.effect_id = ? ORDER BY t.ordinal`).all(effectId);
     requireApply(ids.length > 0, 'APPLY_INVALID', '原应用的修改范围缺失。');
     return ids.map((row) => ({ ...this.#marks.suggestionTarget({ ...input, markId: String(row.mark_id) }), markId: String(row.mark_id),
-      originalBlockId: String(row.block_id), originalFrom: Number(row.from_grapheme), originalTo: Number(row.to_grapheme) }));
+      original: { blockId: String(row.block_id), from: Number(row.from_grapheme), to: Number(row.to_grapheme) } }));
   }
 
   /**
@@ -342,12 +343,11 @@ export class ManuscriptApplyStore {
    * Two touching members from different original paragraphs — joined since — are refused, not reordered (ADR 0105 §2).
    */
   #reverseRangesStand(members: readonly ReverseMember[]): boolean {
-    const ordered = [...members].sort((a, b) => a.blockId.localeCompare(b.blockId) || a.fromGrapheme - b.fromGrapheme || a.originalFrom - b.originalFrom);
+    const ordered = [...members].sort((a, b) => a.blockId.localeCompare(b.blockId) || a.fromGrapheme - b.fromGrapheme || a.original.from - b.original.from);
     return ordered.every((member, index) => {
       const previous = ordered[index - 1];
       return member.status === 'applied' && member.anchorState === 'exact' && (previous === undefined || previous.blockId !== member.blockId ||
-        previous.toGrapheme < member.fromGrapheme || previous.toGrapheme === member.fromGrapheme && previous.originalBlockId === member.originalBlockId &&
-          (previous.toGrapheme > previous.fromGrapheme && member.toGrapheme > member.fromGrapheme || previous.originalTo === member.originalFrom));
+        previous.toGrapheme < member.fromGrapheme || previous.toGrapheme === member.fromGrapheme && inverseTargetsTouchInOrder(previous, member));
     });
   }
 

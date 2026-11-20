@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
@@ -221,6 +222,128 @@ describe('撤销本次修改 across 分段 and 合段 (ADR 0105 §2)', () => {
     expect(textOf(target.blockId) + textOf(created) === target.text).toBe(true);
   });
 
+  it('keeps an applied deletion at a caret at the very end or start of a paragraph exact, and reverses it', () => {
+    const [first, second] = adjacentParagraphs();
+    const length = graphemesOf(first.text).length;
+    const atEnd = accepted(first.blockId, length - 2, length, '');
+    const atStart = accepted(second.blockId, 0, 2, '');
+    const afterFirst = newBlockId();
+    journal(first.blockId, length - 2, { kind: 'split', newBlockId: afterFirst });
+    expect(markAt(atEnd)).toEqual({ blockId: first.blockId, fromGrapheme: length - 2, toGrapheme: length - 2, anchorState: 'exact' });
+    const beforeSecond = newBlockId();
+    journal(second.blockId, 0, { kind: 'split', newBlockId: beforeSecond });
+    expect(markAt(atStart)).toEqual({ blockId: beforeSecond, fromGrapheme: 0, toGrapheme: 0, anchorState: 'exact' });
+    expect([reverse(atEnd), reverse(atStart)]).toEqual(['no-error', 'no-error']);
+    expect(textOf(first.blockId) + textOf(afterFirst) === first.text && textOf(beforeSecond) === second.text).toBe(true);
+  });
+
+  it('reverses a moved suggestion whose split and merge groups were superseded by a recovery restore', async () => {
+    const [first, second] = adjacentParagraphs();
+    const moved = accepted(second.blockId, 12, 16);
+    merge(first.blockId, second.blockId);
+    const created = newBlockId();
+    journal(first.blockId, graphemesOf(first.text).length + 2, { kind: 'split', newBlockId: created });
+    store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const startup = await store.getStartup();
+    if (startup.state !== 'manuscript-recovery') throw new Error('expected journal recovery');
+    await store.restoreRecovery(randomUUID(), startup.recovery.attentionId, startup.recovery.attentionVersion, { kind: 'journal' });
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    expect(db.prepare("SELECT DISTINCT status FROM manuscript_command_groups WHERE branch_id = ? AND kind IN ('split', 'merge')").all(book.branchId))
+      .toEqual([{ status: 'superseded' }]);
+    db.close();
+    expect(markAt(moved)).toMatchObject({ blockId: created, anchorState: 'exact' });
+    expect(reverse(moved)).toBe('no-error');
+    expect(textOf(first.blockId) + textOf(created) === first.text + second.text).toBe(true);
+  });
+
+  it('refuses, writing nothing, a point a 0.7.3 撤销 of a join left exact on the paragraph that had absorbed it', async () => {
+    const [first, second] = adjacentParagraphs();
+    const length = graphemesOf(first.text).length;
+    const point = accepted(second.blockId, 0, 2, '');
+    merge(first.blockId, second.blockId);
+    undo();
+    // 0.7.3's replay left a point at the caret of the undone join exact on the first paragraph; write that state as it left it.
+    store.markCleanShutdown();
+    store.close();
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    db.prepare("UPDATE editorial_marks SET block_id = ?, from_grapheme = ?, to_grapheme = ?, anchor_state = 'exact' WHERE mark_id = ?").run(first.blockId, length, length, point);
+    db.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const before = window();
+    expect(reverse(point)).toBe('APPLY_INVALID');
+    expect(window().journalSequence).toBe(before.journalSequence);
+    expect(textOf(first.blockId) === first.text && textOf(second.blockId) === before.blocks.find((block) => block.blockId === second.blockId)!.text).toBe(true);
+  });
+
+  it.each(['Enter at the seam', '撤销 of the join'] as const)('refuses two applied replacements touching across a joined seam, and reverses them after %s', (way) => {
+    const [first, second] = adjacentParagraphs();
+    const length = graphemesOf(first.text).length;
+    const end = mark(first.blockId, length - 4, length, 'change-suggestion');
+    const start = mark(second.blockId, 0, 4, 'change-suggestion');
+    store.applyChangeSuggestionBatch({ ...binding(), markIds: [end, start], clientEffectId: randomUUID() });
+    merge(first.blockId, second.blockId);
+    const sequence = window().journalSequence;
+    expect(store.prepareReverseApply({ ...book, markId: start }).ready).toBe(false);
+    expect(reverse(start)).toBe('APPLY_TARGET_DRIFTED');
+    expect(window().journalSequence).toBe(sequence);
+    const created = way === 'Enter at the seam' ? newBlockId() : second.blockId;
+    if (way === 'Enter at the seam') journal(first.blockId, length, { kind: 'split', newBlockId: created }); else undo();
+    expect([markAt(end).anchorState, markAt(start)]).toEqual(['exact', { blockId: created, fromGrapheme: 0, toGrapheme: 4, anchorState: 'exact' }]);
+    expect(reverse(start)).toBe('no-error');
+    expect(textOf(first.blockId) === first.text && textOf(created) === second.text).toBe(true);
+  });
+
+  it('refuses, writing nothing, a reversal whose mark stands in a paragraph its words did not flow to', async () => {
+    const [target, other] = paragraphs() as [ManuscriptWindowProjection['blocks'][number], ManuscriptWindowProjection['blocks'][number]];
+    const applied = accepted(target.blockId, 4, 8);
+    journal(other.blockId, 0, undefined, '〔建议〕');
+    // The words the Apply wrote also stand at the start of another paragraph; put the mark there, as no command could.
+    store.markCleanShutdown();
+    store.close();
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    db.prepare('UPDATE editorial_marks SET block_id = ?, from_grapheme = 0, to_grapheme = 4 WHERE mark_id = ?').run(other.blockId, applied);
+    db.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const before = window();
+    expect(reverse(applied)).toBe('APPLY_INVALID');
+    expect(window().journalSequence).toBe(before.journalSequence);
+  });
+
+  it.each([['a combining mark', '́'], ['U+200D', '‍'], ['a variation selector', '️']])(
+    'drifts the absorbed paragraph’s marks when it starts with %s that fuses across the join, and refuses their reversal', (_name, lead) => {
+      const [first, second] = adjacentParagraphs();
+      journal(second.blockId, 0, undefined, lead);
+      const point = accepted(second.blockId, 3, 5, '');
+      merge(first.blockId, second.blockId);
+      expect(markAt(point).anchorState).toBe('drifted');
+      const sequence = window().journalSequence;
+      expect(reverse(point)).toBe('APPLY_TARGET_DRIFTED');
+      expect(window().journalSequence).toBe(sequence);
+    });
+
+  it('drifts the 就地编辑修订 a split moves, so an accepted one is never turned back to pending by reverting the other', () => {
+    const target = paragraphs()[0]!;
+    const sessionId = randomUUID();
+    const revise = (from: number, to: number, insertText: string): ManuscriptWindowProjection => {
+      const now = window();
+      return store.flushJournalEdit({
+        clientEditId: randomUUID(), ...book, baseRevisionId: now.revisionId, blockId: target.blockId, windowStartBlockId: now.blocks[0]!.blockId,
+        baseBlockDigest: now.blocks.find((block) => block.blockId === target.blockId)!.digest, expectedJournalSequence: now.journalSequence,
+        fromGrapheme: from, toGrapheme: to, insertText, editorRevision: { sessionId, autoApply: false },
+      }).window;
+    };
+    revise(10, 12, '〔甲〕');
+    const [kept, reverted] = revise(22, 24, '〔乙〕').marks.filter((m) => m.inlineRevision).sort((a, b) => a.fromGrapheme - b.fromGrapheme).map((m) => m.markId) as [string, string];
+    const decide = (markId: string, action: 'apply-inline-revision' | 'revert-inline-revision'): string => code(() => store.updateEditorialMark({ ...binding(),
+      markId, action, body: null, highlightColor: null, status: null, targetKind: null, proposedText: null, rationale: null }));
+    expect(decide(kept, 'apply-inline-revision')).toBe('no-error');
+    journal(target.blockId, 5, { kind: 'split', newBlockId: newBlockId() });
+    expect([markAt(kept).anchorState, markAt(reverted).anchorState]).toEqual(['drifted', 'drifted']);
+    expect(decide(reverted, 'revert-inline-revision')).toBe('MARK_BINDING_CHANGED');
+    expect(status(kept)).toBe('applied');
+  });
+
   it('refuses, writing nothing, the touching reversal of two applied deletions in two paragraphs joined into one; after 撤销 of the join both points drift', () => {
     const [first, second] = adjacentParagraphs();
     const length = graphemesOf(first.text).length;
@@ -232,11 +355,13 @@ describe('撤销本次修改 across 分段 and 合段 (ADR 0105 §2)', () => {
     expect([markAt(end), markAt(start)].map((at) => [at.blockId, at.fromGrapheme, at.toGrapheme, at.anchorState]))
       .toEqual([[first.blockId, 2, 2, 'exact'], [first.blockId, 2, 2, 'exact']]);
     const before = window();
+    expect(store.prepareReverseApply({ ...book, markId: end }).ready).toBe(false);
     expect(reverse(end)).toBe('APPLY_TARGET_DRIFTED');
     expect(reverse(start)).toBe('APPLY_TARGET_DRIFTED');
     expect(window().journalSequence).toBe(before.journalSequence);
     expect(textOf(first.blockId) === before.blocks.find((block) => block.blockId === first.blockId)!.text).toBe(true);
-    // Known narrow loss: the undone join is a split at the caret where both points sit, so both drift (R5-4 restores them).
+    // Known narrow loss: the undone join is a split at the caret where both points sit, inside the joined paragraph, so both drift
+    // (R5-4 restores them). A single applied deletion at A's end drifts the same way once B is joined and the join undone.
     undo();
     expect([markAt(end).anchorState, markAt(start).anchorState]).toEqual(['drifted', 'drifted']);
     expect(reverse(end)).toBe('APPLY_TARGET_DRIFTED');
