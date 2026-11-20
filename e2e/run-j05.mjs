@@ -1085,8 +1085,18 @@ async function main() {
     await settled(renderer, 'split-reversal-settled');
     const moved = await renderer.evaluate('window.__j05Moved');
     await waitFor(renderer, `(() => { const mark = window.__j05.mark('change-suggestion', ${JSON.stringify(moved)})[0]; return mark?.dataset.markStatus === 'applied' && mark.dataset.markAnchor === 'exact'; })()`, 'split-reversal-mark-moved-exact');
-    await openMarkCard(renderer, 'change-suggestion', moved, 'split-reversal-card');
-    await assertRenderer(renderer, `window.__j05.card()?.querySelector('[data-mark-action="reverse-revision"]')?.disabled === false && window.__j05.act('reverse-revision')`, 'split-reversal-reverse');
+    // A real right press on the moved words opens their menu; real presses choose 打开修改建议 and 撤销本次修改.
+    const movedMark = JSON.stringify(`[data-testid="manuscript-editor"] [data-block-id="${moved}"] .editorial-mark[data-mark-kind="change-suggestion"]`);
+    await renderer.evaluate(`document.querySelector(${movedMark})?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })`);
+    const markPoint = await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => { const node = document.querySelector(${movedMark}); const rect = node?.getClientRects()[0]; if (!rect) return resolve(null); const x = rect.left + Math.min(rect.width / 2, 8), y = rect.top + rect.height / 2; resolve(x >= 0 && y >= 0 && x <= innerWidth && y <= innerHeight && node.contains(document.elementFromPoint(x, y)) ? { x, y } : null); })))`);
+    requireJourney(markPoint !== null, 'split-reversal-mark-under-pointer');
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...markPoint, button: 'none', buttons: 0 });
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...markPoint, button: 'right', buttons: 2, clickCount: 1 });
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...markPoint, button: 'right', buttons: 0, clickCount: 1 });
+    await waitFor(renderer, `window.__j05.menu()?.dataset.markMenu === 'mark' && window.__j05.item('open-card')?.disabled === false`, 'split-reversal-menu');
+    await pointerClick(renderer, waitFor, '.editorial-mark-menu-layer [data-mark-menu] [data-mark-action="open-card"]', 'split-reversal-open-card');
+    await waitFor(renderer, `window.__j05.card()?.dataset.markKind === 'change-suggestion' && window.__j05.card().querySelector('[data-mark-action="reverse-revision"]')?.disabled === false`, 'split-reversal-card');
+    await pointerClick(renderer, waitFor, '.editorial-mark-layer [data-mark-card] [data-mark-action="reverse-revision"]', 'split-reversal-reverse');
     await waitFor(renderer, `window.__j05.text(${JSON.stringify(moved)}) === window.__j05Structure.applied.slice(1) && window.__j05.mark('change-suggestion', ${JSON.stringify(moved)})[0]?.dataset.markStatus === 'open'`, 'split-reversal-wrote-the-original-back', 15_000);
     await press(renderer, 'Escape');
     await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(moved)}, 0, 0)`, 'split-reversal-join-caret');
