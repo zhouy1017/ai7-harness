@@ -1190,7 +1190,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
     // #1553: ordinary mode keeps the conversation, its history and one fold of what a question may consult. The pills, the
-    // governance form, the directives, the sending preview and the habits summary are developer-only, and 学习回溯 waits until
+    // governance form, the directives, the sending preview and the habits summary are developer-only; 学习回溯 is offered because
     // its page opens in ordinary mode (#1549). This stage stops the one preference it creates, so the fold's honest state is
     // "nothing to include"; the live choice is proved on J-16's accepted preference above.
     // The fold exists at mount; its list is written when the projection arrives, so wait for that sentence before asserting.
@@ -1205,7 +1205,8 @@ async function main() {
         root.querySelectorAll('.global-agent-pill').length === 0 &&
         root.querySelector('[data-global-agent-governance]') === null &&
         root.querySelector('[data-global-agent-question-form] button[type="submit"]')?.textContent === '发送问题' &&
-        !Array.from(root.querySelectorAll('button'), (node) => node.textContent).some((text) => text === '查看将发送的内容' || text === '生成审阅习惯总结' || /学习回溯/u.test(text)) &&
+        !Array.from(root.querySelectorAll('button'), (node) => node.textContent).some((text) => text === '查看将发送的内容' || text === '生成审阅习惯总结') &&
+        Array.from(root.querySelectorAll('button'), (node) => node.textContent).includes('学习回溯 · 停止今后使用') &&
         !/治理|监督/u.test(root.textContent);
     })()`;
     await assertRenderer(primary, ordinaryAgentSurface, 'ordinary-agent-one-fold');
