@@ -576,6 +576,22 @@ describe('v31 scoped Global Agent tools (#1171)', () => {
   }
   const propose = (text: string) => () => ({ name: 'propose_learning_supervision', args: { categoryId: 'typos-and-usage', scope: 'house', effect: 'guide', text } });
 
+  it('answers both AI 助手 kinds on the Flash model when Pro and Flash are different models of one channel (#1620)', async () => {
+    store.selectMainRoleModel(binding.route, 'glm-5.3');
+    const main = store.getConfiguredModelRoleBinding('main-editorial')!, flash = store.getConfiguredModelRoleBinding('fast-interaction')!;
+    expect([main.model, flash.model]).toEqual(['glm-5.3', binding.model]);
+    policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, flash);
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
+      live: { scope: 'ordinary-production', ...binding, model: main.model, credentialReference, runBudgetCeiling: 'unset' } });
+    const bookless = start();
+    await waitFor(() => inspect(bookless.dialogueId).attempts[0]?.state === 'completed');
+    const { ask, disclosure } = await scopedAsk();
+    scripted([]);
+    const { dialogue } = await settled(ask, disclosure.sha256);
+    expect(dialogue.attempts[0]!.state).toBe('completed');
+    expect(calls.map((call) => JSON.parse(call.body).model)).toEqual([binding.model, binding.model]);
+  });
+
   it('discloses the pinned scope and runs the four declared tools with each call read back, mutating nothing', async () => {
     const { book, procedure, ask, disclosure } = await scopedAsk();
     expect(disclosure.scope).toMatchObject({ tools: ['retrieve', 'exact_fetch', 'read_procedure', 'propose_learning_supervision'],

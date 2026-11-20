@@ -80,14 +80,17 @@ describe('the four Model Roles (Issue #1620)', () => {
     expect(binding('fast-interaction')).toMatchObject({ route: 'google-gemini', model: 'gemini-3.8-flash', reasoningEffort: 'low' });
   });
 
-  it('admits every Flash task kind of the launch policy on the Pro model when no Flash model is chosen', async () => {
+  it.each([['no Flash model is chosen', null], ['the Flash model is another model of the same channel', 'gpt-5.6-luna']] as const)(
+    'admits every Flash task kind of the launch policy on the model the Flash roles resolve to when %s', async (_case, flashModel) => {
     store.saveModelServiceConnection('Synthetic OpenAI', null, 'ready', 'openai-platform');
     store.selectMainRoleModel('openai-platform', 'gpt-5.6-sol', 'medium');
+    if (flashModel !== null) store.selectFastRoleModel('openai-platform', flashModel);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', binding('main-editorial'), binding('fast-interaction'));
     const ruleOf = (kind: string) => policy.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes(kind));
     for (const kind of ['editorial-dialogue', 'global-agent-dialogue', 'global-agent-scoped-dialogue', 'editorial-polish', 'conflict-regenerate', 'material-translation', 'model-connection-test']) {
-      expect(ruleOf(kind), kind).toMatchObject({ modelRole: 'Fast Interaction Role', route: 'openai-platform', endpoint: 'https://api.openai.com/v1/responses', model: 'gpt-5.6-sol' });
+      expect(ruleOf(kind), kind).toMatchObject({ modelRole: 'Fast Interaction Role', route: 'openai-platform', endpoint: 'https://api.openai.com/v1/responses', model: flashModel ?? 'gpt-5.6-sol' });
     }
+    expect(ruleOf('writing')).toMatchObject({ modelRole: 'Main Editorial Role', model: 'gpt-5.6-sol' });
   });
 
   it('still reads the legacy ids and names: the stored row role, a stored Flash choice, and the policy names', () => {
@@ -133,6 +136,31 @@ describe('a model declared on another route of its channel (#1582)', () => {
       { route: 'opencode-go', modelId: 'gpt-5.6-luna' }, { resolve: vi.fn(async () => 'public-placeholder') }, { requestGovernor }))
       .rejects.toMatchObject({ code: 'MODEL_ROUTE_NOT_SERVED', message: MODEL_ROUTE_NOT_SERVED_REASON });
     expect(nativeFetch).not.toHaveBeenCalled();
+  });
+
+  it('shows a stored Pro model it cannot send as 需处理 with its sentence, and runs a stored refused Flash model\'s tasks on Pro', async () => {
+    const go = store.saveModelServiceConnection('Synthetic Go', null, 'ready', 'opencode-go');
+    store.close();
+    const update = (sql: string, ...values: string[]) => {
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try { database.prepare(sql).run(...values, go.connectionId); } finally { database.close(); }
+    };
+    update('UPDATE model_service_connections SET model_id = ? WHERE connection_id = ?', 'gpt-5.6-luna');
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(store.getModelRoles().map((role) => [role.roleId, role.source, role.status, role.statusDetail])).toEqual([
+      ['foreground-pro', 'pro-tier', 'needs-attention', MODEL_ROUTE_NOT_SERVED_REASON],
+      ['foreground-flash', 'follows-foreground-pro', 'needs-attention', MODEL_ROUTE_NOT_SERVED_REASON],
+      ['underlying-pro', 'pro-tier', 'needs-attention', MODEL_ROUTE_NOT_SERVED_REASON],
+      ['underlying-flash', 'follows-foreground-pro', 'needs-attention', MODEL_ROUTE_NOT_SERVED_REASON],
+    ]);
+    // A Flash choice it cannot send is kept while the Flash roles follow 前台 Pro, which can be sent.
+    store.close();
+    update("UPDATE model_service_connections SET model_id = 'deepseek-v4.1-flash', fast_selected = 1, fast_model_id = ? WHERE connection_id = ?", 'grok-4.6');
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(store.getModelRoles().find((role) => role.roleId === 'underlying-flash')).toMatchObject({ source: 'flash-not-served-follows-foreground-pro',
+      sourceLabel: '这个渠道暂时还不能使用已选的 Flash 模型，现在跟随前台 Pro', status: 'available', statusDetail: null, binding: { modelId: 'deepseek-v4.1-flash' } });
+    expect(binding('fast-interaction')).toEqual(binding('main-editorial'));
+    expect(store.getModelServiceRouteConnection('opencode-go')).toMatchObject({ fastSelected: true, fastBinding: { modelId: 'grok-4.6' } });
   });
 
   it('sends an OpenCode Zen /responses model on its own route, and a custom id on the channel default route', () => {

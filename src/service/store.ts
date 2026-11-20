@@ -31,7 +31,7 @@ import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInpu
 import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } from '../shared/protocol/series.js';
 import { effectiveModelReasoningEffort, modelProfileFor } from './provider/model-profile.js';
 import { composeTaskOverview, estimateTaskStarts } from './task-overview.js';
-import { customAnalysisModeGoal, modelServiceRouteRefusal, type LegacyModelRoleId, type ModelRoleId, type ModelRoleResolutionProjection } from '../shared/protocol.js';
+import { customAnalysisModeGoal, type LegacyModelRoleId, type ModelRoleId, type ModelRoleResolutionProjection } from '../shared/protocol.js';
 import * as modelSearchSettings from './model-search-settings.js';
 import * as materialIndexOperations from './material-index-operations.js';
 import * as globalAgentOperations from './global-agent-operations.js';
@@ -3100,10 +3100,9 @@ export class EditorialStore {
         notice = '上次选择的模型已不可用，本次已使用角色默认模型。';
       }
     }
-    const resolved = modelSearchSettings.resolveModelRole(this.#modelSearchSettingsHost, role, override), binding = resolved.binding;
-    const unserved = resolved.model === null ? null : modelServiceRouteRefusal(resolved.model.providerId, override.modelId ?? resolved.model.modelId);
+    const { binding, refusal } = modelSearchSettings.resolveModelRole(this.#modelSearchSettingsHost, role, override);
     requireStore(this.#baselineAnalysis.launch.operationalScope !== 'ordinary-production' || binding !== null,
-      unserved === null ? 'MODEL_SERVICE_SETUP_REQUIRED' : 'MODEL_ROUTE_NOT_SERVED', unserved ?? '请先在设置中连接可用模型。');
+      refusal === null ? 'MODEL_SERVICE_SETUP_REQUIRED' : 'MODEL_ROUTE_NOT_SERVED', refusal ?? '请先在设置中连接可用模型。');
     const connection = binding === null ? undefined : this.getModelServiceConnections().find(connection => connection.credentialReference === binding.credentialReference);
     return { binding, ...(notice === undefined ? {} : { notice }), executionConfig: { ...(connection === undefined ? {} : { modelConnectionId: connection.connectionId }),
       ...(binding === null ? {} : { modelId: binding.model, reasoningEffort: binding.reasoningEffort ?? 'off' }) } };

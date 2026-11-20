@@ -66,15 +66,18 @@ export const MODEL_ROLE_LABELS: Readonly<Record<ModelRoleId, { readonly roleLabe
 
 /**
  * Where a role's effective model comes from: the editor's Pro or Flash choice; following 前台 Pro because no Flash model is
- * chosen; or following 前台 Pro because the chosen Flash model's channel is not usable now (its choice is kept).
+ * chosen; or following 前台 Pro, its choice kept, because the chosen Flash model's key is not usable now or its channel cannot
+ * send that model (#1582).
  */
-export type ModelRoleSource = 'pro-tier' | 'flash-tier' | 'follows-foreground-pro' | 'flash-unavailable-follows-foreground-pro';
+export type ModelRoleSource = 'pro-tier' | 'flash-tier' | 'follows-foreground-pro' | 'flash-unavailable-follows-foreground-pro'
+  | 'flash-not-served-follows-foreground-pro';
 
 export const MODEL_ROLE_SOURCE_LABELS: Readonly<Record<ModelRoleSource, string>> = {
   'pro-tier': '使用所选 Pro 模型',
   'flash-tier': '使用所选 Flash 模型',
   'follows-foreground-pro': '跟随前台 Pro',
   'flash-unavailable-follows-foreground-pro': '已选的 Flash 模型暂时不可用，现在跟随前台 Pro',
+  'flash-not-served-follows-foreground-pro': '这个渠道暂时还不能使用已选的 Flash 模型，现在跟随前台 Pro',
 };
 
 export type ModelRoleStatus = 'available' | 'setup-required' | 'needs-attention' | 'unavailable';
@@ -93,6 +96,8 @@ export interface ModelRoleResolutionProjection {
   binding: ModelServiceBindingProjection | null;
   status: ModelRoleStatus;
   statusLabel: ModelRoleStatusLabel;
+  /** Why the role needs attention although its key is ready — the stored model cannot be sent (#1582); `null` otherwise. */
+  statusDetail: string | null;
 }
 
 /** Choose the Pro or the Flash model (Issue #1620), with its own 思考强度. */

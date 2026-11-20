@@ -333,6 +333,7 @@ describe('provider documents and the generator (ADR 0073 §2)', () => {
       ['recommended-unserved', (input) => { documentOf(input, 'opencode-go').recommendedModels = { pro: ['gpt-5.6-luna'], flash: [] }; }],
       ['recommended-unserved', (input) => { documentOf(input, 'opencode-go').recommendedModels = { pro: [], flash: ['claude-haiku-4-5'] }; }],
       ['schema', (input) => { documentOf(input, 'opencode-go').recommendedModels = { pro: ['kimi-k3'] }; }],
+      ['alternate-route-ambiguous', (input) => { const models = route(documentOf(input, 'opencode-go'), 2).models; route(documentOf(input, 'opencode-go'), 1).models.push(structuredClone(models[0])); }],
     ];
     for (const [rule, mutate] of cases) {
       const message = refusalAfter(mutate);

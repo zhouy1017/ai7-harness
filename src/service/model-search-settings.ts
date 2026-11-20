@@ -240,6 +240,8 @@ export interface ResolvedModelRole {
   readonly connection: ModelServiceConnectionProjection | null;
   readonly model: import('../shared/protocol.js').ModelServiceBindingProjection | null;
   readonly binding: ConfiguredProviderBinding | null;
+  /** Why the effective model cannot be sent although its key is ready (#1582); `null` otherwise. */
+  readonly refusal: string | null;
 }
 
 /**
@@ -255,20 +257,23 @@ export function resolveModelRole(host: ModelSearchSettingsHost, role: ModelRoleI
   const pro = connections.find((connection) => connection.selected) ??
     connections.find((candidate) => candidate.binding.providerId === 'opencode-go' && candidate.credentialOperationState === 'ready');
   const chosenFlash = connections.find((connection) => connection.fastSelected);
-  const source: ModelRoleSource = !flash ? 'pro-tier' : chosenFlash?.credentialOperationState === 'ready' ? 'flash-tier'
-    : chosenFlash === undefined ? 'follows-foreground-pro' : 'flash-unavailable-follows-foreground-pro';
+  const chosenFlashModel = chosenFlash === undefined ? undefined : chosenFlash.fastBinding ?? chosenFlash.binding;
+  // A chosen Flash model AI7 cannot send (#1582) is kept, like one whose key is missing, while the Flash roles follow 前台 Pro.
+  const source: ModelRoleSource = !flash ? 'pro-tier' : chosenFlash === undefined ? 'follows-foreground-pro'
+    : chosenFlash.credentialOperationState !== 'ready' ? 'flash-unavailable-follows-foreground-pro'
+      : modelServiceRouteRefusal(chosenFlashModel!.providerId, chosenFlashModel!.modelId, 'fast') !== null ? 'flash-not-served-follows-foreground-pro' : 'flash-tier';
   const perTask = override.modelConnectionId !== undefined;
   const connection = perTask ? connections.find((candidate) => candidate.connectionId === override.modelConnectionId)
     : source === 'flash-tier' ? chosenFlash : pro;
   // The channel's model takes its reviewed runtime record: the configured route (a Zen model's own Zen route), endpoint and slot.
   const model = connection === undefined ? null
     : flash && (perTask || source === 'flash-tier') ? connection.fastBinding ?? connection.binding : connection.binding;
-  const resolved = { roleId, source, connection: connection ?? null, model };
+  const resolved = { roleId, source, connection: connection ?? null, model, refusal: null };
   if (connection === undefined || model === null || connection.credentialOperationState !== 'ready') return { ...resolved, binding: null };
   const execution = resolveRuntimeExecutionConfig({ modelConnectionId: connection.connectionId, modelId: model.modelId,
     ...(model.reasoningEffort === undefined ? {} : { reasoningEffort: model.reasoningEffort }) }, override);
   const record = modelServiceRuntimeBinding(model.providerId, execution.modelId!, flash ? 'fast' : 'main');
-  if (record === undefined) return { ...resolved, binding: null };
+  if (record === undefined) return { ...resolved, binding: null, refusal: modelServiceRouteRefusal(model.providerId, execution.modelId!, flash ? 'fast' : 'main') };
   const binding = { route: record.route, model: record.model, credentialSlot: record.credentialSlot, credentialReference: connection.credentialReference, endpoint: record.endpoint,
     ...(execution.reasoningEffort === undefined ? {} : { reasoningEffort: execution.reasoningEffort }) };
   return { ...resolved, binding: (flash ? allowedProductionBindingOf(binding, 'fast-interaction') : allowedProductionBindingOf(binding)) === null ? null : binding };
@@ -284,9 +289,9 @@ export function getModelRoles(host: ModelSearchSettingsHost): ModelRoleResolutio
   return MODEL_ROLE_IDS.map((roleId) => {
     const role = resolveModelRole(host, roleId);
     const state = role.connection?.credentialOperationState;
-    const status = state === 'ready' ? 'available' : state === 'needs-attention' ? 'needs-attention' : 'setup-required';
+    const status = state === 'ready' ? role.refusal === null ? 'available' : 'needs-attention' : state === 'needs-attention' ? 'needs-attention' : 'setup-required';
     return { roleId, ...MODEL_ROLE_LABELS[roleId], tier: modelTierOf(roleId), source: role.source, sourceLabel: MODEL_ROLE_SOURCE_LABELS[role.source],
-      binding: role.model, status, statusLabel: status === 'available' ? '可用' : status === 'needs-attention' ? '需处理' : '需设置' };
+      binding: role.model, status, statusLabel: status === 'available' ? '可用' : status === 'needs-attention' ? '需处理' : '需设置', statusDetail: role.refusal };
   });
 }
 
@@ -301,7 +306,8 @@ export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServi
   requireStore(fastReasoningEffort === undefined || validReasoningEffort(fastReasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
   const connection = host.getModelServiceRouteConnection(route);
   const roles = role === 'both' ? ['main', 'fast'] as const : [role];
-  requireStore(roles.every((item) => modelServiceRouteRefusal(route, modelId, item) === null), 'MODEL_ROUTE_NOT_SERVED', modelServiceRouteRefusal(route, modelId) ?? '');
+  const refusal = roles.map((item) => modelServiceRouteRefusal(route, modelId, item)).find((reason) => reason !== null) ?? null;
+  requireStore(refusal === null, 'MODEL_ROUTE_NOT_SERVED', refusal ?? '');
   requireStore(roles.every((item) => modelServiceRuntimeBinding(route, modelId, item) !== undefined), 'MODEL_CAPABILITY_UNSUPPORTED', '模型 ID 无效或渠道未准入。');
   requireStore(connection !== null && connection.credentialOperationState === 'ready', 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '请先保护并保存凭据。');
   host.transaction(host.authority, () => {

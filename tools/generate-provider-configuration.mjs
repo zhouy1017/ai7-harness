@@ -681,6 +681,12 @@ function alternateRouteModels(providers) {
 /** A recommended model is one the document lists, on a route the runtime table serves (Issue #1620): never one #1582 refuses. */
 function refuseUnservedRecommendations(providers, runtimeModelTable) {
   const alternate = alternateRouteModels(providers);
+  // A model on two further routes of one channel has no one route to be sent on (#1582).
+  for (const provider of providers) {
+    const further = provider.routes.slice(1).flatMap((route) => alternate[route.profile.route]);
+    const twice = further.filter((model, index) => further.indexOf(model) !== index);
+    refuse(twice.length === 0, `PROVIDER_CONFIGURATION/alternate-route-ambiguous: ${provider.providerId}.json declares ${[...new Set(twice)].join(', ')} on two further routes and not on its first`);
+  }
   for (const provider of providers) {
     if (provider.recommendedModels === null) continue;
     for (const [tier, role] of [['pro', 'main'], ['flash', 'fast']]) {

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { SCOPED_EDIT_AUTHORED_ANSWER, scopedEditJourneyInput } from '../support/scoped-edit.js';
 import { resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
@@ -20,6 +21,7 @@ import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { PROVIDER_LEDGER_FILE, isItemLine, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
 import { EditorialStore } from '../../src/service/store.js';
 import type { DevelopmentValidationIntent, FastInteractionRequestProjection, LaunchPolicyProjection } from '../../src/shared/protocol.js';
+import { MODEL_ROUTE_NOT_SERVED_REASON } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -388,6 +390,30 @@ it('runs polish, conflict regeneration and a scoped edit on the Pro model when n
     await fast.settled();
     expect(fast.inspectScopedEdit(book.bookId, scoped.requestId).state).toBe('applied');
     expect(calls.map((call) => [call.url, JSON.parse(call.body).model])).toEqual(Array(3).fill([main.endpoint, 'pro-only-model']));
+  } finally { owner.dispose(); await fast.settled(); }
+});
+
+
+it('refuses at launch a stored model its channel cannot send, before any transport call (#1582)', async () => {
+  const connection = store.saveModelServiceConnection('0.7.3 的选择', null, 'ready', 'opencode-go');
+  store.close();
+  // A Pro choice 0.7.3 accepted: OpenCode Go declares this model on its /responses route only.
+  const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  try { database.prepare('UPDATE model_service_connections SET model_id = ? WHERE connection_id = ?').run('gpt-5.6-luna', connection.connectionId); } finally { database.close(); }
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, null);
+  store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy, live: null });
+  const nativeFetch = vi.fn();
+  const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes({ scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
+    () => policy, () => connection.credentialReference, { resolve: vi.fn(async () => 'synthetic-unserved-placeholder') }) });
+  const fast = new FastRoleRequests(owner, store, () => new Date(), () => owner);
+  try {
+    let refused: unknown;
+    try { fast.scopedEdit(book.bookId, { ...scopedEditJourneyInput(store, book, store.inspectAiEditLocks(book).digest), clientCommandId: randomUUID() }); }
+    catch (error) { refused = error; }
+    expect(refused).toMatchObject({ code: 'MODEL_ROUTE_NOT_SERVED', message: MODEL_ROUTE_NOT_SERVED_REASON });
+    await fast.settled();
+    expect(nativeFetch).not.toHaveBeenCalled();
   } finally { owner.dispose(); await fast.settled(); }
 });
 

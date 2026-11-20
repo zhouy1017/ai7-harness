@@ -37,21 +37,24 @@ export function modelServiceSettingsProjection(state: ModelServiceStoredStatePro
   const inUseRoute: ModelServiceRouteId | null = selected?.binding.providerId ??
     (connectionOf('opencode-go')?.credentialOperationState === 'ready' ? 'opencode-go' : null);
   const connection = inUseRoute === null ? null : connectionOf(inUseRoute);
-  const mainStatus = statusOf(connection);
+  // A stored model AI7 cannot send (#1582) needs attention although its key is ready; the role says why.
+  const refused = (roleId: string): string | null => state.modelRoles.find((role) => role.roleId === roleId)?.statusDetail ?? null;
+  const attention = (status: ModelRoleStatus, roleId: string): ModelRoleStatus => status === 'available' && refused(roleId) !== null ? 'needs-attention' : status;
+  const mainStatus = attention(statusOf(connection), 'foreground-pro');
   const mainStatusLabel = labelOf(mainStatus);
   const mainBinding = connection?.binding ?? MODEL_SERVICE_ROUTE_BINDINGS[inUseRoute ?? 'opencode-go'];
   // The legacy Fast card shows what the Flash roles resolve to (Issue #1620): the chosen Flash model, or 前台 Pro's.
   const flash = state.modelRoles.find((role) => role.roleId === 'foreground-flash');
   const fastConnection = flash?.binding == null ? null : connectionOf(flash.binding.providerId);
-  const fastStatus = statusOf(fastConnection);
+  const fastStatus = attention(statusOf(fastConnection), 'foreground-flash');
   const fastBinding = flash?.binding ?? null;
   const mainStatusDetail = !secretStoreAvailable
     ? '当前操作系统安全凭据库不可用；未启用替代存储。'
-    : mainStatus === 'available'
+    : refused('foreground-pro') ?? (mainStatus === 'available'
       ? '连接名称与凭据已由操作系统安全凭据库保护。'
       : mainStatus === 'needs-attention'
         ? '凭据状态无法确认；请重新输入或移除。'
-        : '请输入连接名称与凭据。';
+        : '请输入连接名称与凭据。');
   const unconfigured = (
     roleId: 'fast-interaction' | 'difficult-escalation' | 'frontier',
     roleLabel: '快速交互角色' | '疑难升级角色' | '前沿模型角色',
@@ -74,7 +77,7 @@ export function modelServiceSettingsProjection(state: ModelServiceStoredStatePro
         purposeLabel: '快速交互与低风险候选生成',
         status: fastStatus,
         statusLabel: labelOf(fastStatus),
-        statusDetail: flash?.source === 'flash-tier' ? '独立保存快速交互模型；主编辑角色的切换不会改变此选择。' : flash!.sourceLabel,
+        statusDetail: refused('foreground-flash') ?? (flash?.source === 'flash-tier' ? '独立保存快速交互模型；主编辑角色的切换不会改变此选择。' : flash!.sourceLabel),
         binding: fastBinding,
         connection: fastConnection,
       }
