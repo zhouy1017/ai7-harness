@@ -895,6 +895,10 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       expect(capture).toMatchObject({ outcome: 'transmitted', usage: line.usage });
       expect(line).toMatchObject({ capturedAt: expect.any(String), incurredUsage: { inputTokens: 0, outputTokens: 0 } });
     }
+    // The reflection's refusal sent nothing and incurred nothing.
+    const refused = lines.slice(FULL_CHAIN_TURNS).filter((entry) => entry.outcome === 'refused');
+    expect(refused).toHaveLength(1);
+    for (const line of refused) expect(line).toMatchObject({ status: null, usage: null, incurredUsage: { inputTokens: 0, outputTokens: 0 } });
     // The kept unit results cite the fresh Book's blocks only.
     const own = blockIdsOf(prepared);
     const earlier = blockIdsOf(first);
