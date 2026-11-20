@@ -3323,8 +3323,10 @@ async function main() {
     requireJourney(typeof managementWritingTitle === 'string' && managementWritingTitle.length > 0, 'management-writing-title', managementWritingTitle);
     await typeInto(`${managementPage} .writing-task [data-writing-field="audience"]`, WRITING_REQUEST.audience, 'management-writing-audience');
     await typeInto(`${managementPage} .writing-task [data-writing-field="channel"]`, WRITING_REQUEST.channel, 'management-writing-channel');
-    // The sheet carries the launch bar itself (0.7.3): its start is the one press, made by the bar's own helper at both sizes.
-    await launchTaskFromBar(renderer, waitFor, 'management-writing');
+    // The sheet carries the launch bar itself (0.7.3), so its start is the one press. The plan is not opened: a draft the editor
+    // began here opens by itself once written, and only a plan they looked at first leaves it waiting (J-07's writing-library stages).
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .writing-task [data-writing-action="start"]`)})?.disabled===false`, 'management-writing-start-ready');
+    await pointerClick(renderer, waitFor, `${managementPage} .writing-task [data-writing-action="start"]`, 'management-writing-start');
     // The page is the ordinary one, so the heading is the document's title alone (the 版本 suffix is the technical layer's).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="promotion-article"] .document-title-heading')?.textContent === ${JSON.stringify(managementWritingTitle)}`, 'management-writing-open', 120_000);
     await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.some(doc=>doc.title===${JSON.stringify(managementWritingTitle)} && doc.origin.drafted===true))`, 'management-writing-drafted');
