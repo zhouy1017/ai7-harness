@@ -1225,6 +1225,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'structure-split',
     'structure-undo-across-apply',
     'structure-merge',
+    'structure-split-keeps-reversal',
     'selection-span-draft',
     'selection-span-review-choices-wide',
     'selection-span-review-choices-gate',

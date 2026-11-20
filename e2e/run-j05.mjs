@@ -1074,6 +1074,27 @@ async function main() {
     await waitFor(renderer, `window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT}) && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split.slice(0, ${STRUCTURE_SPLIT_AT})`, 'undo-merge-is-one-step', 15_000);
     await settled(renderer, 'structure-settled');
 
+    // ADR 0105 §2 (Issue #1622): the applied suggestion moved whole by Enter keeps its 撤销本次修改 in the new paragraph, and
+    // Backspace joins the two paragraphs back into one.
+    at('structure-split-keeps-reversal');
+    await assertRenderer(renderer, DIRECT_EDIT, 'split-reversal-direct-edit');
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(appliedBlock)}, 1, 1)`, 'split-reversal-caret');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+    await pressEnter(renderer);
+    await waitFor(renderer, `(() => { const next = window.__j05.block(${JSON.stringify(appliedBlock)})?.nextElementSibling; window.__j05Moved = next?.dataset.blockId; return next?.tagName === 'P' && window.__j05.text(window.__j05Moved) === window.__j05Structure.applied.slice(1, 2) + ${JSON.stringify(STRUCTURE_APPLIED_TEXT)} + window.__j05Structure.applied.slice(6); })()`, 'split-reversal-split', 10_000);
+    await settled(renderer, 'split-reversal-settled');
+    const moved = await renderer.evaluate('window.__j05Moved');
+    await waitFor(renderer, `(() => { const mark = window.__j05.mark('change-suggestion', ${JSON.stringify(moved)})[0]; return mark?.dataset.markStatus === 'applied' && mark.dataset.markAnchor === 'exact'; })()`, 'split-reversal-mark-moved-exact');
+    await openMarkCard(renderer, 'change-suggestion', moved, 'split-reversal-card');
+    await assertRenderer(renderer, `window.__j05.card()?.querySelector('[data-mark-action="reverse-revision"]')?.disabled === false && window.__j05.act('reverse-revision')`, 'split-reversal-reverse');
+    await waitFor(renderer, `window.__j05.text(${JSON.stringify(moved)}) === window.__j05Structure.applied.slice(1) && window.__j05.mark('change-suggestion', ${JSON.stringify(moved)})[0]?.dataset.markStatus === 'open'`, 'split-reversal-wrote-the-original-back', 15_000);
+    await press(renderer, 'Escape');
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(moved)}, 0, 0)`, 'split-reversal-join-caret');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+    await press(renderer, 'Backspace');
+    await waitFor(renderer, `window.__j05.block(${JSON.stringify(moved)}) === null && window.__j05.text(${JSON.stringify(appliedBlock)}) === window.__j05Structure.applied`, 'split-reversal-joined-back', 10_000);
+    await settled(renderer, 'split-reversal-join-settled');
+
     // Issue #1176 (W22-S5): words from inside one paragraph to inside the second after it reach 就这段发起任务… as one exact span.
     // The composer quotes the span; 准备任务 saves a draft — no Task, plan or Run — pinning every paragraph with its digest. Nothing
     // is written.
