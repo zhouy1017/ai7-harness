@@ -1,5 +1,5 @@
 ---
-status: accepted — reuse and autonomous execution clarified by ADR 0089
+status: accepted — reuse and autonomous execution clarified by ADR 0089; identity-normalised replay added by the amendment of 2026-11-20
 ---
 
 # Authorize the OpenCode Go development credential with live-once provider testing
@@ -14,9 +14,10 @@ The untracked `opencodego.key.txt` at the main checkout root is read only by `to
 
 The existing Provider Test Ledger and Provider Result Cache remain the single host-local development evidence owner, outside every checkout. Each live item records a stated validation question, model/route, prompt contract, request identity, usage, time and outcome. Raw request and response bytes remain protected local capture; repository admission uses reviewed, sanitized fixture tooling.
 
-Two reuse boundaries are distinct:
+Three reuse boundaries are distinct; the third is the [amendment of 2026-11-20](#amendment-of-2026-11-20--identity-normalised-replay-in-developer-live):
 
 - **Exact response reuse:** the same configured route/model and exact canonical request may replay its saved response. The response retains its original capture identity and date; replay is never fresh evidence about the current remote model.
+- **Identity-normalised replay (developer-live only):** the same exact question asked again with only newly minted identities replays the capture's response, mapped onto the new identities, under the checks of the amendment.
 - **Similar validation reuse:** the same capability or business question under an unchanged semantic contract, with only technical identities or other immaterial differences, reuses prior fixtures and regression evidence. A different actual input is not answered with the old response. Changing a Run UUID, sequence, worktree, title or display wording does not by itself justify a new live item.
 
 Necessary new semantic evidence may be collected autonomously: state what the existing evidence cannot answer, use the smallest representative admitted input, execute only the required delta, save the result, and reuse it thereafter. New behavior, a material prompt/contract change, a new input class, a changed route/model/protocol, or an unproven failure mode may justify it. Deterministic UI, storage, projection, recovery and bookkeeping changes normally reuse fixtures. Each test report distinguishes live capture, exact cache replay and fixture regression, together with the original model/contract/date. No additional per-call approval, daily quota or fixed test-count cap is introduced.
@@ -34,3 +35,29 @@ Use the existing product Run Budget Ceiling and the subscription's account limit
 Development reuse applies only to tests and fixtures. Every newly authorized product Task uses its own manuscript, selection, question and current sources through the product's processing scope; similar earlier user questions are not a business-response cache hit. A fresh user Task is not a repeated development test.
 
 The runtime binds `opencode-go/deepseek-v4.1-flash` under active-policy-set v7 and baseline-only Provider Processing v9 ([#807](https://github.com/zhouy1017/ai7-harness/issues/807)); earlier V4 Flash evidence keeps its actual model. The ordinary-production local controlled trial remains the P0 migration [#811](https://github.com/zhouy1017/ai7-harness/issues/811) in the development plan. The official DeepSeek route is retained. Repository-development agents use the subscriptions and models selected by Orca dispatch; those orchestration bindings are distinct from the product's Model Roles.
+
+## Amendment of 2026-11-20 — identity-normalised replay in developer-live
+
+The Owner chose option 1 of [#1585](https://github.com/zhouy1017/ai7-harness/issues/1585) on 2026-11-20 (recorded in wave [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540)): identity-normalised prerequisite replay in developer-live only, with product-owned identity mapping, immutable capture provenance and exact semantic, source and contract checks; an earlier response never answers materially different input. Product behaviour and every product request stay unchanged.
+
+**What it does.** A fresh Book asks the analysis path's questions with newly minted identities, so no request is byte-identical to the evidence that already answers it. Before this amendment such a call was refused (`PROVIDER_VALIDATION_EVIDENCE_EXISTS`) or, where the existing similarity check did not recognise the message, needed a paid resend. Now, under a development validation launch, the once-only transmission (`src/service/provider/live-transmission.ts`) answers it from the newest valid capture that passes all three checks:
+
+1. **Contract:** the same generation — route, endpoint, request shape, model, prompt contract and task contract.
+2. **Semantic and source:** the request is byte-equal to the capture's once a closed set of minted slots is replaced (`src/service/provider/identity-replay.ts`). Only messages that start with an analysis-path task header are normalised (分析单元, 保证抽样, 跨单元归纳, 运行反思, 事实核查单元, 评估单元 / 评估综合, 审稿意见单元 / 审稿意见综合, 评语重写单元 / 评语重写综合, 写作单元 / 写作综合, 审阅单元). Single-request kinds (润色这段, 冲突重新生成, 编辑对话, 来源译文, 局部修改) stay exact-only. Everything else stays byte-exact, including manuscript and material text, the system prompt, ordinals and every digest.
+3. **Mapping:** the slots map one-to-one, and the answer can be carried over safely.
+
+**The slots and what each hides.** Each slot stands for a minted handle and is computed from no content:
+
+- a manuscript block identity at the block-line positions the builders emit (its kind, level and text are the rest of the line, byte-exact);
+- the Run identity in the reflection header (the accounting and its digest stay exact);
+- a sampling finding's handle in `- [ref]（tier）text` (the tier and text stay exact).
+
+Header and request digests (单元摘要, 抽样摘要, 单元集摘要, 账目摘要, 依据摘要, 段落摘要, the clarification line's 请求摘要) are **not** normalised. They are identity-free by construction, and some cover values the body does not carry, such as a unit's block positions or an observation's block ordinals. So they stay exact; the same text imported again yields the same digests. In the answer, block identities are rewritten onto the new ones. A changed Run identity or finding handle that the answer repeats cannot be rewritten safely, so that call keeps the refusal and nothing is sent.
+
+**Provenance.** The capture's entry is never modified, copied or re-keyed; the mapped answer exists only in memory. The ledger line is `replayed` with decision `identity-replay`. It names the one capture it rests on as its evidence and keeps that capture's time and original usage; it incurs nothing. A replay sends nothing and takes no send claim, so cancellation, pause, restart and relaunch replay again without a send. Fixture generation still converts only the original capture: an `identity-replay` line converts to nothing (`FIXTURE_GEN/capture-unproven`). A new final request — for example a synthesis carrying a frozen chapter-synopsis supplement — differs from every capture by construction. It is decided, authorized and accounted as before (`first-capture`, `input-delta` or `config-delta`). A reflection whose accounting counts the current Run's replays is another question too, and similar evidence still refuses it.
+
+**Scope.** Developer-live only: `transmitOnce` is reached solely under a development validation launch. Ordinary production, business Tasks, CI and the Gate neither read nor write the cache, and nothing a model is sent changes.
+
+**The shared ledger and older readers.** The ledger is shared by every checkout on a developer host. A reader built before this amendment (0.7.3, and 0.7.4, which carries the same reader) holds a closed decision list. It refuses the whole ledger as `PROVIDER_LEDGER_CORRUPT` once an `identity-replay` line exists, so developer-live on such a build stops on that host. This is a one-way consequence of the first identity replay, and older readers are not changed. Their fixture tool and evidence scorer still read the line: the scorer labels it `cache`, and the fixture tool refuses to convert it.
+
+**Ledger comparison.** `node tools/generate-provider-configuration.mjs --ledger <cache root>` compares the record only with transmitted lines, so replays never appear there. Successful calls kept external, never admitted to the record, are listed as "transmitted but not recorded"; that is expected for unadmitted items, and a slice reporting the check says so.
