@@ -3349,17 +3349,21 @@ async function main() {
     const ordinaryRow = await readAudit(renderer, (page) => page.rows.length === 1, 'learning-audit-ordinary-row');
     const ordinaryKey = ordinaryRow.rows[0][0];
     requireJourney(ordinaryRow.note !== null && !ordinaryRow.note.includes('授予') && ordinaryRow.rows[0][1] === 'pending' && ordinaryRow.rows[0][2] === '还没决定' && ordinaryRow.rows[0][4] === false, 'learning-audit-ordinary-row-words', ordinaryRow);
-    await assertRenderer(renderer, `(() => {
+    const ordinaryControls = await renderer.evaluate(`(() => {
       const root = document.querySelector('[data-screen="quality-learning"] .learning-audit');
       const buttons = Array.from(root.querySelectorAll('li.learning-audit-material .learning-audit-decide button'));
+      buttons[0]?.scrollIntoView({ block: 'center', behavior: 'instant' });
       const filters = Array.from(root.querySelectorAll('.learning-audit-filter .ui-select-trigger'));
       const query = root.querySelector('#learning-audit-query');
-      const inside = [...filters, query, root.querySelector('#learning-audit-filter-from')].every((node) => { const box = node.getBoundingClientRect(); return box.width > 0 && box.left >= 0 && box.right <= innerWidth; });
+      const fits = (node) => { const box = node.getBoundingClientRect(); return box.width > 0 && box.left >= 0 && box.right <= innerWidth; };
       // Each choice is inside the window and is what a pointer meets at its centre.
-      const reachable = buttons.every((node) => { const box = node.getBoundingClientRect(); return box.width > 0 && box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight && node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)); });
-      return JSON.stringify(buttons.map((node) => node.textContent)) === JSON.stringify(['用于学习', '不用']) && reachable && root.querySelectorAll('.filter-choices').length === 0 && filters.length === 4 && inside &&
-        getComputedStyle(query).borderTopLeftRadius === '8px' && getComputedStyle(filters[0]).borderTopLeftRadius === '8px';
-    })()`, 'learning-audit-ordinary-filters-style');
+      const meets = (node) => { const box = node.getBoundingClientRect(); return box.top >= 0 && box.bottom <= innerHeight && node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)); };
+      return { labels: buttons.map((node) => node.textContent), reachable: buttons.every((node) => fits(node) && meets(node)), buttons: buttons.length,
+        buttonChoices: root.querySelectorAll('.filter-choices').length, filters: filters.length, filtersFit: filters.every(fits), queryFits: fits(query), fromFits: fits(root.querySelector('#learning-audit-filter-from')),
+        queryRadius: getComputedStyle(query).borderTopLeftRadius, selectRadius: filters[0] ? getComputedStyle(filters[0]).borderTopLeftRadius : null, width: innerWidth, height: innerHeight };
+    })()`);
+    requireJourney(JSON.stringify(ordinaryControls.labels) === JSON.stringify(['用于学习', '不用']) && ordinaryControls.reachable && ordinaryControls.buttonChoices === 0 && ordinaryControls.filters === 4 &&
+      ordinaryControls.filtersFit && ordinaryControls.queryFits && ordinaryControls.fromFits && ordinaryControls.queryRadius === '8px' && ordinaryControls.selectRadius === '8px', 'learning-audit-ordinary-filters-style', ordinaryControls);
     await pointerClick(renderer, waitFor, `${auditRow(ordinaryKey)} [data-learning-audit-action="decide-book"]`, 'learning-audit-ordinary-decide');
     const decidedRow = await readAudit(renderer, (page) => page.rows.length === 1 && page.rows[0][1] === 'book', 'learning-audit-ordinary-decided');
     requireJourney(decidedRow.rows[0][2] === '用于学习 · 仅本书' && decidedRow.rows[0][4] === true, 'learning-audit-ordinary-decided-words', decidedRow);
