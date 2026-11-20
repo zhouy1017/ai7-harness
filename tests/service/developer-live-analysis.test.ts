@@ -849,43 +849,147 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     await store.close();
   });
 
-  it('refuses to resend what valid evidence of the same purpose already answers, and names that evidence (Issue #808)', async () => {
+  /** One completed live chain over sample1, then the same manuscript imported again as another Book, its plan frozen. */
+  async function capturedThenReimported() {
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
     const { units: responses, named } = await unitAnswers(prepared);
     const firstCalls: StubCall[] = [];
     await runLive(store, bookId, prepared, owner(store, stubTransport({ calls: firstCalls, responses, named })));
     expect(firstCalls).toHaveLength(FULL_CHAIN_TURNS);
-    // The same manuscript imported again as another Book: every block identity is new, so no request is byte-identical, and
-    // every one asks what the first import's evidence already answers. Nothing is sent; the refusal is each unit's gap.
     const reimported = await importSample1Book(store, roots.codeRoot, 'developer-live sample1');
     await pinEditorialWorkspaceProfileRevision2(store, reimported.bookId);
     let progress = store.createBaselineAnalysisPreparationWork(reimported.bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
     while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
-    const secondCalls: StubCall[] = [];
-    const refused = await runLive(store, reimported.bookId, progress.projection!, owner(store, stubTransport({ calls: secondCalls, responses, named })));
-    expect(secondCalls).toHaveLength(0);
-    // Every unit attempt was refused: #1307 keeps its gaps without a result revision.
-    expect(refused.run?.state).toBe('failed');
-    expect(refused.taskOutcome?.classification).toBe('failed');
-    expect(refused.resultSetRevision).toBeNull();
-    const unitGaps = store.baselineAnalysisLedger.unitCheckpoints(refused.run!.runRecordId)
-      .flatMap(({ unit }) => unit.closed.state === 'gap' ? [unit.closed.gap] : []);
-    expect(unitGaps.map((gap) => gap.unitOrdinal)).toEqual(Array.from({ length: SAMPLE1_UNITS }, (_unused, index) => index + 1));
+    return { store, first: prepared, bookId: reimported.bookId, prepared: progress.projection!, responses, named };
+  }
+  const blockIdsOf = (projection: BaselineAnalysisProjection) => new Set(projection.coverageManifest!.units.flatMap((unit) => [...unit.blockIds, ...unit.overlapBlockIds]));
+  /** Send claims only: an `item-…` file is the reservation every replay and refusal numbers its line with. */
+  const sendClaims = async () => (await readdir(join(cacheRoot, 'claims'))).filter((name) => !name.startsWith('item-'));
+  /**
+   * How each turn after the first chain was answered. The reflection reads this Run's own accounting — its replays, not the
+   * first Run's sends — so it is another question: similar evidence refuses it and nothing is sent.
+   */
+  const answeredAfterFirstChain = async () => (await ledgerLines(cacheRoot)).slice(FULL_CHAIN_TURNS).filter((line) => line.validation !== undefined).map((line) => {
+    const validation = line.validation as { step: string; decision: string; refusal?: string };
+    return [validation.step.replace(/^[^/]+\//u, ''), validation.refusal ?? validation.decision];
+  });
+  const REPLAYED_CHAIN = [
+    ...Array.from({ length: SAMPLE1_UNITS }, (_unused, index) => [`unit-${index + 1}`, 'identity-replay']),
+    ['reduction', 'exact-replay'], ['sampling-1-unit-1', 'identity-replay'], ['reflection', 'PROVIDER_VALIDATION_SIMILAR_EVIDENCE'],
+  ];
+
+  it('answers a fresh import of the same manuscript from the first import\'s captures, mapped onto its own blocks (Issue #1585)', async () => {
+    const { store, first, bookId, prepared, responses, named } = await capturedThenReimported();
+    const claims = await sendClaims();
+    // Every block identity is new, so no request is byte-identical; each asks what the first import already answered.
+    const calls: StubCall[] = [];
+    const replayed = await runLive(store, bookId, prepared, owner(store, stubTransport({ calls, responses, named })));
+    expect(calls).toHaveLength(0);
+    expect(replayed.run?.state).toBe('completed');
+    expect(await sendClaims()).toEqual(claims);
+    expect(await answeredAfterFirstChain()).toEqual(REPLAYED_CHAIN);
+    // Each replay names one capture of the first import, keeps its capture time and original usage, and incurred nothing.
     const lines = await ledgerLines(cacheRoot);
-    expect(lines.slice(0, FULL_CHAIN_TURNS).every((line) => (line.validation as { decision: string }).decision === 'first-capture')).toBe(true);
-    // Every later line is a refusal that sent nothing, incurred nothing, and names the capture it rests on: each unit — and its
-    // safe retry — is the first import's question asked again. A failed Run does not dispatch a reflection.
-    const refusals = lines.slice(FULL_CHAIN_TURNS);
-    for (const line of refusals) {
-      expect(line).toMatchObject({ outcome: 'refused', status: null, usage: null, incurredUsage: { inputTokens: 0, outputTokens: 0 } });
+    for (const line of lines.slice(FULL_CHAIN_TURNS).filter((entry) => entry.outcome === 'replayed')) {
+      const capture = lines.slice(0, FULL_CHAIN_TURNS).find((entry) => entry.itemId === (line.validation as { evidence: string[] }).evidence[0]);
+      expect(capture).toMatchObject({ outcome: 'transmitted', usage: line.usage });
+      expect(line).toMatchObject({ capturedAt: expect.any(String), incurredUsage: { inputTokens: 0, outputTokens: 0 } });
     }
-    const refusalOf = (line: Record<string, unknown>) => line.validation as { step: string; refusal: string; evidence: string[] };
-    expect(refusals.map((line) => [refusalOf(line).step, refusalOf(line).refusal, refusalOf(line).evidence])).toEqual([
-      ...Array.from({ length: SAMPLE1_UNITS }, (_unused, index) => [
-        [`first-baseline/unit-${index + 1}`, 'PROVIDER_VALIDATION_EVIDENCE_EXISTS', [`S40/first-baseline/${index + 1}`]],
-        [`first-baseline/unit-${index + 1}`, 'PROVIDER_VALIDATION_EVIDENCE_EXISTS', [`S40/first-baseline/${index + 1}`]],
-      ]).flat(),
-    ]);
+    // The reflection's refusal sent nothing and incurred nothing.
+    const refused = lines.slice(FULL_CHAIN_TURNS).filter((entry) => entry.outcome === 'refused');
+    expect(refused).toHaveLength(1);
+    for (const line of refused) expect(line).toMatchObject({ status: null, usage: null, incurredUsage: { inputTokens: 0, outputTokens: 0 } });
+    // The kept unit results cite the fresh Book's blocks only.
+    const own = blockIdsOf(prepared);
+    const earlier = blockIdsOf(first);
+    const cited = store.baselineAnalysisLedger.unitCheckpoints(replayed.run!.runRecordId)
+      .flatMap((checkpoint) => [...JSON.stringify(checkpoint.result).matchAll(/blk_[0-9a-f]{24}/gu)].map((match) => match[0]));
+    expect(cited.length).toBeGreaterThan(0);
+    expect(cited.every((id) => own.has(id) && !earlier.has(id))).toBe(true);
+    await store.close();
+  });
+
+  it('never replays by identity for an ordinary business Task, even with the evidence present (Issue #1585)', async () => {
+    const { store, bookId, prepared, responses, named } = await capturedThenReimported();
+    const before = await readFile(join(cacheRoot, PROVIDER_LEDGER_FILE), 'utf8');
+    const calls: StubCall[] = [];
+    const business = await runLive(store, bookId, prepared, owner(store, stubTransport({ calls, responses, named }), CEILING, launchPolicy, null));
+    expect(business.run?.state).toBe('completed');
+    expect(calls).toHaveLength(FULL_CHAIN_TURNS);
+    expect(await readFile(join(cacheRoot, PROVIDER_LEDGER_FILE), 'utf8')).toBe(before);
+    await store.close();
+  });
+
+  /**
+   * The fresh import's Run paused with unit 3 in flight. This case retires the first import's unit-3 capture, so units 1–2 replay
+   * and unit 3 is the one turn sent: the pause lands between replayed units.
+   */
+  async function pausedAmongReplays() {
+    const scenario = await capturedThenReimported();
+    const { store, bookId, prepared, responses, named } = scenario;
+    const cache = new ProviderResultCache(cacheRoot);
+    await cache.open();
+    await cache.invalidate({ itemId: 'S40/first-baseline/3' }, 'test-retired-unit');
+    const calls: StubCall[] = [];
+    const held = heldTransport({ calls, responses, named });
+    const taskIntentId = prepared.taskIntent!.taskIntentId;
+    const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+    const execution = owner(store, held.transport);
+    execution.admitAndDispatch(runRecordId);
+    await held.arrived(0);
+    store.requestBaselineAnalysisPause(bookId, taskIntentId);
+    execution.pauseRun(runRecordId);
+    held.release(0);
+    await execution.whenIdle();
+    expect(store.inspectBaselineAnalysis(bookId, () => null).state).toBe('paused');
+    expect(store.baselineAnalysisLedger.unitCheckpoints(runRecordId)).toHaveLength(3);
+    expect(calls).toHaveLength(1);
+    return { ...scenario, calls, taskIntentId, runRecordId, execution };
+  }
+  /** The chain as {@link REPLAYED_CHAIN} answers it, with unit 3 answered as `unit3` says. */
+  const chainWithUnit3 = (unit3: string) => REPLAYED_CHAIN.map(([step, answer]) => [step, step === 'unit-3' ? unit3 : answer]);
+
+  it('pauses among replayed units, survives a service restart, and resumes without a send, a claim or a repeated line (Issue #1585)', async () => {
+    const { store, bookId, responses, named, calls, runRecordId, execution } = await pausedAmongReplays();
+    const claims = await sendClaims();
+    await execution.dispose();
+    await store.close();
+    const restarted = await openLiveStore(roots.dataRoot);
+    const resumed = owner(restarted, stubTransport({ calls, responses, named }));
+    resumed.admitAndDispatch(runRecordId, restarted.baselineAnalysisLedger, { resume: true });
+    await resumed.whenIdle();
+    expect(restarted.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('completed');
+    expect(calls).toHaveLength(1);
+    expect(await sendClaims()).toEqual(claims);
+    // Each turn was answered once, in order: the pause and the restart repeat none.
+    expect(await answeredAfterFirstChain()).toEqual(chainWithUnit3('first-capture'));
+    await resumed.dispose();
+    await restarted.close();
+  });
+
+  it('cancels a chain partway through its replayed units and relaunches it from the captures, sending nothing (Issue #1585)', async () => {
+    const { store, bookId, responses, named, calls, taskIntentId, runRecordId, execution } = await pausedAmongReplays();
+    const claims = await sendClaims();
+    store.requestBaselineAnalysisCancel(bookId, taskIntentId);
+    execution.cancelRun(runRecordId, store.baselineAnalysisLedger);
+    await execution.whenIdle();
+    expect(store.inspectBaselineAnalysis(bookId, () => null).state).toBe('cancelled');
+    const cancelled = (await answeredAfterFirstChain()).length;
+    expect(await answeredAfterFirstChain()).toEqual(chainWithUnit3('first-capture').slice(0, 3));
+    // The cancelled Run kept its three ranges as a revision, so the relaunch is a new whole-book Task over it.
+    let progress = store.createBaselineAnalysisPreparationWork(
+      bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], { mode: 'reanalyze-book', selectedRange: null }, launchPolicy,
+    );
+    while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+    const relaunched = await runLive(store, bookId, progress.projection!, owner(store, stubTransport({ calls, responses, named })));
+    expect(relaunched.run?.state).toBe('completed');
+    expect(calls).toHaveLength(1);
+    expect(await sendClaims()).toEqual(claims);
+    // The relaunch answers its whole chain from the captures: unit 3 from the cancelled Run's own; no line repeats an item.
+    expect((await answeredAfterFirstChain()).slice(cancelled)).toEqual(chainWithUnit3('exact-replay'));
+    const lines = await ledgerLines(cacheRoot);
+    expect(new Set(lines.map((line) => line.itemId)).size).toBe(lines.length);
+    await execution.dispose();
     await store.close();
   });
 

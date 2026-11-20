@@ -672,6 +672,13 @@ export async function verifySample1Capture(request, selection, parsed) {
       const execution = plan('execution-plan');
       if (execution.baselineSynopsisContext !== undefined) {
         const context = execution.baselineSynopsisContext;
+        // The rebuild reads the latest baseline revision of the pinned manuscript revision. A store analysed again after the
+        // Task froze no longer holds the frozen chain there: refuse with its own reason rather than an unexplained mismatch.
+        const latest = database.prepare(`SELECT r.revision_id FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+          WHERE s.book_id = ? AND s.kind = 'baseline-manuscript-analysis' AND r.manuscript_revision_id = ? ORDER BY r.ordinal DESC LIMIT 1`).get(manifest.manuscript.bookId, pin.revisionId);
+        step = 'synopsis-revision';
+        if (latest?.revision_id !== context.revisionId) fail();
+        step = 'message';
         const rebuilt = owners.freezeTaskBaselineSynopses(database, kind, manifest.manuscript.bookId,
           pin.revisionId, pin.revisionDigest, context.maximumMessageBytes);
         if (canonicalJson(rebuilt.baselineSynopsisContext) !== canonicalJson(context)) fail();
