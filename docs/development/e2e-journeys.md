@@ -2,7 +2,7 @@
 
 ## #1517 synchronized deltas (0.7.3, `codex/integration-0.7.3`)
 
-The R4 closure candidate is **0.7.3 Alpha**, protocol **205**, schema **116**, Data Version **1**. Every R4 slice of both lanes is merged and the service lane has joined three times (`e878be99` is the last join); exact closure verification belongs in the closure PR, with dev delivery and the human-test refresh still pending. The delivered 0.7.2 identity and its evidence remain historical below. The slice sections of #1526, #1543, #1506, #1529 and #1521 below keep their own detail; this table adds the slices that recorded their deltas only in their pull requests.
+**0.7.3 Alpha** (protocol **205**, schema **116**, Data Version **1**) is delivered at `dev@3031f87a` through [PR #1619](https://github.com/zhouy1017/ai7-harness/pull/1619), which records its exact closure verification at the closure tip `1b16f224`. The delivered 0.7.2 identity and its evidence remain historical below. The slice sections of #1526, #1543, #1506, #1529 and #1521 below keep their own detail; this table adds the slices that recorded their deltas only in their pull requests.
 
 | Slice / PR | Journey delta / stage owner |
 | --- | --- |
