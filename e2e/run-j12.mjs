@@ -1242,6 +1242,9 @@ async function main() {
     }
     await primary.send('Emulation.clearDeviceMetricsOverride');
     await primary.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo({top:0,left:0,behavior:'instant'}); })()`);
+    // #1549: the 学习回溯 button this page offers in ordinary mode opens that page, by a real pointer.
+    await pointerClick(primary, waitFor, '[data-global-agent-action="audit"]', 'ordinary-agent-audit-button');
+    await waitFor(primary, `document.querySelector('#quality-tab-audit')?.getAttribute('aria-selected')==='true' && document.querySelector('[data-screen="quality-learning"] .learning-audit[data-learning-audit-view="list"]') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'ordinary-agent-audit-opens');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-restore-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'technical-mode-restore-settings-ready');
     await click(primary, '帮助', 'technical-mode-restore-help');

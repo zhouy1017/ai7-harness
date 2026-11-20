@@ -22,6 +22,8 @@ import {
   LEARNING_AUDIT_ORDINARY_EMPTY,
   LEARNING_AUDIT_ORDINARY_FILTERS,
   LEARNING_AUDIT_ORDINARY_NOTE,
+  LEARNING_AUDIT_ORDINARY_RECORD,
+  LEARNING_AUDIT_ORDINARY_STATUS,
   LEARNING_AUDIT_ORDINARY_OPEN,
   LEARNING_AUDIT_ORDINARY_STANDING_LABELS,
   LEARNING_AUDIT_UNUSED,
@@ -39,6 +41,7 @@ import {
   learningLineageOrdinaryCandidates,
   learningLineageOrdinaryDecisionLine,
   learningLineageOrdinaryEarlier,
+  learningLineageOrdinaryMemories,
   learningLineageOrdinaryHeading,
   learningLineageOrdinarySignalLine,
   learningLineageOrdinaryTaskLine,
@@ -158,6 +161,7 @@ type Panel =
 const ordinary = (): boolean => !technicalLayerVisible;
 const standingLabels = (): Readonly<Record<LearningAuditStanding, string>> =>
   ordinary() ? LEARNING_AUDIT_ORDINARY_STANDING_LABELS : LEARNING_AUDIT_STANDING_LABELS;
+const statusWords = (): Readonly<Record<keyof typeof LEARNING_AUDIT_STATUS, string>> => ordinary() ? { ...LEARNING_AUDIT_STATUS, ...LEARNING_AUDIT_ORDINARY_STATUS } : LEARNING_AUDIT_STATUS;
 const filterLabels = (): typeof LEARNING_AUDIT_FILTERS | typeof LEARNING_AUDIT_ORDINARY_FILTERS => ordinary() ? LEARNING_AUDIT_ORDINARY_FILTERS : LEARNING_AUDIT_FILTERS;
 
 const itemOf = (material: { readonly materialKey: string; readonly digest: string; readonly decisions: number }): LearningRemediationItemInput =>
@@ -221,7 +225,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
    * Reads one page for the filters; on success the page, filters and cursor are the shown ones, the selection clears, and it
    * answers `true`. A failed read keeps the page that was shown, says so in the status, and answers `false`.
    */
-  const request = async (filters: Record<Filter, string>, after: LearningMaterialCursor | null, focus: string | null, refusal: string | null = null): Promise<boolean> => {
+  const request = async (filters: Record<Filter, string>, after: LearningMaterialCursor | null, focus: string | null, refusal: string | null = null, keepSelection = false): Promise<boolean> => {
     if (busy) return false;
     const input = inputOf(filters, after);
     if (input === null) {
@@ -244,7 +248,13 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       for (const book of page.choices.books) knownBooks.set(book.bookId, book.title);
       for (const book of page.books) knownBooks.set(book.bookId, book.title);
       names = learningAuditMaterialNames(page.books.flatMap((book) => book.materials), localInstantLabel);
+      // Deciding one row leaves the ticks on the others: the same materials, read again at the same version.
+      const ticked = keepSelection ? [...selection.values()] : [];
       selection.clear();
+      for (const entry of ticked) {
+        const again = page.books.find((book) => book.bookId === entry.bookId)?.materials.find((candidate) => candidate.materialKey === entry.material.materialKey);
+        if (again !== undefined && again.digest === entry.material.digest) selection.set(again.materialKey, { bookId: entry.bookId, material: again });
+      }
       batch = null;
       listRefusal = refusal;
       listStale = false;
@@ -373,7 +383,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     row.append(stop, clear);
     section.append(row);
     if (!homogeneous()) section.append(el('p', 'field-note learning-audit-mismatch', LEARNING_AUDIT_BATCH_MISMATCH));
-    if (batch !== null) section.append(previewNode(batch, null, (materialKey) => {
+    if (batch !== null && !ordinary()) section.append(previewNode(batch, null, (materialKey) => {
       const entry = selection.get(materialKey);
       return entry === undefined ? null : nameOf(entry.material);
     }, () => {
@@ -521,7 +531,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     busy = false;
     if (!root.isConnected) return;
     const message = refusal ?? (choice === 'book' ? LEARNING_AUDIT_STATUS.decidedUse : LEARNING_AUDIT_STATUS.decidedSkip);
-    const reread = await request(chosen, pageAfter, refusal === null ? `${rowSelector(material.materialKey)} [data-learning-audit-action="open"]` : '.learning-audit-refusal', refusal);
+    const reread = await request(chosen, pageAfter, refusal === null ? `${rowSelector(material.materialKey)} [data-learning-audit-action="open"]` : '.learning-audit-refusal', refusal, true);
     if (!root.isConnected) return;
     if (reread) setStatus(message, refusal === null ? 'success' : 'error');
     else {
@@ -538,14 +548,14 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     busy = true;
     listRefusal = null;
     paint(null);
-    setStatus(LEARNING_AUDIT_STATUS.previewing, 'busy');
+    setStatus(statusWords().previewing, 'busy');
     try {
       const preview = await api.previewLearningRemediation({ bookId: entries[0]!.bookId, items });
       if (!root.isConnected) return;
       batch = { kind: 'preview', preview, items };
     } catch (error) {
       busy = false;
-      if (root.isConnected) { setStatus(errorMessage(error, LEARNING_AUDIT_STATUS.previewFailed), 'error'); paint('[data-learning-audit-action="batch-stop"]'); }
+      if (root.isConnected) { setStatus(errorMessage(error, statusWords().previewFailed), 'error'); paint('[data-learning-audit-action="batch-stop"]'); }
       return;
     }
     // 停止今后使用 is one step (Issue #1410 item 31): what it would stop is recorded at once against exactly the preview read,
@@ -666,14 +676,14 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     if (busy) return;
     busy = true;
     paint(null);
-    setStatus(LEARNING_AUDIT_STATUS.lineage, 'busy');
+    setStatus(statusWords().lineage, 'busy');
     try {
       const read = await api.inspectLearningLineage({ bookId, materialKey });
       if (!root.isConnected) return;
       lineage = { bookId, materialKey, projection: read, panel: null, refusal: lineage?.materialKey === materialKey ? lineage.refusal : null };
-      setStatus(LEARNING_AUDIT_STATUS.lineageOpened);
+      setStatus(statusWords().lineageOpened);
     } catch (error) {
-      if (root.isConnected) setStatus(errorMessage(error, LEARNING_AUDIT_STATUS.lineageUnavailable), 'error');
+      if (root.isConnected) setStatus(errorMessage(error, statusWords().lineageUnavailable), 'error');
     } finally {
       busy = false;
       if (root.isConnected) paint(lineage === null ? `${rowSelector(materialKey)} [data-learning-audit-action="open"]` : focus);
@@ -696,14 +706,14 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     busy = true;
     open.refusal = null;
     paint(null);
-    setStatus(LEARNING_AUDIT_STATUS.previewing, 'busy');
+    setStatus(statusWords().previewing, 'busy');
     try {
       const preview = await api.previewLearningRemediation({ bookId: open.bookId, items });
       if (!root.isConnected) return;
       open.panel = { kind: 'preview', preview, items };
     } catch (error) {
       busy = false;
-      if (root.isConnected) { setStatus(errorMessage(error, LEARNING_AUDIT_STATUS.previewFailed), 'error'); paint('[data-learning-audit-action="stop"]'); }
+      if (root.isConnected) { setStatus(errorMessage(error, statusWords().previewFailed), 'error'); paint('[data-learning-audit-action="stop"]'); }
       return;
     }
     // One step (Issue #1410 item 31), as the batch's.
@@ -722,6 +732,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     try {
       const outcome = await api.recordLearningRemediation({ bookId: open.bookId, items, previewDigest: preview.previewDigest });
       busy = false;
+      if (ordinary()) open.panel = null;
       listStale = true;
       if (!root.isConnected) return;
       await openLineage(open.bookId, open.materialKey, '.learning-lineage h4');
@@ -732,6 +743,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       // What moved since the preview is read again, so the next 停止今后使用 answers what is there now.
       open.refusal = errorMessage(error, LEARNING_AUDIT_STATUS.failed);
       const refusal = open.refusal;
+      if (ordinary()) open.panel = null;
       await openLineage(open.bookId, open.materialKey, '.learning-audit-refusal');
       setStatus(refusal, 'error');
     }
@@ -779,7 +791,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       : `${LEARNING_LINEAGE_REINCLUDE_LEGEND} · ${LEARNING_LINEAGE_REINCLUDE_NOTE}`));
     const consequence = el('p', 'field-note learning-consequence');
     consequence.setAttribute('aria-live', 'polite');
-    const record = action(LEARNING_RECORD, 'primary', 'reinclude-record', () => void reinclude());
+    const record = action(ordinary() ? LEARNING_AUDIT_ORDINARY_RECORD : LEARNING_RECORD, 'primary', 'reinclude-record', () => void reinclude());
     const show = (): void => {
       consequence.hidden = panel.choice === null;
       consequence.textContent = panel.choice === null ? '' : ordinary() && (panel.choice === 'book' || panel.choice === 'house')
@@ -858,7 +870,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       used.push(list);
     }
     if (read.downstream.memoryCandidates > 0) used.push(el('p', 'field-note', learningLineageOrdinaryCandidates(read.downstream.memoryCandidates)));
-    if (read.downstream.activeMemories > 0) used.push(el('p', 'field-note learning-lineage-memories', learningLineageMemories(read.downstream.activeMemories)));
+    if (read.downstream.activeMemories > 0) used.push(el('p', 'field-note learning-lineage-memories', learningLineageOrdinaryMemories(read.downstream.activeMemories)));
     if (read.tasks.length > 0) {
       const list = el('ul', 'learning-lineage-tasks');
       for (const task of read.tasks) {
@@ -1002,7 +1014,8 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     leave.disabled = busy;
     actions.append(leave);
     section.append(actions);
-    if (open.panel?.kind === 'preview') {
+    // Ordinary mode records 停止今后使用 in one step and draws no preview, busy or after a refusal (Issue #1549).
+    if (open.panel?.kind === 'preview' && !ordinary()) {
       const name = nameOf(material);
       section.append(previewNode(open.panel, null, (materialKey) => (materialKey === material.materialKey ? name : null), closePanel, () => void confirmOne()));
     }

@@ -230,8 +230,20 @@ export function learningLineageOrdinaryEarlier(count: number): string {
   return `更早还有 ${count} 个决定，仍在记录里。`;
 }
 export function learningLineageOrdinaryCandidates(count: number): string {
-  return `${count} 条待接受的记忆引用了它，接受后才会使用。`;
+  return `${count} 条待接受的审阅偏好引用了它，接受后才会使用。`;
 }
+export function learningLineageOrdinaryMemories(count: number): string {
+  return `${count} 条你新建的审阅偏好引用了它；停止今后使用后，这些偏好会暂停使用，记录原样保留。`;
+}
+/** The words ordinary mode reads in place of the developer status lines that name 来源链 or a preview. */
+export const LEARNING_AUDIT_ORDINARY_STATUS = {
+  lineage: '正在读取来源与用途…',
+  lineageOpened: '来源与用途已打开',
+  lineageUnavailable: '无法读取来源与用途。',
+  previewing: '正在停止今后使用…',
+  previewFailed: '无法停止今后使用。',
+} as const;
+export const LEARNING_AUDIT_ORDINARY_RECORD = '确定';
 export const LEARNING_LINEAGE_ORDINARY_REINCLUDE = '重新用于学习…';
 export const LEARNING_LINEAGE_ORDINARY_REINCLUDE_LEGEND = '用于学习的范围';
 export const LEARNING_LINEAGE_ORDINARY_REINCLUDE_NOTE = '会追加一个新的决定；之前的「不用」仍留在记录里。';
