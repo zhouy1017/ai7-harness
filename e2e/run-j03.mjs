@@ -90,6 +90,18 @@ const settingsInView = (width, height, form) => `(() => {
   return box.width>0 && box.height>0 && box.top>=0 && box.left>=0 && box.bottom<=innerHeight && box.right<=innerWidth && hit instanceof Node && link.contains(hit);
 })()`;
 
+// #1554: the icons the engine really draws. Every rendered icon matching the selector is 18 × 18, resolves through its <use> to a <symbol> of
+// the sprite that holds at least one shape, takes the specification's 1.8 stroke from the stylesheet, and no two of them share a symbol.
+const drawnIcons = (selector) => `(() => {
+  const icons=[...document.querySelectorAll(${JSON.stringify(selector)})].filter((svg)=>svg.getClientRects().length>0), ids=[];
+  for(const svg of icons){
+    const box=svg.getBoundingClientRect(), id=(svg.querySelector('use')?.getAttribute('href')??'').replace(/^#/,''), symbol=id===''?null:document.querySelector('#editor-icon-sprite symbol[id="'+id+'"]');
+    if(Math.abs(box.width-18)>0.5||Math.abs(box.height-18)>0.5||!symbol||symbol.childElementCount<1||getComputedStyle(svg).strokeWidth!=='1.8px') return false;
+    ids.push(id);
+  }
+  return ids.length>0 && new Set(ids).size===ids.length;
+})()`;
+
 async function checkSettingsPinned(renderer) {
   for (const [width, height] of [[1280, 800], [1008, 681]]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -100,6 +112,7 @@ async function checkSettingsPinned(renderer) {
         await waitFor(renderer, `document.documentElement.dataset.sidebar==='icons'`, `sidebar-settings-icons-${width}`);
       }
       await waitFor(renderer, settingsInView(width, height, form), `sidebar-settings-in-view-${name}`);
+      await assertRenderer(renderer, drawnIcons('.sidebar-link svg.icon'), `sidebar-icons-drawn-${name}`);
       await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-settings]', `sidebar-settings-press-${name}`);
       await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `sidebar-settings-opened-${name}`);
       await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-book-section="manuscript"]', `sidebar-settings-return-${name}`);
@@ -110,6 +123,8 @@ async function checkSettingsPinned(renderer) {
       }
     }
   }
+  // The manuscript screen stands again here, at the smaller size: its right edge draws one distinct symbol per entry.
+  await waitFor(renderer, drawnIcons('[data-edge-entry] svg.icon'), 'edge-icons-drawn');
   await renderer.send('Emulation.clearDeviceMetricsOverride');
 }
 
