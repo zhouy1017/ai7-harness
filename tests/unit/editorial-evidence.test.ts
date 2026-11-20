@@ -258,9 +258,9 @@ describe('the harness', () => {
       expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'measured-pass')).toMatchObject({
         cases: 3, concerns: 11, matched: 6, missed: 4, unmeasured: 1, raisedButExcluded: 0, falsePositiveChecks: 1,
       });
-      // #1074: the 2026-11 pass, replayed from the 38 convertible captures; the tool-using units are unmeasured gaps (#1598).
+      // #1074: the 2026-11 pass, replayed from all 72 captures: every one of the 24 units answers, tool-using units included (#1598).
       expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'measured-pass-2026-11')).toMatchObject({
-        cases: 3, concerns: 11, matched: 9, missed: 1, unmeasured: 1, raisedButExcluded: 0, falsePositiveChecks: 1,
+        cases: 3, concerns: 11, matched: 10, missed: 1, unmeasured: 0, raisedButExcluded: 0, falsePositiveChecks: 1,
       });
       expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'authored')).toMatchObject({
         cases: 2, concerns: 13, matched: 11, missed: 2, falsePositiveChecks: 2,

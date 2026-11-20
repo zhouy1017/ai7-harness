@@ -274,6 +274,53 @@ export function unitContentDigest(ownBlockTexts) {
   return sha256Hex(ownBlockTexts.join('\n'));
 }
 
+// --- Duplicated from src/service/provider/tool-turn-digest.ts (Issue #1598; tests/unit/tool-turn-fixtures.test.ts checks it) ---
+const TOOL_TURN_DIGEST_SCHEMA = 'ai7.model-fixture.tool-turn/1';
+const IDENTITY_TOKEN = /(?<![A-Za-z0-9_-])(?:blk_[0-9a-f]{24}|[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_-])/gu;
+
+/** A scored list with each run of equal scores in identity-free content order: only tied candidates can move. Any other text is returned as it is. */
+function tiesInContentOrder(text) {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return text; }
+  if (!Array.isArray(parsed) || parsed.length < 2 || !parsed.every((entry) => typeof entry === 'object' && entry !== null && typeof entry.score === 'number')) return text;
+  const content = (entry) => JSON.stringify(entry).replace(IDENTITY_TOKEN, '~');
+  const ordered = [];
+  for (let from = 0; from < parsed.length;) {
+    let to = from + 1;
+    while (to < parsed.length && parsed[to].score === parsed[from].score) to += 1;
+    ordered.push(...parsed.slice(from, to).sort((a, b) => (content(a) < content(b) ? -1 : content(a) > content(b) ? 1 : 0)));
+    from = to;
+  }
+  return JSON.stringify(ordered);
+}
+
+/** The exchange with every per-import identity renamed by first appearance: the unit's own blocks `{{block:N}}`, the rest `{{tool-id:K}}`. */
+export function normalizeToolExchange(rounds, ownBlockIds) {
+  const names = new Map(ownBlockIds.map((id, index) => [id, `{{block:${index + 1}}}`]));
+  const foreign = [];
+  const rename = (text) => text.replace(IDENTITY_TOKEN, (identity) => {
+    let name = names.get(identity);
+    if (name === undefined) { foreign.push(identity); name = `{{tool-id:${foreign.length}}}`; names.set(identity, name); }
+    return name;
+  });
+  const canonicalArguments = (raw) => { try { return canonicalJson(JSON.parse(raw)); } catch { return raw; } };
+  return {
+    rounds: rounds.map((round) => ({
+      calls: round.calls.map((call) => ({ name: call.name, arguments: rename(canonicalArguments(call.arguments)) })),
+      results: round.calls.map((call) => {
+        const result = round.results.find((candidate) => candidate.callId === call.id);
+        return { text: rename(tiesInContentOrder(result.text)), isError: result.isError };
+      }),
+    })),
+    foreign,
+  };
+}
+
+/** The key of a tool-turn continuation: the unit's request digest and its whole normalized exchange. */
+export function toolTurnRequestDigest(unitRequestDigest, normalized) {
+  return sha256Hex(canonicalJson({ schema: TOOL_TURN_DIGEST_SCHEMA, unitRequestDigest, rounds: normalized.rounds }));
+}
+
 // --- Arguments --------------------------------------------------------------------------------
 
 const ARGUMENT_KEYS = ['--from-cache', '--cache-root', '--identity', '--description', '--out'];
@@ -658,7 +705,8 @@ export async function verifySample1Capture(request, selection, parsed) {
       expected = owners.buildRunReportReflectionMessage(outcome.runRecordId, owners.runReportAccountingOf(outcome.report));
     } else fail();
     if (expected === undefined || expected !== parsed.unitMessage) fail();
-    return true;
+    // The unit message is proved; the tool exchange a continuation carries is not, unless every word of it is sample1's.
+    return parsed.toolResultTexts === undefined || toolResultsAreSample1(parsed.toolResultTexts, sampleBlocks.map((block) => block.text));
   } catch { fail(); } finally { database?.close(); }
 }
 
@@ -976,6 +1024,120 @@ export function parseCachedRequest(requestBody, promptContractDigest, structured
   }
   refuse(body !== null && typeof body === 'object' && !Array.isArray(body) && Array.isArray(body.messages) && body.messages.length > 0,
     'FIXTURE_GEN/request-shape-unsupported', '缓存条目不是 openai-chat-completions 请求体。');
+  // A tool-turn continuation (Issue #1598) carries the unit's own request and, after its last user message, the tool exchange so far.
+  const lastUser = body.messages.findLastIndex((message) => message !== null && typeof message === 'object' && message.role === 'user');
+  const rounds = lastUser === -1 ? [] : parseToolExchange(body.messages.slice(lastUser + 1));
+  const base = parseUnitRequest(rounds.length === 0 ? body : { ...body, messages: body.messages.slice(0, lastUser + 1) }, promptContractDigest, structuredStageContractDigest);
+  if (rounds.length === 0) return base;
+  refuse(base.unitOrdinal > 0 && base.ownBlockTexts.length > 0 && base.identities.every(({ placeholder }) => placeholder.startsWith('{{block:')),
+    'FIXTURE_GEN/request-shape-unsupported', '工具回合只支持分析单元。');
+  // A placeholder-shaped text in the exchange would hash like an identity renamed in its place, and replay could not tell them apart.
+  refuse(rounds.every((round) => round.calls.every((call) => call.name.match(PLACEHOLDER_SHAPE) === null && call.arguments.match(PLACEHOLDER_SHAPE) === null) &&
+    round.results.every((result) => result.text.match(PLACEHOLDER_SHAPE) === null)),
+  'FIXTURE_GEN/identity-unmapped', '工具交换已含有占位符形式的文字，回放无法与捕获区分。');
+  const normalized = normalizeToolExchange(rounds, base.identities.map(({ identity }) => identity));
+  const resultTexts = rounds.flatMap((round) => round.results.map((result) => result.text));
+  return {
+    ...base,
+    toolResultTexts: resultTexts,
+    requestDigest: toolTurnRequestDigest(base.requestDigest, normalized),
+    contentDigest: null,
+    // What the exchange carried may hold manuscript text and takes part in the echo scan; nothing of it is written to a fixture.
+    carriedBlockTexts: [...base.carriedBlockTexts, ...resultTexts, ...resultTexts.flatMap(jsonStringLeaves)],
+    identities: [...base.identities, ...normalized.foreign.map((identity, index) => ({ placeholder: `{{tool-id:${index + 1}}}`, identity }))],
+  };
+}
+
+/**
+ * The decoded strings of a JSON text, object keys apart from values, or the text itself as the one value when it is not JSON: the
+ * words a result carries, without the escapes (a quotation mark, a newline) that would split a quoted passage in its raw form.
+ */
+function jsonStringsOf(text) {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return { keys: [], values: [text] }; }
+  const keys = [];
+  const values = [];
+  const visit = (node) => {
+    if (typeof node === 'string') values.push(node);
+    else if (Array.isArray(node)) node.forEach(visit);
+    else if (node !== null && typeof node === 'object') for (const [key, value] of Object.entries(node)) { keys.push(key); visit(value); }
+  };
+  visit(parsed);
+  return { keys, values };
+}
+
+/** The decoded string values of a JSON text, or the text itself when it is not JSON. */
+export function jsonStringLeaves(text) {
+  return jsonStringsOf(text).values;
+}
+
+const IDENTITY_WHOLE = /^(?:blk_[0-9a-f]{24}|[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/u;
+/**
+ * The exact words the product's local tools answer with when they refuse or fail: the fixed texts `#executeLocal` returns
+ * (platform-tool-session.ts) and the codes of a `RetrievalError` (retrieval/index.ts). Only these whole strings count as the product's
+ * own; text that merely begins like one, or is shaped like a code, is not. tests/unit/tool-turn-fixtures.test.ts reads both source
+ * files and checks every constant they hold is in this set.
+ */
+const PRODUCT_REFUSALS = new Set([
+  '检索未完成',
+  '检索未完成：本单元的工具往返已达到熔断上限。',
+  '检索未完成：本单元的检索调用次数已用完，请使用已有结果。',
+  '检索未完成：结果超过字节上限。',
+  '本次尝试未准许该工具。',
+  '检索参数无效。',
+  '检索工具超出并行上限，或重复使用调用标识。',
+  '已达到运行预算上限。',
+  'RETRIEVAL_SOURCE_NOT_AUTHORIZED',
+  'RETRIEVAL_SOURCE_MOVED',
+  'MATERIAL_REFERENCE_UNAVAILABLE',
+]);
+/**
+ * The object keys of the product's retrieval results that are as long as a quotation (a candidate's `revisionOrIndexDigest`, an anchor's
+ * `segmentOrdinal`): fixed field names, never manuscript text. Any other key at that length must be proved like a value.
+ * tests/unit/tool-turn-fixtures.test.ts builds real results with the product's own index and checks they pass.
+ */
+const PRODUCT_RESULT_KEYS = new Set(['revisionOrIndexDigest', 'segmentOrdinal']);
+
+/**
+ * Whether every word a carried tool result holds is exact sample1's: each string it carries that could be a quotation — at the echo
+ * threshold or longer — is a passage of a proved block, an identity, or (a value only) one of the product's own whole refusal texts
+ * or (a key only) one of its own result field names. That covers the object keys as well as the values, so foreign text cannot ride in
+ * as a key. A result of any other text (a pinned fact of an edited revision, a guideline clause) leaves the turn unproved, so the
+ * echo rule decides.
+ */
+export function toolResultsAreSample1(resultTexts, blockTexts) {
+  const blocks = blockTexts.map(collapseWhitespace);
+  const proved = (text) => text.length < MANUSCRIPT_ECHO_THRESHOLD || IDENTITY_WHOLE.test(text) || blocks.some((block) => block.includes(collapseWhitespace(text)));
+  return resultTexts.every((text) => {
+    const { keys, values } = jsonStringsOf(text);
+    return values.every((value) => PRODUCT_REFUSALS.has(value) || proved(value)) && keys.every((key) => PRODUCT_RESULT_KEYS.has(key) || proved(key));
+  });
+}
+
+/** The assistant tool calls and `tool` results after the last user message, as rounds; every call needs exactly one result. */
+function parseToolExchange(tail) {
+  const rounds = [];
+  for (const message of tail) {
+    refuse(message !== null && typeof message === 'object' && !Array.isArray(message), 'FIXTURE_GEN/request-shape-unsupported', '请求体中的消息缺少角色。');
+    if (message.role === 'assistant') {
+      refuse(Array.isArray(message.tool_calls) && message.tool_calls.length > 0 && message.tool_calls.every((call) => call !== null && typeof call === 'object' &&
+        call.type === 'function' && typeof call.id === 'string' && call.function !== null && typeof call.function === 'object' &&
+        typeof call.function.name === 'string' && typeof call.function.arguments === 'string'),
+      'FIXTURE_GEN/request-shape-unsupported', '最后一条 user 消息之后只支持带工具调用的助手消息与工具结果。');
+      rounds.push({ calls: message.tool_calls.map((call) => ({ id: call.id, name: call.function.name, arguments: call.function.arguments })), results: [] });
+    } else {
+      const text = message.role === 'tool' && typeof message.tool_call_id === 'string' ? chatMessageText(message.content) : null;
+      refuse(text !== null && rounds.length > 0, 'FIXTURE_GEN/request-shape-unsupported', '最后一条 user 消息之后只支持带工具调用的助手消息与工具结果。');
+      // The chat-completions wire carries no error flag, so none is recorded; the replay rebuilds the same wire.
+      rounds.at(-1).results.push({ callId: message.tool_call_id, text, isError: false });
+    }
+  }
+  refuse(rounds.every((round) => round.results.length === round.calls.length && round.calls.every((call) => round.results.filter((result) => result.callId === call.id).length === 1)),
+    'FIXTURE_GEN/request-shape-unsupported', '工具调用与工具结果不一一对应。');
+  return rounds;
+}
+
+function parseUnitRequest(body, promptContractDigest, structuredStageContractDigest) {
   let unitMessage = null;
   let unitMessageIndex = -1;
   const carriedMessages = [];
@@ -1265,6 +1427,35 @@ export function redactUnitResultText(text, ownBlockTexts, carriedBlockTexts = ow
 // --- The response -----------------------------------------------------------------------------
 
 /**
+ * A model answer that is tool calls (Issue #1598): each call's name and JSON arguments, the identities its arguments name remapped
+ * to the placeholders the adapter fills from the request it answers. An identity no request named refuses, as does an argument that
+ * echoes carried manuscript text outside proved sample1. The model's reasoning beside the calls is not kept.
+ */
+function mapToolCalls(message, usage, request) {
+  const carried = request.carriedBlockTexts ?? [];
+  refuse(message.content === null || message.content === undefined || message.content === '', 'FIXTURE_GEN/response-shape-unsupported', '带工具调用的回答同时含有正文，夹具无法如实回放。');
+  refuse(message.tool_calls.length <= 16, 'FIXTURE_GEN/response-shape-unsupported', '一次回答的工具调用超出夹具边界。');
+  const calls = message.tool_calls.map((call) => {
+    refuse(call !== null && typeof call === 'object' && call.type === 'function' && call.function !== null && typeof call.function === 'object' &&
+      /^[a-z][a-z_]{0,63}$/u.test(call.function.name) && typeof call.function.arguments === 'string', 'FIXTURE_GEN/response-shape-unsupported', '工具调用的形态无效。');
+    let parsed;
+    try { parsed = JSON.parse(call.function.arguments); } catch { parsed = null; }
+    refuse(parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed), 'FIXTURE_GEN/response-shape-unsupported', '工具调用的参数不是 JSON 对象。');
+    refuse(call.function.arguments.match(PLACEHOLDER_SHAPE) === null, 'FIXTURE_GEN/identity-unmapped', '原始工具参数已含有占位符形式的文字，回放无法与捕获区分。');
+    const remapped = remapIdentities(JSON.stringify(parsed), request.identities);
+    refuse(remapped.match(IDENTITY_TOKEN) === null, 'FIXTURE_GEN/identity-unmapped', '工具参数含有请求中没有的标识。');
+    const args = JSON.parse(remapped);
+    if (request.sample1Verified !== true) {
+      const echo = findManuscriptEcho(args, carried);
+      refuse(echo === null, 'FIXTURE_GEN/manuscript-echo', `工具参数 ${echo?.path} 与请求内容仍有 ${echo?.runLength} 个字符重合。`);
+    }
+    refuse(Buffer.byteLength(canonicalJson(args)) <= 4096, 'FIXTURE_GEN/response-shape-unsupported', '工具调用参数超出夹具边界。');
+    return { name: call.function.name, arguments: args };
+  });
+  return { kind: 'tool-calls', calls, usage };
+}
+
+/**
  * One cached result as a fixture response. A limit is a limit whichever way the ledger and the
  * status say so; any other non-200 becomes an adapter failure named after its status; and a 200 must
  * actually carry a result, with the usage the ceiling is measured against. Absent usage refuses
@@ -1283,13 +1474,15 @@ export function mapCachedResponse(entry, selection, ownBlockTexts, request = { i
     'FIXTURE_GEN/response-shape-unsupported', '缓存条目的响应不是 openai-chat-completions 结果。');
   const message = response.choices[0] === undefined ? undefined : response.choices[0].message;
   const text = message === null || typeof message !== 'object' ? undefined : message.content;
-  refuse(typeof text === 'string' && text.length > 0,
+  const calling = message !== null && typeof message === 'object' && Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+  refuse(calling || (typeof text === 'string' && text.length > 0),
     'FIXTURE_GEN/response-shape-unsupported', '缓存条目的响应不含 choices[0].message.content 文本。');
   const usage = response.usage;
   const inputTokens = usage === null || typeof usage !== 'object' ? undefined : usage.prompt_tokens;
   const outputTokens = usage === null || typeof usage !== 'object' ? undefined : usage.completion_tokens;
   refuse(Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isSafeInteger(outputTokens) && outputTokens >= 0,
     'FIXTURE_GEN/usage-absent', '缓存条目的响应不含可用的 usage 计数。');
+  if (calling) return mapToolCalls(message, { inputTokens, outputTokens }, request);
   // A placeholder the model itself wrote would be filled on replay like one the converter wrote, and the replay would no
   // longer say what the capture said; so every placeholder in a fixture must be one this conversion put there.
   refuse(text.match(PLACEHOLDER_SHAPE) === null, 'FIXTURE_GEN/identity-unmapped', '原始响应已含有占位符形式的文字，回放无法与捕获区分。');

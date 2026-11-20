@@ -427,24 +427,17 @@
             "state": "settled"
           }
         ],
-        "unitsClosed": 2,
+        "unitsClosed": 8,
         "unitsTotal": 8,
-        "gaps": [
-          "literary-expression/1:adapter-failure",
-          "literary-expression/2:adapter-failure",
-          "literary-expression/3:adapter-failure",
-          "literary-expression/4:adapter-failure",
-          "literary-expression/7:adapter-failure",
-          "literary-expression/8:adapter-failure"
-        ]
+        "gaps": []
       },
       "findings": {
-        "listed": 21,
-        "located": 21,
+        "listed": 74,
+        "located": 74,
         "excluded": 0,
         "useful": 1,
         "precise": 1,
-        "unclassified": 20,
+        "unclassified": 73,
         "falsePositives": 0
       },
       "concerns": {
@@ -466,7 +459,7 @@
         "adopted": 0,
         "edited": 1,
         "rejected": 0,
-        "left": 20,
+        "left": 73,
         "applied": 1,
         "appliedCorrect": 1,
         "reversed": 1,
@@ -480,13 +473,13 @@
         "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 2,
-        "unmatched": 10
+        "answered": 29,
+        "unmatched": 3
       },
       "recordedUsage": {
-        "requests": 9,
-        "inputTokens": 25989,
-        "outputTokens": 18976
+        "requests": 29,
+        "inputTokens": 85221,
+        "outputTokens": 41005
       },
       "contractsAgree": true,
       "fixtures": [
@@ -570,20 +563,17 @@
             "state": "settled"
           }
         ],
-        "unitsClosed": 6,
+        "unitsClosed": 8,
         "unitsTotal": 8,
-        "gaps": [
-          "style-and-format/6:adapter-failure",
-          "style-and-format/7:adapter-failure"
-        ]
+        "gaps": []
       },
       "findings": {
-        "listed": 9,
-        "located": 9,
+        "listed": 12,
+        "located": 12,
         "excluded": 0,
         "useful": 2,
         "precise": 2,
-        "unclassified": 6,
+        "unclassified": 9,
         "falsePositives": 1
       },
       "concerns": {
@@ -606,7 +596,7 @@
         "adopted": 2,
         "edited": 0,
         "rejected": 1,
-        "left": 6,
+        "left": 9,
         "applied": 0,
         "appliedCorrect": 0,
         "reversed": 0,
@@ -620,13 +610,13 @@
         "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 10,
-        "unmatched": 4
+        "answered": 20,
+        "unmatched": 1
       },
       "recordedUsage": {
-        "requests": 13,
-        "inputTokens": 36408,
-        "outputTokens": 29790
+        "requests": 20,
+        "inputTokens": 62187,
+        "outputTokens": 32664
       },
       "contractsAgree": true,
       "fixtures": [
@@ -786,20 +776,17 @@
             "state": "settled"
           }
         ],
-        "unitsClosed": 6,
+        "unitsClosed": 8,
         "unitsTotal": 8,
-        "gaps": [
-          "typos-and-usage/2:adapter-failure",
-          "typos-and-usage/8:adapter-failure"
-        ]
+        "gaps": []
       },
       "findings": {
-        "listed": 27,
-        "located": 27,
+        "listed": 32,
+        "located": 32,
         "excluded": 0,
-        "useful": 6,
-        "precise": 6,
-        "unclassified": 21,
+        "useful": 7,
+        "precise": 7,
+        "unclassified": 25,
         "falsePositives": 0
       },
       "concerns": {
@@ -807,15 +794,14 @@
         "met": [
           "s1-missing-de",
           "s1-circle-1990",
+          "s1-circle-1980",
           "s1-stray-shang",
           "s1-missing-object",
           "s1-missing-lai",
           "s1-missing-ta"
         ],
         "missed": [],
-        "unmeasured": [
-          "s1-circle-1980"
-        ],
+        "unmeasured": [],
         "excludedOnly": []
       },
       "checks": {
@@ -824,12 +810,12 @@
       },
       "effort": {
         "adopted": 5,
-        "edited": 1,
+        "edited": 2,
         "rejected": 0,
-        "left": 21,
-        "applied": 6,
-        "appliedCorrect": 6,
-        "reversed": 6,
+        "left": 25,
+        "applied": 7,
+        "appliedCorrect": 7,
+        "reversed": 7,
         "restoredExactly": true
       },
       "delivery": null,
@@ -840,13 +826,13 @@
         "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 10,
-        "unmatched": 6
+        "answered": 22,
+        "unmatched": 1
       },
       "recordedUsage": {
-        "requests": 15,
-        "inputTokens": 41404,
-        "outputTokens": 48384
+        "requests": 22,
+        "inputTokens": 62946,
+        "outputTokens": 51237
       },
       "contractsAgree": true,
       "fixtures": [

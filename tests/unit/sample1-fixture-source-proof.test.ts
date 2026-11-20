@@ -377,6 +377,30 @@ describe('exact sample1 fixture exemption source proof', () => {
     await expect(tool.verifySample1Capture(request, selection, candidate)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
   });
 
+  it('keeps the exemption for a carried tool exchange only when every passage in it is sample1\'s (#1598)', async () => {
+    const continuation = (result: string): unknown => tool.parseCachedRequest(JSON.stringify({ messages: [
+      { role: 'system', content: BASELINE_PROMPT_CONTRACT.systemPrompt },
+      { role: 'user', content: message },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'retrieve', arguments: '{"query":"甲"}' } }] },
+      { role: 'tool', tool_call_id: 'call_1', content: result },
+    ] }), BASELINE_PROMPT_CONTRACT_DIGEST);
+    const passage = own.reduce((longest, text) => (text.length > longest.length ? text : longest)).slice(0, 40);
+    const candidate = (preview: string): string => JSON.stringify([{ sourceKind: 'manuscript', sourceId: randomUUID(), revisionOrIndexDigest: 'd'.repeat(64), candidateId: 'c'.repeat(64), anchor: { blockId: `blk_${'1'.repeat(24)}`, start: 0, end: 40 }, score: 0.5, preview }]);
+    const foreign = '来自另一份合成稿件的一段较长的文字，不在样书里。';
+    // The unit message is proved either way; its results are exempt only as sample1's own passages, identities and refusals.
+    expect(await tool.verifySample1Capture(request, selection, continuation(candidate(passage)))).toBe(true);
+    expect(await tool.verifySample1Capture(request, selection, continuation('RETRIEVAL_SOURCE_NOT_AUTHORIZED'))).toBe(true);
+    expect(await tool.verifySample1Capture(request, selection, continuation(candidate(foreign)))).toBe(false);
+    expect(await tool.verifySample1Capture(request, selection, continuation(foreign))).toBe(false);
+    // A refusal is the product's own only as a whole, and only a field name of its results is exempt as a key: nothing else rides in after a
+    // refusal's first words, in a code's shape, or as an object key at any depth.
+    expect(await tool.verifySample1Capture(request, selection, continuation('检索未完成：本单元的检索调用次数已用完，请使用已有结果。'))).toBe(true);
+    expect(await tool.verifySample1Capture(request, selection, continuation(`检索未完成：${foreign}`))).toBe(false);
+    expect(await tool.verifySample1Capture(request, selection, continuation('FOREIGN_UPPERCASE_PASSAGE_TOKEN'))).toBe(false);
+    expect(await tool.verifySample1Capture(request, selection, continuation(JSON.stringify({ [foreign]: 1 })))).toBe(false);
+    expect(await tool.verifySample1Capture(request, selection, continuation(JSON.stringify([{ anchor: { [foreign]: 0 }, score: 0.5 }])))).toBe(false);
+  });
+
   it.each(['unit', 'synthesis'] as const)('proves writing %s from the frozen writing row and refuses altered inputs or source records (#810)', async (stage) => {
     // This historical writing task has no synopsis supplement in its frozen execution plan.
     const execution = canonicalJson({});
