@@ -867,24 +867,28 @@ export function marksOfWindow(
   page?: { afterOrdinal: number; digest: string },
 ): Pick<EditorialMarkCommandProjection, 'marks' | 'marksTruncated' | 'marksPage'> {
   if (!marksRelationExists(db)) return { marks: [], marksTruncated: false };
-  const from = `FROM editorial_marks em JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id
-     WHERE em.branch_id = ? AND em.status IN ${LIVE_STATUSES} AND em.anchor_state IN ('exact', 'drifted')
-       AND wb.position >= ? AND wb.position < ?
-     ORDER BY wb.position, em.from_grapheme, em.to_grapheme DESC, em.created_at, em.mark_id`;
-  const afterOrdinal = page?.afterOrdinal ?? 0;
-  const rows = db.prepare(
-    `${anchorSelect(proposalConflictRelationsExist(db), db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() !== undefined)}
-     ${from.slice(from.indexOf('WHERE'))}
-     LIMIT ? OFFSET ?`,
-  ).all(branchId, startPosition, startPosition + MAX_WINDOW_BLOCKS, MAX_WINDOW_MARKS + 1, afterOrdinal) as SqlRow[];
-  const marks = rows.slice(0, MAX_WINDOW_MARKS).map(anchorProjection);
-  if (page === undefined && rows.length <= MAX_WINDOW_MARKS) return { marks, marksTruncated: false };
-  const ids = (db.prepare(`SELECT em.mark_id ${from}`).all(branchId, startPosition, startPosition + MAX_WINDOW_BLOCKS) as SqlRow[]).map((row) => text(row.mark_id));
+  const select = anchorSelect(proposalConflictRelationsExist(db), db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() !== undefined);
+  const where = `WHERE em.branch_id = ? AND em.status IN ${LIVE_STATUSES} AND em.anchor_state IN ('exact', 'drifted')
+       AND wb.position >= ? AND wb.position < ?`;
+  const order = 'ORDER BY wb.position, em.from_grapheme, em.to_grapheme DESC, em.created_at, em.mark_id';
+  const window = [branchId, startPosition, startPosition + MAX_WINDOW_BLOCKS] as const;
+  const first = page === undefined ? db.prepare(`${select}
+     ${where}
+     ${order}
+     LIMIT ?`).all(...window, MAX_WINDOW_MARKS + 1) as SqlRow[] : undefined;
+  if (first !== undefined && first.length <= MAX_WINDOW_MARKS) return { marks: first.map(anchorProjection), marksTruncated: false };
+  const ids = (db.prepare(`SELECT em.mark_id FROM editorial_marks em JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id
+     ${where} ${order}`).all(...window) as SqlRow[]).map((row) => text(row.mark_id));
   const digest = sha256(JSON.stringify(ids));
+  const afterOrdinal = page?.afterOrdinal ?? 0;
   if (page !== undefined) {
-    requireBounded(page.digest === digest, 'WINDOW_MARKS_CHANGED', '这一段的建议、批注或备注有了变化，请重新打开这一段。');
-    requireBounded(afterOrdinal < ids.length, 'WINDOW_INVALID', '稿件位置无效。');
+    requireBounded(page.digest === digest, 'WINDOW_MARKS_CHANGED', '这一段的修改建议、批注和备注有了变化，正在重新读取。');
+    requireBounded(afterOrdinal < ids.length || afterOrdinal === 0, 'WINDOW_INVALID', '稿件位置无效。');
   }
+  // A later page projects only its own marks, read by identity: the window's order is the identities' order above.
+  const rows = first?.slice(0, MAX_WINDOW_MARKS) ?? db.prepare(`${select} WHERE em.mark_id IN (SELECT value FROM json_each(?)) ${order}`)
+    .all(JSON.stringify(ids.slice(afterOrdinal, afterOrdinal + MAX_WINDOW_MARKS))) as SqlRow[];
+  const marks = rows.map(anchorProjection);
   const nextOrdinal = afterOrdinal + marks.length < ids.length ? afterOrdinal + marks.length : null;
   return { marks, marksTruncated: marks.length < ids.length, marksPage: { shown: marks.length, total: ids.length, nextOrdinal, digest } };
 }
@@ -1362,34 +1366,47 @@ export class EditorialMarkStore {
     // Thousands of marks share a few sources: each distinct one is judged once, here, and the query keeps only the marks it passes.
     const tests: string[] = [], values: string[] = [];
     if (input.categories.length > 0) {
-      const passing = (this.#db.prepare(`SELECT DISTINCT em.source_kind, em.source_origin, em.source_label FROM editorial_marks em WHERE ${open}`).all(...binding) as SqlRow[])
-        .filter((row) => input.categories.includes(resolveEditorialMarkCategory({ sourceKind: text(row.source_kind) as EditorialMarkSourceProjection['kind'],
+      const sourceOf = 'json_array(em.source_kind, em.source_origin, em.source_label)';
+      const passing = (this.#db.prepare(`SELECT DISTINCT ${sourceOf} source, em.source_kind, em.source_origin, em.source_label FROM editorial_marks em WHERE ${open}`)
+        .all(...binding) as SqlRow[]).filter((row) => input.categories.includes(resolveEditorialMarkCategory({ sourceKind: text(row.source_kind) as EditorialMarkSourceProjection['kind'],
           sourceOrigin: nullableText(row.source_origin) as EditorialMarkSourceProjection['origin'], sourceLabel: nullableText(row.source_label) }).key));
-      tests.push(`EXISTS (SELECT 1 FROM json_each(?) j WHERE j.value ->> 0 IS em.source_kind AND j.value ->> 1 IS em.source_origin AND j.value ->> 2 IS em.source_label)`);
-      values.push(JSON.stringify(passing.map((row) => [row.source_kind, row.source_origin, row.source_label])));
+      tests.push(`${sourceOf} IN (SELECT value FROM json_each(?))`);
+      values.push(JSON.stringify(passing.map((row) => text(row.source))));
     }
-    // A model the frozen labels name alone is judged once per labels; any other AI7 mark is read as its card reads it.
-    const recorded = new Set<string>();
+    // A model is judged once per frozen labels that name it alone, in the query; a mark whose labels do not is judged once per what
+    // `historicalMarkModelLabels` reads for it — those labels with its Task, time, origin and conversion — while the walk goes.
+    const frozenOf = `ifnull(json_extract(em.basis_json, '$.source'), '')`;
+    const unnamed = new Set<string>();
+    const passes = (labels: Parameters<typeof frozenModelLabels>[0] & object): boolean => input.models.includes(editorialMarkFilterModel({ kind: 'ai7', ...labels })!);
     if (input.models.length > 0) {
-      const frozen = (this.#db.prepare(`SELECT DISTINCT ifnull(json_extract(em.basis_json, '$.source'), '') source FROM editorial_marks em
-        WHERE ${open} AND em.source_kind = 'ai7'`).all(...binding) as SqlRow[]).map((row) => text(row.source));
-      const kept = frozen.filter((source) => {
-        const named = source === '' ? null : frozenModelLabels(JSON.parse(source));
-        if (named === null) recorded.add(source);
-        return named === null || input.models.includes(editorialMarkFilterModel({ kind: 'ai7', ...named })!);
-      });
-      tests.push(`em.source_kind = 'ai7' AND ifnull(json_extract(em.basis_json, '$.source'), '') IN (SELECT value FROM json_each(?))`);
+      const kept: string[] = [];
+      for (const row of this.#db.prepare(`SELECT DISTINCT ${frozenOf} source FROM editorial_marks em WHERE ${open} AND em.source_kind = 'ai7'`).all(...binding) as SqlRow[]) {
+        const source = text(row.source), labels = source === '' ? null : frozenModelLabels(JSON.parse(source));
+        if (labels === null) unnamed.add(source);
+        if (labels === null || passes(labels)) kept.push(source);
+      }
+      tests.push(`em.source_kind = 'ai7' AND ${frozenOf} IN (SELECT value FROM json_each(?))`);
       values.push(JSON.stringify(kept));
     }
+    const conversion = unnamed.size === 0 || this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'dialogue_conversions'").get() === undefined ? undefined
+      : this.#db.prepare('SELECT attempt_id FROM dialogue_conversions WHERE mark_id = ?');
+    const judged = new Map<string, boolean>();
+    // With every test in the query the first row answers, so the sorter keeps one row instead of ordering a dense paragraph.
     const rows = this.#db.prepare(
-      `SELECT em.mark_id, em.block_id, em.from_grapheme, ifnull(json_extract(em.basis_json, '$.source'), '') frozen_source FROM editorial_marks em
+      `SELECT em.mark_id, em.block_id, em.from_grapheme, em.source_task_id, em.created_at, em.converted_from_mark_id,
+              ${unnamed.size === 0 ? "''" : frozenOf} source FROM editorial_marks em
        JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id
        WHERE ${open} ${tests.map((test) => `AND ${test}`).join(' ')} AND (wb.position, em.from_grapheme, em.mark_id) ${compare} (?, ?, ?)
-       ORDER BY wb.position ${order}, em.from_grapheme ${order}, em.mark_id ${order}`,
+       ORDER BY wb.position ${order}, em.from_grapheme ${order}, em.mark_id ${order}${unnamed.size === 0 ? ' LIMIT 1' : ''}`,
     ).iterate(...binding, ...values, integer(start.position), input.from.grapheme, input.from.markId ?? '') as Iterable<SqlRow>;
     for (const row of rows) {
-      if (recorded.has(text(row.frozen_source))
-        && !input.models.includes(editorialMarkFilterModel({ kind: 'ai7', ...historicalMarkModelLabels(this.#db, text(row.mark_id)) })!)) continue;
+      if (unnamed.has(text(row.source))) {
+        const markId = text(row.mark_id);
+        const key = JSON.stringify([row.source, row.source_task_id, row.created_at, row.converted_from_mark_id, conversion?.get(markId)?.attempt_id ?? null]);
+        let pass = judged.get(key);
+        if (pass === undefined) judged.set(key, pass = passes(historicalMarkModelLabels(this.#db, markId)));
+        if (!pass) continue;
+      }
       return { mark: { markId: text(row.mark_id), blockId: text(row.block_id), fromGrapheme: integer(row.from_grapheme) } };
     }
     return { mark: null };

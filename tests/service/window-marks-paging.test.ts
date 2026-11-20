@@ -1,6 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
+import type { ProducedEditorialMarkInput } from '../../src/service/editorial-marks.js';
 import { decodeRequest, encodeServiceResponse } from '../../src/service/request-frames.js';
 import { markModelLabels, type MarkModelBinding } from '../../src/service/editorial-mark-source.js';
 import { matchesEditorialMarkFilter } from '../../src/renderer/editorial-mark-filter.js';
@@ -94,6 +95,7 @@ it('reaches every one of 1,000 marks in one paragraph by window pages and by 上
   expect(reads).toBe(3);
   expect(marks.map((mark) => mark.markId).sort()).toEqual([...ids].sort());
   expect(new Set(marks.map((mark) => mark.markId)).size).toBe(1_000);
+  expect(first.marksPage!.digest).toBe(createHash('sha256').update(JSON.stringify(marks.map((mark) => mark.markId)), 'utf8').digest('hex'));
   expect(marks.map((mark) => mark.fromGrapheme)).toEqual([...marks.map((mark) => mark.fromGrapheme)].sort((a, b) => a - b));
 
   const start = { blockId: first.blocks[0]!.blockId, grapheme: -1, markId: null };
@@ -132,23 +134,64 @@ it('reaches the last of 2,000 marks in one paragraph by sequential pages, every 
   expect(reads).toBe(5);
   expect(marks.map((mark) => mark.markId).sort()).toEqual([...ids].sort());
   expect(marks.slice(-2).map((mark) => mark.markId)).toContain(ids.at(-1));
+  // An inline revision past the first page (Issue #1604 review): applying it answers its card and the window's paging facts.
+  const head = windowAt(book, blockId), later = head.blocks.find((block) => block.kind === 'paragraph' && block.blockId !== blockId && Array.from(block.text).length > 4)!;
+  store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: head.revisionId, blockId: later.blockId,
+    windowStartBlockId: blockId, baseBlockDigest: later.digest, expectedJournalSequence: head.journalSequence, fromGrapheme: 0, toGrapheme: 2, insertText: '公开修订',
+    editorRevision: { sessionId: randomUUID(), autoApply: false } });
+  const revision = everyPage(book, blockId).marks.find((mark) => mark.inlineRevision)!;
+  const applied = store.updateEditorialMark({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: blockId, markId: revision.markId,
+    action: 'apply-inline-revision', body: null, highlightColor: null, status: null, targetKind: null, proposedText: null, rationale: null });
+  expect(applied.marks.some((mark) => mark.markId === revision.markId)).toBe(false);
+  expect(applied.card?.status).toBe('applied');
+  expect(applied.marksPage).toMatchObject({ shown: MAX_WINDOW_MARKS, total: 2_001, nextOrdinal: MAX_WINDOW_MARKS });
 });
 
-it('steps under a filter exactly as the 批注栏\'s own filter judges each mark of the window (#1604 parity)', async () => {
+it('steps exactly as the rail lists and as the 批注栏\'s own filter judges each mark of the window (#1604 parity)', async () => {
   const sources = [{ label: '错别字与规范', binding: LOCAL }, { label: '事实核查', binding: OTHER }, { label: '人物逻辑', binding: { route: 'test-route', model: 'other-model', reasoningEffort: 'high' } },
     { label: '文学表达', binding: OTHER }, { label: '自定义类别', binding: LOCAL }];
   const { book, blockId } = await denseParagraph(40, 1_000, (index) => sources[index % sources.length]!);
-  const page = windowAt(book, blockId);
-  const cards = new Map(page.marks.map((mark) => [mark.markId, store.getEditorialMarkCard(book.manuscriptId, book.branchId, mark.markId)]));
-  const start = { blockId: page.blocks[0]!.blockId, grapheme: -1, markId: null };
-  const pairs = new Set(page.marks.map((mark) => JSON.stringify([mark.categoryKey, editorialMarkFilterModel(cards.get(mark.markId)!.source)])));
-  expect(pairs.size).toBe(sources.length);
-  for (const pair of pairs) {
-    const [category, model] = JSON.parse(pair) as [EditorialMarkAnchorProjection['categoryKey'], string];
-    const filter = { selectedCategories: new Set([category]), selectedModels: new Set([model]), status: 'all' as const, keyword: '' };
-    const expected = page.marks.filter((mark) => matchesEditorialMarkFilter(mark, cards.get(mark.markId), filter)).map((mark) => mark.markId);
-    expect(walk(book, 'next', { categories: [category], models: [model] }, start)).toEqual(expected);
+  const at = windowAt(book, blockId), block = at.blocks.find((entry) => entry.blockId === blockId)!, text = Array.from(block.text);
+  const produced = (from: number, extra: Partial<ProducedEditorialMarkInput> & Pick<ProducedEditorialMarkInput, 'source'>): ProducedEditorialMarkInput => ({ manuscriptId: book.manuscriptId, branchId: book.branchId, blockId, fromGrapheme: from, toGrapheme: from + 1,
+    pinnedText: text[from]!, kind: 'annotation' as const, body: '公开合成批注', proposedText: null, rationale: null, atomicGroupId: null, basis: [], ...extra });
+  // Two marks on one place, an AI mark whose Task records no model, an imported author's open and resolved 批注 — then the editor's 批注 and highlight.
+  store.createProducedEditorialMarks([
+    produced(3, { kind: 'change-suggestion', body: '', proposedText: '另', source: { kind: 'ai7', origin: 'review-category', label: '错别字与规范', taskId: null }, sourceModelBinding: OTHER }),
+    produced(5, { source: { kind: 'ai7', origin: 'task', label: '自定义类别', taskId: randomUUID() } }),
+    produced(7, { source: { kind: 'imported-author', label: '公开作者' } }),
+    produced(9, { source: { kind: 'imported-author', label: '公开作者' }, status: 'resolved' }),
+  ], () => undefined);
+  for (const [from, kind] of [[11, 'annotation'], [13, 'personal-highlight']] as const) {
+    const now = windowAt(book, blockId), now_block = now.blocks.find((entry) => entry.blockId === blockId)!;
+    store.createEditorialMark({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: now.blocks[0]!.blockId, clientMarkId: randomUUID(),
+      baseRevisionId: now.revisionId, expectedJournalSequence: now.journalSequence, blockId, baseBlockDigest: now_block.digest, fromGrapheme: from, toGrapheme: from + 1,
+      selectedText: text[from]!, kind, highlightColor: kind === 'personal-highlight' ? 1 : null, body: kind === 'annotation' ? '编辑的公开批注' : '', proposedText: null, rationale: null });
   }
+  const page = windowAt(book, blockId);
+  expect(page.marks).toHaveLength(46);
+  const cards = new Map(page.marks.map((mark) => [mark.markId, store.getEditorialMarkCard(book.manuscriptId, book.branchId, mark.markId)]));
+  const start = { blockId: page.blocks[0]!.blockId, grapheme: -1, markId: null }, end = { blockId: page.blocks.at(-1)!.blockId, grapheme: 1_000_000, markId: null };
+  const kinds = new Map(page.marks.map((mark) => [mark.markId, mark.kind]));
+  // Unfiltered, both ways: the rail's places, in the rail's order (ties at one place included); no resolved mark, no highlight.
+  const rail = store.getManuscriptRail(book.manuscriptId, book.branchId).marks.map((place) => `${place.kind}@${place.blockId}`);
+  const forward = walk(book, 'next', { categories: [], models: [] }, start);
+  expect(forward.map((markId) => `${kinds.get(markId)}@${blockId}`)).toEqual(rail);
+  expect(walk(book, 'previous', { categories: [], models: [] }, end)).toEqual([...forward].reverse());
+  expect(forward).toHaveLength(44);
+  // Every (category, model) the window holds, each way: exactly the marks the pane's filter passes; a mark not AI7's never passes a model.
+  const pairs = new Set(page.marks.map((mark) => JSON.stringify([mark.categoryKey, editorialMarkFilterModel(cards.get(mark.markId)!.source)])));
+  expect(pairs.size).toBe(sources.length + 4);
+  for (const pair of pairs) {
+    const [category, model] = JSON.parse(pair) as [EditorialMarkAnchorProjection['categoryKey'], string | null];
+    const filter = { selectedCategories: new Set([category]), selectedModels: new Set(model === null ? [] : [model]), status: 'open' as const, keyword: '' };
+    const expected = forward.filter((markId) => matchesEditorialMarkFilter(page.marks.find((mark) => mark.markId === markId)!, cards.get(markId), filter));
+    const step = { categories: [category], models: model === null ? [] : [model] };
+    expect(walk(book, 'next', step, start), pair).toEqual(expected);
+    expect(walk(book, 'previous', step, end), pair).toEqual([...expected].reverse());
+  }
+  const everyModel = [...new Set([...cards.values()].map((card) => editorialMarkFilterModel(card.source)).filter((model) => model !== null))] as string[];
+  expect(everyModel).toContain('AI7');
+  expect(walk(book, 'next', { categories: [], models: everyModel }, start).every((markId) => cards.get(markId)!.source.kind === 'ai7')).toBe(true);
 });
 
 it('refuses a malformed marks page or pending step at the request frame', () => {

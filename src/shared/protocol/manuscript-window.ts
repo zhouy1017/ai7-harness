@@ -68,8 +68,9 @@ export interface ManuscriptWindowAtInput {
  * The paging facts of a window's marks (Issue #1604), the shape #1592 gives a paged list: `shown` marks in this answer, `total`
  * in the window, in the window's reading order; `nextOrdinal` (0-based) is where the next page starts, `null` after the last.
  * `digest` names the window's marks — their identities and order, not their state. The next page is `getManuscriptWindowAt`
- * at the window's first block (`window-start`) with `marks: { afterOrdinal: nextOrdinal, digest }`; a changed digest is
- * refused with `WINDOW_MARKS_CHANGED`, and the window is read again.
+ * at the window's first block (`window-start`) with `marks: { afterOrdinal: nextOrdinal, digest }`. Despite its name,
+ * `afterOrdinal` is the page's first ordinal, inclusive; any ordinal below `total` is accepted (and `0` of an empty window, which
+ * answers an empty page). A changed digest is refused with `WINDOW_MARKS_CHANGED`, and the window is read again from its start.
  */
 export interface ManuscriptMarksPage {
   shown: number;
