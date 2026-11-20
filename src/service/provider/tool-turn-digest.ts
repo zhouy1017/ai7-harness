@@ -17,7 +17,7 @@ import { assistantToolCalls, toolResultOf, type AssembledMessage } from './paylo
 export const TOOL_TURN_DIGEST_SCHEMA = 'ai7.model-fixture.tool-turn/1';
 const IDENTITY_TOKEN = /(?<![A-Za-z0-9_-])(?:blk_[0-9a-f]{24}|[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_-])/gu;
 const PLACEHOLDER_SHAPE = /\{\{[^{}]+\}\}/u;
-const TOOL_ID_PLACEHOLDER =/\{\{tool-id:(\d+)\}\}/gu;
+const TOOL_ID_PLACEHOLDER = /\{\{tool-id:(\d+)\}\}/gu;
 
 export interface ToolExchangeRound {
   readonly calls: ReadonlyArray<{ readonly id: string; readonly name: string; readonly arguments: string }>;

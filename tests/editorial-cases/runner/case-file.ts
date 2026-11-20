@@ -60,7 +60,7 @@ export interface EditorialCase {
    * How the fixture replays: the deterministic route, or the developer-live owner with or without the v14 model-question wrapper.
    * `score-only` (#1074): no fixture exists; the case scores a copy of the developer-live data root its Run was made in.
    */
-  readonly replay: { readonly route: 'deterministic' } | { readonly route: 'developer-live'; readonly modelQuestions: boolean} | { readonly route: 'score-only' };
+  readonly replay: { readonly route: 'deterministic' } | { readonly route: 'developer-live'; readonly modelQuestions: boolean } | { readonly route: 'score-only' };
   readonly expectedConcerns: ReadonlyArray<TextConcern & StructuralConcern>;
   readonly falsePositiveChecks: ReadonlyArray<TextCheck & StructuralConcern>;
   readonly observations: { readonly acceptance: string; readonly rework: string };
