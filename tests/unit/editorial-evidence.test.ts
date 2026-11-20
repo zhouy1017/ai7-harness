@@ -193,11 +193,9 @@ describe('the case set', () => {
       const read = async (id: string) => JSON.parse(await readFile(join(CASES, `${id}.json`), 'utf8')) as Record<string, unknown>;
       const before = await read(`review-${category}-sample1`);
       const after = await read(`review-${category}-sample1-remeasure`);
-      for (const field of ['kind', 'manuscript', 'bookTitle', 'input', 'measuredPass', 'expectedConcerns', 'falsePositiveChecks', 'observations']) {
+      for (const field of ['kind', 'manuscript', 'bookTitle', 'input', 'measuredPass', 'replay', 'expectedConcerns', 'falsePositiveChecks', 'observations']) {
         expect(after[field], `${category}/${field}`).toEqual(before[field]);
       }
-      // The one difference in how it replays: the 2026-11 captures include tool calls, so their replay keeps the platform tools (#1598).
-      expect(after.replay, `${category}/replay`).toEqual({ ...(before.replay as object), platformTools: true });
       expect([after.fixture, after.pass]).toEqual(['sample1-recorded-v2-editorial-quality-review', '2026-11']);
     }
   });

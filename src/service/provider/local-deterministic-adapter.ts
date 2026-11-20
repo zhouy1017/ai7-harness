@@ -592,8 +592,9 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);
-    const exact = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt) ??
-      (exchange !== null && scriptDigest !== null && this.#fixture.provenance === 'authored' ? resolveFixtureEntry(this.#entries, ordinal, scriptDigest, attempt) : undefined);
+    // The older key over the result bytes alone answers authored scripts only: a captured entry found by it is not its answer.
+    const script = exchange !== null && scriptDigest !== null && this.#fixture.provenance === 'authored' ? resolveFixtureEntry(this.#entries, ordinal, scriptDigest, attempt) : undefined;
+    const exact = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt) ?? (script?.capture === undefined ? script : undefined);
     const stage = crossUnit !== null ? 'reduction' : drafting !== null ? 'writing-synthesis' : reflection !== null ? 'reflection' : null;
     const stageContractDigest = crossUnit !== null ? this.#crossUnitPromptContractDigest : drafting !== null ? this.#promptContractDigest : RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
     const compatible = exact === undefined && !hasSynopsisContext && stage !== null && this.#sourceDigest !== null
@@ -622,9 +623,12 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
         if (entry.capture === undefined && this.#fixture.provenance !== 'authored') {
           yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '只接受显式编写的工具脚本。'); return;
         }
+        const filled = response.calls.map((call) => substituteToolIdPlaceholders(substituteBlockPlaceholders(JSON.stringify(call.arguments), ownBlockIdsOf(text!)), exchange?.foreign ?? []));
+        // A placeholder no carried exchange could fill is never handed to the product as if it were an identity.
+        if (filled.some((args) => args.includes('{{tool-id:'))) { yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '夹具响应的工具标识占位符没有对应的工具交换。'); return; }
         for (const [index, call] of response.calls.entries()) {
           const id = `fixture-${this.#served}-${index}` as CallId;
-          const args = substituteToolIdPlaceholders(substituteBlockPlaceholders(JSON.stringify(call.arguments), ownBlockIdsOf(text!)), exchange?.foreign ?? []);
+          const args = filled[index]!;
           yield { type: 'block-start', index, blockType: 'tool-call' };
           yield { type: 'tool-call-delta', index, id, name: call.name, argumentsDelta: args };
           yield { type: 'block-end', index, block: { type: 'tool-call', id, name: call.name, arguments: args } };
@@ -645,6 +649,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
             : crossUnit === null
               ? substituteToolIdPlaceholders(substituteBlockPlaceholders(response.text, ownBlockIdsOf(text!)), exchange?.foreign ?? [])
               : substituteCrossUnitBlockPlaceholders(response.text, parseCrossUnitCitedBlocks(text!));
+        if (replay.includes('{{tool-id:')) { yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '夹具响应的工具标识占位符没有对应的工具交换。'); return; }
         yield { type: 'block-start', index: 0, blockType: 'text' };
         yield { type: 'text-delta', index: 0, text: replay };
         yield { type: 'block-end', index: 0, block: { type: 'text', text: replay } };

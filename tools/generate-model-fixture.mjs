@@ -274,7 +274,7 @@ export function unitContentDigest(ownBlockTexts) {
   return sha256Hex(ownBlockTexts.join('\n'));
 }
 
-// --- Duplicated from src/service/provider/tool-turn-digest.ts (Issue #1598; tests/unit/generate-model-fixture.test.ts checks it) ---
+// --- Duplicated from src/service/provider/tool-turn-digest.ts (Issue #1598; tests/unit/tool-turn-fixtures.test.ts checks it) ---
 const TOOL_TURN_DIGEST_SCHEMA = 'ai7.model-fixture.tool-turn/1';
 const IDENTITY_TOKEN = /(?<![A-Za-z0-9_-])(?:blk_[0-9a-f]{24}|[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_-])/gu;
 
@@ -698,7 +698,8 @@ export async function verifySample1Capture(request, selection, parsed) {
       expected = owners.buildRunReportReflectionMessage(outcome.runRecordId, owners.runReportAccountingOf(outcome.report));
     } else fail();
     if (expected === undefined || expected !== parsed.unitMessage) fail();
-    return true;
+    // The unit message is proved; the tool exchange a continuation carries is not, unless every word of it is sample1's.
+    return parsed.toolResultTexts === undefined || toolResultsAreSample1(parsed.toolResultTexts, sampleBlocks.map((block) => block.text));
   } catch { fail(); } finally { database?.close(); }
 }
 
@@ -1023,15 +1024,53 @@ export function parseCachedRequest(requestBody, promptContractDigest, structured
   if (rounds.length === 0) return base;
   refuse(base.unitOrdinal > 0 && base.ownBlockTexts.length > 0 && base.identities.every(({ placeholder }) => placeholder.startsWith('{{block:')),
     'FIXTURE_GEN/request-shape-unsupported', '工具回合只支持分析单元。');
+  // A placeholder-shaped text in the exchange would hash like an identity renamed in its place, and replay could not tell them apart.
+  refuse(rounds.every((round) => round.calls.every((call) => call.name.match(PLACEHOLDER_SHAPE) === null && call.arguments.match(PLACEHOLDER_SHAPE) === null) &&
+    round.results.every((result) => result.text.match(PLACEHOLDER_SHAPE) === null)),
+  'FIXTURE_GEN/identity-unmapped', '工具交换已含有占位符形式的文字，回放无法与捕获区分。');
   const normalized = normalizeToolExchange(rounds, base.identities.map(({ identity }) => identity));
+  const resultTexts = rounds.flatMap((round) => round.results.map((result) => result.text));
   return {
     ...base,
+    toolResultTexts: resultTexts,
     requestDigest: toolTurnRequestDigest(base.requestDigest, normalized),
     contentDigest: null,
     // What the exchange carried may hold manuscript text and takes part in the echo scan; nothing of it is written to a fixture.
-    carriedBlockTexts: [...base.carriedBlockTexts, ...rounds.flatMap((round) => round.results.map((result) => result.text))],
+    carriedBlockTexts: [...base.carriedBlockTexts, ...resultTexts, ...resultTexts.flatMap(jsonStringLeaves)],
     identities: [...base.identities, ...normalized.foreign.map((identity, index) => ({ placeholder: `{{tool-id:${index + 1}}}`, identity }))],
   };
+}
+
+/**
+ * The decoded string values of a JSON text, or the text itself when it is not JSON: the words a result carries, without the
+ * escapes (a quotation mark, a newline) that would split a quoted passage in its raw form.
+ */
+export function jsonStringLeaves(text) {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return [text]; }
+  const leaves = [];
+  const visit = (node) => {
+    if (typeof node === 'string') leaves.push(node);
+    else if (Array.isArray(node)) node.forEach(visit);
+    else if (node !== null && typeof node === 'object') Object.values(node).forEach(visit);
+  };
+  visit(parsed);
+  return leaves;
+}
+
+const IDENTITY_WHOLE = /^(?:blk_[0-9a-f]{24}|[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/u;
+/** The fixed refusal words the product's local tools answer with (platform-tool-session.ts, retrieval error codes). */
+const PRODUCT_REFUSAL = /^(?:[A-Z][A-Z0-9_]{3,63}|检索未完成.*|本次尝试未准许该工具。|检索参数无效。|检索工具超出并行上限，或重复使用调用标识。|已达到运行预算上限。)$/u;
+
+/**
+ * Whether every word a carried tool result holds is exact sample1's: each string it carries that could be a quotation — at the echo
+ * threshold or longer, not an identity, not a refusal the product writes — is a passage of a proved block. A result of any other text
+ * (a pinned fact of an edited revision, a guideline clause) leaves the turn unproved, so the echo rule decides.
+ */
+export function toolResultsAreSample1(resultTexts, blockTexts) {
+  const blocks = blockTexts.map(collapseWhitespace);
+  return resultTexts.every((text) => jsonStringLeaves(text).every((leaf) => leaf.length < MANUSCRIPT_ECHO_THRESHOLD ||
+    IDENTITY_WHOLE.test(leaf) || PRODUCT_REFUSAL.test(leaf) || blocks.some((block) => block.includes(collapseWhitespace(leaf)))));
 }
 
 /** The assistant tool calls and `tool` results after the last user message, as rounds; every call needs exactly one result. */

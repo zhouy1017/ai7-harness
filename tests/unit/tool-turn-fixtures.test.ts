@@ -2,10 +2,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { canonicalJson } from '../../src/service/analysis/canonical.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { OPENCODE_GO_ROUTE_PROFILE } from '../../src/service/provider/deepseek-adapter.js';
 import { transmitOnce, type LiveModelFetch } from '../../src/service/provider/live-transmission.js';
+import { fixtureToolResultDigest } from '../../src/service/provider/local-deterministic-adapter.js';
 import { fixtureEntryKey, parseModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ProviderResultCache } from '../../src/service/provider/provider-result-cache.js';
 import { normalizeToolExchange, toolTurnRequestDigest, type ToolExchangeRound } from '../../src/service/provider/tool-turn-digest.js';
@@ -35,8 +36,8 @@ const CANDIDATE = 'c'.repeat(64);
 const FRESH_CANDIDATE = 'e'.repeat(64);
 const PREVIEW = '合成检索预览文字：城门在清晨开启。';
 
-const unitMessage = (own: ReadonlyArray<string>, ordinal = 1): string => [
-  BASELINE_PROMPT_CONTRACT.unitMessageHeader.replace('{ordinal}', String(ordinal)).replace('{total}', '3').replace('{unitDigest}', UNIT_DIGEST),
+const unitMessage = (own: ReadonlyArray<string>, ordinal = 1, unitDigest = UNIT_DIGEST): string => [
+  BASELINE_PROMPT_CONTRACT.unitMessageHeader.replace('{ordinal}', String(ordinal)).replace('{total}', '3').replace('{unitDigest}', unitDigest),
   BASELINE_PROMPT_CONTRACT.overlapHeader,
   `[blk_${'0'.repeat(24)}] (paragraph) 合成重叠段落，不属于本单元。`,
   BASELINE_PROMPT_CONTRACT.ownHeader,
@@ -46,10 +47,10 @@ const unitMessage = (own: ReadonlyArray<string>, ordinal = 1): string => [
 interface Round { calls: Array<{ id: string; name: string; arguments: unknown }>; results: string[] }
 
 /** The chat-completions body of one turn: the unit, then each tool round as the product writes it. */
-function wireBody(own: ReadonlyArray<string>, rounds: ReadonlyArray<Round>, ordinal = 1): { model: string; messages: Array<Record<string, unknown>>; stream: boolean } {
+function wireBody(own: ReadonlyArray<string>, rounds: ReadonlyArray<Round>, ordinal = 1, unitDigest = UNIT_DIGEST): { model: string; messages: Array<Record<string, unknown>>; stream: boolean } {
   return { model: MODEL, stream: false, messages: [
     { role: 'system', content: BASELINE_PROMPT_CONTRACT.systemPrompt },
-    { role: 'user', content: unitMessage(own, ordinal) },
+    { role: 'user', content: unitMessage(own, ordinal, unitDigest) },
     ...rounds.flatMap((round) => [
       { role: 'assistant', content: null, reasoning_content: '合成思考。', tool_calls: round.calls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } })) },
       ...round.calls.map((call, index) => ({ role: 'tool', tool_call_id: call.id, content: round.results[index]! })),
@@ -104,12 +105,19 @@ describe('tool-turn fixtures (Issue #1598)', () => {
   });
 
   /** The synthetic exchange of the first test: retrieve, then exact_fetch, then the unit result. */
-  async function recordedFixture(): Promise<ResolvedModelFixture> {
+  async function recordedEntries(): Promise<Array<Record<string, any>>> {
     const first = await convert(wireBody(OWN, []), callsMessage([{ name: 'retrieve', arguments: { query: '合成之城', k: 2, sourceKinds: ['manuscript'], near: OWN[0] } }]));
     const second = await convert(wireBody(OWN, [retrieveRound(OWN, CANDIDATE)]), callsMessage([{ name: 'exact_fetch', arguments: { candidateId: CANDIDATE } }]));
     const third = await convert(wireBody(OWN, [retrieveRound(OWN, CANDIDATE), fetchRound(CANDIDATE)]), { role: 'assistant', content: UNIT_RESULT(CANDIDATE) });
-    return replayOf(parseModelFixture({ schema: 'ai7.model-fixture/1', identity: 'tool-turn-synthetic', description: '合成', basedOn: null,
-      provider: 'ai7-local-deterministic', model: 'ai7-deterministic-fixture', entries: [first, second, third] }));
+    return [first, second, third];
+  }
+  const sealed = (entries: ReadonlyArray<Record<string, any>>): ReturnType<typeof parseModelFixture> => parseModelFixture({ schema: 'ai7.model-fixture/1', identity: 'tool-turn-synthetic', description: '合成', basedOn: null,
+    provider: 'ai7-local-deterministic', model: 'ai7-deterministic-fixture', entries });
+  /** An entry's response replaced, its capture re-sealed over the new bytes as a hand edit would. */
+  const edited = (entry: Record<string, any>, response: unknown, capture: Record<string, unknown> = {}): Record<string, any> =>
+    ({ ...entry, response, capture: { ...entry.capture, ...capture, fixtureResponseDigest: sha256Hex(canonicalJson(response)) } });
+  async function recordedFixture(): Promise<ResolvedModelFixture> {
+    return replayOf(sealed(await recordedEntries()));
   }
 
   const ask = async (fixture: ResolvedModelFixture, body: object): Promise<{ status: number; message: Record<string, any> | null }> => {
@@ -157,6 +165,8 @@ describe('tool-turn fixtures (Issue #1598)', () => {
     for (const round of [changedArgument, changedTool, changedResult]) expect((await carried(round)).status).toBe(500);
     // The same exchange under another unit of the Run answers nothing: the key is bound to the unit's request.
     expect((await ask(fixture, wireBody(FRESH_OWN, [retrieveRound(FRESH_OWN, FRESH_CANDIDATE)], 2))).status).toBe(500);
+    // Nor does it under the same ordinal and another unit digest: the exchange key carries the unit's request digest itself.
+    expect((await ask(fixture, wireBody(FRESH_OWN, [retrieveRound(FRESH_OWN, FRESH_CANDIDATE)], 1, 'b'.repeat(64)))).status).toBe(500);
   });
 
   it('refuses a result that echoes manuscript text carried only in a tool result, and an identity no request named', async () => {
@@ -172,6 +182,69 @@ describe('tool-turn fixtures (Issue #1598)', () => {
     expect(await refused(callsMessage([{ name: 'retrieve', arguments: { query: PREVIEW.slice(0, 14) } }]))).toMatchObject({ code: 'FIXTURE_GEN/manuscript-echo' });
     expect(await refused(callsMessage([{ name: 'read_blocks', arguments: { blockId: `blk_${'9'.repeat(24)}`, radius: 0 } }]))).toMatchObject({ code: 'FIXTURE_GEN/identity-unmapped' });
     expect(await refused(callsMessage([{ name: 'exact_fetch', arguments: { candidateId: 'f'.repeat(64) } }]))).toMatchObject({ code: 'FIXTURE_GEN/identity-unmapped' });
+  });
+
+  const fresh = async (): Promise<void> => {
+    await rm(root, { recursive: true, force: true });
+    root = await mkdtemp(join(tmpdir(), 'ai7-tool-turn-'));
+    captured = 0;
+  };
+
+  it('reads the result as its decoded strings, so an escaped quotation mark or newline cannot split a quoted passage', async () => {
+    const passage = '城门"在"清晨"开"启，守"卫查"验行"人旅"客通"过合"成\n之后"才"闭"合。';
+    const exchange = [retrieveRound(OWN, CANDIDATE, passage)];
+    const refused = async (message: Record<string, unknown>): Promise<unknown> => { await fresh(); return convert(wireBody(OWN, exchange), message).catch((error: unknown) => error); };
+    expect(await refused({ role: 'assistant', content: UNIT_RESULT(CANDIDATE, passage) })).toMatchObject({ code: 'FIXTURE_GEN/manuscript-echo' });
+    expect(await refused(callsMessage([{ name: 'retrieve', arguments: { query: passage } }]))).toMatchObject({ code: 'FIXTURE_GEN/manuscript-echo' });
+  });
+
+  it('refuses a placeholder-shaped text in the carried exchange, and reads such an exchange as unreadable on replay', async () => {
+    const shaped = await convert(wireBody(OWN, [retrieveRound(OWN, CANDIDATE, '{{tool-id:1}}')]), { role: 'assistant', content: UNIT_RESULT(CANDIDATE) }).catch((error: unknown) => error);
+    expect(shaped).toMatchObject({ code: 'FIXTURE_GEN/identity-unmapped' });
+    await fresh();
+    const fixture = await recordedFixture();
+    expect((await ask(fixture, wireBody(FRESH_OWN, [retrieveRound(FRESH_OWN, FRESH_CANDIDATE)]))).status).toBe(200);
+    expect((await ask(fixture, wireBody(FRESH_OWN, [retrieveRound(FRESH_OWN, FRESH_CANDIDATE, '{{tool-id:1}}')]))).status).toBe(500);
+  });
+
+  it('admits a tool identity only on a continuation, and never hands the product a placeholder it could not fill', async () => {
+    const [first, second, third] = await recordedEntries();
+    const withIdentity = { kind: 'tool-calls', calls: [{ name: 'retrieve', arguments: { near: '{{block:1}}', query: '{{tool-id:1}}' } }], usage: first!.response.usage };
+    const map = [...first!.capture.identityMap, { placeholder: '{{tool-id:1}}', identity: CANDIDATE }];
+    // On a first answer, or on a plain unit answer, the placeholder has no exchange to be filled from: the loader refuses it.
+    expect(() => sealed([edited(first!, withIdentity, { identityMap: map })])).toThrowError();
+    expect(() => sealed([edited(third!, { ...third!.response, text: UNIT_RESULT('{{tool-id:1}}') }, { identityMap: [{ placeholder: '{{tool-id:1}}', identity: CANDIDATE }], validation: { ...third!.capture.validation, step: 'first-baseline/unit-1' } })])).toThrowError();
+    expect(() => sealed([edited(second!, second!.response)])).not.toThrowError();
+    // A resolved entry that carries one anyway (built by hand, past the loader) is answered as a mismatch, not with the literal placeholder.
+    const stray = replayOf(sealed([first!]));
+    const [entry] = [...stray.entries.values()];
+    const hand = { ...stray, entries: new Map([[fixtureEntryKey(entry!.unitOrdinal, entry!.requestDigest, null), { ...entry!, response: withIdentity }]]) } as ResolvedModelFixture;
+    expect((await ask(hand, wireBody(FRESH_OWN, []))).status).toBe(500);
+  });
+
+  it('refuses a captured tool-call answer for a subject no continuation can follow', async () => {
+    const [first] = await recordedEntries();
+    const calls = { kind: 'tool-calls', calls: [{ name: 'retrieve', arguments: { query: '甲' } }], usage: first!.response.usage };
+    expect(() => sealed([{ ...edited(first!, calls, { subject: 'reduction', identityMap: [] }), unitOrdinal: 0 }])).toThrowError(/没有可匹配的后续回合/u);
+  });
+
+  it('answers a captured entry only by its exchange key, never by the older key over result bytes alone', async () => {
+    const [, second] = await recordedEntries();
+    const old = fixtureToolResultDigest([{ text: retrieveRound(OWN, CANDIDATE).results[0]!, isError: false }]);
+    const legacy = replayOf(sealed([{ ...second!, requestDigest: old }]));
+    const hand = { ...legacy, provenance: 'authored' } as ResolvedModelFixture;
+    expect((await ask(hand, wireBody(OWN, [retrieveRound(OWN, CANDIDATE)]))).status).toBe(500);
+  });
+
+  it('replays from the first turn again after the exchange was cut short, on the same transport', async () => {
+    const fixture = await recordedFixture();
+    const transport = replayTransport([fixture], { answered: 0, unmatched: 0, answeredContracts: new Set() });
+    const turn = async (rounds: Round[]): Promise<number> => (await transport('x', { method: 'POST', body: JSON.stringify(wireBody(FRESH_OWN, rounds)) })).status;
+    expect(await turn([])).toBe(200);
+    expect(await turn([retrieveRound(FRESH_OWN, FRESH_CANDIDATE)])).toBe(200);
+    // The run is cancelled here and started again: nothing was kept between requests, so the first turn answers as before.
+    expect(await turn([])).toBe(200);
+    expect(await turn([retrieveRound(FRESH_OWN, FRESH_CANDIDATE), fetchRound(FRESH_CANDIDATE)])).toBe(200);
   });
 
   it('renames identity churn and nothing else in the exchange digest, in the product and in the tool', () => {
@@ -206,6 +279,23 @@ describe('tool-turn fixtures (Issue #1598)', () => {
     const [ordered] = tie(false);
     const inverted: ToolExchangeRound[] = [{ ...ordered!, results: [{ ...ordered!.results[0]!, text: JSON.stringify(JSON.parse(ordered!.results[0]!.text).reverse()) }] }];
     expect(digest(inverted)).not.toBe(digest(tie(false)));
+    // Every kind of identity the key renames — a uuid source, a block that is not the unit's, a candidate — across two rounds and a refusal text.
+    const rich = (own: ReadonlyArray<string>, uuid: string, other: string, candidate: string): ToolExchangeRound[] => [
+      { calls: [{ id: 'p', name: 'retrieve', arguments: JSON.stringify({ query: '合成', k: 2 }) }],
+        results: [{ callId: 'p', text: JSON.stringify([{ sourceId: uuid, candidateId: candidate, anchor: { blockId: other }, score: 0.5, preview: PREVIEW }, { sourceId: uuid, candidateId: 'f'.repeat(64), anchor: { blockId: own[0] }, score: 0.4, preview: '丙' }]), isError: false }] },
+      { calls: [{ id: 'q', name: 'exact_fetch', arguments: JSON.stringify({ candidateId: candidate }) }, { id: 'r', name: 'read_blocks', arguments: JSON.stringify({ blockId: other, radius: 0 }) }],
+        results: [{ callId: 'q', text: 'RETRIEVAL_SOURCE_NOT_AUTHORIZED', isError: false }, { callId: 'r', text: '检索未完成', isError: false }] },
+    ];
+    const richFirst = rich(OWN, '11111111-1111-4111-8111-111111111111', `blk_${'5'.repeat(24)}`, CANDIDATE);
+    const richSecond = rich(FRESH_OWN, '22222222-2222-4222-8222-222222222222', `blk_${'6'.repeat(24)}`, FRESH_CANDIDATE);
+    // Each kind of identity is churn (one digest across two imports) in the product and in the tool alike.
+    expect(digest(richSecond, FRESH_OWN)).toBe(digest(richFirst));
+    const viaTool = (exchange: ToolExchangeRound[], own: ReadonlyArray<string>): string => tool.toolTurnRequestDigest('b'.repeat(64), tool.normalizeToolExchange(exchange, own));
+    expect(viaTool(richSecond, FRESH_OWN)).toBe(viaTool(richFirst, OWN));
+    expect(viaTool(richFirst, OWN)).toBe(digest(richFirst));
+    // The second round is part of the key, and so are the words of a refusal.
+    expect(digest(richFirst.slice(0, 1))).not.toBe(digest(richFirst));
+    expect(digest([richFirst[0]!, { ...richFirst[1]!, results: [{ ...richFirst[1]!.results[0]!, text: 'RETRIEVAL_SOURCE_MOVED' }, richFirst[1]!.results[1]!] }])).not.toBe(digest(richFirst));
     // The tool keeps its own copy of the function; the two agree on every vector above.
     for (const exchange of [rounds(OWN, CANDIDATE), rounds(FRESH_OWN, FRESH_CANDIDATE), twoCalls(true), tie(true)]) {
       expect(tool.toolTurnRequestDigest('b'.repeat(64), tool.normalizeToolExchange(exchange, OWN))).toBe(digest(exchange, OWN));

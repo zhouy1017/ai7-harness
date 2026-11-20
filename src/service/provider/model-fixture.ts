@@ -451,12 +451,16 @@ export function parseModelFixture(value: unknown): ModelFixture {
       '夹具条目的任务与阶段契约不一致。');
       requireFixture(unitSubject ? (entry.unitOrdinal as number) > 0 : entry.unitOrdinal === 0, '夹具条目的捕获契约序号不一致。');
       requireFixture(capture.subject === 'dialogue' ? response.kind !== 'unit-result' : response.kind !== 'answer-chunks', '夹具条目的捕获响应契约不一致。');
+      // A tool identity can be filled only from the exchange a continuation carries, and a continuation is found only under a unit;
+      // the capture's step names the continuations.
+      const continuation = unitSubject && /\/tool-turn-[1-9][0-9]*$/u.test(capture.validation?.step ?? '');
+      requireFixture(response.kind !== 'tool-calls' || (entry.unitOrdinal as number) > 0, '夹具条目的工具调用响应没有可匹配的后续回合。');
       const serializedResponse = JSON.stringify(response);
       const placeholders = serializedResponse.match(/\{\{[^{}]+\}\}/gu) ?? [];
       requireFixture(!/blk_[0-9a-f]{24}/u.test(serializedResponse) && placeholders.every((placeholder) =>
         capture.identityMap.some((mapping) => mapping.placeholder === placeholder)), '夹具条目的响应标识未经映射。');
       requireFixture(capture.identityMap.every((mapping) => serializedResponse.includes(mapping.placeholder) &&
-        (unitSubject ? /^\{\{(?:block|tool-id):/u.test(mapping.placeholder)
+        (unitSubject ? /^\{\{block:/u.test(mapping.placeholder) || (continuation && /^\{\{tool-id:/u.test(mapping.placeholder))
           : capture.subject === 'reduction' ? /^\{\{unit:/u.test(mapping.placeholder)
             : capture.subject === 'sampling' && /^\{\{(?:ref|sample-block):/u.test(mapping.placeholder))), '夹具条目的标识映射与捕获契约不一致。');
     }

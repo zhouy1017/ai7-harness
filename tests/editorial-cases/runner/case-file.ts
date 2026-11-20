@@ -58,11 +58,9 @@ export interface EditorialCase {
   readonly pass?: string;
   /**
    * How the fixture replays: the deterministic route, or the developer-live owner with or without the v14 model-question wrapper.
-   * `platformTools` (#1598): the replay keeps the launch policy's platform tools, so a capture whose model called them replays its tool turns;
-   * without it a historical capture replays with none.
    * `score-only` (#1074): no fixture exists; the case scores a copy of the developer-live data root its Run was made in.
    */
-  readonly replay: { readonly route: 'deterministic' } | { readonly route: 'developer-live'; readonly modelQuestions: boolean; readonly platformTools?: true } | { readonly route: 'score-only' };
+  readonly replay: { readonly route: 'deterministic' } | { readonly route: 'developer-live'; readonly modelQuestions: boolean} | { readonly route: 'score-only' };
   readonly expectedConcerns: ReadonlyArray<TextConcern & StructuralConcern>;
   readonly falsePositiveChecks: ReadonlyArray<TextCheck & StructuralConcern>;
   readonly observations: { readonly acceptance: string; readonly rework: string };
@@ -94,7 +92,7 @@ export function validateCase(value: unknown, fileId: string): EditorialCase {
   require(isRecord(value.input), id, 'input');
   const replay = value.replay;
   require(isRecord(replay) && (replay.route === 'deterministic' || replay.route === 'score-only' ||
-    (replay.route === 'developer-live' && typeof replay.modelQuestions === 'boolean' && (replay.platformTools === undefined || replay.platformTools === true))), id, 'replay');
+    (replay.route === 'developer-live' && typeof replay.modelQuestions === 'boolean')), id, 'replay');
   const scoreOnly = replay.route === 'score-only';
   // A score-only case is a review of one of the four ADR 0091 books over a chapter range, and nothing else is score-only.
   require(scoreOnly === (manuscript.source === 'public-samplebook'), id, 'replay');

@@ -12,11 +12,12 @@ import { assistantToolCalls, toolResultOf, type AssembledMessage } from './paylo
  * same key and the rename hides identity churn and nothing else. One order is also churn: retrieval breaks a tie in score by candidate
  * identity, so two candidates of equal score swap places between imports; a result that is a list of scored entries is read in
  * (score, identity-free content) order before the rename, and no other result is touched. `tools/generate-model-fixture.mjs` carries a copy of this
- * function; tests/unit/generate-model-fixture.test.ts checks that the two agree.
+ * function; tests/unit/tool-turn-fixtures.test.ts checks that the two agree.
  */
 export const TOOL_TURN_DIGEST_SCHEMA = 'ai7.model-fixture.tool-turn/1';
 const IDENTITY_TOKEN = /(?<![A-Za-z0-9_-])(?:blk_[0-9a-f]{24}|[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_-])/gu;
-const TOOL_ID_PLACEHOLDER = /\{\{tool-id:(\d+)\}\}/gu;
+const PLACEHOLDER_SHAPE = /\{\{[^{}]+\}\}/u;
+const TOOL_ID_PLACEHOLDER =/\{\{tool-id:(\d+)\}\}/gu;
 
 export interface ToolExchangeRound {
   readonly calls: ReadonlyArray<{ readonly id: string; readonly name: string; readonly arguments: string }>;
@@ -39,7 +40,9 @@ export function toolExchangeOf(messages: ReadonlyArray<AssembledMessage>, origin
   }
   const complete = rounds.length > 0 && rounds.every((round) => round.results.length === round.calls.length &&
     round.calls.every((call) => round.results.filter((result) => result.callId === call.id).length === 1));
-  return complete ? rounds : null;
+  // A placeholder-shaped text would hash like an identity renamed in its place, so such an exchange is not one this key reads.
+  const shaped = (text: string): boolean => PLACEHOLDER_SHAPE.test(text);
+  return complete && !rounds.some((round) => round.calls.some((call) => shaped(call.name) || shaped(call.arguments)) || round.results.some((result) => shaped(result.text))) ? rounds : null;
 }
 
 /** A scored list with each run of equal scores in identity-free content order: only tied candidates can move. Any other text is returned as it is. */

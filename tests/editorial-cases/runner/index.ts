@@ -77,13 +77,11 @@ export interface RunCaseRequest {
 function replayPolicy(policy: LaunchPolicyProjection, testCase: EditorialCase): LaunchPolicyProjection {
   if (testCase.replay.route !== 'developer-live') return policy;
   const modelQuestions = testCase.replay.modelQuestions;
-  const platformTools = testCase.replay.platformTools === true;
   const kinds = testCase.kind === 'initial-evaluation' ? ['evaluation'] : testCase.kind === 'readers-report' ? ['evaluation', 'readers-report']
     : testCase.kind === 'writing-draft' ? ['writing']
       : (testCase.input.categories as ReadonlyArray<string> | undefined)?.map((category) => `editorial-review/${category}`) ?? [];
   return kinds.reduce((current, kind) => withRuleFor(current, kind, {
-    webSearchToolAllowed: false,
-    ...(platformTools ? {} : { platformTools: null }),
+    webSearchToolAllowed: false, platformTools: null,
     ...(modelQuestions ? {} : { clarificationQuestionAllowed: false, clarificationTimeoutHours: null }),
   }), policy);
 }
