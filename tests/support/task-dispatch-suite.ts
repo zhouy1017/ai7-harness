@@ -30,6 +30,9 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { WRITING_FIXTURE_IDENTITY, WRITING_REQUEST } from '../support/writing-task.js';
 import { READERS_REPORT_FIXTURE_IDENTITY } from '../support/readers-report.js';
 
+// The cases of the former tests/service/task-dispatch-launch.test.ts, moved verbatim (#1621) so that the callers in
+// tests/service/task-dispatch-*.test.ts can run its subjects as files of their own.
+export function taskDispatchSuite(): void {
 // D4: the six ordinary drawer starts use real stores and SampleBook input. No task is dispatched to a provider here.
 const KINDS = ['baseline-analysis', 'custom-analysis', 'writing', 'initial-evaluation', 'readers-report', 'evaluation-rewrite'] as const;
 type Kind = typeof KINDS[number];
@@ -1039,3 +1042,4 @@ describe.each([...KINDS.map(kind => ({ kind, references: 'none' })),
     } finally { db.close(); }
   });
 });
+}
