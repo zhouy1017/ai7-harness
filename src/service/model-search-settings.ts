@@ -14,12 +14,22 @@ import {
   MODEL_SERVICE_CONNECTION_IDS,
   MODEL_SERVICE_ROUTE_BINDINGS,
   MODEL_SERVICE_ROUTES,
+  MODEL_ROLE_IDS,
+  MODEL_ROLE_LABELS,
+  MODEL_ROLE_SOURCE_LABELS,
+  modelRoleIdOf,
   modelServiceChannelOf,
   modelServiceModels,
+  modelServiceRouteRefusal,
   modelServiceRuntimeBinding,
+  modelTierOf,
   validModelServiceModelId,
   type ModelConnectionTestStatus,
+  type LegacyModelRoleId,
   type ModelCredentialOperationState,
+  type ModelRoleId,
+  type ModelRoleResolutionProjection,
+  type ModelRoleSource,
   type ModelServiceConnectionProjection,
   type ModelServiceRouteId,
 } from '../shared/protocol.js';
@@ -165,14 +175,12 @@ export function saveModelServiceConnection(host: ModelSearchSettingsHost, connec
       let credentialReference = credentialReferenceInput ?? randomUUID();
       while (DEVELOPMENT_CREDENTIAL_REFERENCES.has(credentialReference)) credentialReference = randomUUID();
       const anySelected = host.authority.prepare('SELECT 1 FROM model_service_connections WHERE selected = 1').get() !== undefined;
+      // No Flash model is chosen with the first key (Issue #1620): the Flash roles follow 前台 Pro until the editor picks one.
       host.authority.prepare(
           `INSERT INTO model_service_connections(${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_model_id)
            VALUES (?, 'main-editorial', ?, ?, ?, 1, 1, '[]', ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(target.connectionId, connectionName, target.binding.providerId, target.binding.modelId, target.binding.credentialSlot,
         credentialReference, credentialOperationState, now, now, now, anySelected ? null : 1, target.binding.modelId);
-      if (host.authority.prepare('SELECT 1 FROM model_service_connections WHERE fast_selected = 1').get() === undefined) {
-        host.authority.prepare('UPDATE model_service_connections SET fast_selected = 1 WHERE connection_id = ?').run(target.connectionId);
-      }
     } else {
       requireStore(
         host.authority.prepare(
@@ -225,34 +233,67 @@ export function selectModelServiceRoute(host: ModelSearchSettingsHost, route: Mo
   return host.getModelServiceRouteConnection(route)!;
 }
 
-export function getConfiguredModelRoleBinding(host: ModelSearchSettingsHost, role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig = {}): ConfiguredProviderBinding | null {
+/** A role's effective model under the cascade of Issue #1620, and where it comes from. */
+export interface ResolvedModelRole {
+  readonly roleId: ModelRoleId;
+  readonly source: ModelRoleSource;
+  readonly connection: ModelServiceConnectionProjection | null;
+  readonly model: import('../shared/protocol.js').ModelServiceBindingProjection | null;
+  readonly binding: ConfiguredProviderBinding | null;
+}
+
+/**
+ * Resolve a role (ADR 0107 §1; Issue #1620). Pro roles take the Pro tier (the main column group). Flash roles take the Flash
+ * tier (the fast group) when a Flash model is chosen and its channel's key is ready, and otherwise follow 前台 Pro, keeping the
+ * stored Flash choice. A per-Task choice names its connection and is used as it is. A missing key never falls back to another
+ * channel, and a model no runtime record serves resolves to no binding.
+ */
+export function resolveModelRole(host: ModelSearchSettingsHost, role: ModelRoleId | LegacyModelRoleId, override: RuntimeExecutionConfig = {}): ResolvedModelRole {
+  const roleId = modelRoleIdOf(role)!;
+  const flash = modelTierOf(roleId) === 'flash';
   const connections = host.getModelServiceConnections();
-  const chosen = connections.find((connection) => role === 'main-editorial' ? connection.selected : connection.fastSelected);
-  const connection = override.modelConnectionId === undefined
-    ? chosen ?? connections.find((candidate) => candidate.binding.providerId === 'opencode-go' && candidate.credentialOperationState === 'ready')
-    : connections.find((candidate) => candidate.connectionId === override.modelConnectionId);
-  if (connection === undefined || connection.credentialOperationState !== 'ready') return null;
+  const pro = connections.find((connection) => connection.selected) ??
+    connections.find((candidate) => candidate.binding.providerId === 'opencode-go' && candidate.credentialOperationState === 'ready');
+  const chosenFlash = connections.find((connection) => connection.fastSelected);
+  const source: ModelRoleSource = !flash ? 'pro-tier' : chosenFlash?.credentialOperationState === 'ready' ? 'flash-tier'
+    : chosenFlash === undefined ? 'follows-foreground-pro' : 'flash-unavailable-follows-foreground-pro';
+  const perTask = override.modelConnectionId !== undefined;
+  const connection = perTask ? connections.find((candidate) => candidate.connectionId === override.modelConnectionId)
+    : source === 'flash-tier' ? chosenFlash : pro;
   // The channel's model takes its reviewed runtime record: the configured route (a Zen model's own Zen route), endpoint and slot.
-  const selectedBinding = role === 'fast-interaction' ? connection.fastBinding ?? connection.binding : connection.binding;
-  const execution = resolveRuntimeExecutionConfig({ modelConnectionId: connection.connectionId, modelId: selectedBinding.modelId,
-    ...(selectedBinding.reasoningEffort === undefined ? {} : { reasoningEffort: selectedBinding.reasoningEffort }) }, override);
-  const record = modelServiceRuntimeBinding(selectedBinding.providerId, execution.modelId!, role === 'fast-interaction' ? 'fast' : 'main');
-  if (record === undefined) return null;
+  const model = connection === undefined ? null
+    : flash && (perTask || source === 'flash-tier') ? connection.fastBinding ?? connection.binding : connection.binding;
+  const resolved = { roleId, source, connection: connection ?? null, model };
+  if (connection === undefined || model === null || connection.credentialOperationState !== 'ready') return { ...resolved, binding: null };
+  const execution = resolveRuntimeExecutionConfig({ modelConnectionId: connection.connectionId, modelId: model.modelId,
+    ...(model.reasoningEffort === undefined ? {} : { reasoningEffort: model.reasoningEffort }) }, override);
+  const record = modelServiceRuntimeBinding(model.providerId, execution.modelId!, flash ? 'fast' : 'main');
+  if (record === undefined) return { ...resolved, binding: null };
   const binding = { route: record.route, model: record.model, credentialSlot: record.credentialSlot, credentialReference: connection.credentialReference, endpoint: record.endpoint,
     ...(execution.reasoningEffort === undefined ? {} : { reasoningEffort: execution.reasoningEffort }) };
-  return (role === 'fast-interaction' ? allowedProductionBindingOf(binding, 'fast-interaction') : allowedProductionBindingOf(binding)) === null ? null : binding;
+  return { ...resolved, binding: (flash ? allowedProductionBindingOf(binding, 'fast-interaction') : allowedProductionBindingOf(binding)) === null ? null : binding };
 }
 
-export function selectFastRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
-  host.selectRoleModel(route, modelId, 'fast', reasoningEffort);
+/** The binding a role's Tasks take; the legacy ids still name the roles they always did (ADR 0107 §1 aliases). */
+export function getConfiguredModelRoleBinding(host: ModelSearchSettingsHost, role: ModelRoleId | LegacyModelRoleId, override: RuntimeExecutionConfig = {}): ConfiguredProviderBinding | null {
+  return resolveModelRole(host, role, override).binding;
 }
 
-export function selectMainRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
-  host.selectRoleModel(route, modelId, 'main', reasoningEffort);
+/** The four roles as 设置 › 模型服务 lists them (Issue #1620). */
+export function getModelRoles(host: ModelSearchSettingsHost): ModelRoleResolutionProjection[] {
+  return MODEL_ROLE_IDS.map((roleId) => {
+    const role = resolveModelRole(host, roleId);
+    const state = role.connection?.credentialOperationState;
+    const status = state === 'ready' ? 'available' : state === 'needs-attention' ? 'needs-attention' : 'setup-required';
+    return { roleId, ...MODEL_ROLE_LABELS[roleId], tier: modelTierOf(roleId), source: role.source, sourceLabel: MODEL_ROLE_SOURCE_LABELS[role.source],
+      binding: role.model, status, statusLabel: status === 'available' ? '可用' : status === 'needs-attention' ? '需处理' : '需设置' };
+  });
 }
 
-export function selectBothRoleModels(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, reasoningEffort?: string, fastReasoningEffort?: string): void {
-  host.selectRoleModel(route, modelId, 'both', reasoningEffort, fastReasoningEffort);
+/** Clear the Flash model (Issue #1620): the Flash roles follow 前台 Pro again. */
+export function clearFlashModel(host: ModelSearchSettingsHost): void {
+  host.assertAvailable();
+  host.authority.prepare('UPDATE model_service_connections SET fast_selected = NULL, updated_at = ? WHERE fast_selected = 1').run(new Date().toISOString());
 }
 
 export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string): void {
@@ -260,6 +301,7 @@ export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServi
   requireStore(fastReasoningEffort === undefined || validReasoningEffort(fastReasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
   const connection = host.getModelServiceRouteConnection(route);
   const roles = role === 'both' ? ['main', 'fast'] as const : [role];
+  requireStore(roles.every((item) => modelServiceRouteRefusal(route, modelId, item) === null), 'MODEL_ROUTE_NOT_SERVED', modelServiceRouteRefusal(route, modelId) ?? '');
   requireStore(roles.every((item) => modelServiceRuntimeBinding(route, modelId, item) !== undefined), 'MODEL_CAPABILITY_UNSUPPORTED', '模型 ID 无效或渠道未准入。');
   requireStore(connection !== null && connection.credentialOperationState === 'ready', 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '请先保护并保存凭据。');
   host.transaction(host.authority, () => {

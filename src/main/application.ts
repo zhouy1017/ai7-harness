@@ -10,6 +10,7 @@ import { registerEvaluationHandlers } from './evaluation-handlers.js';
 import { createFilePickers } from './file-pickers.js';
 import { randomUUID } from 'node:crypto';
 import { registerModelConnectionTestHandler } from './model-connection-test-handler.js';
+import { MODEL_SELECTION_OPERATIONS, modelServiceSettingsProjection } from './model-service-settings-projection.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, resolve } from 'node:path';
 import {
@@ -61,15 +62,9 @@ import {
   type ImportDraftRecoveryProjection,
   type ImportCommitProjection,
   type ModelServiceSettingsProjection,
-  modelServiceModels,
   type ModelServiceConnectionProjection,
   type ModelServiceCredentialInput,
   type ModelServiceRouteId,
-  type ModelServiceUnsupportedProviderProjection,
-  type ModelRoleStatus,
-  type ModelRoleStatusLabel,
-  MODEL_SERVICE_ROUTE_BINDINGS,
-  MODEL_SERVICE_ROUTE_EFFECT_LABEL,
   MODEL_SERVICE_ROUTES,
   type PickerReselectResult,
   type PickerStageResult,
@@ -84,7 +79,6 @@ import {
 } from '../shared/protocol.js';
 import { CrashRecords, crashHook, installCrashHooks } from './crash-records.js';
 import { DIAGNOSTICS_CHANNELS, writeDiagnosticsBundle } from './diagnostics.js';
-import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
 import { journeyClose, journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import {
   DATA_VERSION_STARTUP_CLOSE,
@@ -205,7 +199,8 @@ export function registerRendererHandlers(
   saveModelServiceProxy: (input: ServiceOperationMap['saveModelServiceProxy']['input']) => Promise<ModelServiceSettingsProjection>,
   saveModelServiceCredential: (input: ModelServiceCredentialInput) => Promise<ModelServiceSettingsProjection>,
   removeModelServiceCredential: (input?: { route: ModelServiceRouteId }) => Promise<ModelServiceSettingsProjection>,
-  modelOps: Pick<RendererApi, 'selectFastRoleModel' | 'selectMainRoleModel' | 'selectBothRoleModels' | 'refreshModelServiceModels'> & {
+  modelOps: Pick<RendererApi, 'refreshModelServiceModels'> & {
+    select(op: (typeof MODEL_SELECTION_OPERATIONS)[number], input: unknown): Promise<ModelServiceSettingsProjection>;
     startConnectionTest(input: Parameters<RendererApi['testModelServiceConnection']>[0]): Promise<unknown>;
     connectionTestSettings(): Promise<ModelServiceSettingsProjection>;
   },
@@ -1970,10 +1965,10 @@ export function registerRendererHandlers(
       return serializeEffect(() => saveModelServiceProxy(input));
     }),
   );
-  for (const op of ['selectFastRoleModel', 'selectMainRoleModel', 'selectBothRoleModels'] as const) {
-    ipcMain.handle(IPC_CHANNELS[op], (event, input: Parameters<RendererApi[typeof op]>[0]) => envelope(async () => {
+  for (const op of MODEL_SELECTION_OPERATIONS) {
+    ipcMain.handle(IPC_CHANNELS[op], (event, input: unknown) => envelope(async () => {
       requireSender(event); requireAuthority();
-      return serializeEffect(() => modelOps[op](input));
+      return serializeEffect(() => modelOps.select(op, input ?? {}));
     }));
   }
   ipcMain.handle(IPC_CHANNELS.refreshModelServiceModels, (event, input: { route: ModelServiceRouteId }) => envelope(async () => {
@@ -4280,112 +4275,9 @@ export async function runApplication(): Promise<void> {
     const settingsProjection = async (): Promise<ModelServiceSettingsProjection> => {
       const state = await service!.call('getModelServiceStoredState', {});
       const connections = await Promise.all(state.connections.map(confirmedConnection));
-      const connectionOf = (route: ModelServiceRouteId): ModelServiceConnectionProjection | null =>
-        connections.find((connection) => connection.binding.providerId === route) ?? null;
-      const statusOf = (connection: ModelServiceConnectionProjection | null): ModelRoleStatus => protectedSecretStore === undefined
-        ? 'unavailable'
-        : connection === null || connection.credentialOperationState === 'missing'
-          ? 'setup-required'
-          : connection.credentialOperationState === 'ready' ? 'available' : 'needs-attention';
-      const labelOf = (status: ModelRoleStatus): ModelRoleStatusLabel => status === 'available' ? '可用'
-        : status === 'setup-required' ? '需设置' : status === 'needs-attention' ? '需处理' : '不可用';
-      // The route new Tasks use (Issue #811): the editor's choice, else the default Go route once its credential is ready.
-      const selected = connections.find((connection) => connection.selected) ?? null;
-      const inUseRoute: ModelServiceRouteId | null = selected?.binding.providerId ??
-        (connectionOf('opencode-go')?.credentialOperationState === 'ready' ? 'opencode-go' : null);
-      const connection = inUseRoute === null ? null : connectionOf(inUseRoute);
-      const mainStatus = statusOf(connection);
-      const mainStatusLabel = labelOf(mainStatus);
-      const mainBinding = connection?.binding ?? MODEL_SERVICE_ROUTE_BINDINGS[inUseRoute ?? 'opencode-go'];
-      const fastConnection = connections.find((candidate) => candidate.fastSelected) ?? connectionOf('opencode-go');
-      const fastStatus = statusOf(fastConnection);
-      const fastBinding = fastConnection?.fastBinding ?? fastConnection?.binding ?? null;
-      const mainStatusDetail = protectedSecretStore === undefined
-        ? '当前操作系统安全凭据库不可用；未启用替代存储。'
-        : mainStatus === 'available'
-          ? '连接名称与凭据已由操作系统安全凭据库保护。'
-          : mainStatus === 'needs-attention'
-            ? '凭据状态无法确认；请重新输入或移除。'
-            : '请输入连接名称与凭据。';
-      const unconfigured = (
-        roleId: 'fast-interaction' | 'difficult-escalation' | 'frontier',
-        roleLabel: '快速交互角色' | '疑难升级角色' | '前沿模型角色',
-        purposeLabel: string,
-      ) => ({
-        roleId,
-        roleLabel,
-        purposeLabel,
-        status: 'setup-required' as const,
-        statusLabel: '需设置' as const,
-        statusDetail: '当前版本未配置此角色的模型服务绑定。',
-        binding: null,
-        connection: null,
-      });
-      // Under ordinary-production the Fast Interaction Role takes the one route the editor chose, as the main role does.
-      const fastInteraction = fastConnection !== null
-        ? {
-            roleId: 'fast-interaction' as const,
-            roleLabel: '快速交互角色' as const,
-            purposeLabel: '快速交互与低风险候选生成',
-            status: fastStatus,
-            statusLabel: labelOf(fastStatus),
-            statusDetail: '独立保存快速交互模型；主编辑角色的切换不会改变此选择。',
-            binding: fastBinding,
-            connection: fastConnection,
-          }
-        : unconfigured('fast-interaction', '快速交互角色', '快速交互与低风险候选生成');
-      const supportedLabels = new Set(MODEL_SERVICE_ROUTES.map((route) => CONFIGURED_PROVIDER_LABELS[route]));
-      const unsupportedProviders: ModelServiceUnsupportedProviderProjection[] = [];
-      for (const route of CONFIGURED_ROUTE_IDS) {
-        const providerLabel = CONFIGURED_PROVIDER_LABELS[route];
-        if (supportedLabels.has(providerLabel) || unsupportedProviders.some((provider) => provider.providerLabel === providerLabel)) continue;
-        unsupportedProviders.push({ providerId: route, providerLabel, statusLabel: '尚未支持' });
-      }
-      return {
-        searchBackends: await service!.call('getSearchBackendSettings', {}),
-        proxy: state.proxy,
-        lastProxyProbe: state.lastProxyProbe ?? null,
-        roles: [
-          fastInteraction,
-          {
-            roleId: 'main-editorial',
-            roleLabel: '主编辑角色',
-            purposeLabel: '中文长篇写作、编辑建议与复杂指令处理',
-            status: mainStatus,
-            statusLabel: mainStatusLabel,
-            statusDetail: mainStatusDetail,
-            binding: mainBinding,
-            connection,
-          },
-          unconfigured('difficult-escalation', '疑难升级角色', '疑难或高后果工作升级'),
-          unconfigured('frontier', '前沿模型角色', '挑战性或明确授权的高后果工作'),
-        ],
-        routeChoice: {
-          routes: MODEL_SERVICE_ROUTES.map((route) => {
-            const routeConnection = connectionOf(route);
-            const status = statusOf(routeConnection);
-            return {
-              route,
-              binding: routeConnection?.binding ?? MODEL_SERVICE_ROUTE_BINDINGS[route],
-              models: state.channels.find((channel) => channel.route === route)?.models.map(({ modelId, modelLabel }) => ({ ...MODEL_SERVICE_ROUTE_BINDINGS[route], modelId, modelLabel })) ?? modelServiceModels(route),
-              isDefault: route === 'opencode-go',
-              inUse: route === inUseRoute,
-              status,
-              statusLabel: labelOf(status),
-              connection: routeConnection,
-            };
-          }),
-          unsupportedProviders,
-          effectLabel: MODEL_SERVICE_ROUTE_EFFECT_LABEL,
-        },
-        protectedSecretStore: {
-          backend: process.platform === 'win32' ? 'windows-credential-manager' : 'macos-keychain',
-          label: process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串',
-          availability: protectedSecretStore === undefined ? 'unavailable' : 'available',
-        },
-        launchPolicy: state.launchPolicy, channels: state.channels,
-        authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。',
-      };
+      // A connection confirmed absent from the secret store changed in the service; its roles are read again.
+      const roles = connections.some((connection, index) => connection !== state.connections[index]) ? (await service!.call('getModelServiceStoredState', {})).modelRoles : state.modelRoles;
+      return modelServiceSettingsProjection({ ...state, modelRoles: roles }, connections, await service!.call('getSearchBackendSettings', {}), protectedSecretStore !== undefined, process.platform);
     };
     const routeOf = (value: unknown): ModelServiceRouteId => {
       if (!MODEL_SERVICE_ROUTES.includes(value as ModelServiceRouteId)) {
@@ -4524,13 +4416,11 @@ export async function runApplication(): Promise<void> {
       saveModelServiceCredential,
       removeModelServiceCredential,
       {
-        selectMainRoleModel: async (input) => { await service!.call('selectMainRoleModel', input); return settingsProjection(); },
-        selectBothRoleModels: async (input) => { await service!.call('selectBothRoleModels', input); return settingsProjection(); },
+        select: async (op, input) => { await service!.call(op, input as never); return settingsProjection(); },
         refreshModelServiceModels: async (input) => {
           const modelDiscovery = await service!.call('refreshModelServiceModels', input);
           return { ...(await settingsProjection()), modelDiscovery };
         },
-        selectFastRoleModel: async (input) => { await service!.call('selectFastRoleModel', input); return settingsProjection(); },
         startConnectionTest: (input) => service!.call('testModelServiceConnection', input),
         connectionTestSettings: settingsProjection,
       },

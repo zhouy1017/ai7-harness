@@ -355,6 +355,43 @@ it('uses Book memory in actual production polish and conflict regeneration', asy
 });
 
 
+it('runs polish, conflict regeneration and a scoped edit on the Pro model when no Flash model is chosen (#1620)', async () => {
+  const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0].route;
+  const connection = store.saveModelServiceConnection('只选 Pro 的连接', null, 'ready', route);
+  store.selectMainRoleModel(route, 'pro-only-model');
+  const main = store.getConfiguredModelRoleBinding('main-editorial')!, flash = store.getConfiguredModelRoleBinding('fast-interaction')!;
+  expect(flash).toEqual(main);
+  const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, flash);
+  const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: connection.credentialReference };
+  store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy, live: { ...configured, scope: 'ordinary-production', runBudgetCeiling: 'unset' } });
+  const calls: StubCall[] = [];
+  let answer = AUTHORED_POLISH_ANSWER;
+  const runtime = { scope: 'ordinary-production' as const, nativeFetch: stubTransport(calls, () => answer) };
+  const secretResolver = { resolve: async () => 'synthetic-pro-only-placeholder' };
+  const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(runtime, () => policy, () => connection.credentialReference, secretResolver) });
+  const fast = new FastRoleRequests(owner, store, () => new Date(), frozen => {
+    if (frozen === null) throw new Error('missing scoped binding');
+    return owner.fork(productionFastRoleRoutes(runtime, () => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', null, frozen),
+      () => frozen.credentialReference, secretResolver));
+  });
+  try {
+    const polish = await settled(fast, fast.polish(book.bookId, { selection: polishSelectionOf(store, book) }).taskId);
+    expect(polish.kind === 'editorial-polish' && polish.polish.state).toBe('suggested');
+    const { markId } = constructSample1Conflict(store, book);
+    const conflict = conflictOf(store, book, markId);
+    answer = AUTHORED_REGENERATION_ANSWER;
+    const regenerated = await settled(fast, fast.regenerate({ manuscriptId: book.manuscriptId, branchId: book.branchId, markId,
+      basisDigest: conflict.basisDigest, unitIndex: conflictUnitIndex(conflict) }).requestId);
+    expect(regenerated.kind === 'conflict-regenerate' && regenerated.regeneration.outcome).toBe('drafted');
+    answer = SCOPED_EDIT_AUTHORED_ANSWER;
+    const scoped = fast.scopedEdit(book.bookId, { ...scopedEditJourneyInput(store, book, store.inspectAiEditLocks(book).digest), clientCommandId: randomUUID() });
+    await fast.settled();
+    expect(fast.inspectScopedEdit(book.bookId, scoped.requestId).state).toBe('applied');
+    expect(calls.map((call) => [call.url, JSON.parse(call.body).model])).toEqual(Array(3).fill([main.endpoint, 'pro-only-model']));
+  } finally { owner.dispose(); await fast.settled(); }
+});
+
+
 it('freezes separate scoped launch bindings and replays a command after role settings change (#1455)', async () => {
   const second = await importSample1Book(store, roots.codeRoot, '并行局部修改');
   const binding = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0];

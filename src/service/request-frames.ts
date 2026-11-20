@@ -490,6 +490,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'getImportStartup':
     case 'listPriorWork':
     case 'getModelServiceStoredState':
+    case 'clearFlashModel':
     case 'getSearchBackendSettings':
     // 待我处理 (Issue #424) reads across every Book, so it names none.
     case 'inspectGlobalAgent':
@@ -611,6 +612,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'selectFastRoleModel':
     case 'selectMainRoleModel':
     case 'selectBothRoleModels':
+    case 'selectProModel':
+    case 'selectFlashModel':
     case 'testModelServiceConnection': {
       const input = requireInputWithOptional(value.input, ['route', 'modelId'], value.op === 'selectBothRoleModels' ? ['reasoningEffort', 'fastReasoningEffort'] : ['reasoningEffort'], tentativeId);
       if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route) || !isBoundedString(input.modelId, 128)) throw new ProtocolError(tentativeId);

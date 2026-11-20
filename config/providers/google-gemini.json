@@ -109,5 +109,9 @@
     "A shape discrepancy, recorded rather than resolved (ADR 0080 §3): the pages read on 2026-09-10 describe an Interactions-style API (`https://generativelanguage.googleapis.com/v1beta/interactions`, `response_format`, typed `steps`), while the implemented `google-generate-content` shape assembles the older `:generateContent` request, which the vendor documentation no longer states. This document binds nothing until a shape review establishes which API the endpoint serves today, and no Gemini binding carries a web-search-enabled rule before it.",
     "Read again on 2026-10-31 (Issue #1225): https://ai.google.dev/api/generate-content states `POST https://generativelanguage.googleapis.com/v1beta/{model=models/*}:generateContent`, not marked deprecated, and its response's `candidates[].content.parts[].text`; the text answer is declared on that reading. The Interactions-style shape question above stays recorded for tools, structured output and search.",
     "Grounding with Google Search (`google_search`) is documented on the Interactions-style pages; it is declared absent here because the shape it is documented on is not the one this route speaks."
-  ]
+  ],
+  "recommendedModels": {
+    "pro": ["gemini-3.1-pro-preview", "gemini-2.5-pro"],
+    "flash": ["gemini-3.8-flash"]
+  }
 }

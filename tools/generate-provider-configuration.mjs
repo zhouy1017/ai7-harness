@@ -637,6 +637,7 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
         .map(([key, entry]) => ({ key, record: evidence[key], note: entry.note ?? null })),
       openQuestions: [...data.openQuestions],
       notes: [...(data.notes ?? [])],
+      recommendedModels: data.recommendedModels ?? null,
     });
   }
   refuse(providers.length > 0, 'PROVIDER_CONFIGURATION/no-documents');
@@ -653,15 +654,46 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
   // And the converse: the marker says the row left the documents, so a row a document still declares carries none.
   const withdrawnDeclared = [...recorded.items].filter(([, item]) => item.withdrawn !== null && declaredRows.has(rowText(item))).map(([itemId]) => itemId);
   refuse(withdrawnDeclared.length === 0, `PROVIDER_CONFIGURATION/recorded-evidence-withdrawn-declared: ${RECORDED_EVIDENCE_FILE} marks ${withdrawnDeclared.join(', ')} withdrawn, but a document still declares its row`);
+  const runtimeModelTable = resolveRuntimeBindings(runtimeBindings, providers);
+  refuseUnservedRecommendations(providers, runtimeModelTable);
   return {
     providers,
-    runtimeModelTable: resolveRuntimeBindings(runtimeBindings, providers),
+    runtimeModelTable,
     searchBackends: resolvedSearchBackends,
     recordedEvidence: {
       liveTestItems: [...recorded.items].map(([itemId, item]) => ({ itemId, ...item })),
       frozenRequestBaselines: [...recorded.baselines].map(([since, baseline]) => ({ since, ...baseline })),
     },
   };
+}
+
+/**
+ * The models a channel declares on a further route only (Issue #1582), by that route: a model id the channel's first route
+ * does not list. Such a model is sent on its own route when the runtime table serves that route, and is otherwise refused.
+ */
+function alternateRouteModels(providers) {
+  return Object.fromEntries(providers.flatMap((provider) => {
+    const primary = new Set(provider.routes[0].models.map((model) => model.model));
+    return provider.routes.slice(1).map((route) => [route.profile.route, route.models.map((model) => model.model).filter((model) => !primary.has(model))]);
+  }));
+}
+
+/** A recommended model is one the document lists, on a route the runtime table serves (Issue #1620): never one #1582 refuses. */
+function refuseUnservedRecommendations(providers, runtimeModelTable) {
+  const alternate = alternateRouteModels(providers);
+  for (const provider of providers) {
+    if (provider.recommendedModels === null) continue;
+    for (const [tier, role] of [['pro', 'main'], ['flash', 'fast']]) {
+      const rows = runtimeModelTable.policyBaseline[role];
+      for (const model of provider.recommendedModels[tier]) {
+        const own = provider.routes.find((route) => route.models.some((entry) => entry.model === model));
+        const served = own !== undefined && (rows.some((row) => row.model === model && provider.routes.some((route) => route.profile.route === row.route)) ||
+          (own === provider.routes[0] ? rows.some((row) => row.route === provider.providerId)
+            : !(alternate[own.profile.route] ?? []).includes(model) || rows.some((row) => row.route === own.profile.route)));
+        refuse(served, `PROVIDER_CONFIGURATION/recommended-unserved: ${provider.providerId}.json recommends ${model} for ${tier}, which it does not list on a route the runtime table serves`);
+      }
+    }
+  }
 }
 
 /** Resolve only reviewed, readable rows; no endpoint or credential slot is independently configurable here. */
@@ -798,6 +830,12 @@ function renderShared({ providers, searchBackends = [], runtimeModelTable }) {
       .map((key) => `  ${literal(key)}: ${literal(providers.flatMap((provider) => provider.routes).find((entry) => entry.profile.route === key.slice(0, key.indexOf('/')))
         .models.find((entry) => entry.model === key.slice(key.indexOf('/') + 1)).displayName)},`),
     '};',
+    '',
+    '/** The recommended Pro and Flash models of each channel (ADR 0107 §1; Issue #1620), by provider: listed first, never bound by themselves. */',
+    `export const CONFIGURED_RECOMMENDED_MODELS: Readonly<Record<string, { readonly pro: readonly string[]; readonly flash: readonly string[] }>> = ${renderValue(Object.fromEntries(providers.filter((provider) => provider.recommendedModels !== null).map((provider) => [provider.providerId, provider.recommendedModels])), 0)};`,
+    '',
+    '/** The models a channel declares on a further route only (Issue #1582), by route: never sent on the first route of the channel. */',
+    `export const CONFIGURED_ALTERNATE_ROUTE_MODELS: Readonly<Record<string, readonly string[]>> = ${renderValue(alternateRouteModels(providers), 0)};`,
     '',
     '/** One credential slot per configured provider (ADR 0073 §4): the members of `CredentialSlotId`, and the Credential Broker\'s closed set. */',
     'export const CONFIGURED_CREDENTIAL_SLOTS = [',
