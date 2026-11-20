@@ -9,6 +9,9 @@ export const HELP_TITLE = '帮助';
 export const HELP_LEDE = '使用说明、隐私说明与第三方许可都在本机读取，打开这里不会更改任何记录。';
 export const HELP_OPENED = '帮助已打开';
 
+/** What a Book-scoped step of 第一次审稿 says while no Book is open, in place of a button that would do nothing. */
+export const HELP_STEP_NEEDS_BOOK = '需要先打开一本图书：在书库里打开后，回到这里继续。';
+
 export type HelpTab = 'usage' | 'privacy' | 'licenses';
 
 /** The three tabs in their fixed order. */
