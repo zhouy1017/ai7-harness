@@ -2,9 +2,9 @@
 // (`tests/service/<file>.test.ts (<n> tests) <ms>ms`, as the guest runner's log keeps them). Usage:
 //   pnpm run test:service:weights -- <log> [<log>...]
 // A file in a report takes its reported seconds (rounded, at least 1); a file the reports do not mention keeps its old
-// weight while it still exists; a file that is gone is dropped. The default is the median of the listed files. The output
-// A file whose tests are all skipped prints no line: give it a weight of 1 by hand; a refresh keeps it. The output
-// has sorted keys and whole seconds, so a refresh is a small diff.
+// weight while it still exists; a file that is gone is dropped. The default is the median of the listed files. A file whose
+// tests are all skipped prints no line: give it a weight of 1 by hand; a refresh keeps it. The output has sorted keys and
+// whole seconds, so a refresh is a small diff.
 import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 

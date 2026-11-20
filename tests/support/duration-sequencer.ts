@@ -47,6 +47,7 @@ export function unlistedFiles(paths: readonly string[], weights: ServiceFileWeig
 }
 
 const isServiceFile = (path: string): boolean => path.startsWith('tests/service/');
+let unlistedNamed = false;
 
 export default class DurationSequencer extends BaseSequencer {
   private pathOf(spec: TestSpecification): string {
@@ -58,21 +59,29 @@ export default class DurationSequencer extends BaseSequencer {
     return files.length > 0 && files.every((spec) => isServiceFile(this.pathOf(spec)));
   }
 
+  /** One file can be listed more than once (one specification per project): every one of them travels with its path. */
+  private byPath(files: readonly TestSpecification[]): Map<string, TestSpecification[]> {
+    const byPath = new Map<string, TestSpecification[]>();
+    for (const spec of files) byPath.set(this.pathOf(spec), [...(byPath.get(this.pathOf(spec)) ?? []), spec]);
+    return byPath;
+  }
+
   override async shard(files: TestSpecification[]): Promise<TestSpecification[]> {
     if (!this.ours(files)) return super.shard(files);
     const { index, count } = this.ctx.config.shard!;
-    const weights = loadServiceWeights();
-    const byPath = new Map(files.map((spec) => [this.pathOf(spec), spec] as const));
-    const unlisted = unlistedFiles([...byPath.keys()], weights);
-    // eslint-disable-next-line no-console
-    if (unlisted.length > 0) console.log(`service weights: ${unlisted.length} file(s) not in service-file-weights.json, assumed ${weights.defaultSeconds} s each: ${unlisted.join(', ')}`);
-    return planServiceShards([...byPath.keys()], weights, count)[index - 1]!.map((path) => byPath.get(path)!);
+    const byPath = this.byPath(files);
+    return planServiceShards([...byPath.keys()], loadServiceWeights(), count)[index - 1]!.flatMap((path) => byPath.get(path)!);
   }
 
   override async sort(files: TestSpecification[]): Promise<TestSpecification[]> {
     if (!this.ours(files)) return super.sort(files);
     const weights = loadServiceWeights();
-    const byPath = new Map(files.map((spec) => [this.pathOf(spec), spec] as const));
-    return orderByWeight([...byPath.keys()], weights).map((path) => byPath.get(path)!);
+    const byPath = this.byPath(files);
+    const unlisted = unlistedFiles([...byPath.keys()], weights);
+    // Every service run names the files the table lacks, once per process (a sharded run sorts after it shards).
+    // eslint-disable-next-line no-console
+    if (unlisted.length > 0 && !unlistedNamed) console.log(`service weights: ${unlisted.length} file(s) not in service-file-weights.json, assumed ${weights.defaultSeconds} s each: ${unlisted.join(', ')}`);
+    unlistedNamed = true;
+    return orderByWeight([...byPath.keys()], weights).flatMap((path) => byPath.get(path)!);
   }
 }
