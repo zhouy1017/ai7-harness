@@ -18,6 +18,7 @@ import {
   SHELL_BOOK_GROUPS,
   SHELL_DESTINATIONS,
   SHELL_LABELS,
+  SHELL_MORE_BOOKS_ICON,
   SHELL_SETTINGS,
   SETTINGS_PAGE_TITLES,
   shellDestinationLabel,
@@ -500,7 +501,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       more.open = moreBooksOpen;
       more.addEventListener('toggle', () => { moreBooksOpen = more.open; });
       const summary = el('summary', 'sidebar-link sidebar-more-books-summary');
-      summary.append(svgIcon('i-library'), el('span', 'nav-label', SHELL_LABELS.moreBooks(restPinned.length + restRecent.length)));
+      summary.append(svgIcon(SHELL_MORE_BOOKS_ICON), el('span', 'nav-label', SHELL_LABELS.moreBooks(restPinned.length + restRecent.length)));
       summary.title = SHELL_LABELS.moreBooksHint(shortcutHint('book.switch'));
       more.append(summary, ...[list(SHELL_LABELS.pinnedHeading, restPinned, 'pinned'), list(SHELL_LABELS.recentHeading, restRecent, 'recent')].filter((node): node is HTMLElement => node !== null));
       blocks.push(more);

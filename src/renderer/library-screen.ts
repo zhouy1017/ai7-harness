@@ -31,7 +31,7 @@ interface Options {
   renderModelServiceSettings: (focus?: "search") => Promise<void>;
   authorityInterrupted: boolean;
   leaveThen: (open: () => Promise<void>) => Promise<void>;
-  renderHelp: () => void;
+  renderHelp: (focus?: 'first-review') => void;
   bookCardOpen: (titleWords: string, stateWords: string, run: () => Promise<void>) => HTMLButtonElement;
   requestBookWorkbenchRoute: (route: BookWorkbenchRoute, onRequestingWindow?: (resolved: ResolvedBookWorkbenchRoute) => Promise<void>, recoveryReturn?: RecoveryReturnContext, navigationRoute?: NavigationCheckpoint) => Promise<void>;
   bookCardAction: (words: string) => HTMLElement;
@@ -255,7 +255,7 @@ async function renderLanding(
         setStatus(rendererErrorMessage(error, labels.skipFailed), 'error');
       }
     });
-    const help = button('帮助', 'quiet', () => { if (!state.authorityInterrupted) void leaveThen(async () => renderHelp()); });
+    const help = button('帮助', 'quiet', () => { if (!state.authorityInterrupted) void leaveThen(async () => renderHelp('first-review')); });
     help.dataset['onboardingHelp'] = 'true';
     onboarding.append(steps, help, skip);
     const warnings = [location.dataLocationException === null ? null : location.channelDescription, location.syncWarning].filter((line): line is string => line !== null);

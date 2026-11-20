@@ -90,6 +90,18 @@ const settingsInView = (width, height, form) => `(() => {
   return box.width>0 && box.height>0 && box.top>=0 && box.left>=0 && box.bottom<=innerHeight && box.right<=innerWidth && hit instanceof Node && link.contains(hit);
 })()`;
 
+// #1554: the icons the engine really draws. Every rendered icon matching the selector is 18 × 18, resolves through its <use> to a <symbol> of
+// the sprite that holds at least one shape, takes the specification's 1.8 stroke from the stylesheet, and no two of them share a symbol.
+const drawnIcons = (selector) => `(() => {
+  const icons=[...document.querySelectorAll(${JSON.stringify(selector)})].filter((svg)=>svg.getClientRects().length>0), ids=[];
+  for(const svg of icons){
+    const box=svg.getBoundingClientRect(), id=(svg.querySelector('use')?.getAttribute('href')??'').replace(/^#/,''), symbol=id===''?null:document.querySelector('#editor-icon-sprite symbol[id="'+id+'"]');
+    if(Math.abs(box.width-18)>0.5||Math.abs(box.height-18)>0.5||!symbol||symbol.childElementCount<1||getComputedStyle(svg).strokeWidth!=='1.8px') return false;
+    ids.push(id);
+  }
+  return ids.length>0 && new Set(ids).size===ids.length;
+})()`;
+
 async function checkSettingsPinned(renderer) {
   for (const [width, height] of [[1280, 800], [1008, 681]]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -100,6 +112,7 @@ async function checkSettingsPinned(renderer) {
         await waitFor(renderer, `document.documentElement.dataset.sidebar==='icons'`, `sidebar-settings-icons-${width}`);
       }
       await waitFor(renderer, settingsInView(width, height, form), `sidebar-settings-in-view-${name}`);
+      await assertRenderer(renderer, drawnIcons('.sidebar-link svg.icon'), `sidebar-icons-drawn-${name}`);
       await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-settings]', `sidebar-settings-press-${name}`);
       await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `sidebar-settings-opened-${name}`);
       await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-book-section="manuscript"]', `sidebar-settings-return-${name}`);
@@ -110,6 +123,8 @@ async function checkSettingsPinned(renderer) {
       }
     }
   }
+  // The manuscript screen stands again here, at the smaller size: its right edge draws one distinct symbol per entry.
+  await waitFor(renderer, drawnIcons('[data-edge-entry] svg.icon'), 'edge-icons-drawn');
   await renderer.send('Emulation.clearDeviceMetricsOverride');
 }
 
@@ -422,6 +437,16 @@ async function runSettingsPages(renderer, cancellation) {
   await assertRenderer(renderer, `${label('nav.library')}===${JSON.stringify(libraryDefault)} && ${label('nav.series')}===${JSON.stringify(seriesDefault)} && document.querySelector('[data-shortcut-command="edit.save"]')?.textContent.startsWith(${JSON.stringify(darwin ? 'Command+S' : 'Ctrl+S')})`, 'keyboard-defaults');
   await assertRenderer(renderer, `document.querySelector('.keyboard-always-on')?.textContent.includes('始终有效')`, 'keyboard-always-on');
 
+  // #1548: F1 opens 帮助 from a page with no Book open. It is listed here with its chord and answers a real key press; with no Book the
+  // steps that act inside one say so instead of offering a button; the settings navigation beside Help leads back.
+  at('help-f1');
+  await assertRenderer(renderer, `${label('help.open')}==='F1'`, 'help-f1-listed');
+  await pressKey(renderer, F1_KEY);
+  await waitFor(renderer, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, 'help-f1-opened');
+  await assertRenderer(renderer, `document.querySelectorAll('[data-help-step]').length===5 && document.querySelectorAll('[data-help-step-go]').length===2 && document.querySelectorAll('[data-help-step-needs-book]').length===3`, 'help-f1-no-book-steps');
+  await pointerClick(renderer, waitFor, '.settings-navigation [data-settings-nav="keyboard"]', 'help-f1-back-keyboard');
+  await waitFor(renderer, `document.querySelector('[data-screen="keyboard"] [data-keyboard-command="nav.series"]')`, 'help-f1-keyboard-ready');
+
   // Q1: the shared command registry is reachable from the palette, and its added shortcuts are listed here.
   await assertRenderer(renderer, `['command.palette','book.switch','review.new','evaluation.start','nav.tasks'].every(id=>document.querySelector('[data-keyboard-command="'+id+'"]'))`, 'quick-shortcuts-listed');
   // #1522: on a global page the palette lists only what does something there — no Book commands, no editing commands — and an
@@ -546,6 +571,7 @@ async function clickSelector(renderer, selector, name) {
 const TAB_KEY = { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 };
 const ENTER_KEY = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
 const ESCAPE_KEY = { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 };
+const F1_KEY = { key: 'F1', code: 'F1', windowsVirtualKeyCode: 112, nativeVirtualKeyCode: 112 };
 
 /** One real key press through the renderer's input pipeline; Enter carries its text so it activates a button. */
 async function pressKey(renderer, descriptor) {
