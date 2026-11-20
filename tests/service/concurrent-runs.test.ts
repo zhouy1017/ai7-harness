@@ -325,11 +325,11 @@ describe('the execution owner\'s concurrency governor over the real store on exa
       // 丙 waits: recorded, nothing sent, nothing begun — 等待运行名额 on ②A, in the plan and in 待我处理.
       const queued = store.inspectBaselineAnalysis(bing.bookId, progress);
       expect(queued).toMatchObject({ state: 'queued', stateLabel: RUN_QUEUED_LABEL });
-      expect(RUN_QUEUED_LABEL).toBe('等待运行名额');
+      expect(RUN_QUEUED_LABEL).toBe('排队中');
       expect(queued.run).toMatchObject({ state: 'authorized', progress: null, attempt: null });
       expect(queued.run!.transitions.map((transition) => transition.state)).toEqual(['authorized']);
       expect(store.inspectTaskPlan({ bookId: bing.bookId, kind: 'baseline-analysis', ref: bing.taskIntentId }, progress).state)
-        .toEqual({ key: 'queued', label: '等待运行名额' });
+        .toEqual({ key: 'queued', label: '排队中' });
       // It holds its Book as a Run does — no new Task beside it — and 取消任务 is not its way out: 取消 before it begins is.
       const busyPrepare = refusal(() => prepare(store, bing.bookId));
       expect(busyPrepare).toMatchObject({ code: 'ANALYSIS_TASK_ACTIVE' });

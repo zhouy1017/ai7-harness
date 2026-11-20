@@ -17,6 +17,7 @@ import {
 import { anthropicMessagesBody, anthropicMessagesStreamBody, messagesReplayItems, messagesSseEvents } from './family-anthropic-messages.js';
 import { chatCompletionsBody, chatCompletionsStreamBody, chatReplayItems, dialogueSseEvents } from './family-chat-completions.js';
 import { providerPreflight, streamingDeclared } from './family-dispositions.js';
+import { DEFAULT_TRANSPORT_SETTINGS, RequestDeadlines, observeRequestActivity } from './request-deadlines.js';
 import { geminiReplayItems, generateContentSseEvents, googleGenerateContentBody, googleGenerateContentUrl } from './family-gemini.js';
 import { openaiResponsesBody, openaiResponsesStreamBody, responsesReplayItems, responsesSseEvents } from './family-openai-responses.js';
 import {
@@ -61,8 +62,6 @@ export { streamingDeclared } from './family-dispositions.js';
  */
 export const DEEPSEEK_ADAPTER_REVISION = 1 as const;
 export const DEEPSEEK_CONFIGURATION_REVISION = 1 as const;
-/** Pre-v26 launch fallback. */
-export const MODEL_REQUEST_DEADLINE_MS = 180_000;
 /** The opaque per-request Session header the gateway uses for prompt caching; it carries the Session id and nothing else. */
 export const OPENCODE_GO_SESSION_HEADER = 'x-opencode-session' as const;
 /** The specific User-Agent the developer-live route sends: the product and the trusted scope, no host or user detail. */
@@ -522,10 +521,8 @@ export type DeepSeekTransport = (
 export interface DeepSeekAdapterDependencies extends Pick<import('../../shared/runtime-execution-config.js').RuntimeExecutionConfig, 'reasoningEffort'> {
   /** Settings supplies the channel's credential-scoped metadata discovery; task adapters need none. */
   readonly discoverModels?: () => Promise<readonly DiscoveredModel[]>;
-  readonly transportSettings?: {
-    readonly requestDeadlineSeconds: number;
-    readonly rateLimitRetry: { readonly honourRetryAfter: boolean; readonly maxRetries: number };
-  };
+  /** Absent: the same `transport` record of the runtime execution defaults (#1599). */
+  readonly transportSettings?: import('../../shared/protocol/transport-settings.js').TransportSettings;
   readonly broker: CredentialBroker;
   readonly slotBinding: CredentialSlotBinding;
   readonly tickets: TransmitTicketSource;
@@ -687,9 +684,8 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     let sent = false;
     let transportRequest: Parameters<DeepSeekTransport>[1] | undefined;
     let responseStatus: number | undefined;
-    const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(new DOMException('模型请求超过时限。', 'TimeoutError')),
-      this.#deps.transportSettings === undefined ? MODEL_REQUEST_DEADLINE_MS : this.#deps.transportSettings.requestDeadlineSeconds * 1000);
+    const deadline = new RequestDeadlines(this.#deps.transportSettings ?? DEFAULT_TRANSPORT_SETTINGS);
+    deadline.start();
     const signal = AbortSignal.any([deadline.signal, ...(options.signal === undefined ? [] : [options.signal]),
       ...(this.#deps.signal === undefined ? [] : [this.#deps.signal])]);
     // The transport owns its send/cache settlement. Abort it through the signal and await its result so a possibly billed
@@ -711,6 +707,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
           body: assembly.body,
           signal,
         };
+        observeRequestActivity(transportRequest, () => deadline.activity());
         return transport(assembly.url, transportRequest);
       });
       responseStatus = response.status;
@@ -723,6 +720,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         // Nothing is yielded before the stream reads: a stop that ends this turn at any chunk then ends a stream already
         // reading, so the transmission still records its possibly billed request as unknown.
         for await (const event of response.stream?.() ?? familyStreamEvents(response, this.#modelProfile, (options.tools ?? []).length > 0)) {
+          deadline.activity();
           if (event.kind === 'text') {
             if (!blockStarted) yield { type: 'block-start', index: 0, blockType: 'text' };
             blockStarted = true;
@@ -787,7 +785,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       outcome = { kind: 'partial', text: streamed, code: classified.code, message: classified.message, usage: null,
         ...(responseStatus === undefined ? {} : { status: responseStatus }) };
     } finally {
-      clearTimeout(timer);
+      deadline.stop();
     }
     this.#lastUsage = 'usage' in outcome ? outcome.usage ?? null : null;
     if (outcome.kind === 'failure') {

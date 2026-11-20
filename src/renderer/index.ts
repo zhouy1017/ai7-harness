@@ -1,3 +1,4 @@
+import { leaveReviewReturn } from './review-return.js';
 import { createLibraryScreen } from './library-screen.js';
 import { createBookOverviewScreen } from './book-overview-screen.js';
 import { createSettingsScreens } from './settings-screens.js';
@@ -6,7 +7,7 @@ import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFa
 
 
 import { mountMenuControls, mountSelectControls } from './components/controls.js';
-import { createStatusSurface } from './notifications.js';
+import { createStatusSurface, followBottomControls, reportResult } from './notifications.js';
 import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
 import { ScreenReturnHistory } from './screen-return.js';
 import { startPreparedTask } from './one-action-start.js';
@@ -18,6 +19,7 @@ import { mountGlobalAgent } from './global-agent.js';
 import { createAppearance, initializeReducedMotion } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { createCommandPalette } from './command-palette.js';
+import { goBack } from './command-usable.js';
 import { applyFindingBatches } from './manuscript-apply.js';
 
 import { mountAgentWorkspace } from './agent-workspace.js';
@@ -29,10 +31,11 @@ import type { BookFindingProjection, ProductionDocumentProjection } from '../sha
 import { mountDiagnostics } from './diagnostics.js';
 import { DIAGNOSTICS_OPENED } from './diagnostics-labels.js';
 import { mountProposalWorkspace } from './proposal-workspace.js';
-import { researchUnavailableLine } from '../shared/research-status.js';
-import { preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
+import { preserveReadingReturn, type ReadingPlace } from './reading-return.js';
+import { hasErrorCode, rendererErrorCode, rendererErrorData, rendererErrorMessage } from './error-words.js';
 import type { AgentWorkspacePromotionProjection, BaselineAnalysisGoal, BaselineAnalysisWireProjection as BaselineAnalysisProjection, BookTaskItemProjection, DefaultExecutionRuleReference, QuickStartBaselineAnalysisWireResult as QuickStartBaselineAnalysisResult, BaselineAnalysisUpdateRequest, BookManuscriptAnchorProjection, BookRecordPresentation, BookSummaryPageProjection, BookWorkbenchRoute, BookWorkOverviewProjection, ContinueImportProjection, ForegroundExecutionBoundaryProjection, GlobalAttentionItemProjection, ImportCommitProjection, ManuscriptReimportCommitProjection, ImportDraftRecoveryProjection, ImportStartupProjection, HistoricalRevisionProjection, ManuscriptWindowProjection, PriorWorkItemProjection, RecoveryComparisonProjection, RecoveryRestorationProjection, RecoverySelection, RecoveryWindowProjection, ResolvedBookWorkbenchRoute, ReviewBeforeImportProjection, ReviewBeforeSourceImportProjection, ServiceWireJobProjection as ServiceJobProjection, StagedImportProjection, StartupProjection, TaskAuthorizationProjection, TaskPlanKind, TaskPlanProjection } from '../shared/protocol.js';
-import { createNotificationObserver, mountQuietNotice, openCurrentBookCompletion } from './notifications.js';
+import { mountTaskNotices } from './task-notices.js';
+import { finishedResultRoute } from './result-destination.js';
 
 import { J03_TASK_GOAL } from '../shared/protocol.js';
 
@@ -46,7 +49,7 @@ import type { LearningMaterialTarget } from '../shared/protocol.js';
 import { mountWordTrackedEditDetail } from './quality-learning.js';
 import type { FeedbackHistoryTarget } from '../shared/protocol.js';
 
-import { mountSeries, mountSeriesList } from './series.js';
+import { mountSeries, mountSeriesList, seriesListHead } from './series.js';
 import { mountBackgroundAnalysis } from './background-analysis.js';
 import { activeCommandBindings, BOOK_SECTION_COMMANDS, configureCommandLabels, createCommandDispatcher, refreshShortcutLabels, type CommandPlatform } from './commands.js';
 import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
@@ -54,11 +57,11 @@ import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
 
 
 
-import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
+import { SERIES_BACK_TO_LIST, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 
 import { EVALUATION_STATUS } from './evaluation-labels.js';
 import { openTaskResultWindow, type TaskResultWindow } from './task-result-window.js';
-import { TASK_PANEL_COMPOSE_STATUS, TASK_PANEL_JUMP_GONE, TASK_PANEL_LEAVE_STATUS, returnChipPlace } from './task-panel-labels.js';
+import { TASK_PANEL_COMPOSE_STATUS, TASK_PANEL_JUMP_GONE, TASK_PANEL_LEAVE_STATUS } from './task-panel-labels.js';
 
 import { DOCUMENT_STATUS_LINES, showRestoreStands } from './production-document-labels.js';
 import type { ProductionDocumentContext } from './production-document-lens.js';
@@ -68,7 +71,7 @@ import { fidelityDetailText, fidelityDisclosureSummary, fidelityOutcomeLabel, WO
 import { mountProposalConflict, type ProposalConflictSurface } from './proposal-conflict.js';
 import { DELIVERABLES_STATUS_LINES } from './deliverables-labels.js';
 import { ViewPreferences, mountRegionSeparator } from './layout.js';
-import { createGlobalAttentionReader, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
+import { createGlobalAttentionReader, mountAttentionPill, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
 import { mountProcessingIndicator } from './processing-indicator.js';
 import { bookIdentityRows, recoveryIdentityRows } from './technical-layer-labels.js';
 
@@ -87,7 +90,7 @@ import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
 
 
 
-import { SETTINGS_HUB_GROUPS, SHELL_LABELS } from './shell-labels.js';
+import { SHELL_LABELS } from './shell-labels.js';
 import { createBaselineAnalysisCard, analysisTabChoice, type AnalysisTabId } from './baseline-analysis-card.js';
 import { createImportReview, type RecoveryReturnContext } from './import-review.js';
 import { type TaskOverviewSurface } from './tasks-overview.js';
@@ -115,7 +118,8 @@ window.addEventListener('pagehide', unmountSelectControls, { once: true });
 const unmountMenuControls = mountMenuControls(document.body);
 window.addEventListener('pagehide', unmountMenuControls, { once: true });
 const persistenceStatus = requiredElement('#persistence-status');
-const updateStatusSurface = createStatusSurface(persistenceStatus);
+const statusSurface = createStatusSurface(persistenceStatus, requiredElement('#status-announcer'));
+followBottomControls(persistenceStatus);
 /** Incremented on every status update so a delayed completion cannot overwrite a newer message. */
 let statusRevision = 0;
 
@@ -147,7 +151,7 @@ const taskDrawer = mountTaskDrawer({
   onOpen: () => {
     manuscriptOnScreen?.closeSupportingPanel();
     if (taskDrawer.view()?.kind === 'launch') taskResultWindow?.close(false);
-  },
+  }, onClose: () => manuscriptOnScreen?.restoreSupportingPanel(),
   onRecorded: (kind, bookId, ref) => {
     taskSurfaceRefresh[kind]?.();
     taskOverviewSurface?.refresh();
@@ -164,7 +168,11 @@ const taskDrawer = mountTaskDrawer({
   openRules: () => void renderKnowledgeBase(technicalLayerVisible ? 'rules' : 'guidelines'),
   // ① 任务面 (Issue #423, S77a): a card's own record, 查看结果's floating window and 发起全书任务.
   openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
-  openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
+  openTaskResult: (entry, backToPanel) => {
+    const route = finishedResultRoute({ result: entry.result, attention: entry.item }, 'panel');
+    if (route.via === 'page') void leaveThen(() => openGlobalAttentionTarget(route.target));
+    else openTaskResult(entry, backToPanel, overviewDrawerBookId === null ? api : overviewApi);
+  },
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
   // 跳到所选文字 on a selection Task's card (Issue #423, S77 deferred item d): every refusal is said on the status line.
   jumpToSelection: (bookId, selection) => void jumpToSelectionText(bookId, selection),
@@ -311,7 +319,7 @@ async function startWholeBookTask(
       return { ref: taskIntentId, started: true };
     }
     const note = taskPlanQuickStartFellBack(result.reasons);
-    setStatus(note);
+    reportResult(setStatus, note);
     return { ref: taskIntentId, note };
   } catch (error) {
     setStatus(rendererErrorMessage(error, TASK_PANEL_COMPOSE_STATUS.failed), 'error');
@@ -435,7 +443,7 @@ async function prepareSelectionReview(
 /** What a quick start that started its Task says: a start the launch has no route for is recorded and blocked before dispatch. */
 function quickStartStartedLine(rule: DefaultExecutionRuleReference, projection: BaselineAnalysisProjection): string {
   return projection.state === 'authorized-blocked'
-    ? `已按默认执行规则「${rule.name}」记下这项任务；当前启动没有可执行的路由，派发前已阻止。`
+    ? `已按默认执行规则「${rule.name}」记下这项任务；${technicalWords('当前启动没有可执行的路由，派发前已阻止', '现在没有可用的模型服务，没有开始')}。`
     : `已按默认执行规则「${rule.name}」开始任务。`;
 }
 
@@ -448,18 +456,7 @@ let manuscriptOnScreen: ManuscriptScreen | null = null;
 
 /** A jump from another screen — 审阅's 回到原文, ②A's 回到稿件范围, a result's 跳到 — leaves the way back to where the editor last read. */
 async function leaveReturnChip(bookId: string, manuscriptId: string, branchId: string): Promise<void> {
-  if (await readReturnPlace(manuscriptId, branchId) !== null) return;
-  const known = lastReadingPlace;
-  if (known?.manuscriptId === manuscriptId && known.branchId === branchId) {
-    await preserveReturnPlace(known);
-    return;
-  }
-  const overview = await api.getBookOverview({ bookId, historyCursor: null });
-  const anchor = overview.manuscriptAnchor;
-  if (anchor?.manuscriptId !== manuscriptId || anchor.branchId !== branchId || anchor.entry === null) return;
-  const remembered = await api.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId: anchor.entry.blockId } });
-  const block = remembered.blocks.find((item) => item.blockId === anchor.entry?.blockId);
-  if (block !== undefined) await preserveReturnPlace({ manuscriptId, branchId, blockId: block.blockId, place: returnChipPlace(remembered.position.structureLabel, block.position) });
+  await preserveReadingReturn(api, lastReadingPlace, bookId, manuscriptId, branchId);
 }
 
 /**
@@ -676,11 +673,7 @@ commandDispatcher.register({
   ...Object.fromEntries(BOOK_SECTION_COMMANDS.map(([id, , section]) =>
     [id, () => clickCommandEntry(`[data-nav-book-section="${section}"]`)])),
   'nav.settings': () => clickCommandEntry('[data-nav-settings]'),
-  'nav.back': () => {
-    const back = screen.querySelector<HTMLElement>('[data-shortcut-command="nav.back"]');
-    if (back !== null) clickCommandEntry('[data-shortcut-command="nav.back"]');
-    else clickCommandEntry('[data-nav-destination="library"]');
-  },
+  'nav.back': () => goBack({ screen, press: clickCommandEntry, returnToOrigin: () => void returnToOrigin() }),
   'view.toggleSidebar': () => clickCommandEntry('#sidebar-toggle'),
   'view.openTasks': () => {
     const bookId = (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'];
@@ -690,8 +683,9 @@ commandDispatcher.register({
 
 const commandPalette = createCommandPalette({
   api: api, execute: (id) => commandDispatcher.execute(id),
+  screen: { has: (command) => commandDispatcher.has(command), currentBookId: () => shell.currentBook()?.bookId ?? null, bookPage: () => (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] !== undefined },
   openBook: (bookId) => leaveThen(() => requestBookWorkbenchRoute({ kind: 'book', bookId })),
-  openResult: (item) => void openOverviewResult(item),
+  openResult: (item) => void leaveThen(() => openResult(item, 'palette')),
   openStart: () => { void leaveThen(async () => { renderTaskOverview(); taskOverviewSurface?.showStart(); }); },
   openHelp: () => { if (!authorityInterrupted) void leaveThen(async () => renderHelp()); },
   beforeStart: settleScreen,
@@ -737,34 +731,14 @@ const globalAttentionEntry = ((): HTMLButtonElement => {
 })();
 mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
 mountProcessingIndicator(requiredElement('#processing-indicator'), globalAttentionReader);
-const showQuietNotice = mountQuietNotice((item) => void leaveThen(() => openTaskNotification(item.itemId, item.target)));
-/** Automatic results stay with the task being watched; an open review already shows its own result. */
-function canAutoOpenTaskResult(item: GlobalAttentionItemProjection): boolean {
-  const bookId = item.book.bookId;
-  if (bookId === null || document.querySelector('dialog[open]') !== null) return false;
-  const target = item.target;
-  const ref = 'taskIntentId' in target ? target.taskIntentId : 'reviewRunId' in target ? target.reviewRunId : 'ref' in target ? target.ref : null;
-  const review = target.kind === 'review' || target.kind === 'review-plan' || target.kind === 'task-plan' && target.taskKind === 'review-run';
-  if (review && screen.dataset['screen'] === 'book-review' && screen.querySelector<HTMLElement>('.review-run')?.dataset['reviewRunId'] === ref) return false;
-  const view = taskDrawer.view();
-  if (view !== null) return view.bookId === bookId && (view.kind === 'panel' || view.kind === 'plan' && ref !== null && view.task.ref === ref);
-  return screen.dataset['screen'] === 'task-overview';
-}
-const observeNotifications = createNotificationObserver({
-  api: api,
-  focused: () => document.hasFocus(),
-  completed: (item) => {
-    showQuietNotice(item);
-    void openCurrentBookCompletion(item, {
-      allowed: canAutoOpenTaskResult, navigation: navigation.route(),
-      enabled: () => localStorage.getItem('ai7.task-overview.auto-result') !== 'off',
-      read: () => api.inspectTaskOverview(), open: (entry) => void openOverviewResult(entry),
-    }).catch(() => undefined);
-  },
+mountTaskNotices({
+  api: api, reader: globalAttentionReader, screen, drawerView: () => taskDrawer.view(),
+  openResult: (item) => void leaveThen(() => openTaskNotification(item.itemId, item.target)),
+  openAttention: (item) => void leaveThen(() => openGlobalAttentionTarget(item.target)),
+  openList: (bookId) => void openGlobalAttention(bookId),
+  openWindow: (entry) => void openResultWindow(entry),
 });
-globalAttentionReader.subscribe((reading) => {
-  if (reading.kind === 'projection') observeNotifications(reading.projection);
-});
+mountAttentionPill({ button: requiredElement('#attention-pill'), reader: globalAttentionReader, open: () => void openGlobalAttention() });
 api.onNotificationNavigate((target) => {
   void leaveThen(async () => {
     if (target.eventId !== null && target.target !== undefined) {
@@ -854,7 +828,7 @@ const shell = mountShell({
   },
   openSettings: () => {
     if (authorityInterrupted) return;
-    void leaveThen(async () => renderSettingsHub());
+    void leaveThen(() => renderModelServiceSettings());
   },
 });
 
@@ -892,32 +866,6 @@ function currentRecoveryReturn(): RecoveryReturnContext | undefined {
 
 function recoveryTone(access: ImportDraftRecoveryProjection['originalFileAccess']['state']): string {
   return access === 'available-exact' ? 'success-note' : 'attention-note';
-}
-
-interface RendererErrorData {
-  readonly code: string;
-  readonly message: string;
-}
-
-function rendererErrorData(error: unknown): RendererErrorData | null {
-  if (typeof error !== 'object' || error === null) return null;
-  const candidate = error as { code?: unknown; message?: unknown };
-  return typeof candidate.code === 'string' && typeof candidate.message === 'string'
-    ? { code: candidate.code, message: candidate.message }
-    : null;
-}
-
-function hasErrorCode(error: unknown, code: string): boolean {
-  return rendererErrorData(error)?.code === code;
-}
-
-function rendererErrorCode(error: unknown): string | null {
-  return rendererErrorData(error)?.code ?? null;
-}
-
-function rendererErrorMessage(error: unknown, fallback: string): string {
-  const data = rendererErrorData(error);
-  return researchUnavailableLine(data?.code, data?.message ?? (error instanceof Error ? error.message : fallback));
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -988,8 +936,10 @@ function instantValue(iso: string): HTMLElement {
 
 function setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void {
   statusRevision += 1;
-  updateStatusSurface(message, tone);
+  statusSurface(message, tone);
 }
+/** `StatusSetter.settle`: no new status is said, so the status revision stays as it is. */
+setStatus.settle = (message: string): void => statusSurface.settle(message);
 
 /**
  * The button or link the editor activated last, for a refusal said beside it (Issue #951; DUR-005). Read at activation, before
@@ -1030,7 +980,6 @@ function restoreCurrentScreen(): () => void | Promise<void> {
   const restore = content instanceof HTMLElement ? agentWorkspaceReturns.get(content) : undefined;
   if (restore !== undefined) return restore;
   const state = screen.dataset['screen'];
-  if (state === 'settings') return renderSettingsHub;
   if (state === 'help') return renderHelp;
   if (state === 'data-storage') return renderDataAndStorage;
   if (state === 'quality-learning') return () => renderQualityLearning();
@@ -1048,7 +997,8 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   const tab = content.dataset['knowledgeTab'] ?? content.dataset['qualityTab'] ?? place?.section ?? null;
   const object = content.dataset['documentId'] ?? content.dataset['manuscriptId'] ?? content.dataset['revisionId'] ?? content.dataset['seriesId'] ?? null;
   const conflict = content.dataset['conflictMarkId'] ?? null;
-  navigation.commit(JSON.stringify([state, bookId, tab, object, conflict]), bookId);
+  // An error is the reason for the page it was raised on: another destination ends it, a repaint of the same one does not.
+  if (navigation.commit(JSON.stringify([state, bookId, tab, object, conflict]), bookId)) statusSurface.clearError();
   if (state !== 'task-overview') overviewDrawerBookId = null;
   screenReturns.enter(state, restoreCurrentScreen());
   const previous = screen.firstElementChild;
@@ -1084,11 +1034,7 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   leaveGuard = null;
   taskSurfaceRefresh = {};
   screen.dataset['screen'] = state;
-  if (state === 'settings' || SETTINGS_HUB_GROUPS.some((group) => group.rows.some((row) => row.route === state))) {
-    const layout = element('div', 'settings-layout');
-    layout.append(settingsNavigation(state), content);
-    screen.replaceChildren(layout);
-  } else screen.replaceChildren(content);
+  screen.replaceChildren(settingsLayout(state, content));
   if (authorityInterrupted) {
     for (const control of screen.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
       control.disabled = true;
@@ -1159,7 +1105,7 @@ async function renderLearningMaterialTarget(target: LearningMaterialTarget, book
       const content = panel();
       content.append(element('h2', undefined, `《${bookTitle}》 · Word 修改来源`));
       const reader = mountWordTrackedEditDetail({ root: content, api: api, ...target, openSourceVersion: openWordSourceVersion });
-      if (technicalLayerVisible) content.append(button('查看学习准入与排除', 'secondary', () => void renderQualityLearning('learning', target.bookId)));
+      if (technicalLayerVisible) content.append(button(technicalWords('查看学习准入与排除'), 'secondary', () => void renderQualityLearning('learning', target.bookId)));
       replaceScreen('word-import-detail', content, { bookId: target.bookId, title: bookTitle, section: 'overview' });
       await reader.load();
       return;
@@ -1550,7 +1496,7 @@ async function renderStartupProjection(
     return;
   }
   if (startup.state === 'committed-recovered') {
-    setStatus('已核对中断前的原子提交结果', 'success');
+    setStatus('已确认：中断前的导入已经完成', 'success');
     navigation.present(() => renderImported(startup.result, recoveryReturn));
     return;
   }
@@ -1990,7 +1936,7 @@ function renderContinuation(
     return;
   }
   if (continuation.state === 'committed-recovered') {
-    setStatus('已核对中断前的原子提交结果', 'success');
+    setStatus('已确认：中断前的导入已经完成', 'success');
     renderImported(continuation.result, recoveryReturn);
     return;
   }
@@ -2165,7 +2111,7 @@ function renderImportRecovery(
         });
         if (result.status === 'cancelled') {
           renderImportRecovery(recovery, recoveryReturn);
-          setStatus('已取消文件重选');
+          reportResult(setStatus, '已取消文件重选');
           return;
         }
         renderContinuation(result.continuation, recoveryReturn);
@@ -2582,7 +2528,7 @@ function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
  * `review-workspace.ts`; the sidebar provides the destination routes. `focus` opens a named Review Run with one finding in
  * view, which is how a Mark Card's 查看任务 arrives here.
  */
-function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null, procedureId: string | null = null): void {
+function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null, procedureId: string | null = null, categories: ReadonlyArray<string> | null = null): void {
   const content = panel();
   content.classList.add('book-review');
   content.dataset['bookId'] = bookId;
@@ -2596,6 +2542,8 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     focus,
     // 运行此工序… from 知识库 (Issue #65, S30): the 新建审阅 sheet opens filled from the procedure.
     procedureId,
+    categories,
+    registerCommands: (handlers) => commandDispatcher.register(handlers),
     api: api,
     awaitServiceJob,
     technicalDetails,
@@ -2620,7 +2568,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
         target: { kind: 'block', blockId: target.blockId },
       });
       if (!current.isCurrent()) return;
-      await leaveReturnChip(bookId, target.manuscriptId, target.branchId);
+      leaveReviewReturn(bookId, target, () => { void leaveThen(async () => renderBookReview(bookId, bookTitle)); });
       if (!current.isCurrent() || screen.firstElementChild !== origin) return;
       await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined, undefined, current);
     },
@@ -2658,7 +2606,7 @@ async function renderProposalWorkspace(input: { manuscriptId: string; branchId: 
   const origin = screen.firstElementChild;
   let onDocument = false;
   try { onDocument = (await api.getManuscriptWindow({ manuscriptId: input.manuscriptId, branchId: input.branchId, cursor: null })).deliverable === 'production-document'; }
-  catch (error) { if (navigation.errorIsCurrent(error, route)) setStatus(rendererErrorMessage(error, '无法打开提案审阅工作区。'), 'error'); return; }
+  catch (error) { if (navigation.errorIsCurrent(error, route)) setStatus(rendererErrorMessage(error, '无法打开修改建议工作区。'), 'error'); return; }
   if (!route.isCurrent() || screen.firstElementChild !== origin) return;
   const content = panel(); content.dataset['bookId'] = bookId; content.classList.add('proposal-workspace');
   const surface = mountProposalWorkspace({ root: content, api: api, input, bookTitle, setStatus,
@@ -2882,7 +2830,7 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
     setStatus,
     errorMessage: rendererErrorMessage,
     // 录入定价与首印… (Issue #430, S82): 设置 › 评估校准与预测 with this Book's entry open.
-    ...(technicalLayerVisible ? { openActuals: (bookId: string) => void renderEvaluationCalibration(bookId) } : {}),
+    openActuals: (bookId: string) => void renderEvaluationCalibration(bookId),
     // 打开 a Production Document (Issue #415): its own surface, read like the manuscript's window.
     openDocument: (documentNow, type, notice) => openProductionDocument(documentNow, type, bookTitle, notice),
     // 新闻稿、简介等衍生稿件 live on 稿件 (Issue #1403).
@@ -2952,7 +2900,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
   );
   if (projection.state === 'available' || (projection.taskIntent !== null && projection.checkpoint === null)) {
     const form = element('section', 'form-row task-authorization-form');
-    const label = element('label', undefined, '固定任务目标');
+    const label = element('label', undefined, '任务目标');
     label.htmlFor = 'j03-task-goal';
     const goal = element('input');
     goal.id = 'j03-task-goal';
@@ -3149,12 +3097,11 @@ function renderBookCreationForm(): void {
 
 function renderDiagnostics(): void {
   if (!technicalLayerVisible) {
-    renderSettingsHub();
-    setStatus('该页在开发者模式下显示');
+    renderSettingsHome('该页在开发者模式下显示');
     return;
   }
   const content = panel();
-  mountDiagnostics(content, api, () => void returnToLibrary());
+  mountDiagnostics(content, api);
   replaceScreen('diagnostics', content);
   setStatus(DIAGNOSTICS_OPENED);
 }
@@ -3173,7 +3120,7 @@ async function renderSeriesList(focusSeriesId: string | null): Promise<void> {
   const host = element('div');
   const back = element('div', 'button-row');
   back.append(button('返回', 'quiet', () => void returnToOrigin()));
-  content.append(element('h2', undefined, SERIES_TITLE), element('p', 'field-note series-lede', technicalWords(SERIES_LEDE, '将相关图书归入同一书系。')), host, back);
+  content.append(...seriesListHead(), host, back);
   replaceScreen('series-list', content);
   const page = navigation.read(content);
   setStatus(SERIES_STATUS.loading, 'busy');
@@ -3210,7 +3157,7 @@ async function renderSeries(seriesId: string): Promise<void> {
   replaceScreen('series', content);
   const page = navigation.read(content);
   setStatus(SERIES_STATUS.loading, 'busy');
-  const surface = mountSeries({ root: host, seriesId, api: api, setStatus, errorMessage: rendererErrorMessage });
+  const surface = mountSeries({ root: host, seriesId, api: api, setStatus, errorMessage: rendererErrorMessage, reviewMember: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => renderBookReview(bookId, route.bookTitle, null, null, ['series-consistency'])).catch((error: unknown) => setStatus(rendererErrorMessage(error, '暂时无法打开审阅。'), 'error')) });
   try {
     const series = await surface.load();
     if (!page.isCurrent()) return;
@@ -3461,7 +3408,7 @@ function renderEditorWindow(
 ): void {
   if (productionDocument === undefined && initialWindow.deliverable === 'production-document') {
     void openEditorWindow(initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, reimport)
-      .catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法打开这份生产文档。'), 'error'));
+      .catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法打开这份衍生稿件。'), 'error'));
     return;
   }
   mountManuscriptScreen({
@@ -3525,7 +3472,7 @@ const appearance = createAppearance(api);
 
 
 const { renderDataAndStorage } = createDataStorage({
-  setStatus, panel, element, button, rendererErrorMessage, initializeStartup, returnToOrigin, technicalDetails, replaceScreen,
+  setStatus, panel, element, button, rendererErrorMessage, initializeStartup, technicalDetails, replaceScreen,
 });
 
 
@@ -3536,10 +3483,10 @@ const { renderKnowledgeBase, renderQualityLearning } = createKnowledgeBase({
 
 
 const { renderModelServiceSettings } = createModelServiceSettings({
-  element, button, setStatus, rendererErrorMessage, panel, initializeStartup, returnToOrigin, replaceScreen,
+  element, button, setStatus, rendererErrorMessage, panel, initializeStartup, replaceScreen,
 });
 
-const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openOverviewResult, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
+const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
   technicalDetails,
   get authorityInterrupted() { return authorityInterrupted; },
   set authorityInterrupted(value) { authorityInterrupted = value; },
@@ -3586,12 +3533,11 @@ const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNo
 });
 
 
-const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsNavigation, renderSettingsHub, renderHelp, renderAppearance } = createSettingsScreens({
+const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsLayout, renderSettingsHome, renderHelp, renderAppearance } = createSettingsScreens({
   setStatus: (...args) => setStatus(...args),
   panel: (...args) => panel(...args),
   element: (...args) => element(...args),
   button: (...args) => button(...args),
-  returnToOrigin: (...args) => returnToOrigin(...args),
   replaceScreen: (...args) => replaceScreen(...args),
   api,
   rendererErrorMessage: (...args) => rendererErrorMessage(...args),
@@ -3604,7 +3550,6 @@ const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, r
   renderDataAndStorage: (...args) => renderDataAndStorage(...args),
   renderDiagnostics: (...args) => renderDiagnostics(...args),
   appearance,
-  initializeStartup: (...args) => initializeStartup(...args),
   viewPreferences,
 });
 
@@ -3641,6 +3586,7 @@ const { renderBookOverview } = createBookOverviewScreen({
   acknowledgeCompletionAfterPaint: (...args) => acknowledgeCompletionAfterPaint(...args),
   get authorityInterrupted() { return authorityInterrupted; },
   set authorityInterrupted(value) { authorityInterrupted = value; },
+  get statusRevision() { return statusRevision; },
 });
 
 

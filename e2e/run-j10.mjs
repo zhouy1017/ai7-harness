@@ -1,4 +1,5 @@
-import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { pointerClick } from './dispatch-chooser.mjs';
+import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -81,7 +82,7 @@ const FOURTH_BOOK = Object.freeze({ title: '澄清旅程' });
 const FIFTH_BOOK = Object.freeze({ title: '预算上限旅程' });
 /** The fifth Book's ceilings (Issue #51, S16a): four ranges spend 6,620 tokens under 5,000; the redo reads the rest under 20,000. */
 const BUDGET = Object.freeze({ kind: 'tokens', maxTotalTokens: 5000 });
-const RAISED = Object.freeze({ kind: 'tokens', maxTotalTokens: 20000 });
+const RAISED = Object.freeze({ kind: 'tokens', maxTotalTokens: 50000 });
 const BUDGET_STOP_NOTE = '已读完 4 / 8 个阅读范围，结果都已保留；这次运行用了 6,620 tokens，达到了预算上限 5,000 tokens';
 const BUDGET_RUN_LABEL = '任务运行预算已达上限 · 已保留部分结果';
 const BUDGET_REDO_GOAL = '改计划重做：沿用已读完的 4 个阅读范围，接着读其余 4 个';
@@ -97,7 +98,7 @@ const EIGHTH_BOOK = Object.freeze({ title: '归纳结果待确认旅程' });
 const REDUCTION_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-reduction-unknown';
 const UNCONFIRMED_REASON = '回答未完整传回，处理与计费结果待确认，AI7 没有自动重发。';
 // Only a step is listed, so the statement names no later re-send (#763 review).
-const UNCONFIRMED_STATEMENT = '回答未传全，处理与计费未知，缺口未重发；保留只记确认。';
+const UNCONFIRMED_STATEMENT = '回答未传全，处理与计费未知，未完成的部分未重发；保留只记确认。';
 /** The fourth Book's launch: unit 2 fails for good, and unit 5's first attempt fails retry-safe (Issue #422, S76d). */
 const TRANSIENT_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 /** Five ranges may settle before the fourth Book's Run is held: 1 to 4 do, 5 asks, 6 settles, and 7 is in flight. */
@@ -114,12 +115,12 @@ const RESUMED_HOLD = 5;
 const THIRD_HOLD = 1;
 // The drawer's own words (`src/renderer/task-drawer-labels.ts` and `src/service/task-plan.ts`), pinned there by
 // their unit suites.
-const REDO_REASON = '先暂停，再改计划重做';
+const REDO_REASON = '先暂停，再重新开始';
 const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步会被中止，此后不会再发送任何内容';
 const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存';
 const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
 const RESUMABLE_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
-const SHUTDOWN_STATEMENT = 'AI7 关闭时正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
+const SHUTDOWN_STATEMENT = 'AI7 关闭时正在运行；已读完的部分都已保存。继续时从下一部分接着读，在此之前不会发送任何内容。';
 const THIRD_PAUSED_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
 /** 改计划重做's summary on the third Book, paused with two ranges kept (Issue #422, S76c). */
 const REDO_SUMMARY = Object.freeze([
@@ -176,6 +177,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-10' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -319,9 +321,10 @@ async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); return input.value === ${JSON.stringify(value)}; })()`, name);
 }
 const TAB = Object.freeze({ key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
-async function pressTab(renderer) {
-  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...TAB });
-  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...TAB });
+async function pressTab(renderer, shift = false) {
+  const modifiers = shift ? 8 : 0;
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...TAB, modifiers });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...TAB, modifiers });
 }
 /** Space as a keyboard sends it, which chooses the focused radio. */
 async function pressSpace(renderer) {
@@ -409,7 +412,7 @@ async function startFirstBaseline(renderer, readiness, name) {
 async function prepareFirstBaseline(renderer, readiness, name) {
   await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='available'`, `${name}-available`);
   await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-open`);
-  await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-bar-ready`);
+  await waitFor(renderer, `document.querySelector('[data-task-launch-kind] [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-bar-ready`);
 }
 
 /**
@@ -482,15 +485,15 @@ function runningWith(settled) {
 /** The bar of a Run under way (AUTH-010): 暂停 and 取消任务 act on it, 改计划重做 says it waits for 暂停. */
 const RUNNING_ACTIONS = Object.freeze([
   ['pause', '暂停', 'enabled', null],
-  ['cancel-run', '停止任务', 'enabled', null],
-  ['redo', '改计划重做', 'disabled', REDO_REASON],
+  ['cancel-run', '取消任务', 'enabled', null],
+  ['redo', '重新开始', 'disabled', REDO_REASON],
   ['run-link', '查看运行', 'enabled', null],
 ]);
 /** The bar of a stopped Run that can go on (CONT-015): 续行 first, then 取消任务, 改计划重做 and the way to the Run. */
 const STOPPED_ACTIONS = Object.freeze([
-  ['resume', '续行', 'enabled', null],
-  ['cancel-run', '停止任务', 'enabled', null],
-  ['redo', '改计划重做', 'enabled', null],
+  ['resume', '继续', 'enabled', null],
+  ['cancel-run', '取消任务', 'enabled', null],
+  ['redo', '重新开始', 'enabled', null],
   ['run-link', '查看运行', 'enabled', null],
 ]);
 
@@ -776,10 +779,18 @@ async function main() {
 
     at('notification-settings');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'notification-settings-hub');
-    await clickSelector(renderer, '[data-settings-route="notifications"]', 'notification-settings-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'notification-settings-landed');
+    await clickSelector(renderer, '.settings-navigation [data-settings-nav="notifications"]', 'notification-settings-open');
     await waitFor(renderer, `document.querySelector('[data-screen="notifications"] [data-notification-settings]')`, 'notification-settings-shown');
     await assertRenderer(renderer, `document.querySelector('#context-title')?.textContent==='设置' && document.querySelector('#context-position')?.textContent==='本机 · 通知'`, 'notification-settings-place');
     await assertRenderer(renderer, `(() => { const switches = [...document.querySelectorAll('[data-notification-preference]')]; return switches.length === 4 && switches.every((control) => !control.checked) && document.querySelector('[data-notification-preference="notifications.completions"]').disabled && document.querySelector('[data-nav-settings="hub"]')?.getAttribute('aria-current') === 'page'; })()`, 'notification-settings-defaults');
+    // #1528: 正在看本书时自动显示结果 lives here now (it was in 发起任务), on until turned off, under its own stored key; the four
+    // system-notification switches above are unchanged.
+    const AUTO_RESULT = '[data-screen="notifications"] [data-task-overview-auto-result]';
+    await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(AUTO_RESULT)}); return input instanceof HTMLInputElement && input.type === 'checkbox' && input.checked && input.closest('label')?.textContent === '正在看本书时自动显示结果' && localStorage.getItem('ai7.task-overview.auto-result') !== 'off'; })()`, 'notification-settings-auto-result-default');
+    for (const [value, key] of [['off', 'notification-settings-auto-result-off'], ['on', 'notification-settings-auto-result-on']]) {
+      await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(AUTO_RESULT)}); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return input.checked === (${JSON.stringify(value)} === 'on') && localStorage.getItem('ai7.task-overview.auto-result') === ${JSON.stringify(value)}; })()`, key);
+    }
     await clickNotificationSwitch(renderer, 'notifications.enabled', 'notification-settings-enable');
     await waitFor(renderer, `document.querySelector('[data-notification-preference="notifications.completions"]')?.disabled === false`, 'notification-completions-enabled');
     await assertRenderer(renderer, `window.ai7.getPreferences().then((preferences) => preferences.values['notifications.enabled'] === true)`, 'notification-settings-saved');
@@ -797,8 +808,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
-    await click(renderer, '模型服务', 'model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -813,11 +823,11 @@ async function main() {
     const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference) && readyConnection?.credentialOperationState === 'ready', 'model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除凭据', 'model-remove');
+    await click(renderer, '移除密钥', 'model-remove');
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     credentialRemoved = true;
-    await click(renderer, '返回', 'model-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-back');
 
     at('run-under-way');
     // 开始任务 from the drawer: the drawer follows the Run, two ranges settle, and the third stays in flight.
@@ -1011,7 +1021,7 @@ async function main() {
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanState==='cancelled-after-start' && drawer.querySelector('.task-drawer-pill')?.textContent==='已取消' && drawer.querySelector('.task-bar-status')?.textContent==='已取消' && drawer.querySelector('.task-plan-activity')===null; })()`, 'cancelled-shown', 60_000);
     const cancelledDrawer = await renderer.evaluate(READ_DRAWER);
     // 改计划重做 is offered beside the way to the Run, now that it has stopped (Issue #422, S76c).
-    requireJourney(JSON.stringify(cancelledDrawer?.actions) === JSON.stringify([['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]]) && cancelledDrawer.note === null, 'cancelled-bar', cancelledDrawer);
+    requireJourney(JSON.stringify(cancelledDrawer?.actions) === JSON.stringify([['redo', '重新开始', 'enabled', null], ['run-link', '查看运行', 'enabled', null]]) && cancelledDrawer.note === null, 'cancelled-bar', cancelledDrawer);
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='cancelled' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='已取消'`, 'cancelled-card-label', 30_000);
 
     at('partial-revision-kept');
@@ -1126,10 +1136,10 @@ async function main() {
     const resumableAttention = await attentionNames(renderer, secondBookId, 'analysis-resumable');
     requireJourney(resumableAttention.named, 'resumable-in-attention', resumableAttention.groups);
     await openAnalysisOf(renderer, secondBookId, 'relaunched-analysis');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可续行'`, 'resumable-card-label', 30_000);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可继续'`, 'resumable-card-label', 30_000);
     const resumable = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const resumableAttempt = resumable?.run?.attempt;
-    requireJourney(resumable?.bookId === secondBookId && resumable.state === 'resumable' && resumable.stateLabel === '任务已中断 · 可续行' &&
+    requireJourney(resumable?.bookId === secondBookId && resumable.state === 'resumable' && resumable.stateLabel === '任务已中断 · 可继续' &&
       resumable.run?.state === 'resumable' && resumable.run.runRecordId === beforeClose.run.runRecordId &&
       JSON.stringify(resumable.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'resumable']) &&
       UUID_PATTERN.test(resumableAttempt?.attemptId ?? '') && JSON.stringify(resumableAttempt.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2]) &&
@@ -1137,7 +1147,7 @@ async function main() {
     'resumable-record', { state: resumable?.state, run: resumable?.run?.state, transitions: resumable?.run?.transitions?.map((transition) => transition.state), spans: resumableAttempt?.spans?.map((span) => span.unitOrdinal) });
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'resumable-open-plan');
     // This Run has never continued: explain shutdown without inventing a previous continuation time (#1309).
-    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行', statement: SHUTDOWN_STATEMENT, note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
+    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可继续', status: '任务已中断 · AI7 关闭时正在运行', statement: SHUTDOWN_STATEMENT, note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
     // Nothing was sent since AI7 opened again.
     await new Promise((settle) => setTimeout(settle, 1_000));
     const stillStopped = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1195,8 +1205,8 @@ async function main() {
     await waitFor(renderer, `document.activeElement !== null && document.activeElement === document.querySelector('#task-drawer-redo-summary h4')`, 'redo-summary-focused', 10_000);
     const redoSummary = await renderer.evaluate(READ_DRAWER);
     const thirdPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(thirdIntentId)} })`);
-    requireJourney(redoSummary?.redo?.heading === '改计划重做摘要' && JSON.stringify(redoSummary.redo.lines) === JSON.stringify(REDO_SUMMARY) &&
-      JSON.stringify(thirdPlan?.redo?.summary) === JSON.stringify(REDO_SUMMARY) && redoSummary.redo.confirm === '确认改计划重做' && redoSummary.redo.keep === '先不重做' &&
+    requireJourney(redoSummary?.redo?.heading === '重新开始摘要' && JSON.stringify(redoSummary.redo.lines) === JSON.stringify(REDO_SUMMARY) &&
+      JSON.stringify(thirdPlan?.redo?.summary) === JSON.stringify(REDO_SUMMARY) && redoSummary.redo.confirm === '确认重新开始' && redoSummary.redo.keep === '先不重做' &&
       redoSummary.impact === null,
     'redo-summary', redoSummary?.redo ?? null);
     const unrecordedRedo = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1263,7 +1273,8 @@ async function main() {
     // Ask-first retry is an optional launch choice, frozen in the first plan.
     await openAnalysisOf(renderer, fourthBookId, 'fourth-analysis');
     await prepareFirstBaseline(renderer, 'ready', 'fourth-baseline');
-    await assertRenderer(renderer, `(() => { const options=document.querySelector('#task-drawer .task-launch-options');options.open=true;const retry=options.querySelector('[data-task-launch-option="retry"]');retry.value='ask-first';retry.dispatchEvent(new Event('change',{bubbles:true}));return retry.value==='ask-first';})()`, 'ask-first-selected');
+    await openLaunchOptions(renderer, waitFor, '[data-task-launch-kind]', 'ask-first-options');
+    await chooseLaunchOption(renderer, waitFor, '[data-task-launch-kind] [data-task-launch-option="retry"]', 'ask-first', 'ask-first-selected');
 
     at('clarification-raised');
     // 开始任务 with five ranges allowed to settle: unit 5 fails retry-safe and, asked first, asks instead of retrying; 6 is
@@ -1305,7 +1316,7 @@ async function main() {
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='awaiting-clarification')`, 'run-waits', 60_000);
     await waitForBar(renderer, {
       state: 'awaiting-clarification', pill: SCOPE_WAITING, status: '等你回答', note: '已读完 7 / 8 个阅读范围；1 个问题等你回答，回答后接着做',
-      actions: [['cancel-run', '停止任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
+      actions: [['cancel-run', '取消任务', 'enabled', null], ['redo', '重新开始', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
     }, 'waiting-bar', 30_000);
     const waitingRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(waitingRun?.state === 'awaiting-clarification' && waitingRun.stateLabel === SCOPE_WAITING &&
@@ -1398,10 +1409,10 @@ async function main() {
       item.itemId === `analysis:${held.taskIntent.taskIntentId}` && item.book?.bookId === held.bookId && item.state === 'analysis-resumable') === true),
     'answered-restart-holders-stopped');
     await openAnalysisOf(renderer, fourthBookId, 'answered-restart');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可续行'`, 'answered-restart-card');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可继续'`, 'answered-restart-card');
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'answered-restart-plan');
     await waitForBar(renderer, {
-      state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行',
+      state: 'resumable', pill: '任务已中断 · 可继续', status: '任务已中断 · AI7 关闭时正在运行',
       statement: SHUTDOWN_STATEMENT,
       note: '已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分', actions: STOPPED_ACTIONS,
     }, 'answered-restart-bar');
@@ -1460,13 +1471,13 @@ async function main() {
     // 更新计划 makes version 2 — the ceiling frozen into the plan, which can still start.
     await openAnalysisOf(renderer, fifthBookId, 'fifth-analysis');
     await prepareFirstBaseline(renderer, 'ready', 'fifth-baseline');
-    await assertRenderer(renderer, `(() => {const options=document.querySelector('#task-drawer .task-launch-options');options.open=true;const input=options.querySelector('[data-task-launch-option="budget"]');input.value='5,000';input.dispatchEvent(new Event('input',{bubbles:true}));return true;})()`, 'budget-first-plan-option');
+    await setLaunchBudget(renderer, waitFor, '[data-task-launch-kind]', '5,000', 'budget-first-plan-option');
 
     at('budget-reached');
     // 开始任务: four ranges spend 6,620 tokens and the fifth would pass the ceiling, so it is never sent. The Run stops as
     // 已停止 · 预算已达上限 with what it read and used — 调整预算并重做 and 查看部分结果, never 续行 or 重试 — its partial revision
     // kept, and 待我处理 holds it as an exception whose next step is 调整预算并重做.
-    await assertRenderer(renderer, `(() => { const timing=document.querySelector('#task-drawer select[data-task-start-when]'); if(!(timing instanceof HTMLSelectElement)||timing.value!=='now')return false; timing.value='idle'; timing.dispatchEvent(new Event('change',{bubbles:true})); return true; })()`, 'budget-deferred-start-choice');
+    await chooseLaunchOption(renderer, waitFor, '[data-task-launch-kind] [data-task-start-when]', 'idle', 'budget-deferred-start-choice');
     const fifthIntentId = await launchTaskFromBar(renderer, waitFor, 'fifth-start');
     const budgetPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(budgetPlan?.planVersion?.ordinal === 1 && budgetPlan.planRevisions.length === 0 &&
@@ -1499,10 +1510,11 @@ async function main() {
     await waitFor(renderer, `(() => { const card=document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(fifthBookId)}] .baseline-analysis-card'); return card?.dataset.analysisState==='interrupted' && card.dataset.taskOutcomeClassification==='interrupted' && card.querySelector('.analysis-state')?.textContent===${JSON.stringify(BUDGET_RUN_LABEL)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='budget-reached'; })()`, 'budget-partial-shown', 30_000);
 
     at('budget-redo');
-    // 调整预算并重做 prepares a new Task that carries the four ranges and begins from the plan's 5,000 tokens; it opens in its
-    // editing with focus on 设置上限….
+    // 调整预算并重做 prepares a new Task that carries the four ranges and begins from the plan's 5,000 tokens; it opens with its
+    // options shown and focus on the bar's 本次用量.
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="redo"]', 'budget-redo');
-    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && typeof drawer.dataset.taskPlanRef==='string' && drawer.dataset.taskPlanRef!==${JSON.stringify(fifthIntentId)} && drawer.dataset.taskPlanState==='ready' && drawer.dataset.taskPlanVersion==='1' && drawer.dataset.taskDrawerMode==='full' && document.activeElement?.dataset?.taskPlanEdit==='budget'; })()`, 'budget-redo-opened', 120_000);
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && typeof drawer.dataset.taskPlanRef==='string' && drawer.dataset.taskPlanRef!==${JSON.stringify(fifthIntentId)} && drawer.dataset.taskPlanState==='ready' && drawer.dataset.taskPlanVersion==='1' && drawer.dataset.taskDrawerMode==='full' && document.querySelector('#task-drawer [data-task-launch-option="budget"]')?.disabled===false; })()`, 'budget-redo-opened', 120_000);
+    await waitFor(renderer, `(() => { const budget=document.querySelector('#task-drawer [data-task-launch-option="budget"]'); return !!budget?.closest('.task-launch-popover')?.matches(':popover-open') && (document.activeElement===budget || document.activeElement===budget.nextElementSibling && budget.nextElementSibling.matches('.ui-select-trigger')); })()`, 'budget-redo-focus', 10_000);
     const budgetRedo = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const budgetRedoId = budgetRedo?.taskIntent?.taskIntentId ?? '';
     requireJourney(UUID_PATTERN.test(budgetRedoId) && budgetRedoId !== fifthIntentId && budgetRedo.state === 'prepared' && (budgetRedo.run ?? null) === null &&
@@ -1514,17 +1526,30 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('#task-drawer .task-plan-sentence-text')?.textContent===${JSON.stringify(BUDGET_REDO_GOAL)} && document.querySelector('#task-drawer dd[data-task-plan-term="预算上限"]')?.textContent==='任务运行预算上限：5,000 tokens'`, 'budget-redo-words');
 
     at('j14-budget-keyboard');
-    // Without a pointer: Enter on 设置上限… opens the field with focus in it; the count is typed and Enter sets it, focus back
-    // on 设置上限… beside 你改的; Tab reaches 去掉上限.
+    // Without a pointer: Shift+Tab back from the bar's 本次用量 to the plan's 设置上限…; Enter opens the field with focus in it,
+    // the count is typed and Enter sets it, focus back on 设置上限… beside 你改的; Tab reaches 去掉上限; the bar shows the same tier.
+    for (let count = 0; count < 80 && !(await renderer.evaluate(`document.activeElement?.dataset?.taskPlanEdit==='budget'`)); count += 1) await pressTab(renderer, true);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget' && document.activeElement.matches(':focus-visible')`, 'keyboard-budget-reached', 10_000);
     await pressEnter(renderer);
     await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl==='budget-input'`, 'keyboard-budget-input', 10_000);
-    await renderer.send('Input.insertText', { text: '20000' });
+    await renderer.send('Input.insertText', { text: String(RAISED.maxTotalTokens) });
     await pressEnter(renderer);
-    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget' && document.activeElement.matches(':focus-visible') && document.querySelector('#task-drawer .task-plan-budget-edited .task-plan-edit-tag')?.textContent==='你改的 · 预算上限 20,000 tokens' && document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 1 处'`, 'keyboard-budget-set', 10_000);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget' && document.activeElement.matches(':focus-visible') && document.querySelector('#task-drawer .task-plan-budget-edited .task-plan-edit-tag')?.textContent==='你改的 · 预算上限 50,000 tokens'`, 'keyboard-budget-set', 10_000);
     await pressTab(renderer);
     await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget-remove' && document.activeElement.matches(':focus-visible')`, 'keyboard-budget-remove-reached', 10_000);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'budget-redo-update');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'budget-redo-version-2', 60_000);
+    await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-launch-option="budget"]')?.value==='50000' && document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='1'`, 'keyboard-budget-selection');
+
+    at('budget-redo-completed');
+    // The quiet completion notice (Issue #937; NOTIF-003): a focused window, and a probe that records each showing and hiding
+    // of the one notice, so its 2.5 seconds are read from the page and not raced by the steps below.
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    const beforeQuietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => ({ count: projection.actionableCount, stop: projection.groups.some((group) => ['exceptions', 'decisions'].includes(group.key) && group.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-budget-reached')) }))`);
+    await waitFor(renderer, `document.querySelector('[data-toast]')?.hidden === true`, 'quiet-completion-idle', 10_000);
+    await assertRenderer(renderer, `(() => { const notice = document.querySelector('[data-toast]'); if (!notice || !notice.hidden) return false; const probe = { shown: [], hiddenAt: null }; const observer = new MutationObserver(() => { const visible = !notice.hidden && notice.dataset.tone === 'analysis-completed'; const last = probe.shown.at(-1); if (visible && (last === undefined || last.hiddenAt !== null)) probe.shown.push({ at: performance.now(), hiddenAt: null, noticeClass: notice.dataset.tone ?? null, text: notice.querySelector('span')?.textContent ?? null }); if (!visible && last !== undefined && last.hiddenAt === null) last.hiddenAt = performance.now(); }); observer.observe(notice, { attributes: true, childList: true, characterData: true, subtree: true }); globalThis.__j10QuietNotice = { probe, stop: () => observer.disconnect() }; return true; })()`, 'quiet-completion-probe');
+    // 开始任务: the redo reads the four ranges left, and the reduction after them, under 50,000 tokens, to its end — the
+    // Book's analysis whole again, and 待我处理 no longer naming the stop.
+    await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="start"]', 'budget-redo-start');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2'`, 'budget-redo-version-2', 60_000);
     const raisedPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     // The stored diff line is read field by field: its record's keys come back in canonical order.
     const raisedDiff = raisedPlan?.planRevisions?.at(-1)?.diff ?? [];
@@ -1534,16 +1559,6 @@ async function main() {
       raisedDiff[0].prior?.maxTotalTokens === BUDGET.maxTotalTokens && raisedDiff[0].proposed?.maxTotalTokens === RAISED.maxTotalTokens,
     'budget-raised', { ceiling: raisedPlan?.providerResolutionPlan?.runBudgetCeiling ?? null, diff: raisedDiff });
 
-    at('budget-redo-completed');
-    // The quiet completion notice (Issue #937; NOTIF-003): a focused window, and a probe that records each showing and hiding
-    // of the one notice, so its 2.5 seconds are read from the page and not raced by the steps below.
-    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-    const beforeQuietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => ({ count: projection.actionableCount, stop: projection.groups.some((group) => ['exceptions', 'decisions'].includes(group.key) && group.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-budget-reached')) }))`);
-    await waitFor(renderer, `document.querySelector('[data-toast]')?.hidden === true`, 'quiet-completion-idle', 10_000);
-    await assertRenderer(renderer, `(() => { const notice = document.querySelector('[data-toast]'); if (!notice || !notice.hidden) return false; const probe = { shown: [], hiddenAt: null }; const observer = new MutationObserver(() => { const visible = !notice.hidden && notice.dataset.tone === 'analysis-completed'; const last = probe.shown.at(-1); if (visible && (last === undefined || last.hiddenAt !== null)) probe.shown.push({ at: performance.now(), hiddenAt: null, noticeClass: notice.dataset.tone ?? null, text: notice.querySelector('span')?.textContent ?? null }); if (!visible && last !== undefined && last.hiddenAt === null) last.hiddenAt = performance.now(); }); observer.observe(notice, { attributes: true, childList: true, characterData: true, subtree: true }); globalThis.__j10QuietNotice = { probe, stop: () => observer.disconnect() }; return true; })()`, 'quiet-completion-probe');
-    // 开始任务: the redo reads the four ranges left, and the reduction after them, under 20,000 tokens, to its end — the
-    // Book's analysis whole again, and 待我处理 no longer naming the stop.
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'budget-redo-start');
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(budgetRedoId)} && analysis.run !== null && !['authorized','admitted','executing'].includes(analysis.run.state))`, 'budget-redo-ended', 180_000);
     const budgetDone = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(budgetDone?.state === 'settled' && budgetDone.run?.state === 'completed' && budgetDone.run.runRecordId !== reached.run.runRecordId &&
@@ -1588,7 +1603,7 @@ async function main() {
 
     at('account-limit-stop');
     // 开始任务: ranges 1 to 3 are read, and the model service refuses the fourth on the account's limit. The Run stops at that
-    // boundary — 模型服务账户限额 in its own words, never 任务已中断 · 可续行's — keeping three ranges and holding nothing:
+    // boundary — 模型服务账户限额 in its own words, never 任务已中断 · 可继续's — keeping three ranges and holding nothing:
     // 处理模型服务 and 续行, beside 取消任务, 改计划重做 and 查看运行; ②A's card says the same, and 待我处理 holds it as an
     // exception whose next step is 处理模型服务.
     await openAnalysisOf(renderer, sixthBookId, 'sixth-analysis');
@@ -1598,7 +1613,7 @@ async function main() {
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(sixthIntentId)} && analysis.run?.state==='resumable')`, 'account-limit-stopped', 180_000);
     await waitForBar(renderer, {
       state: 'account-limit', pill: '模型服务账户限额', status: '模型服务账户限额', note: ACCOUNT_LIMIT_NOTE,
-      actions: [['connect', '处理模型服务', 'enabled', null], ['resume', '续行', 'enabled', null], ['cancel-run', '停止任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
+      actions: [['connect', '处理模型服务', 'enabled', null], ['resume', '继续', 'enabled', null], ['cancel-run', '取消任务', 'enabled', null], ['redo', '重新开始', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
     }, 'account-limit-bar', 30_000);
     const limited = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(limited?.state === 'resumable' && limited.stateLabel === '模型服务账户限额' && limited.run?.stateLabel === '模型服务账户限额' &&
@@ -1619,7 +1634,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.model-service-settings')!==null`, 'account-limit-settings', 30_000);
     const whileAway = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(whileAway?.run?.state === 'resumable' && JSON.stringify(whileAway.run.transitions) === JSON.stringify(limited.run.transitions), 'account-limit-unmoved');
-    await click(renderer, '返回', 'account-limit-settings-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'account-limit-settings-back');
     await openAnalysisOf(renderer, sixthBookId, 'account-limit-return');
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'account-limit-open-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='account-limit' && document.querySelector('#task-drawer [data-task-drawer-control="resume"]')?.disabled===false`, 'account-limit-plan-again', 30_000);
@@ -1746,7 +1761,7 @@ async function main() {
     'unknown-unit-gap-with-revision-and-outcome');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed h4')?.textContent==='该单元结果未知' && document.querySelector('#task-drawer [data-task-drawer-control="resume"]')===null && document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')===null`, 'unknown-unit-ui', 30_000);
     // #1310: the range explanation separates changed text from a failed reread.
-    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed .attention-note')?.textContent==='回答未传全，处理与计费未知，缺口未重发；保留只记确认；原文已改不再列出，上次重读失败仍待确认。'`, 'unknown-unit-explanation');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed .attention-note')?.textContent==='回答未传全，处理与计费未知，未完成的部分未重发；保留只记确认；原文已改不再列出，上次重读失败仍待确认。'`, 'unknown-unit-explanation');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="view-unconfirmed-record"]', 'unknown-unit-view');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed li')?.textContent==='第 4 个阅读范围 · 请求已发出 · 回答没有完整传回'`, 'unknown-unit-listed', 30_000);
     const completedAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
@@ -1847,6 +1862,19 @@ async function main() {
     await waitFor(renderer, `window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}}).then((plan)=>plan.runControl?.activity?.currentUnitOrdinal===1)`, 'review-controls-first-unit');
     const reviewStarted = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}})`);
 
+    at('review-controls-progress-floor');
+    // #1526: while the Run runs, the page's own polls draw its progress list again and it keeps its height — set through the style
+    // object, which the page's policy admits (an inline style attribute it refuses) — so 查看计划 stays where it stands at the end.
+    await waitFor(renderer, `(() => { const list=document.querySelector('.review-workspace-card[data-review-state="running"] ol.review-progress'); if(!list||list.style.minHeight==='')return false;
+      const shown=getComputedStyle(list).minHeight; return shown===list.style.minHeight && shown!=='0px'; })()`, 'review-controls-progress-floor-applied', 30_000);
+    const progressPlace = await renderer.evaluate(`new Promise(resolve => { const page=document.scrollingElement; page.scrollTop=page.scrollHeight; requestAnimationFrame(() => {
+      window.__ai7ProgressProbe=document.querySelector('ol.review-progress'); resolve({ top: document.querySelector('[data-review-action="view-plan"]').getBoundingClientRect().top,
+      end: page.scrollTop > 0 && Math.abs(page.scrollTop + page.clientHeight - page.scrollHeight) < 1 }); }); })`);
+    requireJourney(progressPlace?.end === true, 'review-controls-progress-page-end', progressPlace);
+    await waitFor(renderer, `document.querySelector('ol.review-progress')!==window.__ai7ProgressProbe && document.querySelector('.review-workspace-card')?.dataset.reviewState==='running'`, 'review-controls-progress-redrawn', 30_000);
+    const progressTop = await renderer.evaluate(`document.querySelector('[data-review-action="view-plan"]').getBoundingClientRect().top`);
+    requireJourney(Math.abs(progressTop - progressPlace.top) < 1, 'review-controls-progress-kept-place', { before: progressPlace.top, after: progressTop });
+
     at('review-controls-pause-resume');
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='review-run'||drawer.dataset.taskPlanRef!==${JSON.stringify(reviewRef)})return false; const button=drawer.querySelector('[data-task-drawer-control="pause"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'review-controls-pause-ready');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'review-controls-pause');
@@ -1862,9 +1890,13 @@ async function main() {
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='review-run'||drawer.dataset.taskPlanRef!==${JSON.stringify(reviewRef)})return false; const button=drawer.querySelector('[data-task-drawer-control="cancel-run"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'review-controls-cancel-ready');
 
     at('review-controls-cancel-impact');
-    await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.textContent==='停止任务'`, 'review-controls-stop-wording');
+    await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.textContent==='取消任务'`, 'review-controls-stop-wording');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="cancel-run"]', 'review-controls-impact');
     await waitFor(renderer, `document.querySelector('#task-drawer-cancel-impact') && document.querySelector('#task-drawer [data-task-drawer-control="confirm-cancel-run"]')?.textContent==='确认取消任务'`, 'review-controls-confirm-wording');
+    // The Run still runs with one part of several read: the drawer's bar is filled in proportion, neither empty nor whole (its width
+    // set through the style object, as the page's policy requires; a refused style attribute left it as wide as its track).
+    await waitFor(renderer, `(() => { const fill=document.querySelector('#task-drawer .task-plan-progress-fill'); if(!fill||!fill.parentElement)return false;
+      const width=fill.getBoundingClientRect().width, track=fill.parentElement.getBoundingClientRect().width; return width > 0 && width < track - 1; })()`, 'review-controls-progress-fill', 30_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="confirm-cancel-run"]', 'review-controls-cancel');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='cancelling'`, 'review-controls-cancelling');
     await writeFile(holdPath, '2', 'utf8');

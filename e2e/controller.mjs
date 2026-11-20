@@ -229,6 +229,40 @@ export function sidebarNavigate(selector) {
   return `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.closest('[hidden]')||node.getAttribute('aria-disabled')==='true'||(node instanceof HTMLButtonElement&&node.disabled))return false; const key=node.dataset.navDestination??node.dataset.navBookSection??node.dataset.navSettings; const labels=${JSON.stringify(labels)}; if(key && (node.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')!==labels[key])return false; node.click(); return true; })()`;
 }
 
+/**
+ * #1519: an expression that is true while the status bar is showing, fixed, whole inside the window with its words wrapped in it,
+ * and over nothing the editor needs: the sidebar and its pinned 设置 row, the Task Drawer when it is open, and every element of
+ * `selectors` (a manuscript's bottom controls, a sticky action bar). Every rectangle is read from the viewport at the moment.
+ */
+export function statusBarClear(selectors = []) {
+  return `(() => {
+    const bar = document.querySelector('#persistence-status');
+    if (!(bar instanceof HTMLElement) || bar.hidden || getComputedStyle(bar).position !== 'fixed') return false;
+    const box = bar.getBoundingClientRect();
+    if (!(box.width > 0 && box.top >= 0 && box.bottom <= innerHeight && box.left >= 0 && box.right <= innerWidth + 0.5 && bar.scrollWidth <= bar.clientWidth + 1)) return false;
+    const over = (node) => { const r = node.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !(r.right <= box.left + 0.5 || r.left >= box.right - 0.5 || r.bottom <= box.top + 0.5 || r.top >= box.bottom - 0.5); };
+    return ['#app-sidebar', '#app-sidebar .sidebar-foot', '#task-drawer', '.technical-layer-control', ...${JSON.stringify(selectors)}].every((selector) => Array.from(document.querySelectorAll(selector)).every((node) => !over(node)));
+  })()`;
+}
+
+/** What `statusBarClear` saw, for a failure's detail: the bar's box and every listed element it lies over (#1519). */
+export function statusBarOverlaps(selectors = []) {
+  return `(() => {
+    const bar = document.querySelector('#persistence-status');
+    if (!(bar instanceof HTMLElement)) return { bar: null };
+    const box = bar.getBoundingClientRect(); const round = (r) => [r.left, r.top, r.width, r.height].map((value) => Math.round(value));
+    const over = [];
+    for (const selector of ['#app-sidebar', '#app-sidebar .sidebar-foot', '#task-drawer', '.technical-layer-control', ...${JSON.stringify(selectors)}]) {
+      for (const node of document.querySelectorAll(selector)) {
+        const r = node.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0 && !(r.right <= box.left + 0.5 || r.left >= box.right - 0.5 || r.bottom <= box.top + 0.5 || r.top >= box.bottom - 0.5)) over.push({ selector, tag: node.tagName, cls: node.className, rect: round(r) });
+      }
+    }
+    return { bar: round(box), hidden: bar.hidden, position: getComputedStyle(bar).position, view: [innerWidth, innerHeight], scroll: [bar.scrollWidth, bar.clientWidth],
+      vars: ['--bottom-controls', '--status-area-right', '--status-bar-height'].map((name) => document.documentElement.style.getPropertyValue(name)), over };
+  })()`;
+}
+
 /** The sidebar on the library: the seven destinations in their order with their exact names, 书库 current, 设置 at the foot. */
 export const SIDEBAR_LIBRARY_READY = `(() => { const rows=Array.from(document.querySelectorAll('#app-sidebar .sidebar-destinations [data-nav-destination]')); const names=rows.map((row)=>row.dataset.navDestination+':'+(row.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')); return JSON.stringify(names)===${JSON.stringify(JSON.stringify(['attention:待我处理', 'tasks:任务', 'library:书库', 'series:书系', 'knowledge:知识库', 'quality:质量与学习', 'global-agent:AI 助手']))} && document.querySelector('#app-sidebar [data-nav-destination="library"]')?.getAttribute('aria-current')==='page' && document.querySelector('#app-sidebar [data-nav-settings]')?.textContent==='设置' && document.querySelector('#context-title')?.textContent==='书库'; })()`;
 
@@ -614,6 +648,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'import-review',
     'import-commit',
     'import-editor-open',
+    'panels-geometry',
+    'protection-header-baseline',
+    'protection-panel-geometry',
     'bounded-workspace',
     'cooperative-position-input',
     'cooperative-position-resolve',
@@ -769,6 +806,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   'J-08': Object.freeze([
     'comments-inline-reply-column',
     'comments-inline-reply-overlay',
+    'comments-connector-reply-overlay',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
@@ -804,6 +842,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'sample-book-import',
     'guided-strip',
     'offline-empty-and-import',
+    'settings-lands-on-model-service',
     'distinct-and-duplicate-book-routing',
     'serialized-newest-route-wins',
     'background-state-no-focus-and-later-revision',
@@ -872,6 +911,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-knowledge-keyboard',
     'j14-knowledge-reflow-forced-colors',
     'knowledge-guideline-restart',
+    'knowledge-house-words',
     'knowledge-procedures',
     'knowledge-library-add',
     'knowledge-library-attention',
@@ -1062,6 +1102,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-relaunch',
     'review-destination',
     'dispatch-model-choice',
+    'task-status-finished',
     'review-sheet',
     'review-prepare',
     'review-bar-ready',
@@ -1082,6 +1123,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'book-findings-disposition',
     'review-report',
     'review-report-export',
+    'review-report-export-wide',
+    'review-report-export-gate',
     'review-coverage-moves',
     // Issue #425 (S70): 资料与记录 › 来源与证据 reads this Book's provider-free answer — nothing retained, nothing to save.
     'research-evidence-source-view',
@@ -1090,6 +1133,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Issue #1022: the authorized overlap/Unicode mark, Apply and reversal variation.
     'review-overlap-relaunch',
     'review-overlap-synthetic-edits',
+    // Issue #1506: 生成统合总结 on the overlap Book's 暂缺 summary, at both window sizes.
+    'review-synthesis-only',
+    'review-synthesis-only-wide',
+    'review-synthesis-only-gate',
     // Issue #1430: 导出审阅报告（DOCX） in one click on the overlap Book, its published DOCX read back.
     'review-report-docx-one-step',
     // Issue #901: 事实核查 at its levels on a fresh sample1 Book — the selector, the Evidence Workspace, a review decision, a
@@ -1110,6 +1157,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   'J-05': Object.freeze([
     'comments-inline-apply-column',
     'comments-inline-apply-overlay',
+    'comments-connector-apply-overlay',
+    // Issue #1523: 下一条待处理 across pages, keyboard triage and the Book's count, docked and as the overlay.
+    'comments-triage-column',
+    'comments-triage-overlay',
     'editor-revision',
     'ai-locks',
     'scoped-dispatch-wide',
@@ -1178,6 +1229,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'selection-span-review-choices-wide',
     'selection-span-review-choices-gate',
     'local-check-exact-sample1',
+    'review-keyboard-wide',
+    'review-keyboard-gate',
+    'review-batch-undo-wide',
+    'review-batch-undo-gate',
     'dispatch-review-wide',
     'dispatch-review-gate',
     'dispatch-chooser-wide',
@@ -1304,7 +1359,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'documents-restart',
     'knowledge-exemplars',
     'publication-actuals',
-    // Issue #432 (S84a): 新建文档 · 写作任务 — a second Book's prerequisites, the sheet, the plan, the Run, the draft opened as the
+    // Issue #432 (S84a): 新建衍生稿件 · 写作任务 — a second Book's prerequisites, the sheet, the plan, the Run, the draft opened as the
     // Book's 宣传文章 in its 起草 phase, and its card.
     'writing-book',
     'writing-prerequisites',
@@ -1336,19 +1391,22 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   ]),
   // J-09 (Issue #424, plan slice S78): 待我处理 — the cross-Book attention view, its four groups and its count,
   // made from two Books of exact `sample1`; then concurrent Book work (Issue #49, plan slice S14) over a third — two
-  // Runs at once, a third start 等待运行名额, 暂停 handing its place over without taking focus, 取消任务, and each Run's
+  // Runs at once, a third start 排队中, 暂停 handing its place over without taking focus, 取消任务, and each Run's
   // records kept to its own Book; two Book windows show the same attention state without taking manuscript focus (#632).
   // Each stage is one thing an editor does or finds, so a hosted failure names the
   // behaviour that broke.
   'J-09': Object.freeze([
     ...J14_DARK_PASS_LOCATIONS,
     'task-overview-continuous-enqueue',
+    'task-status-running',
+    'task-status-finished-overview',
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
     'exact-sample1',
     'renderer-api-boundary',
     'entry-in-the-sidebar',
+    'task-overview-empty',
     'first-book-import',
     'first-book-prerequisites',
     'model-credential-saved',
@@ -1397,9 +1455,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'background-revoked-no-dispatch',
     'idle-start-choice',
     'idle-yield-to-foreground',
+    'idle-result-in-place',
     'model-question-launch',
+    'model-question-notice',
     'model-question-decision-item',
     'model-question-answer-turn',
+    'model-question-second-notice',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
@@ -1487,6 +1548,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'outcome-unconfirmed-completed',
     'outcome-unconfirmed-kept',
     'review-controls-prepare',
+    'review-controls-progress-floor',
     'review-controls-pause-resume',
     'review-controls-cancel-impact',
     'review-controls-redo-plan',
@@ -1613,6 +1675,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'editorial-memory-page',
     'learning-ask-frequency',
     'editorial-memory-governance',
+    // Issue #1526: a selected admitted reference reaches the initial evaluation's plan preview, which creates no Task.
+    'launch-reference-preview',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
@@ -1661,7 +1725,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'dialogue-streaming-held',
     'dialogue-background',
     'dialogue-return',
-    'dialogue-stop',
+    'dialogue-stop', 'dialogue-stopped-convert-hidden', 'dialogue-numbered-citation',
     'dialogue-continue-after-mid-stream-stop',
     'dialogue-regenerate',
     'dialogue-panel-answer',
@@ -2476,9 +2540,9 @@ export async function runJ14DarkPass({ renderer, journey, at, representative = '
   const node = `document.querySelector(${JSON.stringify(representative)})`;
   const open = async () => {
     await wait(sidebarNavigate(SIDEBAR.settings), 'j14-dark-pass-open-settings');
-    // 设置 opens through `leaveThen`, so the hub paints after the click: wait for its 外观 row before following it.
-    await wait(`(() => { const button = document.querySelector('#screen[data-screen="settings"] [data-settings-route="appearance"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'j14-dark-pass-settings');
-    await wait(`(() => { const button = document.querySelector('#screen[data-screen="settings"] [data-settings-route="appearance"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, 'j14-dark-pass-open-appearance');
+    // 设置 opens through `leaveThen`, so its first page paints after the click: wait for the 外观 entry in the navigation before following it.
+    await wait(`(() => { const button = document.querySelector('#screen .settings-navigation [data-settings-nav="appearance"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'j14-dark-pass-settings');
+    await wait(`(() => { const button = document.querySelector('#screen .settings-navigation [data-settings-nav="appearance"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, 'j14-dark-pass-open-appearance');
     // 外观 is ready when its three choices are there with the saved preference checked, so a choice reads a settled page.
     await wait(`window.ai7.getPreferences().then((preferences) => { const inputs = Array.from(document.querySelectorAll('#screen[data-screen="appearance"] input[data-appearance-theme]')); return inputs.length === 3 && inputs.filter((input) => input.checked).map((input) => input.value).join() === (preferences.values['appearance.theme'] ?? 'system'); })`, 'j14-dark-pass-appearance');
   };

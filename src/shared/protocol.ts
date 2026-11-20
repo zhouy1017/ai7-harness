@@ -5,6 +5,8 @@ export { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_
 import { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
 export { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
 import type { BookFindingsProjection } from './protocol/review.js';
+import type { TransportSettings } from './protocol/transport-settings.js';
+export type { TransportSettings } from './protocol/transport-settings.js';
 import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, LedgerTaskLaunchOperation } from './runtime-execution-config.js';
 export type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
@@ -309,7 +311,23 @@ import type {
   SaveDeveloperProposalInput,
 } from './protocol/captured-procedures.js';
 
+import type { DurableHistoryProjection, JournalAcknowledgement, ManuscriptRailProjection, ManuscriptWindowProjection } from './protocol/manuscript-window.js';
+import type {
+  ApplyChangeSuggestionBatchInput, ApplyChangeSuggestionInput, ApplyReceiptProjection, BatchProposalDecisionDraftInput, CreateEditorialMarkInput,
+  EditorialMarkCardProjection, EditorialMarkCommandProjection, InspectApplyReceiptInput, ManuscriptApplyCommandProjection, ManuscriptApplyOutcomeProjection,
+  PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordChangeSuggestionDecisionInput,
+  RecordProposalDecisionFeedbackInput, RecordProposalDecisionInput, RecordProposalDecisionReasonInput, ReverseAppliedChangeSuggestionInput,
+  ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput, UpdateEditorialMarkInput,
+} from './protocol/editorial-marks.js';
+import type {
+  ProposalConflictBindingInput, ProposalConflictDraftSaveProjection, ProposalConflictKind, ProposalConflictProjection, ProposalConflictRegenerationProjection,
+  ProposalConflictResolutionProjection, RegenerateProposalConflictUnitInput, ResolveProposalConflictInput, SaveProposalConflictDraftInput,
+} from './protocol/proposal-conflicts.js';
+
 export type { JournalEditInput, JournalStructuralEdit } from './protocol/manuscript-structure.js';
+export * from './protocol/manuscript-window.js';
+export * from './protocol/editorial-marks.js';
+export * from './protocol/proposal-conflicts.js';
 export type { ManuscriptBlockKind, ManuscriptBlockProjection, ManuscriptNoteProjection } from './protocol/manuscript-notes.js';
 export type * from './protocol/import-intake.js';
 export type * from './protocol/import-structure.js';
@@ -364,6 +382,10 @@ export * from './protocol/scoped-edit.js';
  * Schema 116 (PR #1503's in-place 115 -> 116 migration) and Data Version 1
  * remain separate compatibility identities; closure adds no migration.
  *
+ * Protocol 205 (#1517 R4 closure, 0.7.3): PR #1595 (#1506) adds generateReviewSynthesis (生成统合总结 for a settled
+ * Review Run) and optional modelLabel, canGenerate and runChoice on ReviewSynthesisProjection. It is the round's one
+ * protocol change. Schema 116 and Data Version 1 are unchanged; closure adds no migration.
+ *
  * Protocol 203 (#1472 R2 closure, 0.7.1): PR #1478 adds reasoning effort to role
  * selection inputs and settings projections. PR #1487 adds launchReviewRun, optional
  * execution choice on scoped edit and review-workspace inspection, and frozen model
@@ -374,7 +396,7 @@ export * from './protocol/scoped-edit.js';
  * Protocol 202 (#1459 R1 closure, 0.7.0): PR #1462 (#1435) adds `guessed-anchor` to
  * ProposalDraftBatchProjection.excluded.reason. No other R1 change alters IPC.
  */
-export const SERVICE_PROTOCOL_VERSION = 204 as const;
+export const SERVICE_PROTOCOL_VERSION = 205 as const;
 
 export { BOOK_FINDINGS_PAGE_SIZE } from './protocol/review.js';
 export type { BookFindingProjection, BookFindingsProjection } from './protocol/review.js';
@@ -646,6 +668,7 @@ export const IPC_CHANNELS = {
   continueReviewRun: 'ai7:j04:continue-review-run',
   recordReviewFindingDisposition: 'ai7:j04:record-review-finding-disposition',
   generateReviewReport: 'ai7:j04:generate-review-report',
+  generateReviewSynthesis: 'ai7:j04:generate-review-synthesis',
   inspectReviewFindingOfMark: 'ai7:j04:inspect-review-finding-of-mark',
   listBooks: 'ai7:j01:list-books',
   updateBookPeople: 'ai7:j11:update-book-people',
@@ -1344,706 +1367,6 @@ export interface WordTrackedEditSampleDetailProjection {
   items: WordSampleDetailItemProjection[]; nextCursor: WordSampleCursorProjection | null;
 }
 
-export interface ManuscriptWindowProjection {
-  bookId: string;
-  /**
-   * 🔒 锁定 (Issue #1412): the blocks of this window AI7 may not change — locked one by one or inside a locked section — and
-   * the digest of the branch's lock set, which a scoped AI edit or a lock change names. Absent from a store without locks.
-   */
-  aiLockedBlockIds?: ReadonlyArray<string>;
-  aiLocksDigest?: string;
-  manuscriptId: string;
-  branchId: string;
-  revisionId: string;
-  revisionLabel: string;
-  journalSequence: number;
-  workingDigest: string;
-  recoveredStateReview: null | {
-    restorationId: string;
-    recoveredRevisionId: string;
-    label: '当前为恢复的工作状态';
-  };
-  focusBlockId: string | null;
-  focusGrapheme: number | null;
-  previousCursor: string | null;
-  nextCursor: string | null;
-  position: {
-    startBlock: number;
-    endBlock: number;
-    totalBlocks: number;
-    startCharacter: number;
-    endCharacter: number;
-    totalCharacters: number;
-    proportion: number;
-    structureLabel: string | null;
-    label: string;
-  };
-  blocks: ReadonlyArray<ManuscriptBlockProjection>;
-  /**
-   * The Editorial Marks that stand in this window's blocks, as the working state holds them at
-   * `journalSequence` — so the ranges are consistent with `blocks` by construction. At most
-   * `MAX_WINDOW_MARKS`; `marksTruncated` says the window holds more than that.
-   */
-  marks: ReadonlyArray<EditorialMarkAnchorProjection>;
-  marksTruncated: boolean;
-  /**
-   * `production-document` when the window holds a Production Document (Issue #415, S66), however it was reached — 交付物's
-   * 打开, 解决冲突 → 返回, recovery, 待我处理 or 最近稿件 — so it is always drawn as the document it is. Absent for the Book's
-   * Manuscript.
-   */
-  deliverable?: 'production-document';
-}
-
-/** The most chapters and marks the Whole-manuscript Position Rail draws; beyond them it says it is sparse. */
-export const MAX_RAIL_CHAPTERS = 400;
-
-export const MAX_RAIL_MARKS = 2_000;
-
-/**
- * What the Whole-manuscript Position Rail draws beside its track (Issue #409; V2-UX-ED-015, ED-020):
- * chapter ticks on one side, and on the other the open 修改建议, 批注 and 备注 with the ranges the
- * analysis left unread. Every place is a proportion of the whole manuscript's characters, so the rail
- * never needs the manuscript's text; nothing here is a durable record.
- */
-export interface ManuscriptRailProjection {
-  manuscriptId: string;
-  branchId: string;
-  revisionId: string;
-  journalSequence: number;
-  totalCharacters: number;
-  chapters: ReadonlyArray<{
-    blockId: string;
-    title: string;
-    level: number;
-    proportion: number;
-    suggestions: number;
-    annotations: number;
-    notes: number;
-  }>;
-  chaptersTruncated: boolean;
-  marks: ReadonlyArray<{ kind: 'change-suggestion' | 'annotation' | 'editor-note'; blockId: string; proportion: number }>;
-  marksTruncated: boolean;
-  /** `null` while the Book has no analysis to have gaps; otherwise the ranges its latest analysis left unread. */
-  uncovered: ReadonlyArray<{ fromProportion: number; toProportion: number; reason: string }> | null;
-}
-
-/** The most marks one window projection carries; the rest stay reachable once the window moves. */
-export const MAX_WINDOW_MARKS = 400;
-
-export const MAX_MARK_BODY_CODE_UNITS = 4_000;
-
-export const MAX_MARK_REPLIES = 100;
-
-/**
- * The Editorial Mark family of `docs/ui-ux-v2/CONTEXT.md` (V2-UX-MARK-001): a Change Suggestion is
- * the editor-facing form of a Proposal Change Item, an Annotation is an exportable comment, an Editor
- * Note is private to the editor, and a Personal Highlight carries no product meaning.
- */
-export type EditorialMarkKind = 'change-suggestion' | 'annotation' | 'editor-note' | 'personal-highlight';
-
-export type PersonalHighlightColor = 1 | 2 | 3;
-
-/** `applied`: a Change Suggestion whose replacement an AI7 Apply wrote; the mark now stands on the applied text. */
-export type EditorialMarkStatus = 'open' | 'resolved' | 'applied';
-
-export type ProposalItemDisposition = 'accepted' | 'rejected' | 'accepted-with-edit' | 'deferred';
-
-/** A Proposal Change Item's kind (V2-UX-PROP-014): `insert` since schema revision 28 (Issue #411). */
-export type ProposalChangeType = 'replace' | 'delete' | 'insert';
-
-/**
- * Who a mark comes from (V2-UX-MARK-002): the editor, AI7 with what produced it — a Task, a review
- * category or the analysis — or the author an imported file carried in.
- */
-export interface EditorialMarkSourceProjection {
-  kind: 'editor' | 'ai7' | 'imported-author';
-  origin: 'task' | 'review-category' | 'analysis' | null;
-  /** The Task's title, the review category's name, or the imported author's name. */
-  label: string | null;
-  taskId: string | null;
-  /** Registered Book editors, or the frozen producing model's human/technical labels (#1379). */
-  editorName?: string | null;
-  modelLabel?: string | null;
-  modelTechnicalLabel?: string | null;
-}
-
-/** One mark as the manuscript surface draws it; the card's content is read on demand. */
-export interface EditorialMarkAnchorProjection {
-  inlineRevision?: { beforeText: string; afterText: string; sessionId: string };
-  markId: string;
-  kind: EditorialMarkKind;
-  blockId: string;
-  fromGrapheme: number;
-  toGrapheme: number;
-  /** `drifted` when the text the mark was made on no longer stands at its range (原文已变). */
-  anchorState: 'exact' | 'drifted';
-  status: EditorialMarkStatus;
-  highlightColor: PersonalHighlightColor | null;
-  sourceKind: EditorialMarkSourceProjection['kind'];
-  sourceOrigin: EditorialMarkSourceProjection['origin'];
-  sourceLabel: string | null;
-  categoryKey: EditorialMarkCategoryKey;
-  categoryLabel: string;
-  /** The current Proposal Decision of a Change Suggestion, which the surface shows without a card. */
-  disposition: ProposalItemDisposition | null;
-  /**
-   * The words an applied 修改建议 deleted, where the mark is the point they left (pinned on no text);
-   * `null` for every other mark. The surface names them on the point it draws there.
-   */
-  deletedText: string | null;
-  /**
-   * The words a 修改建议 that inserts (Issue #411) would write at the point it stands on, while it is not
-   * applied; `null` for every other mark. The surface names them on the point it draws there.
-   */
-  insertedText: string | null;
-  /** Where a 修改建议's Three-way Proposal Conflict stands (Issue #57); `null` for a mark that has none. */
-  conflict: ProposalConflictState | null;
-}
-
-/** One basis a mark or a suggestion rests on: a labelled place in the manuscript, quoted exactly. */
-export interface EditorialMarkBasisProjection {
-  label: string;
-  blockId: string | null;
-  fromGrapheme: number | null;
-  toGrapheme: number | null;
-  quote: string | null;
-}
-
-export interface ProposalItemDecisionProjection {
-  decisionId: string;
-  disposition: ProposalItemDisposition;
-  /** The text the editor accepted instead of AI7's or their own first wording. */
-  editedText: string | null;
-  /** The editor's Non-blocking Decision Reason as it now stands, and how it was given (V2-UX-PDEC-010). */
-  reason: string | null;
-  reasonSource: 'reason-field' | 'suggested' | 'free-text' | null;
-  /**
-   * Whether the editor gave a reason, said `不说明`, or neither (Issue #61, S26a; FDBK-006, FDBK-007). A dismissal records
-   * only that no reason was given: never agreement, satisfaction or a judgment of any kind.
-   */
-  reasonState: 'none' | 'given' | 'dismissed';
-  /** How many `不说明` and `改原因` entries follow the decision: the count the next one names. */
-  feedbackEntries: number;
-  /** When the editor last changed the reason after first giving it; `null` when it is the first. */
-  reasonRevisedAt: string | null;
-  recordedAt: string;
-}
-
-/**
- * Everything a Mark Card shows (V2-UX-MARK-003, MARK-004). A Change Suggestion carries its Proposal
- * Change Item in the content-first hierarchy of V2-UX-PROP-022: proposed then current wording,
- * rationale, author, collapsed evidence and the editor's decision, a record apart from the item and
- * from any change to the manuscript.
- */
-export interface EditorialMarkCardProjection {
-  inlineRevision?: boolean;
-  markId: string;
-  categoryKey: EditorialMarkCategoryKey;
-  categoryLabel: string;
-  kind: EditorialMarkKind;
-  status: EditorialMarkStatus;
-  anchorState: 'exact' | 'drifted' | 'detached';
-  highlightColor: PersonalHighlightColor | null;
-  blockId: string;
-  fromGrapheme: number;
-  toGrapheme: number;
-  /**
-   * The exact text the mark stands on: what it was made on, or what an Apply wrote there. Empty where
-   * an applied 修改建议 deleted its words: the mark is then the point between two graphemes where they were.
-   */
-  pinnedText: string;
-  source: EditorialMarkSourceProjection;
-  body: string;
-  replies: ReadonlyArray<{ replyId: string; body: string; createdAt: string }>;
-  basis: ReadonlyArray<EditorialMarkBasisProjection>;
-  suggestion: null | {
-    itemId: string;
-    /**
-     * What the item asks: replace its current text, delete it, or — for an insertion a file's author
-     * proposed (Issue #411) — write its proposal at a point, where its current text is empty.
-     */
-    changeType: ProposalChangeType;
-    currentText: string;
-    proposedText: string;
-    rationale: string;
-    atomicGroupId: string | null;
-    decision: ProposalItemDecisionProjection | null;
-    /** The committed Apply that wrote this item, as its Effect Receipt states it; `null` until one has. */
-    application: ManuscriptApplyProjection | null;
-  };
-  convertedFrom: null | { markId: string; kind: EditorialMarkKind; sourceKind: EditorialMarkSourceProjection['kind'] };
-  /**
-   * ADR 0085 §2: the paragraph of this 修改建议 changed elsewhere after its base while its own words stayed
-   * exact — a Safe Non-interacting Merge. A label only; it records and decides nothing.
-   */
-  changedElsewhere: boolean;
-  /** The mark's Three-way Proposal Conflict (Issue #57), or `null` when it has none. */
-  conflict: EditorialMarkConflictProjection | null;
-  /** The conflict this 修改建议 was saved from as a new Proposal version, or `null`. */
-  resolvedFrom: null | { markId: string; conflictKind: ProposalConflictKind };
-  /** What an export does with this mark unless the editor says otherwise (V2-UX-MARK-006, MARK-007). */
-  exportDisposition: 'exported-by-default' | 'only-when-included' | 'never-exported';
-  createdAt: string;
-  updatedAt: string;
-  /** The pin itself, for the Technical Identity Layer. */
-  pin: { revisionId: string; revisionLabel: string; journalSequence: number; blockDigest: string };
-  /** A Correction Proposal's factual lineage (Issue #901), shown in 依据与核查; absent on every other mark. */
-  factualCorrection?: FactualCorrectionLineageProjection;
-}
-
-/** Binds a mark command to the manuscript state the editor saw, and asks for the window's marks back. */
-export interface EditorialMarkBindingInput {
-  manuscriptId: string;
-  branchId: string;
-  windowStartBlockId: string;
-}
-
-export interface CreateEditorialMarkInput extends EditorialMarkBindingInput {
-  clientMarkId: string;
-  baseRevisionId: string;
-  expectedJournalSequence: number;
-  blockId: string;
-  baseBlockDigest: string;
-  fromGrapheme: number;
-  toGrapheme: number;
-  /** The text the editor selected; the service refuses a mark whose range does not hold it. */
-  selectedText: string;
-  kind: EditorialMarkKind;
-  highlightColor: PersonalHighlightColor | null;
-  body: string;
-  proposedText: string | null;
-  rationale: string | null;
-}
-
-/**
- * One change to a mark. Every field is always present so the frame is exact; a field an action does
- * not use is `null`. `convert` makes a new mark on the same pinned text and retires this one, so a
- * mark's kind never changes under a record that points at it.
- */
-export interface UpdateEditorialMarkInput extends EditorialMarkBindingInput {
-  markId: string;
-  action: 'edit-body' | 'recolor' | 'set-status' | 'reply' | 'remove' | 'convert' | 'apply-inline-revision' | 'revert-inline-revision';
-  body: string | null;
-  highlightColor: PersonalHighlightColor | null;
-  status: EditorialMarkStatus | null;
-  targetKind: EditorialMarkKind | null;
-  proposedText: string | null;
-  rationale: string | null;
-}
-
-/**
- * The editor's decision on one Change Suggestion (V2-UX-MARK-004, MARK-005). It records a Proposal
- * Decision and changes no manuscript text: `withdrawn` supersedes the current decision and returns
- * the item to undecided (V2-UX-PDEC-008).
- */
-export interface RecordChangeSuggestionDecisionInput extends EditorialMarkBindingInput {
-  markId: string;
-  clientDecisionId: string;
-  disposition: ProposalItemDisposition | 'withdrawn';
-  editedText: string | null;
-  reason: string | null;
-}
-
-/**
- * The optional reason chips that follow a decision recorded without one (V2-UX-PDEC-009, PDEC-010):
- * a suggested reason the editor picked, or their own words. One reason per decision; a decision that
- * already carries one — from the 为什么这样改 field or an earlier chip — is never asked again.
- */
-export interface RecordProposalDecisionReasonInput extends EditorialMarkBindingInput {
-  markId: string;
-  decisionId: string;
-  reason: string;
-  reasonSource: 'suggested' | 'free-text';
-}
-
-/**
- * After a decision (Issue #61, S26a; FDBK-006, FDBK-007, interaction-spec's feedback rules): `不说明`, which records only that
- * no reason was given and ends the prompt, or `改原因`, a successor to the reason that keeps the one it replaced. Either names
- * how many entries the editor saw after the decision.
- */
-export interface RecordProposalDecisionFeedbackInput extends EditorialMarkBindingInput {
-  markId: string;
-  decisionId: string;
-  expectedFeedback: number;
-  action: 'dismiss' | 'revise';
-  reason: string | null;
-  reasonSource: 'suggested' | 'free-text' | null;
-}
-
-export interface EditorialMarkCommandProjection {
-  window?: ManuscriptWindowProjection;
-  markId: string;
-  marks: ReadonlyArray<EditorialMarkAnchorProjection>;
-  marksTruncated: boolean;
-  card: EditorialMarkCardProjection | null;
-}
-
-/** One exact state of a manuscript: the Revision it rests on, the journal position, and the working digest. */
-export interface ManuscriptStateProjection {
-  revisionId: string;
-  journalSequence: number;
-  workingDigest: string;
-}
-
-/**
- * One committed AI7 Apply as its Effect Receipt states it (V2-UX-EREC-002). Identities, digests, times
- * and the two manuscript states only: a receipt holds no manuscript text. The Effect Approval and the
- * dispatch are records of their own, named here by identity; the Proposal Decision is the item's.
- */
-export interface ManuscriptApplyProjection {
-  effectId: string;
-  kind: 'apply' | 'reverse-apply';
-  interaction: 'accept-and-apply' | 'accept-edited-and-apply' | 'apply-recorded-decision' | 'confirm-batch-apply' | 'confirm-reverse-apply';
-  approvalId: string;
-  dispatchId: string;
-  receiptId: string;
-  changeCount: number;
-  payloadDigest: string;
-  receiptDigest: string;
-  before: ManuscriptStateProjection;
-  after: ManuscriptStateProjection;
-  committedAt: string;
-  reversesEffectId: string | null;
-  reversedByEffectId: string | null;
-}
-
-/**
- * 接受并应用 for one inline 修改建议 (V2-UX-PDEC-012, EAPP-003 to 006): one interaction records the
- * Proposal Decision, records the Effect Approval and dispatches the Apply. `clientEffectId` is the
- * Effect's idempotency key: the same key never writes twice, and asking again with it answers with
- * the receipt it already has.
- */
-export interface ApplyChangeSuggestionInput extends EditorialMarkBindingInput {
-  markId: string;
-  clientEffectId: string;
-  interaction: 'accept-and-apply' | 'accept-edited-and-apply' | 'apply-recorded-decision';
-  editedText: string | null;
-  reason: string | null;
-}
-
-/** 确认应用 on the batch confirmation strip: one Effect over the exact suggestions the strip named, all or none. */
-export interface ApplyChangeSuggestionBatchInput extends EditorialMarkBindingInput {
-  markIds: ReadonlyArray<string>;
-  clientEffectId: string;
-}
-
-/** 确认撤销本次应用: a Reverse Apply is a new Effect with its own approval and receipt (UI ADR 0003). */
-export interface ReverseAppliedChangeSuggestionInput extends EditorialMarkBindingInput {
-  markId: string;
-  clientEffectId: string;
-}
-
-export interface ManuscriptApplyCommandProjection extends EditorialMarkCommandProjection {
-  application: ManuscriptApplyProjection;
-  /** The window the command was issued from, as the working state holds it now. */
-  window: ManuscriptWindowProjection;
-}
-
-/**
- * Apply Outcome Recovery (V2-UX-EREC-004): what the store holds for one Effect identity. The text and
- * its receipt are written in one transaction, so there is no third answer: `committed` with the
- * receipt, or `not-committed` and the manuscript unchanged by that Effect.
- */
-export interface ManuscriptApplyOutcomeProjection {
-  state: 'committed' | 'not-committed';
-  application: ManuscriptApplyProjection | null;
-}
-
-/** Issue #902: settled legacy outcomes retain their exact wire shape. */
-export interface ApplyReceiptProjection {
-  state: 'applied' | 'not-applied' | 'confirming' | 'unresolved';
-  application: ManuscriptApplyProjection | null;
-  clientEffectId: string;
-  manuscriptId: string;
-  branchId: string;
-  bookId: string;
-  actor: 'editor';
-  approvedAt: string | null;
-  replayPolicy: 'idempotency-keyed';
-  safeRetry: boolean;
-  reason: string;
-  decisionIds: ReadonlyArray<string>;
-}
-
-/** Rev 2 compatibility: transient recovery states can never masquerade as settled evidence. */
-export function applyReceiptState(outcome: ManuscriptApplyOutcomeProjection): 'applied' | 'not-applied' {
-  return outcome.state === 'committed' ? 'applied' : 'not-applied';
-}
-
-export function legacyApplyOutcome(receipt: Pick<ApplyReceiptProjection, 'state' | 'application'>): ManuscriptApplyOutcomeProjection | null {
-  if (receipt.state === 'confirming' || receipt.state === 'unresolved') return null;
-  return { state: receipt.state === 'applied' ? 'committed' : 'not-committed', application: receipt.application };
-}
-
-export type ProposalDraftDisposition = 'accepted' | 'rejected' | 'deferred';
-
-export interface ProposalWorkspaceInput {
-  /** Bounded metadata page; scope digests always bind the full result. */
-  offset?: number;
-  manuscriptId: string;
-  branchId: string;
-  /** Exact Review Run or producing Task; null is the editor's branch-local proposals. */
-  resultId: string | null;
-  returnPosition?: ProposalReviewReturnPosition | null;
-}
-
-export interface ProposalReviewReturnPosition {
-  blockId: string | null;
-  activeMarkId: string | null;
-  comparison: 'inline' | 'side-by-side';
-  review: 'all' | 'unreviewed' | 'reviewed' | 'stale' | 'conflicting';
-  chapterBlockId: string | null;
-  changeType: ProposalChangeType | null;
-  expanded: boolean;
-}
-
-export interface ProposalNavigatorItem {
-  markId: string;
-  itemId: string;
-  blockId: string;
-  position: number;
-  fromGrapheme: number;
-  toGrapheme: number;
-  chapterBlockId: string | null;
-  chapter: string;
-  changeType: ProposalChangeType;
-  baseRevisionId: string;
-  stale: boolean;
-  /** `drifted` is a classified Three-way Proposal Conflict (原文已变, ADR 0085); `detached` is not yet classified. */
-  anchorState: 'exact' | 'drifted' | 'detached';
-  conflict: boolean;
-  loaded: boolean;
-  otherVersion: boolean;
-  atomicGroupId: string | null;
-  atomicReason: string | null;
-  draft: ProposalDraftDisposition | null;
-  draftOrdinal: number;
-  decisionId: string | null;
-  disposition: ProposalItemDisposition | null;
-  appliedRevisionId: string | null;
-}
-
-export interface ProposalDecisionProjection {
-  decisionId: string;
-  supersedes: string | null;
-  baseRevisionIds: ReadonlyArray<string>;
-  currentRevisionId: string;
-  journalSequence: number;
-  actor: 'editor';
-  recordedAt: string;
-  items: ReadonlyArray<{ markId: string; itemId: string; disposition: ProposalDraftDisposition; decisionId: string }>;
-  unresolved: ReadonlyArray<string>;
-}
-
-export interface ProposalWorkspaceProjection {
-  totalItems: number;
-  nextOffset: number | null;
-  bookId: string;
-  manuscriptId: string;
-  branchId: string;
-  resultId: string | null;
-  revisionId: string;
-  journalSequence: number;
-  items: ReadonlyArray<ProposalNavigatorItem>;
-  offerWorkspace: boolean;
-  truncated: boolean;
-  scopeDigest: string;
-  decision: ProposalDecisionProjection | null;
-  returnPosition: ProposalReviewReturnPosition | null;
-}
-
-export interface SaveProposalDecisionDraftInput extends ProposalWorkspaceInput {
-  markIds: ReadonlyArray<string>;
-  disposition: ProposalDraftDisposition | null;
-  atomicGroupId: string | null;
-  expectedScopeDigest: string;
-}
-
-export interface BatchProposalDecisionDraftInput extends ProposalWorkspaceInput {
-  scope: 'selection' | 'chapter' | 'change-type' | 'filter';
-  markIds: ReadonlyArray<string>;
-  chapterBlockId: string | null;
-  changeType: ProposalChangeType | null;
-  review: ProposalReviewReturnPosition['review'];
-  disposition: ProposalDraftDisposition;
-  /** null previews the exact frozen scope and every exclusion, without recording anything. */
-  confirmDigest: string | null;
-}
-
-export interface ProposalDraftBatchProjection {
-  nextOffset: number | null;
-  scopeDigest: string;
-  included: ReadonlyArray<string>;
-  excluded: ReadonlyArray<{ markId: string; reason: 'conflict' | 'unclassified-stale' | 'unloaded' | 'other-version' | 'atomic-group' | 'applied' | 'guessed-anchor' }>;
-  saved: boolean;
-  workspace: ProposalWorkspaceProjection;
-}
-
-export interface RecordProposalDecisionInput extends ProposalWorkspaceInput {
-  expectedScopeDigest: string;
-  clientDecisionId: string;
-}
-
-export interface InspectApplyReceiptInput {
-  manuscriptId: string;
-  branchId: string;
-  clientEffectId: string;
-  /**
-   * `settled` reads; `confirming` and `unresolved` are what a surface that lost its acknowledgement, or its recovery
-   * read too, reports; `recheck` is the editor's explicit re-check of a 结果待确认 against the authoritative records.
-   * None of them dispatches.
-   */
-  recovery: 'settled' | 'confirming' | 'unresolved' | 'recheck';
-}
-
-export interface PrepareReverseApplyInput {
-  manuscriptId: string;
-  branchId: string;
-  markId: string;
-}
-
-export interface ReverseApplyPreparationProjection {
-  ranges: ReadonlyArray<{ markId: string; position: number; fromGrapheme: number; toGrapheme: number }>;
-  originalEffectId: string;
-  bookId: string;
-  branchId: string;
-  revisionId: string;
-  journalSequence: number;
-  markId: string;
-  blockId: string;
-  ready: boolean;
-  reason: string;
-}
-
-/**
- * 稿件冲突 (Issue #57, plan slice S22; ADR 0085; V2-UX-CONFLICT-001 to 013). A 修改建议 is in a Three-way
- * Proposal Conflict when the words it replaces changed after its base — its anchor drifted, 原文已变 —
- * while it is undecided or accepted and not yet applied (`suggestion`), or when the words its Apply wrote
- * were edited afterwards, so that reversing the Apply meets them (`reversal`, V2-UX-EREC-012). A change
- * elsewhere in its paragraph is not a conflict (ADR 0085 §1). A conflict is `deferred` once 暂不处理 was
- * recorded and stays unresolved; it is `resolved` by its one outcome, 保留当前稿件 or 保存为新提案版本.
- */
-export type ProposalConflictKind = 'suggestion' | 'reversal';
-
-export type ProposalConflictState = 'unresolved' | 'deferred' | 'resolved';
-
-export type ProposalConflictOutcome = 'keep-current' | 'new-version';
-
-/** The most unresolved conflicts the navigator of 稿件冲突 lists across one manuscript. */
-export const MAX_PROPOSAL_CONFLICT_NAVIGATOR = 200;
-
-/** How many graphemes of the current paragraph stand on each side of the conflicting words. */
-export const PROPOSAL_CONFLICT_CONTEXT_GRAPHEMES = 30;
-
-/** The Resolution Drafts one conflict keeps; a draft is appended per save and never rewritten. */
-export const MAX_PROPOSAL_CONFLICT_DRAFTS = 5_000;
-
-/** The 暂不处理 records one conflict keeps. */
-export const MAX_PROPOSAL_CONFLICT_DEFERRALS = 1_000;
-
-/** The most units one conflict's texts can be cut into, which bounds a draft's request frame. */
-export const MAX_PROPOSAL_CONFLICT_UNITS = 8_192;
-
-/** What a Mark Card says of its mark's conflict, and whether 解决冲突… is offered for it. */
-export interface EditorialMarkConflictProjection {
-  kind: ProposalConflictKind;
-  state: ProposalConflictState;
-  /** The latest 暂不处理, while the conflict is unresolved. */
-  deferredAt: string | null;
-  outcome: ProposalConflictOutcome | null;
-  /** The 修改建议 保存为新提案版本 created. */
-  newMarkId: string | null;
-  resolvedAt: string | null;
-}
-
-export interface ProposalConflictBindingInput {
-  manuscriptId: string;
-  branchId: string;
-  markId: string;
-}
-
-/** A Resolution Draft as saved: one entry per unit of the comparison, index for index. */
-export interface ProposalConflictDraftProjection {
-  draftId: string;
-  ordinal: number;
-  resolutions: ReadonlyArray<ConflictUnitResolution>;
-  text: string;
-  /** Every changed unit has a resolution; only then can it be saved as a new Proposal version. */
-  complete: boolean;
-  savedAt: string;
-  /**
-   * 基于当前稿件重新生成建议 saved this draft (Issue #842): the conflict unit whose words AI7 regenerated, and when. `null` for a
-   * draft the editor saved; a later save of the editor's own carries none, and the regenerated draft stays as it was saved.
-   */
-  regeneration: { unitIndex: number; regeneratedAt: string } | null;
-}
-
-/**
- * 稿件冲突 for one 修改建议 (V2-UX-CONFLICT-004): the three texts, persistently distinct — 提案基准 (`base`),
- * 当前权威稿件 (`current`) and 提议内容 (`proposed`) — the bounded context around them, which is the current
- * paragraph's, the units they compare in, the latest Resolution Draft saved on exactly this basis, and
- * the other unresolved conflicts of the manuscript. `basisDigest` binds every command to these texts: a
- * later change of the paragraph makes it stale, and nothing is ever retargeted.
- */
-export interface ProposalConflictProjection {
-  markId: string;
-  manuscriptId: string;
-  branchId: string;
-  bookId: string;
-  conflictKind: ProposalConflictKind;
-  deferral: { deferralId: string; deferredAt: string } | null;
-  blockId: string;
-  fromGrapheme: number;
-  toGrapheme: number;
-  basisDigest: string;
-  base: string;
-  current: string;
-  proposed: string;
-  context: { before: string; after: string };
-  units: ReadonlyArray<ConflictUnit>;
-  draft: ProposalConflictDraftProjection | null;
-  /** A Resolution Draft was saved against an earlier state of the paragraph; it is kept and not loaded. */
-  draftOnEarlierBasis: boolean;
-  /** 保存为新提案版本 needs words to stand on: where they were deleted, only the other paths are open. */
-  newVersion: { available: boolean; blocker: 'target-deleted' | null };
-  suggestion: { itemId: string; rationale: string; source: EditorialMarkSourceProjection };
-  /** The manuscript's unresolved conflicts in reading order, this one included; at most `MAX_PROPOSAL_CONFLICT_NAVIGATOR`. */
-  navigator: {
-    entries: ReadonlyArray<{ markId: string; blockId: string; conflictKind: ProposalConflictKind; deferred: boolean }>;
-    truncated: boolean;
-  };
-}
-
-export interface SaveProposalConflictDraftInput extends ProposalConflictBindingInput {
-  basisDigest: string;
-  units: ReadonlyArray<ConflictUnitResolution>;
-}
-
-export interface ProposalConflictDraftSaveProjection {
-  markId: string;
-  basisDigest: string;
-  draft: ProposalConflictDraftProjection;
-}
-
-/**
- * 确认保留当前稿件, 暂不处理, or 保存为新提案版本 from the saved draft `draftOrdinal` (V2-UX-CONFLICT-005,
- * CONFLICT-011, CONFLICT-013). None of them writes the manuscript.
- */
-export interface ResolveProposalConflictInput extends ProposalConflictBindingInput {
-  basisDigest: string;
-  outcome: 'keep-current' | 'defer' | 'new-version';
-  draftOrdinal: number | null;
-}
-
-export interface ProposalConflictResolutionProjection {
-  markId: string;
-  outcome: ResolveProposalConflictInput['outcome'];
-  /** The new 修改建议 a new version created, not accepted and not applied; `null` for the other two. */
-  newMarkId: string | null;
-  blockId: string;
-  recordedAt: string;
-}
-
 // ---- 润色这段 and 稿件冲突 › 基于当前稿件重新生成建议 on the Fast Interaction Role (Issue #842) ----------------------------
 
 /** Whether one fast-role action can be asked under this launch for this Book, and why not, in the editor's words. */
@@ -2082,30 +1405,6 @@ export interface EditorialPolishProjection {
   readonly label: string;
 }
 
-/** 基于当前稿件重新生成建议 for one `conflict` unit of the comparison the editor sees, on exactly its basis. */
-export interface RegenerateProposalConflictUnitInput extends ProposalConflictBindingInput {
-  readonly basisDigest: string;
-  readonly unitIndex: number;
-}
-
-/**
- * What a regeneration came to: `requesting` while its one request is in flight; then `drafted` saved the regenerated words as
- * the unit's resolution in a new Resolution Draft, which the editor resolves through the existing paths; `same-as-current` and
- * `same-as-proposed` saved nothing, the words being the current manuscript's or the old proposal's; `withheld` and `failed`
- * saved nothing. The surface reads the conflict again once it settles.
- */
-export interface ProposalConflictRegenerationProjection {
-  readonly requestId: string;
-  readonly bookId: string;
-  readonly manuscriptId: string;
-  readonly branchId: string;
-  readonly markId: string;
-  readonly unitIndex: number;
-  readonly outcome: 'requesting' | 'drafted' | 'same-as-current' | 'same-as-proposed' | 'withheld' | 'failed';
-  readonly outcomeUnknown: boolean;
-  readonly label: string;
-}
-
 /** One fast-role request of this service's lifetime, read again until it settles: a read; it sends nothing. */
 export interface InspectFastInteractionRequestInput {
   readonly requestId: string;
@@ -2117,25 +1416,6 @@ export type FastInteractionRequestProjection =
 
 /** The text-processing commands of the selection menu, run by the window that owns the clipboard. */
 export type EditorClipboardCommand = 'cut' | 'copy' | 'paste' | 'paste-plain-text';
-
-/**
- * Where an editor last entered a Book's primary Manuscript, already resolved against the working
- * state the branch holds now. It speaks the window projection's own vocabulary — a block identity
- * and a grapheme offset inside it — so a caller passes `blockId` straight to a `block` window target.
- * `state` says which of the two the resolution was: `exact` when the recorded Revision is still the
- * branch's base Revision and the block it names is still there, `nearest-anchor` when the recorded
- * position was superseded and the nearest surviving block answered for it.
- */
-export interface ManuscriptEntryPositionProjection {
-  bookId: string;
-  manuscriptId: string;
-  branchId: string;
-  blockId: string;
-  grapheme: number;
-  /** The Manuscript Revision the stored position was recorded against. */
-  recordedRevisionId: string;
-  state: 'exact' | 'nearest-anchor';
-}
 
 export type BookWorkbenchRoute =
   | { kind: 'book'; bookId: string; feedbackEntryId?: string; learningMaterialKey?: string }
@@ -2976,10 +2256,7 @@ export interface LaunchPolicyProjection {
       readonly perRunUnitParallelism: { readonly configurable: true; readonly default: number };
       readonly backgroundShare: { readonly configurable: true; readonly default: number };
     };
-    readonly transport?: {
-      readonly requestDeadlineSeconds: number;
-      readonly rateLimitRetry: { readonly honourRetryAfter: boolean; readonly maxRetries: number };
-    };
+    readonly transport?: TransportSettings;
     readonly research?: { readonly searchesPerClaim: number }; readonly searchConnectionTest?: SearchConnectionTestPolicy;
     /** Fixed-public settings probes use verified search terms independently of model setup. */
     readonly settingsSearchTools?: AdmittedProviderRule['platformTools'];
@@ -4609,19 +3886,6 @@ export interface PromoteAnswerToTaskIntentDraftInput {
   readonly attemptId: string;
 }
 
-export interface DurableHistoryProjection {
-  action: 'undo' | 'redo';
-  branchId: string;
-  revisionId: string;
-  revisionLabel: string;
-  journalSequence: number;
-  workingDigest: string;
-  commandGroupId: string;
-  completionLabel: string;
-  canUndo: boolean;
-  canRedo: boolean;
-}
-
 export interface ServiceJobProjection {
   jobId: string;
   /**
@@ -4638,19 +3902,6 @@ export interface ServiceJobProjection {
     ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | BookDeliveryPackageExportResultProjection |
     EvaluationWorkspaceProjection | WritingTaskProjection | null;
   failure: null | { code: string; message: string };
-}
-
-export interface JournalAcknowledgement {
-  clientEditId: string;
-  branchId: string;
-  baseRevisionId: string;
-  blockId: string;
-  sequence: number;
-  resultingBlockDigest: string;
-  resultingWorkingDigest: string;
-  durableAt: string;
-  completionLabel: '已写入修订日志';
-  window: ManuscriptWindowProjection;
 }
 
 export interface ServiceReadiness {
@@ -5422,6 +4673,8 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   continueReviewRun: { input: ContinueReviewRunInput; output: ReviewWorkspaceProjection };
   recordReviewFindingDisposition: { input: RecordReviewFindingDispositionInput; output: ReviewWorkspaceProjection };
   generateReviewReport: { input: GenerateReviewReportInput; output: ReviewWorkspaceProjection };
+  /** 生成统合总结 (Issue #1506): the summary alone for a settled Run, under the dispatch choice made now; then driven like the Run. */
+  generateReviewSynthesis: { input: GenerateReviewReportInput & TaskExecutionLaunchInput; output: ReviewWorkspaceProjection };
   inspectReviewFindingOfMark: { input: InspectReviewFindingOfMarkInput; output: ReviewFindingOfMarkProjection | null };
   listBooks: {
     /** `filter` narrows the list to the Books whose 书名, 作者 or 责编 hold the words (Issue #431, S83). */
@@ -6137,6 +5390,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   /** 忽略并说明; every other decision on a finding is the mark and Apply operations' with its `markId`. */
   recordReviewFindingDisposition(input: Omit<RecordReviewFindingDispositionInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
   generateReviewReport(input: Omit<GenerateReviewReportInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
+  generateReviewSynthesis(input: Omit<ServiceOperationMap['generateReviewSynthesis']['input'], 'bookId'>): Promise<ServiceWireOutput<ReviewWorkspaceProjection>>;
   /** 查看任务 on a Mark Card: the Run a `review-category` mark came from, `null` for any other mark. */
   inspectReviewFindingOfMark(input: InspectReviewFindingOfMarkRendererInput): Promise<ReviewFindingOfMarkProjection | null>;
   listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;

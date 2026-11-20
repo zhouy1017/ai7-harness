@@ -57,7 +57,7 @@ export function editorialPreferenceEditor(options: {
     const option = el('option', undefined, entry.label); option.value = entry.categoryId; category.append(option);
   }
   const scope = el('select'); scope.setAttribute('aria-label', '适用范围');
-  const house = el('option', undefined, '全社'); house.value = ''; scope.append(house);
+  const house = el('option', undefined, '本社'); house.value = ''; scope.append(house);
   for (const book of options.books) {
     const option = el('option', undefined, `本书：《${book.title}》`); option.value = book.bookId; scope.append(option);
   }
@@ -350,7 +350,7 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     if (material.sourceTask !== null) fact('来源任务', `${material.sourceTask.label}${technicalWords(` · ${material.sourceTask.taskIntentId}`)}`, 'task');
     fact(LEARNING_CARD_TERMS.rationale, material.rationale, 'rationale');
     fact(LEARNING_CARD_TERMS.influence, material.kind === 'word-tracked-edit'
-      ? '尚未用于编辑记忆、审阅偏好或模型任务。' : LEARNING_INFLUENCE, 'influence');
+      ? '尚未用于审阅偏好或模型任务。' : LEARNING_INFLUENCE, 'influence');
     fact(LEARNING_CARD_TERMS.decision, learningDecisionLine(material, localInstantLabel), 'decision');
     card.append(heading, facts);
     if (material.target.kind === 'word-tracked-edit') {
@@ -551,15 +551,15 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
     adoptionAfter = metric.preferenceAdoptionNext ?? null;
     adoptionMore.hidden = adoptionAfter === null;
     adoptionMore.disabled = false;
-    body.textContent = `建议保留率：${metric.applied === 0 ? '暂无已应用的判定' : `${metric.surviving}/${metric.applied}（${Math.round(metric.surviving / metric.applied * 100)}%）`} · 按类别加权的改写量：${metric.editVolume} 字符单位`;
+    body.textContent = `建议保留率：${metric.applied === 0 ? '暂无已接受的判定' : `${metric.surviving}/${metric.applied}（${Math.round(metric.surviving / metric.applied * 100)}%）`} · 按类别加权的改写量：${metric.editVolume} 字符单位`;
     body.dataset['lineageDigest'] = metric.lineageDigest;
     adoption.replaceChildren(el('h4', undefined, '已参考规则的采纳率'));
     const share = (count: { accepted: number; findings: number; rate: number | null }) => count.rate === null ? '暂无发现' : `${count.accepted}/${count.findings} · ${Math.round(count.rate * 100)}%`;
     if (!adoptionRows.length) adoption.append(el('p', 'field-note', '尚无可比较的审阅发现。'));
     for (const row of adoptionRows) {
-      adoption.append(el('p', 'field-note', `${row.bookTitle} · ${row.versionId === null ? '全部规则' : `本社审阅偏好${technicalWords(` v${row.ordinal} · ${row.versionId}`)}`}：已参考 ${share(row.referenced)}；未参考 ${share(row.unreferenced)}${row.mostlyRejected ? '；参考后的发现多数被拒绝，请复核这条规则。' : '。'}`));
+      adoption.append(el('p', 'field-note', `${row.bookTitle} · ${row.versionId === null ? '全部规则' : `审阅偏好${technicalWords(` v${row.ordinal} · ${row.versionId}`)}`}：已参考 ${share(row.referenced)}；未参考 ${share(row.unreferenced)}${row.mostlyRejected ? '；参考后的发现多数被拒绝，请复核这条规则。' : '。'}`));
     }
-    adoption.append(el('p', 'field-note', '采纳数包含接受、修改后接受及已应用，分母包含尚未处理的发现；此比较不证明规则导致采纳。'));
+    adoption.append(el('p', 'field-note', '采纳数包含接受、修改后接受及已写入稿件的修改，分母包含尚未处理的发现；此比较不证明规则导致采纳。'));
   };
   adoptionMore.addEventListener('click', () => void load(false).catch(() => { adoptionMore.disabled = false; body.textContent = '无法读取更多规则采纳率。'; }));
   paintBooks();

@@ -841,7 +841,7 @@ describe('the draft and the page\'s words', () => {
     expect(WRITING_REFERENCE_TERMS).toEqual(['梗概与人物', '评估结论与营销要点', '范例', '资料库', '图书信息']);
     // 资料库 under 允许参考 (Issue #428): one box per item, and how many more were not listed.
     expect(writingMaterialLabel({ title: '参考资料甲', characters: 1234, scope: 'book' })).toBe('《参考资料甲》 · 已提取 1,234 字 · 本书资料');
-    expect(writingMaterialLabel({ title: '社级资料', characters: 80, scope: 'house' })).toBe('《社级资料》 · 已提取 80 字 · 社级资料');
+    expect(writingMaterialLabel({ title: '社级资料', characters: 80, scope: 'house' })).toBe('《社级资料》 · 已提取 80 字 · 本社资料');
     expect(writingMaterialsMore(3)).toBe('另有 3 份资料没有列出：这里只列最近收进的几份。');
     expect(writingTaskLine({ taskIntentId: 'x', typeId: 'promotion-article', typeLabel: '宣传文章', state: 'settled', label: '已完成', refusal: null, planEnvelopeDigest: null })).toBe('写作任务「宣传文章」：已完成');
     // 查看任务 is the page's next step only for a prepared Task nothing refuses; a Task whose 范例 is gone is quiet (#698).
@@ -864,7 +864,7 @@ describe('the draft and the page\'s words', () => {
     expect(writingQuickFailed('这项任务已经开始了。')).not.toContain('可在任务计划里开始');
     expect(writingQuickFailed('  ')).toBe(WRITING_STATUS.quickFailed);
     expect(WRITING_STATUS.quickNoPlan).toBe('这份计划还没有冻结，没有按规则开始；请看过计划后再开始。');
-    expect(WRITING_QUICK_PICK_TYPE).toBe('选好类型后显示：快速开始按这一类文档的默认执行规则开始。');
+    expect(WRITING_QUICK_PICK_TYPE).toBe('选好类型后显示：快速开始按这一类衍生稿件的默认执行规则开始。');
   });
 });
 

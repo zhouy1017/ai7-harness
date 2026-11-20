@@ -1,3 +1,4 @@
+import { localDayTimeLabel } from '../shared/report-wording.js';
 import { technicalWords } from './technical-layer.js';
 /**
  * The words of Editing Protection Mode and its Protective Read-only State (Issue #951, wave 12 slice 12a; V2-UX-DUR-001 to
@@ -6,10 +7,10 @@ import { technicalWords } from './technical-layer.js';
  */
 
 /** The persistent header line that replaces the saved styling (ED-055, DUR-003). */
-export const PROTECTION_HEADLINE = '本地写入中断 · 当前更改尚未持久保存';
-export const PROTECTION_READ_ONLY_HEADLINE = '保护性只读 · 本地写入中断 · 当前更改尚未持久保存';
+export const PROTECTION_HEADLINE = '更改尚未保存';
+export const PROTECTION_READ_ONLY_HEADLINE = '已暂停编辑，更改尚未保存';
 /** The one direct action of the header (DUR-003). */
-export const PROTECTION_OPTIONS_ACTION = '查看保护选项';
+export const PROTECTION_OPTIONS_ACTION = '处理…';
 export const PROTECTION_OPTIONS_TITLE = '编辑保护选项';
 export const PROTECTION_RETRY_ACTION = '重试写入';
 export const PROTECTION_COPY_ACTION = '复制受影响内容';
@@ -26,15 +27,13 @@ export const PROTECTION_SALVAGE_UNAVAILABLE = '本机服务暂不能导出，请
 export const PROTECTION_BUFFER_REFUSED = '未确认内容已接近安全上限，这次输入未被接收；请先重试写入，或复制受影响内容。';
 export const PENDING_BUFFER_REFUSED = '尚待确认的编辑已达到单次安全上限，这次输入未被接收；请等待写入确认后分段输入。';
 export const PROTECTION_ACK_MISMATCH = '修订日志确认与当前编辑不匹配。';
-/** The marker shape beside the words (ED-058): text and shape, never colour alone. */
-export const PROTECTION_MARKER = '⚠';
 
 export type ProtectionCause = 'journal-unavailable' | 'service-stopped' | 'drift';
 export type ProtectionReadOnlyReason = 'capacity' | 'service-stopped' | 'drift';
 
 export function lastDurableLine(sequence: number, durableAt: string): string {
   const at = new Date(durableAt).toLocaleString('zh-CN', { hour12: false });
-  return technicalWords(`最后确认写入：修订日志序号 ${sequence.toLocaleString('zh-CN')} · ${at}`, `最近保存时间：${at}`);
+  return technicalWords(`最后确认写入：修订日志序号 ${sequence.toLocaleString('zh-CN')} · ${at}`, `最近保存时间：${localDayTimeLabel(durableAt)}`);
 }
 
 /** The ordinary words of a copy and of a mismatched acknowledgement (Issue #1431 item 16). */
@@ -75,8 +74,16 @@ export function readOnlyLine(reason: ProtectionReadOnlyReason): string {
 /** DUR-005: the exact reason beside an attempted action that could discard, duplicate or fork the buffered input. */
 export function blockedActionLine(action: string | null): string {
   const named = action === null || action.length === 0 ? '这项操作' : `「${action}」`;
-  return `本地写入中断，当前更改尚未持久保存：暂不能执行${named}。请先${PROTECTION_RETRY_ACTION}，或${PROTECTION_COPY_ACTION}。`;
+  return `本地写入中断，修改还没有保存：暂不能执行${named}。请先${PROTECTION_RETRY_ACTION}，或${PROTECTION_COPY_ACTION}。`;
 }
 
 /** DUR-010: a close request with at-risk input opens the protection surface and says why the window stays. */
-export const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有未持久保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
+export const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有还没有保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
+
+/** Only a distinct cause belongs in the status bar; the banner owns the general state. */
+export function protectionFailureReason(error: unknown): string {
+  // The preload bridge throws a plain `{ code, message }` object, not an Error.
+  const message = typeof error === 'object' && error !== null ? (error as { message?: unknown }).message : error;
+  const reason = (typeof message === 'string' ? message : '').trim();
+  return reason === PROTECTION_HEADLINE || reason === PROTECTION_READ_ONLY_HEADLINE ? '' : reason || '保存失败，未提供具体原因。';
+}

@@ -81,7 +81,7 @@ function reviewControls(options: ControlsOptions = {}) {
   const unexpected: string[] = [];
   const successfulCancels: number[] = [];
   let resumed = false;
-  const cancel = new Button('停止任务', () => { successfulCancels.push(Date.now()); });
+  const cancel = new Button('取消任务', () => { successfulCancels.push(Date.now()); });
   cancel.disabled = true;
   const drawer = {
     dataset: { taskPlanKind: options.drawerKind ?? 'review-run', taskPlanRef: options.drawerRef ?? REVIEW_REF },

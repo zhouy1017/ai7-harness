@@ -125,7 +125,7 @@ function initialChannel(projection: ModelServiceSettingsProjection, chosen: Mode
 function credentialStep(projection: ModelServiceSettingsProjection, channel: ModelServiceChannelProjection, options: ModelServiceFlowOptions): HTMLElement {
   const step = el('div', 'model-service-flow-step model-route-option');
   step.dataset['flowStep'] = 'credential';
-  const heading = el('h4', undefined, '2. 填写凭据并获取模型');
+  const heading = el('h4', undefined, '2. 填写密钥并获取模型');
   step.append(heading);
   const option = channel.route === null ? undefined : projection.routeChoice.routes.find((candidate) => candidate.route === channel.route);
   if (option === undefined) {
@@ -142,7 +142,7 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
   const nameLabel = el('label', undefined, '连接名称'); nameLabel.htmlFor = name.id; nameLabel.append(name);
   const secret = el('input'); secret.type = 'password'; secret.required = true; secret.autocomplete = 'off'; secret.name = 'credential';
   secret.id = name.id.replace('-connection-name', '-credential');
-  const secretLabel = el('label', undefined, option.connection === null ? 'API 凭据' : '填写或更新 API 凭据'); secretLabel.htmlFor = secret.id; secretLabel.append(secret);
+  const secretLabel = el('label', undefined, option.connection === null ? 'API 密钥' : '填写或更新 API 密钥'); secretLabel.htmlFor = secret.id; secretLabel.append(secret);
   const save = el('button', 'primary', '保存并获取模型'); save.type = 'submit'; save.dataset['action'] = 'save-channel-credential'; save.disabled = true;
   const update = (): void => { save.disabled = secret.value.trim().length === 0 || name.value.trim().length === 0; };
   secret.addEventListener('input', update); name.addEventListener('input', update);
@@ -151,17 +151,17 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
     save.disabled = true;
     const pending = options.api.saveModelServiceCredential({ route: option.route, connectionName: name.value.trim(), secret: secret.value });
     secret.value = '';
-    options.setStatus('正在保存凭据并获取模型…', 'busy');
+    options.setStatus('正在保存密钥并获取模型…', 'busy');
     try {
       const result = await pending;
       options.render(result);
       const discovery = result.modelDiscovery;
-      if (discovery?.status === 'failure') options.setStatus(`凭据已保存，但无法获取模型列表：${discovery.reason}`, 'error');
+      if (discovery?.status === 'failure') options.setStatus(`密钥已保存，但无法获取模型列表：${discovery.reason}`, 'error');
       else options.setStatus(discovery?.status === 'success'
-        ? `凭据已保存；已获取 ${discovery.modelCount} 个模型。`
-        : '凭据已保存；可选择账号模型或手动输入模型 ID。', 'success');
+        ? `密钥已保存；已获取 ${discovery.modelCount} 个模型。`
+        : '密钥已保存；可选择账号模型或手动输入模型 ID。', 'success');
     }
-    catch (error) { update(); options.setStatus(options.errorMessage(error, '无法保存模型服务凭据。'), 'error'); }
+    catch (error) { update(); options.setStatus(options.errorMessage(error, '无法保存模型服务密钥。'), 'error'); }
   })(); });
   const actions = el('div', 'button-row');
   const ready = credentialReady(projection, channel.route);
@@ -178,16 +178,16 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
     }
     catch (error) { refresh.disabled = !ready; options.setStatus(options.errorMessage(error, '无法刷新模型列表。'), 'error'); }
   })());
-  const remove = el('button', 'quiet', '移除凭据'); remove.type = 'button'; remove.disabled = !ready; remove.dataset['action'] = 'remove-model-service-credential';
+  const remove = el('button', 'quiet', '移除密钥'); remove.type = 'button'; remove.disabled = !ready; remove.dataset['action'] = 'remove-model-service-credential';
   remove.addEventListener('click', () => void (async () => {
     remove.disabled = true;
-    try { options.render(await options.api.removeModelServiceCredential({ route: option.route })); options.setStatus('凭据已移除。', 'success'); }
-    catch (error) { remove.disabled = !ready; options.setStatus(options.errorMessage(error, '无法移除模型服务凭据。'), 'error'); }
+    try { options.render(await options.api.removeModelServiceCredential({ route: option.route })); options.setStatus('密钥已移除。', 'success'); }
+    catch (error) { remove.disabled = !ready; options.setStatus(options.errorMessage(error, '无法移除模型服务密钥。'), 'error'); }
   })());
   actions.append(save, refresh, remove);
   form.append(...(technicalLayerVisible ? [nameLabel] : []), secretLabel, actions);
-  const stored = el('span', undefined, ready ? '凭据已保存' : '需设置凭据');
-  if (technicalLayerVisible) stored.append('；凭据只写入操作系统安全凭据库，保存后不再显示。');
+  const stored = el('span', undefined, ready ? '密钥已保存' : '需设置密钥');
+  if (technicalLayerVisible) stored.append('；密钥只写入操作系统的安全存储，保存后不再显示。');
   stored.dataset['credentialState'] = option.connection?.credentialOperationState ?? 'missing';
   heading.append(' · ', stored);
   step.append(form);
@@ -212,7 +212,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   filter.addEventListener('input', () => { options.chooseFilter?.(filter.value); repaintCatalogue(); });
   filterLabel.append(filter);
   const legend = el('legend', undefined, '选择模型，再指定使用角色');
-  if (offered.length === 0) legend.append(` · ${ready ? '正在获取模型列表' : '保存凭据后获取模型'}`);
+  if (offered.length === 0) legend.append(` · ${ready ? '正在获取模型列表' : '保存密钥后获取模型'}`);
   group.append(legend);
   let checked: ModelServiceChannelModelProjection | null = null;
   let selectedRadioModel: ModelServiceChannelModelProjection | null = null;
@@ -296,7 +296,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     const inUse = current?.route === channel.route && current.modelId === model.modelId;
     if (ready && (checked === null || preferred === model.modelId)) { radio.checked = true; checked = model; selectedRadioModel = model; }
     radio.addEventListener('change', () => { checked = model; selectedRadioModel = model; custom.value = ''; options.chooseModel?.(model.modelId); paint(); });
-    label.append(radio, ` ${modelLabelWords(model)}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : ''}`);
+    label.append(radio, ` ${modelLabelWords(model)}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存密钥' : ''}`);
     const row = el('div', 'model-service-catalogue-row');
     const favourite = favouriteButton(() => model.modelId);
     row.append(label, favourite);
@@ -457,7 +457,7 @@ export function modelServiceFlow(projection: ModelServiceSettingsProjection, opt
     radio.checked = channel.channelId === channelId;
     radio.addEventListener('change', () => selectChannel(channel.channelId));
     const offered = channel.models.filter(bothEligible).length;
-    label.append(radio, ` ${channel.channelLabel} · ${offered === 0 ? '暂无可选模型' : channel.route !== null && credentialReady(projection, channel.route) ? '凭据已保存' : '需设置凭据'}`);
+    label.append(radio, ` ${channel.channelLabel} · ${offered === 0 ? '暂无可选模型' : channel.route !== null && credentialReady(projection, channel.route) ? '密钥已保存' : '需设置密钥'}`);
     if (technicalLayerVisible) channels.append(label);
     else {
       const option = el('option', undefined, channel.channelLabel);

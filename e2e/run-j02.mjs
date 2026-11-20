@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { DIRECT_EDIT, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, manuscriptBoundary, applyRendererDiagnostics, attachProductOutput, discloseJ02Viewport, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, manuscriptBoundary, applyRendererDiagnostics, attachProductOutput, discloseJ02Viewport, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass, statusBarClear, statusBarOverlaps } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { measureCpuShares } from './readiness-trace.mjs';
 
@@ -52,9 +52,9 @@ const CJK_SPAN = 0x1000;
 const RENDERER_TARGET_QUERY_ABANDONED = new Error('renderer-target query abandoned after the browser disconnected');
 // Editing Protection Mode (Issue #951, wave 12 slice 12a): the product's exact words, and the journal's one-edit bound
 // (src/shared/protocol.ts MAX_EDIT_GRAPHEMES) that says how many entries a buffered run of text lands as.
-const PROTECTION_HEADLINE = '本地写入中断 · 当前更改尚未持久保存';
-const PROTECTION_READ_ONLY_HEADLINE = '保护性只读 · 本地写入中断 · 当前更改尚未持久保存';
-const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有未持久保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
+const PROTECTION_HEADLINE = '更改尚未保存';
+const PROTECTION_READ_ONLY_HEADLINE = '已暂停编辑，更改尚未保存';
+const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有还没有保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
 const PENDING_BUFFER_REFUSED = '尚待确认的编辑已达到单次安全上限，这次输入未被接收；请等待写入确认后分段输入。';
 const JOURNAL_EDIT_GRAPHEMES = 256;
 const PROTECTION_CJK_BASE = 0x7000;
@@ -1020,7 +1020,41 @@ async function milestoneIpcTimeoutCategory(renderer, beforeObservation) {
   return 'save-result-renderer-not-r2';
 }
 
+async function panelGeometry(renderer, selector, width, height, facts = false) {
+  const fits = await renderer.evaluate(`(async () => {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const panel = document.querySelector(${JSON.stringify(selector)});
+    if (!(panel instanceof HTMLElement) || panel.hidden || innerWidth !== ${width} || innerHeight !== ${height}) return false;
+    const box = panel.getBoundingClientRect();
+    const nodes = ${facts} ? [...panel.querySelectorAll('[data-protection-fact]')] : [];
+    return box.width > 0 && box.height > 0 && (${facts} ? nodes.length === 3 : true) && box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight
+      && panel.scrollWidth <= panel.clientWidth + 1
+      && nodes.every(node => node.textContent.length > 0 && node.getBoundingClientRect().width > 0);
+  })()`);
+  requireJourney(fits === true, 'shared-panel-geometry');
+}
+
+async function milestoneGeometry(renderer) {
+  for (const [width, height] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-menu');
+    await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form');
+    // The click must have opened the form inside the still-open save menu, not landed on whatever lies under a moved panel.
+    await assertRenderer(renderer, `document.querySelector('details.editor-save-menu')?.open === true && document.querySelector('.milestone-section')?.open === true`, 'milestone-geometry-form-opened');
+    await panelGeometry(renderer, '.editor-save-menu-body', width, height);
+    await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form-close');
+    await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-close');
+    // The header's export menu: a narrow anchor at the right edge whose content is wider than the anchor.
+    await clickVisibleControl(renderer, 'details.export-menu > summary', 'export-geometry-open');
+    await panelGeometry(renderer, 'details.export-menu[open] > .export-menu-body', width, height);
+    await clickVisibleControl(renderer, 'details.export-menu > summary', 'export-geometry-close');
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
+}
+
 async function runWorkspaceJourney(renderer, dataRoot) {
+  at('panels-geometry');
+  await milestoneGeometry(renderer);
   at('bounded-workspace');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32`, 'renderer-block-ceiling');
   await assertRenderer(renderer, `document.querySelector('#manuscript-position')?.getAttribute('aria-valuemax') === '1000000' && ${MANUSCRIPT_RAIL_POSITION} === 0 && !document.querySelector('.editor-meta')?.textContent.includes('%')`, 'whole-manuscript-position');
@@ -1390,7 +1424,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await assertRenderer(renderer, `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[5]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 5) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 4, text, 1); globalThis.__ai7SearchReturn = { meta: document.querySelector('.editor-meta')?.textContent, blockId: block.dataset.blockId, text: selection.toString(), nodeText: text.data, anchor: 4, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return true; })()`, 'search-return-prepare');
   await assertRenderer(renderer, `(() => { const open = document.querySelector('.search-result button'); if (!open) return false; open.click(); return true; })()`, 'search-jump');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent !== globalThis.__ai7SearchReturn.meta`, 'search-jump-resolved');
-  await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent.startsWith('已到达')`, 'search-arrival-settled');
+  await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed' && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '返回查找前位置')`, 'search-arrival-settled');
   await assertRenderer(renderer, readableEditor, 'search-arrival-readable-editor');
   await waitForExactSearchRange(renderer);
   await clickButton(renderer, '返回查找前位置', 'search-return');
@@ -1775,7 +1809,7 @@ async function typeAtWindowEnd(renderer, text, location) {
 
 const PROTECTION_PROBE = `(() => {
   const banner = document.querySelector('#editing-protection');
-  const fact = (name) => banner?.querySelector('[data-protection-fact="' + name + '"]');
+  const fact = (name) => document.querySelector('#editing-protection-options [data-protection-fact="' + name + '"]');
   const editor = document.querySelector('[data-testid="manuscript-editor"]');
   return {
     shown: banner instanceof HTMLElement && !banner.hidden,
@@ -1813,7 +1847,7 @@ async function runEditorModesJourney(renderer) {
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   discloseJ02Viewport(await renderer.evaluate(`({width:innerWidth,height:innerHeight,overlay:matchMedia('(max-width: 1119.98px)').matches})`));
   // #1287 owns viewport height; A5 #1319 overlays supporting panes below 1120px.
-  await waitForChecks(renderer, `(() => { const toolbar=document.querySelector('.editor-toolbar'); const actions=Array.from(toolbar.querySelector('.editor-edit-actions').children).filter(control=>!control.hidden && !control.classList.contains('ui-select-native') && getComputedStyle(control).display!=='none'); const notice=document.querySelector('[data-toast]'); const footer=document.querySelector('.window-actions').getBoundingClientRect(); return { sidebarNavigation:!toolbar.querySelector('nav'), actionsVisible:actions.every(button=>{ const box=button.getBoundingClientRect(); return box.width>0 && box.height>0 && box.left>=0 && box.right<=innerWidth && box.top>=0 && box.bottom<=innerHeight; }), oneActionRow:new Set(actions.map(button=>{ const box=button.getBoundingClientRect(); return Math.round(box.top+box.height/2); })).size===1, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2, footerClear:footer.bottom<=innerHeight+1, singletonNotice:document.querySelectorAll('[data-toast]').length===1, statusOnScreen:notice.hidden || notice.getBoundingClientRect().bottom<=innerHeight }; })()`, 'editor-viewport-and-toolbar', 10_000);
+  await waitForChecks(renderer, `(() => { const toolbar=document.querySelector('.editor-toolbar'); const actions=Array.from(toolbar.querySelector('.editor-edit-actions').children).filter(control=>!control.hidden && !control.classList.contains('ui-select-native') && getComputedStyle(control).display!=='none'); const notice=document.querySelector('[data-toast]'); const footer=document.querySelector('.window-actions').getBoundingClientRect(); return { sidebarNavigation:!toolbar.querySelector('nav'), actionsVisible:actions.every(button=>{ const box=button.getBoundingClientRect(); return box.width>0 && box.height>0 && box.left>=0 && box.right<=innerWidth && box.top>=0 && box.bottom<=innerHeight; }), oneActionRow:new Set(actions.map(button=>{ const box=button.getBoundingClientRect(); return Math.round(box.top+box.height/2); })).size===1, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2, footerClear:footer.bottom<=innerHeight+1, singletonNotice:document.querySelectorAll('[data-toast]').length<=1, statusOnScreen:notice===null || notice.hidden || notice.getBoundingClientRect().bottom<=innerHeight }; })()`, 'editor-viewport-and-toolbar', 10_000);
   await assertRenderer(renderer, `(() => { const panel=document.querySelector('#manuscript-navigation-panel'); if(panel.hidden)document.querySelector('[data-edge-entry="navigation"]').click(); return !panel.hidden; })()`, 'editor-navigation-layout-open');
   await waitForChecks(renderer, `(() => {
     const panel=document.querySelector('#manuscript-navigation-panel'), box=panel.getBoundingClientRect();
@@ -1853,7 +1887,7 @@ async function runEditorModesJourney(renderer) {
     return Object.fromEntries(Object.entries(checks).map(([key,passed])=>[form+'-'+innerWidth+'-'+key,passed]));
   })()`, 'editor-analysis-no-overlap');
   await assertRenderer(renderer, `(() => { const toggle = document.querySelector('[data-view-command="focus-mode"]'); if (!(toggle instanceof HTMLButtonElement) || toggle.getAttribute('aria-pressed') !== 'false') return false; toggle.focus(); toggle.click(); return true; })()`, 'focus-mode-toggle');
-  await waitForChecks(renderer, `(() => { const hidden = (selector) => { const node = document.querySelector(selector); return node === null || getComputedStyle(node).display === 'none'; }; const status = document.querySelector('[data-toast]'); const toggle = document.querySelector('[data-view-command="focus-mode"]'); return { modeOn: document.documentElement.dataset.focusMode === 'on', sidebarHidden: hidden('#app-sidebar'), navigationHidden: hidden('#manuscript-navigation-panel'), analysisHidden: hidden('#paragraph-analysis-panel'), saveMenuShown: !hidden('#manuscript-save-menu') && document.querySelector('#context-actions #manuscript-save-menu') !== null, edgeEntriesHidden: hidden('.edge-entries'), drawerHidden: hidden('#task-drawer'), manuscriptShown: (document.querySelector('[data-testid="manuscript-editor"]')?.getBoundingClientRect().width ?? 0) > 0, statusAvailable: status instanceof HTMLElement && document.querySelectorAll('[data-toast]').length === 1, restoreControl: toggle?.getAttribute('aria-pressed') === 'true' && toggle.textContent === '退出专注（Esc）' && toggle.getBoundingClientRect().width > 0 }; })()`, 'focus-mode-entered', 15_000);
+  await waitForChecks(renderer, `(() => { const hidden = (selector) => { const node = document.querySelector(selector); return node === null || getComputedStyle(node).display === 'none'; }; const status = document.querySelector('[data-toast]'); const toggle = document.querySelector('[data-view-command="focus-mode"]'); return { modeOn: document.documentElement.dataset.focusMode === 'on', sidebarHidden: hidden('#app-sidebar'), navigationHidden: hidden('#manuscript-navigation-panel'), analysisHidden: hidden('#paragraph-analysis-panel'), saveMenuShown: !hidden('#manuscript-save-menu') && document.querySelector('#context-actions #manuscript-save-menu') !== null, edgeEntriesHidden: hidden('.edge-entries'), drawerHidden: hidden('#task-drawer'), manuscriptShown: (document.querySelector('[data-testid="manuscript-editor"]')?.getBoundingClientRect().width ?? 0) > 0, statusAvailable: document.querySelector('#persistence-status') instanceof HTMLElement && document.querySelectorAll('[data-toast]').length <= 1, restoreControl: toggle?.getAttribute('aria-pressed') === 'true' && toggle.textContent === '退出专注（Esc）' && toggle.getBoundingClientRect().width > 0 }; })()`, 'focus-mode-entered', 15_000);
   at('focus-mode-esc');
   await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]')?.focus({ preventScroll: true })`);
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -1886,9 +1920,32 @@ async function runProtectionJourney(renderer) {
   await typeAtWindowEnd(renderer, protectionText(initialLimit + 1, 8_000), 'protection-initial-bound-type');
   await protectionChecks(renderer, `({ refused: document.querySelector('#persistence-status')?.textContent === ${JSON.stringify(PENDING_BUFFER_REFUSED)} && document.querySelector('#persistence-status')?.dataset.tone === 'error', noInput: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength}, noProtection: !p.shown, noEntry: p.journal === ${durable} })`, 'protection-initial-bound');
   requireJourney((await renderer.setJournalFault('fail-all'))?.mode === 'fail-all', 'protection-arm');
+  at('protection-header-baseline');
+  const headerHeights = [];
+  for (const [width, height] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    headerHeights.push(await renderer.evaluate(`(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); return document.querySelector('.context-header').getBoundingClientRect().height; })()`));
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
   at('protection-enter');
   await typeAtWindowEnd(renderer, protectionText(12), 'protection-enter-type');
   await protectionChecks(renderer, `({ shown: p.shown, headline: p.headline === ${JSON.stringify(PROTECTION_HEADLINE)}, boundary: p.lastDurable?.startsWith(${JSON.stringify(`最后确认写入：修订日志序号 ${durable.toLocaleString('zh-CN')} · `)}) === true, atRisk: p.atRisk === 12, retry: p.retry?.startsWith('自动重试：') === true, active: p.document === 'active' && p.readOnly === 'none', writable: p.writable, closeRisk: p.closeRisk === 'true', noEntry: p.journal === ${durable} })`, 'protection-entered');
+  await assertRenderer(renderer, `(() => { const status = document.querySelector('#persistence-status'); return status.dataset.tone !== 'busy' && !/正在(保存|自动写入)/u.test(status.textContent) && status.textContent.includes('修订日志暂时无法确认写入。') && !status.textContent.includes(${JSON.stringify(PROTECTION_HEADLINE)}); })()`, 'protection-specific-status');
+  at('protection-panel-geometry');
+  for (const [index, [width, height]] of [[1280, 800], [1008, 681]].entries()) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await clickVisibleControl(renderer, '#editing-protection [data-protection-action="options"]', 'protection-geometry-open');
+    await panelGeometry(renderer, '#editing-protection-options', width, height, true);
+    await assertRenderer(renderer, `(() => {
+      const header = document.querySelector('.context-header');
+      const h = header.getBoundingClientRect(), b = document.querySelector('#editing-protection').getBoundingClientRect();
+      return b.width > 0 && b.height > 0 && b.left >= h.left && b.right <= h.right && b.top >= h.top && b.bottom <= h.bottom && header.getBoundingClientRect().height === ${headerHeights[index]}
+        && [...header.querySelectorAll('button, summary')].filter(node => node.checkVisibility())
+          .every(node => { const r = node.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; });
+    })()`, 'protection-header-height');
+    await clickVisibleControl(renderer, '#editing-protection-options [data-protection-action="close"]', 'protection-geometry-close');
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
   at('protection-blocked-action');
   await assertRenderer(renderer, `(() => { const back = document.querySelector('#app-sidebar [data-nav-book-section="overview"]'); if (!(back instanceof HTMLElement) || back.getAttribute('aria-disabled') === 'true') return false; back.focus(); back.click(); return true; })()`, 'protection-blocked-action-click');
   await waitForChecks(renderer, `(() => { const back = document.querySelector('#app-sidebar [data-nav-book-section="overview"]'); const label = (back?.getAttribute('aria-label') ?? back?.textContent ?? '').trim(); const note = back?.nextElementSibling; return { stayed: document.querySelector('#screen')?.dataset.screen === 'editor', reason: note instanceof HTMLElement && note.dataset.protectionBlocked === label && note.textContent.includes('暂不能执行'), noEntry: ${JOURNAL_SEQUENCE_PROBE} === ${durable} }; })()`, 'protection-blocked-action', 30_000);
@@ -1903,7 +1960,7 @@ async function runProtectionJourney(renderer) {
   at('protection-retry-recovery');
   requireJourney((await renderer.setJournalFault('off'))?.mode === 'off', 'protection-fault-off');
   await assertRenderer(renderer, `(() => { const retry = document.querySelector('#editing-protection-options [data-protection-action="retry"]'); if (!(retry instanceof HTMLButtonElement)) return false; if (retry.disabled) return true; retry.click(); return true; })()`, 'protection-retry-click');
-  await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, oneEntry: p.journal === ${durable + 1}, writable: p.writable, closeRisk: p.closeRisk === 'false', status: document.querySelector('[data-toast]')?.textContent === '已写入修订日志', optionsClosed: document.querySelector('#editing-protection-options')?.hidden === true, reasonsGone: document.querySelector('.editing-protection-blocked') === null })`, 'protection-retry-recovered', 60_000);
+  await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, oneEntry: p.journal === ${durable + 1}, writable: p.writable, closeRisk: p.closeRisk === 'false', optionsClosed: document.querySelector('#editing-protection-options')?.hidden === true, reasonsGone: document.querySelector('.editing-protection-blocked') === null })`, 'protection-retry-recovered', 60_000);
   at('protection-reversed-input');
   requireJourney((await renderer.setJournalFault('fail-all'))?.mode === 'fail-all', 'protection-reversed-arm');
   await typeAtWindowEnd(renderer, protectionText(12, 7_000), 'protection-reversed-type');
@@ -2164,6 +2221,89 @@ async function main() {
         return innerWidth===${size.width} && innerHeight===${size.height} && (${size.width}!==1280 || commentsVisible) && mode.dataset.inputMode==='direct-edit' && rects.length>=5 && rects.every(r=>r.width>0 && r.left>=box.left && r.right<=Math.min(box.right,innerWidth) && Math.abs((r.top+r.height/2)-(rects[0].top+rects[0].height/2))<2 && r.bottom<=box.bottom)
           && controls.every(el=>el.scrollWidth<=el.clientWidth+1);
       })()`) === true, 'toolbar-one-row');
+      // #1519: a busy line appears in the bar, an overlay at the bottom of the content area — in view and beside the sidebar — and the
+      // manuscript keeps the height it had. The line is the one a command pressed during an IME composition gets. On the manuscript
+      // the bar keeps to the text column: it may lie over the last lines of text, never over a control.
+      const barLayout = `(() => {
+        const bar = document.querySelector('#persistence-status'); const side = document.querySelector('#app-sidebar'); const shell = document.querySelector('.editor-shell');
+        const box = bar.getBoundingClientRect(); const surface = document.querySelector('.manuscript-surface');
+        return { shell: Math.round(shell.getBoundingClientRect().height * 100), surface: Math.round(surface.getBoundingClientRect().height * 100), toolbar: Math.round((document.querySelector('.editor-toolbar')?.getBoundingClientRect().height ?? 0) * 100), padding: getComputedStyle(document.querySelector('.editor-window')).paddingBottom, page: document.documentElement.scrollHeight, shown: !bar.hidden && box.width > 0,
+          fixed: getComputedStyle(bar).position === 'fixed',
+          inView: box.top >= 0 && box.bottom <= innerHeight && box.left >= side.getBoundingClientRect().right - 0.5 && box.right <= innerWidth + 0.5 };
+      })()`;
+      const MANUSCRIPT_CONTROLS = ['.editor-shell button', '.editor-shell select', '.editor-shell input', '.editor-shell summary', '.rail-track', '.editor-edge', '.manuscript-comments-pane'];
+      // Scrolled to its end, the text pane's last line would stand above the bar: its padding lets it be scrolled clear.
+      const LAST_LINE_CLEAR = `(() => {
+        const bar = document.querySelector('#persistence-status').getBoundingClientRect(); const pane = document.querySelector('.editor-window');
+        const last = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]:last-child');
+        if (!(pane instanceof HTMLElement) || !(last instanceof HTMLElement)) return false;
+        const top = pane.getBoundingClientRect().top, bottomInContent = last.getBoundingClientRect().bottom - top + pane.scrollTop;
+        return top + bottomInContent - (pane.scrollHeight - pane.clientHeight) <= bar.top + 0.5;
+      })()`;
+      // The page is measured only once its columns have settled: the docked drawer and the right column (#1542) ease the body's
+      // padding and may switch the sidebar to icons, and a toolbar that wraps after that would read as the bar's doing.
+      const SETTLED = `(async () => {
+        for (let round = 0; round < 3; round += 1) {
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          await Promise.all(document.body.getAnimations().map((animation) => animation.finished));
+        }
+        return true;
+      })()`;
+      // Two layouts, each with its own baseline taken before the bar shows: the page as it is (the 批注栏 docked), and with the Task
+      // Drawer open beside it — docked at the wide size, over it at 1008×681 — which also puts the sidebar in its icon form.
+      const drawerOpen = () => renderer.evaluate(`document.querySelector('#task-drawer')?.hidden === false`);
+      if (await drawerOpen()) await clickVisibleControl(renderer, '#task-drawer [data-task-drawer-control="close"]', 'status-bar-drawer-reset');
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden !== false`, 'status-bar-drawer-reset-closed');
+      requireJourney(await renderer.evaluate(SETTLED) === true, 'status-bar-page-settled');
+      const quietPage = await renderer.evaluate(barLayout);
+      await clickVisibleControl(renderer, '[data-edge-entry="tasks"]', 'status-bar-drawer-open');
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === false`, 'status-bar-drawer-ready');
+      requireJourney(await renderer.evaluate(SETTLED) === true, 'status-bar-drawer-settled');
+      const quiet = await renderer.evaluate(barLayout);
+      await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').focus({ preventScroll: true })`);
+      await renderer.send('Input.imeSetComposition', { text: '编', selectionStart: 1, selectionEnd: 1, replacementStart: 0, replacementEnd: 0 });
+      await press(renderer, 'f', process.platform === 'darwin' ? 4 : 2);
+      await waitFor(renderer, `!document.querySelector('#persistence-status').hidden && document.querySelector('#persistence-status').textContent.includes('输入法组合尚未结束')`, 'status-bar-busy-shown');
+      const busy = await renderer.evaluate(barLayout);
+      const clear = await renderer.evaluate(statusBarClear(MANUSCRIPT_CONTROLS));
+      await renderer.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0, replacementStart: 0, replacementEnd: 1 });
+      requireJourney(busy?.shown === true && busy.fixed === true && busy.inView === true && busy.shell === quiet?.shell && busy.surface === quiet?.surface && busy.page === quiet?.page && clear === true, 'status-bar-busy-layout', { quiet, busy, clear });
+      // A long error on the manuscript, with the drawer open and then closed: the bar wraps (a long one scrolls inside it), stays
+      // clear of every control, the sidebar and the drawer, the manuscript keeps its height, and the last line can be scrolled
+      // clear of it. The fault is armed apart from the press: the next 发起全书任务… has its reading rejected (one-shot hook).
+      const LONG_FAILURE = '任务撰写没有打开：本机业务服务暂时没有回答，请稍后再试；这条说明故意写得很长，用来确认它在稿件页里自行折行，既不超出窗口，也不压住稿件的控件、侧栏或任务栏。'.repeat(5);
+      await waitFor(renderer, `document.querySelector('#task-drawer .task-panel [data-task-compose-action="compose"]')?.disabled === false`, 'status-bar-compose-ready');
+      await assertRenderer(renderer, `(() => {
+        const arm = (event) => {
+          if (!(event.target instanceof Element) || event.target.closest('[data-task-compose-action="compose"]') === null) return;
+          document.removeEventListener('click', arm, true);
+          const original = Promise.prototype.then;
+          Promise.prototype.then = function (success, failure) { Promise.prototype.then = original; return original.call(this, () => failure({ code: 'SERVICE_UNAVAILABLE', message: ${JSON.stringify(LONG_FAILURE)} }), failure); };
+        };
+        document.addEventListener('click', arm, true);
+        return true;
+      })()`, 'status-bar-long-arm');
+      await clickVisibleControl(renderer, '#task-drawer .task-panel [data-task-compose-action="compose"]', 'status-bar-long-press');
+      await waitFor(renderer, `(() => { const bar = document.querySelector('#persistence-status'); return !bar.hidden && bar.dataset.tone === 'error' && bar.textContent.startsWith('任务撰写没有打开') && document.documentElement.dataset.statusBar === 'shown'; })()`, 'status-bar-long-shown');
+      for (const form of ['drawer', 'page']) {
+        if (form === 'page') {
+          await clickVisibleControl(renderer, '#task-drawer [data-task-drawer-control="close"]', 'status-bar-long-drawer-close');
+          await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden !== false`, 'status-bar-long-drawer-closed');
+        }
+        requireJourney(await renderer.evaluate(SETTLED) === true, `status-bar-long-settled-${form}`);
+        const longClear = `${statusBarClear(MANUSCRIPT_CONTROLS)} && ${LAST_LINE_CLEAR} && (() => { const line = document.querySelector('#persistence-status .status-line'); return line.scrollHeight > line.clientHeight && document.querySelector('#persistence-status').getBoundingClientRect().height <= innerHeight / 4; })()`;
+        try {
+          await waitFor(renderer, longClear, `status-bar-long-clear-${form}`, 30_000);
+        } catch {
+          requireJourney(false, `status-bar-long-clear-${form}`, { overlaps: await renderer.evaluate(statusBarOverlaps(MANUSCRIPT_CONTROLS)), lastLine: await renderer.evaluate(LAST_LINE_CLEAR) });
+        }
+        const long = await renderer.evaluate(barLayout);
+        const before = form === 'drawer' ? quiet : quietPage;
+        requireJourney(long?.inView === true && long.shell === before?.shell && long.surface === before?.surface, `status-bar-long-layout-${form}`, { before, long });
+      }
+      await clickVisibleControl(renderer, '#persistence-status .status-dismiss', 'status-bar-long-dismiss');
+      await waitFor(renderer, `document.querySelector('#persistence-status').hidden === true && document.documentElement.dataset.statusBar === undefined`, 'status-bar-long-dismissed');
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden !== false`, 'status-bar-drawer-closed');
     }
     await renderer.send('Emulation.clearDeviceMetricsOverride');
     // The close and what follows it are their own stages: left under the last j14 step, a failure to

@@ -13,7 +13,7 @@ export const CHANNEL_LABELS = Object.freeze({
 export const CHANNEL_DESCRIPTIONS = Object.freeze({
   'source-checkout': '源码检出运行，产品数据保存在独立的本机位置。',
   'windows-installer': '产品数据在本机用户数据区。',
-  'windows-portable': '程序文件与产品数据分别放在 AI7 文件夹内的两个区域；移动或复制文件夹会带走产品数据，但不会带走模型服务凭据。',
+  'windows-portable': '程序文件与产品数据分别放在 AI7 文件夹内的两个区域；移动或复制文件夹会带走产品数据，但不会带走模型服务密钥。',
   'macos-dmg': '产品数据在 macOS 的应用支持目录。',
   packaged: '未能识别分发渠道；这里显示实际使用的数据位置。',
 } as const);

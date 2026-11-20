@@ -1182,13 +1182,13 @@ it('admits a two-tool turn under the verified ordinary-production policy and set
   expect(opened.inspectReviewCategory(bookId, typosDefinition()).resultSetRevision?.gaps).toEqual([]);
 }, 60_000);
 
-// The Run hands the projected `transport.requestDeadlineSeconds` to the adapter (#1103): v26 states the fallback's 180 s, so only a
-// projection that says otherwise shows the read. Under the fallback this stalled request would outlive the test's own timeout.
-it('ends a stalled sent request at the projected deadline as that unit\'s unknown outcome, never resent', async () => {
+// The Run hands the projected `transport.firstByteSeconds` to the adapter (#1103, #1599): the record states 600 s, so only a
+// projection that says otherwise shows the read. Under the record's own value this stalled request would outlive the test's timeout.
+it('ends a sent request with no first byte at the projected bound as that unit\'s unknown outcome, never resent', async () => {
   const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage'],
     (_category, ordinal, prior) => (ordinal === 1 && prior === 0 ? 'stall' : 'valid'),
     (policy) => ({ ...policy, providerProcessing: { ...policy.providerProcessing,
-      transport: { ...policy.providerProcessing.transport!, requestDeadlineSeconds: 1 } } }), false, true);
+      transport: { ...policy.providerProcessing.transport!, firstByteSeconds: 1 } } }), false, true);
   const stalled = requests.filter((entry) => entry.ordinal === 1);
   expect(stalled).toHaveLength(1);
   expect(stalled[0]!.abortReason).toMatchObject({ name: 'TimeoutError' });
@@ -1198,6 +1198,34 @@ it('ends a stalled sent request at the projected deadline as that unit\'s unknow
     .toEqual([expect.objectContaining({ unitOrdinal: 1, code: 'outcome-unknown' })]);
 
 }, 60_000);
+
+// #1599: a whole-answer unit request whose answer comes back after the former 180 s deadline, well inside the first-byte bound, settles.
+// Only `setTimeout` is faked, advanced in steps while the Run's own I/O is given real turns.
+it('settles a unit whose whole answer arrives after 180 s, within the first-byte bound, sent once', async () => {
+  const realSetTimeout = globalThis.setTimeout;
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    let finished = false;
+    const running = productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, { response: async (response, signal, body) => {
+      const request = JSON.parse(body) as { messages: Array<{ role: string; content: string }> };
+      if (parseReviewCategoryUnitMessageHeader(request.messages.findLast((entry) => entry.role === 'user')!.content)?.ordinal !== 1) return response;
+      // As the native fetch does, the pending request rejects with the signal's reason when its bound aborts it.
+      await new Promise<void>((resolveWait, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        setTimeout(resolveWait, 300_000);
+      });
+      return response;
+    } }).finally(() => { finished = true; });
+    const giveUp = Date.now() + 100_000;
+    while (!finished && Date.now() < giveUp) {
+      await new Promise((resolveTurn) => realSetTimeout(resolveTurn, 25));
+      await vi.advanceTimersByTimeAsync(10_000);
+    }
+    const { store: opened, bookId, requests } = await running;
+    expect(requests.filter((entry) => entry.ordinal === 1)).toHaveLength(1);
+    expect(opened.inspectReviewCategory(bookId, typosDefinition()).resultSetRevision!.gaps).toEqual([]);
+  } finally { vi.useRealTimers(); }
+}, 120_000);
 
 it.each([undefined, 2, 99])('accepts a repeated paragraph quotation in one click (#1435 occurrence %s)', async (occurrence) => {
   const { store: opened, bookId, reviewRunId } = await productionReview(['typos-and-usage'], () => 'valid',

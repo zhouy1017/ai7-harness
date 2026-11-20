@@ -58,7 +58,7 @@ import { readBuiltIdentity } from '../shared/read-build-identity.js';
 import { BACKUP_CHECK_INTERVAL_MS } from './scheduled-backups.js';
 import { isSafeInteger, ProtocolError } from './request-frames.js';
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
-import type { WaitingFor } from './task-plan.js';
+import { REVIEW_WORKSPACE_PAGE_PATHS, type WaitingFor } from './task-plan.js';
 import { controlledAnswerHold, controlledUnitHold } from './unit-hold.js';
 import type { DialogueExecutionOwner } from './dialogue/dialogue-execution.js';
 import type { AgentWorkspace } from './agent-workspace/workspace.js';
@@ -386,7 +386,7 @@ async function dispatch(
         const tasks = await readBookTasks(store, request.input.bookId, analysisProgress, () => connectivity.waitingFor(), (attemptId) => dialogues.liveText(attemptId));
         return { id: request.id, ok: true, op: request.op, result: store.getTaskPlanPage(request.input, tasks) };
       }
-      const plan = request.input.path === 'scopeOptions.chapters.chapters' || request.input.kind === 'task-intent-drafts' ? undefined
+      const plan = REVIEW_WORKSPACE_PAGE_PATHS.includes(request.input.path) || request.input.kind === 'task-intent-drafts' ? undefined
         : await store.inspectTaskPlanWithConnection({ ...request.input, kind: request.input.kind }, (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress);
       return { id: request.id, ok: true, op: request.op, result: store.getTaskPlanPage(request.input, plan) };
     }
@@ -1179,6 +1179,14 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: { ...store.inspectReviewWorkspace(request.input.bookId, launched.projection.run!.reviewRunId, analysisProgress),
         connectivity: connectivity.planConnectivity.reading(),
         ...(launched.projection.launchNotice === undefined ? {} : { launchNotice: launched.projection.launchNotice }) } };
+    }
+    case 'generateReviewSynthesis': {
+      // 生成统合总结 (Issue #1506): offline it waits for Reconnect Preflight exactly as a launched Run does; a replay drives nothing new.
+      const launched = store.launchReviewSynthesis(request.input, launchPolicy, connectivity.planConnectivity.reading() === 'offline' ? 'when-online' : 'now');
+      if (launched.projection.run?.state === 'waiting') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
+      else if (!launched.repeated && !reviewRuns.isDriving(request.input.reviewRunId)) driveReviewRun(reviewRuns, request.input.reviewRunId);
+      return { id: request.id, ok: true, op: request.op, result: { ...store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress),
+        connectivity: connectivity.planConnectivity.reading(), ...(launched.projection.launchNotice === undefined ? {} : { launchNotice: launched.projection.launchNotice }) } };
     }
     case 'prepareReviewRun':
       return {

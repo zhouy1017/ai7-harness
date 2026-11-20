@@ -1,4 +1,5 @@
 import type { TaskLaunchRequest } from './task-drawer.js';
+import { serviceWords } from './service-wording.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { filterChoices, menuPanel, stateTerm } from './components/controls.js';
 import { identityWords } from './technical-layer.js';
@@ -8,6 +9,7 @@ import type {
   EvaluationConclusion,
   EvaluationContent,
   EvaluationInitialDraftProjection,
+  EvaluationReadersReportTemplateProjection,
   EvaluationRecordProjection,
   EvaluationRecordSummaryProjection,
   EvaluationRewriteDecision,
@@ -124,10 +126,12 @@ import {
   evaluationRewriteTaskLine,
   evaluationBandLabel,
   evaluationComparisonLines,
+  evaluationDayTells,
   evaluationDiscardAndOpen,
   evaluationFinalized,
   evaluationFinalizedLine,
   evaluationHeading,
+  evaluationReportDay,
   evaluationItemLegend,
   evaluationRevisionLine,
   evaluationUnreadableLine,
@@ -398,6 +402,20 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (task !== null) section.append(el('p', 'readers-report-task', `${readersReportTaskLine(task, READERS_REPORT_TEMPLATE_LABELS[task.template])}${task.modelLabel ? ` · ${task.modelLabel}` : ''}`));
     // A prepared plan whose frozen reference went away can never start: 评估 offers its preparation again, as the plan says.
     const reportBlocked = page.materialReferences?.blocked.readersReport === true;
+    // The bar is bound to one named template that may start now (the first whose row offers 起草); a row's 起草 binds it to its own.
+    const startable = report.templates.filter(entry => entry.draft === null && entry.drafted === null
+      && (entry.prepare.allowed || task !== null && task.template === entry.template && task.state === 'prepared' && !reportBlocked));
+    const reportBar = el('div', 'evaluation-readers-report-launch');
+    const bindTemplate = (entry: EvaluationReadersReportTemplateProjection): void => options.openLaunch({ bookId: page.bookId, operation: 'launchReadersReport',
+      title: '审稿意见', mount: reportBar, inputEvents: root, startLabel: `${READERS_REPORT_ACTIONS.prepare}${entry.label}`, startDisabled: busy,
+      input: { template: entry.template }, readInput: () => ({ template: entry.template }) });
+    if (startable[0] !== undefined) { bindTemplate(startable[0]); section.append(reportBar); }
+    const startTemplate = (template: ReadersReportTemplate): void => {
+      const entry = startable.find(candidate => candidate.template === template);
+      if (entry === undefined || busy) return;
+      bindTemplate(entry);
+      reportBar.querySelector<HTMLButtonElement>('[data-task-drawer-control="launch"]')?.click();
+    };
     const list = el('ul', 'readers-report-templates');
     for (const entry of report.templates) {
       const item = el('li');
@@ -432,19 +450,19 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         row.append(create);
       } else if (own && task.state === 'prepared' && !reportBlocked) {
         // A plan prepared but not started (Issue #1410 item 11): 起草 starts it; the plan stays one disclosure away.
-        const start = action(READERS_REPORT_ACTIONS.prepare, 'primary', 'prepare-readers-report', () => void prepareReport(entry.template));
+        const start = action(READERS_REPORT_ACTIONS.prepare, 'primary', 'prepare-readers-report', () => startTemplate(entry.template));
         start.dataset['readersReportAction'] = 'prepare';
         const open = action(READERS_REPORT_ACTIONS.openPlan, 'quiet', 'open-readers-report-plan', () => options.openReadersReportPlan(task.taskIntentId));
         open.dataset['readersReportAction'] = 'open-plan';
         start.disabled = open.disabled = busy;
         row.append(start, open);
       } else if (entry.prepare.allowed) {
-        const prepare = action(READERS_REPORT_ACTIONS.prepare, 'secondary', 'prepare-readers-report', () => void prepareReport(entry.template));
+        const prepare = action(READERS_REPORT_ACTIONS.prepare, 'secondary', 'prepare-readers-report', () => startTemplate(entry.template));
         prepare.dataset['readersReportAction'] = 'prepare';
         prepare.disabled = busy;
         row.append(prepare);
       } else {
-        template.append(' · ', el('span', 'readers-report-reason', entry.prepare.reason));
+        template.append(' · ', el('span', 'readers-report-reason', serviceWords(entry.prepare.reason)));
       }
       const modelLabel = entry.draft?.modelLabel ?? entry.drafted?.modelLabel;
       if (modelLabel) template.append(' · ', el('span', 'evaluation-report-model', modelLabel));
@@ -464,12 +482,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   /** Read the page again after a Task started, keeping the version the editor is in. */
   const reread = async (): Promise<void> => {
     if (workspace !== null) workspace = { ...await api.inspectEvaluation({ recordId: workspace.record?.recordId ?? null, recordsBefore: workspace.recordsBefore }), record: workspace.record };
-  };
-
-  /** 起草: the Task's plan prepared as one cooperative job and started at once; 查看计划 opens it in the Task Drawer instead. */
-  const prepareReport = async (template: ReadersReportTemplate): Promise<void> => {
-    if (busy || workspace === null) return;
-    options.openLaunch({ bookId: workspace.bookId, operation: 'launchReadersReport', title: '审稿意见', input: { template } });
   };
 
   /** 打开草稿 of a drafted result: the draft document is made, then opened on the manuscript surface. */
@@ -541,8 +553,12 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const preview = action('先看计划', 'quiet', 'prepare-initial', () => void prepareInitial(true));
     preview.classList.add('text-link');
     start.disabled = preview.disabled = busy || !canStart;
-    row.append(start, preview);
-    if (!canStart && !initial.prepare.allowed) section.append(el('p', 'evaluation-initial-reason', initial.prepare.reason));
+    if (canStart) {
+      options.openLaunch({ bookId: page.bookId, operation: 'launchInitialEvaluation', title: '评估报告', mount: row, inputEvents: root, startLabel: latest === null ? EVALUATION_GENERATE : EVALUATION_REGENERATE, startDisabled: busy, input: {} });
+      row.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-evaluation-action', 'start-initial');
+      row.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-evaluation-action', 'prepare-initial');
+    } else row.append(start, preview);
+    if (!canStart && !initial.prepare.allowed) section.append(el('p', 'evaluation-initial-reason', serviceWords(initial.prepare.reason)));
     if (task !== null && task.state !== 'prepared') {
       const open = action(EVALUATION_AI7_OPEN_TASK, 'quiet', 'open-initial-task', () => options.openPlan(task.taskIntentId));
       open.disabled = busy;
@@ -784,47 +800,22 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       if (rewrite.decided.modelLabel) section.append(el('p', 'evaluation-report-model', `模型 ${rewrite.decided.modelLabel}`));
     }
     const row = el('div', 'button-row evaluation-rewrite-start');
-    // One click regenerates from the saved changes; the plan stays one disclosure away (Issue #1407).
-    if (task !== null && task.state === 'prepared') {
-      const start = action(EVALUATION_REWRITE_ACTIONS.prepare, 'primary', 'prepare-rewrite', () => void prepareRewrite(record));
-      const plan = action('先看计划', 'quiet', 'open-rewrite-plan', () => options.openRewritePlan(task.taskIntentId));
-      plan.classList.add('text-link');
-      start.disabled = plan.disabled = busy;
-      row.append(start, plan);
-    } else {
-      if (rewrite.prepare.allowed) {
-        const prepare = action(EVALUATION_REWRITE_ACTIONS.prepare, proposal === null ? 'primary' : 'secondary', 'prepare-rewrite', () => void prepareRewrite(record));
-        const plan = action('先看计划', 'quiet', 'preview-rewrite', () => void prepareRewrite(record));
-        plan.classList.add('text-link');
-        prepare.disabled = plan.disabled = busy;
-        row.append(prepare, plan);
-      } else {
-        heading.append(' · ', el('span', 'evaluation-rewrite-reason', rewrite.prepare.reason));
-      }
-      if (task !== null) {
-        const open = action(EVALUATION_REWRITE_ACTIONS.openTask, 'quiet', 'open-rewrite-task', () => options.openRewritePlan(task.taskIntentId));
-        open.disabled = busy;
-        row.append(open);
-      }
+    if (rewrite.prepare.allowed || task?.state === 'prepared') {
+      options.openLaunch({ bookId: page.bookId, operation: 'launchEvaluationRewrite', title: '按我的修改重新生成', mount: row, inputEvents: root, startLabel: EVALUATION_REWRITE_ACTIONS.prepare,
+        startDisabled: busy, input: { recordId: record.recordId }, beforeLaunch: async () => !unsaved() || await save(record, false) });
+      row.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-evaluation-action', 'prepare-rewrite');
+      row.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-evaluation-action', 'preview-rewrite');
+    } else heading.append(' · ', el('span', 'evaluation-rewrite-reason', serviceWords(rewrite.prepare.reason)));
+    if (task !== null) {
+      // A prepared plan stays one click away (Issue #1407), as 审稿意见's 查看计划; a started one opens as its Task.
+      const open = task.state === 'prepared'
+        ? action(READERS_REPORT_ACTIONS.openPlan, 'quiet', 'open-rewrite-plan', () => options.openRewritePlan(task.taskIntentId))
+        : action(EVALUATION_REWRITE_ACTIONS.openTask, 'quiet', 'open-rewrite-task', () => options.openRewritePlan(task.taskIntentId));
+      open.disabled = busy;
+      row.append(open);
     }
     section.append(row);
     return section;
-  };
-
-  /**
-   * 按我的修改重新生成 (Issue #429, S81b2; Issue #1407): the Task's plan prepared as one cooperative job over the version's saved
-   * entry and started at once — `preview` opens it in the Task Drawer instead. A regeneration reads only what is saved, so
-   * unsaved edits are saved first (Issue #1410 item 12); a refused save keeps the form and starts nothing.
-   */
-  const prepareRewrite = async (shown: EvaluationRecordProjection): Promise<void> => {
-    if (busy || workspace === null) return;
-    let record = shown;
-    if (unsaved()) {
-      if (!await save(record, false)) return;
-      if (workspace === null) return;
-      record = workspace.record?.recordId === shown.recordId ? workspace.record : shown;
-    }
-    options.openLaunch({ bookId: workspace.bookId, operation: 'launchEvaluationRewrite', title: '按我的修改重新生成', input: { recordId: record.recordId } });
   };
 
   /**
@@ -912,7 +903,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         const item = el('li');
         item.dataset['recordId'] = summary.recordId;
         item.dataset['evaluationState'] = summary.state;
-        const open = action(evaluationVersionLine(workspace.profile, summary), 'quiet', 'open-version', () => openVersion(summary));
+        // Two versions of one day read their time too, and of one minute their order (review S7, N8).
+        const open = action(evaluationVersionLine(workspace.profile, summary, evaluationDayTells(workspace.records).get(summary.recordId)), 'quiet', 'open-version', () => openVersion(summary));
         open.disabled = busy;
         open.setAttribute('aria-current', String(workspace.record?.recordId === summary.recordId));
         item.append(open);
@@ -1002,7 +994,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   const prepareInitial = async (preview = false): Promise<void> => {
     if (busy || workspace === null) return;
     if (!preview) pickedOver = null;
-    options.openLaunch({ bookId: workspace.bookId, operation: 'launchInitialEvaluation', title: '初评', input: {} });
+    options.openLaunch({ bookId: workspace.bookId, operation: 'launchInitialEvaluation', title: '评估报告', input: {} });
   };
 
   const turn = async (recordsBefore: number | null): Promise<void> => {
@@ -1064,11 +1056,16 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     node.dataset['recordId'] = record.recordId;
     node.dataset['evaluationState'] = record.state;
     node.dataset['entries'] = String(record.entries);
-    const heading = el('h3', undefined, record.initial === null ? evaluationHeading(record) : `${EVALUATION_REPORT_HEADING} · ${evaluationHeading(record)}`);
+    // The record's day is its row's: the summary's createdAt, never the last save (review S7); a draft is the report itself.
+    const row = workspace?.records.find((summary) => summary.recordId === record.recordId);
+    const dated = { ...record, ...(row === undefined ? {} : { createdAt: row.createdAt }), finalizedAt: record.finalized?.at ?? null };
+    // The open record says what its row says (review N8): its time and order when the list needs them.
+    const tell = evaluationDayTells(workspace?.records ?? []).get(record.recordId);
+    const heading = el('h3', undefined, record.initial === null ? evaluationHeading(dated, tell) : `${EVALUATION_REPORT_HEADING} · ${record.state === 'draft' ? evaluationReportDay(dated, tell) : evaluationHeading(dated, tell)}`);
     heading.tabIndex = -1;
     heading.append(' · ', el('span', 'evaluation-revision', evaluationRevisionLine(record)));
     node.append(heading);
-    if (record.initial?.modelLabel) node.append(el('p', 'evaluation-report-model', `初评模型 ${record.initial.modelLabel}`));
+    if (record.initial?.modelLabel) node.append(el('p', 'evaluation-report-model', `评估报告模型 ${record.initial.modelLabel}`));
     // Preserve the notices about attribution and damaged versions with the record they qualify.
     const skipped = evaluationSkippedRecordsLine(record);
     if (record.ai7WordsNotice !== null || skipped !== null) {

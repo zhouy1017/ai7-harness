@@ -119,27 +119,61 @@ export function taskPlanPage(plan: TaskPlanProjection, path: string, afterOrdina
 }
 
 export const REVIEW_CHAPTER_PAGE_PATH = 'scopeOptions.chapters.chapters';
-export function reviewWorkspacePage(workspace: ReviewWorkspaceProjection, afterOrdinal: number, digest: string) {
-  const value = workspace.scopeOptions.chapters.chapters;
-  requireAnalysis(sha256Hex(canonicalJson(value)) === digest, 'TASK_PLAN_PAGE_CHANGED', '章节已变化，请重新打开审阅。');
-  const page = planValuePage(value, afterOrdinal, PAGE_BYTES);
-  requireAnalysis(afterOrdinal <= page.total, 'TASK_PLAN_PAGE_INVALID', '章节读取位置无效。');
-  return { path: REVIEW_CHAPTER_PAGE_PATH, items: page.items, nextOrdinal: page.nextOrdinal, digest };
+/**
+ * What of a review workspace grows with the Book's chapters or the Run's findings (#1592), paged at the transport edge and
+ * read back through `getTaskPlanPage` with the opened Run's identity. The findings themselves page by their own cursor.
+ */
+export const REVIEW_WORKSPACE_PAGE_PATHS: readonly string[] = [REVIEW_CHAPTER_PAGE_PATH, 'run.report.record.findings.entries',
+  'run.report.record.mustItems.items', 'run.report.record.appendix.referencedRules', 'run.report.record.statistics.rows', 'run.localCheck.excluded'];
+export function reviewWorkspacePage(workspace: ReviewWorkspaceProjection, path: string, afterOrdinal: number, digest: string) {
+  requireAnalysis(REVIEW_WORKSPACE_PAGE_PATHS.includes(path), 'TASK_PLAN_PAGE_INVALID', '审阅读取范围无效。');
+  const chapters = path === REVIEW_CHAPTER_PAGE_PATH;
+  const value = taskPlanValue(workspace, path);
+  requireAnalysis(Array.isArray(value) && sha256Hex(canonicalJson(value)) === digest, 'TASK_PLAN_PAGE_CHANGED',
+    chapters ? '章节已变化，请重新打开审阅。' : '审阅结果已变化，请重新打开审阅。');
+  const page = planValuePage(value as ReadonlyArray<unknown>, afterOrdinal, PAGE_BYTES);
+  requireAnalysis(afterOrdinal <= page.total, 'TASK_PLAN_PAGE_INVALID', chapters ? '章节读取位置无效。' : '审阅读取位置无效。');
+  return { path, items: page.items, nextOrdinal: page.nextOrdinal, digest };
 }
 
+/**
+ * A review workspace always crosses (#1592). The chapter list is paged first, exactly as before, so every workspace that fitted
+ * that way reads unchanged; only then are the report's growing lists paged too and the findings page shortened to what the
+ * reply leaves — at least one finding, `findingsTruncated` set, the next page read with `findingsAfterOrdinal` as always.
+ */
 export function reviewWorkspaceWire(workspace: ReviewWorkspaceProjection, replyBudget = TASK_REPLY_BUDGET): ReviewWorkspaceProjection {
   if (serializedBytes(workspace) <= replyBudget) return workspace;
-  const chapters = workspace.scopeOptions.chapters.chapters;
-  let share = INLINE_SHARE;
-  for (;;) {
-    const page = planValuePage(chapters, 0, share);
-    const wire = { ...workspace, scopeOptions: { ...workspace.scopeOptions, chapters: { ...workspace.scopeOptions.chapters,
-      chapters: page.items as ReviewWorkspaceProjection['scopeOptions']['chapters']['chapters'] } },
-      listPages: { [REVIEW_CHAPTER_PAGE_PATH]: { shown: page.shown, total: page.total, nextOrdinal: page.nextOrdinal,
-        digest: sha256Hex(canonicalJson(chapters)) } } };
+  const wire = reviewWorkspaceFit(workspace, [REVIEW_CHAPTER_PAGE_PATH], replyBudget, false)
+    ?? reviewWorkspaceFit(workspace, REVIEW_WORKSPACE_PAGE_PATHS, replyBudget, true);
+  requireAnalysis(wire !== null, 'TASK_PLAN_SUMMARY_TOO_LARGE', '审阅摘要超出可读取范围。');
+  return wire!;
+}
+
+function reviewWorkspaceFit(workspace: ReviewWorkspaceProjection, paths: readonly string[], replyBudget: number, shortenFindings: boolean) {
+  for (let share = INLINE_SHARE; ; share = share < 256 ? 0 : Math.floor(share / 2)) {
+    const wire = structuredClone(workspace);
+    const listPages: Record<string, NonNullable<ReviewWorkspaceProjection['listPages']>[string]> = {};
+    for (const path of paths) {
+      const value = taskPlanValue(workspace, path);
+      if (!Array.isArray(value) || (path !== REVIEW_CHAPTER_PAGE_PATH && serializedBytes(value) <= share)) continue;
+      const page = planValuePage(value, 0, share);
+      replaceTaskPlanValue(wire, path, page.items);
+      listPages[path] = { shown: page.shown, total: page.total, nextOrdinal: page.nextOrdinal, digest: sha256Hex(canonicalJson(value)) };
+    }
+    wire.listPages = listPages;
+    if (shortenFindings && wire.run !== null && wire.run.findings.length > 1) {
+      const { findings } = wire.run;
+      let spent = serializedBytes({ ...wire, run: { ...wire.run, findings: [], findingsTruncated: false } });
+      let kept = 0;
+      for (const finding of findings) {
+        const weight = serializedBytes(finding) + (kept > 0 ? 1 : 0);
+        if (kept > 0 && spent + weight > replyBudget) break;
+        spent += weight; kept += 1;
+      }
+      if (kept < findings.length) wire.run = { ...wire.run, findings: findings.slice(0, kept), findingsTruncated: true };
+    }
     if (serializedBytes(wire) <= replyBudget) return wire;
-    requireAnalysis(share > 0, 'TASK_PLAN_SUMMARY_TOO_LARGE', '审阅摘要超出可读取范围。');
-    share = share < 256 ? 0 : Math.floor(share / 2);
+    if (share === 0) return null;
   }
 }
 
@@ -286,7 +320,7 @@ export const OUTCOME_UNKNOWN_STATE = { key: 'outcome-unknown', label: '该单元
  * Why 结果待确认 offers no 改计划重做 (Issue #51, S16c; CONT-011 lists Redo among the blocked repeats): the editor settles the
  * uncertainty first with 取消任务, which keeps each such range as its own gap; a redo after that discloses the resend.
  */
-export const OUTCOME_UNKNOWN_NO_REDO = '结果待确认：先取消任务，确定这次运行到此为止；之后才能改计划重做。';
+export const OUTCOME_UNKNOWN_NO_REDO = '结果待确认：先取消任务，确定这次运行到此为止；之后才能重新开始。';
 /**
  * A Task that recomputes ranges whose earlier request's result could not be known (Issue #51, S16c; CONT-011): it names them,
  * says the earlier request may already have been processed and billed, and that this Task sends it again — under the fresh
@@ -780,7 +814,7 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
     // 需要重新确认计划 (Issue #536; OFF-008): a waiting Run whose plan moved before it could start; any other block keeps
     // 派发前已阻止.
     case 'authorized-blocked':
-      return projection.run?.blockedBy === 'plan-moved' ? { key: 'plan-moved', label: PLAN_MOVED_LABEL } : { key: 'blocked', label: '派发前已阻止' };
+      return projection.run?.blockedBy === 'plan-moved' ? { key: 'plan-moved', label: PLAN_MOVED_LABEL } : { key: 'blocked', label: '没有开始' };
     // Connectivity Wait (Issue #502): the label says what it waits for once the service has looked
     // (`withWaitingReason`); on its own the record says only that it waits for the network.
     case 'waiting':
@@ -806,7 +840,7 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
       return stopped?.accountLimit != null ? { ...ACCOUNT_LIMIT_STATE }
         // 结果待确认 (Issue #51, S16c): its own words too.
         : stopped?.outcomeUnknown?.stopped === true ? { ...OUTCOME_UNKNOWN_STATE }
-          : { key: 'resumable', label: '任务已中断 · 可续行' };
+          : { key: 'resumable', label: '任务已中断 · 可继续' };
     // 任务等待你的说明 (Issue #422, S76d; CLAR-004): every unit the Run could read is read; it waits for the answer.
     case 'awaiting-clarification':
       return { key: 'awaiting-clarification', label: '任务等待你的说明' };
@@ -2115,9 +2149,9 @@ export const RUN_CONTROL_PAUSE_REASON = '这项任务现在没有在运行，不
  * 改计划重做 is offered once the Run has stopped (editor-surfaces §6: 暂停后出现 续行 与 改计划重做; Issue #422, S76c); a
  * Run still under way says to pause it first.
  */
-export const RUN_CONTROL_REDO_REASON = '先暂停，再改计划重做';
+export const RUN_CONTROL_REDO_REASON = '先暂停，再重新开始';
 /** A stopped Run that never began reading has nothing to redo from: it is cancelled, and the Task prepared again. */
-export const RUN_CONTROL_REDO_NOT_BEGUN_REASON = '这项任务还没有开始阅读，没有可以重做的部分；可以取消它，再重新准备任务';
+export const RUN_CONTROL_REDO_NOT_BEGUN_REASON = '这项任务还没有开始阅读，没有可以重做的部分；可以取消它，再重新开始任务';
 /** Once the editor confirmed 取消任务 nothing more is offered: the Run is stopping. */
 export const RUN_CONTROL_CANCELLING_REASON = '已在取消：正在进行的这一步会被中止，此后不再发送任何内容';
 /** While the Run pauses, 取消任务 waits for it to have stopped. */

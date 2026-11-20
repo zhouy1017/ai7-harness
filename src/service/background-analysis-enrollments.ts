@@ -870,7 +870,7 @@ export const BACKGROUND_NOT_ENROLLED = '这本书没有登记后台处理：只�
 export const BACKGROUND_RECORD_DAMAGED = '这本书的后台处理登记记录无法读取，后台分析不会开始；其他图书不受影响。';
 export const BACKGROUND_REVOKED = '已撤销：不会再开始新的后台分析。';
 export const BACKGROUND_SUSPENDED = '本机数据替换或回滚后，这份登记待你确认：重新登记之前不会开始后台分析。';
-export const BACKGROUND_PAUSED = '已暂停：续行之前不会开始新的后台分析；已经开始的运行照常进行。';
+export const BACKGROUND_PAUSED = '已暂停：继续之前不会开始新的后台分析；已经开始的运行照常进行。';
 export const BACKGROUND_NO_CEILING = '这份登记没有预算上限（登记时还不要求设上限）：后台分析不会开始；请撤销后重新登记并设上限。';
 export const BACKGROUND_NO_RULE = '这次启动的模型服务策略没有准许后台分析发送内容（或还没有设置模型服务）：后台分析不会开始。';
 export const BACKGROUND_NO_ROUTE = '这次启动没有可执行的分析路由，后台分析不会开始。';
@@ -889,12 +889,12 @@ export const BACKGROUND_CURRENT = '分析结果与当前稿件一致，没有要
 export const BACKGROUND_EDITOR_TASK = '你最近开始或准备过的任务之后，稿件还没有新的改动：后台分析不重做你开始过的任务。';
 export const BACKGROUND_NOT_MOVED = '登记之后稿件还没有改动。';
 /** 结果待确认 (Issue #51, S16c): the dispatcher never re-sends a request whose result is unknown; the editor starts that Task. */
-export const BACKGROUND_OUTCOME_UNKNOWN = '最新的分析里有阅读范围的请求结果待确认；再分析会再发一次它，所以后台不开始，等你自己开始一项任务。';
+export const BACKGROUND_OUTCOME_UNKNOWN = '最新的分析里有部分的请求结果待确认；再分析会再发一次它，所以后台不开始，等你自己开始一项任务。';
 export const BACKGROUND_ATTEMPTED = '最近一项任务读的就是这一版稿件，没有把结果带到它；稿件再改动后才会再试。';
 export function backgroundQuietReason(quietMs: number): string {
   return `稿件刚改动过；停下 ${Math.round(quietMs / 1000)} 秒后开始。`;
 }
-export const BACKGROUND_PLACE_BUSY = '运行名额已满；有空位后再开始。';
+export const BACKGROUND_PLACE_BUSY = '排队中：轮到时再开始。';
 /** The lane waits for the network as well as for quiet (Issue #1089): nothing starts offline, and ②A says so. */
 export const BACKGROUND_OFFLINE = '现在没有联网；联网后再开始。';
 export function backgroundShareFullReason(share: number): string {
@@ -1313,7 +1313,7 @@ export function backgroundKindOffers(host: BackgroundEnrollmentStoreHost): { kin
   return kinds.map((kind) => {
     const enabled = backgroundKindEnrollable(host, kind);
     return { kind, label: labels[kind] ?? '后台处理', enabled,
-      reason: enabled ? null : '当前模型服务策略未开放这类后台处理登记。' };
+      reason: enabled ? null : '当前模型服务策略未开放这一项的空闲时自动更新。' };
   });
 }
 

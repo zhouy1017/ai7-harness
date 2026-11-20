@@ -434,7 +434,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
       expect(bundle.content.limitations).toEqual(['审稿意见 · 给作者的修改意见：设为发稿版本后又有修改，本包按设为发稿版本时的最新一版（版本 2）。']);
       const prepared = book.store.prepareBookDeliveryPackage({ bookId, purpose: '交出版社存档', expectedContentDigest: bundle.content.digest });
       const version = prepared.package.versions[0]!;
-      expect(version.summary).toBe(`${bundle.content.included[0]!.label} · 生产文档 0 份 · 本书不做 5 类 · 审阅报告 0 份 · 评估记录 1 份 · 审稿意见 1 份`);
+      expect(version.summary).toBe(`${bundle.content.included[0]!.label} · 衍生稿件 0 份 · 本书不做 5 类 · 审阅报告 0 份 · 评估记录 1 份 · 审稿意见 1 份`);
       // A later save moves nothing: the member is pinned, and the package reads as it did.
       await save('（再改）');
       expect(book.store.inspectBookDeliveryPackage(bookId)).toMatchObject({ changedSinceLatest: false, content: { digest: bundle.content.digest } });

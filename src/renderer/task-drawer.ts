@@ -1,9 +1,11 @@
+import { serviceWords, stateWords } from './service-wording.js';
 import { LEDGER_TASK_LAUNCH_KINDS } from '../shared/runtime-execution-config.js';
-import { mountLaunchBar, type LaunchBar, type TaskLaunchOperation, type TaskLaunchRequest } from './components/launch-bar.js';
+import { createLaunchBarPresentation, launchBudgetControl, mountLaunchBar, type LaunchBar, type TaskLaunchOperation, type TaskLaunchRequest } from './components/launch-bar.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { reviewPlanReferenceField } from './task-material-selection.js';
 import { evaluationPlanReferenceField } from './evaluation.js';
 import { createButton } from './components/controls.js';
+import { createTaskStatusCard, type TaskStatusCard } from './components/task-status-card.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { taskPlanWording } from './task-drawer-labels.js';
 import type {
@@ -48,7 +50,7 @@ import {
   TASK_BAR_CANCEL_CONFIRM,
   TASK_BAR_CANCEL_FAILED,
   TASK_BAR_CANCEL_IMPACT_HEADING,
-  TASK_BAR_UNCONFIRMED_HEADING,
+  taskBarUnconfirmedHeading,
   taskBarUnconfirmedUnit,
   TASK_BAR_VIEW_UNCONFIRMED,
   unconfirmedHeading,
@@ -77,6 +79,7 @@ import {
   TASK_BAR_START_FAILED,
   TASK_BAR_START_WHEN_LABEL,
   TASK_BAR_START_WHEN_OPTIONS,
+  TASK_BAR_START_WHEN_ONLINE,
   TASK_BAR_IDLE_RECORDED,
   TASK_BAR_IDLE_RECORDING,
   TASK_BAR_SAVED,
@@ -153,6 +156,15 @@ import {
   taskPlanChips,
   taskPlanCompactRows,
   taskPlanSavedLine,
+  TASK_DRAWER_VIEW_NAMES,
+  TASK_PLAN_FULL_LINK_ORDINARY,
+  taskStatusEnded,
+  taskStatusLines,
+  taskStatusName,
+  taskStatusOutcome,
+  taskStatusRowEnded,
+  type TaskStatusFacts,
+  type TaskStatusRow,
   type TaskBarAction,
   type TaskDrawerMode,
   TASK_PLAN_ASSURANCE_HEADING,
@@ -187,6 +199,7 @@ export interface TaskPlanRequest {
 }
 
 export type { TaskLaunchOperation, TaskLaunchRequest } from './components/launch-bar.js';
+export type { TaskStatusRow } from './task-drawer-labels.js';
 
 export interface TaskDrawerSurface {
   openLaunch(request: TaskLaunchRequest, returnFocus: () => HTMLElement | null): void;
@@ -194,7 +207,11 @@ export interface TaskDrawerSurface {
    * Show one Task's plan; `returnFocus` finds the control focus goes back to when the drawer closes. `note` is said
    * beside the bar's actions until the next one — why a quick start stopped at this plan (Issue #421).
    */
-  open(request: TaskPlanRequest, returnFocus: () => HTMLElement | null, note?: string, how?: { readonly cancel?: boolean; readonly view?: 'plan' | 'run'; readonly redo?: boolean }): void;
+  open(request: TaskPlanRequest, returnFocus: () => HTMLElement | null, note?: string, how?: {
+    readonly cancel?: boolean; readonly view?: 'plan' | 'run'; readonly redo?: boolean;
+    /** The Task's row in the 任务总览 when the opener holds it: the status card reads its model, duration and result from it and asks for no other (Issue #1527). */
+    readonly row?: TaskStatusRow;
+  }): void;
   /**
    * The Book's 任务 panel in the same slot (Issue #423, S77a; TASK-044): its Tasks in three groups. A plan opened from it
    * keeps `← 任务`, which comes back here.
@@ -217,6 +234,7 @@ export interface TaskDrawerSurface {
   /** Read the plan on show again when it is one of `kind`'s: the surface that raised it just recorded something. */
   refresh(kind: TaskPlanKind): void;
   close(restoreFocus: boolean): void;
+  setColumnVisible(visible: boolean): void;
   isOpen(): boolean;
   /** The central destination changed: stay beside a destination of the same Book, close for anything else. */
   followScreen(state: string, bookId: string | null): void;
@@ -296,6 +314,8 @@ export interface MountTaskDrawerOptions {
   awaitServiceJob(initial: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
   /** The one side slot (IA): the drawer is opening, so 导航 closes. */
   onOpen(): void;
+  /** The one side slot closed: the manuscript brings the 批注栏 it temporarily replaced back (no preference write). */
+  onClose?(): void;
   /** The bar started the Task or reconfirmed its plan: the surfaces of that kind on screen read it again. `ref` is the Task's plan. */
   onRecorded(kind: TaskPlanKind, bookId: string, ref?: string): void;
   /** 查看运行 / 查看运行记录 / 查看审阅: the started Task's own surface (AUTH-007). */
@@ -426,6 +446,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let focusTitle = false;
   /** 立即 or 空闲时处理 (Issue #1089): the editor's explicit choice for this Task's start, back to 立即 on another Task. */
   let startWhen: 'now' | 'idle' = 'now';
+  /**
+   * The status card of a started Task in ordinary mode (Issue #1527), and what it reads beside the plan: the Task's overview row, once per
+   * state the Task is in. The row names the model and thinking effort, how long a finished Run took, and the result 查看结果 opens.
+   */
+  let statusCard: TaskStatusCard | null = null;
+  let statusFacts: { readonly key: string; readonly row: TaskStatusRow | null } | null = null;
+  /** The row the opener handed in; the one read for the state a Task is in, which a reopening or a new state may ask for again. */
+  let handedRow: { readonly kind: TaskPlanKind; readonly ref: string; readonly row: TaskStatusRow } | null = null;
+  let statusRead: { readonly generation: number; readonly key: string } | null = null;
+  let statusGeneration = 0;
   /** A start or a reconfirmation is under way: every bar action waits for it. */
   let working = false;
   /** Why the last start or reconfirmation was refused, beside the actions until the next one or a new plan. */
@@ -452,6 +482,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * for 调整预算并重做 (Issue #51, S16a), on 设置上限….
    */
   let editOnOpen: 'first' | 'budget' | null = null;
+  let preparedRedoRef: string | null = null;
   /** Said beside the bar's actions once the plan the drawer was opened on is painted (`open`'s `note`). */
   let pendingNote: string | null = null;
   let pollTimer: number | undefined;
@@ -470,6 +501,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let redoOnOpen = false;
   root.classList.add('task-drawer');
   root.setAttribute('aria-labelledby', 'task-drawer-title');
+  let columnSuspended = false;
   root.hidden = true;
   root.dataset['taskDrawer'] = 'closed';
   root.dataset['taskDrawerMode'] = mode;
@@ -512,6 +544,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   const body = el('div', 'task-drawer-body');
   /** The launch bar the drawer currently shows, so a new view or a re-open disposes the one it replaces (Issue #1545). */
   let launchBar: LaunchBar | null = null;
+  const launchLifetimes = new WeakMap<object, string>();
+  const inlineLaunches = new Map<string, { request: TaskLaunchRequest; bar: LaunchBar }>();
   function disposeLaunchBar(): void {
     if (launchBar !== null) { launchBar.dispose(); launchBar = null; }
   }
@@ -533,8 +567,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     settle: options.settle,
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,
-    openPlan: (kind, ref, cancel, redo) => {
-      if (panelBookId !== null) surface.open({ bookId: panelBookId, kind, ref }, returnFocus, undefined, { cancel, ...(redo === undefined ? {} : { redo }) });
+    openPlan: (kind, ref, cancel, redo, row) => {
+      if (panelBookId !== null) surface.open({ bookId: panelBookId, kind, ref }, returnFocus, undefined, { cancel, ...(redo === undefined ? {} : { redo }), ...(row === undefined ? {} : { row }) });
     },
     // A dialogue Task's 打开对话 brings its dialogue to the foreground in the same slot (TASK-044, DIALOG-011).
     openTarget: (target) => {
@@ -645,7 +679,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     title.textContent = view === 'panel' ? TASK_PANEL_TITLE : view === 'dialogue' ? DIALOGUE_TITLE : view === 'composer' ? TASK_COMPOSER_TITLES.draft : TASK_DRAWER_TITLE;
     modes.hidden = view !== 'plan';
     foot.hidden = view !== 'plan' && view !== 'launch';
-    footer.hidden = view === 'launch';
+    // The footer's sentence is developer mode's: ordinary mode keeps it for the queue's position alone (Issue #1527).
+    footer.hidden = view === 'launch' || !technicalLayerVisible;
     // Leaving a dialogue is backgrounding it (DIALOG-010): nothing is read or shown, and its answer runs on unchanged.
     if (view !== 'dialogue') dialogueSurface.stop();
     if (view !== 'plan') {
@@ -765,7 +800,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const sameItem = plan !== null && plan.ref === next.ref && plan.kind === next.kind;
     const sameVersion = sameItem && plan!.planVersion === next.planVersion;
     if (!force && key === painted && plan !== null) {
-      if (next.runControl !== null) activityBlock(next.runControl);
+      tickActivity(next);
       schedulePoll(next);
       return;
     }
@@ -811,15 +846,24 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     pill.dataset['pillTone'] = tone.tone;
     pill.dataset['pillShape'] = tone.shape;
     pill.dataset['busy'] = String(['running', 'pausing', 'cancelling'].includes(next.state.key));
-    pill.textContent = next.runOutcome?.label ?? next.state.label;
+    pill.textContent = serviceWords(next.runOutcome?.label ?? next.state.label);
     const active = document.activeElement;
     const restore = active instanceof HTMLElement && (body.contains(active) || bar.contains(active)) ? active.dataset['taskDrawerControl'] ?? null : null;
     paintQuestions(next);
+    // Ordinary mode shows a started Task's 运行 view as one status card and its plan behind 查看计划; the title names the Task (Issue #1527).
+    const card = statusViewOf(next);
+    if (!technicalLayerVisible) title.textContent = taskStatusName(next);
+    adoptHandedRow(next);
+    if (card) {
+      statusCard ??= createTaskStatusCard({ viewPlan: () => setMode('full', true) });
+      readStatusFacts(next);
+      paintStatus();
+    }
     replaceBody(
       ...(next.runOutcome?.reason ? [el('p', 'attention-note', next.runOutcome.reason)] : []),
-      ...(next.runControl === null ? [] : [activityBlock(next.runControl)]),
+      ...(card ? [statusCard!.element] : next.runControl === null ? [] : [activityBlock(next.runControl)]),
       ...(next.clarifications.some((card) => card.state !== 'open') ? [clarificationRecord(next)] : []),
-      goalBlock(next),
+      ...(card ? [] : [goalBlock(next)]),
       // 结果待确认 (Issue #51, S16c; CONT-011): a Task that sends again a range whose earlier result could not be known says so
       // in its Plan Preview, in both modes, before it is started.
       ...(next.resend === null ? [] : [resendNote(next.resend)]),
@@ -827,8 +871,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ...(next.unconfirmed === null ? [] : [unconfirmedRecord(next.unconfirmed)]),
       ...(next.defaultRule.startedBy === null ? [] : [quickStartedBlock(next.defaultRule.startedBy)]),
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
-      mode === 'compact' ? compactBlock(next) : fullBlock(next),
-      ...Object.keys(next.listPages ?? {}).filter((path) => !path.startsWith('technical.') && path !== 'runControl.cancel.impact').flatMap((path) => {
+      ...(card ? [] : [mode === 'compact' ? compactBlock(next) : fullBlock(next)]),
+      ...Object.keys(next.listPages ?? {}).filter((path) => !path.startsWith('technical.') && path !== 'runControl.cancel.impact' &&
+        (!card || /^(runControl|unconfirmed|resend|clarifications)/u.test(path))).flatMap((path) => {
         const button = pageControl(next, path, TASK_PAGE_NAMES[path] ?? path);
         return button === null ? [] : [button];
       }),
@@ -841,10 +886,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     restoreInteraction();
     if (redoOnOpen) { redoOnOpen = false; bar.querySelector<HTMLButtonElement>('[data-task-drawer-control="redo"]')?.click(); }
     footer.textContent = TASK_DRAWER_FOOTER;
+    footer.hidden = !technicalLayerVisible;
     if (next.state.key === 'queued') void api.inspectTaskOverview().then((overview) => {
       if (plan?.ref !== next.ref || root.hidden) return;
       const item = overview.groups.flatMap((group) => group.items).find((item) => item.bookId === next.bookId && item.plan?.ref === next.ref);
-      footer.replaceChildren(document.createTextNode(`已记录 · ${item?.queuePosition == null ? '等待运行名额' : `排在第 ${item.queuePosition} 位`} · `));
+      footer.hidden = false;
+      footer.replaceChildren(document.createTextNode(`已记录 · ${item?.queuePosition == null ? '排队中' : `排在第 ${item.queuePosition} 位`} · `));
       const link = control('查看任务总览', 'quiet', 'overview'); link.addEventListener('click', () => options.openTaskOverview?.()); footer.append(link);
     });
     if (interrupted) disableAll();
@@ -859,15 +906,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     } else if (focusBar) {
       // The action that had focus is gone — the start the Run's state replaced — so focus goes to the bar's
       // first action, and to its state when it offers none; the state itself is announced as it changes.
-      (bar.querySelector<HTMLElement>('button:not(:disabled)') ?? bar.querySelector<HTMLElement>('.task-bar-status'))?.focus();
+      (bar.querySelector<HTMLElement>('button:not(:disabled)') ?? bar.querySelector<HTMLElement>('.task-bar-status') ?? title).focus();
     }
     focusBar = false;
     // The Task a redo prepared opens in its editing (Issue #422, S76c), as 返回修改 would open it.
     if (editOnOpen !== null && next.edit.editable) {
-      const target = editOnOpen === 'budget' ? '[data-task-plan-edit="budget"]:not(:disabled)' : '[data-task-plan-edit]:not(:disabled)';
+      // 调整预算并重做 lands on the redo bar's 本次用量; 改计划重做 on the plan's first edit, as before the bar (Issue #422, S76c).
+      const budgetRedo = preparedRedoRef === next.ref && editOnOpen === 'budget';
+      const target = budgetRedo ? '[data-task-launch-option="budget"]:not(:disabled)' : editOnOpen === 'budget' ? '[data-task-plan-edit="budget"]:not(:disabled)' : '[data-task-plan-edit]:not(:disabled)';
       editOnOpen = null;
       if (mode !== 'full') setMode('full', false);
-      (body.querySelector<HTMLElement>(target) ?? body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)'))?.focus();
+      const focusTarget = (): void => (root.querySelector<HTMLElement>(target) ?? (budgetRedo ? bar.querySelector<HTMLElement>('[data-task-drawer-control^="start"]:not(:disabled)') : body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)')) ?? title).focus();
+      // The redo's 本次用量 sits in its options popover: focus it once the popover is shown, not before.
+      const optionsPanel = budgetRedo ? bar.querySelector<HTMLDetailsElement>('.task-launch-options') : null;
+      if (optionsPanel !== null && !optionsPanel.open) { optionsPanel.addEventListener('toggle', focusTarget, { once: true }); optionsPanel.open = true; }
+      else focusTarget();
     }
     // The Run the editor redoes has stopped and reads 已取消: the new Task is prepared now.
     if (redoPending !== null && redoPending.ref === next.ref && next.state.key === 'cancelled-after-start' && next.redo !== null &&
@@ -875,6 +928,95 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       queueMicrotask(() => void redoNow());
     }
     schedulePoll(next);
+  }
+
+  // ---- the status card of ordinary mode (Issue #1527) ---------------------------------------------------------
+
+  /** Ordinary mode's 运行 view of a started Task; developer mode keeps the whole plan and the activity card. */
+  function statusViewOf(next: TaskPlanProjection): boolean {
+    return !technicalLayerVisible && mode === 'compact' && next.start.readiness === 'started';
+  }
+
+  function statusKey(next: TaskPlanProjection): string {
+    return `${next.kind}:${next.ref}:${next.state.key}`;
+  }
+
+  /** The row read for this Task: in the state it is in now, or — for what its state does not change, the model — in any state of it. */
+  function statusRow(next: TaskPlanProjection, anyState: boolean): TaskStatusRow | null {
+    return statusFacts !== null && (anyState ? statusFacts.key.startsWith(`${next.kind}:${next.ref}:`) : statusFacts.key === statusKey(next)) ? statusFacts.row : null;
+  }
+
+  function statusFactsOf(next: TaskPlanProjection): TaskStatusFacts {
+    const row = statusRow(next, false);
+    return {
+      modelLabel: statusRow(next, true)?.attention.modelLabel ?? null,
+      processedMs: row !== null && taskStatusRowEnded(row) ? row.usage?.elapsed ?? null : null,
+      outcome: row === null || !taskStatusRowEnded(row) ? null : taskStatusOutcome(row, next.kind),
+    };
+  }
+
+  /**
+   * The Task's row, for its model, when its running state began, how long it processed and what it formed: one read of the 任务总览 for
+   * each state a Task is in, never one per poll. A read that failed is not asked again until the drawer is opened again or the Task is in
+   * another state; one that settles after either is dropped.
+   */
+  function readStatusFacts(next: TaskPlanProjection): void {
+    const key = statusKey(next);
+    if (statusFacts?.key === key) return;
+    if (statusRead?.generation === statusGeneration && statusRead.key === key) return;
+    const mine = { generation: statusGeneration, key };
+    statusRead = mine;
+    const settle = (row: TaskStatusRow | null, failed: boolean): void => {
+      if (mine.generation !== statusGeneration || plan === null || statusKey(plan) !== key || root.hidden) {
+        if (statusRead === mine) statusRead = null;
+        return;
+      }
+      if (failed) return;
+      statusRead = null;
+      statusFacts = { key, row };
+      if (statusViewOf(plan)) paintStatus();
+    };
+    void api.inspectTaskOverview().then(
+      (overview) => settle(overview.groups.flatMap((group) => group.items).find((item) =>
+        item.bookId === next.bookId && item.plan?.kind === next.kind && item.plan.ref === next.ref) ?? null, false),
+      () => settle(null, true),
+    );
+  }
+
+  /** 查看结果 for a Task that ended and formed a result, or `null`. */
+  function statusResult(next: TaskPlanProjection): (() => void) | null {
+    const row = statusRow(next, false);
+    if (row === null || !taskStatusRowEnded(row) || taskStatusOutcome(row, next.kind)?.kind !== 'result') return null;
+    const asked = request;
+    const finder = returnFocus;
+    return () => {
+      if (asked === null || working || interrupted) return;
+      surface.close(false);
+      // Closing the result brings the drawer back on the same Task, as 任务 does for a card.
+      options.openTaskResult({ item: row.attention, result: row.result }, () => { if (!interrupted) surface.open(asked, finder, undefined, { view: 'run', row }); });
+    };
+  }
+
+  /**
+   * The opener's own row serves the state the drawer was opened in — while it says what the plan says — and no later one: a Task that
+   * paused or resumed since is another state, whose row is read.
+   */
+  function adoptHandedRow(next: TaskPlanProjection): void {
+    const handed = handedRow;
+    handedRow = null;
+    if (handed === null || handed.kind !== next.kind || handed.ref !== next.ref || taskStatusRowEnded(handed.row) !== taskStatusEnded(next)) return;
+    statusFacts = { key: statusKey(next), row: handed.row };
+  }
+
+  function paintStatus(): void {
+    if (plan === null || statusCard === null) return;
+    statusCard.update(taskStatusLines(plan, statusFactsOf(plan), Date.now()), statusResult(plan));
+  }
+
+  /** The clock and the repeated read move the activity card, or the status card, in place. */
+  function tickActivity(next: TaskPlanProjection): void {
+    if (statusViewOf(next)) paintStatus();
+    else if (next.runControl !== null) activityBlock(next.runControl);
   }
 
   /** The disabled action with its reason in words beside it, not only in a tooltip. */
@@ -949,7 +1091,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const asked = request;
     if (current === null || current.unconfirmed?.digest !== digest || !beginWork()) return;
     for (const button of body.querySelectorAll<HTMLButtonElement>('.task-plan-unconfirmed button')) button.disabled = true;
-    options.setStatus('正在记下保留为缺口…', 'busy');
+    options.setStatus('正在记下…', 'busy');
     try {
       await api.resolveUnconfirmedOutcomes({ kind: current.kind, ref: current.ref, digest });
       unconfirmedRecordShown = false;
@@ -976,7 +1118,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const sentence = el('div', 'task-plan-sentence');
     const draft = next.goal.draft;
     if (draft === undefined) {
-      sentence.append(el('p', 'task-plan-sentence-text', next.goal.sentence), unavailable(TASK_PLAN_EDIT, 'edit', TASK_PLAN_EDIT_REASON));
+      // The 修改 that is never available is developer mode's; ordinary mode names no action it cannot take (Issue #1527).
+      sentence.append(el('p', 'task-plan-sentence-text', next.goal.sentence), ...(technicalLayerVisible ? [unavailable(TASK_PLAN_EDIT, 'edit', TASK_PLAN_EDIT_REASON)] : []));
     } else {
       // A Task prepared from a Task Intent Draft (Issue #423, slice 7a): the editor's own sentence, and 修改 back to the composer.
       const asked = el('span', 'task-plan-sentence-text task-plan-draft-sentence', taskPlanDraftSentence(draft.sentence));
@@ -997,7 +1140,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       item.dataset['taskPlanChip'] = chip.key;
       chips.append(item);
     }
-    if (next.goal.savedForEdits) chips.append(el('li', 'task-plan-saved', taskPlanSavedLine(next.goal.chips.taskInputRevision)));
+    // Ordinary mode words the saved revision as 基于当前稿件, which the revision chip already says.
+    if (next.goal.savedForEdits && technicalLayerVisible) chips.append(el('li', 'task-plan-saved', taskPlanSavedLine(next.goal.chips.taskInputRevision)));
     if (next.edit.lastEdit !== null) chips.append(el('li', 'task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit)));
     section.append(sentence, chips);
     return section;
@@ -1054,7 +1198,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       dd.dataset['taskPlanRow'] = term;
       rows.append(dt, dd);
     }
-    const full = control(TASK_PLAN_FULL_LINK, 'quiet task-plan-full-link', 'full-link');
+    const full = control(technicalLayerVisible ? TASK_PLAN_FULL_LINK : TASK_PLAN_FULL_LINK_ORDINARY, 'quiet task-plan-full-link', 'full-link');
     full.addEventListener('click', () => setMode('full', true));
     section.append(...(technicalLayerVisible ? [el('p', 'research-status', next.service.decision)] : []), rows, full);
     return section;
@@ -1172,7 +1316,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const committed = committedEdit(entry);
       const shown = shownEdit(next, entry.id, committed);
       if (shown === 'removed') item.classList.add('task-plan-item-removed');
-      item.append(el('span', 'task-plan-adaptation', entry.label));
+      item.append(el('span', 'task-plan-adaptation', serviceWords(entry.label)));
       if (entry.removable || entry.movable) item.append(...adaptationControls(next, entry, committed, shown));
       if (shown === 'ask-first') asked.push(item);
       else adaptations.append(item);
@@ -1228,7 +1372,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       row.append(line);
     }
     if (!rule.canSet || rule.planEnvelopeDigest === null) {
-      row.append(unavailable(TASK_PLAN_DEFAULT_RULE, 'default-rule', rule.reason ?? TASK_PLAN_DEFAULT_RULE_FAILED));
+      row.append(unavailable(TASK_PLAN_DEFAULT_RULE, 'default-rule', serviceWords(rule.reason) ?? TASK_PLAN_DEFAULT_RULE_FAILED));
       section.append(row);
       return section;
     }
@@ -1236,7 +1380,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const open = control(TASK_PLAN_DEFAULT_RULE, 'secondary', 'default-rule');
     const binds = el('dl', 'task-plan-facts task-plan-default-rule-binds');
     for (const row of rule.binds) {
-      const value = el('dd', undefined, row.value);
+      const value = el('dd', undefined, serviceWords(row.value));
       value.dataset['defaultRuleBind'] = row.label;
       binds.append(el('dt', undefined, row.label), value);
     }
@@ -1337,19 +1481,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     bar.hidden = false;
     bar.dataset['taskBar'] = view.readiness;
     const parts: HTMLElement[] = [];
-    if (view.status !== null) {
+    // The pill in the header says the state and the status card the Task's summary; ordinary mode says neither a second time beside
+    // the actions (Issue #1527).
+    if (technicalLayerVisible && view.status !== null) {
       const status = el('p', 'state-term task-bar-status', view.status);
       status.dataset['pillTone'] = TASK_PLAN_STATE_PILLS[next.state.key].tone;
       status.dataset['busy'] = pill.dataset['busy'] ?? 'false';
       status.setAttribute('role', 'status');
       status.tabIndex = -1;
       parts.push(status);
-    } else {
-      const state = el('span', 'state-term task-bar-state', next.state.label);
+    } else if (technicalLayerVisible) {
+      const state = el('span', 'state-term task-bar-state', stateWords(next.state));
       state.dataset['pillTone'] = TASK_PLAN_STATE_PILLS[next.state.key].tone;
       parts.push(state);
     }
-    parts.push(el('p', 'task-bar-summary', view.summary));
+    if (technicalLayerVisible) parts.push(el('p', 'task-bar-summary', view.summary));
     if (view.statement !== null) parts.push(el('p', 'task-bar-statement', technicalLayerVisible ? view.statement : TASK_BAR_PRODUCTION_STATEMENT));
     let noteId: string | null = null;
     if (view.note !== null) {
@@ -1367,20 +1513,48 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const actions = el('div', 'task-bar-actions');
     for (const action of view.actions) actions.append(barAction(action, noteId));
     const startAction = view.actions.find((action) => action.name === 'start' || action.name === 'start-when-online');
+    let timing: HTMLSelectElement | null = null;
     // J-03's fixed Task only records its authorization and never dispatches: it has nothing to start when idle.
     if (startAction !== undefined && startAction.disabledReason === null && next.kind !== 'fixed-task' &&
         (next.start.readiness === 'ready' || next.start.readiness === 'offline')) {
-      const timing = el('select');
+      timing = el('select');
       timing.setAttribute('aria-label', TASK_BAR_START_WHEN_LABEL);
       timing.dataset['taskStartWhen'] = '';
       for (const [value, label] of TASK_BAR_START_WHEN_OPTIONS) {
         const option = el('option', undefined, label); option.value = value; option.selected = value === startWhen;
         timing.append(option);
       }
-      timing.addEventListener('change', () => { startWhen = timing.value === 'idle' ? 'idle' : 'now'; });
+      const chosen = timing;
+      timing.addEventListener('change', () => { startWhen = chosen.value === 'idle' ? 'idle' : 'now'; });
       actions.prepend(timing);
     }
-    parts.push(actions);
+    if (next.ref === preparedRedoRef && next.edit.editable && next.edit.budget !== null) {
+      const ceiling = budgetBuffers.get(editKey(next)) ?? next.edit.budget.ceiling;
+      const budget = launchBudgetControl(ceiling === 'unset' ? null : ceiling.maxTotalTokens);
+      budget.disabled = !next.edit.budget.settable || working || interrupted;
+      budget.addEventListener('change', () => {
+        const value: RunBudgetCeilingState = budget.value === '' ? 'unset' : { kind: 'tokens', maxTotalTokens: Number(budget.value) };
+        if (sameCeiling(value, next.edit.budget!.ceiling)) budgetBuffers.delete(editKey(next));
+        else budgetBuffers.set(editKey(next), value);
+      });
+      const row = el('label', undefined, '本次用量'); row.append(budget, el('small', undefined, '达到上限后暂停，可调整后重新开始。'));
+      if (!next.edit.budget.settable && next.edit.budget.reason !== null) row.append(el('p', 'task-launch-budget-reason', technicalWords(next.edit.budget.reason, next.edit.budget.reason.replace('开发者实时启动参数', '启动设置').replaceAll('预算上限', '用量上限'))));
+      const optionRows = el('div', 'task-launch-option-rows'); optionRows.append(row);
+      // The plain bar's start-time choice, the same select, among the redo's options.
+      if (timing !== null) { const timingRow = el('label', undefined, TASK_BAR_START_WHEN_LABEL); timingRow.append(timing); optionRows.append(timingRow); }
+      // Offline, the redo records its start to wait for the connection, as the plain bar's 联网后开始任务 does.
+      const offline = next.start.readiness === 'offline';
+      const begin = control(offline ? TASK_BAR_START_WHEN_ONLINE : '开始任务', 'primary', offline ? 'start-when-online' : 'start');
+      begin.disabled = working || interrupted || !['ready', 'offline', 'record-only', 'no-route'].includes(next.start.readiness);
+      begin.addEventListener('click', () => { if (pendingEdits(next) > 0) void updatePlan(true, true); else if (offline) void startWhenOnline(); else void start(); });
+      const model = el('span', 'task-launch-retained-model', next.service.send);
+      model.setAttribute('aria-label', '沿用本次计划的模型与思考强度');
+      const preview = el('div'); preview.append(el('p', undefined, next.scope.process), el('p', undefined, next.scope.send), listOf(next.steps.map(step => step.label), 'task-plan-list'));
+      parts.push(createLaunchBarPresentation(model, begin, { title: '选项', content: optionRows }, preview));
+      // 更新计划 stays beside the start, which itself revises then starts (保存并开始): the edited plan can be saved without starting.
+      for (const action of view.actions.filter(action => !['start', 'start-when-online', 'update-and-start'].includes(action.name))) parts.push(barAction(action, noteId));
+    } else parts.push(actions);
+
     const run = next.runControl;
     if (run !== null && run.outcomeUnknown !== null && unconfirmedShown) parts.push(unconfirmedBlock(run.outcomeUnknown.units));
     if (run !== null && run.cancel.reason === null && cancelConfirmShown) parts.push(cancelImpactBlock(run));
@@ -1870,9 +2044,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   }
 
   /** 更新计划 (PLAN-009, PLAN-011): the plan as the editor left it becomes the next version; a refusal is said beside the bar. */
-  async function updatePlan(andStart = false): Promise<void> {
+  async function updatePlan(andStart = false, offlineWaits = false): Promise<void> {
     const current = plan;
-    let startNext = false;
+    let startNext: 'now' | 'when-online' | null = null;
     const asked = request;
     // The edit's own version: 模型未连接 or 离线 withholds 开始任务's digest, and the edit sends nothing.
     const planEnvelopeDigest = current?.edit.planEnvelopeDigest ?? null;
@@ -1907,15 +2081,17 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       assuranceBuffers.delete(editKey(current));
       if (budgetForm?.key === editKey(current)) budgetForm = null;
       const ordinal = typeof updated.planVersion === 'number' ? updated.planVersion : updated.planVersion?.ordinal;
-      options.setStatus(`计划已更新为${technicalWords(`第 ${ordinal ?? '?'} 版`, '版本')}。`, 'success');
+      options.setStatus(technicalWords(`计划已更新为第 ${ordinal ?? '?'} 版。`, '计划已更新。'), 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
       // 保存并开始 (Issue #1431 item 40): the version just written starts in the same click, through the one start path.
       if (andStart) {
         const fresh = await api.inspectTaskPlan({ kind: current.kind, ref: current.ref });
         if (request !== null && request.ref === fresh.ref && request.kind === fresh.kind) {
-          paint(retainTaskPlanPages(fresh, plan), false);
-          startNext = fresh.start.readiness === 'ready';
+          // This explicit revision must replace the old authorization digest even while its options are open.
+          paint(retainTaskPlanPages(fresh, plan), true);
+          // The redo bar's start offline: the revised plan waits for the connection, as 联网后开始任务 records it. 保存并开始 starts only when ready.
+          startNext = fresh.start.readiness === 'ready' ? 'now' : offlineWaits && fresh.start.readiness === 'offline' ? 'when-online' : null;
         }
       }
     } catch (error) {
@@ -1924,7 +2100,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     } finally {
       endWork(asked);
     }
-    if (startNext) await start();
+    if (startNext === 'now') await start();
+    else if (startNext === 'when-online') await startWhenOnline();
   }
 
   /** Every bar action waits while one is under way; the bar is painted again when it ends. */
@@ -2002,7 +2179,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       }
       // The status line names the event, never a state the Run will leave (V2-UX-LIVE-004): the bar shows the state. A
       // start waiting for a place is recorded, and nothing has begun (CONC-007).
-      options.setStatus(current.kind === 'fixed-task' ? '已记录授权 · 未派发' : recordOnly ? '已记录运行；派发前会被阻止' : queued ? TASK_BAR_QUEUED_STATUS : '已开始任务', 'success');
+      options.setStatus(current.kind === 'fixed-task' ? technicalWords('已记录授权 · 未派发', '已记录 · 没有开始') : recordOnly ? technicalWords('已记录运行；派发前会被阻止', '已记录 · 现在没有可用的模型服务，没有开始') : queued ? TASK_BAR_QUEUED_STATUS : '已开始任务', 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
@@ -2137,7 +2314,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const redo = current?.redo ?? null;
     if (current === null || redo === null || !beginWork()) return;
     redoPending = null;
-    options.setStatus('正在准备改计划重做的新任务…', 'busy');
+    options.setStatus('正在准备重新开始的新任务…', 'busy');
     let prepared: string | null = null;
     try {
       if (current.custom !== undefined && !('kind' in redo.prepare)) {
@@ -2148,7 +2325,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           : await api.prepareBaselineAnalysis({ goal: redo.prepare.goal, update: redo.prepare.update, reconfirm: false, redoOf: redo.prepare.redoOf });
         const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
         if (completed.state === 'cancelled') {
-          options.setStatus('改计划重做的准备已取消；这次运行保持已取消。', 'success');
+          options.setStatus('重新开始的准备已取消；这次运行保持已取消。', 'success');
           return;
         }
         if (completed.result === null) throw new Error(TASK_BAR_REDO_FAILED);
@@ -2166,6 +2343,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       endWork(asked);
     }
     if (prepared !== null && !root.hidden) {
+      preparedRedoRef = prepared;
       editOnOpen = current.state.key === 'budget-reached' ? 'budget' : 'first';
       surface.open({ bookId: current.bookId, kind: current.kind, ref: prepared }, returnFocus);
     }
@@ -2181,7 +2359,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const asked = request;
     const again = current?.reprepare ?? null;
     if (current === null || again === null || !beginWork()) return;
-    options.setStatus('正在重新准备这项任务…', 'busy');
+    options.setStatus('正在另做一份计划…', 'busy');
     let prepared: string | null = null;
     try {
       if (current.custom !== undefined) {
@@ -2190,7 +2368,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         const initial = await api.prepareBaselineAnalysis({ goal: again.prepare.goal, update: again.prepare.update, reconfirm: false, redoOf: null });
         const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
         if (completed.state === 'cancelled') {
-          options.setStatus('重新准备已取消；这项任务保持原样。', 'success');
+          options.setStatus('另做一份计划已取消；这项任务保持原样。', 'success');
           return;
         }
         if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
@@ -2214,7 +2392,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const section = el('section', 'task-bar-unconfirmed');
     section.id = UNCONFIRMED_ID;
     section.setAttribute('role', 'group');
-    const heading = el('h4', undefined, TASK_BAR_UNCONFIRMED_HEADING);
+    const heading = el('h4', undefined, taskBarUnconfirmedHeading());
     heading.id = uid('unconfirmed');
     heading.tabIndex = -1;
     // Named as the bar's controls are, so a repaint while the editor reads the list keeps focus on it.
@@ -2298,8 +2476,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const now = Date.now();
     let progress = section.querySelector<HTMLElement>('.task-plan-progress');
     if (progress === null) {
+      // The five-stage chain repeats the stage the rows name: it is developer mode's alone (Issue #1527).
       const chain = el('ol', 'task-plan-stage-chain');
-      for (const [stage, label] of Object.entries(RUN_LIVENESS_STAGE_LABELS)) {
+      for (const [stage, label] of technicalLayerVisible ? Object.entries(RUN_LIVENESS_STAGE_LABELS) : []) {
         const node = el('li', undefined, label.replace(/^正在/u, '').replace('分析已保存，正在', ''));
         node.dataset['stage'] = stage;
         chain.append(node);
@@ -2309,11 +2488,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       progress.setAttribute('aria-label', technicalWords('阅读范围进度', '任务进度'));
       progress.setAttribute('aria-valuemin', '0');
       progress.append(el('span', 'task-plan-progress-fill'));
-      section.append(chain, progress);
+      section.append(...(technicalLayerVisible ? [chain] : []), progress);
     }
     progress.setAttribute('aria-valuemax', String(activity.unitsTotal));
     progress.setAttribute('aria-valuenow', String(activity.unitsSettled));
-    progress.firstElementChild!.setAttribute('style', `width: ${activity.unitsTotal === 0 ? 0 : activity.unitsSettled / activity.unitsTotal * 100}%`);
+    (progress.firstElementChild as HTMLElement).style.width = `${activity.unitsTotal === 0 ? 0 : activity.unitsSettled / activity.unitsTotal * 100}%`;
     for (const node of section.querySelectorAll<HTMLElement>('[data-stage]')) {
       if (node.dataset['stage'] === activity.stage) node.setAttribute('aria-current', 'step');
       else node.removeAttribute('aria-current');
@@ -2357,7 +2536,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         activityClock = undefined;
         return;
       }
-      activityBlock(plan.runControl);
+      tickActivity(plan);
     }, 1_000);
   }
 
@@ -2445,14 +2624,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const current = plan;
     const asked = request;
     if (current === null || current.runControl === null || !beginWork()) return;
-    options.setStatus('正在续行…', 'busy');
+    options.setStatus('正在继续…', 'busy');
     try {
       const result = await controlRun(current, 'resume');
       const stopReason = current.runControl.stopReason;
       const repeated = stopReason !== undefined
         && result.runRecordId === current.runControl.runRecordId
         && (result.stopReason === stopReason || await observeImmediateResumeStop(current, stopReason));
-      const status = stopReason === undefined ? { message: '已续行，从已保存的进度接着读。', tone: 'success' as const }
+      const status = stopReason === undefined ? { message: '已继续，从已保存的进度接着读。', tone: 'success' as const }
         : taskBarResumeOutcome(stopReason, repeated);
       options.setStatus(status.message, status.tone);
       focusBar = true;
@@ -2810,6 +2989,32 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       title.focus();
     },
     openLaunch(next, finder) {
+      if (next.mount !== undefined) {
+        const discriminator = 'dimensionId' in next.input ? next.input.dimensionId : 'recordId' in next.input ? next.input.recordId : '';
+        let lifetime = '';
+        if (next.lifetime !== undefined) { lifetime = launchLifetimes.get(next.lifetime) ?? crypto.randomUUID(); launchLifetimes.set(next.lifetime, lifetime); }
+        const key = `${next.bookId}:${next.operation}:${discriminator}:${lifetime}`;
+        let entry = inlineLaunches.get(key);
+        if (entry === undefined) {
+          const mounted = mountLaunchBar({ api, request: next,
+            errorMessage: options.errorMessage, setStatus: options.setStatus, settle: options.settle,
+            onRecorded: (kind, bookId, ref) => { inlineLaunches.delete(key); options.onRecorded(kind, bookId, ref); },
+            openRun: (bookId, kind, ref, notice) => { surface.open({ bookId, kind, ref }, finder, notice, { view: 'run' }); mounted.dispose(); },
+            interrupted, ...(next.startLabel === undefined ? {} : { startLabel: next.startLabel }), openSettings: options.openConnectionSettings });
+          entry = { request: next, bar: mounted }; inlineLaunches.set(key, entry);
+        } else {
+          const previous = entry.request.input;
+          const input = { ...next.input, ...('materialIds' in previous ? { materialIds: previous.materialIds } : {}), ...('seriesId' in previous ? { seriesId: previous.seriesId } : {}) };
+          for (const name of ['onStarted', 'beforeLaunch', 'readInput', 'inputEvents', 'startLabel', 'startDisabled'] as const) if (!(name in next)) delete entry.request[name];
+          Object.assign(entry.request, next, { input });
+          entry.bar.sync();
+        }
+        next.mount.id ||= `launch-bar-${crypto.randomUUID()}`;
+        next.mount.dataset['taskLaunchKind'] = LEDGER_TASK_LAUNCH_KINDS[next.operation];
+        next.mount.replaceChildren(...entry.bar.bar);
+        queueMicrotask(() => { for (const [otherKey, other] of inlineLaunches) if (!other.request.mount?.isConnected) { other.bar.dispose(); inlineLaunches.delete(otherKey); } });
+        return;
+      }
       disposeLaunchBar();
       ticket += 1;
       clearPoll(); panel.stop(); dialogueSurface.stop();
@@ -2823,7 +3028,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         api, request: next,
         errorMessage: options.errorMessage, setStatus: options.setStatus, settle: options.settle, onRecorded: options.onRecorded,
         openRun: (bookId, kind, ref, launchNotice) => surface.open({ bookId, kind, ref }, finder, launchNotice, { view: 'run' }),
-        interrupted,
+        interrupted, openSettings: options.openConnectionSettings,
       });
       body.replaceChildren(...launchBar.body);
       bar.hidden = false; bar.replaceChildren(...launchBar.bar);
@@ -2841,11 +3046,19 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       redoOnOpen = how?.redo === true;
       root.dataset['taskDetailView'] = how?.view ?? 'plan';
       if (how?.view) { mode = how.view === 'run' ? 'compact' : 'full'; syncModeButtons(); }
-      for (const button of modeButtons) button.textContent = how?.view ? button.dataset['taskDrawerMode'] === 'compact' ? '运行' : '计划' : TASK_DRAWER_MODES[button.dataset['taskDrawerMode'] as TaskDrawerMode];
+      for (const button of modeButtons) {
+        const value = button.dataset['taskDrawerMode'] as TaskDrawerMode;
+        button.textContent = how?.view || !technicalLayerVisible ? TASK_DRAWER_VIEW_NAMES[value] : TASK_DRAWER_MODES[value];
+      }
       showView();
       if (request?.ref !== next.ref || request?.bookId !== next.bookId || request?.kind !== next.kind) startWhen = 'now';
       request = next;
       returnFocus = finder;
+      statusGeneration += 1;
+      statusRead = null;
+      // A read that found no row for the Task is not remembered into the next opening; a row that was found is.
+      if (statusFacts?.row === null) statusFacts = null;
+      handedRow = how?.row === undefined || next.ref === null ? null : { kind: next.kind, ref: next.ref, row: how.row };
       plan = null;
       deferredPlan = null;
       painted = '';
@@ -2948,10 +3161,22 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (request === null || request.kind !== kind) return;
       read();
     },
+    setColumnVisible(visible) {
+      if (visible && !columnSuspended || !visible && root.hidden) return;
+      const restoring = visible && root.hidden;
+      columnSuspended = !visible;
+      root.hidden = !visible;
+      root.dataset['taskDrawer'] = visible ? 'open' : 'closed';
+      shell.dataset['taskDrawer'] = visible ? 'open' : 'closed';
+      if (restoring) { if (view === 'panel') panel.refresh(); else if (view === 'plan') read(); }
+    },
     close(restoreFocus) {
-      if (root.hidden) return;
+      if (root.hidden && !columnSuspended) return;
+      columnSuspended = false;
       disposeLaunchBar();
       ticket += 1;
+      statusGeneration += 1;
+      statusRead = null;
       clearPoll();
       panel.stop();
       dialogueSurface.stop();
@@ -2968,6 +3193,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       root.hidden = true;
       root.dataset['taskDrawer'] = 'closed';
       shell.dataset['taskDrawer'] = 'closed';
+      options.onClose?.();
       const target = restoreFocus ? returnFocus() : null;
       returnFocus = () => null;
       if (target !== null && target.isConnected) target.focus();
@@ -2976,6 +3202,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       return !root.hidden;
     },
     followScreen(state, bookId) {
+      for (const [key, entry] of inlineLaunches) {
+        if (entry.request.bookId !== bookId || !entry.request.mount?.isConnected) { entry.bar.dispose(); inlineLaunches.delete(key); }
+      }
       if (root.hidden) return;
       const book = view === 'plan' ? request?.bookId ?? null : panelBookId;
       const kept = state === 'task-overview' || bookId !== null && bookId === book && COPILOT_SCREENS.includes(state);
@@ -3000,6 +3229,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       read();
     },
     interrupt() {
+      for (const entry of inlineLaunches.values()) entry.bar.interrupt();
       interrupted = true;
       launchBar?.interrupt();
       ticket += 1;

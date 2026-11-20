@@ -34,7 +34,7 @@ export const KNOWLEDGE_EDIT = '编辑候选项';
 export const KNOWLEDGE_PRESERVE = '保留已披露冲突';
 export const KNOWLEDGE_PRESERVED_NOTE = '冲突会一并记录，未经核实。';
 export const KNOWLEDGE_REUSE_LEGEND = '以后的用途';
-export const KNOWLEDGE_PROMOTE_NOTE = '供以后明确选用；不授权读取、不发送给模型服务、不改稿件，也不决定学习准入。';
+export const KNOWLEDGE_PROMOTE_NOTE = '供以后明确选用；不授权读取、不发送给模型服务、不改稿件，也不决定是否可用于学习。';
 export const KNOWLEDGE_EDIT_SAVE = '保存候选项';
 export const KNOWLEDGE_REVIEW_REFRESH = '重新审阅';
 export const KNOWLEDGE_WAIT_REUSE = '先选择以后的用途。';
@@ -80,7 +80,7 @@ export const KNOWLEDGE_MENU_NOTE = '候选项在书系里经过纳入审阅，�
 export function knowledgeTargetLine(candidate: Pick<SeriesKnowledgeCandidateProjection, 'target'>): string {
   const { target } = candidate;
   if (target.kind === 'new') return `新条目「${target.subject}」（${target.classLabel}）`;
-  return `更新「${target.subject}」（${target.classLabel}，基于${technicalWords(`第 ${target.baseRevisionOrdinal ?? '?'} 版`, '版本')}）`;
+  return `更新「${target.subject}」（${target.classLabel}${technicalWords(`，基于第 ${target.baseRevisionOrdinal ?? '?'} 版`)}）`;
 }
 
 /**
@@ -104,7 +104,7 @@ export function knowledgeItemLine(item: { readonly subject: string; readonly cla
 
 /** One revision in an item's history. */
 export function knowledgeRevisionLine(revision: Pick<SeriesKnowledgeRevisionProjection, 'ordinal' | 'outcome' | 'content'>): string {
-  return `${technicalWords(`第 ${revision.ordinal} 版`, '版本')} · ${revision.outcome === 'created' ? '纳入' : '更新'}：${revision.content}`;
+  return `${technicalWords(`第 ${revision.ordinal} 版 · `)}${revision.outcome === 'created' ? '纳入' : '更新'}：${revision.content}`;
 }
 
 /** The conflicts a revision keeps, never a verification (SER-016). */
@@ -127,7 +127,7 @@ export function knowledgeReviewIdentity(review: Pick<SeriesKnowledgeReviewProjec
 
 /** The current revision a promotion would supersede. */
 export function knowledgeSupersededLine(current: Pick<SeriesKnowledgeRevisionProjection, 'ordinal' | 'content'>): string {
-  return `将被取代的当前版本：${technicalWords(`第 ${current.ordinal} 版`, '版本')} · ${current.content}`;
+  return `将被取代的当前版本：${technicalWords(`第 ${current.ordinal} 版 · `)}${current.content}`;
 }
 
 /** Why `纳入书系知识` waits, or `null` when it may go (SER-015, SER-016). */

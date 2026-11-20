@@ -85,6 +85,7 @@ function importFormHarness() {
   const context = createContext({
     document: { createElement: (tag: string) => new FormElement(tag) },
     technicalWords: (_technical: string, ordinary = '') => ordinary,
+    styleInput: (input: FormElement) => { input.className = 'ui-input'; return input; },
     surface: {
       api: {
         previewImportedExemplar: async () => preview,
@@ -120,7 +121,7 @@ describe('earlier-Book exemplar import form', () => {
     expect(view.type.disabled).toBe(false);
     expect(view.type.value).toBe('');
     expect(view.type.children.map((option) => option.value)).toEqual(['', 'news-release', 'promotion-article']);
-    expect(view.type.children[0]!.textContent).toBe('请选择文档类型');
+    expect(view.type.children[0]!.textContent).toBe('请选择衍生稿件类型');
     expect(view.submit.disabled).toBe(true);
     await view.submitNow();
     expect(view.imported()).toBeNull();

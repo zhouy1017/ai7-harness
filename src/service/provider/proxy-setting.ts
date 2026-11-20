@@ -4,6 +4,7 @@ import { Agent, Client, ProxyAgent, type Dispatcher, buildConnector } from 'undi
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../../shared/data-root.js';
 import { admittedProxyRequest } from '../../shared/network-denial.js';
 import { modelRequestNotSent } from './deepseek-adapter.js';
+import { noteRequestActivity } from './request-deadlines.js';
 import type { ModelServiceProxySetting, ProxyProbeResult } from '../../shared/protocol.js';
 
 export const DIRECT_PROXY_SETTING: ModelServiceProxySetting = { mode: 'direct' };
@@ -114,7 +115,7 @@ export const createProxyDispatcher: ProxyDispatcherFactory = (uri, failed) => ob
 
 /** The production connector; only proxyAwareFetch's own per-call record is ever handed to it. */
 const observedProxyDispatcher = (uri: string, failed: () => void, evidence: ProxyConnectionEvidence | null): Dispatcher => new ProxyAgent({
-  uri, proxyTunnel: true, connections: 1,
+  uri, proxyTunnel: true, connections: 1, ...NO_UNDICI_TIMEOUTS,
   clientFactory: (origin, options) => {
     const connector = (options as { connect: ReturnType<typeof buildConnector> }).connect;
     const client = new Client(origin, { ...options, connect: (opts, callback) => connector(opts, (error, socket) => {
@@ -155,14 +156,22 @@ function responseTimedOut(error: unknown): Error | null {
     : null;
 }
 
-/** Keep the per-call dispatcher alive until the response is consumed or cancelled. */
-function observedResponse(response: Response, finish: () => void): Response {
+/**
+ * undici's own 300 s header and body timers are off on every dispatcher below: each caller bounds its own request (a model
+ * request by its configured first-byte, idle and total bounds; model discovery, search, platform tools and public fetches by
+ * a deadline signal over the whole exchange), and a hidden fixed timer would cut a long answer that is still arriving (#1599).
+ */
+const NO_UNDICI_TIMEOUTS = { headersTimeout: 0, bodyTimeout: 0 } as const;
+
+/** Keep the per-call dispatcher alive until the response is consumed or cancelled; every byte read tells the request's idle bound. */
+function observedResponse(response: Response, finish: () => void, request?: object): Response {
   if (response.body === null) { finish(); return response; }
   const reader = response.body.getReader();
   return new Response(new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const next = await reader.read();
+        noteRequestActivity(request);
         if (next.done) { finish(); controller.close(); }
         else controller.enqueue(next.value);
       } catch { finish(); controller.error(new Error('模型服务传输失败。')); }
@@ -191,7 +200,7 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
     if (setting.mode === 'direct') {
       let connectionFailed = false;
       let connected = false;
-      const dispatcher = new Agent({ connect: (options, callback) => directConnector(options, (error, socket) => {
+      const dispatcher = new Agent({ ...NO_UNDICI_TIMEOUTS, connect: (options, callback) => directConnector(options, (error, socket) => {
         if (error !== null) { connectionFailed = true; callback(error, null); }
         else { connected = true; callback(null, socket!); }
       }) });
@@ -199,7 +208,7 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
       try {
         const response = await nativeFetch(input, { ...init, redirect: 'manual', dispatcher } as RequestInit);
         report(null);
-        return observedResponse(response, finish);
+        return observedResponse(response, finish, init);
       }
       catch (error) {
         finish();
@@ -228,7 +237,7 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
       const response = await token.run(() => nativeFetch(input, { ...init, redirect: 'manual', dispatcher } as RequestInit));
       if (response.status === 407) { proxyFailed = true; throw new Error(PROXY_UNREACHABLE); }
       report(null);
-      return observedResponse(response, finish);
+      return observedResponse(response, finish, init);
     } catch (error) {
       finish();
       const preserved = interruptedOrDenied(error);

@@ -20,13 +20,16 @@ export class NavigationGeneration {
     return { isCurrent: () => intent === this.intent };
   }
 
-  commit(destination: string | symbol = Symbol(), bookId: string | null = null): void {
-    if (destination !== this.destination) {
+  /** Answers whether this is another destination; a repaint of the one on screen is not. */
+  commit(destination: string | symbol = Symbol(), bookId: string | null = null): boolean {
+    const changed = destination !== this.destination;
+    if (changed) {
       this.intent += 1;
       this.page += 1;
       this.destination = destination;
     }
     this.bookId = bookId;
+    return changed;
   }
 
   read(root: HTMLElement): NavigationCheckpoint {
@@ -109,7 +112,7 @@ const BOOK_OWNERSHIP_CALLS = new Set<keyof RendererApi>([
   'createEditorialMark', 'createProductionDocument', 'createReadersReportDraft', 'createWritingDraft',
   'decideEvaluationRewrite', 'decideProductionDocumentType', 'deferRecovery', 'designatePublicationVersion',
   'discardAgentWorkspaceProposals', 'dismissReplacementPreview', 'editBaselineAnalysisPlan', 'enableEditorialWorkspaceProfile',
-  'enrollBackgroundAnalysis', 'flushJournalEdit', 'freezeReplacement', 'generateReviewReport',
+  'enrollBackgroundAnalysis', 'flushJournalEdit', 'freezeReplacement', 'generateReviewReport', 'generateReviewSynthesis',
   'getAnalysisRevisionOverview', 'getAnalysisRevisionUnits', 'getAnalysisRunReportRows', 'getBaselineAnalysisPage',
   'getBaselineAnalysisRangePlan', 'getBookOverview', 'getBookWorkbenchRoute', 'getCoverageManifestUnits',
   'getEditorialMarkCard', 'getHistoricalRevision', 'getImportStartup', 'getManuscriptApplyOutcome',
@@ -147,7 +150,7 @@ const BOOK_OWNERSHIP_CALLS = new Set<keyof RendererApi>([
   'controlTaskRun', 'editTaskPlan', 'stopDialogueAnswer', 'continueDialogueAnswer', 'regenerateDialogueAnswer',
   'saveProductionDocumentType', 'deleteProductionDocumentType', 'reorderProductionDocumentTypes',
   'approveBookDeliveryPackageArchiveExport', 'approveBookDeliveryPackageExport',
-  'cancelBookDeliveryPackageArchiveExport', 'cancelBookDeliveryPackageExport', 'inspectHouseWordList', 'saveHouseWordList',
+  'cancelBookDeliveryPackageArchiveExport', 'cancelBookDeliveryPackageExport',
 ]);
 
 /** One boundary for the capability-revoking leave and subsequent Book-scoped calls.

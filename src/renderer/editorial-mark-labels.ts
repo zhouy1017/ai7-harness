@@ -5,9 +5,39 @@ import type {
   PersonalHighlightColor,
   ProposalItemDisposition,
 } from '../shared/protocol.js';
+import { localDayTimeLabel } from '../shared/report-wording.js';
 import { SELECTION_SPAN_NOTE } from '../shared/selection-span.js';
 import { technicalWords } from './technical-layer.js';
 import { REVIEW_UNCHECKED_DISCLOSURE, REVIEW_GUESSED_ANCHOR_NOTE_PREFIX, REVIEW_PUNCTUATION_ALIGNED_NOTE, reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
+
+/** The 批注栏's words for working through what is pending (Issue #1523). */
+export const COMMENTS_TRIAGE_WORDS = {
+  previous: '上一条待处理',
+  next: '下一条待处理',
+  bookPendingTitle: '全书待处理的修改建议、批注和备注',
+  statusInView: '状态 · 本页',
+  categoryInView: '分类 · 本页',
+  quickAccept: '接受',
+  quickReject: '拒绝',
+  readingPlaces: '正在读取全书待处理的位置，请稍后再试。',
+  searchFailed: '没能读取其他位置的待处理批注；没有移动。',
+  pageEnd: '本页没有待处理的了；点「下一条待处理」到后面继续。',
+} as const;
+
+/** The header's count: the Book's pending marks, `2000+` once the list stops there. */
+export function bookPendingLabel(count: number, truncated: boolean): string {
+  return `全书待处理 ${count}${truncated ? '+' : ''}`;
+}
+
+/** 上一条 / 下一条待处理 found nothing further in that direction; nothing moved. */
+export function noFurtherPendingLine(direction: 'next' | 'previous', filtered: boolean): string {
+  return `${filtered ? '按当前筛选，' : ''}${direction === 'next' ? '后面' : '前面'}没有待处理的了。`;
+}
+
+/** The search beyond the page stopped after this many places without a match; nothing moved. */
+export function pendingSearchStoppedLine(direction: 'next' | 'previous', places: number): string {
+  return `按当前筛选，${direction === 'next' ? '后面' : '前面'}最近的 ${places} 处待处理的位置都不匹配；没有移动。`;
+}
 
 /** The frozen source mark is ordinary editorial information, independent of its task/category. */
 export function markSourceMark(source: EditorialMarkCardProjection['source'], technical = false): string {
@@ -22,9 +52,22 @@ export function markIsHandled(mark: { status: string; disposition?: string | nul
   return mark.status === 'applied' || mark.status === 'resolved' || mark.disposition === 'rejected';
 }
 
+/**
+ * The H01 annotation a review that used 本社词表 leaves (`houseAnnotationDetail`) is recorded with its mark and covered by the
+ * list's digest, so its words change only where they are shown (Issue #1531): ordinary mode reads the one name 本社词表, and
+ * neither the version label nor the identities; the developer layer reads the record as it is. No day: the record names the
+ * list's version, not its day, and the mark's day is not the list's — the 批注栏, the 审阅 page and 待办汇总 say the same.
+ */
+const HOUSE_ANNOTATION = /^本社敏感词表 第\d+版 · H01\/v1\n(词条：[^\n]*\n词条说明：[\s\S]*?\n命中本社词条，请编辑判断。)\n词条 \S+ · 词表 \S+ · 版本 \S+ · 摘要 [0-9a-f]{64}$/u;
+export function houseAnnotationWords(note: string): string {
+  const found = HOUSE_ANNOTATION.exec(note);
+  if (found === null) return note;
+  return technicalWords(note, `本社词表\n${found[1]}`);
+}
+
 /** Display only: stored notes, bodies and exports retain their original bytes. */
 export function markDisplayNote(note: string): { text: string; unchecked: boolean; guessedAnchor: boolean } {
-  let text = note;
+  let text = houseAnnotationWords(note);
   const unchecked = text.startsWith(REVIEW_UNCHECKED_DISCLOSURE);
   const guessedAnchor = reviewFindingHasGuessedAnchor(text);
   while (text.startsWith(REVIEW_UNCHECKED_DISCLOSURE)) text = text.slice(REVIEW_UNCHECKED_DISCLOSURE.length);
@@ -121,17 +164,18 @@ export function markStateLabel(
   const deferred = card.conflict?.state === 'deferred' && card.conflict.deferredAt !== null ? ` · 暂不处理 · ${markTimeLabel(card.conflict.deferredAt)}` : '';
   const keptCurrent = card.conflict?.state === 'resolved' && card.conflict.outcome === 'keep-current';
   if (card.kind === 'change-suggestion') {
-    // 已应用 is the state of a verified Effect Receipt, never of a decision alone (V2-UX-EAPP-011).
+    // 已接受 (formerly 已应用, Issue #1531) is the state of a verified Effect Receipt, never of a decision alone (V2-UX-EAPP-011).
     if (card.status === 'applied') {
       if (keptCurrent) return '已保留当前稿件';
-      return card.anchorState === 'exact' ? '已应用' : `已应用 · 之后又改过${deferred}`;
+      return card.anchorState === 'exact' ? '已接受' : `已接受 · 之后又改过${deferred}`;
     }
     const disposition = card.suggestion?.decision?.disposition;
     if (disposition === 'rejected') return keptCurrent ? '已拒绝 · 保留当前稿件' : `已拒绝${drifted}`;
-    if (disposition === 'accepted-with-edit') return `已记录 · 尚未写入稿件${drifted}${deferred}`;
-    return `待你处理${drifted}${deferred}`;
+    // Accepted and not yet written, with or without the editor's edit: the one word of the three finding lists (review N9).
+    if (disposition === 'accepted-with-edit' || disposition === 'accepted') return `已接受 · 尚未写入稿件${drifted}${deferred}`;
+    return `待处理${drifted}${deferred}`;
   }
-  if (card.kind === 'annotation') return `${card.status === 'resolved' ? '已处理' : '待你处理'}${drifted}`;
+  if (card.kind === 'annotation') return `${card.status === 'resolved' ? '已处理' : '待处理'}${drifted}`;
   return `仅自己可见${drifted}`;
 }
 
@@ -194,8 +238,8 @@ export function markPointKind(mark: Pick<EditorialMarkAnchorProjection, 'deleted
 export function markTimeLabel(iso: string): string {
   const time = new Date(iso);
   if (Number.isNaN(time.getTime())) return '';
-  const minutes = String(time.getMinutes()).padStart(2, '0');
-  return `${time.getMonth() + 1}月${time.getDate()}日 ${String(time.getHours()).padStart(2, '0')}:${minutes}`;
+  // The one day-and-time form of ordinary mode (Issue #1531, review S7).
+  return localDayTimeLabel(iso);
 }
 
 /** Why the 编辑标记 entries cannot act on what is selected. */

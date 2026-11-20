@@ -1,4 +1,5 @@
 import { technicalWords } from './technical-layer.js';
+import { localDayLabel, localDayTimeLabel } from '../shared/report-wording.js';
 import type {
   EvaluationAdjustmentReasonId,
   EvaluationComparisonProjection,
@@ -31,7 +32,7 @@ import { EVALUATION_ADJUSTMENT_REASON_WORDS, evaluationBand, provisionalEvaluati
 
 export const EVALUATION_TITLE = '评估';
 /** Said of a version the editor began alone: AI7's 初评 took no part in it. */
-export const EVALUATION_AI7_PENDING = '这一版不是从 AI7 初评开始的：由你打分。';
+export const EVALUATION_AI7_PENDING = '这一版不是从评估报告开始的：由你打分。';
 export const EVALUATION_START = { first: '开始评估', again: '重新评估' } as const;
 /**
  * `开始评估`, `重新评估`, or — while the latest version cannot be read (Issue #726) — the start that skips it: from the latest
@@ -39,26 +40,26 @@ export const EVALUATION_START = { first: '开始评估', again: '重新评估' }
  */
 export function evaluationStartLabel(start: Extract<EvaluationWorkspaceProjection['start'], { allowed: true }>): string {
   if (start.skipDamaged === null) return EVALUATION_START[start.kind];
-  return start.skipDamaged.seedOrdinal === null ? '从头重新评估' : `从${technicalWords(`第 ${start.skipDamaged.seedOrdinal} 版`, '版本')}重新评估`;
+  return start.skipDamaged.seedOrdinal === null ? '从头重新评估' : `从${technicalWords(`第 ${start.skipDamaged.seedOrdinal} 版`, '上一份可读的定稿')}重新评估`;
 }
 /** What the start that skips a damaged latest version will do (Issue #726), said before it is pressed. */
 export function evaluationSkipDamagedLine(skipDamaged: NonNullable<Extract<EvaluationWorkspaceProjection['start'], { allowed: true }>['skipDamaged']>): string {
   const damaged = `第 ${skipDamaged.skipped.join('、')} 版评估记录已损坏`;
   return skipDamaged.seedOrdinal === null
     ? `${damaged}，没有可以读取的定稿：重新评估将从头开始，新版本会记下跳过了这些版本。`
-    : `${damaged}：重新评估将从${technicalWords(`第 ${skipDamaged.seedOrdinal} 版`, '版本')}定稿开始，新版本会记下跳过了${skipDamaged.skipped.length === 1 ? '它' : '这些版本'}。`;
+    : `${damaged}：重新评估将从${technicalWords(`第 ${skipDamaged.seedOrdinal} 版`, '最近一份可读的')}定稿开始，新版本会记下跳过了${skipDamaged.skipped.length === 1 ? '它' : '这些版本'}。`;
 }
 /** What a version says of the damaged versions it skipped when it began (Issue #726); `null` for one that skipped none. */
 export function evaluationSkippedRecordsLine(record: Pick<EvaluationRecordProjection, 'skippedRecords' | 'seededFrom'>): string | null {
   if (record.skippedRecords.length === 0) return null;
-  const skipped = `这一版跳过了已损坏的第 ${record.skippedRecords.join('、')} 版`;
-  return record.seededFrom === null ? `${skipped}，从头开始评估。` : `${skipped}，从${technicalWords(`第 ${record.seededFrom} 版`, '版本')}定稿重新评估。`;
+  const skipped = technicalWords(`这一版跳过了已损坏的第 ${record.skippedRecords.join('、')} 版`, `这一版跳过了已损坏的评估记录（${record.skippedRecords.length} 份）`);
+  return record.seededFrom === null ? `${skipped}，从头开始评估。` : `${skipped}，从${technicalWords(`第 ${record.seededFrom} 版`, '之前的一份')}定稿重新评估。`;
 }
 export const EVALUATION_SAVE = '保存修改';
 export const EVALUATION_FINALIZE = '定稿';
 /** 定稿 waits while every item is 不评 (Issue #638): the service's own words for its refusal. */
 export { EVALUATION_FINALIZE_NEEDS_SCORE } from '../shared/evaluation-scoring.js';
-export const EVALUATION_STATE_LABELS: Readonly<Record<EvaluationRecordSummaryProjection['state'], string>> = { draft: 'AI7 初稿', editing: '编辑评分中', finalized: '定稿' };
+export const EVALUATION_STATE_LABELS: Readonly<Record<EvaluationRecordSummaryProjection['state'], string>> = { draft: '评估报告', editing: '编辑评分中', finalized: '定稿' };
 export const EVALUATION_NOT_RATED = '不评';
 export const EVALUATION_NOT_RATED_REASON = '不评的理由';
 export const EVALUATION_SCORE = '得分';
@@ -110,18 +111,18 @@ export function evaluationScoreFeedback(raw: string, unreadable: boolean, fullMa
  */
 export const EVALUATION_STAY = '留在这一版';
 export function evaluationUnsavedLine(open: number, next: number): string {
-  return `${technicalWords(`第 ${open} 版`, '版本')}有未保存的修改；打开${technicalWords(`第 ${next} 版`, '版本')}会放弃这些修改。`;
+  return `${technicalWords(`第 ${open} 版`, '这一版')}有未保存的修改；打开${technicalWords(`第 ${next} 版`, '另一版')}会放弃这些修改。`;
 }
 export function evaluationDiscardAndOpen(next: number): string {
-  return `放弃修改并打开${technicalWords(`第 ${next} 版`, '版本')}`;
+  return `放弃修改并打开${technicalWords(`第 ${next} 版`, '另一版')}`;
 }
 
 export function evaluationStarted(ordinal: number): string {
-  return `已开始${technicalWords(`第 ${ordinal} 版`, '版本')}评估。`;
+  return `已开始${technicalWords(`第 ${ordinal} 版`)}评估。`;
 }
 
 export function evaluationFinalized(ordinal: number): string {
-  return `${technicalWords(`第 ${ordinal} 版`, '版本')}评估已定稿。`;
+  return `${technicalWords(`第 ${ordinal} 版`, '这一版')}评估已定稿。`;
 }
 
 /** A score as the editor reads it: whole points plainly, a half point as .5. */
@@ -146,8 +147,49 @@ export function evaluationItemLegend(item: { label: string; fullMarks: number })
   return `${item.label} · 满分 ${item.fullMarks}`;
 }
 
-export function evaluationHeading(record: Pick<EvaluationRecordSummaryProjection, 'ordinal' | 'state'>): string {
-  return `${technicalWords(`第 ${record.ordinal} 版`, '版本')} · ${EVALUATION_STATE_LABELS[record.state]}`;
+/** `第 2 版 · 定稿`; ordinary mode tells one version from another by its day (Issue #1531): `11 月 16 日的定稿`. */
+/**
+ * How one version of a list is told from the others in ordinary mode (Issue #1531, review S7, N8): its day; its time too
+ * when another version shares the day (`EvaluationDayTell.time`), and its order within that minute when even the time is
+ * shared (`order`).
+ */
+export interface EvaluationDayTell { readonly time: boolean; readonly order: number | null }
+export function evaluationHeading(record: Pick<EvaluationRecordSummaryProjection, 'ordinal' | 'state'> & { readonly createdAt?: string; readonly finalizedAt?: string | null },
+  tell: EvaluationDayTell | boolean = false): string {
+  const { time, order } = typeof tell === 'boolean' ? { time: tell, order: null } : tell;
+  const at = record.finalizedAt ?? record.createdAt;
+  const label = EVALUATION_STATE_LABELS[record.state];
+  const which = order === null ? '' : ` · 这一分钟的第 ${order} 份`;
+  const ordinary = at === undefined ? label
+    : record.state === 'editing' ? `${label}（${time ? localDayTimeLabel(at) : localDayLabel(at)}开始）${which}`
+      : time ? `${label} · ${localDayTimeLabel(at)}${which}` : `${localDayLabel(at)}的${label}`;
+  return technicalWords(`第 ${record.ordinal} 版 · ${label}`, ordinary);
+}
+
+/**
+ * An open 评估报告's day under 详细评估报告 (review S7): what its row in the list reads after 「评估报告」 — its time and order
+ * when the list reads them, its day when not.
+ */
+export function evaluationReportDay(record: Parameters<typeof evaluationHeading>[0], tell: EvaluationDayTell | undefined): string {
+  const at = record.finalizedAt ?? record.createdAt;
+  if (at === undefined) return evaluationHeading(record, tell);
+  const which = tell?.order == null ? '' : ` · 这一分钟的第 ${tell.order} 份`;
+  return technicalWords(evaluationHeading(record, tell), tell?.time === true ? `${localDayTimeLabel(at)}${which}` : localDayLabel(at));
+}
+
+/**
+ * What tells each version of a list apart, in one form for the whole list (review S7): the time when any two share a day, and
+ * the order when two share a minute.
+ */
+export function evaluationDayTells(records: ReadonlyArray<Pick<EvaluationRecordSummaryProjection, 'recordId' | 'ordinal' | 'createdAt' | 'finalizedAt'>>): ReadonlyMap<string, EvaluationDayTell> {
+  const at = (record: (typeof records)[number]): string => record.finalizedAt ?? record.createdAt;
+  const tells = new Map<string, EvaluationDayTell>();
+  const time = new Set(records.map((record) => localDayLabel(at(record)))).size < records.length;
+  for (const record of records) {
+    const sameMinute = records.filter((other) => localDayTimeLabel(at(other)) === localDayTimeLabel(at(record))).sort((a, b) => a.ordinal - b.ordinal);
+    tells.set(record.recordId, { time, order: sameMinute.length > 1 ? sameMinute.indexOf(record) + 1 : null });
+  }
+  return tells;
 }
 
 /** The revision a version evaluated, and whether edits waited in the journal beyond it then. */
@@ -174,9 +216,9 @@ export function evaluationConclusionLabel(profile: Pick<EvaluationProfileProject
 }
 
 /** One version in the list: its number and state, the revision, the total and — once chosen — the conclusion. */
-export function evaluationVersionLine(profile: Pick<EvaluationProfileProjection, 'bands' | 'conclusions'>, summary: EvaluationRecordSummaryProjection): string {
+export function evaluationVersionLine(profile: Pick<EvaluationProfileProjection, 'bands' | 'conclusions'>, summary: EvaluationRecordSummaryProjection, withTime: EvaluationDayTell | boolean = false): string {
   const conclusion = summary.conclusion === null ? '' : ` · ${evaluationConclusionLabel(profile, summary.conclusion)}`;
-  return `${evaluationHeading(summary)}${technicalWords(` · 修订版 ${summary.revisionLabel}`)} · ${evaluationTotalLine(profile, summary.total)}${conclusion}`;
+  return `${evaluationHeading(summary, withTime)}${technicalWords(` · 修订版 ${summary.revisionLabel}`)} · ${evaluationTotalLine(profile, summary.total)}${conclusion}`;
 }
 
 /** The Book's 评估 on 工作概览, in one line. */
@@ -209,13 +251,13 @@ export function evaluationComparisonLines(profile: EvaluationProfileProjection, 
   if (comparison.conclusion.previous !== comparison.conclusion.current) {
     lines.push(`结论：${evaluationConclusionLabel(profile, comparison.conclusion.previous)} → ${evaluationConclusionLabel(profile, comparison.conclusion.current)}`);
   }
-  return { heading: `与${technicalWords(`第 ${comparison.previousOrdinal} 版`, '版本')}相比`, lines };
+  return { heading: `与${technicalWords(`第 ${comparison.previousOrdinal} 版`, '上一版')}相比`, lines };
 }
 
 // ---- 知识库 › 评估方案 (Issue #429, S81a; KB-001, EVAL-003, EVAL-005) --------------------------------------------------
 
 export function evaluationProfilePill(profile: Pick<EvaluationProfileProjection, 'version' | 'issuer'>): string {
-  return `${technicalWords(`第 ${profile.version} 版`, '版本')} · ${profile.issuer}`;
+  return `${technicalWords(`第 ${profile.version} 版 · `)}${profile.issuer}`;
 }
 
 /**
@@ -237,9 +279,9 @@ export function evaluationProfileUse(profile: { records: number; books: number }
 
 // ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007) --------------------------------------
 
-export const EVALUATION_AI7_HEADING = 'AI7 评估报告';
+export const EVALUATION_AI7_HEADING = '评估报告';
 export const EVALUATION_AI7_NONE = '还没有评估报告：生成后，AI7 通读全稿，给出逐项评分与评语、原文依据、优缺点、下一步建议和市场分析。';
-export const EVALUATION_AI7_PREPARE: Readonly<Record<InitialEvaluationTaskMode, string>> = { 'evaluation-first': 'AI7 初评', 'evaluation-again': '重新初评' };
+export const EVALUATION_AI7_PREPARE: Readonly<Record<InitialEvaluationTaskMode, string>> = { 'evaluation-first': '生成评估报告', 'evaluation-again': '重新生成评估报告' };
 export const EVALUATION_AI7_OPEN_TASK = '查看任务';
 // ---- 评估报告 as the main way (Issue #1406, #1407) ------------------------------------------------------------------------
 
@@ -271,10 +313,10 @@ export const EVALUATION_ADJUSTMENT_LEGEND = '调分原因 · 可多选';
 export const EVALUATION_ADJUSTMENT_REASON_LABELS: Readonly<Record<EvaluationAdjustmentReasonId, string>> = EVALUATION_ADJUSTMENT_REASON_WORDS;
 export const EVALUATION_ADJUSTMENT_NOTE = '自行输入的原因';
 export const EVALUATION_AI7_STATUS = {
-  preparing: '正在准备 AI7 初评的任务计划…',
-  prepared: 'AI7 初评的任务计划已准备。',
-  cancelled: 'AI7 初评的任务计划准备已取消。',
-  failed: '无法准备 AI7 初评。',
+  preparing: '正在准备评估报告的任务计划…',
+  prepared: '评估报告的任务计划已准备。',
+  cancelled: '评估报告的任务计划准备已取消。',
+  failed: '无法准备评估报告。',
   startingFromInitial: '正在打开评估报告供修改…',
 } as const;
 
@@ -287,7 +329,7 @@ export function evaluationAi7TaskLine(task: NonNullable<EvaluationInitialProject
 export function evaluationAi7LatestLine(profile: Pick<EvaluationProfileProjection, 'bands'>, latest: NonNullable<EvaluationInitialProjection['latest']>): string {
   const total = latest.complete ? evaluationTotalLine(profile, latest.total) : '全书综合没有给出分数';
   const moved = latest.current ? '' : '（稿件此后改过：重新生成后才能在报告上修改）';
-  return `第 ${latest.ordinal} 次初评${technicalWords(` · 读的是修订版 ${latest.revisionLabel}`)} · ${total}${moved}`;
+  return `${technicalWords(`第 ${latest.ordinal} 次初评`, '最近一份评估报告')}${technicalWords(` · 读的是修订版 ${latest.revisionLabel}`)} · ${total}${moved}`;
 }
 
 /** 依据充分度 of one item (EVAL-005), with what it rests on. */
@@ -307,7 +349,7 @@ export function evaluationAi7ItemLine(
 ): string {
   const score = item.score === null ? '没有给出分数' : `${evaluationScore(item.score)} / ${fullMarks}`;
   const after = calibrated === null || item.score === null ? '' : ` · 校准后 ${evaluationScore(calibrated.adjusted)} / ${fullMarks}`;
-  return `AI7 初评 ${score}${after} · ${evaluationAi7SufficiencyLine(item)}`;
+  return `评估报告 ${score}${after} · ${evaluationAi7SufficiencyLine(item)}`;
 }
 
 /**
@@ -317,7 +359,7 @@ export function evaluationAi7ItemLine(
 export function evaluationAi7CalibrationLine(calibration: EvaluationInitialCalibrationProjection | null): string | null {
   if (calibration === null) return null;
   const moved = calibration.items.length === 0 ? '各项偏移为 0，起始分数未变' : `调整了 ${calibration.items.length} 项的起始分数，原始分数仍列在每一项旁边`;
-  return `AI7 的初评分数已按本社校准（依据 ${calibration.basisBooks} 本书的定稿评估）：${moved}；校准只调 AI7 的分数，不调风险项，也不改你的评分。`;
+  return `评估报告的分数已按本社校准（依据 ${calibration.basisBooks} 本书的定稿评估）：${moved}；校准只调 AI7 的分数，不调风险项，也不改你的评分。`;
 }
 
 /**
@@ -397,13 +439,13 @@ export function readersReportTaskLine(task: NonNullable<EvaluationReadersReportP
 
 /** A drafted result not yet opened: what it was drafted from. */
 export function readersReportDraftedLine(drafted: NonNullable<EvaluationReadersReportProjection['templates'][number]['drafted']>): string {
-  return `AI7 已写出草稿 · 依据${technicalWords(`第 ${drafted.recordOrdinal} 版`, '版本')}定稿 · 打开后在稿件编辑面上修改`;
+  return `AI7 已写出草稿 · 依据${technicalWords(`第 ${drafted.recordOrdinal} 版`, '评估')}定稿 · 打开后在稿件编辑面上修改`;
 }
 
 /** A template's draft document: its latest version, what it was drafted from, and whether the text moved past the version. */
 export function readersReportDraftLine(draft: NonNullable<EvaluationReadersReportProjection['templates'][number]['draft']>): string {
   const latest = draft.document.versions[0]?.label ?? '版本 1';
-  return `草稿 · ${latest} · 依据${technicalWords(`第 ${draft.recordOrdinal} 版`, '版本')}定稿${draft.document.changedSinceVersion ? ' · 有修改尚未保存为版本' : ''}`;
+  return `草稿 · ${latest} · 依据${technicalWords(`第 ${draft.recordOrdinal} 版`, '评估')}定稿${draft.document.changedSinceVersion ? ' · 有修改尚未保存为版本' : ''}`;
 }
 
 // ---- 市场 (Issue #429, plan slice S81b2; V2-UX-EVAL-009, EVAL-010) ------------------------------------------------------
@@ -415,8 +457,8 @@ export const EVALUATION_MARKET_OFFLINE = '联网情况以运行报告为准，�
 export const EVALUATION_MARKET_LISTS = { readers: '目标读者', sellingPoints: '差异化卖点', channels: '渠道与策略' } as const;
 /** Said beside AI7's market words: whose they are, and what they rest on. */
 export const EVALUATION_MARKET_AI7 = 'AI7 · 据书稿题材推断';
-export const EVALUATION_MARKET_NONE_ALONE = '这一版不是从 AI7 初评开始的：没有 AI7 写的目标读者、卖点与渠道。';
-export const EVALUATION_MARKET_NONE_INITIAL = '这一版开始时的 AI7 初评没有写出市场部分。';
+export const EVALUATION_MARKET_NONE_ALONE = '这一版不是从评估报告开始的：没有 AI7 写的目标读者、卖点与渠道。';
+export const EVALUATION_MARKET_NONE_INITIAL = '这一版开始时的评估报告没有写出市场部分。';
 export const EVALUATION_COMPARABLES_HEADING = '可比图书';
 export const EVALUATION_COMPARABLE_SOURCE_SERIES = '书系';
 export const EVALUATION_COMPARABLES_NO_SERIES = '这本书不在任何书系中，没有可以列出的同书系图书。';
@@ -504,19 +546,19 @@ export const EVALUATION_REWRITE_STATUS = {
   unsavedAccept: '这一版有未保存的修改：先保存或放弃这些修改，再采用新版报告。',
   accepting: '正在采用新版报告…',
   accepted: '已采用新版报告：各项分数与结论没有改动。',
-  discarding: '正在放弃重写的评语…',
-  discarded: '已放弃这一次重写，评语保持原样。',
-  decideFailed: '无法处理重写的评语。',
+  discarding: '正在放弃重新生成的评语…',
+  discarded: '已放弃这一次重新生成，评语保持原样。',
+  decideFailed: '无法处理重新生成的评语。',
 } as const;
 export const EVALUATION_REWRITE_VERDICT = '总评';
 export const EVALUATION_REWRITE_BEFORE = '现在';
-export const EVALUATION_REWRITE_AFTER = '重写';
+export const EVALUATION_REWRITE_AFTER = '重新生成';
 export const EVALUATION_REWRITE_EMPTY = '（还没有写）';
 export const EVALUATION_REWRITE_STALE = '这一版在重新生成之后又保存过：新版依据的是之前的修改，不能采用；可以放弃它，再按现在的修改重新生成。';
 
 /** The Book's latest rewrite Task in one line: the version it rewrites, and its state as the drawer names it. */
 export function evaluationRewriteTaskLine(task: NonNullable<EvaluationRewriteWorkspaceProjection['task']>): string {
-  return `${EVALUATION_REWRITE_HEADING} · ${technicalWords(`第 ${task.recordOrdinal} 版`, '版本')} · ${task.label}`;
+  return `${EVALUATION_REWRITE_HEADING} · ${technicalWords(`第 ${task.recordOrdinal} 版 · `)}${task.label}`;
 }
 
 /** The proposal waiting for the editor: which save it was written from. */
@@ -532,13 +574,13 @@ export function evaluationRewriteProposalLine(proposal: NonNullable<EvaluationRe
 export function evaluationRewriteReadingLine(reading: NonNullable<EvaluationRewriteWorkspaceProjection['proposal']>['reading']): string {
   // Ordinary mode: whether the rewrite read everything, never the ranges counted (Issue #1431 item 73).
   return reading.unitsRead < reading.unitsTotal
-    ? technicalWords(`AI7 这次重写只读到 ${reading.unitsRead} / ${reading.unitsTotal} 个阅读范围：没读到的范围里的内容没有进入重写的评语。`, 'AI7 这次重写有部分内容没有读到：这些内容没有进入重写的评语。')
-    : technicalWords(`AI7 这次重写读了全部 ${reading.unitsTotal} 个阅读范围。`, 'AI7 这次重写读了全书。');
+    ? technicalWords(`AI7 这次重新生成只读到 ${reading.unitsRead} / ${reading.unitsTotal} 个阅读范围：没读到的范围里的内容没有进入重新生成的评语。`, 'AI7 这次重新生成有部分内容没有读到：这些内容没有进入重新生成的评语。')
+    : technicalWords(`AI7 这次重新生成读了全部 ${reading.unitsTotal} 个阅读范围。`, 'AI7 这次重新生成读了全书。');
 }
 
 /** The version's last decision on a rewrite. */
 export function evaluationRewriteDecidedLine(decided: NonNullable<EvaluationRewriteWorkspaceProjection['decided']>): string {
   return decided.decision === 'accepted'
-    ? technicalWords(`上一次重写的评语已采用（记为第 ${decided.entryOrdinal} 次保存），分数没有改动。`, '上次重写已采用，分数不变。')
-    : '上一次重写的评语已放弃，评语保持原样。';
+    ? technicalWords(`上一次重新生成的评语已采用（记为第 ${decided.entryOrdinal} 次保存），分数没有改动。`, '上次重新生成已采用，分数不变。')
+    : '上一次重新生成的评语已放弃，评语保持原样。';
 }

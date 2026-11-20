@@ -57,6 +57,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-08' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -245,7 +246,7 @@ async function click(renderer, label, name) {
 // Settings > Help remains compatible with the one-step Settings Local switch (#1376 / #1382).
 async function recoveryTechnicalMode(renderer, visible, name) {
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);
-  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `${name}-settings-ready`);
+  await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `${name}-settings-ready`);
   await click(renderer, '帮助', `${name}-help`);
   await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `${name}-toggle-ready`);
   await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle||toggle.disabled)return false; if(toggle.checked!==${JSON.stringify(visible)})toggle.click(); return true; })()`, `${name}-toggle`);

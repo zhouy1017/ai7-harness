@@ -1,3 +1,5 @@
+import { reportResult } from './notifications.js';
+import { styleInput } from './components/controls.js';
 
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { technicalWords, technicalLayerVisible } from './technical-layer.js';
@@ -76,7 +78,7 @@ function renderBookFilter(
   const textLabel = element('label', undefined, BOOK_FILTER_TEXT_LABEL);
   const text = element('input');
   text.id = 'book-filter-text';
-  text.type = 'search';
+  text.type = 'search'; styleInput(text);
   // The service reads at most this many characters; a longer paste is cut here rather than refused as a bad request.
   text.maxLength = MAX_BOOK_SUMMARY_FILTER_CHARACTERS;
   text.value = filter?.text ?? '';
@@ -181,7 +183,6 @@ async function renderLanding(
   content.classList.add('library-home');
   const copy = element('div');
   copy.append(
-    element('p', 'section-label', SHELL_LABELS.library),
     element('h2', undefined, SHELL_LABELS.libraryTitle),
     element('p', 'lede', '新建一本空图书，或从本地 DOCX 导入稿件。也可将 DOCX 拖到这里。'),
   );
@@ -193,7 +194,7 @@ async function renderLanding(
       const result = await api.selectAndStageManuscript();
       if (result.status === 'cancelled') {
         importButton.disabled = false;
-        setStatus('已取消文件选择');
+        reportResult(setStatus, '已取消文件选择');
         return;
       }
       setStatus('DOCX 已完成本地暂存', 'success');
@@ -248,7 +249,7 @@ async function renderLanding(
       try {
         await api.savePreference({ key: 'onboarding.state', value: 'skipped' });
         onboarding.remove();
-        setStatus(labels.skipped);
+        reportResult(setStatus, labels.skipped);
       } catch (error) {
         skip.disabled = false;
         setStatus(rendererErrorMessage(error, labels.skipFailed), 'error');
@@ -336,7 +337,7 @@ async function renderLanding(
     recent.append(element('h3', undefined, '最近稿件'));
     const list = element('div', 'recent-work-list');
     for (const item of priorWork) {
-      const state = item.recoveryAttention ? '恢复待确认状态' : `当前稿件 ${item.revisionLabel}`;
+      const state = item.recoveryAttention ? '恢复待确认状态' : `当前稿件${technicalWords(` ${item.revisionLabel}`)}`;
       const context = `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''}`;
       const open = bookCardOpen(item.bookTitle, state, async () => {
         const current = navigation.begin();

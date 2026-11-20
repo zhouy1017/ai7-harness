@@ -46,7 +46,7 @@ describe('editor-authored House input bounds', () => {
     expect(() => validateInspectHouseWordListInput({ versionId: null, entryOffset: 0, historyOffset: Infinity })).toThrow();
     const heavy = input(Array.from({ length: 500 }, (_, index) => entry(`词${index}`, '注'.repeat(100))));
     expect(houseUtf8Bytes(JSON.stringify(heavy))).toBeGreaterThan(MAX_HOUSE_BYTES);
-    expect(() => validateSaveHouseWordListInput(heavy)).toThrow('128KiB');
+    expect(() => validateSaveHouseWordListInput(heavy)).toThrow('词表内容太长');
   });
   it('bounds prospective public annotation UTF16 units even when a grapheme is extremely long', () => {
     expect(() => validateHouseEntries([entry(`a${'\u0301'.repeat(4050)}`)])).toThrow('批注');
@@ -93,13 +93,14 @@ describe('standalone House panel through its two-operation interface', () => {
       literal.value = '已保存的合成词'; literal.dispatchEvent({ type: 'input' });
       await click('save');
       expect(owner.inspect().selected?.ordinal).toBe(1); expect(api.saveHouseWordList).toHaveBeenCalledTimes(1);
-      expect(status).toHaveBeenLastCalledWith(expect.stringContaining('已保存本社敏感词表 第1版；读取未完成'), 'error');
-      expect(root.textContent).toContain('第1版已保存'); expect(root.textContent).not.toContain('尚未保存');
+      expect(status).toHaveBeenLastCalledWith('已保存本社词表；读取未完成，请重试读取。', 'error');
+      expect(root.textContent).toContain('本社词表已保存'); expect(root.textContent).not.toContain('还没有保存');
       expect(root.textContent).not.toContain('草稿'); expect(miniDocument.body.querySelector('[data-house-action="save"]')).toBeNull();
       await click('retry-read');
       expect(root.textContent).toContain('已保存的合成词'); expect(api.saveHouseWordList).toHaveBeenCalledTimes(1);
       expect(owner.inspect().history).toHaveLength(1);
-      expect(status).toHaveBeenLastCalledWith('已保存本社敏感词表 第1版。', 'success');
+      // The developer layer keeps the number beside the date; the ordinary words are pinned in ordinary-pages-1543.test.ts.
+      expect(status).toHaveBeenLastCalledWith('已保存本社词表（第 1 版）。', 'success');
     } finally { panel.destroy(); db.close(); restore(); }
   });
   it('authors/pastes/saves immutable versions, preserves a stale draft and shows historical versions read-only', async () => {
@@ -111,7 +112,10 @@ describe('standalone House panel through its two-operation interface', () => {
     const click = async (name: string) => { miniDocument.body.querySelector(`[data-house-action="${name}"]`)!.click(); await setImmediate(); };
     const type = (name: string, value: string) => { const field = miniDocument.body.querySelector(`[data-house-field="${name}"]`)!; field.value = value; field.dispatchEvent({ type: 'input' }); };
     try {
-      await panel.load(); expect(root.textContent).toContain('尚未保存'); expect(api.saveHouseWordList).not.toHaveBeenCalled();
+      await panel.load(); expect(root.textContent).toContain('还没有保存本社词表'); expect(api.saveHouseWordList).not.toHaveBeenCalled();
+      // Nothing saved: the one primary action is 创建词表, and there is no history and no 查看当前版本.
+      expect(miniDocument.body.querySelector('[data-house-action="edit"]')?.textContent).toBe('创建词表');
+      expect(root.textContent).not.toContain('以前保存'); expect(miniDocument.body.querySelector('[data-house-action="current"]')).toBeNull();
       await click('edit'); type('paste', '合成甲\n合成乙'); await click('accept-paste');
       expect(owner.inspect().current).toBeNull();
       await click('save');
@@ -123,8 +127,11 @@ describe('standalone House panel through its two-operation interface', () => {
       expect(miniDocument.body.querySelector('[data-house-field="literal"]')?.value).toBe('草稿保留');
       expect(owner.inspect().selected?.ordinal).toBe(2);
       await click('discard'); await click('history-1');
-      expect(root.textContent).toContain('第1版'); expect(miniDocument.body.querySelector('[data-house-field="literal"]')).toBeNull();
-      expect(root.textContent).toContain('词条说明'); expect(Object.keys(api).sort()).toEqual(['inspectHouseWordList', 'saveHouseWordList']);
+      // An earlier list is named by when it was saved, can only be read, and has one way back.
+      expect(root.textContent).toMatch(/这是 .*月 .*日 [0-9]{2}:[0-9]{2}保存的词表，只能查看/u);
+      expect(miniDocument.body.querySelector('[data-house-field="literal"]')).toBeNull(); expect(miniDocument.body.querySelector('[data-house-action="edit"]')).toBeNull();
+      expect(miniDocument.body.querySelector('[data-house-action="current"]')?.textContent).toBe('回到最新词表');
+      expect(root.textContent).toContain('说明：'); expect(Object.keys(api).sort()).toEqual(['inspectHouseWordList', 'saveHouseWordList']);
     } finally { panel.destroy(); db.close(); restore(); }
   });
   it('loads a bounded current draft page by page and keeps its DOM page at fifty rows', async () => {
@@ -139,7 +146,7 @@ describe('standalone House panel through its two-operation interface', () => {
       expect(root.querySelectorAll('[data-house-entry-row]')).toHaveLength(50);
       miniDocument.body.querySelector('[data-house-action="draft-next"]')!.click();
       expect(root.querySelectorAll('[data-house-entry-row]')).toHaveLength(3);
-      expect(root.textContent).toContain('共53条');
+      expect(root.textContent).toContain('第 51–53 条，共 53 条');
     } finally { panel.destroy(); db.close(); restore(); }
   });
 });

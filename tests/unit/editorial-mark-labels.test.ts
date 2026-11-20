@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   DECISION_REASON_ADD,
   DECISION_REASON_CHIPS,
@@ -27,6 +27,10 @@ import {
   selectionMenuReason,
 } from '../../src/renderer/editorial-mark-labels.js';
 import type { EditorialMarkCardProjection } from '../../src/shared/protocol.js';
+
+// The day labels carry the year only when it is not this year (Issue #1531): the synthetic 2026 dates read in 2026.
+beforeAll(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-19T00:00:00.000Z')); });
+afterAll(() => { vi.useRealTimers(); });
 
 const editor = { kind: 'editor', origin: null, label: null, taskId: null } as const;
 
@@ -69,12 +73,12 @@ describe('the wording of the Mark surface', () => {
   });
 
   it('never calls a recorded acceptance an applied change', () => {
-    expect(markStateLabel(suggestionState(null))).toBe('待你处理');
+    expect(markStateLabel(suggestionState(null))).toBe('待处理');
     expect(markStateLabel(suggestionState('rejected'))).toBe('已拒绝');
-    expect(markStateLabel(suggestionState('accepted-with-edit'))).toBe('已记录 · 尚未写入稿件');
-    expect(markStateLabel({ ...suggestionState(null), anchorState: 'drifted' })).toBe('待你处理 · 原文已变');
-    expect(markStateLabel({ ...suggestionState(null), status: 'applied' })).toBe('已应用');
-    expect(markStateLabel({ ...suggestionState(null), status: 'applied', anchorState: 'drifted' })).toBe('已应用 · 之后又改过');
+    expect(markStateLabel(suggestionState('accepted-with-edit'))).toBe('已接受 · 尚未写入稿件');
+    expect(markStateLabel({ ...suggestionState(null), anchorState: 'drifted' })).toBe('待处理 · 原文已变');
+    expect(markStateLabel({ ...suggestionState(null), status: 'applied' })).toBe('已接受');
+    expect(markStateLabel({ ...suggestionState(null), status: 'applied', anchorState: 'drifted' })).toBe('已接受 · 之后又改过');
     expect(markStateLabel({ kind: 'annotation', status: 'resolved', anchorState: 'exact', suggestion: null })).toBe('已处理');
     expect(markStateLabel({ kind: 'editor-note', status: 'open', anchorState: 'exact', suggestion: null })).toBe('仅自己可见');
   });
@@ -101,16 +105,16 @@ describe('the wording of the Mark surface', () => {
       kind, state, deferredAt: state === 'deferred' ? deferredAt : null, outcome, newMarkId: null, resolvedAt: null,
     });
     const drifted = { ...suggestionState(null), anchorState: 'drifted' as const };
-    expect(markStateLabel({ ...drifted, conflict: conflict('unresolved', null) })).toBe('待你处理 · 原文已变');
-    expect(markStateLabel({ ...drifted, conflict: conflict('deferred', null) })).toBe('待你处理 · 原文已变 · 暂不处理 · 9月22日 09:05');
+    expect(markStateLabel({ ...drifted, conflict: conflict('unresolved', null) })).toBe('待处理 · 原文已变');
+    expect(markStateLabel({ ...drifted, conflict: conflict('deferred', null) })).toBe('待处理 · 原文已变 · 暂不处理 · 9 月 22 日 09:05');
     expect(markStateLabel({ ...suggestionState('accepted-with-edit'), anchorState: 'drifted', conflict: conflict('deferred', null) }))
-      .toBe('已记录 · 尚未写入稿件 · 原文已变 · 暂不处理 · 9月22日 09:05');
+      .toBe('已接受 · 尚未写入稿件 · 原文已变 · 暂不处理 · 9 月 22 日 09:05');
     expect(markStateLabel({ ...suggestionState('rejected'), anchorState: 'drifted', conflict: conflict('resolved', 'keep-current') })).toBe('已拒绝 · 保留当前稿件');
     expect(markStateLabel({ ...suggestionState('rejected'), anchorState: 'drifted', conflict: null })).toBe('已拒绝 · 原文已变');
     const applied = { ...suggestionState(null), status: 'applied' as const, anchorState: 'drifted' as const };
-    expect(markStateLabel({ ...applied, conflict: conflict('deferred', null, 'reversal') })).toBe('已应用 · 之后又改过 · 暂不处理 · 9月22日 09:05');
+    expect(markStateLabel({ ...applied, conflict: conflict('deferred', null, 'reversal') })).toBe('已接受 · 之后又改过 · 暂不处理 · 9 月 22 日 09:05');
     expect(markStateLabel({ ...applied, conflict: conflict('resolved', 'keep-current', 'reversal') })).toBe('已保留当前稿件');
-    expect(markStateLabel({ ...applied, conflict: conflict('resolved', 'new-version', 'reversal') })).toBe('已应用 · 之后又改过');
+    expect(markStateLabel({ ...applied, conflict: conflict('resolved', 'new-version', 'reversal') })).toBe('已接受 · 之后又改过');
   });
 
   it('words the conflict entry, the §2 line and a reversal\'s correction exactly', () => {
@@ -177,7 +181,7 @@ describe('the wording of the Mark surface', () => {
   });
 
   it('writes a time the way the manuscript surface does, and nothing for a time it cannot read', () => {
-    expect(markTimeLabel(new Date(2026, 8, 7, 14, 5).toISOString())).toBe('9月7日 14:05');
+    expect(markTimeLabel(new Date(2026, 8, 7, 14, 5).toISOString())).toBe('9 月 7 日 14:05');
     expect(markTimeLabel('not a time')).toBe('');
   });
 });

@@ -6,10 +6,8 @@
 export const HELP_ENTRY = Object.freeze({ label: '帮助', icon: '帮' });
 
 export const HELP_TITLE = '帮助';
-export const HELP_BREADCRUMB = '设置 · 本机';
 export const HELP_LEDE = '使用说明、隐私说明与第三方许可都在本机读取，打开这里不会更改任何记录。';
 export const HELP_OPENED = '帮助已打开';
-export const HELP_BACK = '返回';
 
 export type HelpTab = 'usage' | 'privacy' | 'licenses';
 

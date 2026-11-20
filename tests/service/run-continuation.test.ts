@@ -294,7 +294,7 @@ describe('暂停 and 续行 over the real store', () => {
       await firstOwner.dispose();
       const stopped = first.inspectBaselineAnalysis(bookId, () => null);
       expect(stopped.state).toBe('resumable');
-      expect(stopped.stateLabel).toBe('任务已中断 · 可续行');
+      expect(stopped.stateLabel).toBe('任务已中断 · 可继续');
       expect(stopped.run!.transitions.at(-1)!.detail).toBe(resumableDetail(2, SAMPLE1_UNITS));
       expect(kept(first, runRecordId)).toEqual([1, 2]);
       first.markCleanShutdown();

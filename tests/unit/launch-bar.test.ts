@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { mountLaunchBar, type LaunchBar } from '../../src/renderer/components/launch-bar.js';
+import { createLaunchBarPresentation, mountLaunchBar, type LaunchBar } from '../../src/renderer/components/launch-bar.js';
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../../src/shared/runtime-execution-config.js';
 import { preferenceDefaults } from '../../src/shared/preferences.js';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { MODEL_SERVICE_CONNECTION_IDS } from '../../src/shared/protocol/model-service.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 import { WRITING_REQUEST } from '../support/writing-task.js';
 
@@ -43,7 +44,7 @@ function launchApi(operation: LedgerTaskLaunchOperation, options: { values?: Rec
 }
 
 async function mount(api: unknown, request: unknown) {
-  const callbacks = { errorMessage: (_error: unknown, fallback: string) => fallback, setStatus: vi.fn(), settle: async () => true, onRecorded: vi.fn(), openRun: vi.fn() };
+  const callbacks = { errorMessage: (_error: unknown, fallback: string) => fallback, setStatus: vi.fn(), settle: async () => true, onRecorded: vi.fn(), openRun: vi.fn(), openSettings: vi.fn() };
   const bar = mountLaunchBar({ api: api as never, request: request as never, ...callbacks, interrupted: false });
   mounted.push(bar);
   document.body.append(...bar.body, ...bar.bar);
@@ -79,7 +80,7 @@ it.each(OPERATIONS)('builds the %s input from the run options and the remembered
   await bar.openPlan();
   const previewed = previewTaskLaunch.mock.calls[0]![0].launch;
   expect(previewed.operation).toBe(operation);
-  choose('[data-task-launch-option="budget"]', '12345', 'input');
+  choose('[data-task-launch-option="budget"]', '50000', 'change');
   choose('[data-task-launch-option="retry"]', 'never', 'change');
   choose('[data-task-start-when]', 'idle', 'change');
   await bar.openPlan();
@@ -90,7 +91,7 @@ it.each(OPERATIONS)('builds the %s input from the run options and the remembered
   expect(launch).toHaveBeenCalledOnce();
   expect(launch.mock.calls[0]![0]).toEqual({
     ...inputFor(operation), executionConfig: remembered, rememberedChoice: true, startWhen: 'idle', clientCommandId: latest,
-    planEdits: { removedSteps: [], disallowedAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 12_345 } },
+    planEdits: { removedSteps: [], disallowedAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } },
   });
   // A custom analysis is read as a baseline-analysis Task; every other launch is read as its own kind.
   const planKind = operation === 'launchCustomAnalysis' ? 'baseline-analysis' : kind;
@@ -206,4 +207,229 @@ it('reads the baseline-only options 先问我, no sampling and 联网后开始 i
   expect(miniDocument.querySelector('[data-task-launch-option="sampling"]')!.checked).toBe(false);
   expect(miniDocument.querySelector('[data-task-launch-option="budget"]')!.value).toBe('500');
   expect(miniDocument.querySelector('[data-task-start-when]')!.value).toBe('when-online');
+});
+
+it('keeps 去设置 available beside a missing model after a refused start', async () => {
+  const { api } = launchApi('launchBaselineAnalysis', { launch: async () => { throw new Error('missing model'); } });
+  const { bar, openSettings } = await mount(api, { operation: 'launchBaselineAnalysis', bookId: 'book', title: '分析', input: inputFor('launchBaselineAnalysis') });
+  await bar.start();
+  const settings = miniDocument.querySelector('[data-task-drawer-control="launch-settings"]')!;
+  expect(settings.hidden).toBe(false); settings.click();
+  expect(openSettings).toHaveBeenCalledOnce();
+  expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')!.disabled).toBe(false);
+});
+
+it('offers the ordinary 本次用量 as the four shared tiers, keeps a custom ceiling as 上次上限, and marks a change on 选项', async () => {
+  setTechnicalLayerVisible(false);
+  try {
+    const { api, launch } = launchApi('launchWritingTask');
+    const { bar } = await mount(api, { operation: 'launchWritingTask', bookId: 'book', title: '写作',
+      input: { ...WRITING_REQUEST, planEdits: { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 75_000 } } } });
+    const budget = miniDocument.querySelector('[data-task-launch-option="budget"]')!;
+    expect(budget.querySelectorAll('option').map(option => [option.value, option.textContent])).toEqual([
+      ['50000', '较少'], ['100000', '标准（推荐）'], ['200000', '较多'], ['', '不设上限'], ['75000', '上次上限']]);
+    expect(budget.value).toBe('75000');
+    const summary = miniDocument.querySelector('.task-launch-options summary')!;
+    expect(summary.textContent).toBe('选项');
+    choose('[data-task-launch-option="budget"]', '50000', 'change');
+    expect(summary.textContent).toBe('选项 · 已调整');
+    choose('[data-task-launch-option="budget"]', '75000', 'change');
+    expect(summary.textContent).toBe('选项');
+    choose('[data-task-launch-option="budget"]', '', 'change');
+    await bar.start();
+    expect(launch.mock.calls[0]![0]).toMatchObject({ planEdits: { removedSteps: [], disallowedAdaptations: [] } });
+    expect((launch.mock.calls[0]![0] as { planEdits: Record<string, unknown> }).planEdits).not.toHaveProperty('runBudgetCeiling');
+  } finally { setTechnicalLayerVisible(true); }
+});
+
+it('reads no plan and offers no start while the surface says it cannot start, and both again once it can', async () => {
+  const { api, previewTaskLaunch } = launchApi('launchWritingTask');
+  const request = { operation: 'launchWritingTask', bookId: 'book', title: '写作', input: WRITING_REQUEST, startDisabled: true };
+  const bar = mountLaunchBar({ api: api as never, request: request as never, errorMessage: (_error: unknown, fallback: string) => fallback, setStatus: vi.fn(),
+    settle: async () => true, onRecorded: vi.fn(), openRun: vi.fn(), interrupted: false });
+  mounted.push(bar); document.body.append(...bar.body, ...bar.bar);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await bar.openPlan();
+  expect(previewTaskLaunch).not.toHaveBeenCalled();
+  expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')!.disabled).toBe(true);
+  request.startDisabled = false; bar.sync();
+  await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')!.disabled).toBe(false));
+  await bar.openPlan();
+  expect(previewTaskLaunch).toHaveBeenCalledOnce();
+});
+
+it('closes a launch popover when focus arrives on another control, also after a press rested focus on the sheet', () => {
+  const sheet = document.createElement('dialog'); sheet.tabIndex = -1; document.body.append(sheet);
+  const options = document.createElement('div'); const inside = document.createElement('select'); options.append(inside);
+  const start = document.createElement('button');
+  const bar = createLaunchBarPresentation(document.createElement('span'), start, { title: '选项', content: options }, null);
+  sheet.append(bar);
+  const details = bar.querySelector<HTMLDetailsElement>('.task-launch-options')!;
+  const focusOn = (target: HTMLElement) => target.dispatchEvent({ type: 'focusin', bubbles: true } as never);
+  details.open = true; details.dispatchEvent({ type: 'toggle' } as never);
+  focusOn(inside);
+  expect(details.open).toBe(true);
+  // A press on the panel's text focuses the sheet around it: still open.
+  focusOn(sheet);
+  expect(details.open).toBe(true);
+  // Tab from there on to the bar's start: closed.
+  focusOn(start);
+  expect(details.open).toBe(false);
+});
+
+it('keeps a launch popover open while focus leaves the window, and closes it when focus comes back on another control', () => {
+  const options = document.createElement('div'); options.append(document.createElement('select'));
+  const start = document.createElement('button');
+  const bar = createLaunchBarPresentation(document.createElement('span'), start, { title: '选项', content: options }, null);
+  document.body.append(bar);
+  const details = bar.querySelector<HTMLDetailsElement>('.task-launch-options')!;
+  details.open = true; details.dispatchEvent({ type: 'toggle' } as never);
+  details.dispatchEvent({ type: 'focusout', bubbles: true, relatedTarget: null } as never);
+  expect(details.open).toBe(true);
+  start.dispatchEvent({ type: 'focusin', bubbles: true } as never);
+  expect(details.open).toBe(false);
+});
+
+it('places a launch popover above or below its whole bar, so a wrapped bar keeps 选项 reachable under an open plan (#1526 follow-up)', () => {
+  // J-04 at 1280×800 with the Task Drawer docked beside the page: the update controls' bar is 447.8 px wide and wraps — 模型 · 选项 ·
+  // 开始 on the first row from 382.3 px, 先看计划 alone on the second down to 470.6 px. The plan panel is 520 × 367.5 px.
+  vi.stubGlobal('innerWidth', 1280); vi.stubGlobal('innerHeight', 800);
+  Object.assign(window, { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  const shown = new Set<unknown>();
+  const proto = Object.getPrototypeOf(document.createElement('div')) as Record<string, unknown>;
+  const own = Object.getOwnPropertyDescriptor(proto, 'matches')!;
+  Object.defineProperty(proto, 'showPopover', { configurable: true, value(this: unknown) { shown.add(this); } });
+  Object.defineProperty(proto, 'hidePopover', { configurable: true, value(this: unknown) { shown.delete(this); } });
+  Object.defineProperty(proto, 'matches', { configurable: true, value(this: unknown, selector: string) {
+    return selector === ':popover-open' ? shown.has(this) : (own.value as (s: string) => boolean).call(this, selector); } });
+  try {
+    const bar = createLaunchBarPresentation(document.createElement('span'), document.createElement('button'),
+      { title: '选项', content: document.createElement('div') }, document.createElement('div'));
+    document.body.append(bar);
+    const box = (left: number, top: number, width: number, height: number) => ({ top, bottom: top + height, left, right: left + width, width, height });
+    const plan = bar.querySelector<HTMLDetailsElement>('.task-launch-estimate')!;
+    const panel = plan.querySelector<HTMLElement>('.task-launch-popover')!;
+    const options = box(470.2, 382.3, 58.8, 35.2);
+    Object.assign(bar, { getBoundingClientRect: () => box(270.6, 382.3, 447.8, 88.3) });
+    Object.assign(bar.querySelector('.task-launch-options summary')!, { getBoundingClientRect: () => options });
+    Object.assign(plan.querySelector('summary')!, { getBoundingClientRect: () => box(270.6, 423.9, 112.8, 46.8) });
+    Object.assign(panel, { getBoundingClientRect: () => {
+      const style = panel.style as unknown as Record<string, string>;
+      const height = Math.min(367.5, Number.parseFloat(style['maxHeight'] || '367.5'));
+      return box(Number.parseFloat(style['left'] || '0'), Number.parseFloat(style['top'] || '0'), 520, height);
+    } });
+    plan.open = true; plan.dispatchEvent({ type: 'toggle' } as never);
+    const placed = panel.getBoundingClientRect();
+    expect(shown.has(panel)).toBe(true);
+    // Above the whole bar (there is room for all of it there): neither row is under it, so 选项 stays pressable.
+    expect(placed.bottom).toBeLessThanOrEqual(382.3);
+    expect(placed.bottom <= options.top || placed.top >= options.bottom).toBe(true);
+    expect(placed.height).toBe(367.5);
+    expect(placed.left).toBe(270.6);
+  } finally {
+    Object.defineProperty(proto, 'matches', own);
+    Reflect.deleteProperty(proto, 'showPopover'); Reflect.deleteProperty(proto, 'hidePopover');
+  }
+});
+
+it('keeps an open launch popover by its summary when a transition of the page moves the summary (#1526 follow-up)', () => {
+  // Narrowing a window with the Task Drawer docked: the page's padding transition moves 选项 after the resize event, from 3713 px to
+  // 323 px; the open options panel follows it when that transition ends, instead of staying where it was placed mid-way.
+  vi.stubGlobal('innerWidth', 1008); vi.stubGlobal('innerHeight', 681);
+  Object.assign(window, { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  const shown = new Set<unknown>();
+  const proto = Object.getPrototypeOf(document.createElement('div')) as Record<string, unknown>;
+  const own = Object.getOwnPropertyDescriptor(proto, 'matches')!;
+  Object.defineProperty(proto, 'showPopover', { configurable: true, value(this: unknown) { shown.add(this); } });
+  Object.defineProperty(proto, 'hidePopover', { configurable: true, value(this: unknown) { shown.delete(this); } });
+  Object.defineProperty(proto, 'matches', { configurable: true, value(this: unknown, selector: string) {
+    return selector === ':popover-open' ? shown.has(this) : (own.value as (s: string) => boolean).call(this, selector); } });
+  try {
+    const bar = createLaunchBarPresentation(document.createElement('span'), document.createElement('button'),
+      { title: '选项', content: document.createElement('div') }, null);
+    document.body.append(bar);
+    const box = (left: number, top: number, width: number, height: number) => ({ top, bottom: top + height, left, right: left + width, width, height });
+    let barTop = 3713;
+    const options = bar.querySelector<HTMLDetailsElement>('.task-launch-options')!;
+    const panel = options.querySelector<HTMLElement>('.task-launch-popover')!;
+    Object.assign(bar, { getBoundingClientRect: () => box(270, barTop, 400, 35) });
+    Object.assign(options.querySelector('summary')!, { getBoundingClientRect: () => box(470, barTop, 59, 35) });
+    Object.assign(panel, { getBoundingClientRect: () => {
+      const style = panel.style as unknown as Record<string, string>;
+      return box(Number.parseFloat(style['left'] || '0'), Number.parseFloat(style['top'] || '0'), 320, Math.min(200, Number.parseFloat(style['maxHeight'] || '200')));
+    } });
+    options.open = true; options.dispatchEvent({ type: 'toggle' } as never);
+    expect(panel.getBoundingClientRect().top).toBeGreaterThan(681);
+    barTop = 323;
+    document.body.dispatchEvent({ type: 'transitionend', bubbles: true } as never);
+    const placed = panel.getBoundingClientRect();
+    expect(placed.top).toBe(323 + 35 + 4);
+    expect(placed.bottom).toBeLessThanOrEqual(681);
+  } finally {
+    Object.defineProperty(proto, 'matches', own);
+    Reflect.deleteProperty(proto, 'showPopover'); Reflect.deleteProperty(proto, 'hidePopover');
+  }
+});
+
+/** Native popovers and window events for one test, with a bar of one row at `barTop` and a panel 500 px tall. */
+function popoverBar(barTop: number) {
+  vi.stubGlobal('innerWidth', 1280); vi.stubGlobal('innerHeight', 800);
+  const listeners = new Map<string, () => void>();
+  Object.assign(window, { addEventListener: vi.fn((type: string, listener: () => void) => { listeners.set(type, listener); }),
+    removeEventListener: vi.fn((type: string, listener: () => void) => { if (listeners.get(type) === listener) listeners.delete(type); }) });
+  const shown = new Set<unknown>();
+  const proto = Object.getPrototypeOf(document.createElement('div')) as Record<string, unknown>;
+  const own = Object.getOwnPropertyDescriptor(proto, 'matches')!;
+  Object.defineProperty(proto, 'showPopover', { configurable: true, value(this: unknown) { shown.add(this); } });
+  Object.defineProperty(proto, 'hidePopover', { configurable: true, value(this: unknown) { shown.delete(this); } });
+  Object.defineProperty(proto, 'matches', { configurable: true, value(this: unknown, selector: string) {
+    return selector === ':popover-open' ? shown.has(this) : (own.value as (s: string) => boolean).call(this, selector); } });
+  const bar = createLaunchBarPresentation(document.createElement('span'), document.createElement('button'), null, document.createElement('div'));
+  document.body.append(bar);
+  const box = (left: number, top: number, width: number, height: number) => ({ top, bottom: top + height, left, right: left + width, width, height });
+  const plan = bar.querySelector<HTMLDetailsElement>('.task-launch-estimate')!;
+  const panel = plan.querySelector<HTMLElement>('.task-launch-popover')!;
+  const style = panel.style as unknown as Record<string, string>;
+  Object.assign(bar, { getBoundingClientRect: () => box(270, barTop, 400, 35) });
+  Object.assign(plan.querySelector('summary')!, { getBoundingClientRect: () => box(470, barTop, 112, 35) });
+  // As an engine lays it out: an unbounded panel shows all of itself, and reading its layout then puts its own scroll back to 0.
+  let scroll = 0;
+  Object.defineProperty(panel, 'scrollTop', { configurable: true, get: () => scroll, set: (value: number) => {
+    scroll = style['maxHeight'] ? Math.max(0, Math.min(value, 500 - Number.parseFloat(style['maxHeight']))) : 0; } });
+  Object.assign(panel, { getBoundingClientRect: () => {
+    if (!style['maxHeight']) scroll = 0;
+    return box(Number.parseFloat(style['left'] || '0'), Number.parseFloat(style['top'] || '0'), 520, Math.min(500, Number.parseFloat(style['maxHeight'] || '500')));
+  } });
+  const restore = (): void => { Object.defineProperty(proto, 'matches', own); Reflect.deleteProperty(proto, 'showPopover'); Reflect.deleteProperty(proto, 'hidePopover'); };
+  return { bar, plan, panel, listeners, restore };
+}
+
+it('keeps the editor\'s place in a bounded launch popover when it is placed again (#1526 follow-up)', () => {
+  const { plan, panel, listeners, restore } = popoverBar(382);
+  try {
+    plan.open = true; plan.dispatchEvent({ type: 'toggle' } as never);
+    // 371 px of room below the bar (370 above) for a 500 px plan: bounded, its content scrolls. The editor scrolls to its end (更新计划).
+    expect((panel.style as unknown as Record<string, string>)['maxHeight']).toBe('371px');
+    panel.scrollTop = 129;
+    expect(panel.scrollTop).toBe(129);
+    // Its own scroll reaches the page's captured scroll listener, then a transition of the page ends, then the window resizes.
+    document.body.dispatchEvent({ type: 'scroll', bubbles: true } as never);
+    expect(panel.scrollTop).toBe(129);
+    document.body.dispatchEvent({ type: 'transitionend', bubbles: true } as never);
+    expect(panel.scrollTop).toBe(129);
+    listeners.get('resize')!();
+    expect(panel.scrollTop).toBe(129);
+  } finally { restore(); }
+});
+
+it('lets go of the page once a launch popover is removed while it is open (#1526 follow-up)', () => {
+  const { bar, plan, listeners, restore } = popoverBar(382);
+  try {
+    plan.open = true; plan.dispatchEvent({ type: 'toggle' } as never);
+    expect(listeners.has('resize')).toBe(true);
+    // The bar is drawn anew or disposed with its panel open: no toggle event comes; the next page event finds it detached.
+    bar.remove();
+    document.body.dispatchEvent({ type: 'scroll', bubbles: true } as never);
+    expect(listeners.has('resize')).toBe(false);
+  } finally { restore(); }
 });

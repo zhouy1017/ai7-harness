@@ -22,6 +22,18 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
   authored fixture `synthetic-editorial-review-authored`: nothing of them is transmitted or recorded, and they measure the
   harness and the product path, never a model.
 
+- **The four ADR 0091 Public SampleBooks** (`luxun-zhaohua-xishi.docx`, `luxun-nahan.docx`, `liue-laocan-youji.docx`,
+  `wujingzi-rulin-waishi.docx`) — **score-only** cases (#1074). Each is reviewed developer-live on its exact, unedited file over
+  its first two body chapters, 错别字与规范用语 only (the measured call rate on `sample1` left no budget for 体例与格式 on the
+  four, a budget reason, not a result); no tester edit is made to them (only `sample1` admits a tester's edits), and no fixture may be
+  generated from them (ADR 0091 §3.3), so their evidence stays in the Provider Test Ledger and the developer-live data root
+  outside the repository. The cases fix their references before any live output: the chapter rule, three false-positive traps
+  (a name, and period-authentic forms a reprint keeps), and the reprint-fidelity rule below.
+
+- **The 2026-11 `sample1` re-measurement** (#1074): `review-{typos,style,literary}-sample1-remeasure` carry exactly the 2026-10
+  cases' references and replay `sample1-recorded-v2-editorial-quality-review`; `"pass": "2026-11"` keeps them in their own
+  cohort (`measured-pass-2026-11`). See [the 2026-11 report](../../docs/development/editorial-evidence-2026-11.md).
+
 ## Files
 
 - `cases/<id>.json` — one case, schema `ai7.editorial-case/1` below.
@@ -37,12 +49,13 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
 | `id` | `^[a-z0-9][a-z0-9-]{0,63}$`, equal to the file name |
 | `kind` | `review`, `polish`, `initial-evaluation`, `readers-report`, `writing-draft`, `clarification`, `cross-deliverable` or `material-review` |
 | `title` | The case in the editor's words |
-| `manuscript` | `{ "source": "sample1" }` or `{ "source": "synthetic", "id": "synthetic-lighthouse" \| "synthetic-museum" }` |
+| `manuscript` | `{ "source": "sample1" }`, `{ "source": "synthetic", "id": "synthetic-lighthouse" \| "synthetic-museum" }`, or for a score-only case `{ "source": "public-samplebook", "file": "<one of the four ADR 0091 files>" }` |
 | `bookTitle` | The title the Book is imported under. The live driver and the harness use the same title, so contracts that freeze Book metadata ask the same question |
 | `input` | Kind-specific Task input (below) |
-| `fixture` | The model fixture identity `--replay fixtures` replays |
+| `fixture` | The model fixture identity `--replay fixtures` replays; `null` for a score-only case |
+| `pass` | Optional `YYYY-MM` of a later measured pass (#1074); absent for the 2026-10 pass |
 | `measuredPass` | The kind of the one developer-live pass that produced the fixture (`review`, `polish`, `initial-evaluation`, `readers-report`, `writing-draft`), or `null` when the case replays earlier evidence or an authored fixture |
-| `replay` | `{ "route": "deterministic" }` (the product's fixture route), or `{ "route": "developer-live", "modelQuestions": true | false }` — the developer-live owner whose transport is the product's deterministic adapter, with the v14 model-question wrapper on for a capture made under it and off for an earlier one |
+| `replay` | `{ "route": "score-only" }` for the four ADR 0091 books (never replayed), `{ "route": "deterministic" }` (the product's fixture route), or `{ "route": "developer-live", "modelQuestions": true | false }` — the developer-live owner whose transport is the product's deterministic adapter, with the v14 model-question wrapper on for a capture made under it and off for an earlier one |
 | `expectedConcerns` | What an editor expects the Task to raise; each is a false-negative check (a *miss* when nothing matches it) |
 | `falsePositiveChecks` | Words or results that must not be raised as problems; a finding that touches one is a *false positive* |
 | `observations` | `acceptance` and `rework`: what the editor would accept as useful, and what would send the result back |
@@ -50,7 +63,8 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
 ### `input` by kind
 
 - `review`, `material-review`: `categories` (built-in review category ids) and `scope` (`whole`, or `{ "paragraph": n }` for a
-  one-paragraph selection). `material-review` adds `material: "sample1-derived-library-item"`, the #809 library item.
+  one-paragraph selection, or for a score-only case `{ "chapters": { "from": a, "to": b } }`: 1-based ordinals among the Book's
+  level-1 chapters, with `chapterTitles` the exact titles those chapters must have, so a changed importer refuses). `material-review` adds `material: "sample1-derived-library-item"`, the #809 library item.
 - `polish`: `selection: { paragraph, start, end }` — the selection runs from the first occurrence of `start` to the end of the
   first occurrence of `end` after it, in that paragraph.
 - `initial-evaluation`: `{}`. `readers-report`: `template` (`author` or `editorial`), `evaluationRecord: "j11"` (the
@@ -73,6 +87,35 @@ A **structural concern** (evaluation, report, writing) anchors to paragraphs a r
 require an evaluation `item`, a report passage `passageKind`, or one of `keywords` in the model's own words for that anchor.
 A structural false-positive check fires when model words tied to its `paragraphs` (or anywhere, when it names none) contain one
 of its `keywords`. Keyword checks are a coarse proxy; the report says so.
+
+## Score-only cases (#1074)
+
+`node tools/editorial-evidence.mjs --check-references` imports each score-only case's exact file into a disposable product and checks
+its chapter rule and every check anchor; `pnpm test` runs it. After a developer-live Review Run, and only once that product has
+stopped, `--score <data root> --case <id>` copies the data root into a disposable directory (the root itself is never opened),
+refuses every `fetch`, and binds the Run to the case before scoring: the copy must hold exactly one Book and exactly one Review
+Run, a settled 选章 Run over the case's chapters with exactly the case's categories, on an unedited Book (its block contents equal a fresh
+import of the exact file and its journal has not moved). It then scores that Run with the same scoring, simulated editor, Apply
+and reversal as a replayed case and writes `score-<id>.json` (counts, the Run's identity, ordinal and state, and the Run count).
+
+**References and rules, fixed before any live output.**
+
+- With no planted defect the original is the reference: there is no useful rate or concern recall on the four books.
+- **Reprint fidelity.** Every located finding of the case's categories proposes to change (修改建议) or flags (批注) the pinned
+  original: `changesToOriginal` counts them (`suggestions + annotations === counted`, every located finding of the two
+  categories), an upper bound of false positives, stricter than a modern manuscript's editor would be. Trap hits
+  (`trapHits`) are inside that count.
+- **Conversion residue.** A case may declare `input.conversionResidue` (`著` → `着`): a 修改建议 whose replacement is exactly its
+  quotation with every 著 turned into 着 is counted apart as `variantResidue` (plausibly useful; still inside `suggestions`).
+  In the chosen ranges 著 / 着 occur: 《朝花夕拾》 47 / 0, 《老残游记》 39 / 0, 《儒林外史》 98 / 0, so those three declare it;
+  《呐喊》 1 / 47 (its one 著 is a correct use), so it does not, and a 著→着 suggestion there is an ordinary change to the
+  original. With 39–98 residue sites per range, 错别字 results on three books largely measure the Wikisource zh-hans conversion,
+  not editorial judgement on the authors' text.
+- **Traps.** Three per book: one name, and two period-authentic forms whose modern variant occurs 0 times in the range, so no
+  consistency 批注 is defensible there. Twelve traps prove little: 0 of 12 fired is still compatible with a true firing rate of
+  about 22 % (95 % upper bound), and the name traps are near-trivial.
+- **Time and cost** come from the Provider Test Ledger and the driver's timestamps, never from `score-<id>.json`, whose model
+  and usage fields are empty for a store copy and are not measurements.
 
 ## Metrics (per case)
 

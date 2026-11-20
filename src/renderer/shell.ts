@@ -52,8 +52,9 @@ export const SIDEBAR_ICONS_ONLY_BELOW_PX = 760;
 
 export type SidebarMode = 'full' | 'icons';
 
-export function sidebarMode(collapsed: boolean, narrow: boolean): SidebarMode {
-  return collapsed || narrow ? 'icons' : 'full';
+/** The sidebar's automatic icon form: a right-hand column needs the width, without writing the editor's own preference. */
+export function sidebarMode(collapsed: boolean, narrow: boolean, autoIcons = false): SidebarMode {
+  return collapsed || narrow || autoIcons ? 'icons' : 'full';
 }
 
 /** The screen states that are global destinations or 设置 pages; a Book screen says its own place instead. */
@@ -67,7 +68,6 @@ const SCREEN_ACTIVE: Readonly<Record<string, ShellActive>> = Object.freeze({
   'knowledge-base': { kind: 'destination', destination: 'knowledge' },
   'quality-learning': { kind: 'destination', destination: 'quality' },
   'global-agent': { kind: 'destination', destination: 'global-agent' },
-  settings: { kind: 'settings' },
   help: { kind: 'settings' },
   'model-service': { kind: 'settings' },
   'data-storage': { kind: 'settings' },
@@ -97,13 +97,13 @@ export function contextHeading(state: string, active: ShellActive, book: ShellBo
   if (active.kind === 'section' && book !== null) {
     return { title: book.title, position: `${shellSectionGroupLabel(active.section)} · ${shellSectionLabel(active.section)}`, book: true };
   }
-  if (active.kind === 'settings') return { title: SHELL_SETTINGS.label, position: SETTINGS_PAGE_TITLES[state] ?? SHELL_LABELS.global, book: false };
+  if (active.kind === 'settings') return { title: SHELL_SETTINGS.label, position: SETTINGS_PAGE_TITLES[state] ?? '', book: false };
   if (active.kind === 'destination') {
     const label = shellDestinationLabel(active.destination);
-    return IMPORT_STATES.has(state) ? { title: SHELL_LABELS.importing, position: label, book: false } : { title: label, position: SHELL_LABELS.global, book: false };
+    return IMPORT_STATES.has(state) ? { title: SHELL_LABELS.importing, position: label, book: false } : { title: label, position: '', book: false };
   }
   if (book !== null) return { title: book.title, position: SHELL_LABELS.currentBook, book: true };
-  return { title: SHELL_LABELS.application, position: SHELL_LABELS.global, book: false };
+  return { title: SHELL_LABELS.application, position: '', book: false };
 }
 
 /** A title kept within what a preference holds; the service's titles are already bounded, this only guards the file. */
@@ -519,13 +519,18 @@ export function mountShell(options: MountShellOptions): ShellSurface {
 
   const applyMode = (): void => {
     const narrow = narrowQuery.matches;
-    const mode = sidebarMode(preferences.current['shell.sidebarCollapsed'], narrow);
+    // The manuscript screen's measure observer states the automatic icon form on `:root` (never a preference):
+    // a right-hand column is open and needs the full width, so the sidebar shows icons for as long as it stays open.
+    const column = document.documentElement.dataset['rightColumn'];
+    const autoIcons = column === 'icons' || column === 'overlay';
+    const mode = sidebarMode(preferences.current['shell.sidebarCollapsed'], narrow, autoIcons);
     const root = document.documentElement;
     root.dataset['sidebar'] = mode;
     root.dataset['sidebarCollapsed'] = String(preferences.current['shell.sidebarCollapsed']);
-    options.toggle.disabled = narrow;
+    // Under the automatic icon form a click could change nothing visible, so the toggle says why it waits; the preference stays as it was.
+    options.toggle.disabled = narrow || autoIcons;
     options.toggle.setAttribute('aria-expanded', String(mode === 'full'));
-    options.toggle.setAttribute('aria-label', narrow ? SHELL_LABELS.narrow : mode === 'full' ? SHELL_LABELS.collapse : SHELL_LABELS.expand);
+    options.toggle.setAttribute('aria-label', narrow ? SHELL_LABELS.narrow : autoIcons ? SHELL_LABELS.column : mode === 'full' ? SHELL_LABELS.collapse : SHELL_LABELS.expand);
     options.toggle.title = options.toggle.getAttribute('aria-label') ?? '';
     // A collapsed row says its name on hover too; a full row shows it already.
     for (const link of sidebar.querySelectorAll<HTMLElement>('.sidebar-link')) {
@@ -570,6 +575,8 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     options.title.textContent = heading.title;
     options.title.dataset['contextBook'] = String(heading.book);
     options.position.textContent = heading.position;
+    // A global page says its name once, in the title; only a Book's section or a settings page has a place to add (#1522).
+    options.position.hidden = heading.position === '';
   };
 
   options.toggle.addEventListener('click', () => {
@@ -578,6 +585,10 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     });
   });
   narrowQuery.addEventListener('change', applyMode);
+  // The automatic icon form changes with the manuscript screen's measure state, never with a preference write.
+  const rightColumnObserver = typeof MutationObserver === 'undefined' ? undefined
+    : new MutationObserver(() => applyMode());
+  rightColumnObserver?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-right-column'] });
   preferences.subscribe((values) => paintBooks(values));
   paintBooks(preferences.current);
   paintActive();

@@ -22,6 +22,9 @@ const forbiddenFeatureImports = {
   'src/service/house-review-preference.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/learning/memory-facade.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/learning/ledger.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/editorial-mark-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/manuscript/operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/store-inventory.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/production-document-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/evaluation-calibration-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/evaluation-market.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
@@ -42,6 +45,10 @@ for (const [module, forbidden] of Object.entries(forbiddenFeatureImports)) {
   }
 }
 
+// The whole-project type check needs about 2.4 GB of heap; Node's default limit on a machine with 4 GB of memory (the test
+// guests) is about 2 GB, where it aborts with exit 134. A limit, not a reservation; passed as an argument because the doctor
+// refuses NODE_OPTIONS.
+const TYPE_CHECK_HEAP = '--max-old-space-size=4096';
 const compiler = resolve(ROOT, 'node_modules', 'typescript', 'bin', 'tsc');
 const ENV = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR };
 
@@ -50,7 +57,7 @@ if (!existsSync(compiler)) {
   process.exit(1);
 }
 
-const typeCheck = spawnSync(process.execPath, [compiler, '--noEmit', '--pretty', 'false'], {
+const typeCheck = spawnSync(process.execPath, [TYPE_CHECK_HEAP, compiler, '--noEmit', '--pretty', 'false'], {
   cwd: ROOT,
   env: ENV,
   stdio: 'inherit',

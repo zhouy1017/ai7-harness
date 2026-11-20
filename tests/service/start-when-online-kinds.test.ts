@@ -430,7 +430,7 @@ describe('取消 of a waiting or queued Run of another kind (Issue #760 review)'
       expect(owner.admitOrQueue(started.dispatchRunRecordId!, started.ledger)).toBe('admitted');
       const queued = store.authorizeWriting(queuedBook, second, (await planOf(store, queuedBook, 'writing', second, 'online')).start.planEnvelopeDigest!);
       expect(owner.admitOrQueue(queued.dispatchRunRecordId!, queued.ledger)).toBe('queued');
-      expect((await planOf(store, queuedBook, 'writing', second, 'online')).state).toEqual({ key: 'queued', label: '等待运行名额' });
+      expect((await planOf(store, queuedBook, 'writing', second, 'online')).state).toEqual({ key: 'queued', label: '排队中' });
       // The service's 取消 names the Run the governor must let go of, exactly as it does for a queued baseline Run.
       const cancelled = store.cancelWaitingTask({ bookId: queuedBook, kind: 'writing', ref: second });
       expect(cancelled).toEqual({ dequeue: queued.dispatchRunRecordId });

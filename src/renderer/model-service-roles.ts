@@ -27,7 +27,7 @@ export function modelConnectionTestFeedback(test: ModelConnectionTestStatus | nu
  * label; the model id, the failure code and the instant stay one disclosure away (ADR 0096 §3).
  */
 export function modelConnectionTestLabel(test: ModelConnectionTestStatus | null | undefined, modelLabel?: string): string {
-  if (test == null) return '尚未测试；保存凭据不等于连接成功';
+  if (test == null) return '尚未测试；保存密钥不等于连接成功';
   const model = modelLabel === undefined ? '' : ` · ${modelLabel}`;
   if (test.outcome === 'passed') return `文本连接测试通过${model}`;
   return `文本连接测试${test.outcome === 'outcome-unknown' ? '结果待确认；不会自动重试' : test.outcome === 'cancelled' ? '已取消' : '未通过'}${model}`;

@@ -1,14 +1,30 @@
-export const BACKGROUND_SUMMARY = '登记后，仅在稿件有已确认改动且空闲时处理，每次不超过预算上限；暂停或撤销不开始新任务，未接入的工序不会运行。';
-import { technicalLayerVisible, technicalWords } from './technical-layer.js';
+export const BACKGROUND_SUMMARY = '登记后，仅在稿件有已确认改动且空闲时处理，每次不超过用量上限；暂停或撤销不开始新任务，未接入的工序不会运行。';
+/** The one sentence beside the ordinary mode's switch (Issue #1531): when the block offers a single kind, the select and 登记 become it. */
+export const BACKGROUND_SWITCH_NOTE = '打开后，稿件有已确认的改动且 AI7 空闲时自动更新分析，每次不超过所选用量；关闭后不再开始新的分析。';
+/** The one sentence beside the switch while it is on (Issue #1531): where the setting stands. */
+export const BACKGROUND_SWITCH_STATE: Readonly<Record<'active' | 'paused' | 'suspended', string>> = {
+  active: '已打开：稿件有已确认的改动且 AI7 空闲时会自动更新分析。',
+  paused: '已暂停：继续之前不会开始新的分析；已经开始的照常进行。',
+  suspended: '待你确认：重新打开之前不会开始新的分析。',
+};
+/** What the switch cannot do when no kind is on offer, when the service names no reason. */
+export const BACKGROUND_SWITCH_NONE = '现在没有可以空闲时自动更新的分析。';
+/** The switch's choices, folded away with the form's defaults (Issue #1531, review S6). */
+export const BACKGROUND_SWITCH_OPTIONS = '选项';
+export const BACKGROUND_SWITCH_OPTIONS_LOCKED = '关闭后可以改这些选项。';
+export const BACKGROUND_SWITCH_REOPEN = '重新打开';
+export const BACKGROUND_SWITCH_ON_STATUS = '已打开空闲时自动更新分析';
+export const BACKGROUND_SWITCH_BUSY = '正在打开空闲时自动更新分析…';
+import { technicalWords } from './technical-layer.js';
 import type { BackgroundAnalysisEnrollmentProjection } from '../shared/protocol.js';
 
 /**
  * ②A's 后台分析 words (Issue #95, plan slice S39; ADR 0048; V2-UX-ANALYSIS-017). What an Enrollment binds, what it would do now
  * and why, and what revoking keeps are the service's words; these are the block's own.
  */
-export const BACKGROUND_HEADING = '后台处理登记';
+export const BACKGROUND_HEADING = '空闲时自动更新分析';
 /** The kind the block reads and enrolls (Issue #1089): the selected policy's enrollable kinds, others shown disabled with why. */
-export const BACKGROUND_KIND_LABEL = '后台处理种类';
+export const BACKGROUND_KIND_LABEL = '自动更新哪一项分析';
 export const BACKGROUND_ENROLL_OPEN = '登记后台处理…';
 export const BACKGROUND_DISCLOSURE_HEADING = '登记后台处理';
 /** The token ceiling an enrollment form starts with (Issue #1410 item 24); the editor may write another. */
@@ -26,21 +42,22 @@ export const BACKGROUND_REVOKE_CONFIRM = '撤销登记';
 export const BACKGROUND_CANCEL = '取消';
 export const BACKGROUND_CHOOSE_FIRST = '请先选从哪里开始。';
 export const BACKGROUND_STARTED_HEADING = '按登记开始的分析';
-export const BACKGROUND_HISTORY_SUMMARY = '登记记录';
+export const backgroundHistorySummary = (): string => technicalWords('登记记录', '记录');
 export const BACKGROUND_BINDS_SUMMARY = '这份登记定下的内容';
-export const BACKGROUND_LOADING = '正在读取后台处理登记…';
-export const BACKGROUND_UNAVAILABLE = '无法读取这本书的后台处理登记。';
+export const BACKGROUND_LOADING = '正在读取…';
+export const BACKGROUND_UNAVAILABLE = '无法读取这本书的自动更新分析设置。';
 export const BACKGROUND_ENROLLED_STATUS = '已登记后台处理';
-export const BACKGROUND_REVOKED_STATUS = '已撤销后台处理登记';
-/** Issue #864: the scope, the required ceiling, and 暂停 / 续行. */
+export const BACKGROUND_REVOKED_STATUS = '已关闭空闲时自动更新分析';
+/** Issue #864: the scope, the required ceiling, and 暂停 / 继续. */
 export const BACKGROUND_SCOPE_LEGEND = '范围';
-export const BACKGROUND_CEILING_LABEL = '预算上限 · tokens · 必填';
-export const BACKGROUND_CEILING_FIRST = '请先填写预算上限。';
+/** The developer layer's ceiling field, which takes a token count (the ordinary mode chooses a level). */
+export const backgroundCeilingLabel = (): string => technicalWords('预算上限 · tokens · 必填', BACKGROUND_CEILING_ORDINARY_LABEL);
+export const BACKGROUND_CEILING_FIRST = '请先填写用量上限。';
 export const BACKGROUND_PAUSE = '暂停';
-export const BACKGROUND_RESUME = '续行';
-export const BACKGROUND_PAUSED_STATUS = '已暂停后台处理登记';
-export const BACKGROUND_RESUMED_STATUS = '后台处理登记已续行';
-export const BACKGROUND_REPORT_HEADING = '后台处理登记';
+export const BACKGROUND_RESUME = '继续';
+export const BACKGROUND_PAUSED_STATUS = '已暂停空闲时自动更新分析';
+export const BACKGROUND_RESUMED_STATUS = '空闲时自动更新分析已继续';
+export const BACKGROUND_REPORT_HEADING = '空闲时自动更新分析';
 
 /** The ceiling split equally among a scope's Books in order, the remainder to the first — the service's rule, said before 登记. */
 export function backgroundCeilingShares(ceiling: number, books: number): number[] {
@@ -59,22 +76,22 @@ export function backgroundCeilingOf(text: string, books: number, max: number): n
 /** What each Book's background Runs are held to under the ceiling typed so far. */
 export function backgroundSharePreview(ceiling: number, books: ReadonlyArray<{ title: string }>): string {
   // Ordinary mode says what the ceiling does, not its token count (Issue #1431 item 81).
-  if (!technicalLayerVisible) return books.length <= 1 ? '每次后台分析用到上限就停下。' : `${books.length} 本书平分这个上限，每本书的每次后台分析用到它那一份就停下。`;
-  if (books.length <= 1) return `每次后台分析最多用 ${ceiling} tokens，达到就停下。`;
+  const ordinary = books.length <= 1 ? '每次后台分析用到上限就停下。' : `${books.length} 本书平分这个上限，每本书的每次后台分析用到它那一份就停下。`;
+  if (books.length <= 1) return technicalWords(`每次后台分析最多用 ${ceiling} tokens，达到就停下。`, ordinary);
   const shares = backgroundCeilingShares(ceiling, books.length);
   const each = shares[books.length - 1]!;
-  return shares[0] === each
+  return technicalWords(shares[0] === each
     ? `${books.length} 本书各 ${each} tokens：每本书的每次后台分析最多用它那一份。`
-    : `${books.length} 本书各 ${each} tokens，第一本《${books[0]!.title}》${shares[0]} tokens：每本书的每次后台分析最多用它那一份。`;
+    : `${books.length} 本书各 ${each} tokens，第一本《${books[0]!.title}》${shares[0]} tokens：每本书的每次后台分析最多用它那一份。`, ordinary);
 }
 
 /** `范围：书系《乙》的 3 本书 · 预算上限 900 tokens，本书份额 300 tokens（第 2 本）`. */
 export function backgroundCeilingLine(enrollment: NonNullable<BackgroundAnalysisEnrollmentProjection['enrollment']>): string {
   if (enrollment.ceilingTokens === null || enrollment.shareTokens === null) return `范围：${enrollment.scope.label} · ${technicalWords('这份登记没有预算上限', '没有用量上限')}`;
-  if (!technicalLayerVisible) return `范围：${enrollment.scope.label} · 已设用量上限`;
-  return enrollment.scope.kind === 'book'
+  return technicalWords(enrollment.scope.kind === 'book'
     ? `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens`
-    : `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens，本书份额 ${enrollment.shareTokens} tokens · 第 ${enrollment.scope.position} 本`;
+    : `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens，本书份额 ${enrollment.shareTokens} tokens · 第 ${enrollment.scope.position} 本`,
+  `范围：${enrollment.scope.label} · 已设用量上限`);
 }
 
 /** The Books of a Series or all-Books scope the dispatcher's latest look skipped: `这次跳过：《甲》（…）；《丙》（…）`. */
@@ -100,7 +117,9 @@ export function backgroundEnrollmentLine(
   enrollment: NonNullable<BackgroundAnalysisEnrollmentProjection['enrollment']>,
   instant: (value: string) => string,
 ): string {
-  return `${enrollment.name} · ${enrollment.startingPointLabel} · ${enrollment.enrolledBy}登记于 ${instant(enrollment.enrolledAt)}`;
+  // Ordinary mode: the enrollment's numbered name is the developer layer's (Issue #1531); the date tells one from another.
+  return technicalWords(`${enrollment.name} · ${enrollment.startingPointLabel} · ${enrollment.enrolledBy}登记于 ${instant(enrollment.enrolledAt)}`,
+    `${enrollment.startingPointLabel} · ${enrollment.enrolledBy}打开于 ${instant(enrollment.enrolledAt)}`);
 }
 
 /** One Run the Enrollment started: `同步到当前稿件 · 按第 1 版登记 · 授权于 …`; a version from other data reads without its number. */
@@ -118,7 +137,7 @@ export function backgroundHistoryLine(
   entry: BackgroundAnalysisEnrollmentProjection['history'][number],
   instant: (value: string) => string,
 ): string {
-  return `${technicalWords(`第 ${entry.ordinal} 版`, '版本')} · ${entry.stateLabel} · ${instant(entry.recordedAt)}`;
+  return `${technicalWords(`第 ${entry.ordinal} 版 · `)}${entry.stateLabel} · ${instant(entry.recordedAt)}`;
 }
 
 /** The dispatcher's latest look at the Book: `AI7 上次查看：… · <what it found>`. */
@@ -132,7 +151,7 @@ export function backgroundNotStartedLine(note: NonNullable<BackgroundAnalysisEnr
 }
 
 /** ②A's card beside a plan the Enrollment prepared and did not start (#713 review, P2-2). */
-export const BACKGROUND_PREPARED_PLAN_NOTE = '这份计划是后台处理登记准备的，没有开始，也不是你准备的；可以看过后自己开始，或另外准备一份。';
+export const BACKGROUND_PREPARED_PLAN_NOTE = '这份计划是空闲时自动更新分析准备的，没有开始，也不是你准备的；可以看过后自己开始，或另外准备一份。';
 
 /** `还有 N 项更早的` beneath the ten newest Runs. */
 export function backgroundStartedMoreLine(hidden: number): string {

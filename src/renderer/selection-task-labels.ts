@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import { technicalWords } from './technical-layer.js';
 import type {
   BaselineAnalysisGoal,
@@ -23,7 +24,7 @@ export const SELECTION_TASK_PREPARE = '开始任务';
  * What the Task is given, said before anything is prepared (TASK-002, TASK-003): the paragraph and nothing around it, read the
  * way every range Task reads it, with the plan seen before the start and no quick start.
  */
-export const SELECTION_TASK_NOTE = '任务只针对所选段落，按包含它的阅读范围读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。';
+export const SELECTION_TASK_NOTE = '任务只针对所选段落，按包含它的部分读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。';
 /**
  * The exact context the composer carries (TASK-002; Issue #423 review, P3-6): the Book, the revision and journal position the
  * manuscript stands at — 准备任务 saves the Task's own revision from it — how much is selected, and which paragraph it is in.
@@ -55,7 +56,7 @@ export function selectionProcedureLabel(title: string): string {
 }
 export function selectionProcedureHint(version: number, steps: number, chosenApart: ReadonlyArray<string>): string {
   const apart = chosenApart.length === 0 ? '' : ` · ${chosenApart.map((label) => `「${label}」`).join('、')}另行勾选`;
-  return `可复用工序 · ${technicalWords(`第 ${version} 版`, '版本')} · ${steps} 步${apart}`;
+  return `可复用工序${technicalWords(` · 第 ${version} 版`)} · ${steps} 步${apart}`;
 }
 export const SELECTION_PROCEDURE_NO_VERSION = '现在没有可以运行的版本';
 export function selectionProcedureStepReason(label: string, reason: string): string {
@@ -127,7 +128,7 @@ export function selectionTaskGroupNote(procedures: ReadonlyArray<SelectionProced
  * A Production Document's manuscript (Issue #423 review, P3-5): no Task reads a document yet, so neither selection Task is
  * offered there. TASK-001 names Editorial Deliverables as a composer host too — an Owner question recorded on the PR.
  */
-export const SELECTION_TASK_DOCUMENT_REASON = '在交付物工具栏点击「发起任务」，以当前文档为目标。';
+export const SELECTION_TASK_DOCUMENT_REASON = '在交付物工具栏点击「发起任务」，以当前衍生稿件为目标。';
 
 export const SELECTION_TASK_STATUS = {
   reading: '正在读取可以就这段发起的工序…',
@@ -182,7 +183,7 @@ export function selectionTaskChoices(
   if (analysis !== null) {
     const action = controls?.actions['reanalyze-range'] ?? null;
     if (controls === null || action === null) reasons.push(SELECTION_TASK_NO_BASELINE);
-    else if (controls.blockedByActiveRun) reasons.push(controls.blockedReason ?? action.unavailableReason ?? SELECTION_TASK_NO_BASELINE);
+    else if (controls.blockedByActiveRun) reasons.push(serviceWords(controls.blockedReason ?? action.unavailableReason) ?? SELECTION_TASK_NO_BASELINE);
     else if (!action.available) reasons.push(action.unavailableReason ?? SELECTION_TASK_NO_BASELINE);
     else choices.push({ kind: 'reanalyze', value: 'reanalyze-range', label: SELECTION_TASK_REANALYZE, goal: action.goal as BaselineAnalysisGoal });
   }

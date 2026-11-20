@@ -6,9 +6,9 @@ import { technicalLayerVisible, technicalWords } from './technical-layer.js';
  * What a draft references, the four consequence rows and every reason are the service's words, shown as they come; these are
  * the page's own.
  */
-export const WRITING_HEADING = '新建文档 · 写作任务';
-export const WRITING_LEDE = '选择文档类型，AI7 参考资料起草；范例只参照，不复制。';
-export const WRITING_TYPE_LEGEND = '文档类型';
+export const WRITING_HEADING = '新建衍生稿件 · 写作任务';
+export const WRITING_LEDE = '选择衍生稿件类型，AI7 参考资料起草；范例只参照，不复制。';
+export const WRITING_TYPE_LEGEND = '衍生稿件类型';
 export const WRITING_REFERENCE_HEADING = 'AI7 会参考';
 /**
  * The reference set's rows, in the order editor-surfaces §9 names them, with 资料库 — the items the editor ticks under 允许参考
@@ -17,7 +17,7 @@ export const WRITING_REFERENCE_HEADING = 'AI7 会参考';
 export const WRITING_REFERENCE_TERMS = ['梗概与人物', '评估结论与营销要点', '范例', '资料库', '图书信息'] as const;
 /** One 资料库 item as its box reads: its title, its size as its card states it, and whose it is. */
 export function writingMaterialLabel(item: Pick<WritingTaskMaterialProjection, 'title' | 'characters' | 'scope'>): string {
-  return `《${item.title}》 · ${item.characters > 0 ? `已提取 ${item.characters.toLocaleString('en-US')} 字` : '字数未知'} · ${item.scope === 'book' ? '本书资料' : '社级资料'}`;
+  return `《${item.title}》 · ${item.characters > 0 ? `已提取 ${item.characters.toLocaleString('en-US')} 字` : '字数未知'} · ${item.scope === 'book' ? '本书资料' : '本社资料'}`;
 }
 /** Why a further item cannot be ticked once four are (the service's own bound, MAX_WRITING_MATERIALS). */
 export const WRITING_MATERIALS_AT_LIMIT = '写作任务最多参考 4 份资料库资料；请少选几份。';
@@ -33,7 +33,7 @@ export const WRITING_EXEMPLAR_PICK_TYPE = '选好类型后显示';
 import { MAX_WRITING_AUDIENCE_GRAPHEMES, MAX_WRITING_CHANNEL_GRAPHEMES, MAX_WRITING_REQUIREMENTS_GRAPHEMES } from '../shared/protocol.js';
 
 export const WRITING_FIELD_LABELS = { audience: '受众', channel: '渠道', requirements: '其他要求 · 可不填' } as const;
-export const WRITING_FIELD_HINTS = { audience: '这份文档写给谁看', channel: '会在哪里发布或使用', requirements: '篇幅、语气或必须写到的内容' } as const;
+export const WRITING_FIELD_HINTS = { audience: '这份衍生稿件写给谁看', channel: '会在哪里发布或使用', requirements: '篇幅、语气或必须写到的内容' } as const;
 /** How many characters each field takes, as the service bounds it (#688 review): the service's own words when one is longer. */
 export const WRITING_FIELD_MOST = { audience: MAX_WRITING_AUDIENCE_GRAPHEMES, channel: MAX_WRITING_CHANNEL_GRAPHEMES, requirements: MAX_WRITING_REQUIREMENTS_GRAPHEMES } as const;
 export function writingFieldTooLong(key: keyof typeof WRITING_FIELD_MOST): string {
@@ -56,14 +56,14 @@ export function writingConsequenceRows(consequences: WritingTaskProjection['cons
   ];
 }
 export const WRITING_ACTIONS = {
-  open: '新建文档…',
+  open: '新建衍生稿件…',
   plan: '先看计划',
   quick: '快速开始',
   cancel: '取消',
   openTask: '查看任务',
   openDraft: '打开草稿',
 } as const;
-export const WRITING_PICK_TYPE = '请选择一类文档。';
+export const WRITING_PICK_TYPE = '请选择一类衍生稿件。';
 export const WRITING_STATUS = {
   preparing: '正在准备写作任务的计划…',
   prepared: '写作任务的计划已准备；请在任务面看过计划再开始。',
@@ -73,11 +73,11 @@ export const WRITING_STATUS = {
   quickFailed: '快速开始没有开始任务；计划已准备，可在任务计划里开始。',
   quickNoPlan: '这份计划还没有冻结，没有按规则开始；请看过计划后再开始。',
   openFailed: '草稿没有打开。',
-  unavailable: '新建文档 · 写作任务暂不可用。',
+  unavailable: '新建衍生稿件 · 写作任务暂不可用。',
 } as const;
 
 /** A writing rule covers one house type (#701 review P2-1): until one is chosen there is nothing to say of 快速开始. */
-export const WRITING_QUICK_PICK_TYPE = '选好类型后显示：快速开始按这一类文档的默认执行规则开始。';
+export const WRITING_QUICK_PICK_TYPE = '选好类型后显示：快速开始按这一类衍生稿件的默认执行规则开始。';
 /**
  * A quick start whose call failed: the service's words, if any — which may say the plan can no longer start, so no promise
  * that it can is added to them (#701 re-review P3-2) — or, with none, that the plan stands prepared.
