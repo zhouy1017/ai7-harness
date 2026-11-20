@@ -278,6 +278,22 @@ export function unitContentDigest(ownBlockTexts) {
 const TOOL_TURN_DIGEST_SCHEMA = 'ai7.model-fixture.tool-turn/1';
 const IDENTITY_TOKEN = /(?<![A-Za-z0-9_-])(?:blk_[0-9a-f]{24}|[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_-])/gu;
 
+/** A scored list with each run of equal scores in identity-free content order: only tied candidates can move. Any other text is returned as it is. */
+function tiesInContentOrder(text) {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return text; }
+  if (!Array.isArray(parsed) || parsed.length < 2 || !parsed.every((entry) => typeof entry === 'object' && entry !== null && typeof entry.score === 'number')) return text;
+  const content = (entry) => JSON.stringify(entry).replace(IDENTITY_TOKEN, '~');
+  const ordered = [];
+  for (let from = 0; from < parsed.length;) {
+    let to = from + 1;
+    while (to < parsed.length && parsed[to].score === parsed[from].score) to += 1;
+    ordered.push(...parsed.slice(from, to).sort((a, b) => (content(a) < content(b) ? -1 : content(a) > content(b) ? 1 : 0)));
+    from = to;
+  }
+  return JSON.stringify(ordered);
+}
+
 /** The exchange with every per-import identity renamed by first appearance: the unit's own blocks `{{block:N}}`, the rest `{{tool-id:K}}`. */
 export function normalizeToolExchange(rounds, ownBlockIds) {
   const names = new Map(ownBlockIds.map((id, index) => [id, `{{block:${index + 1}}}`]));
@@ -293,7 +309,7 @@ export function normalizeToolExchange(rounds, ownBlockIds) {
       calls: round.calls.map((call) => ({ name: call.name, arguments: rename(canonicalArguments(call.arguments)) })),
       results: round.calls.map((call) => {
         const result = round.results.find((candidate) => candidate.callId === call.id);
-        return { text: rename(result.text), isError: result.isError };
+        return { text: rename(tiesInContentOrder(result.text)), isError: result.isError };
       }),
     })),
     foreign,
@@ -1338,7 +1354,7 @@ export function redactUnitResultText(text, ownBlockTexts, carriedBlockTexts = ow
 function mapToolCalls(message, usage, request) {
   const carried = request.carriedBlockTexts ?? [];
   refuse(message.content === null || message.content === undefined || message.content === '', 'FIXTURE_GEN/response-shape-unsupported', '带工具调用的回答同时含有正文，夹具无法如实回放。');
-  refuse(message.tool_calls.length <= 5, 'FIXTURE_GEN/response-shape-unsupported', '一次回答的工具调用超出夹具边界。');
+  refuse(message.tool_calls.length <= 16, 'FIXTURE_GEN/response-shape-unsupported', '一次回答的工具调用超出夹具边界。');
   const calls = message.tool_calls.map((call) => {
     refuse(call !== null && typeof call === 'object' && call.type === 'function' && call.function !== null && typeof call.function === 'object' &&
       /^[a-z][a-z_]{0,63}$/u.test(call.function.name) && typeof call.function.arguments === 'string', 'FIXTURE_GEN/response-shape-unsupported', '工具调用的形态无效。');

@@ -1,7 +1,7 @@
 {
   "schema": "ai7.model-fixture/1",
   "identity": "sample1-recorded-v2-editorial-quality-review",
-  "description": "Exact sample1 Review Run (typos-and-usage, style-and-format, literary-expression, run synthesis) of the #1074 measured editorial-quality pass on Go deepseek-v4.1-flash under developer-live, 2026-11-18: 38 of its 72 captures; the 34 tool-turn captures are not convertible yet (#1598)",
+  "description": "Exact sample1 Review Run (typos-and-usage, style-and-format, literary-expression, run synthesis) of the #1074 measured editorial-quality pass on Go deepseek-v4.1-flash under developer-live, 2026-11-18: all 72 captures, the 34 tool-turn ones converted under #1598",
   "basedOn": null,
   "provider": "ai7-local-deterministic",
   "model": "ai7-deterministic-fixture",
@@ -42,6 +42,229 @@
         },
         "identityMap": [],
         "fixtureResponseDigest": "bf8950b6d37b4d11f3fc5469f512d6845b8d64f2cf23fc1fba85bf7e00425171"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "4dc4a182b9d228365376dfca483d3264c49c8c03d79cd5e50caeaf54da803950",
+      "contentDigest": "30b634d2e636a3bf1e188be27744461154be936fe298bf09e5daf5cda6037eef",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "极端少数之人 皓首苍颜 曾本之",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "一九八○年代最后的那个夏天 二十多年前",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 2408,
+          "outputTokens": 3904
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/137",
+        "selectedItemId": "S40/review-first/137",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "taskPromptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "capturedAt": "2026-11-18T15:54:37.586Z",
+        "providerRequestDigest": "3546b9e2f1ae27113613475dc7e552941f5845d2975237a8ff4890113c6678be",
+        "providerResponseDigest": "12645ed0c2822561ac2b8a0f49329a131ee894a0f38757f16bf2683cb89f82b5",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "f45675193a94bff2a312a6a642d2a3db832754a4905f4b877d38bc07c293c8b8",
+        "generation": "97af74794415d08974cf4e6cfa8bcf8e2e83bcc8b9eb00ec23d226b5fea7e0e7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-2"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "4c2bae26312bab1af9500e198c95f59bfd3c62f69a429f7d1a13c731617ef60a"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "be4f9b73d23a2d0c53c680e661f67c4e47ba600fbd98bc84b592ec9e3d957e80",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:3}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:11}}"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 8901,
+          "outputTokens": 196
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/138",
+        "selectedItemId": "S40/review-first/138",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "taskPromptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "capturedAt": "2026-11-18T15:55:41.106Z",
+        "providerRequestDigest": "ab15824f02777227e541c44bbafc71846a88076f6e4320a32b1ba725a95efe6d",
+        "providerResponseDigest": "ccdd18dad64dbfc2897fabd6376a4a0a747df56db955392626079742fff8e4a3",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "9bac363f3a3fde353bdb6efbe6e31fee875a7ebf1adf8f1ebf72fbe135df1d00",
+        "generation": "97af74794415d08974cf4e6cfa8bcf8e2e83bcc8b9eb00ec23d226b5fea7e0e7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-2/tool-turn-2"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{tool-id:3}}",
+            "identity": "6e7174546e35581dd30691b4c01c77fa82070b8da5ba61bdbae30a39cf4689ac"
+          },
+          {
+            "placeholder": "{{tool-id:11}}",
+            "identity": "a02d5afd9bef6664810840d0ae440c49aa8cc5daf6c7cf0e3934ddd41aa38b16"
+          }
+        ],
+        "fixtureResponseDigest": "65ad92ffc57a199fe7164c66ee78604be115350b22034ee21ffcc9e1b03c9f16"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "a2f5f1027f2437adcd581f4d0b185630888972f3d23668d9c857ffb78fee1e7a",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 4,
+              "query": "一般人通信往来都是用简体字 邮递员送来的书信中偶尔有英法德日等文字",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 4,
+              "query": "省博物馆背后，进东湖公园大门，过小梅岭、可竹轩，道路尽头俗称老鼠尾的半岛最前端先月亭前",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 4,
+              "query": "有些无聊的曾本之捡起身边的一块蚌壳 打水漂 先月亭影子顶尖之处",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 9802,
+          "outputTokens": 567
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/139",
+        "selectedItemId": "S40/review-first/139",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "taskPromptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "capturedAt": "2026-11-18T15:55:51.569Z",
+        "providerRequestDigest": "b4274b272d0bb0342c0d69dc3431028e6dfafefaff4b10d6fd9fd16e56f55232",
+        "providerResponseDigest": "5064c868394172bb69942949c28eec2d1a7ff8c1a7923e4b61d6efe027e9e696",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "b1704540921f3fe4fabf66f5480e527186bf5592733ab38d4e1aea72bedbd9c8",
+        "generation": "97af74794415d08974cf4e6cfa8bcf8e2e83bcc8b9eb00ec23d226b5fea7e0e7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-2/tool-turn-4"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "4dda081795b1ec021e1d663cb62a9bcf2069d8031fa3a377dc18f370662dd252"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "26ef2134448a2a42723dd87b9e29965845f1ec3e12fbfb7a537a7083b98d59c5",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"极端少数之人\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"「极端」修饰「少数」不合汉语搭配习惯，与中心语「之人」组合生硬；通常说「极少数人」。\",\"replacement\":\"极少数人\",\"clauseId\":\"typos-and-usage/2\"},{\"quote\":\"一九八○年代\",\"blockOrdinal\":7,\"severity\":\"note\",\"note\":\"按出版物数字用法，年代宜用阿拉伯数字，作「1980年代」或「20世纪80年代」；若保留汉字数字，零位规范字形应为「〇」，不用「○」。\",\"replacement\":\"1980年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "usage": {
+          "inputTokens": 11422,
+          "outputTokens": 2198
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/140",
+        "selectedItemId": "S40/review-first/140",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "taskPromptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "capturedAt": "2026-11-18T15:56:04.451Z",
+        "providerRequestDigest": "2c8dbb396ce953939b4657d4702c5382e8a1db4667067f73a45f6e6f7e090bce",
+        "providerResponseDigest": "7f58ae08e68cfeab3804ca1dbf42456ab1918424d3a69e17c04bfcf21a81fd66",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "53c7659da78baa1c729ede4ea9ccc41690aec76fa49d2addec8d411e31963d60",
+        "generation": "97af74794415d08974cf4e6cfa8bcf8e2e83bcc8b9eb00ec23d226b5fea7e0e7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-2/tool-turn-7"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "95782ceaec4251048b3cb33bef0be7ce4560233f1463f110e3c9009b9115bbbb"
       }
     },
     {
@@ -232,6 +455,171 @@
         },
         "identityMap": [],
         "fixtureResponseDigest": "04e7fd66e77428ccea455cc37a4e7d2ba196032b2a12386a88b8d721a6bea5dd"
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "96bd2f5f447bae9a237f6512a51fb8196a881d363562f56c50f081283e0d9a3f",
+      "contentDigest": "baa26a771e30cec986053cba5981096b238feef12305bd62e9312c133af4f3d0",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "将伸进口袋的手，原样退出来",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "必须在门外小声叫上几次 只要他将书房的门关起来",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "接下来安静在外面敲门",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 2026,
+          "outputTokens": 3385
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/146",
+        "selectedItemId": "S40/review-first/146",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "taskPromptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "capturedAt": "2026-11-18T16:03:46.880Z",
+        "providerRequestDigest": "a7544018fe98a197f2f4c76ad17cefd3e16c15b6dca552a322d6ff0bb51b4c58",
+        "providerResponseDigest": "f81a0d709f3f1b41e329690f5edbd2a13dae9e06cd738b15722d43ff4a85fe28",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "9c1abb24d2e0192141bba4584ff1e63d4469c036a288d71b0a63ef40054e73a3",
+        "generation": "97af74794415d08974cf4e6cfa8bcf8e2e83bcc8b9eb00ec23d226b5fea7e0e7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-8"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "4e0614b977ab29fe56b716e202f9f4f9e30f199932dc46c3afeec5ea3c22d055"
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "1949e8ef20c45e004f562486ec08a6443e1b189affaa7990f2e975ee0f2b5354",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:3}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:13}}"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 9153,
+          "outputTokens": 245
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/147",
+        "selectedItemId": "S40/review-first/147",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "taskPromptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "capturedAt": "2026-11-18T16:04:41.344Z",
+        "providerRequestDigest": "0e50fece85d7cae10ee45588cd769f575428d053e2fb5c4a0fcf73b0222c8ccb",
+        "providerResponseDigest": "e55a45f482f44166d81087439393f30f8242d70b2e41e4a5ec1f1631657ea22e",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "0de5cbe63e923fbddbe8c1638f95df02745dc9581a439a4862b99184b62307a2",
+        "generation": "97af74794415d08974cf4e6cfa8bcf8e2e83bcc8b9eb00ec23d226b5fea7e0e7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-8/tool-turn-3"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{tool-id:3}}",
+            "identity": "51529b464c2fc774d62f08a87eb64936241e72939b5854862d3099d179d2adbe"
+          },
+          {
+            "placeholder": "{{tool-id:13}}",
+            "identity": "3ee18963c4ad6d1e159ea8c847f028b044800c0c3a1a32d143aa9c6e1b4d5503"
+          }
+        ],
+        "fixtureResponseDigest": "356c73c4c33cfaf409881874ffa21574bb07d5dd3b6951013a522492a9b5dd56"
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "77486050b33928f1fa76bd42a16d4cf3bb707ec77791b8d40b7e7f1115aef93e",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[{\"quote\":\"必须在门外小声叫上几次\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"关联词搭配不当：\\\"只要……\\\"应与\\\"就\\\"呼应，句中用\\\"必须\\\"，前后不成套，读来不通顺。\",\"replacement\":\"就得在门外小声叫上几次\",\"clauseId\":\"typos-and-usage/2\"},{\"quote\":\"将伸进口袋的手，原样退出来\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"\\\"手\\\"与\\\"退出来\\\"搭配不当，手不宜说\\\"退出来\\\"，宜用\\\"抽出来\\\"；宾语\\\"手\\\"后的逗号把动宾隔开，不合标点规范，应删。\",\"replacement\":\"将伸进口袋的手原样抽出来\",\"clauseId\":\"typos-and-usage/2\"},{\"quote\":\"接下来安静在外面敲门\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"\\\"接下来\\\"与人物名\\\"安静\\\"紧连，易被误读为\\\"接下来安静（下来）\\\"；在\\\"接下来\\\"后加逗号可消除歧义，也符合状语后停顿的用法。\",\"replacement\":\"接下来，安静在外面敲门\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "usage": {
+          "inputTokens": 10120,
+          "outputTokens": 655
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/148",
+        "selectedItemId": "S40/review-first/148",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "taskPromptContractDigest": "4a850e60b3792afa78ec337e89e2db32e0bad5d2dc3ef71e71252212d6a31f7b",
+        "capturedAt": "2026-11-18T16:04:47.526Z",
+        "providerRequestDigest": "9bfa0a51007f0d646752ff8d78227a80470b68bb9f72d17ef9ba279398211b23",
+        "providerResponseDigest": "44fda3c98654c32a503e19111053b9326d30c69803eae6535b04ab2fe65a8223",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "02bdf73c9f65012b518e8c7d1619bc20e02ac549051f813ec3a0b4319186474c",
+        "generation": "97af74794415d08974cf4e6cfa8bcf8e2e83bcc8b9eb00ec23d226b5fea7e0e7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-8/tool-turn-5"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "f5676c8721f20bd09c6f25ab7bbc9187fd8ffd63956aa9ce1f28ba4393768a1c"
       }
     },
     {
@@ -898,6 +1286,367 @@
       }
     },
     {
+      "unitOrdinal": 6,
+      "requestDigest": "09a88f10f7b001118d9d296e1bb839eaf5c6e16bd0e63ab256dfad4b4848851b",
+      "contentDigest": "81cda8000df69574b2084ed55f80191148b5a479aa2c9916d8c463f40555a804",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "马跃之 专著 书名 《 丝绸 春秋墓葬",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 8
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "楚庄王 三年不鸣 一鸣惊人 引号",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 8
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 2620,
+          "outputTokens": 1950
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/163",
+        "selectedItemId": "S40/review-first/163",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "taskPromptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "capturedAt": "2026-11-18T16:14:57.551Z",
+        "providerRequestDigest": "b6d4b33c980a1c175bda620315a7f8e76f69142edb138904a425142055613a62",
+        "providerResponseDigest": "5cfb1d07758250f5d9904537a2b6f16b1cf1d12a879dbc1f19102cff9b6dfd69",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "3d084d6ba102b56482f3087660e1fd3dc7af86751339905578b8facd5ca34d6f",
+        "generation": "f77ed050c65454f726017471791e0837cc66a7fd6ca34e0dd43e804f813e4d6a",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-6"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "656f5a4baf7872fe7c5beabb246c1b70473ce061866150c0cee5407c30647f0f"
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "4a490671619c252adf9e67b9068d8492bc43b37244249eb57807f69d48db3429",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 8,
+              "query": "《楚学》 著作 《》 书名号 新书 专著",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 6,
+              "query": "二十一世纪 二十世纪 年代 阿拉伯数字",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 8866,
+          "outputTokens": 292
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/164",
+        "selectedItemId": "S40/review-first/164",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "taskPromptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "capturedAt": "2026-11-18T16:15:29.778Z",
+        "providerRequestDigest": "a69edbf7946a1889f5bd429f2d24607579e5c30fe0b2ab9cf2f4ff36e805d2b4",
+        "providerResponseDigest": "b3a002ea328dfdc83f949330442bdac63e0917cf218d7043323fac6b608a6d8e",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "e21b47ddf407ed0a0425f761fe0fd42d09ad373c635c3064d238675d2caabd79",
+        "generation": "f77ed050c65454f726017471791e0837cc66a7fd6ca34e0dd43e804f813e4d6a",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-6/tool-turn-2"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "1e17f4a5f146f0c0f5d42f8873bfd92be0e933342dbb17ee0b910494cb9f439c"
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "5baed29c3ae7e323f9de7a1592043cdaa236e5480107e56e63198a1e1904fa1f",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 8,
+              "query": "《 书名 著作 出版 论文集 专著书名号",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 8,
+              "query": "公里 米 长度 计量 面积 平方米",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12894,
+          "outputTokens": 918
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/165",
+        "selectedItemId": "S40/review-first/165",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "taskPromptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "capturedAt": "2026-11-18T16:15:38.297Z",
+        "providerRequestDigest": "8296b8097d9c103854aa57eeb5aba90c3cb67fc87b90da3e5e57adedecd4ec6a",
+        "providerResponseDigest": "03ea19e7188e071e01e0a001de4b8d4c7fd275b4395e42a03708e855cb766fce",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "9679656ebb3ae68b314ce99ec2532257dfa5305d9816485dfb4cb82aaed03492",
+        "generation": "f77ed050c65454f726017471791e0837cc66a7fd6ca34e0dd43e804f813e4d6a",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-6/tool-turn-4"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "36a59613e5c450b43c2dd1b9c89561874dcef5a93d4ec62d9b5afcbab3d4ea48"
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "f8248d92b338d3bb6f86fda55dc5c9b9660f7eed4628444fe3b50d1a7b8b0767",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[{\"quote\":\"其中就有马跃之的如何保护春秋墓葬中出土丝绸的专著\",\"blockOrdinal\":2,\"severity\":\"should\",\"clauseId\":\"style-and-format/3\",\"note\":\"此处把专著题名“如何保护春秋墓葬中出土丝绸”直接连写进句子，未加书名号；本单元及相邻文字中凡涉及书刊题名处均未见书名号，题名呈现方式需与全书约定统一。建议由编辑核定该题名是否加书名号，并统一全篇题名的标示方式。\"},{\"quote\":\"三年不鸣，一鸣惊人，三年不飞，一飞冲天\",\"blockOrdinal\":4,\"severity\":\"note\",\"clauseId\":\"style-and-format/3\",\"note\":\"该处为古典成句的引用，夹在人物话语内既未加引号，也未作任何标示；而同一段与相邻各段的人物原话均用引号标出。引文与话语的标示方式在同一单元内不一致，宜确定此类成句是否加引号或改为不加标示的引用惯例。\"}]}",
+        "usage": {
+          "inputTokens": 15736,
+          "outputTokens": 2440
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/166",
+        "selectedItemId": "S40/review-first/166",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "taskPromptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "capturedAt": "2026-11-18T16:15:57.560Z",
+        "providerRequestDigest": "8f187f71b40f4a81c4c646f558d22952def461a125f0333fa7ff8a77600b6396",
+        "providerResponseDigest": "b0360b705fbebee12361ed567ba1f8cf8ae4388d902bec6043f467cba1bda79f",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "4ab845115e2caa97ad5cb157aaeb852605df2a798ec4e155ad26cbfc010fe4fc",
+        "generation": "f77ed050c65454f726017471791e0837cc66a7fd6ca34e0dd43e804f813e4d6a",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-6/tool-turn-6"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "208b58ff4ec4d20d79b16739af29b8c5f64558d71a6bb7594d40b5b62dd1951c"
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "22fb67273ebbdd942490b65f4cb5a2ea27bb3531b94ea05b2fab5023e40cb24b",
+      "contentDigest": "ff158e0f8eec32fdf485f964e2c66d92fed84cbf57de527a97b67c515b9aad50",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "一九六六年 出土 九鼎七簋",
+              "k": 5
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "曾侯乙尊盘 照片 出土 1978",
+              "k": 5
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 2886,
+          "outputTokens": 1665
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/167",
+        "selectedItemId": "S40/review-first/167",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "taskPromptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "capturedAt": "2026-11-18T16:16:40.323Z",
+        "providerRequestDigest": "91156262d59d64625207063fd2c64b15631b6aa0bb32ae74c7a23a82648df02a",
+        "providerResponseDigest": "ecdf13a9dd12ff8eded379fc94b7e0da75f6829a703c29218013ab55b319cc2b",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "890e48572af68fafbc6efb147b3d7051813d32bead728681fc7250c5f0e70d9a",
+        "generation": "f77ed050c65454f726017471791e0837cc66a7fd6ca34e0dd43e804f813e4d6a",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-7"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "db013c6fd4468486f2db1757933c5a2cc7950a2c481b6d7c955a96e4e7a547cc"
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "5f6bbc0c17349aa9c84a6b2fb6976f99c7f74103296eb0ff8a590ac5fcb46cc7",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:4}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:3}}"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 7257,
+          "outputTokens": 1974
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/168",
+        "selectedItemId": "S40/review-first/168",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "taskPromptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "capturedAt": "2026-11-18T16:17:09.606Z",
+        "providerRequestDigest": "13caf462a502dc42ad50255d3e7cab433826d715b7df945f533af5b888d6aefd",
+        "providerResponseDigest": "6131a4f7367ccf35ca1f1f00ae9e806b7aee89101712f71c78926afb15642243",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "171b11ccf527e21b67a1b8bbf58fd12a36d6dd149078c44828ec16485f9f3bcb",
+        "generation": "f77ed050c65454f726017471791e0837cc66a7fd6ca34e0dd43e804f813e4d6a",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-7/tool-turn-2"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{tool-id:3}}",
+            "identity": "dac70d13d85ac3bb390832b1b9b2d693459c9a706c80c8685a17b144af9916ef"
+          },
+          {
+            "placeholder": "{{tool-id:4}}",
+            "identity": "0b4a3df4843b86348c496822ac76541cc567e8525b1043823c7345f9203ccfd4"
+          }
+        ],
+        "fixtureResponseDigest": "756a9d87765b4f74f05b52931383cf0784e22b63cec9a0a6b8ec7fd7154daca1"
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "b7782f7f918eba1546d3ea8352f2deedceb67e62ff7e2496840cc71a2f4b4243",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[{\"quote\":\"那幅精心装饰的曾侯乙尊盘照片\",\"blockOrdinal\":2,\"severity\":\"note\",\"clauseId\":\"style-and-format/2\",\"note\":\"同一张照片在本段先用“幅”（墙上那幅……），紧接下一句改用“张”（这张……），同一物件的量词前后不一。属表述方式不统一，建议编辑统一量词用法，与全书称量表述保持一致。\"}]}",
+        "usage": {
+          "inputTokens": 10043,
+          "outputTokens": 434
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/169",
+        "selectedItemId": "S40/review-first/169",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "taskPromptContractDigest": "4befe60e301f0f0d06db1547c190f70221d448f4c74a15e55653365d7626f6d6",
+        "capturedAt": "2026-11-18T16:17:45.821Z",
+        "providerRequestDigest": "28fc888a993bec3be1691b9456027cd87db4bec6eff5d0fce1d04fc365bf01ce",
+        "providerResponseDigest": "f4f057436a8435ddbb2138094f309a4b4f657647014d2f59b0825196c956d6bc",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "cc7db305196ccb85e2c9c224ac355f3854dd972df9fabc73f26f148859fa7962",
+        "generation": "f77ed050c65454f726017471791e0837cc66a7fd6ca34e0dd43e804f813e4d6a",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-7/tool-turn-4"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "4a4831ac17599ff007ce37543c2203287d6c2c66aeb4716776196d34ebb41f74"
+      }
+    },
+    {
       "unitOrdinal": 8,
       "requestDigest": "671551fb2ab8ff7bf658a9648925320353ebd858e68602df4098fc671a67dfd1",
       "contentDigest": "baa26a771e30cec986053cba5981096b238feef12305bd62e9312c133af4f3d0",
@@ -1249,6 +1998,854 @@
       }
     },
     {
+      "unitOrdinal": 1,
+      "requestDigest": "ef1171bbf55f8be84080cd8f9928815ce26cea5dce1ba2e72cd480bf5353091b",
+      "contentDigest": "582fd4c3541fa6f2cfc613106f45b9713aeeeeacfb82ffbbcd940853533b9981",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "曾本之 郑雄 七十小寿 书信",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 8
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "识时务者为俊杰 不识时务者为圣贤",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 8
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 2487,
+          "outputTokens": 594
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/178",
+        "selectedItemId": "S40/review-first/178",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:21:35.133Z",
+        "providerRequestDigest": "5bd80dfa869d19eec3d683e929e2a5b7cee314f96a797db7f26910f11d34711b",
+        "providerResponseDigest": "7db8fed8effcb7c23d6fb28faee1b61b306a5c92cfcecad52ceb0f5f534d9583",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "9079adc33b8238ac888fb8d51a668b0cb6e43f5b076e999d13a9970f2d8707fe",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-1"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "01bf2820f96d9b6130ee2c92afda3dc518d1e49cad0d0044d4c7058a6130c349"
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "492feab7f6bb545764986a2333a81b60d147f2cee0db3558677960ee14ecd13e",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 6,
+              "query": "为了写这封信，刚刚过完六十五岁生日的曾本之累得又是喘气",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 6,
+              "query": "倒回去八年 文质彬彬的警察 弟子的名字在话语体系中消失",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 6,
+              "query": "巴黎香榭丽舍大街上望着玫瑰兴叹 花前月下 墨香墨彩",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 6891,
+          "outputTokens": 422
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/179",
+        "selectedItemId": "S40/review-first/179",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:21:46.591Z",
+        "providerRequestDigest": "b29045f029455f4c8672f381796ce713cea50ef8b075868a46f7cb5954df2000",
+        "providerResponseDigest": "be8fcd426c8087713958b2c31591929964ac49952f6a58972ba8fad851c51c78",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "d64ac557cca289a379cedf34a3f3210eb4b374f969e7ab14914645feb985d9dc",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-1/tool-turn-2"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "78e1073f9b45ecac0f007d981b9872c2ccc500a479ca6ff6d6581059f7f59fe7"
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "8c388db808880876baab9a544c41a943ac415ee3d77e2e71ea0dae8498d37813",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:25}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:4}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:5}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:18}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:40}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:32}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:33}}"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 11956,
+          "outputTokens": 594
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/180",
+        "selectedItemId": "S40/review-first/180",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:21:54.635Z",
+        "providerRequestDigest": "fb01e325b1125c6e74f1c274e5f059b369f59fdb271352803c6e12785bf8a681",
+        "providerResponseDigest": "ac68ffd1a40554a1e2385479d396bd04600ad7557f0c9f6357c93661c082213b",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "06e3b11fa9f20f2bf5bae8590865b7e4dffd1c89f01f82451279d40987ebec9d",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-1/tool-turn-5"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{tool-id:4}}",
+            "identity": "068ab72e15b690b4e073d253a1245818d3f88be47272c6fa09433cb570bd36c2"
+          },
+          {
+            "placeholder": "{{tool-id:5}}",
+            "identity": "c6010c23e59573fc7b29b5984e8e640d474adfd9f051bc654e74a75a0bf93025"
+          },
+          {
+            "placeholder": "{{tool-id:18}}",
+            "identity": "c6274d06dad856b9b41df254c0be37697860302be150ec4517df2ae54e539acd"
+          },
+          {
+            "placeholder": "{{tool-id:25}}",
+            "identity": "6f4b13735131d51fac572c9458789f0777d397a29d4e769fb89894b60574a034"
+          },
+          {
+            "placeholder": "{{tool-id:32}}",
+            "identity": "2fc53080446f506c0056681be0a9d410b5638282383d17940016196585e23b09"
+          },
+          {
+            "placeholder": "{{tool-id:33}}",
+            "identity": "752c4ae45f86f60de6867a577cfb9aa4ef2eebe0f8453095377c917f43b34c61"
+          },
+          {
+            "placeholder": "{{tool-id:40}}",
+            "identity": "0131f352b841fbbf2407bd8a27185fa73e9b7fc6fab90bb06e1ac8fa62556f4c"
+          }
+        ],
+        "fixtureResponseDigest": "8ba3347a3aaeec6032eab7daf6cf2e57b5ef0de7810efd1af00c4e5b55605f91"
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "c8d14bf4ad0f153e8f10611e6e719463b62c5c9cfb30e37d05da452ebc5165c2",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"累得又是喘气，又是叹气\",\"blockOrdinal\":8,\"severity\":\"should\",\"note\":\"两个“又是”紧挨，节奏拖沓；“累得”后接并列短句也显生硬。\",\"replacement\":\"累得直喘气，还不住地叹气\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"在当下能达到钟爱级别的弟子只有女婿郑雄。\",\"blockOrdinal\":8,\"severity\":\"should\",\"note\":\"“达到……级别”把情感量化成等级，搭配生硬；“在当下”偏公文腔，与前后文风不谐。\",\"replacement\":\"如今够得上钟爱二字的弟子，只有女婿郑雄。\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"还要通过一种比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“比较特别”与“卜算”之间缺“的”，且“通过……卜算”动宾搭配不顺，读来卡顿。\",\"replacement\":\"还要经过一种相当特别的卜算\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"其他所有地方都是奉行男做虚岁，女做实岁，男人六十九岁时做七十大寿的规矩。\",\"blockOrdinal\":10,\"severity\":\"should\",\"note\":\"“都是奉行……的规矩”句式累赘，“其他所有地方”与“都是”语义重复，长定语拖慢节奏。\",\"replacement\":\"别处奉行的规矩是男做虚岁、女做实岁，男人六十九岁上做七十大寿。\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"其存在的意义被视为国宝中的国宝\",\"blockOrdinal\":11,\"severity\":\"must\",\"note\":\"“意义被视为国宝”主宾错位，读者需停顿才解得通；宜让“它本身”作被评价的对象。\",\"replacement\":\"它本身则被视为国宝中的国宝\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"多次尝试重写“识时务者为俊杰，不识时务者为圣贤”作为开头语的书信\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"长定语夹在“重写”与“书信”之间，“作为开头语”修饰关系含混，句子重心后置过远。\",\"replacement\":\"多次尝试重写以“识时务者为俊杰，不识时务者为圣贤”开篇的那封信\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"最终不得不再次撕碎已经写好的每一个文字\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"“撕碎……每一个文字”搭配别扭：撕碎的是纸，字随之而碎；以信纸作宾语更顺。\",\"replacement\":\"最终不得不再次把已经写好的信纸撕得粉碎\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"满世界的男人都已习惯宁肯每天上门送一束玫瑰花\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"“习惯”与“宁肯”两个情态词叠用，句子要读两遍才通顺，删一即可。\",\"replacement\":\"满世界的男人都宁肯每天上门送一束玫瑰花\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"连带一应其他书信都不愿意动笔手写了\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"“动笔”已含“手写”之义，“动笔手写”语义重复；“一应”与“其他”也嫌冗。\",\"replacement\":\"连带其他书信也不愿意动笔了\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"在可以称为从前的一九九○年代某天\",\"blockOrdinal\":15,\"severity\":\"note\",\"note\":\"“可以称为从前”绕而且含混，“某天”前又缺“的”，时间状语读来打结，开场气势被削弱。\",\"replacement\":\"在如今只能叫作从前的一九九○年代的某一天\",\"clauseId\":\"literary-expression/2\"}]}",
+        "usage": {
+          "inputTokens": 12721,
+          "outputTokens": 4615
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/181",
+        "selectedItemId": "S40/review-first/181",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:22:02.505Z",
+        "providerRequestDigest": "f3cd6047b3c259438322ff8a18c734bb1f59a088bb306a64d2a37e2924ebc57e",
+        "providerResponseDigest": "ca6a35d779dc470a3fd290dfe1e4d5a53069015a2ff28b1264d4303fc4737fcd",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "537221d79db1ba92e3baa75d26db1bc7768434b6c6fd53f9dc890a8798da65a8",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-1/tool-turn-12"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "ddc5c95abe2054ef4f0f4a1a8a4123962d61cf93e43572b216aef1208e9ffc69"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "a7adaf8b2185a1f965e2a0ca52f7b6f74e639f0f24323d4308c41393e471e625",
+      "contentDigest": "30b634d2e636a3bf1e188be27744461154be936fe298bf09e5daf5cda6037eef",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "皓首苍颜的曾本之 极端少数之人 大师意识",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "独坐之际 太阳将先月亭尖尖的阴影 悄无声息地沉入湖底",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 2343,
+          "outputTokens": 2354
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/182",
+        "selectedItemId": "S40/review-first/182",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:23:08.176Z",
+        "providerRequestDigest": "7222020796feb0710e029c281d426eadacdedd07bbd3ec022107f723599ba239",
+        "providerResponseDigest": "9e71b21f0b37bd6b60707b60dfe686831bee1f08663ac8738eaea383cd8c6884",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "cbbc0efdd21f7fa7a42de9d2d0252aaaf892a945214cc9b0b1d4ea6356bc3a67",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-2"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "a3034eea4f71c872975c63e0820cc5720c0b87ea83b08fc008641b720fffcc85"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "ce847d77cc2c314736c453926b75479c3f0d0706c08041cc43855fc5d8c652da",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:3}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:10}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:11}}"
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 5,
+              "query": "邮递员送来的书信中偶尔有英法德日等文字 大多数写信人是用繁体字",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 5,
+              "query": "这段文字描述的正是曾本之在固定时间、固定地点放松神经的地方",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 5,
+              "query": "那次没有仪式的生命告别 从灵魂放飞 孤灯守灵 到扶棺下葬 清明立碑",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 7524,
+          "outputTokens": 610
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/183",
+        "selectedItemId": "S40/review-first/183",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:23:46.247Z",
+        "providerRequestDigest": "70323f08ede978f851fbd87116e81e73bf31796cf75cc5c8ba82329dd69e8d6d",
+        "providerResponseDigest": "32d154366f87aaea9d401fdbabaef902581b9405da2a01553211850a29066926",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "4f656b21700202806d00ce7ba51d080ccc5780dc08842c7ba7605bd3e375258d",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-2/tool-turn-2"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{tool-id:3}}",
+            "identity": "6e7174546e35581dd30691b4c01c77fa82070b8da5ba61bdbae30a39cf4689ac"
+          },
+          {
+            "placeholder": "{{tool-id:10}}",
+            "identity": "772b78ac970e98aa6636164afe0f0a30c92382760ab2f4cc4c6faaf3a09c4a4c"
+          },
+          {
+            "placeholder": "{{tool-id:11}}",
+            "identity": "b7ffe96b68de648195f64d1d71e45403efb065a05b90d3c57a906c7533124571"
+          }
+        ],
+        "fixtureResponseDigest": "cef71cb8726816a30c10c7d9f9812054994d68fe6a2c8f2fa0415fddbaa44356"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "eabc9783ab5bf6c53a2be47b685ede7c2903923145d7818b71407eba3697a586",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"极端少数之人\",\"blockOrdinal\":2,\"clauseId\":\"literary-expression/1\",\"severity\":\"should\",\"note\":\"“极端”修饰数量属于生造搭配，读来拗口；“极端少数之人”也不像汉语惯用的说法。改成“极少数人”，句子收束更自然。\",\"replacement\":\"极少数人\"},{\"quote\":\"大师意识\",\"blockOrdinal\":2,\"clauseId\":\"literary-expression/2\",\"severity\":\"should\",\"note\":\"“意识”指思想观念，而此处众人称许的是他的生活方式与派头，词义不对位，含义含糊。换成“大师派头”，指向明确。\",\"replacement\":\"大师派头\"},{\"quote\":\"突然变得异常吊诡\",\"blockOrdinal\":2,\"clauseId\":\"literary-expression/2\",\"severity\":\"should\",\"note\":\"“吊诡”指自相矛盾的悖论，此处只是说此事离奇难解，用词不准，且“异常吊诡”搭配生硬。后文已有“更为古怪”，宜换用“蹊跷”。\",\"replacement\":\"突然变得异常蹊跷\"},{\"quote\":\"正是这封信，将很平常的事情，变得极不平常。\",\"blockOrdinal\":4,\"clauseId\":\"literary-expression/1\",\"severity\":\"note\",\"note\":\"两个逗号把短句切成三截，节奏顿挫过密；“将……变得”也偏书面生硬。去掉中间逗号、改用“把”字句，语流更顺。\",\"replacement\":\"正是这封信，把很平常的事情变得极不平常。\"},{\"quote\":\"邮递员送来的书信中偶尔有英法德日等文字\",\"blockOrdinal\":5,\"clauseId\":\"literary-expression/1\",\"severity\":\"should\",\"note\":\"“有英法德日等文字”动宾搭配生硬，且与后文“大多数写信人是用繁体字”层次含混。写明是夹杂外文书信，读者一看即明。\",\"replacement\":\"邮递员送来的书信里偶尔夹杂英文、法文、德文、日文的信件\"},{\"quote\":\"那次没有仪式的生命告别\",\"blockOrdinal\":7,\"clauseId\":\"literary-expression/2\",\"severity\":\"note\",\"note\":\"“生命告别”是对死亡、下葬的抽象替代，与后文“守灵、扶棺下葬、立碑”这一串具体举动并列时显得含混虚浮。直言“告别”即可。\",\"replacement\":\"那次没有仪式的告别\"},{\"quote\":\"这段文字描述的正是曾本之在固定时间、固定地点放松神经的地方\",\"blockOrdinal\":9,\"clauseId\":\"literary-expression/1\",\"severity\":\"should\",\"note\":\"“文字描述……地方”主宾不搭：文字描述的是行踪与所在，不是地点本身；“放松神经”也生硬。改为“说的正是……所在”“松弛身心”。\",\"replacement\":\"这段文字说的正是曾本之固定时间、固定地点松弛身心的那个所在\"},{\"quote\":\"太阳将先月亭尖尖的阴影，从曾本之身体的右边无声无息地移到左边\",\"blockOrdinal\":10,\"clauseId\":\"literary-expression/1\",\"severity\":\"should\",\"note\":\"主语错置：移动的是阴影，太阳并不“将阴影移”到某处。让阴影作主语、太阳作伴随条件，画面才立得住。\",\"replacement\":\"先月亭尖尖的阴影随着太阳，从曾本之身体的右边无声无息地移到左边\"},{\"quote\":\"有些无聊的曾本之捡起身边的一块蚌壳\",\"blockOrdinal\":11,\"clauseId\":\"literary-expression/1\",\"severity\":\"note\",\"note\":\"“有些无聊的”作定语前置，重心落在人物名字前，读来别扭。拆成两小句，先写状态再写动作，节奏更顺。\",\"replacement\":\"曾本之有些无聊，捡起身边的一块蚌壳\"},{\"quote\":\"比女人身上的曲线还要美丽的弧线\",\"blockOrdinal\":11,\"clauseId\":\"literary-expression/2\",\"severity\":\"note\",\"note\":\"“女人身上的曲线”是习见的笼统说法，喻体不具体，“美丽”也是空泛的评价。落到侧身的轮廓上，比喻才看得见。\",\"replacement\":\"比女人侧身时的曲线还要好看的弧线\"},{\"quote\":\"悄无声息地\",\"blockOrdinal\":11,\"clauseId\":\"literary-expression/1\",\"severity\":\"note\",\"note\":\"上一段已有“无声无息”，此处再用“悄无声息”，同一意思连着出现两次，语感发腻。改用“悄然”避复。\",\"replacement\":\"悄然\"}]}",
+        "usage": {
+          "inputTokens": 9337,
+          "outputTokens": 3139
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/184",
+        "selectedItemId": "S40/review-first/184",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:23:56.530Z",
+        "providerRequestDigest": "60d2cda0d8fe359d76ffdfba2b4d7a8a97b1d69eb5ac54425b0759f2ec23ef1a",
+        "providerResponseDigest": "772d1b9a9bd7ec390add02860deb86c939ade0f85c4266b3dc51e621e2d04912",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "0d560f4c6f4e4a330f48fb6fecb60b49b8ea54d9e21ed5104c2caae84de60a0b",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-2/tool-turn-8"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "30b35c603ffc16d04531c2f2fc8759e144f65bd528cbf4d7c7b0f4a0dc0ee3f8"
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "89e037d83effc2fddce50b3f83e9e6c95d3d5e687a3933b78b0fe1e6e08accff",
+      "contentDigest": "a961d6dc02f89d79d932b93f7d23398f5ae6d205901f48adc2ba7e8b682b0d29",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "湖面上刚刚响过一声春雷 清水幽幽的那种静 柳枝悠悠的那种软",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "载有甲骨文的梦境，就会造访睡意正浓的曾本之",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 2769,
+          "outputTokens": 250
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/185",
+        "selectedItemId": "S40/review-first/185",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:24:44.415Z",
+        "providerRequestDigest": "1f4248645bce46ce5d128454304d005b543cd5db10795746dfcb25a4286d63aa",
+        "providerResponseDigest": "488686f9e210b7c654d389ef7e2c5b6567fc34e07982756faefad640f516709d",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "37c3935828f045da4714982511b50a4d4bc0a7c6de7f86f1d0d128f9aad7524d",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-3"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "87956ce3b1979ce169a067f16c94a94e44da428a423f684c7f3e2f4398f8c9f1"
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "30935470b5c1cedceedac9491108b893ba55f7e533f67e7a54529e885974de9d",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:3}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:11}}"
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "他将眼前的景物怔怔地看过几遍",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 3
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "邮递员将信交给他之前，实在忍不住多说了几句",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 3
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "曾本之接过信件，只看了一眼，便忍俊不禁",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 3
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "邮递员对甲骨文没有兴趣，他想了解",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 3
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 5581,
+          "outputTokens": 542
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/186",
+        "selectedItemId": "S40/review-first/186",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:24:50.692Z",
+        "providerRequestDigest": "f29abe13a872d98418ca8619e73dc3c04179b9f5fb6fd1fbd3057066360774f9",
+        "providerResponseDigest": "aeb35e363a8ac5f00fd9e708435fae19a804b352950488ed5490af785614f2fc",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "5c4c42d7abf6f82084ad2295695e70e1767eb82ccb26f436c5025a0d6ac2579d",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-3/tool-turn-2"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{tool-id:3}}",
+            "identity": "463e5ea3d790b06a1f99dab33b42b7f9a18f585fe689df7591d75cb940981842"
+          },
+          {
+            "placeholder": "{{tool-id:11}}",
+            "identity": "ffdd8be605f4f5203d78fe8651fdada91102c5fea6b7c894ea36fb615a1e513e"
+          }
+        ],
+        "fixtureResponseDigest": "72433930b7dd702e4b195e6df3fa092a72d129bd50c317779e24ec10414b988e"
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "49a77e05ac27b4f1f12be824c07f82c9dff2e5edf26c48abec69e0106b8f3abc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"都是只有突如其来的雷声刚刚响过才有的模样\",\"blockOrdinal\":2,\"severity\":\"should\",\"clauseId\":\"literary-expression/1\",\"note\":\"同一句开头已写“湖面上刚刚响过一声春雷”，此处再重复“刚刚响过”，且“都是只有……才有的模样”句式层层套叠，读来拖沓。\",\"replacement\":\"都是雷声乍过时才有的模样\"},{\"quote\":\"秀色诱人的湖水\",\"blockOrdinal\":2,\"severity\":\"should\",\"clauseId\":\"literary-expression/2\",\"note\":\"“秀色”多用于容颜或笼统的风景，与“湖水”搭配含混，也近于现成的套语；改为具体可感的颜色与光感更有画面。\",\"replacement\":\"碧盈盈的湖水\"},{\"quote\":\"将一缕缕的阳光，不停地吹在人的身上\",\"blockOrdinal\":2,\"severity\":\"should\",\"clauseId\":\"literary-expression/1\",\"note\":\"“阳光”被“吹在身上”搭配生硬，风是吹送而非把阳光吹到人身上；“不停地”也使节奏拖沓。\",\"replacement\":\"把一缕缕阳光不停地送到人身上\"},{\"quote\":\"这种无法拒绝的舒适\",\"blockOrdinal\":2,\"severity\":\"note\",\"clauseId\":\"literary-expression/2\",\"note\":\"“无法拒绝的舒适”说法含混，只给了抽象判断，未落到身体感受上，与前句毛孔张开的具体描写不接。\",\"replacement\":\"这种暖到骨头里的舒适\"},{\"quote\":\"多不会超过两次，但也不会少于一次\",\"blockOrdinal\":3,\"severity\":\"should\",\"clauseId\":\"literary-expression/1\",\"note\":\"用“不超过……也不少于……”绕一圈来表达一两次，节奏拖沓，与下句的短句不相称。\",\"replacement\":\"总有一两次\"},{\"quote\":\"他将眼前的景物怔怔地看过几遍。\",\"blockOrdinal\":4,\"severity\":\"note\",\"clauseId\":\"literary-expression/1\",\"note\":\"“怔怔地”夹在“看过”之前，状语位置使句子停顿不顺；“看过几遍”也不如“看了几遍”自然。\",\"replacement\":\"他怔怔地把眼前的景物看了几遍。\"}]}",
+        "usage": {
+          "inputTokens": 7650,
+          "outputTokens": 3051
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/187",
+        "selectedItemId": "S40/review-first/187",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:25:02.011Z",
+        "providerRequestDigest": "fd63c086e986b219e77d7be29230b062ade311c583faaecc6f1f3f60646c4d2f",
+        "providerResponseDigest": "74f4968c18bf3b110abd490ba8c8e5ec382fddc9a17b5ad897e724b56267c7a0",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "2566fc43596f1258bfdb20ab3f925a659bd416c523287e5104b4e8e2af903efb",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-3/tool-turn-8"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "cdfbbbdb42abba2855f58b4bce16d91ca94cad1338e2dc0e3ff4ae3e8a6c827b"
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "82e1c6f5e071d16d87d60221c9606b34dbd557f361453a0a75a0f343d7131f40",
+      "contentDigest": "12743a413d0267626854136350c016a039416f2f096dca9decfd5c7d4f8956cc",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "曾本之没有接话 甲骨文书信 晴空霹雳",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "马跃之 楚学院 栋梁之材 漆器和丝绸 人微言轻",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 2602,
+          "outputTokens": 274
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/188",
+        "selectedItemId": "S40/review-first/188",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:25:51.945Z",
+        "providerRequestDigest": "ac4ab125630f0194022f3d93e7f1d54468c14c808dc5f8ce94489f43f99b54f7",
+        "providerResponseDigest": "06f526c04a77db15dbd20f16d2d8562221172bcc6bf1ff992e5e51c416763c52",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "330f5e090ab0c144405d04d4afe2565e8d6cdf535768f3821f2aae4b758a0080",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-4"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "067fc39f4363973408368907707c68fcd0d860274658273e0e89c954323a773a"
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "c6d4e95cd6d8233d427fca8c7adf3608c9077a40b74a471ccc4d001f241acde9",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:3}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:6}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:11}}"
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 6,
+              "query": "如此言简意赅符合曾本之的职业习惯 也表明写信人具有相同的职业素养",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 6,
+              "query": "红彤彤的印章 郝嘉 熟悉程度依然仅次于自己的名字",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 5307,
+          "outputTokens": 503
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/189",
+        "selectedItemId": "S40/review-first/189",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:25:57.155Z",
+        "providerRequestDigest": "f9732b75278587f677c35d9cbaf1884d270aec4c9c6bee6ba0630528c803390c",
+        "providerResponseDigest": "4c4d92fe1a41c96c6db4c8983818b5ced3b6e457c44ee6da4d3adad8e5b6fef3",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "25266fb2ce628decb1b5f9fe60ba3436ee961c168dcda7dbe6d06664caba2f2f",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-4/tool-turn-2"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{tool-id:3}}",
+            "identity": "def5d4a863affd2ee747c6c6894a5e85074811001762f4ebc39bef2df80490bd"
+          },
+          {
+            "placeholder": "{{tool-id:6}}",
+            "identity": "0ce46bbd134cdeb765b436cb4c1fafc36ab75811dfecce98093d3fe573579a9f"
+          },
+          {
+            "placeholder": "{{tool-id:11}}",
+            "identity": "fa99400136d3a42c83dd13a1c46e10b432575ab79b476428aea54bbec21680d7"
+          }
+        ],
+        "fixtureResponseDigest": "bc8e3dddd20e3ad417246118be6f5273a5191de13ed64a5be93af1063d62bf1a"
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "75dd623e492b9e1a26a63a54de0b18a6da90f8f2b85f0ab45d19633b4599ab07",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[{\"quote\":\"像晴空霹雳一样来到眼前\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"“晴空霹雳”是熟极而滥的比喻，写突然之事已无表现力，也与下文从容推想语气的节奏不合。\",\"replacement\":\"毫无征兆地落到眼前\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"或许是先前某件事，中途被停止\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"“被停止”是生硬的被动式，与“某件事”搭配不畅，读来拗口；下文“重新开始”才接得住。\",\"replacement\":\"或许是先前某件事中途停了下来\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"想说而没有说出来，现在必须说话了\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"一句之内“说”“说出来”“说话”三处同源词连用，节奏滞重；“论述”与“说话”搭配也不稳。\",\"replacement\":\"想说而一直没有说出口，现在必须开口了\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"总之都是表示，有什么事情从此要大变样了\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"“都是表示”是含混的概述，后面“大变样了”也过于口语而失之笼统，收句力量不足。\",\"replacement\":\"总之意思只有一个：有什么事情要从此不同了\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"这个方向上声名显赫的学术权威\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"本段已两次出现“方向”，此处第三次重复；改为“这一行”可避开重复而意思不变。\",\"replacement\":\"在这一行里声名显赫的学术权威\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"曾本之每次闻听\",\"blockOrdinal\":14,\"severity\":\"note\",\"note\":\"“闻听”文白夹杂，且与前后口语化叙述不协调，显得生硬。\",\"replacement\":\"曾本之每次听了\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"马跃之上第一次谈恋爱就选了一个不算“市花”\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"“马跃之上第一次”多出一个“上”字，读来卡顿；“选了一个……柳琴”动宾搭配也欠顺。\",\"replacement\":\"马跃之第一次谈恋爱就找了一个不算“市花”\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"总算点了一下千金之首，答应嫁给他\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"“点了一下千金之首”表意含混，且分句主语突然从曾本之转为安静，易被误读为曾本之答应。\",\"replacement\":\"安静总算点了一下千金之首，答应嫁给他\",\"clauseId\":\"literary-expression/1\"}]}",
+        "usage": {
+          "inputTokens": 7076,
+          "outputTokens": 3457
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/190",
+        "selectedItemId": "S40/review-first/190",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:26:04.866Z",
+        "providerRequestDigest": "8445cf8b09316ee367fc75e64eb74b612a6e2e93665e96269c3e7a87810e0dd0",
+        "providerResponseDigest": "477b307a8dc0d4228543902ffbb80dec023470b99bc86de7db3098e78538cc2f",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "bd3e45051b87837f730f84dcc8b1adf258357d795eff539e86e343c15fdaf14e",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-4/tool-turn-7"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "dba6fb94a9cf964c386b12e485124fe7ffbbdd5b310e061ced45ba3b6a85b5fb"
+      }
+    },
+    {
       "unitOrdinal": 5,
       "requestDigest": "5513d9389eae8bd3cc2263e772584fbb7d0543fb599009dda37634a843a4f92a",
       "contentDigest": "48fb4b784e0dd65b543799e015af64f0abe448d8913011525d29bf328972394b",
@@ -1322,6 +2919,544 @@
         },
         "identityMap": [],
         "fixtureResponseDigest": "84d537f89e52b14b0c046e2619a3c57af6db4c7893b5bf15968e4eda40acda78"
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "86950b1618dcb12d5ac15c8ad609c899c64eab92244db0d85ad6c50b8da93851",
+      "contentDigest": "ff158e0f8eec32fdf485f964e2c66d92fed84cbf57de527a97b67c515b9aad50",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "曾本之 曾侯乙尊盘 黑片照片 放大镜 透空蟠虺纹饰",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "郑雄 曾本之 副厅长 楚学 青铜重器 九鼎七簋",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 5
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 2640,
+          "outputTokens": 237
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/193",
+        "selectedItemId": "S40/review-first/193",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:28:39.307Z",
+        "providerRequestDigest": "3672593e84dec7c72a411088c939c3adf4668f7aa27fdc51b0e61aa29bb3f10b",
+        "providerResponseDigest": "7b4435f8d9db94e4d05b3030a6d59e4e16aebc86d8b8e193b089ac6ae108e4a0",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "c7f4e2070f3d6ed263a8a7e9ac17a09739ecd2ae2c4418002d4406b8649e6f0a",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-7"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "8d59efedb32f3e233aac06ad3aee1cd3cf56e930ea8bd413c15abe7051de2c99"
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "f4fdc99f16a2db6baaaa4ac35866c005d2fa363adab03f29885d82d7fd013725",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 5,
+              "query": "天下万事万物 只有你这小东西 能将外公的魂从那些破铜烂铁上找回来",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 5,
+              "query": "不用问 也不用想 这时候 只能是下班回家的郑雄 家里的气氛就有了微妙变化",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 5,
+              "query": "不多，就下午一个会，先前的副省长超越常务副省长升级为省长，第一次公开露面，大家都去捧场",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 5,
+              "query": "这种会有什么好开的 你已经不年轻了 不抓紧时间搞点自己的研究 耍嘴皮子",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 5,
+              "query": "郑雄不敢笑，又不能不笑，他将嘴角咧两下，又让眉梢扬两下",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 5,
+              "query": "楚楚正要开口说话，曾本之伸手捂住他的嘴 刮一场台风 出气筒",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 5,
+              "query": "曾本之并没有用力，楚楚还能呜呜地说 管青铜的，就不要管丝绸",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 5,
+              "query": "曾本之也不说什么，等到弄明白安静只是让去开门时，女儿曾小安已带着外孙楚楚推门进来了",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 5414,
+          "outputTokens": 799
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/194",
+        "selectedItemId": "S40/review-first/194",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:28:46.431Z",
+        "providerRequestDigest": "85c186250bda99a415dd362d9000004b190ca8196ffe277bc50fd0a8cfd47993",
+        "providerResponseDigest": "028ab5a232cadbd6b0ed8436dea0ca883b2b2dda8f1131acd786866249e504ff",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "c220b3f6193299c46159109613b20c70e42ed63304993f2f7e81695e1d33a4e7",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-7/tool-turn-2"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "120852aa5cfbb0bdab2ca44ca09705054538a67b6b21fbee4d1238be6bff3522"
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "394ef1abeab2b6d194b8b1f5175c7d88cb6f37adf75156ad5954b7f024782115",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:3}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:8}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:17}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:21}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:22}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:23}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:30}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:13}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:16}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:18}}"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 10085,
+          "outputTokens": 4106
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/195",
+        "selectedItemId": "S40/review-first/195",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:28:58.055Z",
+        "providerRequestDigest": "8659793b782a62c00789ba9425ab8caed345e3b75aa1b131c8541097d41a759b",
+        "providerResponseDigest": "8ccf49c4090f25b676402c00f87a74609d3b3845313f76835554a97c41c02af7",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "59cf19356a8ab072df55df2401ddeac61c453d9386f2fcdcb0354d6ea52f5415",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-7/tool-turn-10"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{tool-id:3}}",
+            "identity": "0b4a3df4843b86348c496822ac76541cc567e8525b1043823c7345f9203ccfd4"
+          },
+          {
+            "placeholder": "{{tool-id:8}}",
+            "identity": "269f9833e43fa2ee581fc1758156f2d3eb2769b020561765da961dd2680e1b48"
+          },
+          {
+            "placeholder": "{{tool-id:13}}",
+            "identity": "dbd5440e336406bc2499a1874e1af4df38d637f128f7181bec7dc7d0acedabc8"
+          },
+          {
+            "placeholder": "{{tool-id:16}}",
+            "identity": "dac70d13d85ac3bb390832b1b9b2d693459c9a706c80c8685a17b144af9916ef"
+          },
+          {
+            "placeholder": "{{tool-id:17}}",
+            "identity": "4f3121cd352905473488338d63d68b025fadfcfcb3996a122d283b03a9d0c02a"
+          },
+          {
+            "placeholder": "{{tool-id:18}}",
+            "identity": "7eebb5408d166b1b4276b5b20d16b6402a50841edf419a0113aa5cbfa58dfc80"
+          },
+          {
+            "placeholder": "{{tool-id:21}}",
+            "identity": "a5ca4b2c969dfc776597d0ce1bbcea02a76b2b2b687a9cc9ee347c6c28876d11"
+          },
+          {
+            "placeholder": "{{tool-id:22}}",
+            "identity": "6ff659b8101d896889f67d10ff94ec9dc7985a098373b0bb3e85bdf46fe0c860"
+          },
+          {
+            "placeholder": "{{tool-id:23}}",
+            "identity": "0d1041b6598f3ff99282cde63a934451e7f3e2b7961cafa091443582c8f3e0ff"
+          },
+          {
+            "placeholder": "{{tool-id:30}}",
+            "identity": "9e5c6cc699e4be28f923679f3078c17d51b9cd16f898ebdeb7fbe468beebbf2f"
+          }
+        ],
+        "fixtureResponseDigest": "4774d21efbd6adaeddf143684e753fe2d7239ce328badc2d7a91ab3a1437751e"
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "d6b5835a9c6065951faf94ca82c9038c0d2764677816e5b2ebfc78ace09e3055",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[{\"quote\":\"精心装饰的曾侯乙尊盘照片\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"照片配镜框应说“装裱”，“精心装饰”与“照片”搭配生硬，也与下文“唯一饰物”重复。\",\"replacement\":\"精心装裱的曾侯乙尊盘照片\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"走到曾侯乙尊盘黑白照片前\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"本段开头已写他对着墙上照片呆坐，此处再说“走到……照片前”，位置交代重复，且“曾侯乙尊盘”一句内第四次出现，节奏累赘。\",\"replacement\":\"凑到照片跟前\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"不待曾本之说什么\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"紧接上句“曾本之也不说什么”，“说什么”再度出现，语感原地打转；换用代词并改写动词可消除重复。\",\"replacement\":\"不待他开口\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"家里的气氛就有了微妙变化\",\"blockOrdinal\":12,\"severity\":\"note\",\"note\":\"“气氛有了微妙变化”是熟套且含混，读者无从感知变化为何；用可感的“空气沉下来”承接下文问答，更具体而不改情节。\",\"replacement\":\"家里的空气就沉了下来\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"先前的副省长超越常务副省长升级为省长\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"“超越常务副省长”“升级为省长”是生造搭配，官阶递进说得含混；拆成“越过……直接升了……”更合口语。\",\"replacement\":\"先前的副省长越过常务副省长，直接升了省长\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"难道后半辈子就用耍嘴皮子来对付\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"“用……来对付”缺宾语，语义悬空，诘问的力量也被拖散；换成“靠……混过去”更贴曾本之的口气。\",\"replacement\":\"难道后半辈子就靠耍嘴皮子混过去\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"后生晚辈只有做些大树底下好乘凉的事\",\"blockOrdinal\":16,\"severity\":\"should\",\"note\":\"把俗语硬塞进“做些……的事”的框架，“只有做些……的事”读来别扭；直用俗语作谓语更利落。\",\"replacement\":\"后生晚辈只能在大树底下乘凉\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"只有狡辩的才能大有长进\",\"blockOrdinal\":17,\"severity\":\"should\",\"note\":\"“只有……才能……”与“狡辩的才能”两种切分互相干扰，句意一时难辨；调整语序后讥讽意味更直接。\",\"replacement\":\"狡辩的本事倒大有长进\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"他将嘴角咧两下，又让眉梢扬两下\",\"blockOrdinal\":18,\"severity\":\"should\",\"note\":\"“将嘴角咧两下”“让眉梢扬两下”都是把身体动作交给介词摆布的生硬说法，节奏也被两个“两下”拖平。\",\"replacement\":\"他咧了咧嘴，又扬了扬眉梢\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"只有占住这个位置，才发现这个位置有多么重要\",\"blockOrdinal\":18,\"severity\":\"should\",\"note\":\"前面是“如果……”，此处却以“只有……才发现……”相接，条件与结论断开，句子前后失去着落。\",\"replacement\":\"就得占住这个位置，占住了才知道这个位置有多么重要\",\"clauseId\":\"literary-expression/1\"}]}",
+        "usage": {
+          "inputTokens": 14434,
+          "outputTokens": 3539
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/196",
+        "selectedItemId": "S40/review-first/196",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:29:58.621Z",
+        "providerRequestDigest": "d76d84caf6852a8f7b1b147605fe1962386fba01be27956d33ada1679f2382d3",
+        "providerResponseDigest": "c00d7659fe432b1430ebba897d59c06abcd8023e28e7453f1b886ef3251b7c14",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "131183b0c3cd9a285f66009a2be03334ff18ffee85ee693d519a6b8cc4882cb7",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-7/tool-turn-20"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "1c6a7621f0d0c41e9911fd33dd87573369e768086ee4df8460849c754d9501d5"
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "3c356771a6b43d6ef8a8d1c0be3d7b6d42925b85d4485680e72a050ec4cbb1a5",
+      "contentDigest": "baa26a771e30cec986053cba5981096b238feef12305bd62e9312c133af4f3d0",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "曾本之盯着郑雄不再说话 放大镜 龟甲 楚楚 门外小声叫",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 8
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "query": "郑雄总是称曾本之为先生 马跃之酸溜溜地说 柳琴没有给他生个女儿",
+              "sourceKinds": [
+                "manuscript"
+              ],
+              "k": 8
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 1962,
+          "outputTokens": 239
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/197",
+        "selectedItemId": "S40/review-first/197",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:30:51.314Z",
+        "providerRequestDigest": "9f91a4011029d81321cea65a13e67db4d0ed02f381c30898b7dd946e74bdb444",
+        "providerResponseDigest": "cdcf3aca895eb2dc84624f89575834f71a38a9e02032de5a15aaa2d70df5755f",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "b55eec34752662213f0173f3006387be9686caeed80d519a4470b7869dd20479",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-8"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "b24b46dab73b1dce2a0c24eead95ef26cd3f03982ccd966e3dc9f6336c2c3a47"
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "6c16a5506f8661fbf8274eaa1c16830d393da2a6055244c5e108fa5d2d0e8eda",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:3}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:14}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:16}}"
+            }
+          },
+          {
+            "name": "exact_fetch",
+            "arguments": {
+              "candidateId": "{{tool-id:15}}"
+            }
+          },
+          {
+            "name": "retrieve",
+            "arguments": {
+              "k": 5,
+              "query": "安静在外面敲门 站起来 书房中央 拥抱 脸贴着脸 晚安",
+              "sourceKinds": [
+                "manuscript"
+              ]
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 6331,
+          "outputTokens": 474
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/198",
+        "selectedItemId": "S40/review-first/198",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:30:57.649Z",
+        "providerRequestDigest": "ae73e89273d457fd15b3c429acec43448c2a26e057bbba5109a81c0617923158",
+        "providerResponseDigest": "f4b8d427ecffbc1b6d567b50a0d3fea749bdb3316fc590a9726bc1515c69e012",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "090172b73eddca68d35d69ee559725f9e6209b4777dc16f6cd583fc219a2b8ca",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-8/tool-turn-2"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{tool-id:3}}",
+            "identity": "51529b464c2fc774d62f08a87eb64936241e72939b5854862d3099d179d2adbe"
+          },
+          {
+            "placeholder": "{{tool-id:14}}",
+            "identity": "98f1e8242456a3ef5a8f85f339c67ec6e1a00cb9cee4b259385e5756a14cd1a1"
+          },
+          {
+            "placeholder": "{{tool-id:15}}",
+            "identity": "50a43c00581ebd222478a2a6aa26da17dea4bd20376df55220f6732fcc99ca52"
+          },
+          {
+            "placeholder": "{{tool-id:16}}",
+            "identity": "f854af8a596a0c8b476e9871d77f9c9f097c27f8d63b04d43c41d5931d8fe4ed"
+          }
+        ],
+        "fixtureResponseDigest": "55b651536390004aa032cf6212a3c2d74322c15dacbccb85473bfaa480cb989c"
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "cf05cd5b74f50ebb631cd4e8df3aa2ca51d7ed28a7cb52687748ee3c6a7e3603",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[{\"quote\":\"或者看看他是否需要添些茶水，必须在门外小声叫上几次\",\"blockOrdinal\":2,\"clauseId\":\"literary-expression/1\",\"severity\":\"should\",\"note\":\"「想进来说话」的「想」没有管到「看看」，「或者看看」读来主语脱节；后半句「只要……必须」条件句缺「就」呼应，「必须」的命令口吻也与叙述语气不合。\",\"replacement\":\"或者想看看他是否需要添些茶水，就得在门外小声叫上几次\"},{\"quote\":\"将伸进口袋的手，原样退出来\",\"blockOrdinal\":2,\"clauseId\":\"literary-expression/1\",\"severity\":\"should\",\"note\":\"与前句「将手伸进口袋里……再拿出来」用词重叠，节奏重复；「将伸进口袋的手，原样退出来」语序拗口，且句末缺「了」，动作收尾发滞。\",\"replacement\":\"让那只手原样退了出来\"},{\"quote\":\"曾本之才转身回到书房\",\"blockOrdinal\":2,\"clauseId\":\"literary-expression/1\",\"severity\":\"note\",\"note\":\"同一句开头已出「曾本之盯着郑雄」，此处再出全名，主语复沓，句子拖沓；承前省略即可，人名不必二度点出。\",\"replacement\":\"才转身回到书房\"},{\"quote\":\"家里的各种声音在渐次消失\",\"blockOrdinal\":3,\"clauseId\":\"literary-expression/1\",\"severity\":\"note\",\"note\":\"「在」进行体与「渐次」叠加，一动一静相抵，节奏发滞；「渐次」偏书面，与上下文平白口语不搭。\",\"replacement\":\"家里的各种声音渐渐消失了\"},{\"quote\":\"郑雄多少年如一日地用手指在门上轻轻敲了两下\",\"blockOrdinal\":3,\"clauseId\":\"literary-expression/2\",\"severity\":\"should\",\"note\":\"「多少年如一日」是熟烂的套语，且与「敲了两下」这一单次动作相抵；改写可保留习惯性，又让动作落到具体一下。\",\"replacement\":\"郑雄照老习惯用手指在门上轻轻敲了两下\"},{\"quote\":\"曾本之一向不会对这类闲话做出反应\",\"blockOrdinal\":4,\"clauseId\":\"literary-expression/2\",\"severity\":\"should\",\"note\":\"「不会……做出反应」是译文腔搭配，与前文平实叙述不谐；「不会」也偏于能力，削弱了人物一贯的淡漠态度。\",\"replacement\":\"这类闲话，曾本之一向不理会\"},{\"quote\":\"这样称呼的人无一不是学界权威\",\"blockOrdinal\":4,\"clauseId\":\"literary-expression/2\",\"severity\":\"should\",\"note\":\"「这样称呼的人」指代含混：是称呼者还是被称呼者，读者无从分辨；补出动作方向，判断才立得住。\",\"replacement\":\"用这种称呼的人，无一不是学界权威\"},{\"quote\":\"用放大镜细细地看了很久\",\"blockOrdinal\":6,\"clauseId\":\"literary-expression/1\",\"severity\":\"note\",\"note\":\"「细细地」与「很久」在语义上叠压，状语「地」字也使收尾松散；删去「地」字，节奏更紧而意思不减。\",\"replacement\":\"用放大镜细细看了很久\"}]}",
+        "usage": {
+          "inputTokens": 8014,
+          "outputTokens": 4228
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/199",
+        "selectedItemId": "S40/review-first/199",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "taskPromptContractDigest": "712a934e4007196673ac613c189480a2708f5e389c55aa07290592a904e96b24",
+        "capturedAt": "2026-11-18T16:31:08.098Z",
+        "providerRequestDigest": "ab51e807b6fe6b047f3609627d71b894c09a68b7192ca884b0cf67fc802db4ae",
+        "providerResponseDigest": "5775098aece5f79f1ad509b959f25059a942e798c72377b1c780a750c9f053c9",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "c04a2e87969f3f8f7c3879c98e5a6ad11745fc70e9ca052f680405b9c7a2352c",
+        "generation": "08e43979fa7b3561e37760c48afb8d4d7c477e3411c8ec8e81ac147545b1bbe7",
+        "validation": {
+          "family": "editorial-quality-measurement",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-8/tool-turn-7"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "70c2cb1dc9cbb9c6bdd9c716be691b0909b9f83ade251396521076cd6526cf9e"
       }
     },
     {

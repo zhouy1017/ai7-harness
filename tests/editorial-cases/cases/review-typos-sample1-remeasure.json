@@ -18,7 +18,8 @@
   "pass": "2026-11",
   "replay": {
     "route": "developer-live",
-    "modelQuestions": true
+    "modelQuestions": true,
+    "platformTools": true
   },
   "expectedConcerns": [
     {

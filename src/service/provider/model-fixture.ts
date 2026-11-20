@@ -118,6 +118,8 @@ export const FIXTURE_IDENTITY_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_FIXTURE_BYTES = 512 * 1024;
 const MAX_BASE_DEPTH = 4;
 const MAX_FIXTURE_ATTEMPT = 8;
+/** The most parallel tool calls one recorded answer carries: a model may exceed the five a unit may run, and the product answers the rest as errors. */
+const MAX_TOOL_CALLS_PER_ANSWER = 16;
 /** The most text deltas one dialogue answer streams. */
 const MAX_ANSWER_CHUNKS = 64;
 /** The keys an entry may carry beside the three it must; every other key is still refused. */
@@ -288,7 +290,7 @@ function parseResponse(value: unknown): ModelFixtureResponse {
   requireFixture(isRecord(value), '夹具响应不是对象。');
   switch (value.kind) {
     case 'tool-calls': {
-      requireFixture(hasExactKeys(value, ['kind', 'calls', 'usage']) && Array.isArray(value.calls) && value.calls.length > 0 && value.calls.length <= 5 &&
+      requireFixture(hasExactKeys(value, ['kind', 'calls', 'usage']) && Array.isArray(value.calls) && value.calls.length > 0 && value.calls.length <= MAX_TOOL_CALLS_PER_ANSWER &&
         value.calls.every((call: unknown) => isRecord(call) && hasExactKeys(call, ['name', 'arguments']) &&
           typeof call.name === 'string' && /^[a-z][a-z_]{0,63}$/u.test(call.name) && isRecord(call.arguments) && Buffer.byteLength(canonicalJson(call.arguments)) <= 4096) &&
         isRecord(value.usage) && hasExactKeys(value.usage, ['inputTokens', 'outputTokens']) &&

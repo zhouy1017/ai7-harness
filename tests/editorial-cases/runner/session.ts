@@ -231,6 +231,8 @@ export function developerLiveReplayOwner(
   return new BaselineAnalysisExecutionOwner({
     requestGovernor: roots.requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+    // As the service entry binds it: a Run's tools read its pinned sources, ranked with the store's own vectors (#1598).
+    retrievalIndex: (runRecordId, ledger) => store.retrievalIndexForRun(runRecordId, ledger),
     ...(materialGuard === undefined ? {} : { materialGuard }),
     secretResolver: { resolve: async () => 'placeholder-development-key' },
     developerLive: { launch: { runBudgetCeiling, providerCacheRoot: join(roots.inputRoot, 'replay-ledger'),

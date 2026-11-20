@@ -196,8 +196,18 @@ describe('tool-turn fixtures (Issue #1598)', () => {
     expect(digest(twoCalls(true))).not.toBe(digest(twoCalls(false)));
     const errored = rounds(OWN, CANDIDATE);
     expect(digest([{ calls: errored[0]!.calls, results: errored[0]!.results.map((result) => ({ ...result, isError: true })) }])).not.toBe(base);
+    // Retrieval breaks a tie in score by candidate identity, so two equal-scored candidates swap between imports: the same digest.
+    const tie = (swap: boolean): ToolExchangeRound[] => {
+      const entries = [{ candidateId: CANDIDATE, score: 0.5, preview: '甲' }, { candidateId: FRESH_CANDIDATE, score: 0.5, preview: '乙' }, { candidateId: 'd'.repeat(64), score: 0.4, preview: '丙' }];
+      return [{ calls: [{ id: 'x', name: 'retrieve', arguments: '{"query":"甲"}' }], results: [{ callId: 'x', text: JSON.stringify(swap ? [entries[1], entries[0], entries[2]] : entries), isError: false }] }];
+    };
+    expect(digest(tie(true))).toBe(digest(tie(false)));
+    // Only a tie moves: the lower score ahead of the higher is another exchange.
+    const [ordered] = tie(false);
+    const inverted: ToolExchangeRound[] = [{ ...ordered!, results: [{ ...ordered!.results[0]!, text: JSON.stringify(JSON.parse(ordered!.results[0]!.text).reverse()) }] }];
+    expect(digest(inverted)).not.toBe(digest(tie(false)));
     // The tool keeps its own copy of the function; the two agree on every vector above.
-    for (const exchange of [rounds(OWN, CANDIDATE), rounds(FRESH_OWN, FRESH_CANDIDATE), twoCalls(true)]) {
+    for (const exchange of [rounds(OWN, CANDIDATE), rounds(FRESH_OWN, FRESH_CANDIDATE), twoCalls(true), tie(true)]) {
       expect(tool.toolTurnRequestDigest('b'.repeat(64), tool.normalizeToolExchange(exchange, OWN))).toBe(digest(exchange, OWN));
     }
   });

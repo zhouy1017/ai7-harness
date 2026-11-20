@@ -9,7 +9,9 @@ import { assistantToolCalls, toolResultOf, type AssembledMessage } from './paylo
  *
  * Identities minted per import or per Run (block identities, candidate identities, uuids) are renamed by first appearance before the
  * hash — the unit's own blocks `{{block:N}}`, every other one `{{tool-id:K}}` — so a fresh import of the same manuscript yields the
- * same key and the rename hides identity churn and nothing else. `tools/generate-model-fixture.mjs` carries a copy of this
+ * same key and the rename hides identity churn and nothing else. One order is also churn: retrieval breaks a tie in score by candidate
+ * identity, so two candidates of equal score swap places between imports; a result that is a list of scored entries is read in
+ * (score, identity-free content) order before the rename, and no other result is touched. `tools/generate-model-fixture.mjs` carries a copy of this
  * function; tests/unit/generate-model-fixture.test.ts checks that the two agree.
  */
 export const TOOL_TURN_DIGEST_SCHEMA = 'ai7.model-fixture.tool-turn/1';
@@ -40,6 +42,22 @@ export function toolExchangeOf(messages: ReadonlyArray<AssembledMessage>, origin
   return complete ? rounds : null;
 }
 
+/** A scored list with each run of equal scores in identity-free content order: only tied candidates can move. Any other text is returned as it is. */
+function tiesInContentOrder(text: string): string {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return text; }
+  if (!Array.isArray(parsed) || parsed.length < 2 || !parsed.every((entry) => typeof entry === 'object' && entry !== null && typeof (entry as { score?: unknown }).score === 'number')) return text;
+  const content = (entry: unknown): string => JSON.stringify(entry).replace(IDENTITY_TOKEN, '~');
+  const ordered: unknown[] = [];
+  for (let from = 0; from < parsed.length;) {
+    let to = from + 1;
+    while (to < parsed.length && parsed[to].score === parsed[from].score) to += 1;
+    ordered.push(...parsed.slice(from, to).sort((a: unknown, b: unknown) => (content(a) < content(b) ? -1 : content(a) > content(b) ? 1 : 0)));
+    from = to;
+  }
+  return JSON.stringify(ordered);
+}
+
 export interface NormalizedToolExchange {
   readonly rounds: ReadonlyArray<{ readonly calls: ReadonlyArray<{ readonly name: string; readonly arguments: string }>; readonly results: ReadonlyArray<{ readonly text: string; readonly isError: boolean }> }>;
   /** Every identity that is not an own block of the unit, in order of first appearance: `{{tool-id:K}}` is `foreign[K - 1]`. */
@@ -60,7 +78,7 @@ export function normalizeToolExchange(rounds: ReadonlyArray<ToolExchangeRound>, 
       calls: round.calls.map((call) => ({ name: call.name, arguments: rename(canonicalArguments(call.arguments)) })),
       results: round.calls.map((call) => {
         const result = round.results.find((candidate) => candidate.callId === call.id)!;
-        return { text: rename(result.text), isError: result.isError };
+        return { text: rename(tiesInContentOrder(result.text)), isError: result.isError };
       }),
     })),
     foreign,

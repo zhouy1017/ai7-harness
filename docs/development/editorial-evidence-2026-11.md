@@ -41,11 +41,11 @@ Plus 16 zero-cost refusals. Money per call is not observable on the subscription
 
 - **`sample1` ended partial.** 错别字 (22 calls, 32 findings on the manuscript) and 体例 (20 calls, 12 findings, one gap unit) settled and the 全书审阅统合总结 completed (1 call; 22 + 20 + 29 + 1 = 72), but 文学性与表达改进 (29 calls) stopped at the developer-live default **Run Budget Ceiling** (30,000 tokens per frozen unit, 240,000 for eight units) before its result set was materialized. The product's own detail: coverage 8/8 units, all reduction/synthesis stages closed, 74 located findings, 27 sampled, estimated precision 0.78. This ceiling is developer-live's default; ordinary production leaves the ceiling unset. Per the plan, `sample1` is scored through the fixture replay, not the partial live Run.
 - **《老残游记》 and 《儒林外史》 stopped on outcome-unknown.** 《老残游记》 unit 9 (`S40/review-first-range/65`, 17:28:01.214Z) and 《儒林外史》 unit 7 (`/72`, 17:36:06.250Z) each ended outcome-unknown exactly 180 s after the previous ledger line, i.e. at the product's fixed request deadline (`config/runtime-execution-defaults.json` › `transport.requestDeadlineSeconds: 180`, applied once from the start of the request and not extended while the answer streams; an abort after send is classified outcome-unknown). The next unknown in each Run (`/66` +0.66 s, `/73` +0.45 s) was the next unit, aborted when the driver cancelled the Run, as the stop rule required. Typical unit calls took 40–75 s. Both books are **not measured**: re-measuring would mean the same questions again (refused as `PROVIDER_VALIDATION_EVIDENCE_EXISTS`) plus retries of unknown outcomes, which the rules forbid. Filed as [#1599](https://github.com/zhouy1017/ai7-harness/issues/1599): an editor's long unit answer fails the same way.
-- **Tool turns.** In the current contract the model used platform tools on 10 of `sample1`'s 24 units (错别字 2, 体例 2, 文学性 6). Of the 72 captures, 38 convert into the fixture; the generator refuses the 34 tool-use captures (24 continuation turns `request-shape-unsupported`, 10 first answers that were tool calls `response-shape-unsupported`), and the replay transport has no tool calls. Filed as [#1598](https://github.com/zhouy1017/ai7-harness/issues/1598).
+- **Tool turns.** In the current contract the model used platform tools on 10 of `sample1`'s 24 units (错别字 2, 体例 2, 文学性 6). Of the 72 captures, 38 convert into the fixture; the generator refuses the 34 tool-use captures (24 continuation turns `request-shape-unsupported`, 10 first answers that were tool calls `response-shape-unsupported`), and the replay transport has no tool calls. Filed as [#1598](https://github.com/zhouy1017/ai7-harness/issues/1598); since converted, see [Correction after #1598](#correction-after-1598) — the figures below are as first reported.
 
 ## Results
 
-**`sample1`** (fixture replay, 14 of 24 units answered; the tool-using units are unmeasured gaps, never filled):
+**`sample1`** (as first reported: fixture replay, 14 of 24 units answered; the tool-using units are unmeasured gaps, never filled — replaced by the table in the Correction below):
 
 | Case | Units answered | Concerns met (unmeasured) | Useful / located | Listed / located / excluded | FP checks fired | Editor adopt / edit / reject / leave | Applies correct; reversal exact |
 | --- | --- | ---: | ---: | --- | ---: | --- | --- |
@@ -77,6 +77,24 @@ What an editor gets, read from these numbers:
 - **On classic texts the 错别字 category modernizes.** Period forms are "corrected"; on the books with conversion residue most suggestions are the residue. A reprint editor would reject most of these, a modernizing editor might accept many.
 - **Runs do not always finish.** Two of five Runs stopped on the 180 s deadline and one category of a third on the developer-live budget ceiling.
 
+## Correction after #1598
+
+The 34 tool-use captures are converted into the `sample1` fixture ([#1598](https://github.com/zhouy1017/ai7-harness/issues/1598): 72 of 72 captures, each with exact source proof) and the three `sample1` cases replay with the platform tools on, the product running its own `retrieve` and `exact_fetch` between the recorded turns. This is a re-read of the same live captures, not a new live pass: no call was made. All 24 units now answer; every figure below is computed from the replay metrics by script, and it replaces the `sample1` table above.
+
+| Case | Units answered | Concerns met (unmeasured) | Useful / located | Listed / located / excluded | FP checks fired | Editor adopt / edit / reject / leave | Applies correct; reversal exact |
+| --- | --- | ---: | ---: | --- | ---: | --- | --- |
+| 错别字与规范用语 | 8 / 8 | 7 / 7 (0) | 7 / 32 | 32 / 32 / 0 | 0 / 4 | 5 / 2 / 0 / 25 | 7 of 7; yes |
+| 体例与格式 | 8 / 8 | 2 / 2 | 2 / 12 | 12 / 12 / 0 | 1 / 3 | 2 / 0 / 1 / 9 | 批注; yes |
+| 文学性与表达改进 | 8 / 8 | 1 / 2 (0) | 1 / 74 | 74 / 74 / 0 | 0 / 4 | 0 / 1 / 0 / 73 | 1 of 1; yes |
+| **Total** | 24 / 24 | **10 / 11** (0 unmeasured, 1 missed) | 10 / 118 (8 %) | 118 / 118 / 0 (located 100 %) | 1 / 11 | 7 / 3 / 1 / 107 | yes |
+
+The listed counts (32, 12, 74) equal the live Run's own detail for the three categories. What changes in the reading above:
+
+- **All eleven false-positive checks are measurable now**, so the figure is a true 1 / 11 like 2026-10's (the same 体例 trap fires). The caveat that four checks sat in unanswered units no longer applies.
+- **The circle-zero year concern (`s1-circle-1980`) is met** — it sat in a tool-using unit and was unmeasured. 错别字 meets all seven concerns; 体例 both; 文学性 still misses `s1-long-attributive`.
+- **The useful rate is 10 / 118 (8 %)**, not 9 / 57: 文学性 lists 74 findings across its eight units, of which one is classified by the references. Most findings still need an editor's judgement (107 of 118 unclassified), as before.
+- **Against 2026-10**: replayed on today's code the 2026-10 answers meet 6 / 11 concerns (1 unmeasured) and 2026-11 meets 10 / 11; useful 6 / 116 (5 %) then and 10 / 118 (8 %) now; FP checks 1 / 11 in both. Both passes now answer every unit they measured except 2026-10's 错别字 unit 7, so the like-for-like narrowing above is no longer needed for 2026-11.
+
 ## Compared with 2026-10
 
 The 2026-10 live pass on `sample1`, as reported: located 65 / 116 (51 lost as `quote-not-found`, #879), concerns 3 / 11, FP checks 1 / 11, 38 calls, 79,241 / 191,471 tokens; its review lines in the Provider Test Ledger span 16:22–16:55Z on 2026-10-15, about 33 min (a ledger figure, not stated in the 2026-10 report). The same 2026-10 answers replayed on today's code (the reviewed baseline): located 116 / 116, concerns 6 / 11 (1 unmeasured), useful 6 / 116 (5 %), FP checks 1 / 11. The useful rates (9 / 57 now, 6 / 116 then) are not comparable: the unit mix differs, and this time 文学性, which lists the most findings, answered only 2 of 8 units.
@@ -88,7 +106,7 @@ What changed between the passes: review contract v2 and the location fix (#879 /
 ## What was not measured
 
 - 《老残游记》 and 《儒林外史》 (stopped on the 180 s deadline, #1599).
-- `sample1`'s ten tool-using units (#1598); 文学性 on `sample1` therefore rests on 2 of 8 units.
+- (`sample1`'s ten tool-using units were unmeasured in the first report; converted under #1598, see the Correction.)
 - Useful rate and concern recall on the four ADR 0091 books (no planted defects; Owner decision needed); 体例与格式 and 文学性 on the four (budget).
 - 初评, 审稿意见 and writing (structural; final-only recording blocked by #1585); whole-book runs of the four; factual review.
 - Variance; money per call; real editors (protocol below).
@@ -106,7 +124,7 @@ Arranged by the Owner with the unified human test after 0.8.0 ([#1540](https://g
 ## Limitations
 
 - One model on one route, one Run per book; three of five books measured; first two body chapters only (a chapter-start bias).
-- `sample1`'s numbers come from 14 of 24 units; its live Run was partial.
+- `sample1`'s numbers come from all 24 units replayed from the live captures after #1598 (14 of 24 in the first report); its live Run was partial (文学性 stopped at the budget ceiling), and the replay's tool results are the product's own, not the live Run's bytes.
 - The four classics have no planted defects; their false-positive count is an upper bound by a reprint-fidelity rule that a modernizing editor would not apply, and three of them carry conversion residue that dominates the 错别字 results.
 - Expected concerns and traps are editorial judgements fixed before the pass; unclassified findings may be valuable and are not scored.
 - The editor is simulated by fixed rules; "time" is the Run's wall time on the Go route on 2026-11-18, including sampling and synthesis, not an editor's minutes.
