@@ -15,8 +15,10 @@ import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // and the Run Report reflection those Runs send — depends on the four categories' frozen contracts and
 // on the findings themselves, so it is derived by driving the real path until no Run asks anything new.
 //
-// Ordinary service tests derive and compare the current fixture without writing. After a clause, label or 工序
-// changes, explicitly write the provider-free derivation with
+// Ordinary service tests check the committed fixture without writing, in ONE pass (a fixed-point check, see the comment at
+// the check). The full derivation from the predecessor — three to four passes, until no Run asks anything new — runs behind
+// AI7_FULL_REVIEW_FIXTURE_DERIVATION=1, which a change to the fixture's inputs must run once; writing implies it. After a
+// clause, label or 工序 changes, explicitly write the provider-free derivation with
 //   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts tests/unit/editorial-evidence.test.ts --no-file-parallelism -t 'generates the authored|refreshes the overlap|authors the synthetic|authors the stock|regeneration preserves'
 // and review the fixture's diff like any other change.
 import { randomUUID } from 'node:crypto';
@@ -157,6 +159,7 @@ const j16SharedKeys = new Set<string>();
 const activeFixtureEntries = new Set<Map<string, ModelFixtureEntry>>();
 const emittedFiles = new Map<string, string>();
 const regenerating = process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1';
+const fullDerivation = regenerating || process.env['AI7_FULL_REVIEW_FIXTURE_DERIVATION'] === '1';
 async function readFixture(path: string, encoding: 'utf8'): Promise<string> {
   return emittedFiles.get(path) ?? await readFile(path, encoding);
 }
@@ -165,6 +168,8 @@ async function emitFixture(path: string, contents: string, encoding: 'utf8'): Pr
   if (regenerating) await writeFile(path, contents, encoding);
 }
 let additions = 0;
+/** The entries the current pass asked for (every add() of it, new or not): the emitted set is what the closing pass requested. */
+let passKeys = new Set<string>();
 
 function refreshRepeatedFinding(entry: ModelFixtureEntry): ModelFixtureEntry {
   if (entry.response.kind !== 'unit-result') return entry;
@@ -179,6 +184,7 @@ function refreshRepeatedFinding(entry: ModelFixtureEntry): ModelFixtureEntry {
 function add(entry: ModelFixtureEntry, group: number, order: string): void {
   entry = refreshRepeatedFinding(entry);
   const key = fixtureEntryKey(entry.unitOrdinal, entry.requestDigest);
+  passKeys.add(key);
   if (order.startsWith('j16')) {
     j16SharedKeys.add(key);
     if (!entries.has(key)) j16Keys.add(key);
@@ -622,18 +628,42 @@ it('generates the authored review fixture without unreachable committed entries'
   await requireExactSample1(roots.codeRoot);
   const predecessor = parseModelFixture(JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', 'sample1-review-authored.json'), 'utf8')));
   predecessor.entries.forEach((entry, index) => add(entry, -2, String(index).padStart(5, '0')));
+  const predecessorKeys = new Set(passKeys);
   const base = await loadModelFixture(resolve(FIXTURE_PATH, '..'), FIXTURE_BASE);
   for (const [key, entry] of base.entries) if (!fixture.entries.has(key)) fixture.entries.set(key, entry);
+  // The ordinary run is a fixed-point check of the committed fixture C: the real path is driven ONCE with C's entries served
+  // from the start, and the pass must then re-emit exactly C. It proves what the full derivation proves —
+  //   - every entry is a deterministic function of the authored inputs and of the responses to EARLIER requests (a request
+  //     digest hashes the earlier responses: unit requests, then assurance sampling, then the run report's reflection), so
+  //     the requests form a dependency DAG and the closure of the predecessor and base under derivation is unique;
+  //   - the emitted files are built only from the entries this pass requests through add() (passKeys) — the entries seeded
+  //     here reach the fixture the real path reads, never the emitted set — so an entry of C that no closed run asks for is
+  //     not emitted, a requested entry C lacks is emitted, and an answer of C that differs from the derived one is replaced;
+  //     the byte comparison with the committed files at the end then fails for a stale, missing, altered or re-keyed entry;
+  //   - the pass closing means no request went unanswered.
+  // The full derivation emits the same set: its closing pass requests exactly the entries of C (an answer an earlier pass
+  // derived while others were missing is not requested by the closed run and is not written). So C = emit(derive(C)): C is a
+  // fixed point of the derivation and holds nothing else, and by the uniqueness of the closure it is the entry set the full
+  // derivation reaches from the predecessor.
+  if (!fullDerivation) {
+    for (const name of [FIXTURE_IDENTITY, 'sample1-agent-workspace-cross-chapter']) {
+      const committed = parseModelFixture(JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', `${name}.json`), 'utf8')));
+      for (const entry of committed.entries) fixture.entries.set(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest), entry);
+    }
+  }
   let closed = false;
-  for (let index = 0; index < 6 && !closed; index += 1) {
+  for (let index = 0; index < (fullDerivation ? 6 : 1) && !closed; index += 1) {
     additions = 0;
+    passKeys = new Set(predecessorKeys);
     closed = await pass();
     // eslint-disable-next-line no-console
     console.log(`pass ${index + 1}: +${additions} entries, all closed: ${closed}`);
-    if (additions > 0) closed = false;
+    if (fullDerivation && additions > 0) closed = false;
   }
   expect(closed).toBe(true);
-  const ordered = [...entries.values()].sort((left, right) => left.group - right.group || (left.order < right.order ? -1 : left.order > right.order ? 1 : 0));
+  // Only what the closing pass requested (and the predecessor's authored answers) is written: an answer that an earlier pass
+  // derived while others were still missing is requested by no closed run and is not kept.
+  const ordered = [...entries.entries()].filter(([key]) => passKeys.has(key)).map(([, labelled]) => labelled).sort((left, right) => left.group - right.group || (left.order < right.order ? -1 : left.order > right.order ? 1 : 0));
   const body = {
     schema: 'ai7.model-fixture/1',
     identity: FIXTURE_IDENTITY,

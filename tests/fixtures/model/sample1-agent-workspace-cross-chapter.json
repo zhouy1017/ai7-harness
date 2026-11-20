@@ -21,18 +21,6 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "2b9f2b97117b33e5a170fb76d5d782b052a07f30599fa3239e172ce6432cc43d",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"未能形成发现的条目下一轮可要求模型给出更短、在内容块内唯一的引文，而不是重审整个单元。\",\"basis\":\"账目按排除原因分别记录了未能定位的条数，已定位的发现按严重度分别计数。\"},{\"suggestion\":\"稿件变化后优先只审改动过的单元，未改动的已审单元按血缘复用即可。\",\"basis\":\"账目记录了本次提交、复用与未进入范围的单元数，复用单元不产生模型用量。\"}]}",
-        "usage": {
-          "inputTokens": 900,
-          "outputTokens": 210
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
       "requestDigest": "641cd92d18b8aa8911ccf42bc2da4cade39332fb1d02ba06423a8263bd69cd58",
       "response": {
         "kind": "unit-result",
@@ -78,18 +66,6 @@
         "usage": {
           "inputTokens": 800,
           "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "a9e4246b39b649b071745343d9944514911d88d8c1da881c7b6ec071979497ae",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"}]}",
-        "usage": {
-          "inputTokens": 1630,
-          "outputTokens": 100
         }
       }
     },
