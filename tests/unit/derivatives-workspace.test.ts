@@ -411,11 +411,13 @@ it('follows an AI 写作 start on the management page and opens its draft (#1551
   expect(root.querySelector('.writing-task-sheet')).not.toBeNull();
   expect(root.querySelector<HTMLInputElement>('.writing-task-sheet [data-document-field="title"]')!.value).toBe('《测试图书》宣传文章');
   const before = methods.inspectWritingTask.mock.calls.length;
-  root.querySelector<HTMLElement>('[data-writing-action="start"]')!.click();
+  // The launch bar (0.7.3) owns the start control; the sheet hands it this task's request and the start's follow-up.
   expect(writingLaunch).toHaveBeenCalledOnce();
   recordStart();
   // The recorded start refreshes this page's writing surface at once: it follows the task and opens the new draft.
-  (writingLaunch.mock.calls[0]![0] as { onStarted?: () => void }).onStarted?.();
+  const request = writingLaunch.mock.calls[0]![0] as { beforeLaunch?: () => Promise<boolean>; onStarted?: () => void };
+  expect(await request.beforeLaunch?.()).toBe(true);
+  request.onStarted?.();
   await flush(); await flush();
   expect(methods.inspectWritingTask.mock.calls.length).toBeGreaterThan(before);
   expect(methods.createWritingDraft).toHaveBeenCalledWith({ revisionId: 'draft-1', title: '《测试图书》宣传文章' });
