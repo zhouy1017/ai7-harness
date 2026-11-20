@@ -54,6 +54,9 @@ describe('the command registry', () => {
     expect(COMMANDS.find((command) => command.id === 'view.openTasks')).toMatchObject({ name: '查看任务', defaults: { win32: 'F7' } });
     expect(COMMANDS.find((command) => command.id === 'view.focusMode')).toMatchObject({ name: '专注模式', defaults: { win32: 'F8' } });
     expect(effectiveSequence('evaluation.start', {}, 'win32')).toBe('Mod+Shift+E');
+    // F1 opens 帮助 from anywhere (#1548); it is rebindable like the others.
+    expect(COMMANDS.find((command) => command.id === 'help.open')).toMatchObject({ name: '帮助', context: 'application', defaults: { win32: 'F1', darwin: 'F1' } });
+    expect(effectiveSequence('help.open', { 'help.open': 'Mod+Shift+H' }, 'win32')).toBe('Mod+Shift+H');
     const saved = { 'view.focusMode': 'Mod+Shift+J' };
     expect(validatedBindings(saved, 'win32')).toEqual(saved);
     expect(validatedBindings({ 'view.focusMode': 'Mod+Shift+E' }, 'win32')).toEqual({});
@@ -86,7 +89,7 @@ describe('the command registry', () => {
     const forbidden = ['开始任务', '采纳', '设为发稿版本', '保存为里程碑版本', '删除', '批准', '授权', '应用', '放弃', '覆盖', '替换全部', '确认'];
     for (const command of COMMANDS) {
       for (const word of forbidden) expect(command.name, command.id).not.toContain(word);
-      expect(command.id, command.id).toMatch(/^(?:nav|search|view|command|book|review|evaluation)\./u);
+      expect(command.id, command.id).toMatch(/^(?:nav|search|view|command|book|review|evaluation|help)\./u);
       expect(command.id, command.id).not.toMatch(/authoriz|adopt|apply|publish|designate|delete|approve|milestone|decision/iu);
     }
     expect(FIXED_COMMANDS.map((fixed) => fixed.id)).toEqual(['edit.save', 'edit.undo', 'edit.redo', 'edit.replace', 'edit.previousWindow', 'edit.nextWindow']);
@@ -131,6 +134,8 @@ describe('reserved keys', () => {
   });
 
   it('lets a function key or a modified letter through', () => {
+    expect(reservedReason(chord('F1'), 'win32')).toBeNull();
+    expect(reservedReason(chord('F1'), 'darwin')).toBeNull();
     expect(reservedReason(chord('F6'), 'win32')).toBeNull();
     expect(reservedReason(chord('Shift+F6'), 'darwin')).toBeNull();
     expect(reservedReason(chord('Mod+Shift+L'), 'win32')).toBeNull();

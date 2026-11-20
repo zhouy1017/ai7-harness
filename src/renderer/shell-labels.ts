@@ -20,7 +20,7 @@ export type ShellDestination = 'attention' | 'tasks' | 'library' | 'series' | 'k
 /** The seven global destinations in their fixed order (IA-007): 待我处理 · 任务 · 书库 · 书系 · 知识库 · 质量与学习 · AI 助手（Issue #1083; named by #1521）. */
 export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination; readonly label: string; readonly icon: IconId }> = Object.freeze([
   { key: 'attention', label: '待我处理', icon: 'i-inbox' },
-  { key: 'tasks', label: '任务', icon: 'i-task' },
+  { key: 'tasks', label: '任务', icon: 'i-checklist' },
   { key: 'library', label: '书库', icon: 'i-library' },
   { key: 'series', label: '书系', icon: 'i-series' },
   { key: 'knowledge', label: '知识库', icon: 'i-kb' },
@@ -61,6 +61,9 @@ export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work' as const,
   icon: 'i-workspace' as const, state: 'agent-workspace' as const });
 
 export const SHELL_SETTINGS = Object.freeze({ label: '设置', icon: 'i-settings' });
+
+/** 更多图书 (Issue #1554): a destination of its own, so it no longer borrows 书库's symbol. */
+export const SHELL_MORE_BOOKS_ICON: IconId = 'i-more';
 
 export const SHELL_LABELS = Object.freeze({
   navigation: '主导航',

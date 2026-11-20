@@ -1,7 +1,7 @@
 import { initializeTechnicalLayer, resetTechnicalLayer, setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { developerModeRow, mountHelp, THIRD_PARTY_LICENSES, type ThirdPartyLicense } from '../../src/renderer/help.js';
+import { developerModeRow, mountHelp, THIRD_PARTY_LICENSES, type HelpCommands, type ThirdPartyLicense } from '../../src/renderer/help.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { SERVICE_PROTOCOL_VERSION } from '../../src/shared/protocol.js';
 import { HELP_ABOUT_FAILED } from '../../src/renderer/help-labels.js';
@@ -24,10 +24,11 @@ const LICENSES: ReadonlyArray<ThirdPartyLicense> = [
   { name: 'gamma', version: '3.0.0', license: 'Apache-2.0', repository: null, homepage: null, licenseText: '文本未随包提供', licenseTextDigest: 'g' },
 ];
 
-function mounted() {
+function mounted(commands?: HelpCommands) {
   const root = document.createElement('section');
   mountHelp({
     root,
+    ...(commands === undefined ? {} : { commands }),
     loadVersions: async () => ({ softwareVersion: '0.9.9', dataVersion: 1, frozen: true }),
     licenses: LICENSES,
   });
@@ -110,6 +111,29 @@ describe('the mounted 帮助 screen', () => {
     filter.value = 'nothing-matches';
     filter.dispatchEvent({ type: 'input' });
     expect(find('.help-license-empty').hidden).toBe(false);
+  });
+});
+
+describe('第一次审稿 (#1548)', () => {
+  const stepNodes = (root: MiniElement): MiniElement[] => root.querySelectorAll('[data-help-step]') as unknown as MiniElement[];
+
+  it('puts 第一次审稿 first, with a button on each step that runs its command', () => {
+    const run = vi.fn();
+    const { root } = mounted({ run, usable: () => true });
+    const first = root.querySelector('.help-section') as unknown as MiniElement;
+    expect(first.dataset['helpSection']).toBe('first-review');
+    expect(stepNodes(root as unknown as MiniElement).map((node) => node.dataset['helpStep'])).toEqual(['model', 'import', 'review', 'process', 'export']);
+    for (const node of stepNodes(root as unknown as MiniElement)) (node.querySelector('button') as unknown as MiniElement).click();
+    expect(run.mock.calls.map((call) => call[0])).toEqual(['nav.settings', 'nav.library', 'review.new', 'nav.book.findings', 'nav.book.deliverables']);
+  });
+
+  it('says a Book is needed, in place of a button, on the steps that act inside one', () => {
+    const run = vi.fn();
+    const { root } = mounted({ run, usable: (command) => command === 'nav.settings' || command === 'nav.library' });
+    const nodes = stepNodes(root as unknown as MiniElement);
+    expect(nodes.map((node) => node.querySelector('button') !== null)).toEqual([true, true, false, false, false]);
+    expect(nodes.slice(2).map((node) => node.querySelector('[data-help-step-needs-book]')?.textContent)).toEqual(Array(3).fill('需要先打开一本图书：在书库里打开后，回到这里继续。'));
+    expect(run).not.toHaveBeenCalled();
   });
 });
 

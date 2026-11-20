@@ -69,6 +69,8 @@ export const COMMANDS: readonly CommandDefinition[] = [
     defaults: { win32: `Alt+Shift+${index === 1 ? 0 : index === 0 ? 1 : index}`, darwin: `Mod+Alt+Shift+${index === 1 ? 0 : index === 0 ? 1 : index}` },
   })),
   { id: 'nav.settings', name: COMMAND_NAMES['nav.settings'], group: 'navigation', context: 'application', defaults: both('Mod+Comma') },
+  // 帮助 opens from anywhere on F1 (#1548); it is the one function key the system no longer keeps.
+  { id: 'help.open', name: COMMAND_NAMES['help.open'], group: 'navigation', context: 'application', defaults: both('F1') },
   { id: 'view.toggleSidebar', name: COMMAND_NAMES['view.toggleSidebar'], group: 'view', context: 'application', defaults: both('Mod+Backslash') },
   { id: 'nav.back', name: COMMAND_NAMES['nav.back'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+ArrowLeft', darwin: 'Mod+BracketLeft' } },
   { id: 'search.find', name: COMMAND_NAMES['search.find'], group: 'search', context: 'manuscript', defaults: both('Mod+F') },
@@ -344,7 +346,7 @@ export function refreshShortcutLabels(root: ParentNode = document): void {
 const TEXT_EDITING_KEYS = new Set(['A', 'C', 'X', 'V', 'Y', 'Z', 'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
 /** Keys that type, commit an input method's composition, or leave a field — with any modifier but Alt they stay the text's. */
 const TYPING_KEYS = new Set(['Space', 'Enter', 'Escape', 'Tab', 'Backspace', 'Delete', 'Insert']);
-const SYSTEM_FUNCTION_KEYS = new Set(['F1', 'F5', 'F10', 'F11', 'F12']);
+const SYSTEM_FUNCTION_KEYS = new Set(['F5', 'F10', 'F11', 'F12']);
 const WINDOW_COMMAND_LETTERS = ['W', 'Q', 'N', 'R', 'O', 'T'];
 
 /** Why a single chord may never be bound, or `null`. Judged on the platform's own conventions. */

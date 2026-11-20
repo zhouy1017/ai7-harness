@@ -883,7 +883,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   function replaceComments(replacer: RightColumnReplacer): void { switchColumn(() => rightColumn.replaceComments(replacer)); }
   function restoreComments(replacer: RightColumnReplacer): void { switchColumn(() => rightColumn.restoreComments(replacer)); }
   const edgeEntries = element('div', 'edge-entries');
-  for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-analysis'], [tasksEntry, 'i-task'], [commentsEntry, 'i-comment']] as const) {
+  for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-paragraph-analysis'], [tasksEntry, 'i-task'], [commentsEntry, 'i-comment']] as const) {
     const label = element('span', 'edge-label', entry.textContent ?? '');
     const badge = element('span', 'edge-badge');
     badge.setAttribute('aria-hidden', 'true');
