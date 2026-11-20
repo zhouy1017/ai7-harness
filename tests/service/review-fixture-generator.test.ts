@@ -655,12 +655,15 @@ it('generates the authored review fixture without unreachable committed entries'
   // emitted, an answer of C that differs from the derived one is replaced, and the comparison fails for a missing, altered or
   // re-keyed one. What the pass proves: every entry a harvested Run requests is byte-identical to the committed one, nothing
   // it derives is missing from C, and the Runs close (`closed` covers the harvested Runs only; Runs that `runReviewSynthesis`
-  // drives are not harvested, and their unit-0 requests are answered from the seeded entries).
+  // drives are not harvested, and their unit-0 requests are answered where the committed files hold an answer).
   // What it cannot derive: the entries of C that no harvested Run requests in the closing pass — run-report reflections and
   // assurance-sampling answers that only an earlier pass of the full derivation, or a Run that is not harvested, asks for.
-  // They are kept as they are, and each must be exactly the answer the generator authors for its kind (`expectKeptAnswer`).
-  // Only the switch run (AI7_FULL_REVIEW_FIXTURE_DERIVATION=1) pins their membership, and which file a Run shared with J-16
-  // lands in, which depends on the order the full derivation first adds an entry in.
+  // They are kept as they are, and each must be an answer the generator authors for its kind (`expectKeptAnswer`): a kept
+  // reflection is pinned whole; a kept assurance-sampling answer is pinned in shape only.
+  // Only the switch run (AI7_FULL_REVIEW_FIXTURE_DERIVATION=1) pins the rest: the kept entries' membership and request
+  // digests, a kept sampling answer's disposition count and which unit's usage it carries, and which file a Run shared with
+  // J-16 lands in, which depends on the order the full derivation first adds an entry in. A hand edit of those passes the
+  // ordinary run and fails the switch run at the byte comparison.
   const committedEntries = new Map<string, readonly ModelFixtureEntry[]>();
   if (!fullDerivation) {
     for (const name of [FIXTURE_IDENTITY, 'sample1-agent-workspace-cross-chapter']) {
