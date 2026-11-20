@@ -22,6 +22,7 @@
     "words:report": "node tools/words-report.mjs",
     "test": "vitest run tests/unit",
     "test:service": "vitest run tests/service",
+    "test:service:weights": "node tools/refresh-service-weights.mjs",
     "build": "node tools/build-controller.mjs",
     "version:identity": "node tools/build-identity.mjs",
     "inspect": "node tools/inspect.mjs",
