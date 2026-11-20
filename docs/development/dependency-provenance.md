@@ -78,7 +78,7 @@ Status: **the exact external development experiment is authorized; grouped execu
 
 Outcome (closing record, 2026-11-16): the exact approved bytes were acquired and verified. Single-text inference passed the measured comparisons and was identical across processes (maximum coordinate difference 0); batched inference **FAILED** the fixed 1e-4 numerical tolerance. The synthetic retrieval comparison favoured the embedding model over BM25. Two supplementary-plane Han characters (U+20BB7 and U+20000) tokenize to unknown. Memory-pressure / OOM behaviour was not exercised, and the strict containment canary was inconclusive. These are the Worker's retained results, unrepeated by the planned fresh Reviewer; the detailed boundaries below remain in force.
 
-This validation establishes no production wiring or redistribution clearance: notice-carrier completeness remains held, and the cases were synthetic only. Any later product use belongs to the separate feature umbrella [#1027](https://github.com/zhouy1017/ai7-harness/issues/1027) and requires its own Owner decision, with the batching failure and unknown-token finding as inputs.
+This validation establishes no production wiring or redistribution clearance: notice-carrier completeness remains held, and the cases were synthetic only. No product use follows from it: the Owner closed the feature umbrella [#1027](https://github.com/zhouy1017/ai7-harness/issues/1027) on 2026-11-19 (closing disposition below), with the batching failure and unknown-token finding among the reasons.
 
 ### Scope, custody and reporting status
 
