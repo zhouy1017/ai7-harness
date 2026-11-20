@@ -583,8 +583,10 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     // cannot read keeps the older key over the result bytes alone, which only authored scripts use.
     const rounds = toolResults.length > 0 && !named && reviewSynthesis === null ? toolExchangeOf(options.messages, lastUserIndex) : null;
     const exchange = rounds === null ? null : normalizeToolExchange(rounds, ownBlockIdsOf(text!));
-    const scriptDigest = toolResults.length > 0 ? fixtureToolResultDigest(toolResults) : null;
-    let expectedDigest = reviewSynthesis !== null ? unitDigest : exchange !== null ? toolTurnRequestDigest(unitDigest, exchange) : scriptDigest ?? unitDigest;
+    const scriptDigest = toolResults.length > 0 && reviewSynthesis === null ? fixtureToolResultDigest(toolResults) : null;
+    // The request is keyed by its result bytes alone exactly when it carries results and no exchange this reads.
+    const keyedByScript = exchange === null && scriptDigest !== null;
+    let expectedDigest = exchange !== null ? toolTurnRequestDigest(unitDigest, exchange) : scriptDigest ?? unitDigest;
     const originalDigest = expectedDigest;
     if (text !== null && (synthesis !== null || report !== null || rewrite !== null || drafting !== null))
       expectedDigest = taskSynopsisMessageRequestDigest(expectedDigest, text);
@@ -592,9 +594,11 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);
-    // The older key over the result bytes alone answers authored scripts only: a captured entry found by it is not its answer.
+    // The older key over the result bytes alone answers capture-less entries only (authored scripts): a captured entry is keyed by its
+    // unit or its whole exchange, so one found under the result bytes is not its answer, whether this request's exchange is readable or not.
+    const found = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
     const script = exchange !== null && scriptDigest !== null && this.#fixture.provenance === 'authored' ? resolveFixtureEntry(this.#entries, ordinal, scriptDigest, attempt) : undefined;
-    const exact = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt) ?? (script?.capture === undefined ? script : undefined);
+    const exact = (keyedByScript && found?.capture !== undefined ? undefined : found) ?? (script?.capture === undefined ? script : undefined);
     const stage = crossUnit !== null ? 'reduction' : drafting !== null ? 'writing-synthesis' : reflection !== null ? 'reflection' : null;
     const stageContractDigest = crossUnit !== null ? this.#crossUnitPromptContractDigest : drafting !== null ? this.#promptContractDigest : RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
     const compatible = exact === undefined && !hasSynopsisContext && stage !== null && this.#sourceDigest !== null

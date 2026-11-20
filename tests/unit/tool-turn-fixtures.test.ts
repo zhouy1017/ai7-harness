@@ -236,6 +236,31 @@ describe('tool-turn fixtures (Issue #1598)', () => {
     expect((await ask(hand, wireBody(OWN, [retrieveRound(OWN, CANDIDATE)]))).status).toBe(500);
   });
 
+  it('never lets the older key answer a captured entry when the carried exchange is unreadable, and still answers an authored script', async () => {
+    const [first, , third] = await recordedEntries();
+    // A placeholder-shaped result makes the exchange one the key does not read, so the request is looked up under its result bytes alone.
+    const unreadable = retrieveRound(FRESH_OWN, FRESH_CANDIDATE, '{{tool-id:1}}');
+    const readable = retrieveRound(FRESH_OWN, FRESH_CANDIDATE);
+    const old = (round: Round): string => fixtureToolResultDigest([{ text: round.results[0]!, isError: false }]);
+    const plain = edited(third!, { ...third!.response, text: '{"synopsis":"合成概述","entities":[]}' }, { identityMap: [] });
+    const asAuthored = (fixture: ReturnType<typeof parseModelFixture>): ResolvedModelFixture => ({ ...replayOf(fixture), provenance: 'authored' }) as ResolvedModelFixture;
+    // A captured tool-call answer and a captured text answer, each stored under the result-bytes key of the request that asks.
+    for (const captured of [first!, plain]) {
+      const under = (round: Round): ReturnType<typeof parseModelFixture> => sealed([{ ...captured, requestDigest: old(round) }]);
+      for (const fixture of [replayOf(under(unreadable)), asAuthored(under(unreadable))]) {
+        expect((await ask(fixture, wireBody(FRESH_OWN, [unreadable]))).status).toBe(500);
+      }
+    }
+    // The same entry without its capture is an authored script and answers by that key, with an unreadable exchange and a readable one;
+    // the captured third turn only gives the replay transport its adapter and sits under a key of its own.
+    const script = (round: Round): ReturnType<typeof parseModelFixture> => sealed([third!, { unitOrdinal: 1, requestDigest: old(round), response: plain.response }]);
+    for (const round of [unreadable, readable]) {
+      expect((await ask(asAuthored(script(round)), wireBody(FRESH_OWN, [round]))).status).toBe(200);
+    }
+    // A recorded fixture is answered by the exchange key: its capture-less entry under the result-bytes key is no fallback for a readable exchange.
+    expect((await ask(replayOf(script(readable)), wireBody(FRESH_OWN, [readable]))).status).toBe(500);
+  });
+
   it('replays from the first turn again after the exchange was cut short, on the same transport', async () => {
     const fixture = await recordedFixture();
     const transport = replayTransport([fixture], { answered: 0, unmatched: 0, answeredContracts: new Set() });
