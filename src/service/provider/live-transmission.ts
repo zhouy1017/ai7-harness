@@ -22,7 +22,7 @@ import {
   type ProviderValidationRecord,
 } from './provider-result-cache.js';
 import type { ResearchSnapshot, ResearchSnapshotCache } from './research-snapshot-cache.js';
-import { identityRemap, remapResponse } from './identity-replay.js';
+import { identityForm, identityRemap, remapResponse } from './identity-replay.js';
 
 /**
  * The once-only live transmission (ADR 0067, ADR 0070, ADR 0089), shared by every path that sends to a model or a platform tool
@@ -168,14 +168,17 @@ export async function transmitOnce(
     }
     // 2. The same question asked again under the same configuration. Asked with newly minted identities only, the newest such
     // capture answers it, mapped onto this request in memory (Issue #1585); its entry is never touched. One it cannot map
-    // safely still refuses: nothing is sent for a question the evidence already answers.
-    for (const capture of captures.filter(({ line }) => line.generation === generation).reverse()) {
-      if (capture.entry.streamedAnswer?.complete === false) continue;
-      const remap = identityRemap(capture.entry.requestBody, init.body);
-      const response = remap === null ? null : remapResponse(capture.entry.response, remap);
-      if (response === null) continue;
-      return replay(cache, item, model, requestDigest, identity, { ...capture.entry, response },
-        decided('identity-replay', [capture.line.itemId]), null);
+    // safely still refuses: nothing is sent for a question the evidence already answers. Every valid capture answered whole:
+    // a partial stream's line is `failed`, never evidence.
+    const form = identityForm(init.body);
+    if (form !== null) {
+      for (const capture of captures.filter(({ line }) => line.generation === generation).reverse()) {
+        const remap = identityRemap(capture.entry.requestBody, form);
+        const response = remap === null ? null : remapResponse(capture.entry.response, remap);
+        if (response === null) continue;
+        return replay(cache, item, model, requestDigest, identity, { ...capture.entry, response },
+          decided('identity-replay', [capture.line.itemId]), null);
+      }
     }
     const repeated = evidence.filter((line) => line.generation === generation && line.semanticDigest === identity.semanticDigest);
     if (repeated.length > 0) {
