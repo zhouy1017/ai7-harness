@@ -3326,6 +3326,7 @@ async function main() {
     await choose(renderer, '#learning-audit-filter-standing', '', 'learning-audit-ordinary-standing-cleared');
     await readAudit(renderer, (page) => page.view === 'list' && page.rows.length > 0, 'learning-audit-ordinary-standing-read');
     await choose(renderer, '#learning-audit-filter-kind', '', 'learning-audit-ordinary-kind-cleared');
+    await readAudit(renderer, (page) => page.view === 'list' && page.rows.length > 0, 'learning-audit-ordinary-kind-read');
     await fill(renderer, '#learning-audit-query', '分页原因5', 'learning-audit-ordinary-query');
     await clickSelector(renderer, '[data-learning-audit-action="search"]', 'learning-audit-ordinary-search');
     const ordinaryRow = await readAudit(renderer, (page) => page.rows.length === 1, 'learning-audit-ordinary-row');
