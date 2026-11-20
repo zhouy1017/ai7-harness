@@ -52,7 +52,7 @@ armPerTicketHostAdmission();
 
 // Every case's first Book is a copy of one imported sample1 store, placed in its data root before the case opens its own store (#1621);
 // a second Book of a case (and the import itself, proven by the cases that import) goes through `importSample1Book`.
-const seeded = sample1Seed({ title: 'sample1 事实核查', connectionName: null });
+const seeded = sample1Seed({ title: 'sample1 事实核查' });
 let placedBook: Sample1Seed['book'] | null = null;
 
 const TINYFISH = SEARCH_BACKENDS.find((entry) => entry.id === 'search-tinyfish')!;

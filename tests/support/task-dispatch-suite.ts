@@ -53,7 +53,7 @@ let capture: ReturnType<typeof capturedOrdinaryExecution> | undefined;
 let setupOwner: BaselineAnalysisExecutionOwner | undefined;
 let dimensionId: string | undefined;
 // Every case starts from a copy of one imported sample1 store (#1621); the case's first `book()` is that Book and a second Book is imported.
-const seeded = sample1Seed({ title: 'sample1 任务派发', connectionName: null });
+const seeded = sample1Seed({ title: 'sample1 任务派发' });
 let placedBook: Sample1Seed['book'] | null = null;
 
 beforeEach(async () => {

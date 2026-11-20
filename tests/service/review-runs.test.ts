@@ -111,7 +111,7 @@ afterEach(async () => {
 
 // Cases whose first act is the import start from a copy of one imported sample1 store (#1621); a case that imports a second Book,
 // reopens a store or tests the import itself keeps `importSample1Book` or a plain `open`.
-const seeded = sample1Seed({ title: 'L2 sample1 审阅记录', connectionName: 'L2 主编辑连接' });
+const seeded = sample1Seed({ title: 'L2 sample1 审阅记录' });
 
 interface Session {
   readonly store: EditorialStore;
@@ -155,7 +155,12 @@ async function close(session: Session): Promise<void> {
 }
 
 async function importBook(session: Session): Promise<Book> {
-  if (session.seeded) { const { book } = await seeded(); return { bookId: book.bookId, manuscriptId: book.manuscriptId, branchId: book.branchId }; }
+  if (session.seeded) {
+    const { book } = await seeded();
+    // Recorded here, after the session's own route connection, as before the seed: the first connection becomes the fast role's.
+    recordMissingCredentialConnection(session.store, 'L2 主编辑连接');
+    return { bookId: book.bookId, manuscriptId: book.manuscriptId, branchId: book.branchId };
+  }
   await requireExactSample1(roots.codeRoot);
   const imported = await importSample1Book(session.store, roots.codeRoot, 'L2 sample1 审阅记录');
   await pinEditorialWorkspaceProfileRevision2(session.store, imported.bookId);
@@ -559,9 +564,11 @@ async function stopBetweenCategories(): Promise<{ book: Book; reviewRunId: strin
   return { book: book!, reviewRunId: reviewRunId! };
 }
 
-async function plantStoppedCategory(book: Book | undefined, planted: 'authorized' | 'admitted' | 'executing') {
-  const first = await open('sample1-review-cross-chapter-authored', undefined, undefined, true);
+async function plantStoppedCategory(book: Book | undefined, planted: 'authorized' | 'admitted' | 'executing', earlierRuns: number) {
+  // Only the first turn starts from the seed: a later turn opens the data root the earlier turns wrote, which is the point of the case.
+  const first = await open('sample1-review-cross-chapter-authored', undefined, undefined, book === undefined);
   try {
+    expect(withDatabase((db) => (db.prepare('SELECT COUNT(*) AS runs FROM review_runs').get() as { runs: number }).runs), 'Review Runs the earlier turns left in the store').toBe(earlierRuns);
     book ??= await importBook(first);
     const prepared = prepare(first, book, [TYPOS], WHOLE);
     const reviewRunId = prepared.reviewRunId;
@@ -1919,8 +1926,8 @@ describe('a Review Run over the real store on exact sample1', () => {
 
   it('reconciles stopped admitted or executing categories while preserving explicit continuation (#657)', async () => {
     let book: Book | undefined;
-    for (const planted of ['authorized', 'admitted', 'executing'] as const) {
-      const stopped = await plantStoppedCategory(book, planted);
+    for (const [turn, planted] of (['authorized', 'admitted', 'executing'] as const).entries()) {
+      const stopped = await plantStoppedCategory(book, planted, turn);
       book = stopped.book;
       const { reviewRunId, runRecordId } = stopped;
       const second = await open('sample1-review-cross-chapter-authored');

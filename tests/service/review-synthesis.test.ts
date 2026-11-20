@@ -23,7 +23,7 @@ import { setLibraryDecision } from '../support/library-materials.js';
 import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { sample1Seed } from '../support/sample1-seed.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { reportContentDigest } from '../../src/service/review/review-report.js';
 import { RUN_SYNTHESIS_SCHEMA_SQL } from '../../src/service/review/run-synthesis-storage.js';
@@ -44,7 +44,7 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 
 // A case whose first act is the import starts from a copy of one imported sample1 store (#1621); the case that imports a second Book keeps
 // `importSample1Book`.
-const seeded = sample1Seed({ title: 'sample1 全书审阅统合', connectionName: '统合正式请求捕获' });
+const seeded = sample1Seed({ title: 'sample1 全书审阅统合' });
 
 async function openCapturedSession(synthesisAnswer = sample1SynthesisAnswer,
   controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false, restatedNotes = false, failedUnit = 0, dataRoot = roots.dataRoot, restatedSynopses = false, seed = false): Promise<Session> {
@@ -105,6 +105,7 @@ async function withCapturedReviewBook(body: (session: Session, book: Book) => Pr
   const session = await openCapturedSession(synthesisAnswer, controls, emptyFindings, literary, restatedNotes, failedUnit, roots.dataRoot, restatedSynopses, true);
   try {
     const { book } = await seeded();
+    recordMissingCredentialConnection(session.store, '统合正式请求捕获');
     restatedBranch = book.branchId;
     await body(session, book);
   } finally { await closeCapturedSession(session); }
@@ -262,7 +263,7 @@ it('resumes a synthesis waiting for its turn after restart under its launched mo
   let session = await openSeededSession();
   let book!: Book, runId!: string, launchedModel!: string;
   try {
-    book = (await seeded()).book;
+    book = (await seeded()).book; recordMissingCredentialConnection(session.store, '统合排队重启');
     runId = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
     const categoryOnly = new ReviewRunDriver({ ...session.store.reviewRunDriveSteps, begin: id => session.store.reviewRunDriveSteps.begin(id).filter(category => category === TYPOS) }, session.owner);
     try { await categoryOnly.drive(runId); } finally { await categoryOnly.dispose(); }
@@ -382,7 +383,7 @@ it('settles a graceful stop during the ordinary transport request without resend
   const first = await openSeededSession(sample1SynthesisAnswer, { transportHold: async (_request, message) => { if (sample1SynthesisAnswer(message) !== undefined) { reached(); await gate; } } });
   let book!: Book, runId!: string;
   try {
-    book = (await seeded()).book;
+    book = (await seeded()).book; recordMissingCredentialConnection(first.store, '统合运行重启');
     runId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
     const driving = first.driver.drive(runId); await held;
     await first.owner.dispose(); await driving;
@@ -676,7 +677,7 @@ it('reconciles a crash snapshot taken inside the synthesis transport at startup 
   const crashRoot = join(roots.inputRoot, 'crash-data');
   let book!: Book, runId!: string, findings: unknown;
   try {
-    book = (await seeded()).book;
+    book = (await seeded()).book; recordMissingCredentialConnection(first.store, '统合崩溃快照');
     runId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
     void first.driver.drive(runId); await held;
     findings = workspace(first, book).run!.findings;

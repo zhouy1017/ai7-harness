@@ -157,7 +157,7 @@ async function productionLaunch(): Promise<ProductionLaunch> {
 
 // A store opened with `seed` starts from a copy of one imported sample1 store (#1621); its first `sample1Book` is that Book, and a
 // second Book (or a store opened without `seed`) is imported.
-const seeded = sample1Seed({ title: '合成样书', connectionName: null });
+const seeded = sample1Seed({ title: '合成样书' });
 const seededBooks = new Map<EditorialStore, string>();
 
 async function openProductionStore(dataRoot: string = roots.dataRoot, seed = false): Promise<{ store: EditorialStore; production: ProductionLaunch }> {
