@@ -1,5 +1,4 @@
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
-import { localInstantLabel } from './plan-preview-labels.js';
 import { MODEL_SERVICE_SETUP_REQUIRED_REASON, type GlobalAgentDialogueProjection, type GlobalAgentProcedure, type GlobalAgentProjection, type GlobalAgentRendererApi, type GlobalAgentScopeInput, type GlobalMemoryItem, type GlobalAgentSourceCandidate, type PrepareGlobalAgentTurnInput, type RecordLearningSupervisionInput } from '../shared/protocol.js';
 import { globalAgentAnswerStatus, shellDestinationLabel } from './shell-labels.js';
 import { visibleQualityLearningTabs } from './quality-learning-labels.js';
