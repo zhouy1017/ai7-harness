@@ -64,6 +64,7 @@ import {
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../src/shared/provider-configuration.generated.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+import { sample1Seed } from '../support/sample1-seed.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // One explicit model-request capability per test application.
@@ -107,6 +108,9 @@ afterEach(async () => {
     }
   }
   await roots.dispose();
+  // A seeded Book no case took would be a Book the case never had before the seed.
+  const unused = seededBooks.size; seededBooks.clear();
+  expect(unused).toBe(0);
 });
 
 vi.setConfig({ hookTimeout: 60_000 });
@@ -151,7 +155,14 @@ async function productionLaunch(): Promise<ProductionLaunch> {
   return state;
 }
 
-async function openProductionStore(dataRoot: string = roots.dataRoot): Promise<{ store: EditorialStore; production: ProductionLaunch }> {
+// A store opened with `seed` starts from a copy of one imported sample1 store (#1621); its first `sample1Book` is that Book, and a
+// second Book (or a store opened without `seed`) is imported.
+const seeded = sample1Seed({ title: '合成样书' });
+const seededBooks = new Map<EditorialStore, string>();
+
+async function openProductionStore(dataRoot: string = roots.dataRoot, seed = false): Promise<{ store: EditorialStore; production: ProductionLaunch }> {
+  const seedOfStore = seed ? await seeded() : null;
+  seedOfStore?.place(dataRoot);
   const store = await EditorialStore.open(dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -161,6 +172,7 @@ async function openProductionStore(dataRoot: string = roots.dataRoot): Promise<{
     baselineAnalysisRoute: null,
   });
   opened.push(store);
+  if (seedOfStore !== null) seededBooks.set(store, seedOfStore.book.bookId);
   const production = await productionLaunch();
   store.baselineAnalysisLedger.bindLaunch(production.launch);
   await production.rebind(store);
@@ -201,6 +213,8 @@ function prepare(store: EditorialStore, bookId: string, policy: LaunchPolicyProj
 }
 
 async function sample1Book(store: EditorialStore, title: string): Promise<string> {
+  const placed = seededBooks.get(store);
+  if (placed !== undefined) { seededBooks.delete(store); return placed; }
   const { bookId } = await importSample1Book(store, roots.codeRoot, title);
   await pinEditorialWorkspaceProfileRevision2(store, bookId);
   return bookId;
@@ -319,7 +333,7 @@ it('keeps launch fields enumerable across retained-reader fallback without freez
 });
 
 it.each(['missing', 'ambiguous'] as const)('refuses the %s actual baseline rule without inventing a serial receipt or admission history (#1131 rev10)', async (selection) => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '合成规则唯一性'); const prepared = prepare(store, bookId, production.policy);
   const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
   const runId = authorized.dispatchRunRecordId!;
@@ -345,7 +359,7 @@ it.each(['missing', 'ambiguous'] as const)('refuses the %s actual baseline rule 
 });
 
 it.each(['missing', 'denied', 'different-binding'] as const)('refuses a %s frozen-policy resolver before history or secret access (#1131)', async (resolution) => {
-  const { store, production } = await openProductionStore();
+  const { store, production } = await openProductionStore(undefined, true);
   const reference = await configure(store, production, 'deepseek-open-platform');
   const bookId = await sample1Book(store, '合成固定策略准入拒绝'); const prepared = prepare(store, bookId, production.policy);
   const runId = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
@@ -368,7 +382,7 @@ it.each(['missing', 'denied', 'different-binding'] as const)('refuses a %s froze
 });
 
 it('starts a queued enrolled background Run on its frozen route after Main becomes missing (#1131)', async () => {
-  const { store, production } = await openProductionStore();
+  const { store, production } = await openProductionStore(undefined, true);
   const reference = await configure(store, production, 'deepseek-open-platform');
   const bookId = await sample1Book(store, '合成等待后台固定路线');
   const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
@@ -395,7 +409,7 @@ it('starts a queued enrolled background Run on its frozen route after Main becom
 });
 
 it('reopens a stopped Run on its frozen official route after Main switches to an unready connection (#1131)', async () => {
-  const { store, production } = await openProductionStore(); const reference = await configure(store, production, 'deepseek-open-platform');
+  const { store, production } = await openProductionStore(undefined, true); const reference = await configure(store, production, 'deepseek-open-platform');
   const bookId = await sample1Book(store, '合成重启后固定路线'); const prepared = prepare(store, bookId, production.policy);
   const calls: StubCall[] = []; let limited = true;
   const transport = stubTransport(calls, await chainAnswers(prepared), (ordinal) => ordinal === 3 && limited
@@ -437,7 +451,7 @@ it('restores only exact current baseline contract variants without changing the 
 });
 
 it.each(['unrelated', 'retained-v1'] as const)('refuses an unmatched %s baseline contract before continuation effects (#1131 rev14)', async (variant) => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'deepseek-open-platform');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'deepseek-open-platform');
   const bookId = await sample1Book(store, '合成契约失配拒绝'); const prepared = prepare(store, bookId, production.policy);
   const calls: StubCall[] = []; const reads: string[] = [];
   const execution = owner(store, production, stubTransport(calls, await chainAnswers(prepared), () => ({ status: 402, body: { error: { message: 'Insufficient Balance' } } })), reads);
@@ -481,7 +495,7 @@ function snapshotAtBoundary(name: string): string {
 }
 
 it.each(['cross-unit-reduction', 'assurance-sampling'] as const)('reconciles a returned %s response lost before its checkpoint without a paused row or resend (#1131)', async (stage) => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的阶段中断'); const prepared = prepare(store, bookId, production.policy);
   const calls: StubCall[] = []; const transport = stubTransport(calls, await chainAnswers(prepared));
   const reached = deferred(); const release = deferred();
@@ -508,7 +522,7 @@ it.each(['cross-unit-reduction', 'assurance-sampling'] as const)('reconciles a r
 });
 
 it('reuses immediate completed reduction evidence and its exact usage after restart without a preceding pause (#1131)', async () => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的归纳结算'); const prepared = prepare(store, bookId, production.policy);
   const ledger = store.baselineAnalysisLedger; const checkpoint = ledger.checkpointStageRequests.bind(ledger); let snapshot: string | undefined;
   vi.spyOn(ledger, 'checkpointStageRequests').mockImplementation((runId, stage, stages, usage) => {
@@ -533,7 +547,7 @@ it('reuses immediate completed reduction evidence and its exact usage after rest
 });
 
 it('settles a fenced unit by its frozen contract after a restart with Main missing, and the store opens again (#1131 review)', async () => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'deepseek-open-platform');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'deepseek-open-platform');
   const bookId = await sample1Book(store, '公开样书的冻结契约结算'); const prepared = prepare(store, bookId, production.policy);
   const ledger = store.baselineAnalysisLedger; const admit = ledger.admitModelRequest.bind(ledger); let snapshot: string | undefined;
   const fence = vi.spyOn(ledger, 'admitModelRequest').mockImplementation((runId, request, claim) => {
@@ -565,7 +579,7 @@ it('settles a fenced unit by its frozen contract after a restart with Main missi
 });
 
 it('keeps an actually selected finite-ceiling production v2 Run serial with free global capacity (#1131)', async () => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的有限预算'); const initial = prepare(store, bookId, production.policy);
   const prepared = store.editBaselineAnalysisPlan({ bookId, taskIntentId: initial.taskIntent!.taskIntentId, planEnvelopeDigest: initial.planEnvelope!.digest,
     removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 },
@@ -588,7 +602,7 @@ it('keeps an actually selected finite-ceiling production v2 Run serial with free
 });
 
 it('keeps a historical v2 binding without an execution receipt serial on explicit resume (#1131)', async () => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的历史绑定'); const prepared = prepare(store, bookId, production.policy);
   const ledger = store.baselineAnalysisLedger; const begin = ledger.beginRequestAdmissions.bind(ledger); let snapshot: string | undefined;
   vi.spyOn(ledger, 'beginRequestAdmissions').mockImplementation((runId, width, rule) => {
@@ -622,7 +636,7 @@ it('keeps a historical v2 binding without an execution receipt serial on explici
 
 /** An actual pre-receipt attempt, extended exclusively through the retained legacy question/answer/claim writers. */
 async function legacyClaimLaunch() {
-  const application = await openProductionStore(); await configure(application.store, application.production, 'opencode-go');
+  const application = await openProductionStore(undefined, true); await configure(application.store, application.production, 'opencode-go');
   const bookId = await sample1Book(application.store, '合成历史澄清回答'); const prepared = prepare(application.store, bookId, application.production.policy);
   const initialLedger = application.store.baselineAnalysisLedger; const begin = initialLedger.beginRequestAdmissions.bind(initialLedger);
   let snapshot: string | undefined;
@@ -787,7 +801,7 @@ it.each(['runRecordId', 'sequence', 'recordedAt'].flatMap((field) => [false, tru
   });
 
 it.each(['carriedUsage', 'stageContinuation'] as const)('refuses a rehashed inherited %s copy on a later governed row (#1131 review)', async (field) => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的阶段证据副本'); const prepared = prepare(store, bookId, production.policy);
   const runId = (await run(store, owner(store, production, stubTransport([], await chainAnswers(prepared))), bookId, prepared)).run!.runRecordId;
   store.markCleanShutdown(); store.close();
@@ -812,7 +826,7 @@ it.each(['carriedUsage', 'stageContinuation'] as const)('refuses a rehashed inhe
 });
 
 it('claims a live clarification answer only with its granted fence and preserves a pause plus queued restart evidence (#1131)', async () => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的排队澄清'); const prepared = prepare(store, bookId, production.policy);
   const answers = await chainAnswers(prepared); const calls: StubCall[] = []; let asked = false;
   const transport = stubTransport(calls, answers, (ordinal) => {
@@ -853,7 +867,7 @@ it('claims a live clarification answer only with its granted fence and preserves
 });
 
 it.each(['generic', 'AbortError', 'TimeoutError', 'forged-no-send'] as const)('never resends a possibly-sent production %s rejection during settlement, continuation or reopen (#1131)', async (kind) => {
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的未知结果回归');
   const prepared = prepare(store, bookId, production.policy); const calls: StubCall[] = [];
   const normal = stubTransport(calls, await chainAnswers(prepared)); let firstUnitCalls = 0;
@@ -895,7 +909,7 @@ it('preserves the committed production outcome when real harness cleanup subsequ
     }
     return handle;
   });
-  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const { store, production } = await openProductionStore(undefined, true); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的清理回归'); const prepared = prepare(store, bookId, production.policy);
   const calls: StubCall[] = []; const execution = owner(store, production, stubTransport(calls, await chainAnswers(prepared)));
   const settled = await run(store, execution, bookId, prepared); const runRecordId = settled.run!.runRecordId;
@@ -1026,7 +1040,7 @@ it('starts the selected finite model deadline only after real shared capacity gr
 
 describe('ordinary production over exact sample1 with a stub transport (Issue #811)', { timeout: 120_000 }, () => {
   it.each(['opencode-go', 'deepseek-open-platform'] as const)('dispatches an enrolled background Run under v23 on %s with its mandatory frozen ceiling (#864)', async (route) => {
-    const { store, production } = await openProductionStore();
+    const { store, production } = await openProductionStore(undefined, true);
     await configure(store, production, route);
     const reference = await sample1Book(store, 'L2 后台合成回答参照');
     const answers = await chainAnswers(prepare(store, reference, production.policy));
@@ -1080,7 +1094,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
   });
 
   it.each(['opencode-go', 'deepseek-open-platform'] as const)('discloses %s transmission and metered usage with no default ceiling before authorization', async (route) => {
-    const { store, production } = await openProductionStore();
+    const { store, production } = await openProductionStore(undefined, true);
     await configure(store, production, route);
     const bookId = await sample1Book(store, 'L2 正式使用披露');
     const prepared = prepare(store, bookId, production.policy);
@@ -1094,7 +1108,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(blocked.start.readiness).toBe('needs-connection');
   });
   it('says 模型服务需设置 and prepares nothing until a route is configured', async () => {
-    const { store, production } = await openProductionStore();
+    const { store, production } = await openProductionStore(undefined, true);
     expect(production.policy.providerProcessing).toMatchObject({ bindingState: 'setup-required', admittedRules: [], liveTransmissionAllowed: false });
     const bookId = await sample1Book(store, 'L2 需设置');
     let refused: unknown = null;
@@ -1190,7 +1204,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
 
   it('restarts beside an exact seeded development response, reads no cache file, and sends identical Tasks twice', async () => {
     const cacheRoot = join(dirname(roots.dataRoot), 'ai7-harness-provider-cache');
-    const first = await openProductionStore();
+    const first = await openProductionStore(undefined, true);
     await configure(first.store, first.production, 'opencode-go');
     const bookId = await sample1Book(first.store, 'L2 相同输入');
     const prepared = prepare(first.store, bookId, first.production.policy);
@@ -1246,7 +1260,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
   });
 
   it.each(['foreground', 'background'] as const)('keeps a %s Run on its frozen binding when settings switch route', async (origin) => {
-    const { store, production } = await openProductionStore();
+    const { store, production } = await openProductionStore(undefined, true);
     await configure(store, production, 'opencode-go');
     const first = await sample1Book(store, 'L2 切换前');
     const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
@@ -1284,7 +1298,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
   });
 
   it('stops on the account limit as 模型服务账户限额 with 续行: no retry, no fallback, the same route again', async () => {
-    const { store, production } = await openProductionStore();
+    const { store, production } = await openProductionStore(undefined, true);
     const frozenReference = await configure(store, production, 'deepseek-open-platform');
     const bookId = await sample1Book(store, 'L2 账户限额');
     const prepared = prepare(store, bookId, production.policy);
@@ -1324,7 +1338,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
   });
 
   it('runs without a ceiling by default and honours the one the editor sets', async () => {
-    const { store, production } = await openProductionStore();
+    const { store, production } = await openProductionStore(undefined, true);
     await configure(store, production, 'opencode-go');
     const bookId = await sample1Book(store, 'L2 预算上限');
     const prepared = prepare(store, bookId, production.policy);
