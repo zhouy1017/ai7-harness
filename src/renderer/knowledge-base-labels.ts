@@ -421,13 +421,9 @@ export function libraryEligibilityLine(material: Pick<LibraryMaterialProjection,
 /** Whose Tasks may list it under 允许参考 (KB-007), or what it still waits for. */
 export function libraryReferenceLine(material: Pick<LibraryMaterialProjection, 'reference' | 'eligibility'>): string {
   if (material.reference.state === 'available') {
-    return material.reference.scope === 'book'
-      ? `《${material.reference.bookTitle}》的任务可以把它列进「允许参考」。`
-      : '每本书的任务都可以把它列进「允许参考」。';
+    return material.reference.scope === 'book' ? '这本书的任务可参考' : '本社可参考';
   }
-  return material.eligibility?.choice === 'deferred'
-    ? '是否可用于学习记为稍后决定：决定之前，任务还不能把它列进「允许参考」。'
-    : '定了给谁用与是否可用于学习，任务才能把它列进「允许参考」。';
+  return material.eligibility?.choice === 'deferred' ? '暂不使用' : '还不能参考：先选给谁用';
 }
 
 /** The decisions on record: how many, and — past the latest the card names — that only those are listed. */
@@ -445,7 +441,7 @@ export function libraryDecisionLine(entry: LibraryMaterialDecisionProjection, in
 }
 
 export function libraryAdded(title: string): string {
-  return `已放入资料库：「${title}」；已允许任务参考。`;
+  return `已放入资料库：「${title}」。`;
 }
 
 export function libraryAttributed(title: string, where: string): string {

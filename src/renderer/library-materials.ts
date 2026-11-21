@@ -118,6 +118,7 @@ export interface MountLibraryMaterialsOptions {
 
 type Chooser =
   | { readonly materialId: string; readonly kind: 'attribution'; choice: string | null; book: { bookId: string; title: string } | null }
+  | { readonly materialId: string; readonly kind: 'use'; choice: string | null }
   | { readonly materialId: string; readonly kind: 'eligibility'; choice: LearningEligibilityChoice | null; reason: string };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -183,6 +184,25 @@ function indexSignature(material: LibraryMaterialProjection): string {
   const { index } = material;
   return JSON.stringify([index.state, index.digest, index.vectors?.state ?? null, index.vectors?.built ?? null, index.translation?.state ?? null,
     index.translation?.translated ?? null, index.translation?.request.available ?? null, index.translation?.lastFailure ?? null]);
+}
+
+/** Record the same decisions offered by the developer choosers, using each returned revision. */
+export async function recordLibraryUse(
+  api: Pick<RendererApi, 'decideLibraryMaterial'>, material: LibraryMaterialProjection, value: string,
+  updated: (material: LibraryMaterialProjection) => void,
+): Promise<LibraryMaterialProjection> {
+  let now = material;
+  const target = value.startsWith('book:') ? { scope: 'book' as const, bookId: value.slice(5) } : { scope: 'house' as const };
+  const same = now.attribution?.scope === target.scope && (target.scope === 'house' ||
+    (now.attribution?.scope === 'book' && now.attribution.bookId === target.bookId));
+  const send = async (decision: LibraryMaterialDecisionInput): Promise<void> => {
+    now = await api.decideLibraryMaterial({ materialId: now.materialId, expectedDecisions: now.decisionCount, decision });
+    updated(now);
+  };
+  if ((value !== 'deferred' && !same) || now.attribution === null) await send({ kind: 'attribution', attribution: target });
+  const eligibility = value === 'deferred' ? 'deferred' : target.scope;
+  if (now.eligibility?.choice !== eligibility || now.eligibility.reason !== null) await send({ kind: 'eligibility', choice: eligibility, reason: null });
+  return now;
 }
 
 export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { load(): Promise<void> } {
@@ -401,7 +421,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     heading.append(title, el('span', 'status-pill library-kind', LIBRARY_KIND_LABELS[material.kind]));
     node.append(heading);
     const summary = el('p', 'knowledge-file-summary', libraryReferenceLine(material));
-    summary.append(' · ', el('span', 'knowledge-file-index', `索引：${materialIndexStateLine(material.index)}`));
+    if (technicalLayerVisible) summary.append(' · ', el('span', 'knowledge-file-index', `索引：${materialIndexStateLine(material.index)}`));
     node.append(summary);
     const more = el('details', 'knowledge-file-more');
     more.append(el('summary', undefined, '查看资料'), el('p', 'library-source', librarySourceLine(material, localInstantLabel)));
@@ -410,13 +430,23 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       el('dt', undefined, LIBRARY_ATTRIBUTION_TERM), el('dd', 'library-attribution', libraryAttributionLine(material)),
       el('dt', undefined, LIBRARY_ELIGIBILITY_TERM), el('dd', 'library-eligibility', libraryEligibilityLine(material)),
     );
-    more.append(facts);
+    if (technicalLayerVisible) more.append(facts);
     if (material.eligibility?.reasonHasMore) more.append(reasonReader(material.materialId, material.eligibility.ordinal));
     if (material.eligibilityReset) more.append(el('p', 'attention-note library-reset', LIBRARY_ELIGIBILITY_RESET));
     more.append(el('p', `library-reference library-reference-${material.reference.state}`, libraryReferenceLine(material)));
-    more.append(indexSection(material));
+    if (technicalLayerVisible) more.append(indexSection(material));
     if (refusal?.materialId === material.materialId) more.append(alert(refusal.message));
-    if (chooser?.materialId === material.materialId) {
+    if (!technicalLayerVisible) {
+      const use = action('给谁用…', 'secondary', 'use', () => {
+        chooser = { materialId: material.materialId, kind: 'use', choice: null };
+        if (books === null) void loadBooks(material);
+        else paint(`[data-material-id="${material.materialId}"] .library-use-chooser input`);
+      });
+      use.disabled = busy || preview !== null || chooser !== null;
+      node.append(use);
+      if (chooser?.materialId === material.materialId && chooser.kind === 'use') node.append(useChooser(material, chooser));
+      if (refusal?.materialId === material.materialId) node.append(alert(refusal.message));
+    } else if (chooser?.materialId === material.materialId && chooser.kind !== 'use') {
       more.append(chooser.kind === 'attribution' ? attributionChooser(material, chooser) : eligibilityChooser(material, chooser));
     } else {
       const row = el('div', 'button-row library-card-actions');
@@ -683,12 +713,48 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const cancel = action(LIBRARY_CANCEL, 'quiet', 'cancel-decision', () => {
       const kind = chooser?.kind;
       chooser = null;
-      paint(`[data-material-id="${material.materialId}"] [data-library-action="${kind === 'eligibility' ? 'eligibility' : 'attribute'}"]`);
+      paint(`[data-material-id="${material.materialId}"] [data-library-action="${kind === 'use' ? 'use' : kind === 'eligibility' ? 'eligibility' : 'attribute'}"]`);
     });
     cancel.disabled = busy;
     row.append(confirm, cancel);
     section.append(row);
     return confirm;
+  };
+
+  const useChooser = (material: LibraryMaterialProjection, state: Extract<Chooser, { kind: 'use' }>): HTMLElement => {
+    const section = el('section', 'library-chooser library-use-chooser');
+    const fieldset = el('fieldset');
+    fieldset.append(el('legend', undefined, '给谁用'));
+    let confirm: HTMLButtonElement;
+    const chosen = (value: string): void => { state.choice = value; confirm.disabled = busy; };
+    const name = `library-use-${material.materialId}`;
+    for (const book of books ?? []) fieldset.append(choice(name, `book:${book.bookId}`, `这本书：《${book.title}》`, state.choice === `book:${book.bookId}`, busy, chosen));
+    if (booksCursor !== null) fieldset.append(action(LIBRARY_BOOKS_MORE, 'quiet', 'more-books', () => void loadBooks(material)));
+    if (!onFirstBooksPage) fieldset.append(action('回到图书首页', 'quiet', 'first-books', () => void loadBooks(material, true)));
+    for (const [value, label] of [['house', '本社'], ['deferred', '暂不使用']] as const) fieldset.append(choice(name, value, label, state.choice === value, busy, chosen));
+    section.append(fieldset);
+    confirm = chooserActions(section, material, '确认', 'confirm-use', () => { if (state.choice !== null) void decideUse(material, state.choice); });
+    confirm.disabled = busy || state.choice === null;
+    return section;
+  };
+
+  // Attribution resets eligibility; each subsequent request uses the returned count.
+  const decideUse = async (material: LibraryMaterialProjection, value: string): Promise<void> => {
+    if (busy) return;
+    busy = true;
+    refusal = null;
+    paint(null);
+    let now = material;
+    try {
+      now = await recordLibraryUse(api, material, value, replace);
+      chooser = null;
+      setStatus(libraryReferenceLine(now), 'success');
+    } catch (error) {
+      refusal = { materialId: material.materialId, message: errorMessage(error, LIBRARY_STATUS.decideFailed) };
+      setStatus(refusal.message, 'error');
+    }
+    busy = false;
+    paint(`[data-material-id="${material.materialId}"] h3`);
   };
 
   /** 定归属: one Book, a Series once Series exist, or the house — the first Book listed chosen to begin with. */

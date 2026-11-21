@@ -1,3 +1,4 @@
+import { recordLibraryUse } from '../../src/renderer/library-materials.js';
 import { describe, expect, it } from 'vitest';
 import { nextIndexPollDelay, startsWaiting } from '../../src/renderer/library-materials.js';
 import {
@@ -192,7 +193,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     expect(artifactLine({ ...artifact, state: 'unavailable-needs-attention' })).toBe('本社方案 v2 · 不可用 · 需要处理');
   });
 
-  it('says a 资料库 item in the editor\'s words: what arrived, where it belongs, its eligibility, and whose Tasks may list it', () => {
+  it('says a 资料库 item in the editor\'s words: what arrived, where it belongs, its eligibility, and whose Tasks may list it', async () => {
     const instant = (iso: string): string => `〔${iso.slice(0, 10)}〕`;
     const source = { displayName: 'sample1.docx', format: 'DOCX' as const, bytes: 29_550, sha256: 'a'.repeat(64) };
     expect([libraryBytes(512), libraryBytes(29_550), libraryBytes(5 * 1024 * 1024), libraryBytes(3 * 1024 * 1024 * 1024)])
@@ -204,19 +205,40 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
       attribution: null, eligibility: null, eligibilityReset: false, reference: { state: 'pending' }, decisionCount: 0, decisions: [],
       index: UNBUILT,
     };
+    // #1552: the ordinary chooser records existing developer decisions, in sequence with returned counts.
+    for (const value of ['book:b', 'house', 'deferred']) {
+      const calls: unknown[] = [];
+      let current = pending;
+      await recordLibraryUse({ decideLibraryMaterial: async (request) => {
+        calls.push(request);
+        const decision = request.decision;
+        current = { ...current, decisionCount: current.decisionCount + 1,
+          attribution: decision.kind === 'attribution'
+            ? decision.attribution.scope === 'book'
+              ? { ...decision.attribution, bookTitle: '甲书', decidedAt: '' }
+              : { scope: 'house', decidedAt: '' }
+            : current.attribution,
+          eligibility: null };
+        return current;
+      } }, pending, value, () => {});
+      expect(calls).toEqual([
+        { materialId: 'm', expectedDecisions: 0, decision: { kind: 'attribution', attribution: value === 'book:b' ? { scope: 'book', bookId: 'b' } : { scope: 'house' } } },
+        { materialId: 'm', expectedDecisions: 1, decision: { kind: 'eligibility', choice: value === 'book:b' ? 'book' : value, reason: null } },
+      ]);
+    }
     expect(librarySourceLine(pending, instant)).toBe('sample1.docx · Word · 28.9 KB · 放入于 〔2026-09-25〕');
     expect([libraryAttributionLine(pending), libraryEligibilityLine(pending), libraryReferenceLine(pending)])
-      .toEqual(['尚未定给谁用', '尚未定', '定了给谁用与是否可用于学习，任务才能把它列进「允许参考」。']);
+      .toEqual(['尚未定给谁用', '尚未定', '还不能参考：先选给谁用']);
     const book = { ...pending, attribution: { scope: 'book' as const, bookId: 'b', bookTitle: '甲书', decidedAt: '2026-09-25T02:00:00.000Z' } };
     const deferred = { ...book, eligibility: { reasonHasMore: false, ordinal: 2, choice: 'deferred' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' } };
     expect([libraryAttributionLine(book), libraryEligibilityLine(deferred), libraryReferenceLine(deferred)])
-      .toEqual(['《甲书》', '稍后决定', '是否可用于学习记为稍后决定：决定之前，任务还不能把它列进「允许参考」。']);
+      .toEqual(['《甲书》', '稍后决定', '暂不使用']);
     const own = {
       ...book,
       eligibility: { reasonHasMore: false, ordinal: 2, choice: 'book' as const, bookTitle: '甲书', reason: '责编确认', decidedAt: '2026-09-25T03:00:00.000Z' },
       reference: { state: 'available' as const, scope: 'book' as const, bookTitle: '甲书' },
     };
-    expect([libraryEligibilityLine(own), libraryReferenceLine(own)]).toEqual(['仅纳入《甲书》（说明：责编确认）', '《甲书》的任务可以把它列进「允许参考」。']);
+    expect([libraryEligibilityLine(own), libraryReferenceLine(own)]).toEqual(['仅纳入《甲书》（说明：责编确认）', '这本书的任务可参考']);
     const house = {
       ...pending,
       attribution: { scope: 'house' as const, decidedAt: '2026-09-25T02:00:00.000Z' },
@@ -224,7 +246,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
       reference: { state: 'available' as const, scope: 'house' as const },
     };
     expect([libraryAttributionLine(house), libraryEligibilityLine(house), libraryReferenceLine(house)])
-      .toEqual(['本社', '纳入本社经验', '每本书的任务都可以把它列进「允许参考」。']);
+      .toEqual(['本社', '纳入本社经验', '本社可参考']);
     // The choices as LEARN-004 to LEARN-006 name them, and the wider one's consequence said where it is chosen.
     expect((['book', 'house', 'excluded', 'deferred'] as const).map((choice) => eligibilityChoiceLabel(choice, '甲书')))
       .toEqual(['仅纳入《甲书》', '纳入本社经验', '明确排除', '稍后决定']);
