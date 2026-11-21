@@ -298,13 +298,21 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
     }
   }, 300_000);
 
-  it('cancels only a Run that waits: one started now is not the waiting Run\'s to cancel', async () => {
+  it('cancels an unstarted blocked Run with its reason but refuses one that began sending', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const { bookId, prepared } = await preparedBook(store, 'L2 sample1 不在等待');
       const taskIntentId = prepared.taskIntent!.taskIntentId;
-      store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest);
-      expect(await refusal(() => store.cancelWaitingBaselineAnalysis(bookId, taskIntentId))).toBe('ANALYSIS_CANCEL_NOT_WAITING');
+      const blocked = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).projection;
+      expect(blocked.run?.state).toBe('blocked-before-dispatch');
+      const cancelled = store.cancelWaitingBaselineAnalysis(bookId, taskIntentId);
+      expect(cancelled.run?.state).toBe('cancelled');
+      expect(cancelled.run?.transitions.at(-1)?.detail).toBe('编辑取消了这项没能开始的任务；没有发送任何内容，也没有产生用量。');
+      const next = prepare(store, bookId), nextId = next.taskIntent!.taskIntentId;
+      const started = store.authorizeBaselineAnalysis(bookId, nextId, next.planEnvelope!.digest).projection.run!;
+      store.baselineAnalysisLedger.recordRunState(started.runRecordId, 'executing', { detail: '合成：运行已开始发送。' });
+      store.baselineAnalysisLedger.recordRunState(started.runRecordId, 'blocked-before-dispatch', { detail: '合成：已开始的运行不能当作未开始取消。' });
+      expect(await refusal(() => store.cancelWaitingBaselineAnalysis(bookId, nextId))).toBe('ANALYSIS_CANCEL_NOT_WAITING');
       store.markCleanShutdown();
     } finally {
       store.close();

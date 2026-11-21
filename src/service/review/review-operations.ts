@@ -59,7 +59,7 @@ export interface ReviewOperationsHost extends ReviewEvidenceReader {
   prepareTaskMaterials(bookId: string, materialIds: ReadonlyArray<string>): ReadonlyArray<TaskMaterialSource>;
   resultBinding(bookId: string, resultId: string): { reader: ManuscriptReader };
   launchChoice(role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig, remembered?: boolean): LaunchChoice;
-  requireRelaunchSource(bookId: string, source: import('../../shared/runtime-execution-config.js').TaskRelaunchSource | undefined): void;
+  requireRelaunchSource(bookId: string, source: import('../../shared/runtime-execution-config.js').TaskRelaunchSource | undefined, preview?: boolean): void;
   executionLedgerForRun(runRecordId: string): BaselineAnalysisStore;
   materializeFactualVerification(reviewRunId: string): void;
   inspectTaskPlanWithConnection(input: InspectTaskPlanInput, credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>, connectivity: TaskPlanConnectivity, progress?: ProgressReader): Promise<TaskPlanProjection>;
@@ -337,7 +337,7 @@ export function reviewRunRequest(host: ReviewOperationsHost,
 export function previewReviewRun(host: ReviewOperationsHost, input: import('../../shared/runtime-execution-config.js').ReviewExecutionLaunchInput,
   launchPolicy: LaunchPolicyProjection, bookTitle: string): import('../../shared/runtime-execution-config.js').TaskLaunchPreviewProjection {
   return host.reviewCall(() => {
-    host.requireRelaunchSource(input.bookId, input.relaunchOf);
+    host.requireRelaunchSource(input.bookId, input.relaunchOf, true);
     const model = host.reviewRuns.requiresModel(input.bookId, input.categoryIds);
     requireStore(model || (input.planEdits === undefined && input.startWhen !== 'idle'),
       'REVIEW_LAUNCH_OPTIONS_UNAVAILABLE', '这次审阅不使用模型，无需选择运行选项。');
@@ -347,7 +347,7 @@ export function previewReviewRun(host: ReviewOperationsHost, input: import('../.
       ? resolveSourceCheckoutLaunchPolicySync(host.codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
     const planned = reviewRunRequest(host, input.bookId, input.categoryIds, input.scope, policy,
       input.capturedProcedure ?? null, input.materialIds ?? [], null, null, input.seriesId ?? null, input.localCheck, input.decisionId, input.procedureDefinition ?? null);
-    return host.reviewRuns.preview(planned, choice.binding, input, bookTitle);
+    return host.reviewRuns.preview(planned, choice.binding, input, bookTitle, input.relaunchOf?.cancelsFirst === true);
   });
 }
 

@@ -2814,7 +2814,7 @@ export class EditorialStore {
       prepareTaskMaterials: this.#prepareTaskMaterials.bind(this),
       resultBinding: this.#resultBinding.bind(this),
       launchChoice: this.#launchChoice.bind(this),
-      requireRelaunchSource: (bookId, source) => requireTaskRelaunchSource(this.#taskRelaunchHost(), bookId, source, 'review-run'),
+      requireRelaunchSource: (bookId, source, preview) => requireTaskRelaunchSource(this.#taskRelaunchHost(), bookId, source, 'review-run', preview),
       executionLedgerForRun: (runRecordId) => this.executionLedgerForRun(runRecordId),
       materializeFactualVerification: (reviewRunId) => this.materializeFactualVerification(reviewRunId),
       inspectTaskPlanWithConnection: (input, credentialReadiness, connectivity, progress) => this.inspectTaskPlanWithConnection(input, credentialReadiness, connectivity, progress),
@@ -3127,11 +3127,11 @@ export class EditorialStore {
     create: (context: import('./task-plan-creation.js').TaskLaunchContext, policy: LaunchPolicyProjection) => ReturnType<BaselineAnalysisStore['launchTask']>,
     startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     if (preview !== undefined) {
-      requireTaskRelaunchSource(this.#taskRelaunchHost(), input.bookId, input.relaunchOf, kind === 'custom-analysis' ? 'baseline-analysis' : kind);
+      requireTaskRelaunchSource(this.#taskRelaunchHost(), input.bookId, input.relaunchOf, kind, true);
       const choice = this.#launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice);
       const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
         ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
-      this.#analysisCall(() => create({ snapshotId: randomUUID(), execution: this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch, preview,
+      this.#analysisCall(() => create({ snapshotId: randomUUID(), execution: this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch, preview, previewAfterCancellation: input.relaunchOf?.cancelsFirst === true,
         ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }) }, policy));
       throw new StoreError('TASK_PREVIEW_FAILED', '这次计划暂时无法读取。');
     }
@@ -3140,7 +3140,7 @@ export class EditorialStore {
     try {
       const launched = launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind, input: request },
         () => this.#launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice), (choice, snapshotId) => {
-          requireTaskRelaunchSource(this.#taskRelaunchHost(), input.bookId, input.relaunchOf, kind === 'custom-analysis' ? 'baseline-analysis' : kind);
+          requireTaskRelaunchSource(this.#taskRelaunchHost(), input.bookId, input.relaunchOf, kind);
           const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
             ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
           execution = this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch;

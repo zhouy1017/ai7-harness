@@ -600,6 +600,35 @@ function expectVanishedSelectionRefused(target: LaunchBook): void {
 }
 
 if (ONE_STEP_KINDS[subject].length > 0) describe.each(ONE_STEP_KINDS[subject])('%s one-step launch', (kind) => {
+  it('relaunches a completed task with exactly the repeat request (#1656)', async () => {
+    const target = await book(kind, true), answer = await lifecycleAnswers(kind); let first!: LaunchedTask; ordinary(request => answer(request, first.ledger.definition));
+    first = command(kind, target, {})(); driveLaunchedLedgerRun(capture!.owner, first); await capture!.owner.whenIdle();
+    expect(first.ledger.currentRunState(first.runRecordId)).toMatch(/^completed/u);
+    const taskKind = kind === 'custom-analysis' ? 'baseline-analysis' : kind;
+    const recipe = store.inspectTaskPlan({ bookId: target.bookId, kind: taskKind, ref: first.taskIntentId }).relaunch!;
+    expect(recipe.summary).toEqual(['按原来的要求重新开始一项新任务。']); expect(recipe.cancelsFirst).toBeNull();
+    const repeat = store.repeatTaskRequest(target.bookId, { kind: taskKind, ref: first.taskIntentId });
+    const { bookId: _book, relaunchOf: _source, ...request } = recipe.input;
+    switch (repeat.kind) {
+      case 'baseline-analysis': expect(request).toEqual(kind === 'custom-analysis' ? { dimensionId, update: repeat.update } : { goal: BASELINE_ANALYSIS_MODE_GOALS[repeat.update?.mode ?? 'first-baseline'], update: repeat.update }); break;
+      case 'initial-evaluation': expect(request).toEqual({ materialIds: repeat.materialIds }); break;
+      case 'readers-report': expect(request).toEqual({ template: repeat.template, materialIds: repeat.materialIds }); break;
+      case 'evaluation-rewrite': expect(request).toEqual({ recordId: repeat.recordId }); break;
+      case 'writing': expect(request).toEqual(repeat.request); break;
+    }
+    const next = commitLaunch(target, { operation: recipe.operation, input: { ...recipe.input, clientCommandId: randomUUID() } } as import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch']);
+    expect(next.taskIntentId).not.toBe(first.taskIntentId);
+  });
+
+  if (kind === 'baseline-analysis' || kind === 'custom-analysis') it('refuses a source from the other analysis kind (#1656)', async () => {
+    const target = await book(kind, true); ordinary(); const first = command(kind, target, {})();
+    first.ledger.recordRunState(first.runRecordId, 'failed', { detail: '合成运行失败' });
+    const source = store.inspectTaskPlan({ bookId: target.bookId, kind: 'baseline-analysis', ref: first.taskIntentId }).relaunch!.input.relaunchOf!;
+    const input = { bookId: target.bookId, clientCommandId: randomUUID(), relaunchOf: source, update: null };
+    expect(() => kind === 'baseline-analysis' ? store.launchCustomAnalysis({ ...input, dimensionId: randomUUID() }, policy) : store.launchBaselineAnalysis({ ...input, goal: BASELINE_ANALYSIS_TASK_GOAL }, policy))
+      .toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+  });
+
   it.each([false, true])('relaunches a failed task and replays once, remembered=%s (#1656)', async remembered => {
     const target = await book(kind, true); ordinary();
     const first = command(kind, target, { reasoningEffort: 'high' })();
@@ -634,32 +663,42 @@ if (ONE_STEP_KINDS[subject].length > 0) describe.each(ONE_STEP_KINDS[subject])('
     expect(capture!.requests).toHaveLength(0);
   });
 
-  it.each(['interrupted', 'blocked-before-dispatch', 'restart-queued', 'cancelled-after-start', 'outcome-unknown'] as const)('offers the right relaunch for %s without sending the old task (#1656)', async state => {
+  it.each(['interrupted', 'blocked-before-dispatch', 'restart-queued', 'paused', 'resumable', 'cancelled-after-start', 'outcome-unknown'] as const)('offers the right relaunch for %s without sending the old task (#1656)', async state => {
     const target = await book(kind, true); ordinary();
     const first = command(kind, target, {}, randomUUID(), false, state === 'cancelled-after-start'
       ? { removedSteps: [], disallowedAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 64000 } } : undefined)();
     const taskKind = kind === 'custom-analysis' ? 'baseline-analysis' : kind;
-    if (state === 'cancelled-after-start') first.ledger.recordRunState(first.runRecordId, 'executing', { detail: '合成已开始' });
+    if (state === 'cancelled-after-start' || state === 'paused' || state === 'resumable') first.ledger.recordRunState(first.runRecordId, 'executing', { detail: '合成已开始' });
     first.ledger.recordRunState(first.runRecordId, state === 'restart-queued' ? 'blocked-before-dispatch' : state === 'cancelled-after-start' ? 'cancelled' : state === 'outcome-unknown' ? 'resumable' : state,
       state === 'restart-queued' ? { reconciled: true, detail: 'AI7 上次关闭时这项任务还在等待运行名额，没有开始，也没有发送任何内容；重新启动后它不会自己开始。需要时请重新准备并开始。' } : { detail: '合成停止', ...(state === 'outcome-unknown' ? { stopReason: 'outcome-unknown' } : {}) });
     const plan = store.inspectTaskPlan({ bookId: target.bookId, kind: taskKind, ref: first.taskIntentId });
     if (state === 'outcome-unknown') { expect(plan.relaunch).toBeNull(); return; }
     const recipe = plan.relaunch!; expect(recipe).not.toBeNull();
+    const blocked = state === 'blocked-before-dispatch' || state === 'restart-queued', stopped = state === 'paused' || state === 'resumable';
+    expect(recipe.cancelsFirst?.operation ?? null).toBe(blocked ? taskKind === 'baseline-analysis' ? 'cancelWaitingBaselineAnalysis' : 'cancelWaitingTask' : stopped ? taskKind === 'baseline-analysis' ? 'cancelBaselineAnalysisRun' : 'controlTaskRun' : null);
+    expect(recipe.summary).toEqual(blocked ? ['先取消这项尚未开始的任务，再重新开始。', '重新开始一项新任务，已完成的内容不会带入。'] : [...(stopped ? ['先取消这项未完成的任务，再重新开始。'] : []), state === 'cancelled-after-start' || stopped ? '重新开始一项新任务；可以沿用的已完成部分会保留，其余重新处理。' : '重新开始一项新任务，已完成的内容不会带入。']);
     const launch = { operation: recipe.operation, input: { ...recipe.input, clientCommandId: randomUUID(), executionConfig: { reasoningEffort: 'low' } } } as import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch'];
     if (recipe.cancelsFirst !== null) {
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const before = database.prepare('SELECT count(*) n FROM analysis_run_states').get();
+        expect(store.previewTaskLaunch({ bookId: target.bookId, launch }, policy).units).toBeGreaterThan(0);
+        expect(database.prepare('SELECT count(*) n FROM analysis_run_states').get()).toEqual(before);
+        expect(first.ledger.currentRunState(first.runRecordId)).not.toBe('cancelled');
+      } finally { database.close(); }
       expect(() => commitLaunch(target, { ...launch, input: { ...launch.input, relaunchOf: { ...recipe.input.relaunchOf!, cancelsFirst: false } } } as import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch']))
         .toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
       expect(() => commitLaunch(target, launch)).toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
       if (recipe.cancelsFirst.operation === 'cancelWaitingBaselineAnalysis') store.cancelWaitingBaselineAnalysis(target.bookId, first.taskIntentId);
       else if (recipe.cancelsFirst.operation === 'cancelWaitingTask') store.cancelWaitingTask(recipe.cancelsFirst.input);
-      else controlLaunched(kind, target, first, 'cancel');
+      else { controlLaunched(kind, target, first, 'cancel'); capture!.owner.cancelRun(first.runRecordId, first.ledger); await capture!.owner.whenIdle(); }
       expect(first.ledger.currentRunState(first.runRecordId)).toBe('cancelled');
     }
     const preview = state === 'cancelled-after-start' ? store.previewTaskLaunch({ bookId: target.bookId, launch }, policy) : null;
     const next = commitLaunch(target, launch);
     expect(next.taskIntentId).not.toBe(first.taskIntentId);
     if (state === 'cancelled-after-start') expect(recipe.input).toHaveProperty('redoOf', first.runRecordId);
-    if (kind === 'baseline-analysis') expect(store.inspectAnalysisTask(target.bookId, next.taskIntentId).taskIntent?.redoOf?.runRecordId ?? null).toBe(state === 'cancelled-after-start' ? first.runRecordId : null);
+    if (kind === 'baseline-analysis') expect(store.inspectAnalysisTask(target.bookId, next.taskIntentId).taskIntent?.redoOf?.runRecordId ?? null).toBe(state === 'cancelled-after-start' || stopped ? first.runRecordId : null);
     if (preview !== null) {
       expect(preview.usage).toBe(store.inspectTaskPlan({ bookId: target.bookId, kind: taskKind, ref: next.taskIntentId }).service.usage);
       expect(next.ledger.loadExecutionPlan(next.runRecordId).editorEdits.disallowedAdaptations).toEqual(['safe-retry']);

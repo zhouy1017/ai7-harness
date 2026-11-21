@@ -3356,7 +3356,7 @@ export interface TaskOverviewProjection {
 
 /** Existing Book-owned drawer commands reachable from the cross-Book task page. */
 export const TASK_OVERVIEW_OPERATIONS = ['inspectTaskPlan', 'getTaskPlanPage', 'controlTaskRun', 'redoTaskPlan',
-  'cancelWaitingTask', 'cancelWaitingBaselineAnalysis', 'answerBaselineAnalysisClarification',
+  'cancelWaitingTask', 'cancelWaitingBaselineAnalysis', 'cancelReviewRun', 'answerBaselineAnalysisClarification',
   'inspectDialogue', 'stopDialogueAnswer', 'continueDialogueAnswer', 'regenerateDialogueAnswer',
   'convertDialogueToChangeSuggestion', 'authorizeBaselineAnalysis', 'authorizeReviewRun', 'authorizeInitialEvaluation',
   'authorizeReadersReport', 'authorizeEvaluationRewrite', 'authorizeWritingTask', 'authorizeTaskAuthorization',

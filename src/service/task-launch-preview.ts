@@ -12,7 +12,7 @@ export function previewTaskLaunch(store: EditorialStore, input: TaskLaunchPrevie
       const plan = describe === undefined ? baselineAnalysisPlan({ projection: projection as BaselineAnalysisProjection, bookTitle: title(input.bookId), blocks })
         : describe(projection, blocks, title(input.bookId));
       throw new TaskLaunchPreview(launchPreviewProjection(withLedgerRunControls(plan, projection as BaselineAnalysisProjection, blocks), projection.coverageManifest!.units.length));
-    });
+    }, 'relaunchOf' in input.launch.input && input.launch.input.relaunchOf?.cancelsFirst === true);
   const launch = input.launch;
   try {
     switch (launch.operation) {

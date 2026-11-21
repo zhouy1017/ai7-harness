@@ -514,6 +514,7 @@ export interface TaskPlanRedoProjection {
 
 export type TaskRelaunchOperation = 'launchBaselineAnalysis' | 'launchCustomAnalysis' | 'launchInitialEvaluation' | 'launchReadersReport' | 'launchEvaluationRewrite' | 'launchWritingTask' | 'launchReviewRun';
 export type TaskRelaunchCancellation =
+  | { operation: 'cancelReviewRun'; input: { bookId: string; reviewRunId: string } }
   | { operation: 'cancelBaselineAnalysisRun'; input: { bookId: string; taskIntentId: string } }
   | { operation: 'cancelWaitingBaselineAnalysis'; input: { bookId: string; taskIntentId: string } }
   | { operation: 'cancelWaitingTask'; input: import('../protocol.js').CancelWaitingTaskInput }
