@@ -128,6 +128,7 @@ const BOOK_OWNERSHIP_CALLS = new Set<keyof RendererApi>([
   'inspectReviewWorkspace', 'inspectScopedAiEdit', 'inspectTaskAuthorization', 'inspectTaskIntentDrafts',
   'inspectTaskPlan', 'inspectWritingTask', 'installEditorialWorkspaceProfile', 'launchReviewRun',
   'listMaintenanceCases', 'openBookWorkbench', 'polishSelection', 'pollServiceJob',
+  'openSourceInBrowser',
   'prepareBaselineAnalysis', 'prepareBookDeliveryPackage', 'prepareCustomAnalysis', 'prepareEvaluationRewrite',
   'prepareInitialEvaluation', 'prepareManuscriptReimport', 'prepareReadersReport', 'prepareReplacement',
   'prepareReverseApply', 'prepareReviewRun', 'prepareTaskAuthorization', 'prepareWritingTask',

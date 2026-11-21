@@ -32,6 +32,8 @@ export interface LaunchArguments {
   injectedSavePath: string | undefined;
   /** J-07's answer to the folder dialog of a 图书交付包 export (Issue #416, S67b): single-use, like the Save dialog's. */
   injectedFolderPath: string | undefined;
+  /** J-04 only (Issue #1641): the file 在浏览器中打开 writes each address to instead of opening the system browser. */
+  browserRecordPath: string | undefined;
   injectedDiagnosticsFolder: string | undefined;
   importControl: J01ImportControl | undefined;
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
@@ -85,6 +87,7 @@ export function parseArguments(argv: string[]): LaunchArguments {
           key === '--j13-picker-path' ||
           key === '--j07-save-path' ||
           key === '--j07-folder-path' ||
+          key === '--j04-browser-record' ||
           key === '--j12-diagnostics-folder' ||
           key === '--j04-save-path' ||
           key === '--j12-save-path' ||
@@ -219,6 +222,9 @@ export function parseArguments(argv: string[]): LaunchArguments {
   const injectedSavePath = j07SavePath ?? j04SavePath ?? j12SavePath ?? j11SavePath ?? j13SavePath;
   const injectedFolderPath = values.get('--j07-folder-path');
   requireDesktop(injectedFolderPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(injectedFolderPath)));
+  // J-04 shows the factual-check sources and 来源与证据; its record file stands in for the system browser (Issue #1641).
+  const browserRecordPath = values.get('--j04-browser-record');
+  requireDesktop(browserRecordPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(browserRecordPath)));
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
@@ -313,7 +319,7 @@ export function parseArguments(argv: string[]): LaunchArguments {
     launchForm.trustedOperationalScope === 'development-ci' ||
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
-        applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && injectedDiagnosticsFolder === undefined && connectivityPath === undefined &&
+        applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && injectedDiagnosticsFolder === undefined && connectivityPath === undefined && browserRecordPath === undefined &&
         unitHoldPath === undefined && answerHoldPath === undefined && navigationAnswerHoldPath === undefined && backgroundQuietValue === undefined && calibrationMinBooksValue === undefined),
   );
   return {
@@ -323,6 +329,7 @@ export function parseArguments(argv: string[]): LaunchArguments {
     injectedPickerPath,
     injectedSavePath,
     injectedFolderPath,
+    browserRecordPath,
     injectedDiagnosticsFolder,
     importControl,
     foregroundExecutionControl,

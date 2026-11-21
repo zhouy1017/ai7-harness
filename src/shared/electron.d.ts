@@ -103,5 +103,5 @@ declare module 'electron' {
     removeListener(event: 'updated', listener: () => void): void;
   };
   export const session: { defaultSession: Session; fromPartition(partition: string): Session };
-  export const shell: { showItemInFolder(path: string): void };
+  export const shell: { showItemInFolder(path: string): void; openExternal(url: string): Promise<void> };
 }

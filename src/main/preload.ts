@@ -425,6 +425,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['inspectFactualVerification']['output']>(IPC_CHANNELS.inspectFactualVerification, input),
   inspectEvidenceWorkspace: (input: Parameters<RendererApi['inspectEvidenceWorkspace']>[0]) =>
     invoke<ServiceOperationMap['inspectEvidenceWorkspace']['output']>(IPC_CHANNELS.inspectEvidenceWorkspace, input),
+  openSourceInBrowser: (input: Parameters<RendererApi['openSourceInBrowser']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['openSourceInBrowser']>>>(IPC_CHANNELS.openSourceInBrowser, input),
   recordVerificationReviewDecision: (input: Parameters<RendererApi['recordVerificationReviewDecision']>[0]) =>
     invoke<ServiceOperationMap['recordVerificationReviewDecision']['output']>(IPC_CHANNELS.recordVerificationReviewDecision, input),
   prepareCorrectionProposal: (input: Parameters<RendererApi['prepareCorrectionProposal']>[0]) =>
