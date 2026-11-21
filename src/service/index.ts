@@ -224,7 +224,16 @@ async function dispatch(
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'selectMainRoleModel':
+    case 'selectProModel':
       store.selectMainRoleModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'selectFlashModel':
+      store.selectFastRoleModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'clearFlashModel':
+      store.clearFlashModel();
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'refreshModelServiceModels':
@@ -234,7 +243,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), lastProxyProbe: proxyProbes.get(store) ?? null, channels: modelServiceChannels((route) => store.getModelServiceModels(route)) },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), lastProxyProbe: proxyProbes.get(store) ?? null, channels: modelServiceChannels((route) => store.getModelServiceModels(route)), modelRoles: store.getModelRoles() },
       };
     case 'saveModelServiceProxy': {
       const { probeRoute, ...input } = request.input;
@@ -262,7 +271,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels((route) => store.getModelServiceModels(route)) },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels((route) => store.getModelServiceModels(route)), modelRoles: store.getModelRoles() },
       };
     }
     case 'setModelServiceCredentialState': {
@@ -1421,6 +1430,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.reverseAppliedChangeSuggestion(request.input) };
     case 'getManuscriptRail':
       return { id: request.id, ok: true, op: request.op, result: store.getManuscriptRail(request.input.manuscriptId, request.input.branchId) };
+    case 'findPendingMark':
+      return { id: request.id, ok: true, op: request.op, result: store.findPendingMark(request.input) };
     case 'inspectProposalWorkspace':
       return { id: request.id, ok: true, op: request.op, result: store.inspectProposalWorkspace(request.input) };
     case 'saveProposalDecisionDraft':
@@ -1465,7 +1476,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: store.getManuscriptWindowAt(request.input.manuscriptId, request.input.branchId, request.input.target),
+        result: store.getManuscriptWindowAt(request.input.manuscriptId, request.input.branchId, request.input.target, request.input.marks),
       };
     case 'getOutline':
       return {

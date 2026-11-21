@@ -122,8 +122,9 @@ export function decideInlineEditorRevision(db: DatabaseSync, manuscript: Bounded
         editorRevision: { sessionId: String(link.session_id), autoApply: Number(session.auto_apply) === 1 } }, lifetimeId);
     }
     const window = manuscript.getWindow(input.manuscriptId, input.branchId, { kind: 'window-start', blockId: input.windowStartBlockId });
-    const live = window.marks.some((mark) => mark.markId === input.markId);
-    return { markId: input.markId, marks: window.marks, marksTruncated: window.marksTruncated, window,
+    // The mark's own status says whether it stands, as every mark command's answer does: the window may carry only its first page.
+    const live = db.prepare("SELECT 1 FROM editorial_marks WHERE mark_id = ? AND status IN ('open', 'resolved', 'applied')").get(input.markId) !== undefined;
+    return { markId: input.markId, marks: window.marks, marksTruncated: window.marksTruncated, ...(window.marksPage ? { marksPage: window.marksPage } : {}), window,
       card: live ? marks.card(input.manuscriptId, input.branchId, input.markId) : null };
   });
 }

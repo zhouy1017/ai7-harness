@@ -21,7 +21,6 @@ export function createCommandPalette(options: {
   openBook(bookId: string): Promise<void>;
   openResult(item: TaskOverviewItemProjection): void;
   openStart(): void;
-  openHelp(): void;
   beforeStart(): Promise<boolean>;
   status(message: string, tone?: 'busy' | 'success' | 'error'): void;
 }) {
@@ -77,7 +76,7 @@ export function createCommandPalette(options: {
       for (const [name, selector, needsBook] of [[SHELL_AGENT_WORKSPACE_ROW.label, '[data-nav-agent-workspace]', true], [shellDestinationLabel('global-agent'), '[data-nav-destination="global-agent"]', false]] as const) {
         if ((inBook || !needsBook) && commandEntry(selector) !== null) entries.push({ label: name, run: () => commandEntry(selector)?.click() });
       }
-      entries.push({ label: '发起任务 · 连续加入队列', run: options.openStart }, { label: '设置 · 帮助', run: options.openHelp });
+      entries.push({ label: '发起任务 · 连续加入队列', run: options.openStart });
     }
     paint(); sheet.show(); input.focus();
     try {

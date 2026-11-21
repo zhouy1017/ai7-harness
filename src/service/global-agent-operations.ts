@@ -188,7 +188,9 @@ export function globalAgentModelConnection(host: GlobalAgentOperationsHost): { b
   const binding = host.getConfiguredModelRoleBinding('fast-interaction');
   const connection = binding === null ? undefined : host.getModelServiceConnections().find((entry) =>
     entry.credentialOperationState === 'ready' && entry.credentialReference === binding.credentialReference &&
-    entry.binding.providerId === modelServiceChannelOf(binding.route) && entry.binding.modelId === binding.model && entry.binding.credentialSlot === binding.credentialSlot);
+    entry.binding.providerId === modelServiceChannelOf(binding.route) && entry.binding.credentialSlot === binding.credentialSlot &&
+    // The Flash binding comes from the connection's Flash model, or its Pro model when Flash follows 前台 Pro (Issue #1620).
+    (entry.fastBinding?.modelId === binding.model || entry.binding.modelId === binding.model));
   requireStore(binding !== null && connection !== undefined, 'GLOBAL_AGENT_POLICY_BLOCKED', '模型服务连接已变化；未发送任何内容。');
   const policy = resolveSourceCheckoutLaunchPolicySync(host.codeRoot, 'ordinary-production',
     host.getConfiguredModelRoleBinding('main-editorial'), binding);

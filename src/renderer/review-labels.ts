@@ -129,7 +129,7 @@ export const REVIEW_ACTION_LABELS = {
   'scope-cancel': '取消任务',
   // A Run whose 本社审阅偏好 version read a material later 停止今后使用 (Issue #912; LAUD-007, LAUD-008): the way on without it.
   'influence-redo': '重新执行（不含该影响）',
-  'influence-lineage': '查看学习来源链…',
+  'influence-lineage': '查看来源与用途…',
   'scope-cancel-confirm': '确认取消任务',
   'scope-cancel-keep': '不取消',
   /** 将以上工序保存为可复用工序 (Issue #65, S30; ADR 0087 §2). */

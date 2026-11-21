@@ -295,6 +295,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .source-card, .review-section { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
 .source-card dl, .identity-grid { display: grid; grid-template-columns: max-content 1fr; gap: .55rem 1rem; margin: .8rem 0 0; }
 .help-build-identity, .data-version-build { min-width: 0; overflow-wrap: anywhere; }
+/* 第一次审稿 (#1548): five numbered steps, each a sentence and the button that goes there. */
+.help-steps { margin: .5rem 0 0; padding-left: 1.6rem; }
+.help-step { padding-block: .45rem; }
+.help-step > p { margin: .2rem 0 .5rem; }
+.help-step > .field-note { margin-top: 0; }
 .native-artifact-card { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
 .native-artifact-heading { display: flex; align-items: center; justify-content: space-between; gap: .8rem; }
 .native-artifact-heading h3, .native-artifact-card h4 { margin: 0; }
@@ -1167,6 +1172,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .learning-audit-search { display: flex; flex-wrap: wrap; align-items: end; gap: .4rem; min-width: 0; }
 .learning-audit-batch, .learning-lineage, .learning-remediation-preview { display: grid; gap: .5rem; min-width: 0; padding: .8rem; border: 2px solid var(--boundary-strong); border-radius: 10px; background: var(--surface-subdued); }
 .learning-lineage h4, .learning-lineage h5, .learning-remediation-preview h4, .learning-remediation-preview h5 { margin: 0; overflow-wrap: anywhere; }
+.learning-lineage-parts { display: grid; gap: .5rem; min-width: 0; }
 .learning-lineage-steps { display: grid; gap: .5rem; margin: 0; padding-left: 1.4rem; }
 .learning-lineage-step { display: grid; gap: .3rem; min-width: 0; padding: .45rem .6rem; border: 1px solid var(--boundary); border-radius: 8px; background: var(--surface); }
 .learning-lineage-decisions { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; }
@@ -3106,7 +3112,13 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .derivatives-category-chips [aria-pressed="true"] { background: var(--action-primary); color: var(--action-primary-text); }
 .derivatives-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .75rem; }
 .derivatives-item { display: grid; gap: .65rem; padding: 1rem; border: 1px solid var(--boundary); border-radius: .5rem; background: var(--surface); }
-.derivatives-item > input { width: 100%; font-weight: 600; font-size: 1.05rem; }
+.derivatives-item-title { display: flex; align-items: center; gap: .5rem; }
+.derivatives-item-title-text { flex: 1; min-width: 0; font-weight: 600; font-size: 1.05rem; overflow-wrap: anywhere; }
+.derivatives-item-title-input { flex: 1; min-width: 0; font-weight: 600; font-size: 1.05rem; }
+.derivatives-confirm { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .65rem .8rem; margin-top: .5rem; border: 1px solid var(--boundary); border-radius: .5rem; background: var(--surface-subdued); }
+.derivatives-confirm-problem { flex-basis: 100%; margin: 0; color: var(--status-blocked); }
+.derivatives-confirm .danger { color: var(--action-danger); border-color: var(--action-danger); }
+.derivatives-confirm[hidden] { display: none; }
 .derivatives-item-meta { font-size: .85rem; color: var(--text-subdued); }
 .derivatives-preview { margin: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .derivatives-empty { padding: 2rem; text-align: center; }

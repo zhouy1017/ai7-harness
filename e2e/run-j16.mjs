@@ -985,6 +985,40 @@ async function main() {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-existing-preference-quality');
       await waitFor(renderer, `document.querySelector('[data-review-preference]')?.textContent.includes('保留作者有意使用的短句。')`, 'ordinary-existing-preference-visible');
       await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); const row=root.querySelector('[data-review-preference]'); const buttons=Array.from(row.querySelectorAll('button'), button=>button.textContent); return row.textContent.includes('已启用') && buttons.includes('停用') && buttons.includes('编辑偏好') && Array.from(root.querySelectorAll('form')).every(form=>form.matches('form.preference-editor[data-preference-editor]')) && root.querySelectorAll('form[data-preference-editor="new"]').length===1 && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent); })()`, 'ordinary-existing-preference-actions');
+      // #1553: the fold lists a real choice — the preference/memory accepted above — counts it on the closed summary and
+      // ticks it; ordinary mode no longer offers the stopped or proposed items as dead checkboxes.
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-memory-entry');
+      await waitFor(renderer, `document.querySelector('[data-global-agent-fold="references"] input[data-source-item]')`, 'ordinary-agent-memory-listed');
+      const foldSummary = `[data-global-agent-fold="references"] > summary`;
+      const foldRow = `[data-global-agent-fold="references"] .global-agent-source-card label.global-agent-choice`;
+      const summaryText = (preferences) => `参考哪些书和偏好 · 已选 0 本书、${preferences} 条偏好`;
+      await assertRenderer(renderer, `(() => {
+        const fold=document.querySelector('[data-global-agent-fold="references"]');
+        const row=fold?.querySelector('input[data-source-item]')?.closest('.global-agent-source-card');
+        return fold instanceof HTMLDetailsElement && !fold.open && row instanceof HTMLElement && row.textContent.includes('已启用') && !/监督|治理/u.test(row.textContent) &&
+          fold.querySelector(':scope > summary')?.textContent===${JSON.stringify(summaryText(0))};
+      })()`, 'ordinary-agent-memory-choice-listed');
+      // A real pointer opens the fold, ticks the row's label (so the count follows a real choice), unticks it and closes the
+      // fold, at both window forms; the row's whole rectangle lies inside the viewport the page reports.
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await waitFor(renderer, `innerWidth===${width} && innerHeight===${height}`, `ordinary-agent-memory-viewport-${width}`);
+        await pointerClick(renderer, waitFor, foldSummary, `ordinary-agent-memory-open-${width}`);
+        await waitFor(renderer, `document.querySelector('[data-global-agent-fold="references"]')?.open===true`, `ordinary-agent-memory-opened-${width}`);
+        await pointerClick(renderer, waitFor, foldRow, `ordinary-agent-memory-tick-${width}`);
+        await waitFor(renderer, `(() => {
+          const fold=document.querySelector('[data-global-agent-fold="references"]');
+          const input=fold?.querySelector('input[data-source-item]');
+          const box=input?.closest('label')?.getBoundingClientRect();
+          return input instanceof HTMLInputElement && input.checked && box.width>0 && box.height>0 && box.left>=0 && box.top>=0 && box.right<=innerWidth && box.bottom<=innerHeight &&
+            fold.querySelector(':scope > summary').textContent===${JSON.stringify(summaryText(1))};
+        })()`, `ordinary-agent-memory-choice-counts-${width}`);
+        await pointerClick(renderer, waitFor, foldRow, `ordinary-agent-memory-untick-${width}`);
+        await waitFor(renderer, `document.querySelector('[data-global-agent-fold="references"] input[data-source-item]')?.checked===false && document.querySelector('[data-global-agent-fold="references"] > summary').textContent===${JSON.stringify(summaryText(0))}`, `ordinary-agent-memory-choice-uncounts-${width}`);
+        await pointerClick(renderer, waitFor, foldSummary, `ordinary-agent-memory-close-${width}`);
+        await waitFor(renderer, `document.querySelector('[data-global-agent-fold="references"]')?.open===false`, `ordinary-agent-memory-fold-closed-${width}`);
+      }
+      await renderer.send('Emulation.clearDeviceMetricsOverride');
     }
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-preference-return-global');
     await waitFor(renderer, `document.querySelector('[data-global-agent-item]') && document.querySelector('[data-global-agent-save]')`, 'ordinary-preference-developer-preserved');

@@ -123,7 +123,7 @@ export const QUALITY_LEARNING_TABS: ReadonlyArray<{ readonly tab: QualityLearnin
   { tab: 'preferences', label: '审阅偏好' },
   { tab: 'feedback', label: '反馈历史' },
   { tab: 'learning', label: '学习准入', developerOnly: true },
-  { tab: 'audit', label: '学习回溯', developerOnly: true },
+  { tab: 'audit', label: '学习回溯' },
 ];
 export function visibleQualityLearningTabs(developerMode: boolean): ReadonlyArray<(typeof QUALITY_LEARNING_TABS)[number]> {
   return developerMode ? QUALITY_LEARNING_TABS : QUALITY_LEARNING_TABS.filter((entry) => entry.developerOnly !== true)

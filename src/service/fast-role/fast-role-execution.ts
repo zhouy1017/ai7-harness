@@ -9,7 +9,7 @@ import { CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY, modelServiceChannels, res
 import type { EditorialStore } from '../store.js';
 import type { ModelTextAttemptProvenance, FastModelSelectionInput, ModelConnectionTestStatus, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
-import { MODEL_SERVICE_SETUP_REQUIRED_REASON, modelServiceRuntimeBinding, type DeveloperLiveProviderProcessingVersion, type OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
+import { MODEL_SERVICE_SETUP_REQUIRED_REASON, modelServiceRouteRefusal, modelServiceRuntimeBinding, type DeveloperLiveProviderProcessingVersion, type OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
@@ -576,6 +576,8 @@ export async function testModelServiceConnection(
   // The channel's model takes its reviewed runtime record — a Zen model its own Zen route (Issue #1225); any other declared model
   // is refused by its named disposition (family not admitted, text untested or unsupported, no runtime record) before any ticket.
   const allowed = modelServiceRuntimeBinding(input.route, input.modelId, 'fast');
+  const unserved = modelServiceRouteRefusal(input.route, input.modelId, 'fast');
+  if (unserved !== null) throw new FastRoleError('MODEL_ROUTE_NOT_SERVED', unserved);
   if (allowed === undefined) {
     const declared = modelServiceChannels().find((channel) => channel.route === input.route)?.models.find((model) => model.modelId === input.modelId);
     throw new FastRoleError('MODEL_CONNECTION_TEST_UNAVAILABLE', `所选模型不能测试文本连接（${declared?.fast ?? 'not-declared'}）；没有发送任何内容。`);

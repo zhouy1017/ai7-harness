@@ -52,6 +52,7 @@ const DISPOSITION_WORDS: Readonly<Record<Exclude<ModelServiceModelDisposition, '
   'untested:text': '文本回答尚未核验',
   'unsupported:text': '此协议不支持文本回答',
   'channel-not-admitted-by-selected-policy': '当前渠道尚未获准',
+  'route-not-served': '这个渠道暂时还不能使用',
 };
 
 /** Why a model cannot be chosen for a role, in words with the disposition's name; `可选` when it can. */

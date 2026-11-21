@@ -19,7 +19,7 @@ import { mountGlobalAgent } from './global-agent.js';
 import { createAppearance, initializeReducedMotion } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { createCommandPalette } from './command-palette.js';
-import { goBack } from './command-usable.js';
+import { commandUsable, goBack, refreshCommandEntries, type UsableScreen } from './command-usable.js';
 import { applyFindingBatches } from './manuscript-apply.js';
 
 import { mountAgentWorkspace } from './agent-workspace.js';
@@ -52,7 +52,6 @@ import type { FeedbackHistoryTarget } from '../shared/protocol.js';
 import { mountSeries, mountSeriesList, seriesListHead } from './series.js';
 import { mountBackgroundAnalysis } from './background-analysis.js';
 import { activeCommandBindings, BOOK_SECTION_COMMANDS, configureCommandLabels, createCommandDispatcher, refreshShortcutLabels, type CommandPlatform } from './commands.js';
-import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
 
 
 
@@ -673,6 +672,7 @@ commandDispatcher.register({
   ...Object.fromEntries(BOOK_SECTION_COMMANDS.map(([id, , section]) =>
     [id, () => clickCommandEntry(`[data-nav-book-section="${section}"]`)])),
   'nav.settings': () => clickCommandEntry('[data-nav-settings]'),
+  'help.open': () => { if (!authorityInterrupted) void leaveThen(async () => renderHelp()); },
   'nav.back': () => goBack({ screen, press: clickCommandEntry, returnToOrigin: () => void returnToOrigin() }),
   'view.toggleSidebar': () => clickCommandEntry('#sidebar-toggle'),
   'view.openTasks': () => {
@@ -681,13 +681,13 @@ commandDispatcher.register({
   },
 });
 
+const usableScreen: UsableScreen = { has: (command) => commandDispatcher.has(command), currentBookId: () => shell.currentBook()?.bookId ?? null, bookPage: () => (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] !== undefined };
 const commandPalette = createCommandPalette({
   api: api, execute: (id) => commandDispatcher.execute(id),
-  screen: { has: (command) => commandDispatcher.has(command), currentBookId: () => shell.currentBook()?.bookId ?? null, bookPage: () => (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] !== undefined },
+  screen: usableScreen,
   openBook: (bookId) => leaveThen(() => requestBookWorkbenchRoute({ kind: 'book', bookId })),
   openResult: (item) => void leaveThen(() => openResult(item, 'palette')),
   openStart: () => { void leaveThen(async () => { renderTaskOverview(); taskOverviewSurface?.showStart(); }); },
-  openHelp: () => { if (!authorityInterrupted) void leaveThen(async () => renderHelp()); },
   beforeStart: settleScreen,
   status: setStatus,
 });
@@ -701,22 +701,6 @@ function applyKeyboardBindings(bindings: Parameters<typeof configureCommandLabel
   refreshShortcutLabels(document);
 }
 void api.getPreferences().then((preferences) => applyKeyboardBindings(preferences.values['keyboard.bindings']), () => undefined);
-
-/** Each shortcut hint is derived from the same registry that dispatches it (KEY-011). */
-function refreshCommandEntries(): void {
-  for (const entry of document.querySelectorAll<HTMLElement>('[data-nav-destination]')) entry.dataset['shortcutCommand'] = `nav.${entry.dataset['navDestination']}`;
-  for (const [id, , section] of BOOK_SECTION_COMMANDS) {
-    const entry = document.querySelector<HTMLElement>(`[data-nav-book-section="${section}"]`);
-    if (entry !== null) entry.dataset['shortcutCommand'] = id;
-  }
-  const settings = document.querySelector<HTMLElement>('[data-nav-settings]');
-  if (settings !== null) settings.dataset['shortcutCommand'] = 'nav.settings';
-  requiredElement('#sidebar-toggle').dataset['shortcutCommand'] = 'view.toggleSidebar';
-  for (const entry of screen.querySelectorAll<HTMLButtonElement>('button')) {
-    if ((BACK_COMMAND_ENTRIES as readonly string[]).includes(entry.textContent?.trim() ?? '')) entry.dataset['shortcutCommand'] = 'nav.back';
-  }
-  refreshShortcutLabels(document);
-}
 
 /**
  * 待我处理 (Issue #424, plan slice S78): one reader for the whole window, read on every screen change and
@@ -1046,7 +1030,7 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   globalAttentionReader.refresh();
   // The sidebar marks where the window is, and a Book screen makes its Book current and recent (Issue #934).
   shell.follow(state, place);
-  refreshCommandEntries();
+  refreshCommandEntries(screen);
 }
 
 /**
@@ -1285,7 +1269,7 @@ async function renderGlobalAgent(dialogueId?: string): Promise<void> {
     await api.leaveBookWorkbench();
     if (!navigationRoute.isCurrent()) return;
     replaceScreen('global-agent', mountGlobalAgent({ api: api, setStatus, errorMessage: rendererErrorMessage,
-      ...(dialogueId === undefined ? {} : { dialogueId }), openAudit: () => void leaveThen(() => renderQualityLearning('audit', null)) }));
+      ...(dialogueId === undefined ? {} : { dialogueId }), openAudit: () => void leaveThen(() => renderQualityLearning('audit', null)), openModelService: () => void leaveThen(() => renderModelServiceSettings()) }));
   } catch (error) {
     if (navigation.errorIsCurrent(error, navigationRoute)) throw error;
   }
@@ -2804,12 +2788,12 @@ function renderDerivativesWorkspace(bookId: string, bookTitle: string): void {
   const surface = mountDerivativesWorkspace({ root: content, bookId, bookTitle, api: api,
     setStatus, errorMessage: rendererErrorMessage,
     openDocument: (doc, type, notice) => openProductionDocument(doc, type, bookTitle, notice),
+    writing: { awaitServiceJob, openLaunch: (request) => taskDrawer.openLaunch(request, () => null), openWritingPlan: (ref, note) => openTaskPlan(bookId, 'writing', ref, note) },
   });
   replaceScreen('book-derivatives', content, { bookId, title: bookTitle, section: 'derivatives' });
   derivativesSurface = surface;
   agentWorkspaceReturns.set(content, () => renderDerivativesWorkspace(bookId, bookTitle));
   surface.start();
-  setStatus('衍生稿件');
 }
 
 function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string }, focusPackageVersionId?: string): void {
@@ -3544,6 +3528,7 @@ const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, r
   screen,
   renderRunReport: (...args) => renderRunReport(...args),
   applyKeyboardBindings: (...args) => applyKeyboardBindings(...args),
+  commands: { run: (id) => commandDispatcher.execute(id), usable: (id) => commandUsable(id, usableScreen) },
   get keyboardSettingsOff() { return keyboardSettingsOff; },
   set keyboardSettingsOff(value) { keyboardSettingsOff = value; },
   renderModelServiceSettings: (...args) => renderModelServiceSettings(...args),

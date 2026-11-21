@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import defaults from '../../config/runtime-execution-defaults.json' with { type: 'json' };
-import { MODEL_SERVICE_CHANNELS, MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, modelServiceRuntimeBinding, isTrustedOperationalScope, type ModelServiceChannelProjection, type ModelServiceModelDisposition, type ModelServiceRouteId, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope, type SearchConnectionTestPolicy } from '../shared/protocol.js';
+import { MODEL_SERVICE_CHANNELS, MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, modelServiceRecommendedModels, modelServiceRouteRefusal, modelServiceRuntimeBinding, isTrustedOperationalScope, type ModelServiceChannelProjection, type ModelServiceModelDisposition, type ModelServiceRouteId, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope, type SearchConnectionTestPolicy } from '../shared/protocol.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_RUNTIME_MODEL_TABLE } from '../shared/provider-configuration.generated.js';
 import { modelDisposition, providerPreflight, type ProviderPreflightRefusal } from './provider/family-dispositions.js';
@@ -102,10 +102,11 @@ export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) =>
           modelLabel: entry.modelLabel,
           family: model.capabilities.requestShape,
           capabilities: { text: modelDisposition(model, 'text'), stream: modelDisposition(model, 'stream'), functionTools: modelDisposition(model, 'functionTools') },
-          main: disposition(model, 'main'),
-          fast: disposition(model, 'fast'),
+          main: modelServiceRouteRefusal(channelId, entry.modelId, 'main') === null ? disposition(model, 'main') : 'route-not-served',
+          fast: modelServiceRouteRefusal(channelId, entry.modelId, 'fast') === null ? disposition(model, 'fast') : 'route-not-served',
         };
       }).sort((a, b) => Number(b.modelId === MODEL_SERVICE_ROUTE_BINDINGS[channelId].modelId) - Number(a.modelId === MODEL_SERVICE_ROUTE_BINDINGS[channelId].modelId)),
+      ...(modelServiceRecommendedModels(channelId) === undefined ? {} : { recommended: structuredClone(modelServiceRecommendedModels(channelId)!) }),
     };
   });
 }

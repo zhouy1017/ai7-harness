@@ -1,4 +1,5 @@
-import { BOOK_SECTION_COMMANDS } from './commands.js';
+import { BOOK_SECTION_COMMANDS, refreshShortcutLabels } from './commands.js';
+import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
 
 /**
  * Which commands do something on the screen the editor is on (#1522). The palette lists only these, decided before it paints and
@@ -40,4 +41,22 @@ export function commandUsable(id: string, screen: UsableScreen): boolean {
   if (id.startsWith('nav.') && id !== 'nav.back' && id !== 'nav.settings') return commandEntry(`[data-nav-destination="${id.slice(4)}"]`) !== null;
   if (id === 'nav.settings') return commandEntry('[data-nav-settings]') !== null;
   return true;
+}
+
+/** Each shortcut hint is derived from the same registry that dispatches it (KEY-011). */
+export function refreshCommandEntries(screen: ParentNode): void {
+  for (const entry of document.querySelectorAll<HTMLElement>('[data-nav-destination]')) entry.dataset['shortcutCommand'] = `nav.${entry.dataset['navDestination']}`;
+  for (const [id, , section] of BOOK_SECTION_COMMANDS) {
+    const entry = document.querySelector<HTMLElement>(`[data-nav-book-section="${section}"]`);
+    if (entry !== null) entry.dataset['shortcutCommand'] = id;
+  }
+  const settings = document.querySelector<HTMLElement>('[data-nav-settings]');
+  if (settings !== null) settings.dataset['shortcutCommand'] = 'nav.settings';
+  const toggle = document.querySelector<HTMLElement>('#sidebar-toggle');
+  if (toggle === null) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
+  toggle.dataset['shortcutCommand'] = 'view.toggleSidebar';
+  for (const entry of screen.querySelectorAll<HTMLButtonElement>('button')) {
+    if ((BACK_COMMAND_ENTRIES as readonly string[]).includes(entry.textContent?.trim() ?? '')) entry.dataset['shortcutCommand'] = 'nav.back';
+  }
+  refreshShortcutLabels(document);
 }
