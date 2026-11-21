@@ -965,7 +965,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     setTimeout(() => { if (pressSequence === sequence) releaseCommentPress(); }, 100);
   };
   function focusComment(mark: EditorialMarkAnchorProjection): void {
+    // Tab within the selected card may scroll its controls into view; keep that pane position.
     if (pressedComment !== undefined) return;
+    if (activeComment === mark.markId) {
+      if (document.activeElement === commentNodes.get(mark.markId)?.node) scheduleCommentsLayout();
+      return;
+    }
     const rect = commentAnchor(mark)?.getBoundingClientRect();
     const viewport = options.scroll.getBoundingClientRect();
     if (rect && (rect.bottom < viewport.top || rect.top > viewport.bottom)) commentAnchor(mark)?.scrollIntoView({ block: 'center', behavior: 'instant' });
@@ -1196,7 +1201,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     for (const pending of commentsCanvas.querySelectorAll<HTMLElement>('[data-comment-pending]')) if (!present.has(pending.dataset['commentPending']!)) pending.remove();
     const selectedIndex = items.findIndex(item => item.mark.markId === activeComment && item.anchor.bottom >= viewport.top && item.anchor.top <= viewport.bottom);
     const paneTop = commentsScroll.scrollTop || 0;
-    const holdingFrame = preservePanePositions || (activeComment === undefined && paneTop > 0);
+    const selectedNode = activeComment === undefined ? undefined : commentNodes.get(activeComment)?.node;
+    const holdingControl = selectedNode !== undefined && document.activeElement !== selectedNode && selectedNode.contains(document.activeElement);
+    const holdingFrame = preservePanePositions || holdingControl || (activeComment === undefined && paneTop > 0);
     const placed = holdingFrame ? (() => {
       const existing = items.filter(item => Number.isFinite(Number.parseFloat(item.node.style.top)))
         .sort((a, b) => Number.parseFloat(a.node.style.top) - Number.parseFloat(b.node.style.top));
@@ -1212,7 +1219,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       return held;
     })() : stackEditorialComments(items, selectedIndex, { top: paneTop, height: commentsScroll.clientHeight });
     // Shift canvas and scroll together: cards above the selection remain reachable.
-    const shift = selectedIndex < 0 || preservePanePositions ? 0 : Math.max(0, 8 - Math.min(...placed.map(item => item.top)));
+    const shift = selectedIndex < 0 || preservePanePositions || holdingControl ? 0 : Math.max(0, 8 - Math.min(...placed.map(item => item.top)));
     for (const item of placed) item.top += shift;
     const forward = revealed?.pending ? placed.find(item => item.mark.markId === revealed!.markId) : undefined;
     if (forward && revealed) { revealed = { markId: revealed.markId, pending: false }; forward.node.focus({ preventScroll: true }); }
@@ -1236,19 +1243,20 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       : selectedIndex >= 0 ? paneTop + shift + commentsScroll.clientHeight : 0;
     commentsCanvas.style.height = `${Math.max(commentsScroll.clientHeight, scrollFloor, ...placed.map((item) => item.top + item.measuredHeight + 10))}px`;
     if (shift) commentsScroll.scrollTop = paneTop + shift;
-    if (activeComment !== undefined && !preservePanePositions) commentsFrameScroll = paneTop + shift;
+    if (activeComment !== undefined && !preservePanePositions && !holdingControl) commentsFrameScroll = paneTop + shift;
     if (hoveredComment !== undefined) for (const node of options.host.querySelectorAll<HTMLElement>(`[data-mark-id="${CSS.escape(hoveredComment)}"]`)) node.dataset['commentHovered'] = 'true';
     const active = selectedIndex < 0 ? undefined : placed.find((item) => item.mark.markId === activeComment);
     if (active) {
       // Expansion can change the height after the stack measured it. Correct only cards
       // that fit their final visible box; taller cards retain the stack's head alignment.
-      if (!preservePanePositions) {
+      if (!preservePanePositions && !holdingControl) {
         const pane = commentsScroll.getBoundingClientRect();
         const box = active.node.getBoundingClientRect();
         if (box.height <= commentsScroll.clientHeight) {
           const visibleBottom = pane.top + commentsScroll.clientHeight;
           const delta = box.bottom > visibleBottom ? box.bottom - visibleBottom : box.top < pane.top ? box.top - pane.top : 0;
-          if (delta) commentsScroll.scrollTop += delta;
+          // Browser scroll offsets can round fractional pixels back outside the visible box.
+          if (delta) commentsScroll.scrollTop += delta > 0 ? Math.ceil(delta) : Math.floor(delta);
           commentsFrameScroll = commentsScroll.scrollTop;
         }
       }

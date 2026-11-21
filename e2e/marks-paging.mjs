@@ -28,7 +28,7 @@ const PLACE = `(() => {
     activeInWindow:(() => { const r=document.activeElement?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.top<=innerHeight-40; })()};
 })()`;
 
-/** Check final engine geometry; only a taller card needs reader wheel input before its action. */
+/** Check final engine geometry; Tab reaches a taller card's action while the pane follows focus. */
 export async function assertCardActionReachable(renderer, check, waitFor, selector, name) {
   const facts = `(() => {
     const card=document.querySelector(${JSON.stringify(selector)}), pane=document.querySelector('.manuscript-comments-scroll');
@@ -45,19 +45,44 @@ export async function assertCardActionReachable(renderer, check, waitFor, select
   })()`;
   await waitFor(renderer, `new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`, name+'-rest');
   const before=await renderer.evaluate(facts);
+  console.log('COMMENTS_ACTION_ARRIVAL/'+name+'/'+JSON.stringify(before));
   check(before!==null && (before.branch==='fits'?before.whole && before.action:before.head), name+'-arrival', before);
   if (before.branch==='tall') {
-    for (let turn=0;turn<12;turn++) {
-      const now=await renderer.evaluate(facts);
-      if (now.action) break;
-      await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:now.x,y:now.y,deltaX:0,deltaY:now.delta});
-      await waitFor(renderer, `(${facts})?.scrollTop!==${now.scrollTop}`, name+'-wheel');
-      await waitFor(renderer, `new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`, name+'-wheel-rest');
+    const focused=`document.activeElement===document.querySelector(${JSON.stringify(selector)})?.querySelector('[data-mark-action="accept-and-apply"]')`;
+    const trail=[];
+    for (let turn=0;turn<40 && !(await renderer.evaluate(focused));turn++) {
+      trail.push(await renderer.evaluate(`({tag:document.activeElement?.tagName,action:document.activeElement?.dataset?.markAction??null})`));
+      await renderer.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,nativeVirtualKeyCode:9});
+      await renderer.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,nativeVirtualKeyCode:9});
     }
+    check(await renderer.evaluate(focused),name+'-tab-reached',{trail,arrival:before});
+    const focusBox=await renderer.evaluate(facts);
+    await renderer.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:(focusBox.button[0]+focusBox.button[2])/2,y:(focusBox.button[1]+focusBox.button[3])/2,buttons:0});
+    await waitFor(renderer, `new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`, name+'-tab-rest');
   }
   const after=await renderer.evaluate(facts);
   console.log('COMMENTS_ACTION/'+name+'/'+JSON.stringify({arrival:before,after}));
   check(after?.action===true,name+'-action',{...after,branch:before.branch,arrival:before});
+}
+
+/** The action was revealed by the reader already: measure and press without moving either pane. */
+async function pressCardAction(renderer, waitFor, selector, name) {
+  const query=JSON.stringify(selector);
+  const point=`(() => { const node=document.querySelector(${query}), r=node?.getBoundingClientRect();
+    if (!r || r.width<=0 || r.height<=0 || r.left<0 || r.top<0 || r.right>innerWidth || r.bottom>innerHeight) return null;
+    const x=r.left+r.width/2,y=r.top+r.height/2;
+    return node.contains(document.elementFromPoint(x,y))?{x,y,width:r.width,height:r.height}:null;
+  })()`;
+  try {
+    await waitFor(renderer,`new Promise(resolve=>requestAnimationFrame(()=>{const before=${point};requestAnimationFrame(()=>{const after=${point};resolve(before!==null&&after!==null&&JSON.stringify(before)===JSON.stringify(after));});}))`,name+'-pointer-target');
+    const ready=await renderer.evaluate(point);
+    if (ready===null) throw new Error(name+'-target-moved-before-press');
+    const at={x:ready.x,y:ready.y};
+    await renderer.send('Input.dispatchMouseEvent',{type:'mousePressed',...at,button:'left',buttons:1,clickCount:1});
+    const hit=await renderer.evaluate(`document.querySelector(${query})?.contains(document.elementFromPoint(${at.x},${at.y}))===true`);
+    await renderer.send('Input.dispatchMouseEvent',{type:'mouseReleased',...at,button:'left',buttons:0,clickCount:1});
+    if (!hit) throw new Error(name+'-target-moved-after-press');
+  } catch(error) { console.log('COMMENTS_ACTION_PRESS/'+name+'/'+error.message); throw error; }
 }
 
 /** The row's words and where it stands: inside the pane, which is inside the window, with its control under the pointer. */
@@ -214,7 +239,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   const wantSelected = around ?? expected.markId;
   const placeBefore = await renderer.evaluate(PLACE);
   await assertCardActionReachable(renderer, check, waitFor, card, 'marks-paging-accept');
-  await pointerClick(renderer, waitFor, `${card} [data-mark-action="accept-and-apply"]`, 'marks-paging-accept');
+  await pressCardAction(renderer, waitFor, `${card} [data-mark-action="accept-and-apply"]`, 'marks-paging-accept');
   check(await renderer.evaluate(`(async () => {
     for (let turn=0; turn<120; turn++) {
       const card=await window.ai7.getEditorialMarkCard({manuscriptId:globalThis.__marksPaging.manuscriptId,branchId:globalThis.__marksPaging.branchId,markId:${JSON.stringify(expected.markId)}});
@@ -240,6 +265,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   } catch { /* said below with what stood */ }
   await waitFor(renderer, `new Promise((resolve)=>{const box=()=>JSON.stringify(${PLACE});const first=box();requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(box()===first)));})`, 'marks-paging-decision-place-rest');
   const placeAfter = await renderer.evaluate(PLACE);
+  console.log('COMMENTS_DECISION_PLACE/'+JSON.stringify({placeBefore,placeAfter,next:around}));
   check(placeAfter.first === placeBefore.first && Math.abs(placeAfter.scrollTop - placeBefore.scrollTop) <= Math.round((await renderer.evaluate('innerHeight')) / 4) && placeAfter.selected === wantSelected && (around === null || placeAfter.active === wantSelected) && placeAfter.selectedInWindow && placeAfter.activeInWindow,
     'marks-paging-decision-keeps-place', { placeBefore, placeAfter, next: around });
   await pointerClick(renderer, waitFor, '[data-mark-filter-toggle]', 'marks-paging-reset-open');
