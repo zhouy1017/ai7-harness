@@ -2515,3 +2515,15 @@ it('decodes 重新启用 / 删除 of one 审阅偏好 row by its own pin, and ke
   expect(decode('recordLearningSupervision', { ...directive, operation: 'deactivate' })).toMatchObject({ op: 'recordLearningSupervision' });
   for (const operation of ['reactivate', 'retire']) expect(() => decode('recordLearningSupervision', { ...directive, operation })).toThrow(ProtocolError);
 });
+
+it('accepts return-to-editing and optional fidelity acceptance only on reimport submissions (#1638)', () => {
+  const input = { draftId: '11111111-1111-4111-8111-111111111111', expectedDraftVersion: 2 };
+  const frame = (op: string, value: object) => Buffer.from(JSON.stringify({ id: randomUUID(), op, input: value }));
+  expect(decodeRequest(frame('returnImportToEditing', input)).op).toBe('returnImportToEditing');
+  const commit = { ...input, reviewDigest: 'a'.repeat(64), commitId: '22222222-2222-4222-8222-222222222222' };
+  for (const value of [commit, { ...commit, acceptDegradation: true }, { ...commit, acceptDegradation: false }]) {
+    expect(decodeRequest(frame('commitManuscriptReimport', value)).op).toBe('commitManuscriptReimport');
+  }
+  expect(() => decodeRequest(frame('commitManuscriptReimport', { ...commit, acceptDegradation: 'yes' }))).toThrow();
+  expect(() => decodeRequest(frame('commitSourceImport', { ...commit, acceptDegradation: true }))).toThrow();
+});

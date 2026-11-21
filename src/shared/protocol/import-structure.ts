@@ -237,3 +237,9 @@ export interface ReimportLineageSourceVersionPageProjection {
   previousCursor: string | null;
   nextCursor: string | null;
 }
+
+/** A completed choice also supplies the single row and the remaining count for an incremental page. */
+export interface ReimportResolutionProjection extends ReviewBeforeManuscriptReimportProjection {
+  row: ReimportGroupProjection;
+  unresolvedGroups: number;
+}

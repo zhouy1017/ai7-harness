@@ -321,6 +321,8 @@ async function dispatch(
         op: request.op,
         result: await store.stageSelectedManuscript(request.input.selectionToken, request.input.selectedPath),
       };
+    case 'returnImportToEditing':
+      return { id: request.id, ok: true, op: request.op, result: store.returnImportToEditing(request.input.draftId, request.input.expectedDraftVersion) };
     case 'continueImportDraft':
       return {
         id: request.id,

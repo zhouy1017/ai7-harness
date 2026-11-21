@@ -142,9 +142,10 @@ export function stagedStructure(db: DatabaseSync, draftId: string, offerHeadings
 }
 
 /** The staged projection's `structure` field: present only when the draft lists something. */
-export function stagedStructureField(db: DatabaseSync, draftId: string, offerHeadings: boolean): { structure?: ImportStructureProjection } {
-  const structure = stagedStructure(db, draftId, offerHeadings);
-  return structure === null ? {} : { structure };
+export function stagedStructureField(db: DatabaseSync, draftId: string, offerHeadings: boolean): { structure?: ImportStructureProjection; savedStructureChoice?: ImportStructureChoice } {
+  const choice = recordedStructureChoice(db, draftId);
+  const structure = stagedStructure(db, draftId, offerHeadings, choice ?? undefined);
+  return structure === null ? {} : { structure, ...(choice === null ? {} : { savedStructureChoice: choice }) };
 }
 
 /** The review projection's `structure` field: the staged list stated with the choice the review was formed with. */
