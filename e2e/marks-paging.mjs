@@ -196,15 +196,17 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   } catch {
     check(false, 'marks-paging-decision-keeps-pages', await renderer.evaluate(`({row:${rowNow},rowWant:${JSON.stringify(rowWant)},card:document.querySelector(${JSON.stringify(card)})!==null,words:document.querySelector('.editor-window [data-mark-id="${expected.markId}"]')!==null,anyWords:document.querySelector('[data-mark-id="${expected.markId}"]')!==null,first:document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId,drawn:document.querySelectorAll('.editor-window [data-mark-id]').length,status:document.querySelector('#persistence-status')?.textContent??null})`));
   }
+  // At the window's last pending mark (`around` is null) there is no card to go on to: the card stays selected and the focus is where an
+  // ordinary window leaves it (the re-drawn card does not hold it; the unit parity case for the last mark pins that).
   // The editor's place is kept: the same paragraph at the top of the text and the scroll where it was (to a few lines, as the applied
   // words reflow), and the next pending card is selected and focused (a pointer decision stays on the page), as in a window that
   // holds every mark; both stand inside the window.
   try {
-    await waitFor(renderer, `(() => { const place=${PLACE}; return place.selected===${JSON.stringify(wantSelected)} && place.active===${JSON.stringify(wantSelected)}; })()`, 'marks-paging-decision-keeps-place', 60_000);
+    await waitFor(renderer, `(() => { const place=${PLACE}; return place.selected===${JSON.stringify(wantSelected)} && (${JSON.stringify(around)}===null || place.active===${JSON.stringify(wantSelected)}); })()`, 'marks-paging-decision-keeps-place', 60_000);
   } catch { /* said below with what stood */ }
   await waitFor(renderer, `new Promise((resolve)=>{const box=()=>JSON.stringify(${PLACE});const first=box();requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(box()===first)));})`, 'marks-paging-decision-place-rest');
   const placeAfter = await renderer.evaluate(PLACE);
-  check(placeAfter.first === placeBefore.first && Math.abs(placeAfter.scrollTop - placeBefore.scrollTop) <= Math.round((await renderer.evaluate('innerHeight')) / 4) && placeAfter.selected === wantSelected && placeAfter.active === wantSelected && placeAfter.selectedInWindow && placeAfter.activeInWindow,
+  check(placeAfter.first === placeBefore.first && Math.abs(placeAfter.scrollTop - placeBefore.scrollTop) <= Math.round((await renderer.evaluate('innerHeight')) / 4) && placeAfter.selected === wantSelected && (around === null || placeAfter.active === wantSelected) && placeAfter.selectedInWindow && placeAfter.activeInWindow,
     'marks-paging-decision-keeps-place', { placeBefore, placeAfter, next: around });
   await pointerClick(renderer, waitFor, '[data-mark-filter-toggle]', 'marks-paging-reset-open');
   await waitFor(renderer, isOpen, 'marks-paging-reset-opened');

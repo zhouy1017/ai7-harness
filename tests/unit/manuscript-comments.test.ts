@@ -1005,6 +1005,7 @@ describe('comments command parity and refresh continuity', () => {
         paged = dense; latest.clear();
         const list = [0, 1, 2, 3, 4, 5].map(kinds ?? suggested);
         const ui = mount(list[0]!, list.slice(1), { bookPending: { read: () => ({ places: [], truncated: false }), windowAt: async () => windowOf(), go: async () => true } }); await paint();
+        ui.setPage({ position: { startCharacter: 0, endCharacter: 10, totalCharacters: 1000 } } as never);
         const served = (start: number, digest: string) => ({ ...pageOf([start, start + 1], 2, start + 2 < 6 ? start + 2 : null, digest, 6), marks: [start, start + 1].map((index) => anchor(latest.get(list[index]!.markId) ?? list[index]!)) });
         if (dense) {
           ui.setPage({ marks: [anchor(list[0]!)] }); await paint();
@@ -1059,6 +1060,17 @@ describe('comments command parity and refresh continuity', () => {
           row(mounted.pane, 'm4').querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!.click();
         });
         expect(seen.dense.apply.mock.calls[0]?.[0]).toMatchObject({ markId: 'm4', interaction: 'accept-and-apply' });
+      });
+
+      it('accepting the last mark of the third page, where there is no next pending card', async () => {
+        const { seen } = await both(async (mounted, list) => {
+          mounted.apply.mockImplementationOnce(async () => ({ ...answer(list, decidedAs(list[5]!, 'applied')), window: windowOf(), application: {} }) as never);
+          row(mounted.pane, 'm5').click(); await paint();
+          row(mounted.pane, 'm5').querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!.click();
+        });
+        expect(seen.dense.apply.mock.calls[0]?.[0]).toMatchObject({ markId: 'm5', interaction: 'accept-and-apply' });
+        // The card stays selected; the focus is the ordinary window's (compared above), not necessarily on the card.
+        expect(seen.selected).toBe('m5');
       });
 
       it('accepting an edited suggestion on the first page', async () => {
