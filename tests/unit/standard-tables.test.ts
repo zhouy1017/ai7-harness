@@ -60,6 +60,18 @@ describe('the 字表与词表 library (R5-L1)', () => {
     } finally { db.close(); }
   });
 
+  it('gives every installed table and version its own version-4 UUID, different in every store', () => {
+    const ids = (): string[] => {
+      const db = library();
+      try { return (db.prepare('SELECT table_id id FROM standard_tables UNION ALL SELECT version_id FROM standard_table_versions').all() as { id: string }[]).map((row) => row.id); } finally { db.close(); }
+    };
+    const first = ids();
+    const second = ids();
+    expect(first).toHaveLength(8);
+    expect(new Set([...first, ...second]).size).toBe(16);
+    expect([...first, ...second].every((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(id))).toBe(true);
+  });
+
   it('pins each version-1 digest to the digest the shared function computes from the seed, whatever the installation order', () => {
     for (const key of PREINSTALLED_TABLE_KEYS) expect(standardTableDigest(preinstalledKind(key), preinstalledEntries(key))).toBe(DIGESTS[key]);
     const db = library([...PREINSTALLED_TABLE_KEYS].reverse());

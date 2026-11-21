@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { canonicalJson, sha256Hex } from './analysis/canonical.js';
 import { requireStore } from './store-records.js';
@@ -176,6 +176,19 @@ export function preinstalledEntries(key: PreinstalledTableKey): StandardEntry[] 
 export function preinstalledDigest(key: PreinstalledTableKey): string { return PREINSTALLED[key].digest; }
 export function preinstalledKind(key: PreinstalledTableKey): StandardTableKind { return PREINSTALLED[key].kind; }
 
+/**
+ * A version-4 UUID from the system's random bytes, not from `randomUUID`: the memory compatibility packets (#1498) pin the order of
+ * every `randomUUID` a store hands out, and a store's creation draws eight of these ids. A seed's ids mean nothing by themselves
+ * (the key and the digest identify what was installed), so they stay out of that sequence.
+ */
+function newId(): string {
+  const bytes = randomBytes(16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 const INSERT_ENTRIES = `INSERT INTO standard_table_entries
   SELECT ?, e.key + 1, json_extract(e.value, '$[0]'), json_extract(e.value, '$[1]'), json_extract(e.value, '$[2]'),
     json_extract(e.value, '$[3]'), json_extract(e.value, '$[4]'), json_extract(e.value, '$[5]'), json_extract(e.value, '$[6]'),
@@ -199,8 +212,8 @@ export function installPreinstalledStandardTables(db: DatabaseSync, keys: readon
     if (db.prepare('SELECT 1 FROM standard_tables WHERE preinstalled_key = ?').get(key) !== undefined) continue;
     const entries = table.entries();
     requireStore(entries.length === table.entryCount, 'STANDARD_TABLE_INVALID', '预装字表的内容与记录不符。');
-    const tableId = randomUUID();
-    const versionId = randomUUID();
+    const tableId = newId();
+    const versionId = newId();
     db.prepare('INSERT INTO standard_tables VALUES (?, ?, ?, ?, ?, 1, ?, ?)').run(tableId, table.kind, table.name, 'preinstalled', key, versionId, now);
     db.prepare('INSERT INTO standard_table_versions VALUES (?, ?, 1, ?, ?, ?, NULL, ?, NULL, NULL, NULL, ?)')
       .run(versionId, tableId, table.versionLabel, table.sourceDescription, table.digest, entries.length, now);
