@@ -45,7 +45,9 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   };
   await opened();
   // The text on screen carries more marks than one answer: the first 400, and the sentence says so.
-  const facts = await renderer.evaluate(READ_WINDOW);
+  // The Book's reads answer once the screen has settled after the way in (they are not registered while it changes).
+  await waitFor(renderer, `(async () => { try { globalThis.__marksFacts=await (${READ_WINDOW}); return true; } catch { return false; } })()`, 'marks-paging-window-read', 60_000);
+  const facts = await renderer.evaluate('globalThis.__marksFacts');
   check(facts.total > 400 && facts.shown === 400, 'marks-paging-dense-window', { shown: facts.shown, total: facts.total });
   const sentence = `已显示 400 / ${facts.total} 条。`;
   await waitFor(renderer, `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(sentence)}`, 'marks-paging-sentence');
