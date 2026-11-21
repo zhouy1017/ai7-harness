@@ -29,6 +29,7 @@ import {
   type NewBookImportTargetChoiceId,
   type OriginalFileAccessProjection,
   type ReimportGroupVerb,
+  type ReimportLineageSourceVersionPageProjection,
   type ReviewBeforeImportProjection,
   type ReviewBeforeSourceImportProjection,
   type SourceFormat,
@@ -487,13 +488,9 @@ export function sourceImportRecordPresentations(host: ImportReviewRecordsHost, b
     return records;
   }
 
-export function reimportLineageSourceVersionPage(host: ImportReviewRecordsHost, bookId: string, after: string | null): {
-    items: string[];
-    previousCursor: string | null;
-    nextCursor: string | null;
-  } {
+export function reimportLineageSourceVersionPage(host: ImportReviewRecordsHost, bookId: string, after: string | null): Pick<ReimportLineageSourceVersionPageProjection, 'items' | 'previousCursor' | 'nextCursor'> {
     const rows = (host.authority.prepare(
-      `SELECT source_version_id FROM (
+      `SELECT sv.source_version_id, sv.display_name, sv.created_at FROM (
          SELECT mir.source_version_id
          FROM manuscript_import_records mir
          WHERE mir.book_id = ?
@@ -502,10 +499,13 @@ export function reimportLineageSourceVersionPage(host: ImportReviewRecordsHost, 
          FROM manuscript_reimport_records rr
          WHERE rr.book_id = ? AND
            ((rr.result_kind = 'changed' AND rr.resulting_revision_id IS NOT NULL) OR rr.result_kind = 'no-change')
-       ) ${after === null ? '' : 'WHERE source_version_id < ?'}
-       ORDER BY source_version_id DESC LIMIT ${REIMPORT_LINEAGE_CHOICE_LIMIT + 1}`,
+       ) lineage JOIN source_versions sv ON sv.source_version_id = lineage.source_version_id
+       ${after === null ? '' : 'WHERE sv.source_version_id < ?'}
+       ORDER BY sv.source_version_id DESC LIMIT ${REIMPORT_LINEAGE_CHOICE_LIMIT + 1}`,
     ).all(...(after === null ? [bookId, bookId] : [bookId, bookId, after])) as SqlRow[]);
-    const items = rows.slice(0, REIMPORT_LINEAGE_CHOICE_LIMIT).map((row) => asString(row.source_version_id));
+    const items = rows.slice(0, REIMPORT_LINEAGE_CHOICE_LIMIT).map((row) => ({
+      sourceVersionId: asString(row.source_version_id), displayName: recordedSourceDisplayName(row.display_name), importedAt: asString(row.created_at),
+    }));
     const previousRows = after === null ? [] : host.authority.prepare(
       `SELECT source_version_id FROM (
          SELECT mir.source_version_id FROM manuscript_import_records mir WHERE mir.book_id = ?
@@ -520,7 +520,7 @@ export function reimportLineageSourceVersionPage(host: ImportReviewRecordsHost, 
       previousCursor: previousRows.length === REIMPORT_LINEAGE_CHOICE_LIMIT
         ? asString(previousRows.at(-1)!.source_version_id)
         : null,
-      nextCursor: rows.length > REIMPORT_LINEAGE_CHOICE_LIMIT ? items.at(-1)! : null,
+      nextCursor: rows.length > REIMPORT_LINEAGE_CHOICE_LIMIT ? items.at(-1)!.sourceVersionId : null,
     };
   }
 
@@ -969,7 +969,7 @@ export function identityFindings(host: ImportReviewRecordsHost, snapshot: DraftS
     const rows = host.authority
       .prepare(
         `SELECT b.book_id, b.title, sv.source_version_id, sv.source_digest, sv.content_digest,
-                sv.structure_digest, sv.parser_identity, sv.display_name,
+                sv.structure_digest, sv.parser_identity, sv.display_name, sv.created_at,
                 records.import_record_id, records.record_kind
          FROM source_versions sv
          JOIN books b ON b.book_id = sv.book_id
@@ -1017,6 +1017,7 @@ export function identityFindings(host: ImportReviewRecordsHost, snapshot: DraftS
         bookId: asString(row.book_id),
         bookTitle: asString(row.title),
         sourceVersionId: asString(row.source_version_id),
+        displayName: recordedSourceDisplayName(row.display_name), importedAt: asString(row.created_at),
         importRecordId: asString(row.import_record_id),
         recordKind: asString(row.record_kind) as ImportIdentityFindingProjection['recordKind'],
         recordLabel: asString(row.record_kind) === 'manuscript-import'
@@ -1856,7 +1857,7 @@ export function createNewBookReviewDigestV4(
   draftVersion: number,
   plan: ImportFidelityPlan,
   targetChoiceId: NewBookImportTargetChoiceId,
-  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
+  identityFindings: ReadonlyArray<Omit<ImportIdentityFindingProjection, 'displayName' | 'importedAt'>>,
 ): string {
   return sha256(
     canonicalJson({
@@ -1878,7 +1879,7 @@ export function createNewBookReviewDigestV4(
         contentDigest: snapshot.contentDigest,
         structureDigest: snapshot.structureDigest,
       },
-      identityFindings,
+      identityFindings: identityFindingPins(identityFindings),
       fidelity: snapshot.fidelity,
       degradationDecision:
         plan.degradations.length === 0
@@ -2218,7 +2219,7 @@ export function sourceImportRetainedBoundary(snapshot: DraftSnapshot): ReviewBef
 export function createSourceImportReviewDigest(
   snapshot: DraftSnapshot,
   target: ResolvedSourceImportTarget,
-  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
+  identityFindings: ReadonlyArray<Omit<ImportIdentityFindingProjection, 'displayName' | 'importedAt'>>,
 ): string {
   return sha256(canonicalJson({
     // Revision 2: the retained boundary now carries the identified format and may carry no parse.
@@ -2253,7 +2254,7 @@ export function createSourceImportReviewDigest(
     },
     parserIdentity: snapshot.parserIdentity,
     objectDigest: snapshot.objectDigest,
-    identityFindings,
+    identityFindings: identityFindingPins(identityFindings),
     recordsToCreate: sourceImportRecordsToCreate(target),
     namedNonEffects: SOURCE_IMPORT_NON_EFFECTS,
     editorialDimensionSet: target.kind === 'new-book'
@@ -2283,7 +2284,7 @@ export function createImportReviewDigestV6(
   draftVersion: number,
   reviewed: ReviewedFidelity,
   target: ResolvedImportTarget,
-  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
+  identityFindings: ReadonlyArray<Omit<ImportIdentityFindingProjection, 'displayName' | 'importedAt'>>,
   profile: BuiltInWorkflowProfile,
 ): string {
   const { plan } = reviewed;
@@ -2316,7 +2317,7 @@ export function createImportReviewDigestV6(
       contentDigest: snapshot.contentDigest,
       structureDigest: snapshot.structureDigest,
     },
-    identityFindings,
+    identityFindings: identityFindingPins(identityFindings),
     fidelity: reviewed.fidelity,
     ...(reviewed.word === undefined ? {} : { word: reviewed.word.prepared }),
     textBoxDisposition: plan.textBoxDisposition,
@@ -2389,3 +2390,13 @@ export const LEGACY_WORKFLOW_PROFILE_DIGEST = sha256(canonicalJson(LEGACY_WORKFL
 export const BASELINE_EDITORIAL_DIMENSION_SET_DIGEST = sha256(canonicalJson(BASELINE_EDITORIAL_DIMENSION_SET));
 export const EDITORIAL_DIMENSIONS = BASELINE_EDITORIAL_DIMENSION_SET.dimensions;
 const recordOperations = { identityFindings };
+
+function recordedSourceDisplayName(value: SQLOutputValue | undefined): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+/** Display metadata does not change existing reviewed import identities. */
+function identityFindingPins(findings: ReadonlyArray<Omit<ImportIdentityFindingProjection, 'displayName' | 'importedAt'>>) {
+  return findings.map(({ bookId, bookTitle, sourceVersionId, importRecordId, recordKind, recordLabel, identityClass }) =>
+    ({ bookId, bookTitle, sourceVersionId, importRecordId, recordKind, recordLabel, identityClass }));
+}

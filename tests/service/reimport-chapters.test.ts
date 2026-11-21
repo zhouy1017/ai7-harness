@@ -766,3 +766,37 @@ it.each([false, true])('keeps the ordinary missing-draft refusal with acceptance
     store.markCleanShutdown();
   } finally { store.close(); }
 });
+
+it('names earlier lineage files with their first import times in every import-page projection (N.5)', async () => {
+  const first = await compose('earlier-original', [21, 22, 23].map((b) => paragraph(span(b))));
+  const second = await compose('earlier-revised', [21, 24, 23].map((b) => paragraph(span(b))));
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const book = await importBook(store, first);
+    const initial = store.getBookOverview(book.bookId).records.find((r) => r.kind === 'import-record');
+    if (initial?.kind !== 'import-record') throw new Error('Expected import record');
+    let review = await prepareReimport(store, book, second);
+    for (const row of store.getReimportMappingPage(review.draftId, review.draftVersion, null).items) review = resolve(store, review, row.groupId, 'rewrite');
+    const result = await commit(store, review);
+    const expected = [
+      { sourceVersionId: initial.sourceVersionId, displayName: 'earlier-original.docx', importedAt: initial.importedAt },
+      { sourceVersionId: result.sourceVersionId, displayName: 'earlier-revised.docx', importedAt: result.importedAt },
+    ].sort((a, b) => b.sourceVersionId.localeCompare(a.sourceVersionId));
+    const page = store.getReimportLineageSourceVersionPage(book.bookId, null);
+    expect(page.items).toEqual(expected);
+    const legacyPage = { ...page, items: page.items.map((item) => item.sourceVersionId) };
+    expect(JSON.stringify(legacyPage)).toBe(JSON.stringify({ bookId: book.bookId, after: null, items: expected.map((item) => item.sourceVersionId), previousCursor: null, nextCursor: null }));
+    expect(store.getReimportLineageSourceVersionPage(book.bookId, expected[0]!.sourceVersionId)).toEqual({ bookId: book.bookId, after: expected[0]!.sourceVersionId, items: expected.slice(1), previousCursor: null, nextCursor: null });
+    expect(store.listBooks(null).items.find((item) => item.bookId === book.bookId)!.reimportLineageSourceVersionIds).toEqual(expected);
+    const staged = await store.stageSelectedManuscript(randomUUID(), first);
+    const choice = staged.targetChoices.find((item) => item.kind === 'existing-book' && item.bookId === book.bookId);
+    expect(choice).toMatchObject({ reimportLineageSourceVersionIds: expected });
+    const finding = staged.identityFindings.find((item) => item.sourceVersionId === initial.sourceVersionId)!;
+    expect(finding.displayName).toBe('earlier-original.docx');
+    expect(finding.importedAt).toBe(initial.importedAt);
+    const { displayName: _name, importedAt: _time, ...legacyFinding } = finding;
+    expect(JSON.stringify(legacyFinding)).toBe(JSON.stringify({ bookId: book.bookId, bookTitle: '章节对应组稿', sourceVersionId: initial.sourceVersionId,
+      importRecordId: initial.importRecordId, recordKind: 'manuscript-import', recordLabel: '稿件导入记录', identityClass: { kind: 'immutable-original', label: '精确原始文件身份' } }));
+    store.markCleanShutdown();
+  } finally { store.close(); }
+});

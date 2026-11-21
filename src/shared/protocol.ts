@@ -1239,7 +1239,7 @@ export interface BookSummaryProjection {
   people: { authors: ReadonlyArray<string>; editors: ReadonlyArray<string>; related: ReadonlyArray<{ roleLabel: string; name: string }> };
   manuscriptState: 'empty' | 'populated';
   manuscriptStateLabel: '尚无稿件' | '已有主稿件';
-  reimportLineageSourceVersionIds: ReadonlyArray<string>;
+  reimportLineageSourceVersionIds: ReimportLineageSourceVersionPageProjection['items'];
   reimportLineageNextCursor: string | null;
 }
 

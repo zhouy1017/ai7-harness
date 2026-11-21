@@ -5711,7 +5711,7 @@ export class EditorialStore {
       const projectedManuscriptState: 'empty' | 'populated' =
         manuscriptState === 'empty' ? 'empty' : 'populated';
       const lineagePage = projectedManuscriptState === 'empty'
-        ? { items: [] as string[], nextCursor: null }
+        ? { items: [], nextCursor: null }
         : this.#reimportLineageSourceVersionPage(bookId, null);
       return {
         bookId,
@@ -7677,11 +7677,7 @@ export class EditorialStore {
     after: string | null,
   ): ReimportLineageSourceVersionPageProjection { return manuscriptReimportOperations.getReimportLineageSourceVersionPage(this.#manuscriptReimportOperationsHost, bookId, after); }
 
-  #reimportLineageSourceVersionPage(bookId: string, after: string | null): {
-    items: string[];
-    previousCursor: string | null;
-    nextCursor: string | null;
-  } { return importReviewOperations.reimportLineageSourceVersionPage(this.#importReviewRecordsHost, bookId, after); }
+  #reimportLineageSourceVersionPage(bookId: string, after: string | null): Pick<ReimportLineageSourceVersionPageProjection, 'items' | 'previousCursor' | 'nextCursor'> { return importReviewOperations.reimportLineageSourceVersionPage(this.#importReviewRecordsHost, bookId, after); }
 
   private prepareBookCreationReviewForExactIdentity(
     bookId: string,
