@@ -272,7 +272,7 @@ describe('定期自动备份 over the real store', () => {
       expect(made.backups[0]).toMatchObject({ fileName: backupFileName(T), createdAt: T.toISOString(), expiresAt: at(14 * DAY).toISOString(), present: true });
       const packaged = unzipSync(await readFile(join(location, backupFileName(T))));
       expect(parseCanonicalJson(strFromU8(packaged['manifest.json']!))).toMatchObject({
-        schema: 'ai7.database-package/1', origin: 'scheduled-backup', dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, credentials: 'excluded',
+        schema: 'ai7.database-package/1', origin: 'scheduled-backup', dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, credentials: 'excluded',
       });
       expect((await readdir(location)).filter((name) => name.includes('.partial'))).toEqual([]);
 

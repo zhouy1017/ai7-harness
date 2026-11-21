@@ -10,7 +10,7 @@ import { EvaluationError, EvaluationRecords, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL
 import { LEARNING_ELIGIBILITY_SCHEMA_SQL } from '../../../src/service/learning-eligibility.js';
 import { loadBuiltInManuscriptProfile } from '../../../src/service/native-workflow-profile.js';
 import { DERIVATIVE_WORKSPACE_SCHEMA_SQL, seedProductionDocumentCategories } from '../../../src/service/production-document-types.js';
-import { PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL, PRODUCTION_DOCUMENT_SCHEMA_SQL } from '../../../src/service/production-document-ledger.js';
+import { PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL, PRODUCTION_DOCUMENT_SCHEMA_SQL, PRODUCTION_DOCUMENT_INDEX_SQL } from '../../../src/service/production-document-ledger.js';
 import { PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_SQL } from '../../../src/service/production-document-origins.js';
 import { PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL } from '../../../src/service/production-document-workflow.js';
 import { PublicationVersionError, type PublicationVersionStore } from '../../../src/service/publication-versions.js';
@@ -45,6 +45,8 @@ export async function evaluationDomainDatabase(): Promise<DatabaseSync> {
   try {
     initializeOutsideOwnerTables(db);
     createBaselineRelations(db, BOOK_PEOPLE_SCHEMA_SQL);
+    // The one Book Manuscript per Book, the production-document owner's index over the stub Manuscripts.
+    db.exec(PRODUCTION_DOCUMENT_INDEX_SQL.manuscripts_one_primary_per_book);
     createBaselineRelations(db, PRODUCTION_DOCUMENT_SCHEMA_SQL);
     createBaselineRelations(db, PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL);
     createBaselineRelations(db, PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL);

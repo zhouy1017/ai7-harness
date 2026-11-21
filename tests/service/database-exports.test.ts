@@ -187,7 +187,7 @@ describe('导出数据库 over the real store', () => {
         destination,
         disposition: 'create',
         dispositionLabel: '新建文件',
-        dataVersion: 1,
+        dataVersion: 2,
         softwareVersion: version,
         contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 },
         receipt: null,
@@ -206,7 +206,7 @@ describe('导出数据库 over the real store', () => {
       const manifest = parseCanonicalJson(strFromU8(packaged['manifest.json']!)) as Record<string, unknown>;
       expect(manifest).toMatchObject({
         schema: 'ai7.database-package/1',
-        dataVersion: 1,
+        dataVersion: 2,
         softwareVersion: version,
         schemaRevision: LATEST_SCHEMA_VERSION,
         origin: 'database-export',

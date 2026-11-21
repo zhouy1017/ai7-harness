@@ -780,7 +780,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     await close(session);
     const broken = database();
     try { broken.exec('DROP TABLE review_excluded_findings'); } finally { broken.close(); }
-    await expect(open('review-overlap-authored')).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
+    await expect(open('review-overlap-authored')).rejects.toMatchObject({ code: 'SCHEMA_INVALID' });
   }, 300_000);
 
   it('counts a safe retry and one later contract retry separately, with no third contract retry (#1084)', async () => {
