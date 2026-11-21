@@ -316,7 +316,7 @@ describe('registered local tools without egress', () => {
     // One phrasing per form the ranker reads: Ａ, a and ａ are one, and so is the query's own ＡＬＰＨＡ.
     expect(canonicalToolArguments('retrieve', { query: 'alpha', queries: ['Ａ', 'a', 'ａ', 'ＡＬＰＨＡ'] })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8, queries: ['Ａ'] });
     // An over-long phrasing is cut first, never inside a surrogate pair.
-    const cut = (canonicalToolArguments('retrieve', { query: 'alpha', queries: ['x'.repeat(999) + '𠮷'] }) as { queries: string[] }).queries[0]!;
+    const cut = (canonicalToolArguments('retrieve', { query: 'alpha', queries: ['x'.repeat(999) + '𠮷'] }) as unknown as { queries: string[] }).queries[0]!;
     expect([cut.length, cut.isWellFormed()]).toEqual([999, true]);
     expect(canonicalToolArguments('retrieve', { queries: ['beta'] })).toBeNull();
     // Only the rule-declared set (composition v2) offers them; composition v1 keeps its legacy bytes.
