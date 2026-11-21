@@ -6,7 +6,6 @@ import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, hasExactKeys, isRecord, parseStoredJson, sha256Hex } from '../analysis/canonical.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
 import { ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, isSupportedProviderProcessingVersion, localFixtureProfileOf, selectedPolicyIdentityOf } from '../launch-policy.js';
-import { POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION } from '../task-authorization.js';
 import { GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_RULE_ID } from './global-agent-session.js';
 import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from './contract.js';
 import type { DialogueMessageInput } from './contract.js';
@@ -400,7 +399,7 @@ export class DialogueLedger {
   askGlobal(scope: import('../../shared/protocol.js').TrustedOperationalScope, sources: ReadonlyArray<GlobalMemoryPin>, questionSha256: string, now: Date,
     qualification?: QualifiedGlobalAttemptMetadata): { task: StoredGlobalDialogueTask; attemptId: string } {
     requireDialogue(DIGEST_PATTERN.test(questionSha256) && sources.length <= 12, 'DIALOGUE_INVALID', '全域对话范围无效。');
-    if (qualification !== undefined) requireDialogue(scope === 'ordinary-production' && this.#currentReader() &&
+    if (qualification !== undefined) requireDialogue(scope === 'ordinary-production' &&
       qualifiedGlobalAttemptMetadataOf(qualification) !== null, 'DIALOGUE_INVALID', '全域对话的原文字段身份无效。');
     const task: StoredGlobalDialogueTask = { dialogueId: randomUUID(), bookId: null, sources, operationalScope: scope,
       sourcesSha256: sha256Hex(canonicalJson(sources)), questionSha256, askedAt: now.toISOString() };
@@ -547,7 +546,7 @@ export class DialogueLedger {
     let qualification: QualifiedGlobalAttemptMetadata | undefined;
     if (raw.schema === 'ai7.dialogue-attempt/2') {
       const metadata = qualifiedGlobalAttemptMetadataOf(Object.fromEntries(QUALIFIED_GLOBAL_FIELDS.map((key) => [key, raw[key]])));
-      requireDialogue(this.#currentReader() && metadata !== null && this.globalTask(base.dialogueId)?.operationalScope === 'ordinary-production',
+      requireDialogue(metadata !== null && this.globalTask(base.dialogueId)?.operationalScope === 'ordinary-production',
         'DIALOGUE_RECORD_INVALID', INVALID);
       qualification = metadata;
     }
@@ -575,7 +574,7 @@ export class DialogueLedger {
         if (isRecord(record) && record.schema === 'ai7.dialogue-execution-binding/2') {
           const selected = selectedPolicyIdentityOf(record.selectedPolicyIdentity);
           const profile = selected === null ? null : localFixtureProfileOf(record.localFixtureProfile, selected);
-          requireDialogue(this.#currentReader() && selected?.providerProcessingVersion === 'v29' && profile !== null,
+          requireDialogue(selected?.providerProcessingVersion === 'v29' && profile !== null,
             'DIALOGUE_RECORD_INVALID', INVALID);
           binding = { ...binding, selectedPolicyIdentity: selected, localFixtureProfile: profile };
           this.#verifyLocalProfile(base.dialogueId, binding);
@@ -601,10 +600,6 @@ export class DialogueLedger {
     return binding;
   }
 
-  #currentReader(): boolean {
-    return Number(this.#db.prepare('PRAGMA user_version').get()?.user_version) >= POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION;
-  }
-
   #verifyLocalProfile(dialogueId: string, binding: StoredLocalDialogueBinding): void {
     const expected = binding.promptContractSha256 === AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST ? 'workspace'
       : binding.promptContractSha256 === DIALOGUE_PROMPT_CONTRACT_DIGEST || binding.promptContractSha256 === DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST ? 'dialogue' : null;
@@ -622,7 +617,7 @@ export class DialogueLedger {
 
   #insertAttempt(dialogueId: string, ordinal: number, kind: DialogueAttemptKind, priorAttemptId: string | null, now: Date,
     qualification?: QualifiedGlobalAttemptMetadata): string {
-    if (qualification !== undefined) requireDialogue(this.#currentReader() && qualifiedGlobalAttemptMetadataOf(qualification) !== null &&
+    if (qualification !== undefined) requireDialogue(qualifiedGlobalAttemptMetadataOf(qualification) !== null &&
       this.globalTask(dialogueId)?.operationalScope === 'ordinary-production', 'DIALOGUE_INVALID', '全域对话的原文字段身份无效。');
     const attempt = { attemptId: randomUUID(), dialogueId, ordinal, kind, priorAttemptId, createdAt: now.toISOString() };
     const seal = sealed({ schema: qualification === undefined ? ATTEMPT_SCHEMA : 'ai7.dialogue-attempt/2', ...attempt, ...qualification });
@@ -657,7 +652,7 @@ export class DialogueLedger {
     if (binding.route === 'ai7-local-deterministic' &&
         (Object.hasOwn(binding, 'selectedPolicyIdentity') || Object.hasOwn(binding, 'localFixtureProfile'))) {
       const selected = selectedPolicyIdentityOf(binding.selectedPolicyIdentity);
-      requireDialogue(this.#currentReader() && selected?.providerProcessingVersion === 'v29' &&
+      requireDialogue(selected?.providerProcessingVersion === 'v29' &&
         localFixtureProfileOf(binding.localFixtureProfile, selected) !== null, 'DIALOGUE_INVALID', '本地对话的确定性配置无效。');
       this.#verifyLocalProfile(attempt.dialogueId, binding);
     }

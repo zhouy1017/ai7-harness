@@ -215,9 +215,9 @@ import {
  * - `quality_signals`: the minimal Quality Signal an ignored finding records (REV-004).
  * - `review_reports`: the versioned 审阅报告 (REV-009).
  *
- * Nothing existing moves (ADR 0079: an additive revision keeps the same Data Version). The relations are
- * created shape-detected in `EditorialStore.open` before `initializeTaskAuthorizationSchema` stamps the
- * version, exactly as revisions 21 to 23 add theirs, and join the exact-schema validator the same way.
+ * The storage baseline (#1634) creates these relations once, with every other, when it builds an empty store
+ * (`createStoreAtBaseline`); an open checks them exactly against the baseline (`requireBaselineSchema`)
+ * and creates nothing.
  */
 /** Revision 90: a local stage has no model Run or analysis-result FK. Old event SQL is untouched. */
 export const LOCAL_STAGE_SCHEMA_SQL = { review_local_stage_artifacts: `CREATE TABLE review_local_stage_artifacts (

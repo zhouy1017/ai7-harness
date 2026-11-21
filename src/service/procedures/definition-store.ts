@@ -2,9 +2,7 @@ import { appendOnly } from '../append-only.js';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ProcedureDefinitionDocument, ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { canonicalJson, canonicalRecord, parseCanonicalJson, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
-import { preinstalledProcedureDefinitions, allPreinstalledProcedureDefinitions, FULL_REVIEW_PROCEDURE_ID } from './preinstalled.js';
-import { FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
-import { HOUSE_WORD_LIST_SCHEMA_VERSION } from '../review/house-word-list.js';
+import { allPreinstalledProcedureDefinitions } from './preinstalled.js';
 
 export const PROCEDURE_DEFINITION_SCHEMA_SQL = {
   procedure_definitions: `CREATE TABLE procedure_definitions (
@@ -67,16 +65,8 @@ export function seedPreinstalledProcedures(db: DatabaseSync): void {
 }
 
 /** Check the finite product catalogue by key. Historical content is immutable and validated when written/read. */
-export function validateProcedureDefinitions(db: DatabaseSync, allowLegacy = false, allowPreCrossChapter = false): void {
-  const schemaVersion = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  const expected = allowLegacy && schemaVersion < REVIEW_CONTRACT_SCHEMA_VERSION ? preinstalledProcedureDefinitions(1)
-    : allPreinstalledProcedureDefinitions();
-  for (const document of expected) {
-    if (schemaVersion < 116 && document.id === 'ai7-procedure/review-run-synthesis') continue;
-    if (schemaVersion < EDITABLE_PROCEDURE_SCHEMA_VERSION && ['evaluation', 'readers-report', 'evaluation-rewrite', 'writing'].some((kind) => document.id === `ai7-procedure/${kind}`)) continue;
-    if (schemaVersion < FACTUAL_CLAIM_SCHEMA_VERSION && document.id === 'ai7-procedure/factual-claim-check') continue;
-    if (schemaVersion < COMPOSITE_PROCEDURE_SCHEMA_VERSION && document.id === FULL_REVIEW_PROCEDURE_ID) continue;
-    if (allowLegacy && schemaVersion < HOUSE_WORD_LIST_SCHEMA_VERSION && document.id === 'ai7-procedure/local-text-check') continue;
+export function validateProcedureDefinitions(db: DatabaseSync, allowPreCrossChapter = false): void {
+  for (const document of allPreinstalledProcedureDefinitions()) {
     if (allowPreCrossChapter && ((document.id === 'ai7-procedure/review-style-and-format' && document.version === 3) ||
       (document.id === 'ai7-procedure/review-plot-consistency' && document.version === 2))) continue;
     requireAnalysis(db.prepare('SELECT 1 FROM procedure_definition_versions WHERE version_id = ?').get(`${document.id}@${document.version}`) !== undefined,

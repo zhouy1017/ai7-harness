@@ -1654,7 +1654,7 @@ export class EditorialStore {
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
       facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: LATEST_SCHEMA_VERSION }),
-      // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
+      // A package's data opens as a store of its own, with no launch control: at this baseline or refused, checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
           induceUnprovableReconciliation: false,
@@ -1912,9 +1912,9 @@ export class EditorialStore {
     let journal: DatabaseSync | null = null;
     let ingest: DatabaseSync | null = null;
     try {
-      // 存储基线 (#1634; ADR 0105 §4): a store of an earlier Data Version was refused above from its files; one that reaches
-      // SQLite anyway is refused before this open writes anything. An empty store is built at the baseline in one transaction,
-      // with its seed and its first version record; a store at the baseline is checked against it, object by object.
+      // 存储基线 (#1634; ADR 0105 §4): a store of an earlier Data Version, or a database AI7 did not make, was refused above from
+      // its files, untouched. This second check only guards the files' reading: it writes nothing, but closing the handle may
+      // checkpoint a log. An empty store is built at the baseline in one transaction, with its seed and its first version record.
       const revision = Number(authority.prepare('PRAGMA user_version').get()?.user_version);
       EditorialStore.#refuseOlder(null, revision);
       requireStore(revision === 0 || revision === BASELINE_SCHEMA_REVISION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');

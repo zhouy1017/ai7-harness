@@ -1,13 +1,19 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { BASELINE_SCHEMA_REVISION, createBaselineSchema, requireBaselineSchema } from '../../src/service/baseline-schema.js';
 import { canonicalSchemaSql } from '../../src/service/manuscript/bounded-kernel.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+// @ts-expect-error the dump tool is plain JavaScript
+import { schemaDumpText } from '../../tools/schema-dump.mjs';
 
 // The storage baseline fold (#1634; ADR 0105 §4). `revision-116-schema.json` is `tools/schema-dump.mjs` over a store the code at
 // 1bc1e3ea1 built on an empty Agent Data Root (byte-equal to the admitted sample1 store opened and migrated to 116 there). The
 // baseline must be that shape exactly: every table and index byte for byte, every trigger by name, table and canonical text (the
 // append-only ledger triggers now come from one helper), and nothing more or less. The only other difference is the revision.
+// `revision-117-schema.json` is the same tool over the current baseline, held exactly: a storage-train slice that changes the shape
+// regenerates it (`AI7_REGENERATE_BASELINE_SCHEMA=1 pnpm exec vitest run tests/unit/baseline-schema.test.ts`), names each change in
+// INTENDED_DELTA, and the file's diff in its pull request is the shape change to review.
 
 interface DumpRow { readonly type: string; readonly name: string; readonly tbl_name: string; readonly sql: string | null }
 
@@ -37,26 +43,41 @@ function dump(db: DatabaseSync): DumpRow[] {
 }
 
 describe('storage baseline (revision 117)', () => {
-  it('is the shape of a store migrated to revision 116, apart from the revision and the helper-written trigger text', () => {
+  it('is the shape of a store migrated to revision 116, apart from the revision, the helper-written trigger text and INTENDED_DELTA', () => {
     const db = baseline();
     try {
       expect(reference.userVersion).toBe(116);
       expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(BASELINE_SCHEMA_REVISION);
       const key = (row: DumpRow): string => `${row.type}:${row.name}`;
-      const intended = new Set(INTENDED_DELTA.map((entry) => entry.object));
       const actual = new Map(dump(db).map((row) => [key(row), row]));
       const expected = new Map(reference.rows.map((row) => [key(row), row]));
       const differences: string[] = [];
       for (const [name, row] of expected) {
         const built = actual.get(name);
-        if (built === undefined) { differences.push(`missing ${name}`); continue; }
+        if (built === undefined) { differences.push(`removed ${name}`); continue; }
         const same = built.tbl_name === row.tbl_name && (row.type === 'trigger'
           ? row.sql !== null && built.sql !== null && canonicalSchemaSql(built.sql) === canonicalSchemaSql(row.sql)
           : built.sql === row.sql);
         if (!same) differences.push(`changed ${name}`);
       }
       for (const name of actual.keys()) if (!expected.has(name)) differences.push(`added ${name}`);
-      expect(differences.filter((difference) => !intended.has(difference.slice(difference.indexOf(' ') + 1)))).toEqual([]);
+      // Every difference is named with its own kind, and every entry names a difference that exists.
+      const named = INTENDED_DELTA.map((entry) => `${entry.change} ${entry.object}`);
+      expect(differences.filter((difference) => !named.includes(difference))).toEqual([]);
+      expect(named.filter((entry) => !differences.includes(entry))).toEqual([]);
+      expect(new Set(named).size).toBe(named.length);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('is exactly the committed revision-117 dump, and 117 has one value wherever it is used', () => {
+    const db = baseline();
+    try {
+      const text = schemaDumpText(db) as string;
+      if (process.env.AI7_REGENERATE_BASELINE_SCHEMA === '1') writeFileSync('tests/fixtures/database/revision-117-schema.json', text);
+      expect(text).toBe(readFileSync('tests/fixtures/database/revision-117-schema.json', 'utf8'));
+      expect(BASELINE_SCHEMA_REVISION).toBe(LATEST_SCHEMA_VERSION);
     } finally {
       db.close();
     }

@@ -22,9 +22,9 @@ import type { WordTrackedCompilation } from './docx.js';
  * the branch's working state exists, all or none: a mark that cannot be pinned exactly refuses the import
  * rather than being dropped (D5). Nothing is ever applied by importing.
  *
- * Nothing existing moves (ADR 0079 §1.1): the rebuild changes no row, and the one relation is added.
- * `EditorialStore.open` runs `initializeImportedMarkSchema` before the version is stamped; it is
- * shape-detected, so it does its work once.
+ * The storage baseline (#1634) creates this relation once, with every other, when it builds an empty store
+ * (`createStoreAtBaseline`); an open checks them exactly against the baseline (`requireBaselineSchema`)
+ * and creates nothing.
  */
 
 type SqlRow = Record<string, SQLOutputValue>;

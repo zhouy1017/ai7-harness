@@ -48,9 +48,9 @@ import { DIGEST_PATTERN, UUID_PATTERN, canonicalRecord, isRecord, parseCanonical
  *   interaction: the prompt to enter the 定价与首印 actuals (V2-UX-EVAL-010, S82) and the archiving of the
  *   Book's 审稿意见 into 范例 (V2-UX-KB-006, S79). Nothing consumes them yet.
  *
- * Nothing existing moves (ADR 0079: an additive revision keeps the same Data Version). The relations are
- * created shape-detected in `EditorialStore.open` before `initializeTaskAuthorizationSchema` stamps the
- * version, exactly as revisions 21 to 24 add theirs, and join the exact-schema validator the same way.
+ * The storage baseline (#1634) creates these relations once, with every other, when it builds an empty store
+ * (`createStoreAtBaseline`); an open checks them exactly against the baseline (`requireBaselineSchema`)
+ * and creates nothing.
  */
 export const PUBLICATION_VERSION_SCHEMA_SQL = {
   publication_versions: `CREATE TABLE publication_versions (

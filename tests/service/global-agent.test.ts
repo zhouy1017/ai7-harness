@@ -15,6 +15,7 @@ import {
   type HousePreferenceSource,
 } from '../../src/service/house-review-preference.js';
 import { buildDialogueMessage, parseDialogueMessage } from '../../src/service/dialogue/contract.js';
+import { DIALOGUE_SCHEMA_SQL, DIALOGUE_TRIGGER_SQL, DialogueLedger } from '../../src/service/dialogue/dialogue-ledger.js';
 import {
   GLOBAL_AGENT_POLICY_BLOCKED,
   type GlobalMemoryPin,
@@ -138,6 +139,30 @@ describe('the Book-less Global Agent', () => {
       globalSources: [{ itemId: randomUUID(), revisionId: randomUUID(), text: '合成偏好：保留短句。' }] };
     expect(parseDialogueMessage(buildDialogueMessage(input))).toEqual(input);
     expect(buildDialogueMessage(input)).not.toContain('【所选文字】');
+  });
+
+  it('keeps global metadata out of Book lookup', () => {
+    const db = new DatabaseSync(':memory:');
+    const id = randomUUID();
+    try {
+      for (const [table, key] of [['books', 'book_id'], ['manuscripts', 'manuscript_id'], ['manuscript_branches', 'branch_id'], ['manuscript_revisions', 'revision_id'], ['editorial_marks', 'mark_id']]) {
+        db.exec(`CREATE TABLE ${table} (${key} TEXT PRIMARY KEY)`);
+        db.prepare(`INSERT INTO ${table} VALUES (?)`).run(id);
+      }
+      for (const sql of Object.values(DIALOGUE_SCHEMA_SQL)) db.exec(sql);
+      for (const sql of Object.values(DIALOGUE_TRIGGER_SQL)) db.exec(sql);
+      const ledger = new DialogueLedger(db);
+      const asked = ledger.ask({ bookId: id, manuscriptId: id, branchId: id, revisionId: id, journalSequence: 0,
+        blockId: `blk_${'a'.repeat(24)}`, fromGrapheme: 0, toGrapheme: 1, blockDigest: 'b'.repeat(64),
+        selectionSha256: 'c'.repeat(64), questionSha256: 'd'.repeat(64), now: new Date() });
+      expect(ledger.task(asked.task.dialogueId)).toEqual(asked.task);
+      const global = ledger.askGlobal('development-ci', [{ itemId: randomUUID(), revisionId: randomUUID() }], 'e'.repeat(64), new Date());
+      expect(ledger.task(global.task.dialogueId)).toBeNull();
+      expect(ledger.globalTask(global.task.dialogueId)).toEqual(global.task);
+      expect(db.prepare('SELECT book_id, manuscript_id, branch_id, revision_id, block_id FROM dialogue_tasks WHERE dialogue_id = ?').get(global.task.dialogueId))
+        .toEqual({ book_id: null, manuscript_id: null, branch_id: null, revision_id: null, block_id: null });
+      expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    } finally { db.close(); }
   });
 
 });

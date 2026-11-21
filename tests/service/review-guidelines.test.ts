@@ -32,6 +32,9 @@ import {
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { REVIEW_GUIDELINE_TRIGGER_SQL } from '../../src/service/review-guidelines.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -399,6 +402,83 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       await close(session);
     }
   }, 300_000);
+  it('keeps the house version across a reopen, reads a re-rooted chain, ignores a planted AI7-fixed version, and refuses a version rewritten by hand', async () => {
+    const first = await openStore();
+    try {
+      const preview = await first.store.previewReviewGuidelineVersion(TYPOS_DOCUMENT, file('house.txt', HOUSE_CLAUSES));
+      first.store.importReviewGuidelineVersion(preview.previewId);
+    } finally {
+      await close(first);
+    }
+    const reopened = await openStore();
+    try {
+      // The house's version stands after a reopen, over AI7's version 1.
+      expect(typosDocument(reopened.store.inspectReviewGuidelines())).toMatchObject({ currentOrdinal: 2, issuer: '本社' });
+    } finally {
+      await close(reopened);
+    }
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
+      expect(() => database.exec("UPDATE review_guideline_versions SET recorded_at = recorded_at")).toThrowError(/REVIEW_GUIDELINE_LEDGER_IMMUTABLE/u);
+      expect(() => database.exec('DELETE FROM review_guideline_versions')).toThrowError(/REVIEW_GUIDELINE_LEDGER_IMMUTABLE/u);
+      // A later build that rewords a built-in clause moves the digest of AI7's version 1; the house's version still reads,
+      // chained to the root its import recorded. Planted by re-rooting the stored version, its own digest recomputed.
+      database.exec('DROP TRIGGER review_guideline_versions_no_update');
+      const stored = database.prepare('SELECT version_id, canonical_json FROM review_guideline_versions').get() as { version_id: string; canonical_json: string };
+      const rerooted = canonicalRecord({ ...(JSON.parse(stored.canonical_json) as Record<string, unknown>), previousSha256: 'e'.repeat(64) });
+      database.prepare('UPDATE review_guideline_versions SET previous_sha256 = ?, canonical_json = ?, sha256 = ? WHERE version_id = ?')
+        .run('e'.repeat(64), rerooted.json, rerooted.digest, stored.version_id);
+      database.exec(REVIEW_GUIDELINE_TRIGGER_SQL.review_guideline_versions_no_update!);
+      // A version of a document AI7 fixes, as a build before that rule could have stored one: named nowhere, applied never.
+      const versionId = randomUUID();
+      const recordedAt = new Date().toISOString();
+      const planted = canonicalRecord({
+        schema: 'ai7.review-guideline-version/1', versionId, documentId: 'ai7-builtin/factual-review', ordinal: 2, title: '事实核查契约', issuer: '本社',
+        clauses: [{ clauseId: 'factual-review/1', text: '本社核查。' }], source: { displayName: 'fact.txt', format: 'text', sha256: 'd'.repeat(64), bytes: 16 },
+        previousSha256: 'e'.repeat(64), recordedAt,
+      });
+      database.prepare('INSERT INTO review_guideline_versions(version_id, document_id, ordinal, previous_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(versionId, 'ai7-builtin/factual-review', 2, 'e'.repeat(64), recordedAt, planted.json, planted.digest);
+    } finally {
+      database.close();
+    }
+    const rebuilt = await openStore();
+    try {
+      const page = rebuilt.store.inspectReviewGuidelines();
+      expect(typosDocument(page)).toMatchObject({ currentOrdinal: 2, issuer: '本社' });
+      const factual = page.documents.find((document) => document.documentId === 'ai7-builtin/factual-review')!;
+      expect([factual.currentOrdinal, factual.issuer, factual.versions.length]).toEqual([1, 'AI7 内置默认', 1]);
+      const creation = rebuilt.store.prepareBookCreation('空图书', null);
+      const emptyBookId = rebuilt.store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+      const basis = (categoryId: string) => rebuilt.store.inspectReviewWorkspace(emptyBookId, null).categories.find((category) => category.categoryId === categoryId)!.basis;
+      expect(basis('factual-review').guidelineDocuments).toContainEqual(expect.objectContaining({ issuer: 'AI7 内置默认', title: '事实核查契约', version: '1' }));
+      expect(basis(TYPOS).guidelineDocuments).toContainEqual(expect.objectContaining({ issuer: '本社', title: '文字规范条款', version: '2' }));
+    } finally {
+      await close(rebuilt);
+    }
+    // Rewritten by hand behind the triggers' back: the chain no longer reads, and the page says so rather than guess.
+    const rewrite = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      rewrite.exec('DROP TRIGGER review_guideline_versions_no_update');
+      rewrite.exec(`UPDATE review_guideline_versions SET canonical_json = replace(canonical_json, '本社新增', '改过')`);
+      rewrite.exec(REVIEW_GUIDELINE_TRIGGER_SQL.review_guideline_versions_no_update!);
+    } finally {
+      rewrite.close();
+    }
+    const tampered = await openStore();
+    try {
+      expect(await refusal(() => tampered.store.inspectReviewGuidelines())).toMatch(/^REVIEW_GUIDELINE_RECORD_INVALID:/u);
+      // 审阅 says the same, never a failed request: its categories read the configuration the chain gives.
+      const creation = tampered.store.prepareBookCreation('空图书', null);
+      const bookId = tampered.store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+      expect(await refusal(() => tampered.store.inspectReviewWorkspace(bookId, null))).toMatch(/^REVIEW_GUIDELINE_RECORD_INVALID:/u);
+    } finally {
+      await tampered.owner.dispose();
+      tampered.store.close();
+    }
+  }, 300_000);
+
 
   it('names the latest reviews of a version and counts the rest, and so the Books still on an older one', async () => {
     await requireExactSample1(roots.codeRoot);
