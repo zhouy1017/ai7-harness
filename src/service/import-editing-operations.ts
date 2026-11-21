@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { ReturnImportToEditingProjection } from '../shared/protocol/import-intake.js';
+import type { ReturnImportToEditingProjection, ImportEditingChoices } from '../shared/protocol/import-intake.js';
 import type { ImportIntakeOperationsHost } from './import-intake-operations.js';
 import type { CommitAttempt } from './import-review-records.js';
 import { createReimportReviewDigest, degradationReview } from './import-review-records.js';
@@ -34,13 +34,31 @@ export function returnImportToEditing(host: ImportIntakeOperationsHost, reimport
     .some((work) => work.draftId === draftId) && !Array.from(reimport.reimportCommitWork.values()).some((work) => work.input.draftId === draftId),
     'SERVICE_BUSY', '这次导入还在处理中，请等待完成或取消当前操作后再返回修改。');
   const snapshot = host.loadDraftSnapshot(draftId);
-  requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入选择已变化，请重新打开导入详情后再修改。');
+  requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入进度已更新，请使用最新显示的选择继续。');
   requireStore(snapshot.state === 'reviewed', 'DRAFT_STATE_CHANGED', '请先打开导入详情，再返回修改。');
   const nextVersion = snapshot.version + 1;
   let reviewDigest: string | null = null;
+  let editingChoices: ImportEditingChoices | null = null;
+  if (snapshot.reviewedRelationship !== 'reimport') {
+    const findings = host.identityFindings(snapshot);
+    if (snapshot.reviewedRelationship === 'source-only') {
+      const target = host.reconstructReviewedSourceImportTarget(snapshot, findings);
+      requireStore(target !== null, 'REVIEW_CHANGED', '导入目标已变化，请重新选择导入目标。');
+      const review = host.sourceImportReviewProjection(snapshot, target, findings, null);
+      editingChoices = { target: review.target, relationship: 'source-only', title: snapshot.reviewedTitle,
+        textBoxDisposition: null, trackedChanges: null, structure: null, acceptance: false };
+    } else {
+      const prior = host.reconstructReviewedImport(snapshot, findings);
+      requireStore(prior !== null, 'REVIEW_CHANGED', '导入目标已变化，请重新选择导入目标。');
+      const review = host.reviewProjection(snapshot, snapshot.reviewDigest, prior.reviewed, true, prior.target, findings, null);
+      editingChoices = { target: review.target, relationship: 'first-manuscript', title: snapshot.reviewedTitle,
+        textBoxDisposition: review.textBoxDisposition, trackedChanges: review.trackedChanges ?? null,
+        structure: review.structure?.choice ?? null, acceptance: review.degradationDecision.state === 'accepted-complete-set' };
+    }
+  }
   if (snapshot.reviewedRelationship === 'reimport') {
     const target = reconstructReviewedReimportTarget(reimport, snapshot);
-    requireStore(target !== null, 'REVIEW_CHANGED', '稿件已变化，请重新打开导入详情。');
+    requireStore(target !== null, 'REVIEW_CHANGED', '稿件已变化，请重新比较新旧稿件后再修改。');
     const evidence = reimportEvidence(reimport, draftId);
     const currentReview = reimportReviewProjection(reimport, snapshot, target, null);
     reviewDigest = createReimportReviewDigest({ ...snapshot, version: nextVersion }, target,
@@ -57,12 +75,12 @@ export function returnImportToEditing(host: ImportIntakeOperationsHost, reimport
       : host.authority.prepare(`UPDATE import_drafts SET draft_version = ?, review_digest = ?, reviewed_at = ?
           WHERE draft_id = ? AND state = 'reviewed' AND draft_version = ?`)
           .run(nextVersion, reviewDigest, new Date().toISOString(), draftId, expectedDraftVersion);
-    requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入选择已变化，请重新打开导入详情后再修改。');
+    requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入进度已更新，请使用最新显示的选择继续。');
     host.authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(draftId);
   });
   const refreshed = host.loadDraftSnapshot(draftId);
-  if (reviewDigest === null) return { state: 'staged', draftVersion: nextVersion, staged: host.stagedProjection(refreshed) };
+  if (reviewDigest === null) return { state: 'staged', draftVersion: nextVersion, staged: host.stagedProjection(refreshed), editingChoices: editingChoices! };
   const target = reconstructReviewedReimportTarget(reimport, refreshed);
-  requireStore(target !== null, 'REVIEW_CHANGED', '稿件已变化，请重新打开导入详情。');
+  requireStore(target !== null, 'REVIEW_CHANGED', '稿件已变化，请重新比较新旧稿件后再修改。');
   return { state: 'reimport', draftVersion: nextVersion, review: reimportReviewProjection(reimport, refreshed, target, null) };
 }

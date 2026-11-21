@@ -101,7 +101,7 @@ export function sendJournalEdit(api: Pick<RendererApi, 'flushJournalEdit'>, inpu
 // These calls require or establish the window's Book route/capabilities in main.
 // Unrelated house-wide reads and settings must remain available during a leave.
 const BOOK_OWNERSHIP_CALLS = new Set<keyof RendererApi>([
-  'abandonImportDraft', 'acceptReimportDegradation', 'answerBaselineAnalysisClarification', 'appendMaintenanceCaseRevision',
+  'returnImportToEditing', 'abandonImportDraft', 'acceptReimportDegradation', 'answerBaselineAnalysisClarification', 'appendMaintenanceCaseRevision',
   'applyChangeSuggestion', 'applyChangeSuggestionBatch', 'approveManuscriptExport', 'askAboutSelection',
   'authorizeBaselineAnalysis', 'authorizeEvaluationRewrite', 'authorizeInitialEvaluation', 'authorizeReadersReport',
   'authorizeReviewRun', 'authorizeTaskAuthorization', 'authorizeWritingTask', 'batchProposalDecisionDraft',

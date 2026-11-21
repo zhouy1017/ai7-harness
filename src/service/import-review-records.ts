@@ -2156,8 +2156,8 @@ export function emptyReimportResolutionDigest(): string {
 }
 
 export function createReimportReviewDigest(
-  snapshot: DraftSnapshot,
-  target: ResolvedReimportTarget,
+  snapshot: Pick<DraftSnapshot, 'draftId' | 'version' | 'objectDigest' | 'sourceDigest' | 'contentDigest' | 'structureDigest' | 'parserIdentity'>,
+  target: Pick<ResolvedReimportTarget, 'bookId' | 'stableIdentity' | 'manuscriptId' | 'branchId' | 'bookStateDigest' | 'checkpoint' | 'lineage' | 'sourceVersionDisposition' | 'reuseSourceVersionId'>,
   comparisonDigest: string,
   resolutionDigest: string,
   degradationDecisionState: ImportDegradationDecisionReviewProjection['state'],

@@ -264,6 +264,7 @@ export interface StagedImportProjection {
   wordTrackedChanges?: WordTrackedChangesIntakeProjection;
   /** Candidate headings and split paragraphs (Issue #1205); absent when the reading offers neither. */
   structure?: ImportStructureProjection;
+  savedStructureChoice?: ImportStructureChoice;
 }
 
 
@@ -544,9 +545,19 @@ export type CommitManuscriptReimportRendererInput = Omit<ServiceOperationMap['co
   commitAttemptId: string | null;
 };
 
+export interface ImportEditingChoices {
+  target: ReviewBeforeImportProjection['target'] | ReviewBeforeSourceImportProjection['target'];
+  relationship: 'first-manuscript' | 'source-only';
+  title: string | null;
+  textBoxDisposition: TextBoxDisposition | null;
+  trackedChanges: WordTrackedChangesChoice | null;
+  structure: ImportStructureChoice | null;
+  acceptance: boolean;
+}
+
 /** The page to reopen after returning from import details. */
 export type ReturnImportToEditingProjection =
-  | { state: 'staged'; draftVersion: number; staged: StagedImportProjection }
+  | { state: 'staged'; draftVersion: number; staged: StagedImportProjection; editingChoices: ImportEditingChoices }
   | { state: 'reimport'; draftVersion: number; review: ReviewBeforeManuscriptReimportProjection };
 
 export interface ImportReviewServiceOperations {

@@ -15,12 +15,13 @@ export function registerImportEditingHandlers(context: {
   captureImportReviewTarget(owned: OwnedRendererWindow, review: ImportReview): void;
   rememberJobResources(owned: OwnedRendererWindow, job: ServiceJobProjection, capability: Omit<EditorResourceCapability, 'kind' | 'routeGeneration'>): void;
   captureReimportJob(owned: OwnedRendererWindow, job: ServiceJobProjection): void;
+  leaveBookWorkbench(owned: OwnedRendererWindow): void;
   releaseCommitBinding(owned: OwnedRendererWindow, draftId: string): void;
   service: ServiceClient;
 }): void {
   const { requireSender, requireAuthority, serializeEffect, requireImportDraft, requireImportTarget,
     reserveExistingImportTarget, captureImportReviewTarget, rememberJobResources, captureReimportJob,
-    releaseCommitBinding, service } = context;
+    releaseCommitBinding, leaveBookWorkbench, service } = context;
   ipcMain.handle(IPC_CHANNELS.returnImportToEditing,
     (event, input: ServiceOperationMap['returnImportToEditing']['input']) => envelope(async () => {
       const owned = requireSender(event);
@@ -28,11 +29,11 @@ export function registerImportEditingHandlers(context: {
         requireAuthority();
         requireImportDraft(owned, input.draftId);
         const target = owned.importTargets.get(input.draftId);
-        if (target !== undefined) await reserveExistingImportTarget(owned, target);
+        if (target?.mutation === 'manuscript-reimport') await reserveExistingImportTarget(owned, target);
         const result = await service.call('returnImportToEditing', input);
         releaseCommitBinding(owned, input.draftId);
         if (result.state === 'reimport') captureImportReviewTarget(owned, result.review);
-        else owned.importTargets.delete(input.draftId);
+        else { owned.importTargets.delete(input.draftId); leaveBookWorkbench(owned); }
         return result;
       });
     }));

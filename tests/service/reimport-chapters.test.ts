@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { cp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
@@ -15,6 +15,11 @@ import type {
 } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText, type SourceSpan } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+vi.mock('node:crypto', async (original) => {
+  const actual = await original<typeof import('node:crypto')>();
+  return { ...actual, randomUUID: vi.fn(actual.randomUUID) };
+});
 
 // Service-integration suite (L2) for the chapter-level Reimport Comparison (Issue #412, plan slice S63; V2-UX-IMP-041,
 // IMP-042, IMP-057) over the real `EditorialStore` on a temporary Agent Data Root. Both files are composed from exact
@@ -479,8 +484,14 @@ describe('editing an import review again (#1638)', () => {
       if (returned.state !== 'reimport') throw new Error('expected comparison');
       expect(returned.draftVersion).toBe(review.draftVersion + 1);
       expect(store.getReimportMappingPage(review.draftId, returned.draftVersion, null).items[0]!.verb).toBe('delete');
+      expect(code(() => store.returnImportToEditing(review.draftId, review.draftVersion))).toBe('DRAFT_VERSION_CHANGED');
       review = resolve(store, returned.review, row.groupId, 'split');
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getReimportMappingPage(review.draftId, review.draftVersion, null).items[0]!.verb).toBe('split');
       const result = await commit(store, review);
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       const digests = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks.map((b) => b.digest);
       const directRoots = await createServiceTestRoots();
       const directStore = await EditorialStore.open(directRoots.dataRoot, directRoots.codeRoot);
@@ -540,7 +551,9 @@ describe('editing an import review again (#1638)', () => {
         store.markCleanShutdown(); store.close();
         store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
         const returned = store.returnImportToEditing(staged.draftId, review.draftVersion);
-        expect(returned).toMatchObject({ state: 'staged', draftVersion: review.draftVersion + 1, staged: { source: staged.source } });
+        expect(returned).toMatchObject({ state: 'staged', draftVersion: review.draftVersion + 1, staged: { source: staged.source },
+          editingChoices: { target: review.target, title: target.confirmedTitle, relationship: sourceOnly ? 'source-only' : 'first-manuscript',
+            textBoxDisposition: sourceOnly ? null : (review as { textBoxDisposition: unknown }).textBoxDisposition, trackedChanges: null, structure: null, acceptance: false } });
         expect(code(() => store.returnImportToEditing(staged.draftId, review.draftVersion))).toBe('DRAFT_VERSION_CHANGED');
         const again = sourceOnly ? store.prepareSourceImportReview(staged.draftId, returned.draftVersion, { ...target, relationship: 'source-only' })
           : store.prepareNewBookReview(staged.draftId, returned.draftVersion, target, false);
@@ -563,15 +576,26 @@ it.each([false, true])('accepts reduced fidelity on submission only when require
     let review = await prepareReimport(store, book, second);
     for (const row of store.getReimportMappingPage(review.draftId, review.draftVersion, null).items) review = resolve(store, review, row.groupId, 'rewrite');
     const input = { draftId: review.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID() };
-    if (required) await expect(store.createManuscriptReimportCommitWork(input)).rejects.toMatchObject({ code: 'DEGRADATION_ACCEPTANCE_REQUIRED' });
+    if (required) {
+      const before = tableState();
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const version = db.prepare('PRAGMA data_version').get();
+        await expect(store.createManuscriptReimportCommitWork(input)).rejects.toMatchObject({ code: 'DEGRADATION_ACCEPTANCE_REQUIRED' });
+        expect(db.prepare('PRAGMA data_version').get()).toEqual(version);
+        expect(tableState()).toEqual(before);
+      } finally { db.close(); }
+    }
     const work = await store.createManuscriptReimportCommitWork({ ...input, acceptDegradation: true });
+    const firstRow = store.getReimportMappingPage(review.draftId, review.draftVersion + (required ? 1 : 0), null).items[0]!;
+    expect(code(() => store.createReimportResolutionWork(review.draftId, review.draftVersion + (required ? 1 : 0), firstRow.groupId, 'delete'))).toBe('SERVICE_BUSY');
     let result = work.result;
     while (result === null) { await new Promise((next) => setTimeout(next, 5)); result = (await store.advanceManuscriptReimportCommitWork(work.workId!)).result; }
     if (required) expect(result.receipt.degradationDecision?.summaryLabel).toBe('含已接受的降级');
     else expect(result.receipt.degradationDecision).toBeNull();
     store.markCleanShutdown(); store.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const replay = await store.createManuscriptReimportCommitWork({ ...input, acceptDegradation: true });
+    const replay = await store.createManuscriptReimportCommitWork(required ? { ...input, acceptDegradation: true } : input);
     let replayed = replay.result;
     while (replayed === null) { await new Promise((next) => setTimeout(next, 5)); replayed = (await store.advanceManuscriptReimportCommitWork(replay.workId!)).result; }
     expect(replayed.commitId).toBe(input.commitId);
@@ -658,3 +682,54 @@ it('clears a proved uncommitted prepared attempt when returning to editing (#163
     store.markCleanShutdown();
   } finally { store.close(); }
 });
+
+function tableState(dataRoot = roots.dataRoot): Record<string, string> {
+  const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    return Object.fromEntries(db.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all().map((t) => {
+      const rows = db.prepare('SELECT * FROM "' + String(t.name).replaceAll('"', '""') + '"').all().map((r) => JSON.stringify(r)).sort();
+      return [String(t.name), createHash('sha256').update(JSON.stringify(rows)).digest('hex')];
+    }));
+  } finally { db.close(); }
+}
+
+it('records inline acceptance exactly like separate accept-then-submit in every table (#1638 review 2)', async () => {
+  const first = await compose('equivalent-base', [21, 22, 23].map((b) => paragraph(span(b))));
+  const second = join(roots.inputRoot, 'equivalent-new.md');
+  await writeFile(second, (await Promise.all([21, 24, 23].map((b) => sourceSpanText(SOURCE, span(b))))).join('\n\n') + '\n\n*' + await sourceSpanText(SOURCE, span(25)) + '*\n');
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  let review!: ReviewBeforeManuscriptReimportProjection;
+  try {
+    const book = await importBook(store, first);
+    review = await prepareReimport(store, book, second);
+    for (const row of store.getReimportMappingPage(review.draftId, review.draftVersion, null).items) review = resolve(store, review, row.groupId, 'rewrite');
+    store.markCleanShutdown();
+  } finally { store.close(); }
+  const other = await createServiceTestRoots();
+  try {
+    await cp(roots.dataRoot, other.dataRoot, { recursive: true });
+    const commitId = randomUUID();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-22T00:00:00Z'));
+    for (const [dataRoot, inline] of [[roots.dataRoot, false], [other.dataRoot, true]] as const) {
+      let ordinal = 0;
+      vi.mocked(randomUUID).mockImplementation(() => `00000000-0000-4000-8000-${String(++ordinal).padStart(12, '0')}`);
+      store = await EditorialStore.open(dataRoot, roots.codeRoot);
+      try {
+        const accepted = inline ? review : store.acceptReimportDegradation(review.draftId, review.draftVersion);
+        const work = await store.createManuscriptReimportCommitWork({ draftId: review.draftId, commitId,
+          expectedDraftVersion: accepted.draftVersion, reviewDigest: accepted.reviewDigest, ...(inline ? { acceptDegradation: true } : {}) });
+        let result = work.result;
+        while (result === null) { await new Promise((next) => setTimeout(next, 5)); result = (await store.advanceManuscriptReimportCommitWork(work.workId!)).result; }
+        store.markCleanShutdown();
+      } finally { store.close(); }
+      store = await EditorialStore.open(dataRoot, roots.codeRoot);
+      store.markCleanShutdown(); store.close();
+    }
+    expect(tableState(other.dataRoot)).toEqual(tableState());
+  } finally {
+    vi.useRealTimers();
+    vi.mocked(randomUUID).mockImplementation((await vi.importActual<typeof import('node:crypto')>('node:crypto')).randomUUID);
+    await other.dispose();
+  }
+}, 180_000);

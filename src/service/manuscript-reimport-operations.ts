@@ -609,6 +609,8 @@ export function createReimportResolutionWork(host: ManuscriptReimportOperationsH
     requireStore(UUID_PATTERN.test(draftId) && UUID_PATTERN.test(groupId) && REIMPORT_GROUP_VERBS.includes(verb),
       'REIMPORT_MAPPING_INVALID', '重新导入对应行的解决参数无效。');
     requireUncommittedImportDraft(host, draftId);
+    requireStore(!Array.from(host.reimportCommitWork.values()).some((work) => work.input.draftId === draftId),
+      'SERVICE_BUSY', '这次导入正在提交，请等待完成或取消当前提交后再改选。');
     const snapshot = host.loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'reviewed' && snapshot.reviewedRelationship === 'reimport' &&
       snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '重新导入复核已变化。');
@@ -910,6 +912,50 @@ export function cancelReimportResolutionWork(host: ManuscriptReimportOperationsH
     return host.reimportResolutionWork.delete(workId);
   }
 
+/** The accepted review is the ordinary accept step's review, including on restart/replay of the original request. */
+function acceptedReimportSubmission(host: ManuscriptReimportOperationsHost,
+  input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string; acceptDegradation?: boolean }, allowAccept = true) {
+  const { acceptDegradation, ...commit } = input;
+  if (acceptDegradation !== true) return commit;
+  const row = one(host.authority.prepare(`SELECT c.*, d.*, b.stable_identity FROM manuscript_reimport_comparisons c
+    JOIN import_drafts d ON d.draft_id = c.draft_id JOIN books b ON b.book_id = d.reviewed_existing_book_id
+    WHERE c.draft_id = ?`).all(input.draftId) as SqlRow[],
+    'REIMPORT_COMPARISON_INVALID', '重新导入比较不存在。');
+  if (asNumber(row.degradation_accepted) === 0) {
+    if (!allowAccept || row.state === 'committed') return commit;
+    const snapshot = host.loadDraftSnapshot(input.draftId);
+    if (host.reimportFidelity(snapshot).plan.degradations.length === 0) return commit;
+    requireStore(snapshot.version === input.expectedDraftVersion && snapshot.reviewDigest === input.reviewDigest,
+      'DRAFT_VERSION_CHANGED', '重新导入复核已变化。');
+    requireStore(!Array.from(host.reimportCommitWork.values()).some((work) => work.input.draftId === input.draftId),
+      'SERVICE_BUSY', '这次导入正在提交，请等待完成或取消当前提交后再改选。');
+    const accepted = acceptReimportDegradation(host, input.draftId, input.expectedDraftVersion);
+    return { ...commit, expectedDraftVersion: accepted.draftVersion, reviewDigest: accepted.reviewDigest };
+  }
+  if (asNumber(row.draft_version) !== input.expectedDraftVersion + 1) return commit;
+  // Committed Books have advanced, so reconstruct the submitted review from its frozen comparison facts.
+  const target: Parameters<typeof createReimportReviewDigest>[1] = {
+    bookId: asString(row.reviewed_existing_book_id), stableIdentity: asString(row.stable_identity),
+    manuscriptId: asString(row.reviewed_manuscript_id), branchId: asString(row.reviewed_branch_id), bookStateDigest: asString(row.reviewed_book_state_digest),
+    sourceVersionDisposition: row.reviewed_reuse_source_version_id === null ? 'created' : 'reused-same-book',
+    reuseSourceVersionId: row.reviewed_reuse_source_version_id === null ? null : asString(row.reviewed_reuse_source_version_id),
+    checkpoint: { bookId: asString(row.reviewed_existing_book_id), manuscriptId: asString(row.reviewed_manuscript_id), branchId: asString(row.reviewed_branch_id),
+      revisionId: asString(row.checkpoint_revision_id), revisionLabel: asString(row.checkpoint_revision_label),
+      revisionDigest: asString(row.checkpoint_revision_digest), journalSequence: asNumber(row.checkpoint_journal_sequence),
+      createdForDirtyJournal: asNumber(row.checkpoint_created_for_dirty_journal) === 1 },
+    lineage: row.lineage_status === 'verified'
+      ? { status: 'verified', sourceVersionId: asString(row.lineage_source_version_id), revisionId: asString(row.lineage_revision_id), comparisonKind: 'three-way' }
+      : { status: 'unconfirmed', sourceVersionId: null, revisionId: null, comparisonKind: 'two-way' },
+  };
+  const oldDigest = createReimportReviewDigest({ draftId: input.draftId, version: input.expectedDraftVersion,
+    objectDigest: asString(row.object_digest), sourceDigest: asString(row.staged_source_digest),
+    contentDigest: asString(row.staged_content_digest), structureDigest: asString(row.staged_structure_digest),
+    parserIdentity: asString(row.staged_parser_identity) }, target,
+    asString(row.comparison_digest), asString(row.resolution_digest), 'required-unselected');
+  if (input.reviewDigest !== oldDigest) return commit;
+  return { ...commit, expectedDraftVersion: asNumber(row.draft_version), reviewDigest: asString(row.review_digest) };
+}
+
 export function resolveAcknowledgedManuscriptReimportReplay(host: ManuscriptReimportOperationsHost, input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string; acceptDegradation?: boolean }): { draftId: string; commitId: string; bookId: string } {
     host.assertAvailable();
     requireStore(
@@ -919,6 +965,7 @@ export function resolveAcknowledgedManuscriptReimportReplay(host: ManuscriptReim
       'COMMIT_REPLAY_INVALID',
       '已确认的稿件重新导入提交重放证据不匹配。',
     );
+    input = acceptedReimportSubmission(host, input, false);
     const requestFingerprint = commitRequestFingerprint('manuscript-reimport', input);
     const attempt = host.loadCommitAttemptForDraft(input.draftId);
     requireStore(
@@ -970,6 +1017,7 @@ export async function createManuscriptReimportCommitWork(host: ManuscriptReimpor
       '稿件重新导入提交参数无效。',
     );
     host.requireNoAbandonmentCleanupIntent(input.draftId);
+    input = acceptedReimportSubmission(host, input);
     const requestFingerprint = commitRequestFingerprint('manuscript-reimport', input);
     const existingAttempt = host.loadCommitAttemptForDraft(input.draftId);
     if (existingAttempt) {
@@ -1017,8 +1065,8 @@ export async function createManuscriptReimportCommitWork(host: ManuscriptReimpor
     const acceptance = one(host.authority.prepare('SELECT degradation_accepted FROM manuscript_reimport_comparisons WHERE draft_id = ?')
       .all(input.draftId) as SqlRow[], 'REIMPORT_COMPARISON_INVALID', '重新导入比较不存在。');
     requireStore(host.reimportFidelity(snapshotBeforeAttempt).plan.degradations.length === 0 ||
-      asNumber(acceptance.degradation_accepted) === 1 || input.acceptDegradation === true,
-      'DEGRADATION_ACCEPTANCE_REQUIRED', '请先确认接受导入详情中的变化，再提交导入。');
+      asNumber(acceptance.degradation_accepted) === 1,
+      'DEGRADATION_ACCEPTANCE_REQUIRED', '部分格式无法保留，请先确认按所列方式导入，再提交。');
     const object = one(host.authority.prepare(
       'SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?',
     ).all(snapshotBeforeAttempt.objectDigest) as SqlRow[], 'SNAPSHOT_RESELECTION_REQUIRED', '暂存对象记录缺失。');
@@ -1424,8 +1472,8 @@ export function finalizeManuscriptReimportCommit(host: ManuscriptReimportOperati
       const degradationAcceptance = one(host.authority.prepare(
         'SELECT degradation_accepted FROM manuscript_reimport_comparisons WHERE draft_id = ?',
       ).all(input.draftId) as SqlRow[], 'REIMPORT_COMPARISON_INVALID', '重新导入比较不存在。');
-      requireStore(fidelityPlan.degradations.length === 0 || asNumber(degradationAcceptance.degradation_accepted) === 1 || input.acceptDegradation === true,
-        'DEGRADATION_ACCEPTANCE_REQUIRED', '请先确认接受导入详情中的变化，再提交导入。');
+      requireStore(fidelityPlan.degradations.length === 0 || asNumber(degradationAcceptance.degradation_accepted) === 1,
+        'DEGRADATION_ACCEPTANCE_REQUIRED', '部分格式无法保留，请先确认按所列方式导入，再提交。');
 
       const now = new Date().toISOString();
       const before = reimportAuthorityCounts(host, target.bookId);

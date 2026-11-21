@@ -1,4 +1,3 @@
-import { reimportAcceptanceRecorded } from './import-review-request.js';
 import {
   schemaObjectSql,
   requireContinuitySchema,
@@ -158,6 +157,7 @@ import {
   resolveBranchMarksAfterRewrite,
   workingBlockDigests,
 } from './editorial-marks.js';
+
 const CONTINUITY_SCHEMA_VERSION = 5;
 const EDITOR_SCHEMA_VERSION = 6;
 const RECOVERY_SCHEMA_VERSION = 7;
@@ -2676,7 +2676,7 @@ ${canonicalJson({ groupId: asString(row.group_id), verb: asString(row.verb) })}`
         }));
         requireBounded(plan !== undefined && plan.outcome === asString(record.fidelity_outcome) &&
           fidelityReviewDigest === asString(record.fidelity_review_digest) &&
-          reimportAcceptanceRecorded(db, comparison, record, plan.degradations.length > 0) &&
+          (asNumber(comparison.degradation_accepted) === (plan.degradations.length > 0 ? 1 : 0)) &&
           ((degradationDecision === null && record.degradation_decision_id === null && record.degradation_decision === null) ||
             (degradationDecision !== null && record.degradation_decision_id !== null &&
               degradationDecision === asString(record.degradation_decision))),

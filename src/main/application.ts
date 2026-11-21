@@ -1360,7 +1360,7 @@ export function registerRendererHandlers(
   );
   registerImportEditingHandlers({ requireSender, requireAuthority, serializeEffect, requireImportDraft,
     requireImportTarget, reserveExistingImportTarget, captureImportReviewTarget, rememberJobResources,
-    captureReimportJob, releaseCommitBinding, service });
+    captureReimportJob, releaseCommitBinding, leaveBookWorkbench, service });
   ipcMain.handle(IPC_CHANNELS.commitManuscriptReimport, (event, input: CommitManuscriptReimportRendererInput) =>
     envelope(async () => {
       const owned = requireSender(event);

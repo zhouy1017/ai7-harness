@@ -10473,9 +10473,7 @@ export class EditorialStore {
           expectedDraftVersion: attempt.expectedDraftVersion,
           reviewDigest: attempt.reviewDigest,
           commitId: attempt.attemptId,
-        }) || (attempt.operationKind === 'manuscript-reimport' && attempt.requestFingerprint === commitRequestFingerprint(attempt.operationKind, {
-          draftId: attempt.draftId, expectedDraftVersion: attempt.expectedDraftVersion, reviewDigest: attempt.reviewDigest, commitId: attempt.attemptId, acceptDegradation: true,
-        })) || (
+        }) || (
           attempt.operationKind === 'manuscript-import' &&
           attempt.requestFingerprint === sha256(canonicalJson({
             draftId: attempt.draftId,
