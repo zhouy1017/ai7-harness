@@ -140,6 +140,8 @@ The editor sees only the tables they imported (direction 2). The source file and
 | GF 1001-2001 《第一批异形词整理表》 | 词形 | 国家规范 | 338 main groups; the 44 appendix groups carry the condition 「附录，仅供参考」 |
 | 《现代汉语常用词表（第2版）》 (the default 常用词表) | 常用词 | 辞书推荐 | 56,462 words with their frequency ranks, from the repository transcription at commit `712fb0f` |
 
+> Commander clarification, 2026-11-21, following §6 and §10: the condition of the 44 appendix groups is the data's own text, 「2001年附录参考；须按2013年字表及具体语境复核。」, kept verbatim so that results pinned to version 1 read the same; 「附录，仅供参考」 in the table above was a paraphrase. The 44 groups also carry the source 「附录」, so the main / appendix split lives in the data and not only in a note's wording (R5-L1, [#1649](https://github.com/zhouy1017/ai7-harness/issues/1649)).
+
 They behave like any imported table: they can be disabled, deleted, or replaced by 导入新版本 (e.g. a corrected Annex 1 that adds the ~151 missing forms). A deleted pre-installed table can be put back with 恢复预装字表; the program keeps its seed. No other dictionary table is shipped: 《现代汉语词典》, 《现代汉语规范词典》 and the like stay house-imported.
 
 **The default 常用词表's rights and content** (direction 6):

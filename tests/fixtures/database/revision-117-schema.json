@@ -3459,6 +3459,36 @@
   },
   {
    "type": "index",
+   "name": "sqlite_autoindex_standard_table_versions_1",
+   "tbl_name": "standard_table_versions",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_standard_table_versions_2",
+   "tbl_name": "standard_table_versions",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_standard_table_versions_3",
+   "tbl_name": "standard_table_versions",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_standard_tables_1",
+   "tbl_name": "standard_tables",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_standard_tables_2",
+   "tbl_name": "standard_tables",
+   "sql": null
+  },
+  {
+   "type": "index",
    "name": "sqlite_autoindex_store_versions_1",
    "tbl_name": "store_versions",
    "sql": null
@@ -5226,6 +5256,24 @@
    "name": "staged_word_revision_intakes",
    "tbl_name": "staged_word_revision_intakes",
    "sql": "CREATE TABLE staged_word_revision_intakes (\n  draft_id TEXT PRIMARY KEY REFERENCES staged_import_snapshots(draft_id) ON DELETE CASCADE,\n  source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),\n  compiler_identity TEXT NOT NULL,\n  inventory_digest TEXT NOT NULL CHECK(length(inventory_digest) = 64),\n  compatibility TEXT NOT NULL CHECK(compatibility IN ('ready', 'unsupported')),\n  preview_reading TEXT CHECK(preview_reading IN ('rejected', 'accepted')),\n  canonical_json TEXT NOT NULL CHECK(json_valid(canonical_json)),\n  sha256 TEXT NOT NULL CHECK(length(sha256) = 64),\n  reviewed_json TEXT CHECK(reviewed_json IS NULL OR json_valid(reviewed_json)),\n  reviewed_sha256 TEXT CHECK(reviewed_sha256 IS NULL OR length(reviewed_sha256) = 64),\n  CHECK((reviewed_json IS NULL) = (reviewed_sha256 IS NULL)),\n  CHECK(compatibility <> 'ready' OR preview_reading IS NOT NULL)\n) STRICT"
+  },
+  {
+   "type": "table",
+   "name": "standard_table_entries",
+   "tbl_name": "standard_table_entries",
+   "sql": "CREATE TABLE standard_table_entries (\n  version_id TEXT NOT NULL,\n  position INTEGER NOT NULL CHECK(position >= 1),\n  recommended TEXT NOT NULL,\n  discouraged TEXT NOT NULL CHECK(json_type(discouraged) = 'array'),\n  rank INTEGER CHECK(rank IS NULL OR rank >= 1),\n  condition_note TEXT CHECK(condition_note IS NULL OR length(condition_note) > 0),\n  source TEXT,\n  strength TEXT NOT NULL CHECK(strength IN ('national', 'dictionary', 'house')),\n  status TEXT NOT NULL CHECK(status IN ('applied', 'to-confirm', 'unrecognized')),\n  review_note TEXT,\n  source_text TEXT,\n  PRIMARY KEY(version_id, position)\n) STRICT, WITHOUT ROWID"
+  },
+  {
+   "type": "table",
+   "name": "standard_table_versions",
+   "tbl_name": "standard_table_versions",
+   "sql": "CREATE TABLE standard_table_versions (\n  version_id TEXT PRIMARY KEY,\n  table_id TEXT NOT NULL REFERENCES standard_tables(table_id),\n  ordinal INTEGER NOT NULL CHECK(ordinal >= 1),\n  version_label TEXT NOT NULL,\n  source_description TEXT NOT NULL,\n  digest TEXT NOT NULL CHECK(length(digest) = 64),\n  previous_digest TEXT CHECK(previous_digest IS NULL OR length(previous_digest) = 64),\n  entry_count INTEGER NOT NULL CHECK(entry_count >= 0),\n  conversion_report TEXT CHECK(conversion_report IS NULL OR json_valid(conversion_report)),\n  source_file_name TEXT,\n  source_object_digest TEXT REFERENCES content_objects(object_digest),\n  recorded_at TEXT NOT NULL,\n  UNIQUE(table_id, ordinal),\n  UNIQUE(table_id, version_id),\n  CHECK((ordinal = 1) = (previous_digest IS NULL)),\n  CHECK((source_file_name IS NULL) = (source_object_digest IS NULL))\n) STRICT"
+  },
+  {
+   "type": "table",
+   "name": "standard_tables",
+   "tbl_name": "standard_tables",
+   "sql": "CREATE TABLE standard_tables (\n  table_id TEXT PRIMARY KEY,\n  kind TEXT NOT NULL CHECK(kind IN ('standard-characters', 'character-forms', 'word-forms', 'common-words')),\n  name TEXT NOT NULL CHECK(length(name) > 0),\n  origin TEXT NOT NULL CHECK(origin IN ('preinstalled', 'imported')),\n  preinstalled_key TEXT UNIQUE,\n  enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),\n  current_version_id TEXT NOT NULL,\n  created_at TEXT NOT NULL,\n  CHECK((origin = 'preinstalled') = (preinstalled_key IS NOT NULL)),\n  FOREIGN KEY(table_id, current_version_id) REFERENCES standard_table_versions(table_id, version_id) DEFERRABLE INITIALLY DEFERRED\n) STRICT"
   },
   {
    "type": "table",

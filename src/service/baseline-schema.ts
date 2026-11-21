@@ -76,6 +76,7 @@ import { SCHEDULED_BACKUP_SCHEMA_SQL, SCHEDULED_BACKUP_TRIGGER_SQL } from './sch
 import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL, SERIES_RETRIEVAL_EXCLUSION_TRIGGER_SQL } from './series-exclusions.js';
 import { SERIES_KNOWLEDGE_SCHEMA_SQL, SERIES_KNOWLEDGE_TRIGGER_SQL } from './series-knowledge.js';
 import { SERIES_SCHEMA_SQL, SERIES_TRIGGER_SQL } from './series.js';
+import { STANDARD_TABLE_SCHEMA_SQL, installPreinstalledStandardTables, requireStandardTableEntries } from './standard-tables.js';
 import { StoreError, requireStore } from './store-records.js';
 import { seedSearchBackends } from './store-schema.js';
 import {
@@ -125,7 +126,7 @@ const BASELINE_SCHEMA: ReadonlyArray<Definitions> = [
   BOOK_DELIVERY_PACKAGE_SCHEMA_SQL, BOOK_DELIVERY_PACKAGE_TRIGGER_SQL, BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL, BOOK_DELIVERY_PACKAGE_EXPORT_TRIGGER_SQL,
   MAINTENANCE_CASE_SCHEMA_SQL, MAINTENANCE_CASE_TRIGGER_SQL, BOOK_PEOPLE_SCHEMA_SQL, BOOK_PEOPLE_TRIGGER_SQL,
   REVIEW_RUN_SCHEMA_SQL, REVIEW_RUN_TRIGGER_SQL, LOCAL_STAGE_SCHEMA_SQL, LOCAL_STAGE_TRIGGER_SQL, RUN_SYNTHESIS_SCHEMA_SQL,
-  HOUSE_WORD_LIST_SCHEMA_SQL, HOUSE_WORD_LIST_TRIGGER_SQL, REVIEW_GUIDELINE_SCHEMA_SQL, REVIEW_GUIDELINE_TRIGGER_SQL,
+  HOUSE_WORD_LIST_SCHEMA_SQL, HOUSE_WORD_LIST_TRIGGER_SQL, STANDARD_TABLE_SCHEMA_SQL, REVIEW_GUIDELINE_SCHEMA_SQL, REVIEW_GUIDELINE_TRIGGER_SQL,
   HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL,
   DEFAULT_EXECUTION_RULE_SCHEMA_SQL, DEFAULT_EXECUTION_RULE_TRIGGER_SQL, RUN_CHECKPOINT_SCHEMA_SQL, RUN_CHECKPOINT_TRIGGER_SQL,
   CLARIFICATION_SCHEMA_SQL, CLARIFICATION_TRIGGER_SQL, OUTCOME_RESOLUTION_SCHEMA_SQL, OUTCOME_RESOLUTION_TRIGGER_SQL,
@@ -199,7 +200,8 @@ type SqlRow = Record<string, SQLOutputValue>;
 /**
  * The exact check of a store at the baseline revision: every object the baseline defines is there with the same SQL (compared
  * as `canonicalSchemaSql` folds it), the trigram index's shadow tables are as SQLite makes them, and nothing else stands —
- * no table, index, trigger or view the baseline does not name. Equal SQL means equal columns, keys, checks and references.
+ * no table, index, trigger or view the baseline does not name. Equal SQL means equal columns, keys, checks and references. The
+ * 字表与词表 entries' version is the one reference not declared, so it is checked here, by one seek per version.
  */
 export function requireBaselineSchema(db: DatabaseSync): void {
   const expected = new Map<string, string>();
@@ -212,11 +214,12 @@ export function requireBaselineSchema(db: DatabaseSync): void {
     requireStore(sql !== undefined && typeof row.sql === 'string' && canonicalSchemaSql(row.sql) === sql,
       'SCHEMA_INVALID', `数据库结构对象 ${String(row.name)} 与当前版本不一致。`);
   }
+  requireStandardTableEntries(db); // the one reference no whole-database pass walks (see standard-tables.ts)
 }
 
 /**
  * A new store (#1634; ADR 0105 §4): in one transaction, the baseline, its seed — the shipped search backends, the pre-installed
- * 工序 and the built-in document categories, as a store of revision 116 held them when it was new — and its first version
+ * 工序, the built-in document categories and the four pre-installed 字表与词表 (R5-L1), as a store of revision 116 held them when it was new — and its first version
  * record, checked for references before it commits.
  */
 export function createStoreAtBaseline(db: DatabaseSync, softwareVersion: string, dataVersion: number): void {
@@ -226,6 +229,7 @@ export function createStoreAtBaseline(db: DatabaseSync, softwareVersion: string,
     seedSearchBackends(db, new Date().toISOString());
     seedPreinstalledProcedures(db);
     seedProductionDocumentCategories(db);
+    installPreinstalledStandardTables(db);
     new DataVersionLedger(db).recordOpen({ softwareVersion, dataVersion, schemaRevision: BASELINE_SCHEMA_REVISION });
     requireStore(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_INVALID', '新数据库的引用校验失败。');
     db.exec('COMMIT');

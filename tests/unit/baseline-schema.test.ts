@@ -22,6 +22,15 @@ interface DumpRow { readonly type: string; readonly name: string; readonly tbl_n
  * is an object (`type:name`) the baseline adds, drops or changes against revision 116, with the train slice that owns it.
  */
 const INTENDED_DELTA: ReadonlyArray<{ readonly object: string; readonly change: 'added' | 'removed' | 'changed'; readonly slice: string }> = [
+  // R5-L1: the 字表与词表 library (ADR 0106 §9): three tables and the autoindexes SQLite makes for their keys.
+  { object: 'table:standard_tables', change: 'added', slice: 'R5-L1' },
+  { object: 'table:standard_table_versions', change: 'added', slice: 'R5-L1' },
+  { object: 'table:standard_table_entries', change: 'added', slice: 'R5-L1' },
+  { object: 'index:sqlite_autoindex_standard_tables_1', change: 'added', slice: 'R5-L1' },
+  { object: 'index:sqlite_autoindex_standard_tables_2', change: 'added', slice: 'R5-L1' },
+  { object: 'index:sqlite_autoindex_standard_table_versions_1', change: 'added', slice: 'R5-L1' },
+  { object: 'index:sqlite_autoindex_standard_table_versions_2', change: 'added', slice: 'R5-L1' },
+  { object: 'index:sqlite_autoindex_standard_table_versions_3', change: 'added', slice: 'R5-L1' },
   // R5-F1a
   { object: 'table:model_service_connections', change: 'changed', slice: 'R5-F1a' },
   { object: 'index:sqlite_autoindex_model_service_connections_3', change: 'removed', slice: 'R5-F1a' },

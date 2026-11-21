@@ -153,6 +153,7 @@
     "tests/service/series-exclusions.test.ts": 2,
     "tests/service/series-knowledge.test.ts": 21,
     "tests/service/series.test.ts": 3,
+    "tests/service/standard-tables.test.ts": 3,
     "tests/service/start-when-online-followups.test.ts": 7,
     "tests/service/start-when-online-kinds.test.ts": 10,
     "tests/service/stock-typos-leaf.test.ts": 9,

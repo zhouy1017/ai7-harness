@@ -5,6 +5,7 @@ import { J03_TASK_GOAL, isTrustedOperationalScope, selectedPolicyIdentityOf, typ
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './analysis/identity.js';
 import { isRecord } from './analysis/canonical.js';
 import { providerPlanPolicyMetadata } from './analysis/plan-boundary.js';
+import { foreignKeyViolations } from './store-records.js';
 import {
   ACTIVE_SET_VERSION,
   DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION,
@@ -1216,7 +1217,7 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
         }), 'TASK_RECORD_INVALID', '运行记录超出标准直接授权的未派发终态。');
     }
   }
-  requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,
+  requireTask(foreignKeyViolations(db, IMMUTABLE_TABLES) === 0,
     'TASK_RECORD_INVALID', '任务授权记录引用校验失败。');
 }
 
@@ -1682,6 +1683,6 @@ function validateAuthorizationStartTimes(db: DatabaseSync): void {
 export function validateTaskAuthorizationRecords(db: DatabaseSync): void {
   validateStoredCanonicalRows(db);
   validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
-  requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'TASK_RECORD_INVALID', '分析任务账本引用校验失败。');
+  requireTask(foreignKeyViolations(db, ANALYSIS_LEDGER_TABLES) === 0, 'TASK_RECORD_INVALID', '分析任务账本引用校验失败。');
   validateAuthorizationStartTimes(db);
 }
