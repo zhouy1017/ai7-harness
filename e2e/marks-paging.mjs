@@ -110,8 +110,8 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     return {card:inside(rect(node),rect(scroll)) && inside(rect(node),view), words:inside(rect(words),rect(editor)) && inside(rect(words),view), row:${rowNow}, cardBox:rect(node)&&[rect(node).left,rect(node).top,rect(node).right,rect(node).bottom], viewport:[innerWidth,innerHeight]};
   })()`);
   check(arrived.card && arrived.words && arrived.row === rowWant, 'marks-paging-arrived-beyond-first-page', { ...arrived, rowWant });
-  // It can be accepted: A on the focused card, by a real key; the service records the Apply.
-  await key(renderer, 'a', 'KeyA', 65);
+  // It can be accepted: 接受并应用 on its card, by a real click (a pointer decision stays on the page); the service records the Apply.
+  await pointerClick(renderer, waitFor, `${card} [data-mark-action="accept-and-apply"]`, 'marks-paging-accept');
   check(await renderer.evaluate(`(async () => {
     for (let turn=0; turn<120; turn++) {
       const card=await window.ai7.getEditorialMarkCard({manuscriptId:globalThis.__marksPaging.manuscriptId,branchId:globalThis.__marksPaging.branchId,markId:${JSON.stringify(expected.markId)}});
