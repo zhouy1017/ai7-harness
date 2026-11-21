@@ -565,9 +565,9 @@ async function firstRunClick(renderer, selector, label = null, block = 'center')
  * (帮助 arrives scrolled to 第一次审稿 from the first-run card and at the top from F1), the control is pressed with the real
  * pointer, and the page it opens has its heading inside the window and the document at offset 0 — measured by the engine.
  */
-async function pressIntoSettingsPage(renderer, selector, pageSelector, headingSelector, name) {
+async function pressIntoSettingsPage(renderer, selector, pageSelector, headingSelector, name, block = 'center') {
   await renderer.evaluate(`(async () => { const root=document.scrollingElement; root.scrollTop=Math.max(root.scrollTop,240); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); })()`);
-  requireJourney((await firstRunClick(renderer, selector, null, 'nearest')) > 0, `${name}-scrolled-before`);
+  requireJourney((await firstRunClick(renderer, selector, null, block)) > 0, `${name}-scrolled-before`);
   await waitFor(renderer, pageSelector, name);
   await assertRenderer(renderer, `(() => { const box=document.querySelector(${JSON.stringify(headingSelector)})?.getBoundingClientRect(); return !!box && box.top>=-1 && box.bottom<=innerHeight+1 && document.scrollingElement.scrollTop===0; })()`, `${name}-at-top`);
 }
@@ -1020,7 +1020,7 @@ async function main() {
     // #1548 rework: a switch through the settings navigation opens its page at the top as well.
     await firstRunClick(onboardingPage, '[data-onboarding-help]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] .settings-navigation')`, 'first-run-help-nav-opened');
-    await pressIntoSettingsPage(onboardingPage, '.settings-navigation [data-settings-nav="data-storage"]', '[data-screen="data-storage"]', '[data-screen="data-storage"] h2', 'first-run-help-nav-data-storage');
+    await pressIntoSettingsPage(onboardingPage, '.settings-navigation [data-settings-nav="data-storage"]', '[data-screen="data-storage"]', '[data-screen="data-storage"] h2', 'first-run-help-nav-data-storage', 'nearest');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'first-run-help-nav-returned');
     at('first-run-data-location-settings');
