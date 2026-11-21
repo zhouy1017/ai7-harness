@@ -1,9 +1,4 @@
-import {
-  CURATION_SCHEMA_SQL,
-  FACTUAL_RANGE_TASK_INTENTS_SQL,
-  LATEST_SCHEMA_VERSION,
-} from '../../src/service/task-authorization.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { randomUUID } from 'node:crypto';
@@ -20,18 +15,12 @@ import {
   type HousePreferenceSource,
 } from '../../src/service/house-review-preference.js';
 import { buildDialogueMessage, parseDialogueMessage } from '../../src/service/dialogue/contract.js';
+import { DIALOGUE_SCHEMA_SQL, DIALOGUE_TRIGGER_SQL, DialogueLedger } from '../../src/service/dialogue/dialogue-ledger.js';
 import {
   GLOBAL_AGENT_POLICY_BLOCKED,
   type GlobalMemoryPin,
   type RecordLearningSupervisionInput,
 } from '../../src/shared/protocol.js';
-import {
-  DialogueLedger,
-  DIALOGUE_SCHEMA_SQL,
-  DIALOGUE_TASKS_REVISION_86_SQL,
-  DIALOGUE_TRIGGER_SQL,
-  initializeDialogueSchema,
-} from '../../src/service/dialogue/dialogue-ledger.js';
 import {
   SUPERVISION_SCHEMA_SQL,
   SUPERVISION_TRIGGER_SQL,
@@ -152,7 +141,7 @@ describe('the Book-less Global Agent', () => {
     expect(buildDialogueMessage(input)).not.toContain('【所选文字】');
   });
 
-  it('widens legacy dialogue metadata without changing a Book task, and keeps global metadata out of Book lookup', () => {
+  it('keeps global metadata out of Book lookup', () => {
     const db = new DatabaseSync(':memory:');
     const id = randomUUID();
     try {
@@ -160,15 +149,12 @@ describe('the Book-less Global Agent', () => {
         db.exec(`CREATE TABLE ${table} (${key} TEXT PRIMARY KEY)`);
         db.prepare(`INSERT INTO ${table} VALUES (?)`).run(id);
       }
-      for (const [table, sql] of Object.entries(DIALOGUE_SCHEMA_SQL)) db.exec(table === 'dialogue_tasks' ? DIALOGUE_TASKS_REVISION_86_SQL : sql);
+      for (const sql of Object.values(DIALOGUE_SCHEMA_SQL)) db.exec(sql);
       for (const sql of Object.values(DIALOGUE_TRIGGER_SQL)) db.exec(sql);
       const ledger = new DialogueLedger(db);
       const asked = ledger.ask({ bookId: id, manuscriptId: id, branchId: id, revisionId: id, journalSequence: 0,
         blockId: `blk_${'a'.repeat(24)}`, fromGrapheme: 0, toGrapheme: 1, blockDigest: 'b'.repeat(64),
         selectionSha256: 'c'.repeat(64), questionSha256: 'd'.repeat(64), now: new Date() });
-      const before = db.prepare('SELECT canonical_json, sha256 FROM dialogue_tasks').get();
-      initializeDialogueSchema(db);
-      expect(db.prepare('SELECT canonical_json, sha256 FROM dialogue_tasks').get()).toEqual(before);
       expect(ledger.task(asked.task.dialogueId)).toEqual(asked.task);
       const global = ledger.askGlobal('development-ci', [{ itemId: randomUUID(), revisionId: randomUUID() }], 'e'.repeat(64), new Date());
       expect(ledger.task(global.task.dialogueId)).toBeNull();
@@ -178,42 +164,12 @@ describe('the Book-less Global Agent', () => {
       expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally { db.close(); }
   });
+
 });
 
 describe('revision 87 (Issue #1083)', () => {
   const objects = (db: DatabaseSync): Array<{ name: string; sql: string }> =>
     db.prepare("SELECT name, sql FROM sqlite_schema WHERE sql IS NOT NULL AND name <> 'review_run_synthesis' AND name NOT LIKE 'dialogue_tasks%' AND name NOT LIKE 'learning_supervision_directives%' ORDER BY name").all() as Array<{ name: string; sql: string }>;
-
-  it('migrates an exact revision-86 store by adding the supervision ledger and widening dialogue metadata, moving nothing else, and refuses an 87 without the ledger', async () => {
-    const subject = await open();
-    subject.markCleanShutdown(); await subject.close(); store = undefined;
-    const path = join(roots!.dataRoot, 'store', 'ai7.sqlite');
-    const planted = new DatabaseSync(path, { enableForeignKeyConstraints: false });
-    let before: Array<{ name: string; sql: string }>;
-    try {
-      // The store as revision 86 left it: no supervision ledger, every dialogue binding column NOT NULL.
-      for (const trigger of Object.keys(SUPERVISION_TRIGGER_SQL)) planted.exec(`DROP TRIGGER ${trigger}`);
-      planted.exec('DROP TABLE learning_supervision_directives; DROP TRIGGER dialogue_tasks_no_update; DROP TRIGGER dialogue_tasks_no_delete; DROP TABLE dialogue_tasks;');
-      planted.exec(DIALOGUE_TASKS_REVISION_86_SQL);
-      planted.exec(DIALOGUE_TRIGGER_SQL.dialogue_tasks_no_update!); planted.exec(DIALOGUE_TRIGGER_SQL.dialogue_tasks_no_delete!);
-      execPre74Fixture(planted, 'PRAGMA user_version = 86');
-      before = objects(planted);
-    } finally { planted.close(); }
-    store = await EditorialStore.open(roots!.dataRoot, roots!.codeRoot);
-    store.markCleanShutdown(); await store.close(); store = undefined;
-    const migrated = new DatabaseSync(path, { enableForeignKeyConstraints: false });
-    try {
-      // Synchronized with #1084: revision 88 follows, adding only its own relations, which this predecessor already carries.
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: LATEST_SCHEMA_VERSION });
-      expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'learning_supervision_directives'").get() as { sql: string }).sql)
-        .toBe(SUPERVISION_SCHEMA_SQL.learning_supervision_directives);
-      expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'dialogue_tasks'").get() as { sql: string }).sql).toBe(DIALOGUE_SCHEMA_SQL.dialogue_tasks);
-      expect(objects(migrated)).toEqual(before.map((row) => row.name === 'analysis_task_intents' ? { ...row, sql: FACTUAL_RANGE_TASK_INTENTS_SQL } : CURATION_SCHEMA_SQL[row.name] === undefined ? row : { ...row, sql: CURATION_SCHEMA_SQL[row.name] }));
-      for (const trigger of Object.keys(SUPERVISION_TRIGGER_SQL)) migrated.exec(`DROP TRIGGER ${trigger}`);
-      migrated.exec('DROP TABLE learning_supervision_directives');
-    } finally { migrated.close(); }
-    await expect(EditorialStore.open(roots!.dataRoot, roots!.codeRoot).then((opened) => { store = opened; return opened; })).rejects.toThrow();
-  }, 120_000);
 
   it('keeps developer-live refused and resolves the dedicated v27 Book-less rule beside the Book dialogue', async () => {
     roots = await createServiceTestRoots('ai7-global-agent-policy-');

@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -73,25 +74,10 @@ export const PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'PRODUCTION_DOCUMENT_WORKFLOW_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'PRODUCTION_DOCUMENT_WORKFLOW_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const PRODUCTION_DOCUMENT_WORKFLOW_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  production_document_workflow_instances: ['document_id>production_documents.document_id:NO ACTION/NO ACTION/NONE'],
-  production_document_phase_transitions: ['document_id>production_document_workflow_instances.document_id:NO ACTION/NO ACTION/NONE'],
-};
+export const PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  production_document_workflow_instances: 'PRODUCTION_DOCUMENT_WORKFLOW_LEDGER_IMMUTABLE',
+  production_document_phase_transitions: 'PRODUCTION_DOCUMENT_WORKFLOW_LEDGER_IMMUTABLE',
+});
 
 /** The profile a document follows, as the instance pins it (WORK-002). */
 export interface WorkflowProfilePin {
@@ -148,29 +134,6 @@ function insertInstance(db: DatabaseSync, documentId: string, profile: WorkflowP
        document_id, profile_id, profile_name, profile_version, profile_digest, activated_at, canonical_json, sha256
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(documentId, profile.id, profile.name, profile.version, profile.digest, activatedAt, record.json, record.digest);
-}
-
-/**
- * Revision 40's relations, created once (shape-detected): a revision-39 store gains them and one instance per document it
- * holds — the profile in force, activated when the document was made — and nothing existing moves.
- */
-export function initializeProductionDocumentWorkflowSchema(db: DatabaseSync, profile: WorkflowProfilePin): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'production_document_workflow_instances'").get() !== undefined) return;
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'production_documents'").get() === undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL)) db.exec(sql);
-    const documents = db.prepare('SELECT document_id, created_at FROM production_documents ORDER BY created_at, rowid').iterate();
-    for (const row of documents) insertInstance(db, text(row.document_id), profile, text(row.created_at));
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Production Document workflow schema rollback failed.');
-    }
-    throw error;
-  }
-  requireWorkflow(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_INVALID', '生产文档工作流程的关系与已有记录不一致。');
 }
 
 /** What a phase may move to, from each state (WORK-004, WORK-009). */

@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -100,41 +101,13 @@ export const SERIES_KNOWLEDGE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const SERIES_KNOWLEDGE_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(SERIES_KNOWLEDGE_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'SERIES_KNOWLEDGE_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'SERIES_KNOWLEDGE_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const SERIES_KNOWLEDGE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  series_knowledge_items: ['series_id>series.series_id:NO ACTION/NO ACTION/NONE'],
-  series_knowledge_candidates: [
-    'series_id>series.series_id:NO ACTION/NO ACTION/NONE',
-    'source_book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'supersedes_version_id>series_knowledge_candidates.version_id:NO ACTION/NO ACTION/NONE',
-    'target_item_id>series_knowledge_items.item_id:NO ACTION/NO ACTION/NONE',
-  ],
-  series_knowledge_revisions: [
-    'candidate_version_id>series_knowledge_candidates.version_id:NO ACTION/NO ACTION/NONE',
-    'item_id>series_knowledge_items.item_id:NO ACTION/NO ACTION/NONE',
-    'source_book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'supersedes_revision_id>series_knowledge_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-  series_knowledge_conflicts: ['revision_id>series_knowledge_revisions.revision_id:NO ACTION/NO ACTION/NONE'],
-  series_knowledge_promotions: [
-    'candidate_version_id>series_knowledge_candidates.version_id:NO ACTION/NO ACTION/NONE',
-    'revision_id>series_knowledge_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const SERIES_KNOWLEDGE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  series_knowledge_items: 'SERIES_KNOWLEDGE_LEDGER_IMMUTABLE',
+  series_knowledge_candidates: 'SERIES_KNOWLEDGE_LEDGER_IMMUTABLE',
+  series_knowledge_revisions: 'SERIES_KNOWLEDGE_LEDGER_IMMUTABLE',
+  series_knowledge_conflicts: 'SERIES_KNOWLEDGE_LEDGER_IMMUTABLE',
+  series_knowledge_promotions: 'SERIES_KNOWLEDGE_LEDGER_IMMUTABLE',
+});
 
 export class SeriesKnowledgeError extends Error {
   constructor(readonly code: string, message: string) {
@@ -158,22 +131,6 @@ const REVIEW_SCHEMA = 'ai7.series-knowledge-review/1';
 const ACTOR = '本机编辑';
 const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'series_knowledge_items'";
 const INVALID = '书系知识记录已损坏。';
-
-/** Revision 53's relations, created once: a store that predates them gains five empty relations and nothing existing moves. */
-export function initializeSeriesKnowledgeSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(SERIES_KNOWLEDGE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(SERIES_KNOWLEDGE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Series Knowledge schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 /** An item's name as it is recorded: 1 to 40 characters on one line, NFC-normalized and trimmed, spaces collapsed. */
 export function seriesKnowledgeSubject(value: unknown): string | null {

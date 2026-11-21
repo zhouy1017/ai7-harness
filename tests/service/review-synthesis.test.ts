@@ -1,8 +1,7 @@
 import { appendBaselineUnitVariant } from '../support/synopsis-reuse.js';
 import { randomUUID } from 'node:crypto';
-import { readFile, mkdir, writeFile, cp } from 'node:fs/promises';
-import { basename, dirname, resolve, relative, isAbsolute } from 'node:path';
-import { unzipSync } from 'fflate';
+import { writeFile, cp } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { join } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, it } from 'vitest';
@@ -25,7 +24,6 @@ import { sample1Seed } from '../support/sample1-seed.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
-import { reportContentDigest } from '../../src/service/review/review-report.js';
 import { RUN_SYNTHESIS_SCHEMA_SQL } from '../../src/service/review/run-synthesis-storage.js';
 import { SYNTHESIS_TEXT_LIMIT } from '../../src/service/review/run-synthesis-contract.js';
 import { TYPOS_AND_USAGE, STYLE_AND_FORMAT, LITERARY_EXPRESSION } from '../support/review-categories.js';
@@ -398,61 +396,6 @@ it('settles a graceful stop during the ordinary transport request without resend
     expect(workspace(second, book, runId).run!.synthesis?.state).toBe('missing');
     expect(second.capture.requests).toHaveLength(0);
   } finally { await closeCapturedSession(second); }
-});
-
-it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a paused 0.7.1 run without synthesis, and merges that legacy Book (#1433)', async () => {
-  const source = join(roots.codeRoot, 'tests/fixtures/database/sample1-review-071.ai7db');
-  const probeRoot = join(roots.inputRoot, 'legacy-direct-open');
-  for (const [name, bytes] of Object.entries(unzipSync(await readFile(source)))) {
-    if (name === 'manifest.json') continue;
-    const destination = resolve(probeRoot, name), path = relative(probeRoot, destination);
-    if (path.startsWith('..') || isAbsolute(path)) throw new Error('Invalid compatibility fixture member');
-    await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, bytes);
-  }
-  const probe = await EditorialStore.open(probeRoot, roots.codeRoot);
-  probe.markCleanShutdown(); probe.close();
-  let target = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  try { await target.prepareDatabaseReplacement((await target.inspectDatabaseImport(source)).previewId, new Date()); }
-  finally { target.markCleanShutdown(); target.close(); }
-  const session = await openCapturedSession();
-  let archivedId!: string, archivedRunId!: string, archivedDigest!: string;
-  try {
-    const books = session.store.listBooks(null).items;
-    expect(books.map(book => book.title), JSON.stringify(await session.store.inspectDatabaseReplacements())).toContain('sample1 · 0.7.1 已归档审阅');
-    const archived = books.find(book => book.title === 'sample1 · 0.7.1 已归档审阅')!;
-    const paused = books.find(book => book.title === 'sample1 · 0.7.1 暂停审阅')!;
-    archivedId = archived.bookId;
-    const original = session.store.inspectReviewWorkspace(archived.bookId, null).run!;
-    archivedRunId = original.reviewRunId; archivedDigest = original.report!.digest;
-    // No member and no request; an eligible 0.7.1 Run offers 生成统合总结 (Issue #1506).
-    expect(original.synthesis).toMatchObject({ state: 'missing', summary: null, canGenerate: true }); expect(original.categories).toHaveLength(1);
-    expect(canonicalRecord(original.report!.record).digest).toBe(original.report!.digest);
-    const contentDigest = reportContentDigest(original.report!.record);
-    const repeated = session.store.generateReviewReport(archived.bookId, original.reviewRunId).run!.report!;
-    expect(reportContentDigest(repeated.record)).toBe(contentDigest);
-    const archive = new DatabaseSync(join(roots.dataRoot, 'store/ai7.sqlite'), { readOnly: true });
-    try {
-      const row = archive.prepare('SELECT canonical_json,sha256 FROM review_reports WHERE report_id=?').get(original.report!.reportId)!;
-      expect(row.sha256).toBe(archivedDigest); expect(canonicalRecord(JSON.parse(String(row.canonical_json))).digest).toBe(archivedDigest);
-    } finally { archive.close(); }
-    const pending = session.store.inspectReviewWorkspace(paused.bookId, null).run!;
-    expect(pending.canContinue).toBe(true); expect(pending.synthesis).toBeUndefined();
-    await session.driver.continue(pending.reviewRunId);
-    const completed = session.store.inspectReviewWorkspace(paused.bookId, pending.reviewRunId).run!;
-    expect(completed.state).toBe('settled'); expect(completed.synthesis).toMatchObject({ state: 'missing', summary: null, canGenerate: true });
-    expect(completed.categories).toHaveLength(1);
-    expect(session.capture.requests.every(request => request.stage !== 'cross-unit-reduction')).toBe(true);
-  } finally { await closeCapturedSession(session); }
-  const mergedRoot = join(roots.inputRoot, 'legacy-merge-data');
-  target = await EditorialStore.open(mergedRoot, roots.codeRoot);
-  try { await target.prepareDatabaseMerge((await target.inspectDatabaseImport(source)).previewId, new Date()); }
-  finally { target.markCleanShutdown(); target.close(); }
-  target = await EditorialStore.open(mergedRoot, roots.codeRoot);
-  try {
-    const merged = target.inspectReviewWorkspace(archivedId, archivedRunId).run!;
-    expect(merged.synthesis).toMatchObject({ state: 'missing', summary: null, canGenerate: true }); expect(merged.report!.digest).toBe(archivedDigest);
-    expect(canonicalRecord(merged.report!.record).digest).toBe(archivedDigest);
-  } finally { target.markCleanShutdown(); target.close(); }
 });
 
 it('uses identical synthesis wording in the pre-start plan and the frozen launched plan (#1433)', async () => {

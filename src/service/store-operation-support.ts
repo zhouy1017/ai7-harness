@@ -5,7 +5,6 @@ import type { WritingCopyRules, WritingExemplarInput } from './writing/writing-c
 import type { BaselineAnalysisRouteFacts } from './analysis/baseline-analysis-store.js';
 import type { BaselinePromptContractSelection } from './analysis/kind-definition.js';
 import { clarificationPlanBaseDigest } from './provider/clarification-contract.js';
-import type { ClassifiedSchemaRevision } from './data-version.js';
 import type { StartWhenOnlineTaskKind } from '../shared/protocol.js';
 
 /** The Fact-check Lens's words (Issue #901). */
@@ -68,16 +67,6 @@ export interface StoreControl {
    * service suites open it.
    */
   softwareVersion?: string;
-  /**
-   * The suites' own classification of schema revisions (Issue #433, S85b), so an upgrade to a later Data Version can be
-   * opened before a later revision is classified breaking. The service entry never sets it.
-   */
-  schemaRevisionClasses?: ReadonlyArray<ClassifiedSchemaRevision>;
-  /**
-   * The suites stop an open here (Issue #433 review): after every migration and just before the versions that opened the store
-   * are recorded, or just after, before the upgrade's note is cleared. The service entry never sets it.
-   */
-  interruptUpgradeAt?: 'before-record' | 'after-record';
   /**
    * The suites record a new writing Task under these copy rules (#707): `1` composes its contract, its plan and its row as the
    * software before #698 did — a row naming no rules — so a genuine `/1` Task is driven through the store's authorize, run and

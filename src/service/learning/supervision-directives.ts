@@ -1,3 +1,4 @@
+import { appendOnly } from '../append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { GlobalAgentSourceCandidate, GlobalEditorialMemoryVersion, EditorialMemoryVersion, LegacyEditorialMemoryVersion, GlobalMemoryItem, GlobalMemoryPin, HouseReviewPreferenceVersion, LearningSupervisionDirective, RecordLearningSupervisionInput, TrustedOperationalScope } from '../../shared/protocol.js';
@@ -17,14 +18,9 @@ export const SUPERVISION_SCHEMA_SQL = {
   UNIQUE(operational_scope, ordinal)
 ) STRICT`,
 } as const;
-export const SUPERVISION_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(['update', 'delete'].map((op) => [
-  `learning_supervision_directives_no_${op}`, `CREATE TRIGGER learning_supervision_directives_no_${op}
-  BEFORE ${op.toUpperCase()} ON learning_supervision_directives
-  BEGIN SELECT RAISE(ABORT, 'LEARNING_SUPERVISION_IMMUTABLE'); END`,
-]));
-export const SUPERVISION_FOREIGN_KEYS = {
-  learning_supervision_directives: ['supersedes>learning_supervision_directives.directive_id:NO ACTION/NO ACTION/NONE'],
-};
+export const SUPERVISION_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  learning_supervision_directives: 'LEARNING_SUPERVISION_IMMUTABLE',
+});
 
 /**
  * The F-05 owner (Issue #1082) keeps examples, eligibility and version writes; this seam reads its memory versions by their
@@ -55,15 +51,6 @@ export function supervisionSourceCandidates(directives: ReadonlyArray<LearningSu
 function valid(condition: unknown, code = 'LEARNING_SUPERVISION_INVALID'): asserts condition {
   if (!condition) throw new LearningEligibilityError(code, code === 'LEARNING_SUPERVISION_STALE'
     ? '记忆版本已经变化，请重新查看后再操作。' : '学习监督指令或记忆记录无效。');
-}
-export function initializeSupervisionSchema(db: DatabaseSync, version: number): void {
-  if (version >= 87 || db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'learning_supervision_directives'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(SUPERVISION_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(SUPERVISION_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
 export function validSupervisionInput(value: unknown): value is RecordLearningSupervisionInput {

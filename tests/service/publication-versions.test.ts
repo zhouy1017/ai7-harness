@@ -1,12 +1,9 @@
-import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
-import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { PUBLICATION_VERSION_SCHEMA_SQL } from '../../src/service/publication-versions.js';
-import { EDITORIAL_REVIEW_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   PUBLICATION_ACTUALS_PROMPT_LABEL,
   PUBLICATION_ACTUALS_PROMPT_STATE,
@@ -25,18 +22,7 @@ import {
   composeManuscriptDocx,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
-import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
-import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
-import { IMPORT_RETENTION_RELATIONS_DROP_ORDER } from '../support/import-retention.js';
-import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
-import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
-import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
-import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
-import { MIGRATION_EMPTY_RELATIONS, PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
-import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for ⑥ 发稿 (Issue #414, plan slice S65): Milestone Versions with their
 // purposes, 设为发稿版本 and the 交付物 read, over the real `EditorialStore` on a temporary Agent Data
@@ -142,25 +128,6 @@ function ledgerCounts(): Record<string, number> {
 function expectNoForbiddenWords(value: unknown): void {
   const serialized = JSON.stringify(value);
   for (const word of PUBLICATION_FORBIDDEN_WORDS) expect(serialized.includes(word)).toBe(false);
-}
-
-/**
- * Every relation the store holds, with its exact `CREATE` text and a digest over its whole content.
- * Relations hold manuscript text, so the content is compared as a row count and a hex digest.
- */
-function relationTruth(database: DatabaseSync): Map<string, { sql: string; content: string }> {
-  const relations = database.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'table' ORDER BY name").all() as { name: string; sql: string | null }[];
-  return new Map(relations.map((relation) => {
-    const rows = database.prepare(`SELECT * FROM "${relation.name}"`).all() as Record<string, SQLOutputValue>[];
-    const hash = createHash('sha256');
-    for (const row of rows) {
-      for (const column of Object.keys(row).sort()) {
-        const value = row[column]!;
-        hash.update(JSON.stringify([column, value instanceof Uint8Array ? [...value] : typeof value === 'bigint' ? value.toString() : value]));
-      }
-    }
-    return [relation.name, { sql: String(relation.sql), content: `${rows.length}:${hash.digest('hex')}` }];
-  }));
 }
 
 async function saveMilestone(
@@ -537,71 +504,4 @@ describe('⑥ 发稿: Milestone Versions and 设为发稿版本', () => {
     }
   }, 300_000);
 
-  it('migrates a revision-24 store forward, adding the three empty relations and reading the milestones it held', async () => {
-    let book: Imported;
-    let held: MilestoneProjection[];
-    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      book = await importBook(first);
-      // A revision-24 store held purposes as free words: 自行输入 stores them exactly as it always did.
-      held = [
-        await saveMilestone(first, book, '旧里程碑', 'custom', '确认结构复核后的状态'),
-        await saveMilestone(first, book, '旧留档', 'custom', '阶段留档'),
-      ];
-      first.markCleanShutdown();
-    } finally {
-      first.close();
-    }
-
-    // Plant revision 24: its relations are exactly the current ones less the three revision 25 adds and
-    // the three revision 26 adds.
-    const truthBefore = withDatabase(false, (database) => {
-      execPre74Fixture(database, `BEGIN IMMEDIATE;
-        ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join('\n        ')}
-        PRAGMA user_version = ${EDITORIAL_REVIEW_SCHEMA_VERSION};
-        COMMIT;`);
-      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EDITORIAL_REVIEW_SCHEMA_VERSION);
-      expect(database.prepare("SELECT count(*) total FROM sqlite_schema WHERE name LIKE 'publication%' OR name LIKE 'public_release%'").get()).toEqual({ total: 0 });
-      return relationTruth(database);
-    });
-
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      const truthAfter = relationTruth(database);
-      // Exactly the relations revisions 25 and 26 add appear, each empty; no relation the revision-24 store
-      // held changed shape, and the only content that moved is the service lifetime every open appends.
-      expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), 'review_run_synthesis', ...RESEARCH_EVIDENCE_RELATIONS, ...MATERIAL_INDEX_LAYER_RELATIONS, ...PROPOSAL_REVIEW_RELATIONS, ...FACTUAL_VERIFICATION_RELATIONS, ...HOUSE_REVIEW_PREFERENCE_RELATIONS, ...TASK_INTENT_DRAFT_RELATIONS, ...IMPORTED_SKILL_RELATIONS, ...CUSTOM_ANALYSIS_RELATIONS, ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
-      for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
-      for (const relation of [...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
-      // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
-      expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_task_intents', 'proposal_item_decisions']);
-      expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.content !== before.content).map(([name]) => name)).toEqual(['service_lifetimes']);
-      expect(database.prepare("SELECT count(*) total FROM sqlite_schema WHERE type = 'trigger' AND tbl_name IN ('publication_versions', 'public_release_permissions', 'publication_events')").get()).toEqual({ total: 6 });
-      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    });
-
-    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      const deliverables = reopened.inspectDeliverables(book.bookId);
-      // The rows saved before the kinds existed read back by the words they hold.
-      expect(deliverables.publication.milestones.map((item) => [item.milestoneId, item.purposeKind, item.purposeLabel])).toEqual([
-        [held[1]!.milestoneId, 'stage-archive', '阶段留档'],
-        [held[0]!.milestoneId, 'custom', '确认结构复核后的状态'],
-      ]);
-      expect(deliverables.publication.designations).toEqual([]);
-      const designated = reopened.designatePublicationVersion({ bookId: book.bookId, milestoneId: held[0]!.milestoneId, scope: '纸质版首印', basis: '迁移后首次设定' });
-      expect(designated).toMatchObject({ outcome: 'designated', completionLabel: '已设为发稿版本 · 「旧里程碑」 · r1 · 纸质版首印' });
-      expect(ledgerCounts()).toEqual({ publication_versions: 1, public_release_permissions: 1, publication_events: 2 });
-      reopened.markCleanShutdown();
-    } finally {
-      reopened.close();
-    }
-  }, 300_000);
 });

@@ -1,26 +1,25 @@
 import { setLibraryDecision } from '../support/library-materials.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strToU8, zipSync, type Zippable } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LIBRARY_OBJECT_DIRECTORY } from '../../src/service/library-materials.js';
-import { MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEX_SCHEMA_SQL, MATERIAL_INDEX_TRIGGER_SQL, MATERIAL_INDEX_WORK_DIRECTORY } from '../../src/service/material-index.js';
+import { MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEX_TRIGGER_SQL, MATERIAL_INDEX_WORK_DIRECTORY } from '../../src/service/material-index.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL } from '../../src/service/background-analysis-enrollments.js';
 import { replacementBlockedBy } from '../../src/service/replacement-gate.js';
-import { LATEST_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import { MAX_FRAME_BYTES, MAX_MATERIAL_SEGMENTS_PAGE, type LibraryMaterialKind, type LibraryMaterialProjection } from '../../src/shared/protocol.js';
 import { sample1Path } from '../support/sample1-baseline.js';
-import { analysisRunAuthorizationsShape, downgradeAnalysisRunAuthorizationsToRevision65 } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
 import { RetrievalIndex } from '../../src/service/retrieval/index.js';
 import { materialRetrievalSources } from '../../src/service/retrieval/source-readers.js';
+import { existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 
 // Service-integration suite (L2) for ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009,
 // ATTN-009) over the real store on a temporary Agent Data Root. The collected book is exact `sample1` — an admitted Public
@@ -516,7 +515,8 @@ describe('资料索引 over the real store', () => {
     }
   }, 120_000);
 
-  it('builds at the next start what a closing service stopped, what arrived at revision 65, and removes stray working copies', async () => {
+
+  it('builds at the next start what a closing service stopped, and removes stray working copies', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let materialId: string;
     try {
@@ -524,19 +524,6 @@ describe('资料索引 over the real store', () => {
       store.markCleanShutdown();
     } finally {
       store.close();
-    }
-    // A revision-65 store: the item arrived before revision 66's enrollments and revision 67's index existed, so its open
-    // takes the two steps 65 → 66 → 67 before it builds (#725 re-review; #729).
-    const plant = new DatabaseSync(storePath());
-    try {
-      plant.exec('PRAGMA foreign_keys = OFF');
-      for (const table of [...Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse(), ...Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse()]) plant.exec(`DROP TABLE ${table}`);
-      plant.exec('PRAGMA foreign_keys = ON');
-      downgradeAnalysisRunAuthorizationsToRevision65(plant);
-      execPre74Fixture(plant, `PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
-      expect(analysisRunAuthorizationsShape(plant)).toBe('revision-65');
-    } finally {
-      plant.close();
     }
     const work = join(roots.dataRoot, MATERIAL_INDEX_WORK_DIRECTORY);
     mkdirSync(work, { recursive: true });
@@ -557,7 +544,6 @@ describe('资料索引 over the real store', () => {
       const database = new DatabaseSync(storePath(), { readOnly: true });
       try {
         expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-        expect(analysisRunAuthorizationsShape(database)).toBe('current');
         expect((database.prepare('SELECT count(*) count FROM material_index_builds').get() as { count: number }).count).toBeLessThanOrEqual(1);
       } finally {
         database.close();

@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, copyFileSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -52,48 +53,10 @@ export const DATABASE_MERGE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const DATABASE_MERGE_TRIGGER_SQL: Readonly<Record<string, string>> = {
-  database_merges_no_update: `CREATE TRIGGER database_merges_no_update
-    BEFORE UPDATE ON database_merges
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_MERGE_LEDGER_IMMUTABLE');
-    END`,
-  database_merges_no_delete: `CREATE TRIGGER database_merges_no_delete
-    BEFORE DELETE ON database_merges
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_MERGE_LEDGER_IMMUTABLE');
-    END`,
-  database_merge_books_no_update: `CREATE TRIGGER database_merge_books_no_update
-    BEFORE UPDATE ON database_merge_books
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_MERGE_LEDGER_IMMUTABLE');
-    END`,
-  database_merge_books_no_delete: `CREATE TRIGGER database_merge_books_no_delete
-    BEFORE DELETE ON database_merge_books
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_MERGE_LEDGER_IMMUTABLE');
-    END`,
-};
-
-export const DATABASE_MERGE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  database_merge_books: ['merge_id>database_merges.merge_id:NO ACTION/NO ACTION/NONE'],
-};
-
-/** Revision 58's relations, created once: a store that predates them gains an empty ledger and nothing existing moves. */
-export function initializeDatabaseMergeSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'database_merges'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(DATABASE_MERGE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(DATABASE_MERGE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Database merge schema rollback failed.');
-    }
-    throw error;
-  }
-}
+export const DATABASE_MERGE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  database_merges: 'DATABASE_MERGE_LEDGER_IMMUTABLE',
+  database_merge_books: 'DATABASE_MERGE_LEDGER_IMMUTABLE',
+});
 
 export type MergeTablePolicy = 'seed' | 'owned' | 'dependent' | 'shared' | 'excluded' | 'transient' | 'house' | 'derived';
 

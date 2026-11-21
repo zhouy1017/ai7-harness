@@ -1,3 +1,4 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -8,7 +9,7 @@ import { localCheckProcedureDefinition, localCheckProcedureDefinitionV2, localCh
 import { STANDARD_CHARACTERS, VARIANT_WORDS, APPENDIX_WORDS } from '../../src/service/review/deterministic/tables.js';
 import { mechanicalReplacement, validateLocalResultV3 } from '../../src/service/review/deterministic/checker.js';
 import { parseBookTerms } from '../../src/shared/protocol/deterministic.js';
-import { HouseWordLists, initializeHouseWordListSchema } from '../../src/service/review/house-word-list.js';
+import { HouseWordLists, HOUSE_WORD_LIST_SCHEMA_SQL } from '../../src/service/review/house-word-list.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import type { LocalCheckOptions } from '../../src/shared/protocol/procedures.js';
 
@@ -137,7 +138,7 @@ describe('local punctuation and numeral predicates', () => {
 });
 
 function housePlan(texts: string[], entries: readonly { literal: string; enabled?: boolean; note?: string }[], options: Partial<LocalCheckOptions> = {}) {
-  const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+  const db = new DatabaseSync(':memory:'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
   try {
     const owner = new HouseWordLists(db);
     const saved = owner.save({ expectedCurrent: null, sourceKind: 'editor-entry', entries: entries.map((entry) => ({ entryId: null, note: '', enabled: true, ...entry })) });

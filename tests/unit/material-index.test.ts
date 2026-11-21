@@ -1,26 +1,10 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import {
-  MATERIAL_INDEXER_FIRST,
-  MATERIAL_INDEXER_IDENTITY,
-  MATERIAL_INDEXER_PREDECESSOR,
-  MATERIAL_INDEX_PREPARE_SLICE,
-  MATERIAL_INDEX_SCHEMA_SQL,
-  MaterialIndexAborted,
-  MaterialIndexError,
-  MaterialIndexLedger,
-  classifyLanguage,
-  initializeMaterialIndexSchema,
-  materialCitation,
-  prepareMaterialIndex,
-  prepareMaterialIndexInSlices,
-  splitSentences,
-  type MaterialExtraction,
-  type MaterialLayerActivity,
-} from '../../src/service/material-index.js';
+import { MATERIAL_INDEXER_FIRST, MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEXER_PREDECESSOR, MATERIAL_INDEX_PREPARE_SLICE, MATERIAL_INDEX_SCHEMA_SQL, MaterialIndexAborted, MaterialIndexError, MaterialIndexLedger, classifyLanguage, materialCitation, prepareMaterialIndex, prepareMaterialIndexInSlices, splitSentences, type MaterialExtraction, type MaterialLayerActivity } from '../../src/service/material-index.js';
 import { STUB_EMBEDDING_DIMENSIONS, STUB_EMBEDDING_IDENTITY } from '../../src/service/knowledge/embedding-stub.js';
-import { LIBRARY_MATERIAL_SCHEMA_SQL, initializeLibraryMaterialSchema } from '../../src/service/library-materials.js';
+import { LIBRARY_MATERIAL_SCHEMA_SQL } from '../../src/service/library-materials.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 
 // Unit suite (L1) for the Material Index's own rules (Issue #428, plan slice S80a; V2-UX-KB-009): the sentence anchors, the
@@ -148,8 +132,8 @@ describe('the ledger over a minimal store', () => {
   function store(): DatabaseSync {
     const db = new DatabaseSync(':memory:');
     db.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT');
-    initializeLibraryMaterialSchema(db);
-    initializeMaterialIndexSchema(db);
+    createBaselineRelations(db, LIBRARY_MATERIAL_SCHEMA_SQL);
+    createBaselineRelations(db, MATERIAL_INDEX_SCHEMA_SQL);
     db.prepare('INSERT INTO library_materials(material_id, object_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?)')
       .run(MATERIAL, 'b'.repeat(64), '2026-10-09T00:00:00.000Z', '{}', SHA);
     return db;
@@ -165,7 +149,6 @@ describe('the ledger over a minimal store', () => {
 
   it('creates its relations once and records one build per item, with the metadata it read', () => {
     const db = store();
-    initializeMaterialIndexSchema(db);
     expect(Object.keys(MATERIAL_INDEX_SCHEMA_SQL)).toEqual(['material_index_builds', 'material_index_segments']);
     expect(Object.keys(LIBRARY_MATERIAL_SCHEMA_SQL)).toContain('library_materials');
     const ledger = new MaterialIndexLedger(db);

@@ -1,8 +1,4 @@
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
-import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
-import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,7 +19,6 @@ import { PLAN_EDIT_ADAPTATION_LABELS } from '../../src/service/analysis/plan-edi
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   ANSWER_BLOCKED_OFFLINE,
   RESUME_BLOCKED_BINDING,
@@ -38,12 +33,8 @@ import {
   type BaselineAnalysisProjection,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
-import { CLARIFICATION_RELATIONS_DROP_ORDER, plantRevision34Relations, runStatesShapeAt34 } from '../support/clarifications.js';
-import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
-import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -161,70 +152,6 @@ function withDatabase<T>(readOnly: boolean, operation: (database: DatabaseSync) 
   }
 }
 
-function relationTruth(database: DatabaseSync): Map<string, { sql: string; content: string }> {
-  const relations = database.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Row[];
-  return new Map(relations.map((relation) => {
-    const rows = database.prepare(`SELECT * FROM "${relation.name}"`).all() as Row[];
-    const hash = createHash('sha256');
-    for (const row of rows) {
-      for (const column of Object.keys(row).sort()) {
-        const value = row[column]!;
-        hash.update(JSON.stringify([column, value instanceof Uint8Array ? [...value] : typeof value === 'bigint' ? value.toString() : value]));
-      }
-    }
-    return [String(relation.name), { sql: String(relation.sql), content: `${rows.length}:${hash.digest('hex')}` }];
-  }));
-}
-
-describe('schema revision 35 over the real store', () => {
-  it('widens a planted revision-34 store\'s Run states with every row as it was, and adds the clarification relations empty', async () => {
-    const first = await openWithRoute(happy);
-    const execution = owner(first, happy);
-    try {
-      const bookId = await importedBook(first, 'L2 sample1 澄清迁移');
-      const prepared = prepare(first, bookId);
-      execution.admitAndDispatch(first.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!);
-      await execution.whenIdle();
-      first.markCleanShutdown();
-    } finally {
-      await execution.dispose();
-      first.close();
-    }
-    const before = withDatabase(false, (database) => {
-      constructPre94PolicyEncoding(database);
-      plantRevision34Relations(database);
-      execPre74Fixture(database, 'PRAGMA user_version = 34');
-      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
-      expect(runStatesShapeAt34(database)).toBe('revision-34');
-      return { states: database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all() as Row[], truth: relationTruth(database) };
-    });
-    expect(before.states.length).toBeGreaterThan(0);
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(runStatesShapeAt34(database)).toBe('current');
-      expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
-      const after = relationTruth(database);
-      expect([...after.keys()]).toEqual([...before.truth.keys(), 'review_run_synthesis', ...RESEARCH_EVIDENCE_RELATIONS, ...MATERIAL_INDEX_LAYER_RELATIONS, ...PROPOSAL_REVIEW_RELATIONS, ...FACTUAL_VERIFICATION_RELATIONS, ...HOUSE_REVIEW_PREFERENCE_RELATIONS, ...TASK_INTENT_DRAFT_RELATIONS, ...IMPORTED_SKILL_RELATIONS, ...CUSTOM_ANALYSIS_RELATIONS, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER].sort());
-      for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(after.get(relation)?.content).toMatch(/^0:/);
-      for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
-      // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_run_states', 'analysis_task_intents', 'proposal_item_decisions']);
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
-      // Still a ledger: nothing rewrites or removes a question or its answer.
-      for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) {
-        expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ? ORDER BY name").all(relation))
-          .toEqual([{ name: `${relation}_no_delete` }, { name: `${relation}_no_update` }]);
-      }
-      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    });
-  }, 300_000);
-});
 
 describe('Clarification Requests over the real store', () => {
   it('moves the safe retry into 先问你 as the next plan version, and the plan says where the editor may be asked', async () => {

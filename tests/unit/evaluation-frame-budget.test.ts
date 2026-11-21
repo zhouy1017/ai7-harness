@@ -1,18 +1,9 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { graphemeCount } from '../../src/service/analysis/factual-review-contract.js';
-import {
-  BUILTIN_EVALUATION_PROFILE,
-  EVALUATION_TEXT_TOO_DENSE,
-  EvaluationError,
-  EvaluationRecords,
-  evaluationTextTooDense,
-  evaluationProfileDigest,
-  initializeEvaluationInitialDraftSchema,
-  initializeEvaluationRecordSchema,
-  type InitialEvaluationFacts,
-} from '../../src/service/evaluation-records.js';
+import { BUILTIN_EVALUATION_PROFILE, EVALUATION_TEXT_TOO_DENSE, EvaluationError, EvaluationRecords, evaluationTextTooDense, evaluationProfileDigest, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL, EVALUATION_RECORD_SCHEMA_SQL, type InitialEvaluationFacts } from '../../src/service/evaluation-records.js';
 import { boundedEvidence, evidenceShares, rewriteProposalItems } from '../../src/service/evaluation-rewrites.js';
 import {
   MAX_EVALUATION_BYTES_PER_GRAPHEME,
@@ -45,8 +36,8 @@ let db: DatabaseSync;
 
 beforeEach(() => {
   db = new DatabaseSync(':memory:', { enableForeignKeyConstraints: false });
-  initializeEvaluationRecordSchema(db);
-  initializeEvaluationInitialDraftSchema(db);
+  createBaselineRelations(db, EVALUATION_RECORD_SCHEMA_SQL);
+  createBaselineRelations(db, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL);
 });
 
 afterEach(() => {

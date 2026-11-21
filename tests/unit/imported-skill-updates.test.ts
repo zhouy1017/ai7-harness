@@ -1,16 +1,15 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Socket } from 'node:net';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
-import {
-  IMPORTED_SKILL_UPDATE_RULE_CONFIRMATION, IMPORTED_SKILL_UPDATE_SCHEMA_SQL, initializeImportedSkillSchema, initializeImportedSkillUpdateSchema,
-} from '../../src/service/imported-skill-schema.js';
+import { IMPORTED_SKILL_UPDATE_RULE_CONFIRMATION, IMPORTED_SKILL_UPDATE_SCHEMA_SQL, IMPORTED_SKILL_SCHEMA_SQL } from '../../src/service/imported-skill-schema.js';
 import { authorityChanges, ImportedSkillUpdates, reconcileFiles, skillIdentity } from '../../src/service/imported-skill-updates.js';
 import { acquireSkillPackage, convertSkillFiles, ImportedSkills, MAX_SKILL_DECLARATION_CHARACTERS, MAX_SKILL_FILES } from '../../src/service/imported-skills.js';
 import { decodeRequest } from '../../src/service/request-frames.js';
-import { CapturedProcedures, capturedProcedureDocument, initializeCapturedProcedureSchema, recordReviewRunProcedurePin } from '../../src/service/captured-procedures.js';
+import { CapturedProcedures, capturedProcedureDocument, CAPTURED_PROCEDURE_SCHEMA_SQL, recordReviewRunProcedurePin } from '../../src/service/captured-procedures.js';
 import { reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
 import type { ImportedSkillFile, ImportedSkillUpdateCandidateProjection } from '../../src/shared/protocol.js';
 
@@ -56,8 +55,8 @@ beforeEach(() => {
   db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON; CREATE TABLE books(book_id TEXT PRIMARY KEY) STRICT');
   db.prepare('INSERT INTO books VALUES (?)').run(bookId);
-  initializeImportedSkillSchema(db, 0);
-  initializeImportedSkillUpdateSchema(db, 0);
+  createBaselineRelations(db, IMPORTED_SKILL_SCHEMA_SQL);
+  createBaselineRelations(db, IMPORTED_SKILL_UPDATE_SCHEMA_SQL);
   skills = new ImportedSkills(db);
   updates = new ImportedSkillUpdates(db, skills);
 });
@@ -360,7 +359,7 @@ describe('current selection and rollback (REUSE-035)', () => {
     // A minimal Run identity supplies the FK; the version and by-value pin use the product schema and writers.
     // Imported Skills have no executor, so no test invents an executable Run pin to an imported revision.
     db.exec('CREATE TABLE review_runs(review_run_id TEXT PRIMARY KEY) STRICT');
-    initializeCapturedProcedureSchema(db);
+    createBaselineRelations(db, CAPTURED_PROCEDURE_SCHEMA_SQL);
     const runId = randomUUID();
     db.prepare('INSERT INTO review_runs VALUES (?)').run(runId);
     const procedures = new CapturedProcedures(db);

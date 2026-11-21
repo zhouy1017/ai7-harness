@@ -1,12 +1,11 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import {
-  HouseWordLists, HOUSE_WORD_LIST_TRIGGER_SQL, initializeHouseWordListSchema, validateHouseWordListSnapshot, validateHouseWordListStore,
-} from '../../src/service/review/house-word-list.js';
+import { HouseWordLists, HOUSE_WORD_LIST_TRIGGER_SQL, HOUSE_WORD_LIST_SCHEMA_SQL, validateHouseWordListSnapshot, validateHouseWordListStore } from '../../src/service/review/house-word-list.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { validateSaveHouseWordListInput, type HouseWordListDraftEntry, type HouseWordListPin } from '../../src/shared/protocol/house-word-list.js';
 
@@ -14,15 +13,15 @@ import { validateSaveHouseWordListInput, type HouseWordListDraftEntry, type Hous
 const entry = (literal: string): HouseWordListDraftEntry => ({ entryId: null, literal, note: '公开的合成词条说明', enabled: true });
 const expected = (pin: HouseWordListPin) => ({ versionId: pin.versionId, digest: pin.digest });
 function setup() {
-  const db = new DatabaseSync(':memory:'); db.exec('PRAGMA foreign_keys = ON'); initializeHouseWordListSchema(db);
+  const db = new DatabaseSync(':memory:'); db.exec('PRAGMA foreign_keys = ON'); createBaselineRelations(db, HOUSE_WORD_LIST_SCHEMA_SQL);
   return { db, owner: new HouseWordLists(db) };
 }
 describe('immutable local House owner on disposable SQLite', () => {
-  it('initializes its exact relation once without a global schema stamp or any seeded data', () => {
+  it('holds its exact relation without a global schema stamp or any seeded data', () => {
     const { db, owner } = setup();
     try {
       expect(owner.inspect()).toMatchObject({ current: null, selected: null, entries: [], history: [], nextEntryOffset: null, nextHistoryOffset: null });
-      initializeHouseWordListSchema(db); expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(0);
+      expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(0);
       expect(db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all()).toEqual([{ name: 'house_word_list_versions' }]);
     } finally { db.close(); }
   });
@@ -65,7 +64,7 @@ describe('immutable local House owner on disposable SQLite', () => {
     const directory = await mkdtemp(join(tmpdir(), 'ai7-house-owner-')); const path = join(directory, 'owner.sqlite');
     const first = new DatabaseSync(path); const second = new DatabaseSync(path);
     try {
-      initializeHouseWordListSchema(first); const a = new HouseWordLists(first); const b = new HouseWordLists(second);
+      createBaselineRelations(first, HOUSE_WORD_LIST_SCHEMA_SQL); const a = new HouseWordLists(first); const b = new HouseWordLists(second);
       const initial = a.save({ expectedCurrent: null, sourceKind: 'editor-entry', entries: [entry('初版')] });
       const stale = b.inspect().current!;
       const next = a.save({ expectedCurrent: expected(initial.pin), sourceKind: 'editor-entry', entries: [entry('新版')] });
@@ -118,7 +117,7 @@ describe('immutable local House owner on disposable SQLite', () => {
           }
           db.exec("CREATE TRIGGER house_word_list_versions_no_update BEFORE UPDATE ON house_word_list_versions BEGIN SELECT RAISE(ABORT, 'HOUSE_WORD_LIST_IMMUTABLE'); END");
         }
-        expect(() => owner.inspect()).toThrow(); expect(() => initializeHouseWordListSchema(db)).toThrow();
+        expect(() => owner.inspect()).toThrow(); expect(() => validateHouseWordListStore(db)).toThrow();
       } finally { db.close(); }
     }
   });
@@ -134,9 +133,9 @@ describe('immutable local House owner on disposable SQLite', () => {
         const json = canonicalJson(damaged);
         db.exec('DROP TRIGGER house_word_list_versions_no_update');
         db.prepare('UPDATE house_word_list_versions SET canonical_json = ?, sha256 = ?').run(json, sha256Hex(json));
-        db.exec(HOUSE_WORD_LIST_TRIGGER_SQL.house_word_list_versions_no_update);
+        db.exec(HOUSE_WORD_LIST_TRIGGER_SQL.house_word_list_versions_no_update!);
         expect(() => owner.inspect()).toThrowError(expect.objectContaining({ code: 'HOUSE_RECORD_INVALID', message: expect.stringContaining('损坏') }));
-        expect(() => initializeHouseWordListSchema(db)).toThrowError(expect.objectContaining({ code: 'HOUSE_RECORD_INVALID' }));
+        expect(() => validateHouseWordListStore(db)).toThrowError(expect.objectContaining({ code: 'HOUSE_RECORD_INVALID' }));
       } finally { db.close(); }
     }
   });

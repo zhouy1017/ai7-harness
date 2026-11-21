@@ -1,5 +1,4 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -7,7 +6,6 @@ import { DatabaseSync, type SQLInputValue, type StatementResultingChanges } from
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
-import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import {
   EDITORIAL_WORKSPACE_PROFILE_DIGEST,
@@ -20,9 +18,7 @@ import {
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
-import { REVIEW_GUIDELINE_TRIGGER_SQL } from '../../src/service/review-guidelines.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BOOK_PEOPLE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import {
   MAX_GUIDELINE_OLDER_BOOKS_SHOWN,
@@ -36,7 +32,9 @@ import {
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { REVIEW_GUIDELINE_TRIGGER_SQL } from '../../src/service/review-guidelines.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -404,8 +402,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       await close(session);
     }
   }, 300_000);
-
-  it('adds revision 45 to a revision-44 store with nothing else moved, and refuses a version rewritten by hand', async () => {
+  it('keeps the house version across a reopen, reads a re-rooted chain, ignores a planted AI7-fixed version, and refuses a version rewritten by hand', async () => {
     const first = await openStore();
     try {
       const preview = await first.store.previewReviewGuidelineVersion(TYPOS_DOCUMENT, file('house.txt', HOUSE_CLAUSES));
@@ -413,21 +410,12 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
     } finally {
       await close(first);
     }
-    // A revision-44 store never held the relation: planted by dropping it, it gains it again empty.
-    const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    const reopened = await openStore();
     try {
-      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; DROP TABLE library_material_decisions; DROP TABLE library_materials; DROP TABLE review_guideline_versions; PRAGMA user_version = ${BOOK_PEOPLE_SCHEMA_VERSION};`);
-      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
+      // The house's version stands after a reopen, over AI7's version 1.
+      expect(typosDocument(reopened.store.inspectReviewGuidelines())).toMatchObject({ currentOrdinal: 2, issuer: '本社' });
     } finally {
-      plant.close();
-    }
-    const migrated = await openStore();
-    try {
-      expect(typosDocument(migrated.store.inspectReviewGuidelines()).currentOrdinal).toBe(1);
-      const preview = await migrated.store.previewReviewGuidelineVersion(TYPOS_DOCUMENT, file('house-again.txt', HOUSE_CLAUSES));
-      migrated.store.importReviewGuidelineVersion(preview.previewId);
-    } finally {
-      await close(migrated);
+      await close(reopened);
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
@@ -490,6 +478,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       tampered.store.close();
     }
   }, 300_000);
+
 
   it('names the latest reviews of a version and counts the rest, and so the Books still on an older one', async () => {
     await requireExactSample1(roots.codeRoot);

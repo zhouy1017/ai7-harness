@@ -1,4 +1,3 @@
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { startQuickTasks } from '../support/quick-tasks.js';
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
@@ -11,15 +10,12 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { unitRequestDigest } from '../../src/service/analysis/contract.js';
-import { ANALYSIS_RESULT_SET_REVISION_81_SQL, ANALYSIS_RESULT_SET_SCHEMA_SQL } from '../../src/service/analysis/result-set-schema.js';
 import { CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL } from '../../src/service/custom-analysis-dimensions.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
-import { CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { CUSTOM_ANALYSIS_ASSURANCE_STATEMENT, type CustomAnalysisDimensionsProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { CUSTOM_DIMENSION_TEMPLATE, CUSTOM_DIMENSION_TITLE } from '../support/custom-analysis.js';
-import { execPre74Fixture, restoreCustomAnalysisPredecessor } from '../support/pre74-schema.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 
 // One explicit model-request capability per test application.
@@ -431,56 +427,3 @@ describe('baseline and custom analysis on the same launch', () => {
   }, 180_000);
 });
 
-describe('schema revision 82', () => {
-  it.each([TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION])('rebuilds revision %i Result Set relations byte for byte, adds dimensions empty, and refuses a terminal store without them', async (predecessor) => {
-    // Synchronized with #89: imported-Skill update ledgers follow revision 82 without rebuilding its relations.
-    expect(LATEST_SCHEMA_VERSION).toBe(116);
-    let bookId = '';
-    await withBook(async (book) => {
-      bookId = book.bookId;
-      // A baseline Result Set Revision the rebuild must carry: the fixture's base answers the first baseline.
-      let progress = book.store.createBaselineAnalysisPreparationWork(book.bookId, '对当前书稿执行基线稿件分析，形成覆盖全部结构单元的结果集修订版。', null, launchPolicy);
-      while (!progress.done) progress = book.store.advanceBaselineAnalysisPreparationWork(progress.workId!);
-      const authorized = book.store.authorizeBaselineAnalysis(book.bookId, progress.projection!.taskIntent!.taskIntentId, progress.projection!.planEnvelope!.digest);
-      book.owner.admitAndDispatch(authorized.dispatchRunRecordId!, authorized.ledger);
-      await book.owner.whenIdle();
-      expect(book.store.inspectBaselineAnalysis(book.bookId).resultSetRevision).not.toBeNull();
-    });
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const plant = new DatabaseSync(path);
-    constructPre94PolicyEncoding(plant);
-    const sets = plant.prepare('SELECT rowid, * FROM analysis_result_sets ORDER BY rowid').all();
-    const revisions = plant.prepare('SELECT rowid, * FROM analysis_result_set_revisions ORDER BY rowid').all();
-    const plans = plant.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all();
-    expect(sets).toHaveLength(1);
-    restoreCustomAnalysisPredecessor(plant);
-    execPre74Fixture(plant, `PRAGMA user_version = ${predecessor}`);
-    expect((plant.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_result_sets'").get() as { sql: string }).sql).toBe(ANALYSIS_RESULT_SET_REVISION_81_SQL.analysis_result_sets);
-    plant.close();
-    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      expect(reopened.inspectBaselineAnalysis(bookId).resultSetRevision).not.toBeNull();
-      reopened.markCleanShutdown();
-    } finally {
-      reopened.close();
-    }
-    const migrated = new DatabaseSync(path);
-    try {
-      // Synchronized with #89: revision 83 adds imported-Skill update ledgers after this revision's migration.
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: LATEST_SCHEMA_VERSION });
-      for (const table of ['analysis_result_sets', 'analysis_result_set_revisions'] as const) {
-        expect((migrated.prepare(`SELECT sql FROM sqlite_schema WHERE name = '${table}'`).get() as { sql: string }).sql).toBe(ANALYSIS_RESULT_SET_SCHEMA_SQL[table]);
-      }
-      expect(JSON.stringify(migrated.prepare('SELECT rowid, * FROM analysis_result_sets ORDER BY rowid').all()) === JSON.stringify(sets)).toBe(true);
-      expect(JSON.stringify(migrated.prepare('SELECT rowid, * FROM analysis_result_set_revisions ORDER BY rowid').all()) === JSON.stringify(revisions)).toBe(true);
-      expect(JSON.stringify(migrated.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all()) === JSON.stringify(plans)).toBe(true);
-      for (const table of Object.keys(CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL)) {
-        expect((migrated.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n).toBe(0);
-      }
-      migrated.exec('DROP TABLE custom_analysis_dimension_states');
-    } finally {
-      migrated.close();
-    }
-    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
-  }, 180_000);
-});

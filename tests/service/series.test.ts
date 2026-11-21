@@ -1,11 +1,11 @@
-import { execPre74Fixture, expectedSchema75 } from '../support/pre74-schema.js';
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SERIES_SCHEMA_SQL, SERIES_TRIGGER_SQL, SeriesError, SeriesLedger, initializeSeriesSchema, seriesMembershipImpact } from '../../src/service/series.js';
+import { SERIES_SCHEMA_SQL, SERIES_TRIGGER_SQL, SeriesError, SeriesLedger, seriesMembershipImpact } from '../../src/service/series.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EVALUATION_CALIBRATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   MAX_FRAME_BYTES,
   MAX_BOOK_SERIES_MEMBERSHIPS,
@@ -16,7 +16,6 @@ import {
   type SeriesImpactGroupProjection,
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 书系 › 成员与共享范围 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012; ADR 0002,
 // ADR 0036) over the real store: 新建书系, the four-part Series Membership Impact Preview, 加入书系 and 移出书系 against the
@@ -251,8 +250,7 @@ describe('书系 over the real store', () => {
     const database = new DatabaseSync(':memory:');
     try {
       database.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT;');
-      initializeSeriesSchema(database);
-      initializeSeriesSchema(database);
+      createBaselineRelations(database, SERIES_SCHEMA_SQL);
       const ledger = new SeriesLedger(database);
       const bookId = randomUUID();
       database.prepare('INSERT INTO books(book_id) VALUES (?)').run(bookId);
@@ -326,46 +324,6 @@ describe('书系 over the real store', () => {
       tampered.markCleanShutdown();
     } finally {
       tampered.close();
-    }
-  }, 120_000);
-
-  it('adds revision 52 to a revision-51 store with nothing else moved', async () => {
-    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      emptyBook(first, '早先的图书');
-      first.markCleanShutdown();
-    } finally {
-      first.close();
-    }
-    const schemaOf = (database: DatabaseSync): Array<{ name: string; sql: string }> =>
-      database.prepare("SELECT name, sql FROM sqlite_schema WHERE type IN ('table', 'trigger', 'index') AND sql IS NOT NULL ORDER BY name").all() as Array<{ name: string; sql: string }>;
-    const plant = new DatabaseSync(databasePath());
-    let before: Array<{ name: string; sql: string }>;
-    try {
-      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; PRAGMA user_version = ${EVALUATION_CALIBRATION_SCHEMA_VERSION};`);
-      before = schemaOf(plant);
-      // Taken before the kind-coupled relations go back to revision 58: revision 59 rebuilds them to these exact shapes again.
-      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
-    } finally {
-      plant.close();
-    }
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      expect(migrated.inspectSeriesList()).toEqual({ series: [], nextCursor: null });
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    const database = new DatabaseSync(databasePath(), { readOnly: true });
-    try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      const after = schemaOf(database);
-      expect(after.filter((entry) => !/^(series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts|dialogue_|readers_report_|captured_procedure|review_run_procedure_pins|developer_capability_proposal|evaluation_rewrite_|writing_|material_index_|analysis_outcome_resolutions)/u.test(entry.name))).toEqual(expectedSchema75(before!));
-      expect(after.filter((entry) => SERIES_TABLES.includes(entry.name)).map((entry) => entry.sql))
-        .toEqual(SERIES_TABLES.slice().sort().map((table) => SERIES_SCHEMA_SQL[table as keyof typeof SERIES_SCHEMA_SQL]));
-      expect(counts()).toEqual({ series: 0, series_membership_changes: 0 });
-    } finally {
-      database.close();
     }
   }, 120_000);
 

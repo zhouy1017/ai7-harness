@@ -89,9 +89,7 @@ Wave 23's remaining store groups use the same host pattern. Private callbacks st
 | [review-handlers.ts](../../src/main/review-handlers.ts) | Review workspace, execution, findings and reports |
 | [deliverables-handlers.ts](../../src/main/deliverables-handlers.ts) | Deliverables, maintenance, production documents and delivery packages |
 
-[bounded-schema-sql.ts](../../src/service/manuscript/bounded-schema-sql.ts) holds the bounded manuscript store's existing schema SQL, expected historical shapes and foreign-key signatures; [bounded-manuscript.ts](../../src/service/bounded-manuscript.ts) re-exports its public SQL constants.
-
-[bounded-schema-check.ts](../../src/service/manuscript/bounded-schema-check.ts) holds the same store's exact table, index, trigger and search-schema checks, including its existing column-signature cache; initialization, migrations and the store class remain in the hub.
+[bounded-schema-sql.ts](../../src/service/manuscript/bounded-schema-sql.ts) holds the manuscript core's final-shape SQL (#1634). [baseline-schema.ts](../../src/service/baseline-schema.ts) is the one creation path and exact check of the whole store: it lists every owner module's final-shape definitions once, builds a new store at revision 117 from them, and checks a store at that revision object by object. [append-only.ts](../../src/service/append-only.ts) writes every ledger's two refusal triggers. There is no migration chain.
 
 ## Tooling ownership
 

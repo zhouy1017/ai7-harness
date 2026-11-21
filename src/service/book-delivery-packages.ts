@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -57,52 +58,14 @@ export const BOOK_DELIVERY_PACKAGE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const BOOK_DELIVERY_PACKAGE_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(BOOK_DELIVERY_PACKAGE_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'BOOK_DELIVERY_PACKAGE_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'BOOK_DELIVERY_PACKAGE_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const BOOK_DELIVERY_PACKAGE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  book_delivery_package_versions: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'prior_version_id>book_delivery_package_versions.package_version_id:NO ACTION/NO ACTION/NONE',
-    'publication_version_id>publication_versions.publication_version_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const BOOK_DELIVERY_PACKAGE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  book_delivery_package_versions: 'BOOK_DELIVERY_PACKAGE_LEDGER_IMMUTABLE',
+});
 
 export class BookDeliveryPackageSchemaError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
     this.name = 'BookDeliveryPackageSchemaError';
-  }
-}
-
-/** Revision 39's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
-export function initializeBookDeliveryPackageSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'book_delivery_package_versions'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(BOOK_DELIVERY_PACKAGE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(BOOK_DELIVERY_PACKAGE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Book delivery package schema rollback failed.');
-    }
-    throw error;
-  }
-  if (db.prepare('PRAGMA foreign_key_check').all().length !== 0) {
-    throw new BookDeliveryPackageSchemaError('SCHEMA_INVALID', '图书交付包的关系与已有记录不一致。');
   }
 }
 

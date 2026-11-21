@@ -1,3 +1,4 @@
+import { appendOnly } from '../append-only.js';
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
@@ -45,44 +46,11 @@ export const IMPORT_STRUCTURE_SCHEMA_SQL = {
   ) STRICT`,
 } as const;
 
-export const IMPORT_STRUCTURE_FOREIGN_KEYS = {
-  staged_import_paragraph_pieces: ['draft_id>staged_import_snapshots.draft_id:NO ACTION/CASCADE/NONE'],
-  staged_import_structure_choices: ['draft_id>staged_import_snapshots.draft_id:NO ACTION/CASCADE/NONE'],
-  manuscript_import_lineage: [
-    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
-    'first_block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
-    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-} as const;
-
 /** Committed lineage is a record of the import that made it: appended once, never rewritten. */
-export const IMPORT_STRUCTURE_TRIGGER_SQL: Readonly<Record<string, string>> = {
-  manuscript_import_lineage_no_update: `CREATE TRIGGER manuscript_import_lineage_no_update
-    BEFORE UPDATE ON manuscript_import_lineage
-    BEGIN
-      SELECT RAISE(ABORT, 'IMPORT_RETENTION_RECORD_IMMUTABLE');
-    END`,
-  manuscript_import_lineage_no_delete: `CREATE TRIGGER manuscript_import_lineage_no_delete
-    BEFORE DELETE ON manuscript_import_lineage
-    BEGIN
-      SELECT RAISE(ABORT, 'IMPORT_RETENTION_RECORD_IMMUTABLE');
-    END`,
-};
+export const IMPORT_STRUCTURE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  manuscript_import_lineage: 'IMPORT_RETENTION_RECORD_IMMUTABLE',
+});
 
 export function hasImportStructureSchema(db: DatabaseSync): boolean {
   return db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_import_lineage'").get() !== undefined;
-}
-
-/** Revision 102's step: the three relations and the lineage triggers, in one transaction. */
-export function initializeImportStructureSchema(db: DatabaseSync): void {
-  if (hasImportStructureSchema(db)) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(IMPORT_STRUCTURE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(IMPORT_STRUCTURE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
 }

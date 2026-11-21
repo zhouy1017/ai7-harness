@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import type { FastRoleProvenance } from './fast-role/fast-role-execution.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -98,25 +99,10 @@ export const MATERIAL_INDEX_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const MATERIAL_INDEX_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(MATERIAL_INDEX_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const MATERIAL_INDEX_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  material_index_builds: ['material_id>library_materials.material_id:NO ACTION/NO ACTION/NONE'],
-  material_index_segments: ['index_id>material_index_builds.index_id:NO ACTION/NO ACTION/NONE'],
-};
+export const MATERIAL_INDEX_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  material_index_builds: 'MATERIAL_INDEX_LEDGER_IMMUTABLE',
+  material_index_segments: 'MATERIAL_INDEX_LEDGER_IMMUTABLE',
+});
 
 /**
  * Revision 76's relations (Issue #892): the similarity vectors of a build's paragraphs — one per paragraph per provider
@@ -148,28 +134,10 @@ export const MATERIAL_INDEX_LAYER_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const MATERIAL_INDEX_LAYER_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const MATERIAL_INDEX_LAYER_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  material_index_vectors: ['index_id>material_index_builds.index_id:NO ACTION/NO ACTION/NONE'],
-  material_index_translations: ['index_id>material_index_builds.index_id:NO ACTION/NO ACTION/NONE'],
-};
-
-/** The revision that adds them; a store stamped at or above it must already hold them exactly. */
-const MATERIAL_INDEX_LAYER_REVISION = 76;
+export const MATERIAL_INDEX_LAYER_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  material_index_vectors: 'MATERIAL_INDEX_LEDGER_IMMUTABLE',
+  material_index_translations: 'MATERIAL_INDEX_LEDGER_IMMUTABLE',
+});
 
 /** Revision 84: one bounded, payload-free record per actual translation batch attempt; no invented historical attempts. */
 export const MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL = {
@@ -182,34 +150,9 @@ export const MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL = {
   sha256 TEXT NOT NULL CHECK(length(sha256) = 64)
 ) STRICT`,
 } as const;
-export const MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL = {
-  material_translation_attempts_no_update: `CREATE TRIGGER material_translation_attempts_no_update
-    BEFORE UPDATE ON material_translation_attempts
-    BEGIN
-      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
-    END`,
-  material_translation_attempts_no_delete: `CREATE TRIGGER material_translation_attempts_no_delete
-    BEFORE DELETE ON material_translation_attempts
-    BEGIN
-      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
-    END`,
-} as const;
-export const MATERIAL_TRANSLATION_ATTEMPT_FOREIGN_KEYS = {
-  material_translation_attempts: ['index_id>material_index_builds.index_id:NO ACTION/NO ACTION/NONE'],
-} as const;
-
-export function initializeMaterialTranslationAttemptSchema(db: DatabaseSync, version: number): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'material_translation_attempts'").get() !== undefined) {
-    validateMaterialTranslationAttemptSchema(db);
-    return;
-  }
-  requireIndex(version < 84, 'SCHEMA_INVALID', '来源译文尝试记录表缺失。');
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of [...Object.values(MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL), ...Object.values(MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL)]) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
-}
+export const MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  material_translation_attempts: 'MATERIAL_INDEX_LEDGER_IMMUTABLE',
+});
 
 /** Closed metadata only; shared by persisted connection tests and translation attempt readers. */
 export function isModelTextAttemptProvenance(value: unknown): value is ModelTextAttemptProvenance {
@@ -328,55 +271,6 @@ type SqlRow = Record<string, SQLOutputValue>;
 
 function foldSql(sql: string): string {
   return sql.replace(/\s+/gu, ' ').trim();
-}
-
-/**
- * Revision 76's relations (Issue #892), created once before the version is stamped: a store that predates them gains two
- * empty relations and nothing existing moves. A store that holds them must hold them exactly; one stamped 76 or later
- * without them is refused.
- */
-export function initializeMaterialIndexLayerSchema(db: DatabaseSync, version: number): void {
-  const present = Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL).filter((table) => db.prepare(LAYER_TABLE_PRESENT).get(table) !== undefined);
-  if (present.length > 0) {
-    validateMaterialIndexLayerSchema(db);
-    return;
-  }
-  requireIndex(version < MATERIAL_INDEX_LAYER_REVISION, 'SCHEMA_INVALID', '资料索引的相似向量与来源译文表缺失。');
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(MATERIAL_INDEX_LAYER_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(MATERIAL_INDEX_LAYER_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Material index layer schema rollback failed.');
-    }
-    throw error;
-  }
-}
-
-/** Every relation and trigger of revision 76 exactly as written, and nothing of it missing. */
-export function validateMaterialIndexLayerSchema(db: DatabaseSync): void {
-  for (const [name, sql] of [...Object.entries(MATERIAL_INDEX_LAYER_SCHEMA_SQL), ...Object.entries(MATERIAL_INDEX_LAYER_TRIGGER_SQL)]) {
-    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name = ?').get(name) as SqlRow | undefined;
-    requireIndex(row !== undefined && typeof row.sql === 'string' && foldSql(row.sql) === foldSql(sql), 'SCHEMA_INVALID', '资料索引的相似向量与来源译文表结构不兼容。');
-  }
-}
-
-/** Revision 67's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
-export function initializeMaterialIndexSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(MATERIAL_INDEX_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Material index schema rollback failed.');
-    }
-    throw error;
-  }
 }
 
 // ---- the segment layer: sentences, and the language ---------------------------------------------------------------

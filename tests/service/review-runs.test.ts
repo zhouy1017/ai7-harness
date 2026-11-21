@@ -1,4 +1,3 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { startQuickTasks } from '../support/quick-tasks.js';
@@ -8,7 +7,6 @@ import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-un
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { withHouseReviewPreferenceFor } from '../support/policy-rules.js';
 import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
 import { HOUSE_PREFERENCE_CLOSED, HOUSE_PREFERENCE_NOT_RULE } from '../../src/service/task-plan.js';
@@ -488,29 +486,6 @@ function selectionContext(session: Session, book: Book) {
   return { at, on };
 }
 
-/** Only coverage of the genuine revision-84 review-contract widening; the database suites start elsewhere. */
-function revision84ReviewStore(): Array<{ table: string; rows: unknown[] }> {
-  const before: Array<{ table: string; rows: unknown[] }> = [];
-  return withDatabase((db) => {
-    constructPre94PolicyEncoding(db);
-    execPre74Fixture(db, 'PRAGMA user_version = 95');
-    db.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE');
-    for (const table of ['analysis_task_intents', 'analysis_result_set_revisions', 'analysis_plan_adaptations']) {
-      const sql = String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)!.sql);
-      const triggers = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ?").all(table);
-      before.push({ table, rows: db.prepare(`SELECT canonical_json, sha256 FROM ${table} ORDER BY rowid`).all() });
-      db.exec(`CREATE TEMP TABLE old_review_rows AS SELECT * FROM ${table}; DROP TABLE ${table};`);
-      db.exec(sql.replaceAll("'ai7.editorial-review/1', 'ai7.editorial-review/2'", "'ai7.editorial-review/1'")
-        .replaceAll("contract_version IN ('ai7.editorial-review/1')", "contract_version = 'ai7.editorial-review/1'")
-        .replace("adaptation_class IN ('safe-retry', 'contract-retry')", "adaptation_class = 'safe-retry'"));
-      db.exec(`INSERT INTO ${table} SELECT * FROM temp.old_review_rows; DROP TABLE temp.old_review_rows;`);
-      for (const trigger of triggers) db.exec(String(trigger.sql));
-    }
-    execPre74Fixture(db, 'DROP TABLE review_excluded_findings; PRAGMA user_version = 84; COMMIT');
-    return before;
-  });
-}
-
 /** The editor's mark actions used to arrange report versioning. */
 function handleReviewFindings(session: Session, book: Book, run: ReviewRunProjection) {
   const [annotation, anotherAnnotation] = run.findings.filter((finding) => finding.categoryId === STYLE);
@@ -800,33 +775,12 @@ describe('a Review Run over the real store on exact sample1', () => {
     } finally { await close(current); }
   }, 300_000);
 
-  it('widens a v1 revision-84 store without changing its recorded bytes (#1084)', async () => {
-    const legacy = await open('review-overlap-authored');
-    const book = await importBook(legacy);
-    // This retained v1 fixture closes no units under the current outcome rule (#1307).
-    try { expect((await authorizeAndDrive(legacy, book, prepare(legacy, book, [TYPOS], WHOLE))).state).toBe('failed'); }
-    finally { await close(legacy); }
-    const before = revision84ReviewStore();
-    const session = await open('review-overlap-authored');
-    try {
-      // Inherited at integration-24: this two-paragraph synthetic fixture has no sample1 request entries.
-      expect(workspace(session, book).runs[0]!.state).toBe('failed');
-      const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
-      expect(projection.resultSetRevision).toBeNull();
-      expect(projection.run!.transitions.some((entry) => entry.detail?.includes('确定性夹具没有该单元与请求摘要对应的响应'))).toBe(true);
-      withDatabase((after) => {
-        for (const snapshot of before) expect(after.prepare(`SELECT canonical_json, sha256 FROM ${snapshot.table} ORDER BY rowid`).all()).toEqual(snapshot.rows);
-        expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-      });
-    } finally { await close(session); }
-  }, 300_000);
-
   it('refuses a terminal store missing its excluded findings relation (#1084)', async () => {
     const session = await open('review-overlap-authored');
     await close(session);
     const broken = database();
     try { broken.exec('DROP TABLE review_excluded_findings'); } finally { broken.close(); }
-    await expect(open('review-overlap-authored')).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
+    await expect(open('review-overlap-authored')).rejects.toMatchObject({ code: 'SCHEMA_INVALID' });
   }, 300_000);
 
   it('counts a safe retry and one later contract retry separately, with no third contract retry (#1084)', async () => {

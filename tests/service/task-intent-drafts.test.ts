@@ -1,7 +1,4 @@
-import { FACTUAL_RANGE_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError, type DraftPreparation } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
-import { ANALYSIS_LEDGER_REVISION_79_SQL, ANALYSIS_LEDGER_SCHEMA_SQL, LATEST_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
 import { TASK_INTENT_DRAFT_SCHEMA_SQL, draftAnswer, goalFromText, resolveDraft, type DraftResolutionFacts } from '../../src/service/task-intent-drafts.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
@@ -21,7 +17,6 @@ import {
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { restoreTaskIntentDraftPredecessor } from '../support/pre74-schema.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { WRITING_FIXTURE_IDENTITY, WRITING_REQUEST } from '../support/writing-task.js';
 
@@ -626,60 +621,3 @@ describe('the kind a draft becomes, decided without a model', () => {
   });
 });
 
-describe('schema revision 80', () => {
-  it('rebuilds a revision-79 store\'s Task Intents with every row byte for byte and adds the draft relations empty', async () => {
-    expect(TASK_INTENT_DRAFT_SCHEMA_VERSION).toBe(80);
-
-    const store = await open();
-    let bookId: string;
-    try {
-      const book = await importBook(store, 'L2 修订版 80', true);
-      bookId = book.bookId;
-      let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
-      while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const plant = new DatabaseSync(path);
-    constructPre94PolicyEncoding(plant);
-    const intents = plant.prepare('SELECT rowid, * FROM analysis_task_intents ORDER BY rowid').all();
-    const plans = plant.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all();
-    expect(intents).toHaveLength(1);
-    restoreTaskIntentDraftPredecessor(plant);
-    execPre74Fixture(plant, 'PRAGMA user_version = 79');
-    expect((plant.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() as { sql: string }).sql).toBe(ANALYSIS_LEDGER_REVISION_79_SQL.analysis_task_intents);
-    plant.close();
-    const reopened = await open();
-    try {
-      expect(reopened.inspectBaselineAnalysis(bookId!).state).toBe('prepared');
-      reopened.markCleanShutdown();
-    } finally {
-      reopened.close();
-    }
-    const migrated = new DatabaseSync(path);
-    try {
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: LATEST_SCHEMA_VERSION });
-      expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() as { sql: string }).sql).toBe(FACTUAL_RANGE_TASK_INTENTS_SQL);
-      expect(migrated.prepare('SELECT rowid, * FROM analysis_task_intents ORDER BY rowid').all()).toEqual(intents);
-      expect(migrated.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all()).toEqual(plans);
-      for (const table of Object.keys(TASK_INTENT_DRAFT_SCHEMA_SQL)) expect(migrated.prepare(`SELECT count(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
-      // The rebuilt CHECKs: a bounded goal for every kind, the custom analysis family with its contract and the baseline modes only.
-      migrated.exec('PRAGMA foreign_keys = OFF');
-      const insert = (kind: string, contract: string, mode: string, goal: string): void => {
-        migrated.prepare(`INSERT INTO analysis_task_intents(task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256, mode)
-          VALUES (?, ?, ?, ?, ?, 'now', '{}', ?, ?)`).run(randomUUID(), bookId!, kind, contract, goal, randomUUID().replaceAll('-', '').padEnd(64, '0'), mode);
-      };
-      migrated.exec('BEGIN');
-      expect(() => insert('custom-analysis/names', 'ai7.custom-analysis/1', 'first-baseline', '自定义')).not.toThrow();
-      expect(() => insert('custom-analysis/names', 'ai7.custom-analysis/1', 'review-first', '自定义')).toThrow(/CHECK/u);
-      expect(() => insert('custom-analysis/Names', 'ai7.custom-analysis/1', 'first-baseline', '自定义')).toThrow(/CHECK/u);
-      expect(() => insert('baseline-manuscript-analysis', 'ai7.baseline-manuscript-analysis/1', 'first-baseline', '字'.repeat(401))).toThrow(/CHECK/u);
-      expect(() => insert('baseline-manuscript-analysis', 'ai7.baseline-manuscript-analysis/1', 'first-baseline', '')).toThrow(/CHECK/u);
-      migrated.exec('ROLLBACK');
-    } finally {
-      migrated.close();
-    }
-  }, 300_000);
-});

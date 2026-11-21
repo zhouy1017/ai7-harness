@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { one } from './store-operation-support.js';
 import { dialogueMemoryContext } from './learning/editorial-memory.js';
 import { decisionResolvesConflict } from './proposal-conflicts.js';
@@ -85,29 +86,10 @@ export const HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL = {
   PRIMARY KEY(review_run_id, task_intent_id)
 ) STRICT`,
 } as const;
-export const HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL).flatMap((table) => ['update', 'delete'].map((op) => [
-    `${table}_no_${op}`, `CREATE TRIGGER ${table}_no_${op} BEFORE ${op.toUpperCase()} ON ${table}
-    BEGIN SELECT RAISE(ABORT, 'HOUSE_REVIEW_PREFERENCE_IMMUTABLE'); END`,
-  ])),
-);
-export const HOUSE_REVIEW_PREFERENCE_FOREIGN_KEYS = {
-  house_review_preference_versions: ['supersedes_version_id>house_review_preference_versions.version_id:NO ACTION/NO ACTION/NONE'],
-  review_run_preference_pins: ['review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE', 'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE'],
-};
-
-export function initializeHouseReviewPreferenceSchema(db: DatabaseSync, version: number): void {
-  if (version >= 79 || Object.keys(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL).some((name) => db.prepare("SELECT 1 FROM sqlite_schema WHERE name = ?").get(name) !== undefined)) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}
+export const HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  house_review_preference_versions: 'HOUSE_REVIEW_PREFERENCE_IMMUTABLE',
+  review_run_preference_pins: 'HOUSE_REVIEW_PREFERENCE_IMMUTABLE',
+});
 
 export interface HousePreferenceSource {
   readonly bookId: string;

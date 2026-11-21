@@ -1,3 +1,4 @@
+import { appendOnly } from '../append-only.js';
 import { reviewSynthesisOmissionLabel, reviewSynthesisOrdinalRanges } from '../../shared/review-synthesis-wording.js';
 import { readClosedBaselineSynopses, reviewSynthesisRequestBytes } from '../analysis/baseline-synopsis.js';
 import { REVIEW_UNCHECKED_DISCLOSURE } from '../../shared/review-basis.js';
@@ -14,7 +15,6 @@ import { compositeReviewRun, type CompositeReviewRun } from '../procedures/compo
 import { procedureContent } from '../procedures/execution.js';
 import { compositeMembers, readProcedurePlanView, resolveProcedureForKind } from '../procedures/composite.js';
 import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
-import { LOCAL_REVIEW_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
 import { LocalCheckError, freezeLocalPlan, freezeLocalPlanV3, freezeLocalPlanV4, isLocalTablePlan, numeralBasis, validLocalOptions, validateAnyLocalPlan, type AnyLocalCheckPlan, type LocalCheckBlock } from './deterministic/plan.js';
 import { exactLocalCandidateIds, checkLocalPlan, anyLocalCandidateNote, mechanicalReplacement, validateLocalResultV3, type AnyLocalCheckResult } from './deterministic/checker.js';
 import { LOCAL_CHECK_CATEGORY, LOCAL_CHECK_PROCEDURE, LOCAL_CHECK_LIMITATION, LOCAL_TABLE_LIMITATION, LOCAL_RULE_IDS } from './deterministic/rules.js';
@@ -215,9 +215,9 @@ import {
  * - `quality_signals`: the minimal Quality Signal an ignored finding records (REV-004).
  * - `review_reports`: the versioned 审阅报告 (REV-009).
  *
- * Nothing existing moves (ADR 0079: an additive revision keeps the same Data Version). The relations are
- * created shape-detected in `EditorialStore.open` before `initializeTaskAuthorizationSchema` stamps the
- * version, exactly as revisions 21 to 23 add theirs, and join the exact-schema validator the same way.
+ * The storage baseline (#1634) creates these relations once, with every other, when it builds an empty store
+ * (`createStoreAtBaseline`); an open checks them exactly against the baseline (`requireBaselineSchema`)
+ * and creates nothing.
  */
 /** Revision 90: a local stage has no model Run or analysis-result FK. Old event SQL is untouched. */
 export const LOCAL_STAGE_SCHEMA_SQL = { review_local_stage_artifacts: `CREATE TABLE review_local_stage_artifacts (
@@ -232,21 +232,10 @@ export const LOCAL_STAGE_SCHEMA_SQL = { review_local_stage_artifacts: `CREATE TA
   PRIMARY KEY(review_run_id, sequence),
   UNIQUE(review_run_id, attempt_id, state)
 ) STRICT` } as const;
-export const LOCAL_STAGE_TRIGGER_SQL = Object.fromEntries(['update', 'delete'].map((operation) => [
-  `review_local_stage_artifacts_no_${operation}`,
-  `CREATE TRIGGER review_local_stage_artifacts_no_${operation} BEFORE ${operation.toUpperCase()} ON review_local_stage_artifacts
-    BEGIN SELECT RAISE(ABORT, 'REVIEW_LOCAL_STAGE_IMMUTABLE'); END`,
-]));
-export const LOCAL_STAGE_FOREIGN_KEYS = { review_local_stage_artifacts: ['review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE'] };
+export const LOCAL_STAGE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  review_local_stage_artifacts: 'REVIEW_LOCAL_STAGE_IMMUTABLE',
+});
 
-export function initializeLocalStageSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'review_local_stage_artifacts'").get() !== undefined) return;
-  requireReview(Number(db.prepare('PRAGMA user_version').get()?.user_version) < LOCAL_REVIEW_SCHEMA_VERSION, 'SCHEMA_INVALID', '本地工序记录表缺失。');
-  transact(db, () => {
-    db.exec(LOCAL_STAGE_SCHEMA_SQL.review_local_stage_artifacts);
-    for (const sql of Object.values(LOCAL_STAGE_TRIGGER_SQL)) db.exec(sql);
-  });
-}
 type LocalStageState = 'started' | 'completed' | 'materialized' | 'interrupted' | 'cancelled' | 'failed' | 'refused';
 interface LocalStageArtifact {
   schema: 'ai7.review.local-stage-artifact/1' | 'ai7.review.local-stage-artifact/3'; reviewRunId: string; categoryId: typeof LOCAL_CHECK_CATEGORY;
@@ -465,54 +454,16 @@ export const REVIEW_RUN_SCHEMA_SQL = {
 } as const;
 
 /** Every Review Run relation is a ledger: a row is appended once and never rewritten or removed. */
-export const REVIEW_RUN_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(REVIEW_RUN_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'REVIEW_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'REVIEW_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the seven relations, in the exact-schema validator's own spelling. */
-export const REVIEW_RUN_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  review_runs: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
-    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
-    'manuscript_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-  review_run_authorizations: ['review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE'],
-  review_run_category_events: [
-    'result_set_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE',
-    'run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE',
-  ],
-  review_excluded_findings: ['result_set_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE', 'review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE'],
-  review_findings: [
-    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
-    'mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE',
-    'review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE',
-  ],
-  review_finding_dispositions: [
-    'finding_id>review_findings.finding_id:NO ACTION/NO ACTION/NONE',
-    'review_run_id>review_findings.review_run_id:NO ACTION/NO ACTION/NONE',
-  ],
-  quality_signals: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'disposition_id>review_finding_dispositions.disposition_id:NO ACTION/NO ACTION/NONE',
-    'finding_id>review_findings.finding_id:NO ACTION/NO ACTION/NONE',
-    'mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE',
-    'review_run_id>review_findings.review_run_id:NO ACTION/NO ACTION/NONE',
-  ],
-  review_reports: ['review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE'],
-};
+export const REVIEW_RUN_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  review_runs: 'REVIEW_LEDGER_IMMUTABLE',
+  review_run_authorizations: 'REVIEW_LEDGER_IMMUTABLE',
+  review_run_category_events: 'REVIEW_LEDGER_IMMUTABLE',
+  review_excluded_findings: 'REVIEW_LEDGER_IMMUTABLE',
+  review_findings: 'REVIEW_LEDGER_IMMUTABLE',
+  review_finding_dispositions: 'REVIEW_LEDGER_IMMUTABLE',
+  quality_signals: 'REVIEW_LEDGER_IMMUTABLE',
+  review_reports: 'REVIEW_LEDGER_IMMUTABLE',
+});
 
 export class ReviewRunError extends Error {
   constructor(readonly code: string, message: string) {
@@ -538,37 +489,6 @@ export function selectionOutsideLine(count: number): string {
 /** A 当前选区 Run names the reading ranges and actual reasons for its excluded findings. */
 export function selectionExcludedLine(count: number, reasonLabels: ReadonlyArray<string>): string {
   return `所读范围内另有 ${count} 条发现未采用，列在排除附录中：${[...new Set(reasonLabels)].join('；')}`;
-}
-
-/**
- * The seven relations and their ledger triggers. Created once and never rebuilt: a store that predates
- * them gains seven empty relations and nothing existing moves. Like revisions 21 to 23 this runs before
- * the version is stamped in `task-authorization.ts` and is shape-detected, so a store that already has
- * them does no work here. On a store older than revision 15 the analysis relations two of them refer to
- * are created after this, by the version stamp's own migration; SQLite resolves a reference when a row
- * uses it, and no row is written before both exist.
- */
-export function initializeReviewRunSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'review_runs'").get();
-  if (existing !== undefined && db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'review_excluded_findings'").get() !== undefined) return;
-  requireReview(existing === undefined || Number(db.prepare('PRAGMA user_version').get()?.user_version) < REVIEW_CONTRACT_SCHEMA_VERSION,
-    'SCHEMA_INVALID', '数据库缺少本版本的审阅排除记录。');
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    if (existing === undefined) {
-      for (const sql of Object.values(REVIEW_RUN_SCHEMA_SQL)) db.exec(sql);
-      for (const sql of Object.values(REVIEW_RUN_TRIGGER_SQL)) db.exec(sql);
-    } else {
-      db.exec(REVIEW_RUN_SCHEMA_SQL.review_excluded_findings);
-      db.exec(REVIEW_RUN_TRIGGER_SQL['review_excluded_findings_no_update']!);
-      db.exec(REVIEW_RUN_TRIGGER_SQL['review_excluded_findings_no_delete']!);
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-  requireReview(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
 // ---- the store ------------------------------------------------------------------------------------

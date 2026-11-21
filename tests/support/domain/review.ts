@@ -1,3 +1,4 @@
+import { createBaselineRelations } from '../baseline-relations.js';
 import { BaselineAnalysisStore } from '../../../src/service/analysis/baseline-analysis-store.js';
 import { factualReviewKindDefinition } from '../../../src/service/analysis/kind-definition.js';
 import { EditorialMarkStore } from '../../../src/service/editorial-marks.js';
@@ -5,8 +6,8 @@ import { RecentCache } from '../../../src/service/recent-cache.js';
 import { ReviewRunStore } from '../../../src/service/review/review-runs.js';
 import { reviewLedgerOf, type ReviewOperationsHost } from '../../../src/service/review/review-operations.js';
 import { DatabaseSync } from 'node:sqlite';
-import { initializeReviewRunSchema, initializeLocalStageSchema, REVIEW_RUN_SCHEMA_SQL } from '../../../src/service/review/review-runs.js';
-import { initializeRunSynthesisSchema } from '../../../src/service/review/run-synthesis-storage.js';
+import { LOCAL_STAGE_SCHEMA_SQL, REVIEW_RUN_SCHEMA_SQL } from '../../../src/service/review/review-runs.js';
+import { RUN_SYNTHESIS_SCHEMA_SQL } from '../../../src/service/review/run-synthesis-storage.js';
 
 export const REVIEW_DOMAIN_TABLES = [...Object.keys(REVIEW_RUN_SCHEMA_SQL), 'review_local_stage_artifacts', 'review_run_synthesis'];
 /** external-owner stub — not a schema or provenance proof. Parity checks every column's type, NOT NULL and key position. */
@@ -38,9 +39,9 @@ export function reviewDatabase(): DatabaseSync {
   try {
     db.exec('PRAGMA foreign_keys=ON');
     for (const [table, columns] of Object.entries(REVIEW_EXTERNAL_STUBS)) db.exec(`CREATE TABLE ${table} (${columns}) STRICT`);
-    initializeReviewRunSchema(db);
-    initializeLocalStageSchema(db);
-    initializeRunSynthesisSchema(db);
+    createBaselineRelations(db, REVIEW_RUN_SCHEMA_SQL);
+    createBaselineRelations(db, LOCAL_STAGE_SCHEMA_SQL);
+    createBaselineRelations(db, RUN_SYNTHESIS_SCHEMA_SQL);
     return db;
   } catch (error) { db.close(); throw error; }
 }

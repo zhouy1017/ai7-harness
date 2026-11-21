@@ -29,16 +29,6 @@ async function unpack(): Promise<void> {
   }
 }
 
-// The admitted sample1 fixture supplies real source objects, review results and marks. Upgrade it
-// only in test setup; inventoryStore itself must never open EditorialStore or migrate anything.
-async function seed(): Promise<void> {
-  await unpack();
-  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  try { await importSample1(store); } finally { store.close(); }
-  const db = new DatabaseSync(path);
-  try { seedEntities(db); } finally { db.close(); }
-}
-
 async function importSample1(store: EditorialStore): Promise<void> {
   const manuscript = join(roots.inputRoot, 'sample1.docx');
   await composeRevisedDocx(manuscript, { source: ADMITTED_BASELINE_DOCX, title: 'sample1', paragraphs: [{ runs: [{ text: { block: 21 } }] }] });
@@ -47,6 +37,15 @@ async function importSample1(store: EditorialStore): Promise<void> {
   const commitId = randomUUID();
   await store.commitNewBookImport({ draftId: draft.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
   await store.acknowledgeImportCompletion(commitId);
+}
+
+const POLICY_CLASSES: readonly MergeTablePolicy[] = ['seed', 'owned', 'dependent', 'shared', 'excluded', 'transient', 'house', 'derived'];
+
+/** The 0.7.1 package store as it was packed, written to directly (#1634 review F7): no open, no migration. */
+async function seed(): Promise<void> {
+  await unpack();
+  const db = new DatabaseSync(path);
+  try { seedEntities(db); } finally { db.close(); }
 }
 
 /** Seed missing D7 relations using the real schema and foreign keys; payloads are sample1 metadata.
@@ -81,7 +80,8 @@ function seedEntities(db: DatabaseSync): void {
     insert('production_document_versions', { document_id: document, version: 1, revision_id: saved, revision_digest: digest, origin: 'created', recorded_at: now });
     insert(table, { document_id: document, book_id: String(book.book_id), analysis_revision_id: String(analysis.revision_id), task_intent_id: String(task.task_intent_id), ...(table === 'writing_drafts' ? { type_id: 'sample1' } : { template: 'author', record_id: record }), recorded_at: now, ...payload() });
   }
-  insert('review_run_synthesis', { review_run_id: String(review.review_run_id), synthesis_key: 'sample1' });
+  // Revision 116's relation: the 0.7.1 store was packed before it, so it holds none.
+  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'review_run_synthesis'").get() !== undefined) insert('review_run_synthesis', { review_run_id: String(review.review_run_id), synthesis_key: 'sample1' });
   insert('editorial_mark_replies', { reply_id: id(), mark_id: String(db.prepare('SELECT mark_id FROM editorial_marks LIMIT 1').get()!.mark_id), ordinal: 1, body: String(book.title), author: 'editor', created_at: now });
   seedMemory(db, insert, payload, String(book.book_id), String(book.title), now);
   for (const [table, fields] of [ ['backup_preferences', { enabled: 1 }], ['evaluation_preferences', { prediction_enabled: 1, calibration_enabled: 0 }] ] as const) {
@@ -117,8 +117,6 @@ function seedMemory(db: DatabaseSync, insert: (table: string, values: Record<str
     previous = version;
   }
 }
-
-const POLICY_CLASSES: readonly MergeTablePolicy[] = ['seed', 'owned', 'dependent', 'shared', 'excluded', 'transient', 'house', 'derived'];
 
 describe('read-only business inventory', () => {
   it('requires every merge-policy table and every table of a real store to be counted or listed as not counted', async () => {
@@ -166,18 +164,18 @@ describe('read-only business inventory', () => {
     expect([after.mtimeMs, after.size]).toEqual([before.mtimeMs, before.size]);
   });
 
-  it('counts a real revision-116 store deterministically and equals its online backup', async () => {
+  it('counts a real 0.7.1 store deterministically and equals its online backup', async () => {
     await seed();
     const before = await stat(path);
     const output = inventoryStore(path);
     expect(inventoryStore(path)).toBe(output);
     const parsed = JSON.parse(output);
     expect(Object.keys(parsed)).toEqual(['entities', 'tables']);
-    for (const table of ['books', 'manuscripts', 'production_documents', 'production_document_versions', 'content_objects', 'source_versions', 'editorial_marks', 'editorial_mark_replies', 'manuscript_revisions', 'milestone_versions', 'publication_versions', 'analysis_result_sets', 'review_runs', 'review_findings', 'review_reports', 'review_run_synthesis', 'evaluation_records', 'readers_report_drafts', 'writing_drafts', 'global_editorial_memory_items', 'global_editorial_memory_item_versions', 'house_review_preference_versions', 'model_service_connections', 'search_backend_connections', 'backup_preferences', 'evaluation_preferences']) expect(parsed.tables[table], table).toBeGreaterThan(0);
+    for (const table of ['books', 'manuscripts', 'production_documents', 'production_document_versions', 'content_objects', 'source_versions', 'editorial_marks', 'editorial_mark_replies', 'manuscript_revisions', 'milestone_versions', 'publication_versions', 'analysis_result_sets', 'review_runs', 'review_findings', 'review_reports', 'evaluation_records', 'readers_report_drafts', 'writing_drafts', 'global_editorial_memory_items', 'global_editorial_memory_item_versions', 'house_review_preference_versions', 'model_service_connections', 'search_backend_connections', 'backup_preferences', 'evaluation_preferences']) expect(parsed.tables[table], table).toBeGreaterThan(0);
     for (const [table, n] of Object.entries(parsed.entities.relations)) expect(n, table).toBe(parsed.tables[table]);
     // The relations the upgrade changes by design are physical counts only, never entities.
     for (const table of ['manuscript_revisions', 'working_offset_nodes', 'store_versions']) expect(parsed.entities.relations[table], table).toBeUndefined();
-    expect(parsed.entities.manuscripts).toEqual({ primary: 3, 'production-document': 2, other: 0 });
+    expect(parsed.entities.manuscripts).toEqual({ primary: 2, 'production-document': 2, other: 0 });
     // One memory version of the legacy item has a state outside the vocabulary: it is counted in `other`, not dropped.
     expect(parsed.entities.memory.versions).toEqual({ total: 15, withTitle: 15, byState: { proposed: 3, active: 4, inactive: 4, frozen: 3, other: 1 }, titledByState: { proposed: 3, active: 4, inactive: 4, frozen: 3, other: 1 }, byScope: { 'ordinary-production': 4, 'developer-live': 4, 'development-ci': 4, legacy: 3, other: 0 } });
     expect(parsed.entities.memory.currentItems.total).toBe(4);
@@ -188,8 +186,10 @@ describe('read-only business inventory', () => {
     expect(leaves(parsed).every((value) => typeof value === 'number')).toBe(true);
     const db = openPackageStore(path);
     try {
-      expect(Number(db.prepare('PRAGMA user_version').get()!.user_version)).toBe(116);
-      const expected = Object.fromEntries(INVENTORY_TABLES.map((table) => [table, Number(db.prepare(`SELECT count(*) n FROM "${table}"`).get()!.n)]));
+      expect(Number(db.prepare('PRAGMA user_version').get()!.user_version)).toBe(115);
+      // A relation the 0.7.1 store predates is counted 0, as the inventory reads it.
+      const present = (table: string): boolean => db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) !== undefined;
+      const expected = Object.fromEntries(INVENTORY_TABLES.map((table) => [table, present(table) ? Number(db.prepare(`SELECT count(*) n FROM "${table}"`).get()!.n) : 0]));
       expect(parsed.tables).toEqual(expected);
       expect(() => db.exec('CREATE TABLE forbidden (id INTEGER)')).toThrow(/readonly|read-only/i);
       const copy = join(roots.inputRoot, 'backup.sqlite');
@@ -201,8 +201,9 @@ describe('read-only business inventory', () => {
   });
 
   it('counts the rows of an un-checkpointed WAL and leaves the main file and the -wal bytes unchanged', async () => {
-    await unpack();
     // A live product store: WAL mode, auto-checkpoint off. A crash-like snapshot is its main file and its -wal, without -shm.
+    // One clean open and close first, so the main file holds the baseline and only the import waits in the log.
+    (await EditorialStore.open(roots.dataRoot, roots.codeRoot)).close();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const wal = join(roots.inputRoot, 'wal');
     const mainOnly = join(roots.inputRoot, 'main-only');

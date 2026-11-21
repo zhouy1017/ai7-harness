@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -96,37 +97,11 @@ export const MAINTENANCE_CASE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const MAINTENANCE_CASE_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(MAINTENANCE_CASE_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MAINTENANCE_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MAINTENANCE_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const MAINTENANCE_CASE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  maintenance_cases: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'publication_version_id>publication_versions.publication_version_id:NO ACTION/NO ACTION/NONE',
-    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-  maintenance_errata_versions: [
-    'case_id>maintenance_cases.case_id:NO ACTION/NO ACTION/NONE',
-  ],
-  maintenance_case_revisions: [
-    'case_id>maintenance_cases.case_id:NO ACTION/NO ACTION/NONE',
-    'link_errata_version_id>maintenance_errata_versions.errata_version_id:NO ACTION/NO ACTION/NONE',
-    'link_mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE',
-    'link_publication_version_id>publication_versions.publication_version_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const MAINTENANCE_CASE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  maintenance_cases: 'MAINTENANCE_LEDGER_IMMUTABLE',
+  maintenance_errata_versions: 'MAINTENANCE_LEDGER_IMMUTABLE',
+  maintenance_case_revisions: 'MAINTENANCE_LEDGER_IMMUTABLE',
+});
 
 export class MaintenanceCaseError extends Error {
   constructor(readonly code: string, message: string) {
@@ -156,24 +131,6 @@ const REVISION_SCHEMA = 'ai7.maintenance-case-revision/1';
 const ERRATA_SCHEMA = 'ai7.maintenance-errata-version/1';
 const ACTOR = '本机编辑';
 const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'maintenance_cases'";
-
-/** Revision 43's relations, created once: a store that predates them gains three empty relations and nothing existing moves. */
-export function initializeMaintenanceCaseSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'publication_versions'").get() === undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(MAINTENANCE_CASE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(MAINTENANCE_CASE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Maintenance case schema rollback failed.');
-    }
-    throw error;
-  }
-  requireMaintenance(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_INVALID', '维护事项的关系与已有记录不一致。');
-}
 
 /** The first status each classification records (D4): 撤回 and 归档 set an internal state at once. */
 const INITIAL_STATUS: Readonly<Record<MaintenanceClassification, MaintenanceCaseStatus>> = {

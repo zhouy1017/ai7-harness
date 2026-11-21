@@ -1,8 +1,9 @@
+import { appendOnly } from './append-only.js';
 import { applyReceiptState, type InspectApplyReceiptInput, type ApplyReceiptProjection, type PrepareReverseApplyInput, type ReverseApplyPreparationProjection } from '../shared/protocol.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { BoundedManuscriptStore, ExactReplacementCommit, ExactReplacementTarget } from './bounded-manuscript.js';
-import { applyProjection, EditorialMarkError, editorialMarksShape, widenEditorialMarks, type EditorialMarkStore } from './editorial-marks.js';
+import { applyProjection, EditorialMarkError, type EditorialMarkStore } from './editorial-marks.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
 import { inverseTargetsTouchInOrder, type InverseTarget } from './manuscript/structural-edits.js';
 import {
@@ -99,47 +100,13 @@ export const MANUSCRIPT_EFFECT_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const MANUSCRIPT_EFFECT_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(MANUSCRIPT_EFFECT_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const MANUSCRIPT_EFFECT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  manuscript_effect_intents: [
-    'base_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
-    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
-    'reverses_effect_id>manuscript_effect_intents.effect_id:NO ACTION/NO ACTION/NONE',
-  ],
-  manuscript_effect_targets: [
-    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
-    'decision_id>proposal_item_decisions.decision_id:NO ACTION/NO ACTION/NONE',
-    'effect_id>manuscript_effect_intents.effect_id:NO ACTION/NO ACTION/NONE',
-    'item_id>proposal_change_items.item_id:NO ACTION/NO ACTION/NONE',
-  ],
-  manuscript_effect_approvals: ['effect_id>manuscript_effect_intents.effect_id:NO ACTION/NO ACTION/NONE'],
-  manuscript_effect_dispatches: [
-    'approval_id>manuscript_effect_approvals.approval_id:NO ACTION/NO ACTION/NONE',
-    'effect_id>manuscript_effect_intents.effect_id:NO ACTION/NO ACTION/NONE',
-  ],
-  manuscript_effect_receipts: [
-    'command_group_id>manuscript_command_groups.command_group_id:NO ACTION/NO ACTION/NONE',
-    'dispatch_id>manuscript_effect_dispatches.dispatch_id:NO ACTION/NO ACTION/NONE',
-    'effect_id>manuscript_effect_intents.effect_id:NO ACTION/NO ACTION/NONE',
-    'resulting_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const MANUSCRIPT_EFFECT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  manuscript_effect_intents: 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE',
+  manuscript_effect_targets: 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE',
+  manuscript_effect_approvals: 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE',
+  manuscript_effect_dispatches: 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE',
+  manuscript_effect_receipts: 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE',
+});
 
 type SqlRow = Record<string, SQLOutputValue>;
 
@@ -152,47 +119,6 @@ function requireApply(condition: unknown, code: string, message: string): assert
 
 function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
-}
-
-/**
- * Revision 23, once per store and in one transaction. On a store that revision 22 created,
- * `editorial_marks` is first rebuilt to the text that admits the empty pin an applied deletion stands
- * on (`widenEditorialMarks`), with foreign keys off around the transaction; then the five Effect
- * relations are created, and every reference is checked before anything commits. Shape-detected, like
- * the relations of revisions 21 and 22: once the Effect relations exist this has been done, and the
- * mark relation is rebuilt only while it holds revision 22's exact text — a new store creates it
- * widened, and nothing moves for it.
- */
-export function initializeManuscriptEffectSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_effect_intents'").get();
-  if (existing !== undefined) return;
-  const widen = editorialMarksShape(db) === 'revision-22';
-  const foreignKeys = (): number => Number((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
-  const restoreForeignKeys = widen && foreignKeys() === 1;
-  if (widen) {
-    db.exec('PRAGMA foreign_keys = OFF');
-    requireApply(foreignKeys() === 0, 'SCHEMA_MIGRATION_FAILED', '无法暂时停用引用校验以迁移数据库。');
-  }
-  try {
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      if (widen) widenEditorialMarks(db);
-      for (const sql of Object.values(MANUSCRIPT_EFFECT_SCHEMA_SQL)) db.exec(sql);
-      for (const sql of Object.values(MANUSCRIPT_EFFECT_TRIGGER_SQL)) db.exec(sql);
-      requireApply(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-      db.exec('COMMIT');
-    } catch (error) {
-      try { db.exec('ROLLBACK'); } catch (rollbackError) {
-        throw new AggregateError([error, rollbackError], 'Manuscript effect schema rollback failed.');
-      }
-      throw error;
-    }
-  } finally {
-    if (restoreForeignKeys) {
-      db.exec('PRAGMA foreign_keys = ON');
-      requireApply(foreignKeys() === 1, 'SCHEMA_MIGRATION_FAILED', '无法恢复引用校验。');
-    }
-  }
 }
 
 interface PlannedTarget {

@@ -1,8 +1,4 @@
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
-import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
-import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -12,7 +8,6 @@ import { ASSURANCE_SAMPLING_REMOVED, NO_PLAN_EDITS, SAFE_RETRY_WITHHELD, planEdi
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { SET_RULE_EDITED } from '../../src/service/default-execution-rules.js';
 import { PLAN_EDIT_DRIFT_REASON, PLAN_EDIT_STARTED_REASON } from '../../src/service/task-plan.js';
 import {
@@ -22,13 +17,8 @@ import {
   type BaselineAnalysisUpdateRequest,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
-import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
-import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
-import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
-import { planRevisionsShapeAt33, plantRevision33Relations } from '../support/plan-edits.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -121,73 +111,6 @@ function withDatabase<T>(readOnly: boolean, operation: (database: DatabaseSync) 
   }
 }
 
-function relationTruth(database: DatabaseSync): Map<string, { sql: string; content: string }> {
-  const relations = database.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Row[];
-  return new Map(relations.map((relation) => {
-    const rows = database.prepare(`SELECT * FROM "${relation.name}"`).all() as Row[];
-    const hash = createHash('sha256');
-    for (const row of rows) {
-      for (const column of Object.keys(row).sort()) {
-        const value = row[column]!;
-        hash.update(JSON.stringify([column, value instanceof Uint8Array ? [...value] : typeof value === 'bigint' ? value.toString() : value]));
-      }
-    }
-    return [String(relation.name), { sql: String(relation.sql), content: `${rows.length}:${hash.digest('hex')}` }];
-  }));
-}
-
-describe('schema revision 34 over the real store', () => {
-  it('widens a planted revision-33 store\'s Plan Revisions with every row as it was', async () => {
-    const first = await openWithRoute(happy);
-    const execution = owner(first, happy);
-    try {
-      const bookId = await importedBook(first, 'L2 sample1 计划修改迁移');
-      const prepared = prepare(first, bookId);
-      const settled = await runToSettled(first, execution, bookId, prepared.planEnvelope!.digest, prepared.taskIntent!.taskIntentId);
-      // A pending Plan Revision to carry across: a range update prepared at one range, then at another.
-      const options = settled.updateControls!.actions['reanalyze-range'].options;
-      prepare(first, bookId, { mode: 'reanalyze-range', selectedRange: { startPosition: options[2]!.startPosition, endPosition: options[2]!.endPosition } });
-      const drifted = prepare(first, bookId, { mode: 'reanalyze-range', selectedRange: { startPosition: options[7]!.startPosition, endPosition: options[7]!.endPosition } });
-      expect(drifted.planRevision).toMatchObject({ trigger: 'prepare', state: 'pending' });
-      first.markCleanShutdown();
-    } finally {
-      await execution.dispose();
-      first.close();
-    }
-    const before = withDatabase(false, (database) => {
-      constructPre94PolicyEncoding(database);
-      plantRevision33Relations(database);
-      execPre74Fixture(database, 'PRAGMA user_version = 33');
-      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
-      expect(planRevisionsShapeAt33(database)).toBe('revision-33');
-      return { revisions: database.prepare('SELECT rowid, * FROM analysis_plan_revisions ORDER BY rowid').all() as Row[], truth: relationTruth(database) };
-    });
-    expect(before.revisions.map((row) => row.trigger_kind)).toEqual(['prepare']);
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(planRevisionsShapeAt33(database)).toBe('current');
-      expect(database.prepare('SELECT rowid, * FROM analysis_plan_revisions ORDER BY rowid').all()).toEqual(before.revisions);
-      const after = relationTruth(database);
-      // Revision 35's relations arrive empty on the way (Issue #422, S76d).
-      expect([...after.keys()]).toEqual([...before.truth.keys(), 'review_run_synthesis', ...RESEARCH_EVIDENCE_RELATIONS, ...MATERIAL_INDEX_LAYER_RELATIONS, ...PROPOSAL_REVIEW_RELATIONS, ...FACTUAL_VERIFICATION_RELATIONS, ...HOUSE_REVIEW_PREFERENCE_RELATIONS, ...TASK_INTENT_DRAFT_RELATIONS, ...IMPORTED_SKILL_RELATIONS, ...CUSTOM_ANALYSIS_RELATIONS, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER].sort());
-      for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(after.get(relation)?.content).toMatch(/^0:/);
-      for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
-      // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_plan_revisions', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_task_intents', 'proposal_item_decisions']);
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
-      // Still a ledger: nothing rewrites or removes a Plan Revision.
-      expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_plan_revisions' ORDER BY name").all())
-        .toEqual([{ name: 'analysis_plan_revisions_no_delete' }, { name: 'analysis_plan_revisions_no_update' }]);
-      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    });
-  }, 300_000);
-});
 
 describe('更新计划 over the real store', () => {
   it('writes the next plan version as the editor left the plan, records the edit, and the Run leaves out 核对与抽检', async () => {

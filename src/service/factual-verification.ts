@@ -50,7 +50,7 @@ import { FACTUAL_VERIFICATION_POLICY_VERSION, graphemeCount } from './analysis/f
 import { retrievalCandidateOf, type FactualEvidenceRelation } from './analysis/factual-review-contract-v2.js';
 import { ResearchEvidenceLedger } from './research-evidence.js';
 import { evidenceStaleness, titleSiteLabel } from './analysis/factual-review-evidence.js';
-import { FACTUAL_CLAIM_SCHEMA_SQL, FACTUAL_CLAIM_TRIGGER_SQL, FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from './factual-verification-schema.js';
+import { FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from './factual-verification-schema.js';
 import type { FactualClaimLedger } from './analysis/factual-claim-ledger.js';
 import type { FactualClaimVerificationResult } from './analysis/factual-claim-contract.js';
 
@@ -78,25 +78,12 @@ function requireVerification(condition: unknown, code: string, message: string):
 }
 
 type SqlRow = Record<string, SQLOutputValue>;
-const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
-/** The revision this module's relations first stand in. */
-export const FACTUAL_VERIFICATION_REVISION = 78;
 export const FACTUAL_VERIFICATION_PRODUCER = 'AI7 事实核查';
 const RESULT_SCHEMA = 'ai7.factual-verification-result/1';
 const DECISION_SCHEMA = 'ai7.factual-review-decision/1';
 const PROPOSAL_SCHEMA = 'ai7.correction-proposal/1';
 const RUN_ASSURANCE_SCHEMA = 'ai7.factual-run-assurance/1';
 const GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
-
-export function initializeFactualClaimSchema(db: DatabaseSync, version: number): void {
-  for (const [name, sql] of Object.entries({ ...FACTUAL_CLAIM_SCHEMA_SQL, ...FACTUAL_CLAIM_TRIGGER_SQL })) {
-    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name = ?').get(name);
-    if (row === undefined) {
-      requireVerification(version < 97, 'SCHEMA_INVALID', '事实断言账本结构缺失。');
-      db.exec(sql);
-    } else requireVerification(fold(String(row.sql)) === fold(sql), 'SCHEMA_INVALID', '事实断言账本结构不兼容。');
-  }
-}
 
 export interface FactualClaimSession {
   readonly sessionId: string;
@@ -132,36 +119,6 @@ export interface FactualRecheckSelection {
   readonly claimId: string;
   readonly ledgerDigest: string;
   readonly excludedSources: readonly string[];
-}
-
-/** Revision 78's relations, created once on a store below it; a store that has them is checked against their exact text. */
-export function initializeFactualVerificationSchema(db: DatabaseSync, version: number): void {
-  const present = Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL).filter((table) =>
-    db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) !== undefined);
-  if (present.length > 0) {
-    validateFactualVerificationSchema(db);
-    return;
-  }
-  requireVerification(version < FACTUAL_VERIFICATION_REVISION, 'SCHEMA_INVALID', '事实核查结果表缺失。');
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(FACTUAL_VERIFICATION_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(FACTUAL_VERIFICATION_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Factual verification schema rollback failed.');
-    }
-    throw error;
-  }
-}
-
-/** Every relation and trigger of revision 78 exactly as written, and nothing of it missing. */
-export function validateFactualVerificationSchema(db: DatabaseSync): void {
-  for (const [name, sql] of [...Object.entries(FACTUAL_VERIFICATION_SCHEMA_SQL), ...Object.entries(FACTUAL_VERIFICATION_TRIGGER_SQL)]) {
-    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name = ?').get(name) as SqlRow | undefined;
-    requireVerification(row !== undefined && typeof row.sql === 'string' && fold(row.sql) === fold(sql), 'SCHEMA_INVALID', '事实核查结果表结构不兼容。');
-  }
 }
 
 // ---- Evidence Source Lineage ------------------------------------------------------------------------------------------

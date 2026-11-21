@@ -4,8 +4,7 @@ import * as liveAdmission from '../../src/service/analysis/live-kind-admission.j
 import { createHash, randomUUID } from 'node:crypto';
 import { Socket } from 'node:net';
 import { join } from 'node:path';
-import { DatabaseSync, backup } from 'node:sqlite';
-import { cpSync, mkdirSync, readdirSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
@@ -15,7 +14,6 @@ import { buildFactualReviewUnitMessage, type FactualUnitAssertion } from '../../
 import { deriveCoverageManifest } from '../../src/service/analysis/coverage-manifest.js';
 import { factualClaimVerificationInput, freezeFactualClaimLedger } from '../../src/service/analysis/factual-claim-ledger.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
-import { mergeClaimEvidenceUnits } from '../../src/service/analysis/factual-review-evidence.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import type { ReviewRunDriveSteps } from '../../src/service/review/review-run-driver.js';
@@ -36,6 +34,7 @@ import {
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { sample1Seed, type Sample1Seed } from '../support/sample1-seed.js';
+import { mergeClaimEvidenceUnits } from '../../src/service/analysis/factual-review-evidence.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -598,7 +597,6 @@ describe('factual claim occurrence ledger', () => {
     expect(resumed.currentRunState(runRecordId)).toBe('completed');
     expect(resumed.factualVerification.claims(runRecordId)).toEqual(frozen);
   }, 300_000);
-
   it.each(['fresh', 'existing-prefix'] as const)('continues a claim-stage pause with %s evidence without replacing prior captures', async (prefix) => {
     await setup({ claimStages: true, twoAssertions: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
     const book = await newBook('断言取证暂停后续行');
@@ -625,20 +623,6 @@ describe('factual claim occurrence ledger', () => {
       else if (rows().length === 0) {
         store.recordResearchEvidence({ bookId: book.bookId, runRecordId, unitOrdinal: claims.claims[0]!.producers[0]!.sourceUnitOrdinal,
           backendId: TINYFISH.id, unit: kept[0]!.evidence });
-      }
-      if (prefix === 'existing-prefix') {
-        const migration = await createServiceTestRoots('ai7-claim-prefix-106-');
-        mkdirSync(join(migration.dataRoot, 'store'), { recursive: true });
-        for (const entry of readdirSync(roots.dataRoot)) if (entry !== 'store') cpSync(join(roots.dataRoot, entry), join(migration.dataRoot, entry), { recursive: true });
-        await backup(db, join(migration.dataRoot, 'store', 'ai7.sqlite'));
-        const old = new DatabaseSync(join(migration.dataRoot, 'store', 'ai7.sqlite'));
-        old.exec('DROP TABLE research_evidence_unit_revisions; PRAGMA user_version=106'); old.close();
-        let migrated: EditorialStore | undefined;
-        try {
-          migrated = await EditorialStore.open(migration.dataRoot, roots.codeRoot);
-          expect(migrated.inspectDataVersion()).toMatchObject({ schemaRevision: 116, dataVersion: 1 });
-          expect(migrated.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null }).records.map((r) => r.evidenceId)).toEqual(rows().map((r) => r.evidence_id).reverse());
-        } finally { migrated?.close(); await migration.dispose(); }
       }
       const original = rows();
       const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
@@ -688,6 +672,7 @@ describe('factual claim occurrence ledger', () => {
       } finally { target.close(); await targetRoots.dispose(); }
     } finally { db.close(); }
   });
+
 
   it('spends an unknown model submission and preserves that claim allowance after reopen', async () => {
     await setup({ claimStages: true, claimModelUnknown: true, relations: [] });

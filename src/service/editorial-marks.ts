@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { editorialMarkFilterModel, resolveEditorialMarkCategory } from '../shared/editorial-mark-category.js';
 import { EditorialMemoryFacade } from './learning/memory-facade.js';
@@ -78,15 +79,15 @@ import { requireBounded } from './manuscript/bounded-kernel.js';
  *
  * Revision 23 (Issue #408) widened `editorial_marks` for the one pin that is empty: a 修改建议 whose
  * Apply deleted its words is pinned on no text, at the zero-width range where they were, and is exact
- * there until an edit spans that point. A new store is created with the widened text; a store that
- * revision 22 created is rebuilt to it (`widenEditorialMarks`), and revision 22's text is kept only to
- * recognise and validate such a store (`EDITORIAL_MARK_REVISION_22_SQL`).
+ * there until an edit spans that point. The storage baseline (#1634) creates the widened text; the
+ * rebuild of a store revision 22 created, and revision 22's text, went with the migration chain: the
+ * upgrade tool (ADR 0105 §4) is what reads such a store now.
  *
  * Revision 28 (Issue #411) widened `proposal_change_items` for the third change kind a file's author can
  * propose: `insert`, an item with no current text that writes its proposal at a point. Its mark stands on
- * the empty range there, exactly like an applied deletion's. A store that revision 22 to 27 created is
- * rebuilt to the widened text (`widenProposalChangeItems`), and revision 27's text is kept only to
- * recognise and validate such a store (`PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL`).
+ * the empty range there, exactly like an applied deletion's. The baseline creates the widened text; the
+ * rebuild of a store revision 22 to 27 created, and revision 27's text, went with the migration chain
+ * (#1634).
  */
 export const EDITORIAL_MARK_SCHEMA_SQL = {
   editorial_marks: `CREATE TABLE editorial_marks (
@@ -176,106 +177,12 @@ export const EDITORIAL_MARK_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-/**
- * `editorial_marks` exactly as schema revision 22 created it (Issue #407): no pin may be empty and no
- * exact anchor zero-width. It is kept only to recognise and validate, exactly, a store that revision 22
- * created before revision 23 rebuilds the relation; nothing is ever created from it.
- */
-export const EDITORIAL_MARK_REVISION_22_SQL = {
-  editorial_marks: `CREATE TABLE editorial_marks (
-  mark_id TEXT PRIMARY KEY,
-  client_mark_id TEXT NOT NULL UNIQUE,
-  book_id TEXT NOT NULL REFERENCES books(book_id),
-  manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-  branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-  block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
-  kind TEXT NOT NULL CHECK(kind IN ('change-suggestion', 'annotation', 'editor-note', 'personal-highlight')),
-  highlight_color INTEGER CHECK(highlight_color IN (1, 2, 3)),
-  pinned_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-  pinned_journal_sequence INTEGER NOT NULL CHECK(pinned_journal_sequence >= 0),
-  pinned_block_digest TEXT NOT NULL,
-  pinned_from_grapheme INTEGER NOT NULL CHECK(pinned_from_grapheme >= 0),
-  pinned_to_grapheme INTEGER NOT NULL CHECK(pinned_to_grapheme > pinned_from_grapheme),
-  pinned_text TEXT NOT NULL CHECK(length(pinned_text) > 0),
-  pinned_text_digest TEXT NOT NULL,
-  from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
-  to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),
-  anchor_state TEXT NOT NULL CHECK(anchor_state IN ('exact', 'drifted', 'detached')),
-  followed_journal_sequence INTEGER NOT NULL CHECK(followed_journal_sequence >= 0),
-  body TEXT NOT NULL,
-  source_kind TEXT NOT NULL CHECK(source_kind IN ('editor', 'ai7', 'imported-author')),
-  source_origin TEXT CHECK(source_origin IN ('task', 'review-category', 'analysis')),
-  source_label TEXT,
-  source_task_id TEXT,
-  basis_json TEXT NOT NULL,
-  export_disposition TEXT NOT NULL CHECK(export_disposition IN ('exported-by-default', 'only-when-included', 'never-exported')),
-  status TEXT NOT NULL CHECK(status IN ('open', 'resolved', 'applied', 'removed', 'converted')),
-  converted_from_mark_id TEXT REFERENCES editorial_marks(mark_id),
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  CHECK((kind = 'personal-highlight') = (highlight_color IS NOT NULL)),
-  CHECK((source_kind = 'ai7') = (source_origin IS NOT NULL)),
-  CHECK(source_kind = 'editor' OR source_label IS NOT NULL),
-  CHECK(kind NOT IN ('editor-note', 'personal-highlight') OR source_kind = 'editor'),
-  CHECK(anchor_state <> 'exact' OR to_grapheme > from_grapheme),
-  UNIQUE(branch_id, block_id, mark_id)
-) STRICT`,
-} as const;
-
-/**
- * `proposal_change_items` exactly as schema revisions 22 to 27 carried it: a replacement or a deletion of
- * text that is there, never an insertion. Kept only to recognise and validate, exactly, a store created
- * before revision 28 rebuilds the relation; nothing is ever created from it.
- */
-export const PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL = `CREATE TABLE proposal_change_items (
-  item_id TEXT PRIMARY KEY,
-  mark_id TEXT NOT NULL UNIQUE REFERENCES editorial_marks(mark_id),
-  change_type TEXT NOT NULL CHECK(change_type IN ('replace', 'delete')),
-  current_text TEXT NOT NULL CHECK(length(current_text) > 0),
-  proposed_text TEXT NOT NULL,
-  rationale TEXT NOT NULL,
-  atomic_group_id TEXT,
-  created_at TEXT NOT NULL,
-  CHECK((change_type = 'delete') = (length(proposed_text) = 0)),
-  CHECK(proposed_text <> current_text)
-) STRICT`;
-
-const LEDGER_TABLES = ['editorial_mark_replies', 'proposal_change_items', 'proposal_item_decisions', 'proposal_decision_reasons'] as const;
-
-export const EDITORIAL_MARK_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  LEDGER_TABLES.flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'EDITORIAL_MARK_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'EDITORIAL_MARK_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the five relations, in the exact-schema validator's own spelling. */
-export const EDITORIAL_MARK_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  editorial_marks: [
-    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
-    'converted_from_mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE',
-    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
-    'pinned_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-  editorial_mark_replies: ['mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE'],
-  proposal_change_items: ['mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE'],
-  proposal_item_decisions: [
-    'decided_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'item_id>proposal_change_items.item_id:NO ACTION/NO ACTION/NONE',
-    'supersedes_decision_id>proposal_item_decisions.decision_id:NO ACTION/NO ACTION/NONE',
-  ],
-  proposal_decision_reasons: ['decision_id>proposal_item_decisions.decision_id:NO ACTION/NO ACTION/NONE'],
-};
+export const EDITORIAL_MARK_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  editorial_mark_replies: 'EDITORIAL_MARK_LEDGER_IMMUTABLE',
+  proposal_change_items: 'EDITORIAL_MARK_LEDGER_IMMUTABLE',
+  proposal_item_decisions: 'EDITORIAL_MARK_LEDGER_IMMUTABLE',
+  proposal_decision_reasons: 'EDITORIAL_MARK_LEDGER_IMMUTABLE',
+});
 
 type SqlRow = Record<string, SQLOutputValue>;
 
@@ -346,116 +253,6 @@ function transact<T>(db: DatabaseSync, operation: () => T): T {
     db.exec('ROLLBACK');
     throw error;
   }
-}
-
-/**
- * Revision 22's relations and their ledger triggers. Created once and never rebuilt: a store that
- * predates the revision gains five empty relations, and nothing existing moves. Like revision 21's
- * relation this runs before the version moves in `task-authorization.ts` and is shape-detected.
- */
-export function initializeEditorialMarkSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'editorial_marks'").get();
-  if (existing !== undefined) return;
-  transact(db, () => {
-    for (const sql of Object.values(EDITORIAL_MARK_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(EDITORIAL_MARK_TRIGGER_SQL)) db.exec(sql);
-  });
-  requireMark(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-}
-
-/** A relation's text with its whitespace folded, the way `task-authorization.ts` compares exact texts. */
-function foldedSql(value: string): string {
-  return value.trim().replace(/\s+/gu, ' ');
-}
-
-/**
- * Which of its two texts `editorial_marks` holds: revision 22's, or the current one that admits the
- * empty pin of an applied deletion. No other text was ever created, so any other is refused.
- */
-export function editorialMarksShape(db: DatabaseSync): 'revision-22' | 'current' {
-  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'editorial_marks'").get() as SqlRow | undefined;
-  const sql = row === undefined ? '' : foldedSql(text(row.sql));
-  if (sql === foldedSql(EDITORIAL_MARK_SCHEMA_SQL.editorial_marks)) return 'current';
-  requireMark(sql === foldedSql(EDITORIAL_MARK_REVISION_22_SQL.editorial_marks), 'SCHEMA_MIGRATION_FAILED', '标记表结构不兼容。');
-  return 'revision-22';
-}
-
-/**
- * Revision 22 → 23 for `editorial_marks` (Issue #408): the relation is rebuilt from its current text,
- * which admits the one empty pin — a 修改建议 whose Apply deleted its words — with every row copied byte
- * for byte, rowid included, in rowid order, and every index or trigger on it re-armed from its own
- * text (revision 22 created none; the indexes behind its keys come back with the table). It runs in
- * the caller's transaction with foreign keys off, so the replies, the Proposal Change Items and the
- * marks converted from other marks keep their texts and rows while the relation they reference is
- * re-created; the caller checks every reference before it commits.
- */
-export function widenEditorialMarks(db: DatabaseSync): void {
-  requireMark(
-    db.isTransaction && integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys) === 0,
-    'SCHEMA_MIGRATION_FAILED',
-    '标记表只能在停用引用校验的事务中重建。',
-  );
-  const columnsOf = (): string => (db.prepare("SELECT name FROM pragma_table_info('editorial_marks') ORDER BY cid").all() as SqlRow[])
-    .map((row) => text(row.name)).join(', ');
-  const rows = (): number => integer((db.prepare('SELECT count(*) total FROM editorial_marks').get() as SqlRow).total);
-  const columns = columnsOf();
-  const before = rows();
-  const attached = (db.prepare(
-    "SELECT sql FROM sqlite_schema WHERE tbl_name = 'editorial_marks' AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name",
-  ).all() as SqlRow[]).map((row) => text(row.sql));
-  db.exec('CREATE TEMP TABLE migrate_editorial_marks AS SELECT rowid AS migrate_rowid, * FROM editorial_marks');
-  db.exec('DROP TABLE editorial_marks');
-  db.exec(EDITORIAL_MARK_SCHEMA_SQL.editorial_marks);
-  requireMark(columnsOf() === columns, 'SCHEMA_MIGRATION_FAILED', '标记表迁移前后的列不一致。');
-  db.exec(`INSERT INTO editorial_marks(rowid, ${columns}) SELECT migrate_rowid, ${columns} FROM temp.migrate_editorial_marks ORDER BY migrate_rowid`);
-  db.exec('DROP TABLE temp.migrate_editorial_marks');
-  for (const sql of attached) db.exec(sql);
-  requireMark(rows() === before, 'SCHEMA_MIGRATION_FAILED', '标记表迁移未保留全部记录。');
-}
-
-/**
- * Which of its two texts `proposal_change_items` holds: revision 27's, or revision 28's that admits an
- * insertion. No other text was ever created, so any other is refused.
- */
-export function proposalChangeItemsShape(db: DatabaseSync): 'revision-27' | 'current' {
-  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'proposal_change_items'").get() as SqlRow | undefined;
-  const sql = row === undefined ? '' : foldedSql(text(row.sql));
-  if (sql === foldedSql(EDITORIAL_MARK_SCHEMA_SQL.proposal_change_items)) return 'current';
-  requireMark(sql === foldedSql(PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL), 'SCHEMA_MIGRATION_FAILED', '提案修改项表结构不兼容。');
-  return 'revision-27';
-}
-
-/**
- * Revision 27 → 28 for `proposal_change_items` (Issue #411): the ledger is rebuilt from its current text,
- * which admits the `insert` kind, with every row copied byte for byte, rowid included, in rowid order, and
- * its two ledger triggers — and any index — re-armed from their own texts once the rows are back. It runs
- * in the caller's transaction with foreign keys off, so the decisions and the Effect targets that name an
- * item keep their rows while the relation they reference is re-created; the caller checks every reference
- * before it commits.
- */
-export function widenProposalChangeItems(db: DatabaseSync): void {
-  requireMark(
-    db.isTransaction && integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys) === 0,
-    'SCHEMA_MIGRATION_FAILED',
-    '提案修改项表只能在停用引用校验的事务中重建。',
-  );
-  const columnsOf = (): string => (db.prepare("SELECT name FROM pragma_table_info('proposal_change_items') ORDER BY cid").all() as SqlRow[])
-    .map((row) => text(row.name)).join(', ');
-  const rows = (): number => integer((db.prepare('SELECT count(*) total FROM proposal_change_items').get() as SqlRow).total);
-  const columns = columnsOf();
-  const before = rows();
-  const attached = (db.prepare(
-    "SELECT sql FROM sqlite_schema WHERE tbl_name = 'proposal_change_items' AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name",
-  ).all() as SqlRow[]).map((row) => text(row.sql));
-  db.exec('CREATE TEMP TABLE migrate_proposal_change_items AS SELECT rowid AS migrate_rowid, * FROM proposal_change_items');
-  db.exec('DROP TABLE proposal_change_items');
-  db.exec(EDITORIAL_MARK_SCHEMA_SQL.proposal_change_items);
-  requireMark(columnsOf() === columns, 'SCHEMA_MIGRATION_FAILED', '提案修改项表迁移前后的列不一致。');
-  db.exec(`INSERT INTO proposal_change_items(rowid, ${columns})
-    SELECT migrate_rowid, ${columns} FROM temp.migrate_proposal_change_items ORDER BY migrate_rowid`);
-  db.exec('DROP TABLE temp.migrate_proposal_change_items');
-  for (const sql of attached) db.exec(sql);
-  requireMark(rows() === before, 'SCHEMA_MIGRATION_FAILED', '提案修改项表迁移未保留全部记录。');
 }
 
 const relationSeen = new WeakSet<DatabaseSync>();
@@ -928,10 +725,6 @@ export interface ProducedEditorialMarkInput {
   status?: 'open' | 'resolved';
 }
 
-export const PROPOSAL_ITEM_DECISIONS_PRE77_SQL = EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions.replace(
-  "'withdrawn', 'deferred'", "'withdrawn'",
-);
-
 export const PROPOSAL_REVIEW_SCHEMA_SQL = {
   proposal_atomic_groups: `CREATE TABLE proposal_atomic_groups (
     group_id TEXT PRIMARY KEY,
@@ -981,55 +774,13 @@ export const PROPOSAL_REVIEW_SCHEMA_SQL = {
     PRIMARY KEY(client_effect_id, ordinal)
   ) STRICT`,
 } as const;
-export const PROPOSAL_REVIEW_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  proposal_atomic_groups: ['branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE'],
-  proposal_decision_drafts: ['item_id>proposal_change_items.item_id:NO ACTION/NO ACTION/NONE'],
-  proposal_decisions: ['branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE', 'current_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE', 'supersedes>proposal_decisions.decision_id:NO ACTION/NO ACTION/NONE'],
-  proposal_review_positions: ['branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE'],
-  manuscript_outcome_recovery: ['branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE', 'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE'],
-};
-export const PROPOSAL_REVIEW_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL).flatMap((table) =>
-    ['update', 'delete'].map((action) => [`${table}_no_${action}`, `CREATE TRIGGER ${table}_no_${action}
-      BEFORE ${action.toUpperCase()} ON ${table} BEGIN SELECT RAISE(ABORT, 'PROPOSAL_RECORD_IMMUTABLE'); END`])),
-);
-
-/** Byte-preserving CHECK widening. Restore keys, triggers, indexes and rowids in one transaction. */
-export function initializeProposalReviewSchema(db: DatabaseSync): void {
-  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 77) {
-    requireMark(Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL).every((name) => db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(name) !== undefined), 'SCHEMA_MIGRATION_FAILED', '提案审阅记录缺失。');
-  }
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'proposal_decisions'").get()) return;
-  const shape = db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'proposal_item_decisions'").get() as SqlRow;
-  const widen = foldedSql(text(shape.sql)) === foldedSql(PROPOSAL_ITEM_DECISIONS_PRE77_SQL);
-  requireMark(widen || foldedSql(text(shape.sql)) === foldedSql(EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions),
-    'SCHEMA_MIGRATION_FAILED', '提案决定表结构不兼容。');
-  const restore = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
-  if (widen) db.exec('PRAGMA foreign_keys = OFF');
-  try {
-    transact(db, () => {
-      if (widen) {
-        requireMark(Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 0, 'SCHEMA_MIGRATION_FAILED', '引用校验尚未停用。');
-        const attached = (db.prepare("SELECT sql FROM sqlite_schema WHERE tbl_name = 'proposal_item_decisions' AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name").all() as SqlRow[]).map((row) => text(row.sql));
-        const columns = (db.prepare("SELECT name FROM pragma_table_info('proposal_item_decisions') ORDER BY cid").all() as SqlRow[]).map((row) => text(row.name)).join(', ');
-        const before = db.prepare('SELECT rowid, * FROM proposal_item_decisions ORDER BY rowid').all();
-        db.exec('CREATE TEMP TABLE migrate_proposal_item_decisions AS SELECT rowid AS migrate_rowid, * FROM proposal_item_decisions');
-        db.exec('DROP TABLE proposal_item_decisions');
-        db.exec(EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions);
-        db.exec(`INSERT INTO proposal_item_decisions(rowid, ${columns}) SELECT migrate_rowid, ${columns} FROM temp.migrate_proposal_item_decisions ORDER BY migrate_rowid`);
-        db.exec('DROP TABLE temp.migrate_proposal_item_decisions');
-        for (const sql of attached) db.exec(sql);
-        requireMark(JSON.stringify(before) === JSON.stringify(db.prepare('SELECT rowid, * FROM proposal_item_decisions ORDER BY rowid').all()),
-          'SCHEMA_MIGRATION_FAILED', '提案决定迁移未保留原始记录。');
-      }
-      for (const sql of Object.values(PROPOSAL_REVIEW_SCHEMA_SQL)) db.exec(sql);
-      for (const sql of Object.values(PROPOSAL_REVIEW_TRIGGER_SQL)) db.exec(sql);
-      requireMark(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-    });
-  } finally {
-    if (widen && restore) db.exec('PRAGMA foreign_keys = ON');
-  }
-}
+export const PROPOSAL_REVIEW_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  proposal_atomic_groups: 'PROPOSAL_RECORD_IMMUTABLE',
+  proposal_decision_drafts: 'PROPOSAL_RECORD_IMMUTABLE',
+  proposal_decisions: 'PROPOSAL_RECORD_IMMUTABLE',
+  proposal_review_positions: 'PROPOSAL_RECORD_IMMUTABLE',
+  manuscript_outcome_recovery: 'PROPOSAL_RECORD_IMMUTABLE',
+});
 
 export class EditorialMarkStore {
   readonly #db: DatabaseSync;

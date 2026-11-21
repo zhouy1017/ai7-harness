@@ -61,5 +61,14 @@ it('pins memory snapshots, separate digest formulas and preference records (#149
 it('pins distinct memory read order and transaction placement (#1498)', () => {
   // Consecutive repeats are cache details; transitions and actual execution flags are memory timing.
   expect(actual.timing.points).toContainEqual(expect.objectContaining({ surface: 'transaction-placement', inTransaction: true }));
-  expect(actual.timing).toEqual(expected.timing);
+  // The open reads each memory ledger once since the baseline fold (#1634): the base's chain read two of them twice during
+  // the creating open, so the open's reads are exactly the base's last six, in order, and everything after them is unchanged.
+  const split = (timing: Pins['timing']) => {
+    const points = timing.order.split(',').map((index) => JSON.stringify(timing.points[parseInt(index, 36)]));
+    const opened = points.findIndex((point) => (JSON.parse(point) as { surface: string }).surface !== 'open');
+    return { open: points.slice(0, opened), after: points.slice(opened) };
+  };
+  const [head, base] = [split(actual.timing), split(expected.timing)];
+  expect(base.open).toHaveLength(8);
+  expect(head).toEqual({ open: base.open.slice(2), after: base.after });
 });

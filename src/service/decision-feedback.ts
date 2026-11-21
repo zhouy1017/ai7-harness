@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { ProposalItemDecisionProjection } from '../shared/protocol.js';
@@ -33,32 +34,13 @@ export const DECISION_FEEDBACK_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const DECISION_FEEDBACK_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(DECISION_FEEDBACK_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'DECISION_FEEDBACK_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'DECISION_FEEDBACK_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const DECISION_FEEDBACK_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  proposal_decision_feedback: [
-    'decision_id>proposal_item_decisions.decision_id:NO ACTION/NO ACTION/NONE',
-    'supersedes_feedback_id>proposal_decision_feedback.feedback_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const DECISION_FEEDBACK_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  proposal_decision_feedback: 'DECISION_FEEDBACK_LEDGER_IMMUTABLE',
+});
 
 const RECORD_SCHEMA = 'ai7.proposal-decision-feedback/1';
 /** Who gives the reason, as the other editor records of this device name it. */
 const ACTOR = '本机编辑';
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'proposal_decision_feedback'";
 
 export class DecisionFeedbackError extends Error {
   constructor(readonly code: string, message: string) {
@@ -72,22 +54,6 @@ function requireFeedback(condition: unknown, code: string, message: string): ass
 }
 
 type SqlRow = Record<string, SQLOutputValue>;
-
-/** Revision 49's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
-export function initializeDecisionFeedbackSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(DECISION_FEEDBACK_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(DECISION_FEEDBACK_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Decision feedback schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 /** One entry after a decision: the editor's 不说明, or a reason that replaced the one before it. */
 export interface DecisionFeedbackEntry {

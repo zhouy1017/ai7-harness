@@ -1,8 +1,6 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -12,51 +10,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { BACKGROUND_AUTHORIZED_DETAIL, type LaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
 import { BackgroundAnalysisDispatcher, type BackgroundAnalysisDispatcherDependencies } from '../../src/service/background-analysis.js';
-import {
-  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL, BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL,
-  BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL,
-  BACKGROUND_ATTEMPTED,
-  BACKGROUND_CHECKPOINT_PREEMPTED,
-  BACKGROUND_CURRENT,
-  BACKGROUND_NO_RULE,
-  BACKGROUND_EDITOR_TASK,
-  BACKGROUND_ENROLL_NO_RULE,
-  BACKGROUND_ENROLL_NO_ROUTE,
-  BACKGROUND_ENROLL_NO_SHARE,
-  BACKGROUND_NOT_ENROLLED,
-  BACKGROUND_NOT_MOVED,
-  BACKGROUND_NO_ROUTE,
-  BACKGROUND_PLACE_BUSY,
-  BACKGROUND_PREPARATION_IN_FLIGHT,
-  BACKGROUND_EDITOR_JOB,
-  BACKGROUND_RECOVERY_PENDING,
-  BACKGROUND_REPLACEMENT_WAITING,
-  BACKGROUND_RECORD_DAMAGED,
-  BACKGROUND_REVOKED,
-  BACKGROUND_START_SYNC,
-  BACKGROUND_SUSPENDED,
-  BACKGROUND_TASK_PREPARED,
-  BACKGROUND_TASK_RUNNING,
-  BackgroundAnalysisEnrollmentLedger,
-  backgroundDriftReason,
-  backgroundNotStartedReason,
-  backgroundQuietReason,
-  backgroundShareFullReason,
-} from '../../src/service/background-analysis-enrollments.js';
-import { MATERIAL_INDEX_SCHEMA_SQL } from '../../src/service/material-index.js';
+import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL, BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL, BACKGROUND_ATTEMPTED, BACKGROUND_CHECKPOINT_PREEMPTED, BACKGROUND_CURRENT, BACKGROUND_NO_RULE, BACKGROUND_EDITOR_TASK, BACKGROUND_ENROLL_NO_RULE, BACKGROUND_ENROLL_NO_ROUTE, BACKGROUND_ENROLL_NO_SHARE, BACKGROUND_NOT_ENROLLED, BACKGROUND_NOT_MOVED, BACKGROUND_NO_ROUTE, BACKGROUND_PLACE_BUSY, BACKGROUND_PREPARATION_IN_FLIGHT, BACKGROUND_EDITOR_JOB, BACKGROUND_RECOVERY_PENDING, BACKGROUND_REPLACEMENT_WAITING, BACKGROUND_RECORD_DAMAGED, BACKGROUND_REVOKED, BACKGROUND_START_SYNC, BACKGROUND_SUSPENDED, BACKGROUND_TASK_PREPARED, BACKGROUND_TASK_RUNNING, BackgroundAnalysisEnrollmentLedger, backgroundDriftReason, backgroundNotStartedReason, backgroundQuietReason, backgroundShareFullReason } from '../../src/service/background-analysis-enrollments.js';
 import { QUICK_START_PLAN_CHANGED } from '../../src/service/default-execution-rules.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError, type BackgroundAnalysisRuntime } from '../../src/service/store.js';
-import {
-  canonicalRecord, ANALYSIS_LEDGER_TRIGGER_SQL,
-  ANALYSIS_LEDGER_SCHEMA_SQL,
-  LATEST_SCHEMA_VERSION,
-  WRITING_TASK_SCHEMA_VERSION,
-} from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -66,7 +26,6 @@ import {
   type LaunchPolicyProjection,
   type ReviewRunScopeRequest,
 } from '../../src/shared/protocol.js';
-import { analysisRunAuthorizationsShape, downgradeAnalysisRunAuthorizationsToRevision65 } from '../support/default-execution-rules.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, sample1Path } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -292,36 +251,6 @@ function preparationInterruptions(store: EditorialStore): Array<{ title: string;
       },
     },
   ];
-}
-
-async function revision65Store() {
-  let bookId = '';
-  await withAnalysisStore(async (store, owner) => {
-    const book = await analysedBook(store, owner, 'L2 sample1 修订版 65');
-    bookId = book.bookId;
-    // A 快速开始 under a 默认执行规则, so the rows copied carry both origins revision 65 admitted.
-    const source = prepare(store, book.bookId, 'reanalyze-book');
-    const rule = store.setDefaultExecutionRule(book.bookId, source.taskIntent!.taskIntentId, source.planEnvelope!.digest);
-    const quick = await store.quickStartBaselineAnalysis(book.bookId, source.taskIntent!.taskIntentId, source.planEnvelope!.digest, rule.ruleVersionId, {
-      credentialReadiness: async () => null,
-      connectivity: { reading: () => 'online', reachesNetwork: (route) => route === LOCAL_DETERMINISTIC_ROUTE, slotBusy: () => false, carriesStoppedRun: () => false },
-    });
-    expect(quick.outcome).toBe('started');
-    owner.admitAndDispatch(quick.dispatchRunRecordId!, store.baselineAnalysisLedger);
-    await owner.whenIdle();
-  });
-  const before = withDatabase(false, (database) => {
-    constructPre94PolicyEncoding(database);
-    database.exec('PRAGMA foreign_keys = OFF');
-    // A revision-65 store holds neither revision 67's relations (Issue #428, S80a) nor revision 66's.
-    for (const table of [...Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse(), ...Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse()]) database.exec(`DROP TABLE ${table}`);
-    database.exec('PRAGMA foreign_keys = ON');
-    downgradeAnalysisRunAuthorizationsToRevision65(database);
-    execPre74Fixture(database, `PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
-    expect(analysisRunAuthorizationsShape(database)).toBe('revision-65');
-    return database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all();
-  });
-  return { bookId, before };
 }
 
 describe('后台处理登记 over the real store on exact sample1', () => {
@@ -1113,26 +1042,6 @@ describe('后台处理登记 over the real store on exact sample1', () => {
     }
   }, 300_000);
 
-  it('brings a revision-65 store to revision 66: three empty relations, the origin widened, every authorization of every origin byte for byte', async () => {
-    const { bookId, before } = await revision65Store();
-    expect((before as Row[]).map((row) => row.origin)).toEqual(['standard-direct', 'default-execution-rule']);
-    const reopened = await openWithRoute();
-    try {
-      expect(reopened.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION);
-      expect(reopened.inspectBaselineAnalysis(bookId).authorization).toMatchObject({ origin: 'default-execution-rule', startWhen: 'now', ruleVersionId: expect.any(String) });
-      expect(reopened.inspectBackgroundAnalysisEnrollment(bookId, runtime()).state).toBe('none');
-      expect(reopened.backgroundAnalysisBooks()).toEqual([]);
-      reopened.markCleanShutdown();
-    } finally {
-      reopened.close();
-    }
-    withDatabase(true, (database) => {
-      expect(database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all().map(({ start_when, ...row }) => { expect(start_when).toBe('now'); return row; })).toEqual(before);
-      for (const table of Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL)) {
-        expect((database.prepare(`SELECT count(*) n FROM ${table}`).get() as Row).n).toBe(0);
-      }
-    });
-  }, 300_000);
 });
 
 
@@ -1184,65 +1093,6 @@ it('reads v27 enrollment eligibility per kind, isolates holds/revocation and nev
   } finally { store.close(); }
 });
 
-function revision88Rows() {
-  return withDatabase(false, (db) => {
-    constructPre94PolicyEncoding(db);
-    db.exec('PRAGMA foreign_keys = OFF');
-    db.exec('BEGIN IMMEDIATE');
-    for (const [table, sql] of Object.entries({ analysis_run_authorizations: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations, ...BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL })) {
-      const omit = table === 'analysis_run_authorizations' ? 'start_when' : 'kind';
-      const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)).filter((name) => name !== omit);
-      db.exec(`CREATE TEMP TABLE old_${table} AS SELECT rowid AS prior_rowid, * FROM ${table}`);
-      db.exec(`DROP TABLE ${table}`); db.exec(sql);
-      db.exec(`INSERT INTO ${table}(rowid, ${columns.join(',')}) SELECT prior_rowid, ${columns.join(',')} FROM old_${table} ORDER BY prior_rowid`);
-      db.exec(`DROP TABLE old_${table}`);
-      // Build genuinely older canonical records, then capture the bytes the migration must preserve.
-      const remove = table === 'analysis_run_authorizations' ? 'startWhen' : 'kind';
-      for (const row of db.prepare(`SELECT rowid, canonical_json FROM ${table}`).all()) {
-        const record = JSON.parse(String(row.canonical_json)); delete record[remove];
-        // Preserve nested canonical structure using the service's canonical writer below.
-        const canonical = canonicalRecord(record);
-        db.prepare(`UPDATE ${table} SET canonical_json = ?, sha256 = ? WHERE rowid = ?`).run(canonical.json, canonical.digest, row.rowid!);
-      }
-      for (const [name, trigger] of Object.entries(table === 'analysis_run_authorizations' ? ANALYSIS_LEDGER_TRIGGER_SQL : BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL)) {
-        if (name === `${table}_no_update` || name === `${table}_no_delete`) db.exec(trigger);
-      }
-    }
-    execPre74Fixture(db, 'PRAGMA user_version = 88; COMMIT; PRAGMA foreign_keys = ON');
-    return Object.keys({ analysis_run_authorizations: '', ...BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL }).map((table) => [table,
-      db.prepare(`SELECT rowid, canonical_json, sha256 FROM ${table} ORDER BY rowid`).all()] as const);
-  });
-}
-
-it('migrates revision 88 authorizations and enrollment rows without changing historical bytes, then validates recovery (#1089)', async () => {
-  const store = await openWithRoute();
-  let bookId = '';
-  try {
-    recordMissingCredentialConnection(store, '合成迁移连接');
-    const book = await importedBook(store, '合成迁移图书'); bookId = book.bookId;
-    const prepared = prepare(store, bookId);
-    store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-    enroll(store, bookId, 'backfill');
-    store.markCleanShutdown();
-  } finally { store.close(); }
-  const before = revision88Rows();
-  const reopened = await openWithRoute();
-  try {
-    expect(reopened.inspectBaselineAnalysis(bookId).authorization?.startWhen).toBe('now');
-    expect(reopened.inspectBackgroundAnalysisEnrollment(bookId, runtime()).kind).toBe('baseline-analysis');
-    expect(reopened.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION);
-    reopened.markCleanShutdown();
-  } finally { reopened.close(); }
-  withDatabase(true, (db) => {
-    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    for (const [table, rows] of before) expect(db.prepare(`SELECT rowid, canonical_json, sha256 FROM ${table} ORDER BY rowid`).all()).toEqual(rows);
-    for (const table of Object.keys(BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL)) expect(db.prepare(`SELECT kind FROM ${table}`).all().every((row) => row.kind === 'baseline-analysis')).toBe(true);
-  });
-  const recovered = await openWithRoute();
-  try { expect(recovered.inspectBackgroundAnalysisEnrollment(bookId, runtime()).state).toBe('active'); recovered.markCleanShutdown(); }
-  finally { recovered.close(); }
-});
-
 
 it('uses the latest confirmed edit across Books and the existing editor-job fact for the 30-second idle boundary (#1089)', async () => {
   const store = await openWithRoute();
@@ -1265,41 +1115,6 @@ it('uses the latest confirmed edit across Books and the existing editor-job fact
   } finally { store.close(); }
 });
 
-
-it('recovers only the exact pre-stamp authorization shape and refuses an unexpected column without rebuilding (#1089)', async () => {
-  const store = await openWithRoute();
-  let bookId = '';
-  try {
-    recordMissingCredentialConnection(store, '合成恢复连接');
-    const book = await importedBook(store, '合成未盖版本印章'); bookId = book.bookId;
-    const prepared = prepare(store, bookId);
-    store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-    store.markCleanShutdown();
-  } finally { store.close(); }
-  const snapshot = withDatabase(false, (db) => {
-    constructPre94PolicyEncoding(db);
-    execPre74Fixture(db, 'PRAGMA user_version = 88');
-    return db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all();
-  });
-  const recovered = await openWithRoute();
-  try {
-    expect(recovered.inspectBaselineAnalysis(bookId).authorization?.startWhen).toBe('now');
-    expect(recovered.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION);
-    recovered.markCleanShutdown();
-  }
-  finally { recovered.close(); }
-  withDatabase(false, (db) => {
-    expect(db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(snapshot);
-    execPre74Fixture(db, 'PRAGMA user_version = 88; ALTER TABLE analysis_run_authorizations ADD COLUMN unexpected INTEGER');
-  });
-  await expect(openWithRoute()).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
-  withDatabase(true, (db) => {
-    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(88);
-    expect(String(db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get()?.sql)).toContain('unexpected INTEGER');
-    expect(db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all())
-      .toEqual(snapshot.map((row) => ({ ...row, unexpected: null })));
-  });
-});
 
 
 it('defers a Review approval on the same driver, propagates idle to its categories and recovers an unstarted approval (#1089)', async () => {

@@ -1,5 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
-import { migrateProcedurePlanSnapshots } from './definition-store.js';
+import { appendOnly } from '../append-only.js';
 
 /** Revision 98 adds lineage and the editor's choices; existing definition/version rows remain unchanged. */
 export const EDITABLE_PROCEDURE_SCHEMA_SQL = {
@@ -22,27 +21,7 @@ export const EDITABLE_PROCEDURE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const EDITABLE_PROCEDURE_TRIGGER_SQL = Object.fromEntries(
-  ['procedure_version_origins', 'procedure_version_stops'].flatMap((table) => ['update', 'delete'].map((operation) => [
-    `${table}_no_${operation}`, `CREATE TRIGGER ${table}_no_${operation} BEFORE ${operation.toUpperCase()} ON ${table}
-    BEGIN SELECT RAISE(ABORT, 'PROCEDURE_DEFINITION_IMMUTABLE'); END`,
-  ])),
-);
-
-export const EDITABLE_PROCEDURE_FOREIGN_KEYS = {
-  procedure_version_origins: ['version_id>procedure_definition_versions.version_id:NO ACTION/NO ACTION/NONE'],
-  procedure_version_stops: ['version_id>procedure_definition_versions.version_id:NO ACTION/NO ACTION/NONE'],
-  procedure_run_choices: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'version_id>procedure_definition_versions.version_id:NO ACTION/NO ACTION/NONE'],
-} as const;
-
-export function initializeEditableProcedureSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'procedure_version_origins'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    migrateProcedurePlanSnapshots(db);
-    for (const sql of Object.values(EDITABLE_PROCEDURE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(EDITABLE_PROCEDURE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
-}
+export const EDITABLE_PROCEDURE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  procedure_version_origins: 'PROCEDURE_DEFINITION_IMMUTABLE',
+  procedure_version_stops: 'PROCEDURE_DEFINITION_IMMUTABLE',
+});

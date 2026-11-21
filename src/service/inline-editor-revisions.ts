@@ -26,14 +26,6 @@ export const INLINE_EDITOR_REVISION_SCHEMA_SQL = {
   accepted INTEGER NOT NULL DEFAULT 0 CHECK(accepted IN (0, 1))
 ) STRICT`,
 } as const;
-export const INLINE_EDITOR_REVISION_FOREIGN_KEYS = {
-  editor_inline_revision_commands: ['command_group_id>manuscript_command_groups.command_group_id:NO ACTION/NO ACTION/NONE'],
-  editor_inline_revision_marks: ['mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE'],
-};
-export function initializeInlineEditorRevisionSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_commands'").get()) return;
-  transact(db, () => { for (const sql of Object.values(INLINE_EDITOR_REVISION_SCHEMA_SQL)) db.exec(sql); });
-}
 
 /** Recover this session's original spans against the text just before the next journal write. Unrelated edits stay intact. */
 export function inlineRevisionBaseline(db: DatabaseSync, input: JournalEditInput, beforeText: string): string {

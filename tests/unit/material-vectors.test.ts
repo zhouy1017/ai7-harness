@@ -1,22 +1,12 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { MAX_FRAME_BYTES, MAX_MATERIAL_SEGMENTS_PAGE } from '../../src/shared/protocol.js';
 import { MAX_MATERIAL_TRANSLATION_CODE_UNITS } from '../../src/service/fast-role/material-translation-contract.js';
 import { cosineSimilarity, vectorBytes, vectorFromBytes, vectorNorm } from '../../src/service/knowledge/embedding.js';
 import { STUB_EMBEDDING_DIMENSIONS, STUB_EMBEDDING_IDENTITY, StubEmbeddingProvider, stubEmbedding, stubFeatures } from '../../src/service/knowledge/embedding-stub.js';
-import { initializeLibraryMaterialSchema } from '../../src/service/library-materials.js';
-import {
-  MATERIAL_INDEX_LAYER_SCHEMA_SQL,
-  MaterialIndexError,
-  MaterialIndexLedger,
-  initializeMaterialIndexLayerSchema,
-  initializeMaterialIndexSchema,
-  materialCitation,
-  materialParagraphCitation,
-  type MaterialEmbeddingFacts,
-  type MaterialExtraction,
-  type MaterialLayerActivity,
-} from '../../src/service/material-index.js';
+import { LIBRARY_MATERIAL_SCHEMA_SQL } from '../../src/service/library-materials.js';
+import { MATERIAL_INDEX_LAYER_SCHEMA_SQL, MaterialIndexError, MaterialIndexLedger, MATERIAL_INDEX_SCHEMA_SQL, materialCitation, materialParagraphCitation, type MaterialEmbeddingFacts, type MaterialExtraction, type MaterialLayerActivity } from '../../src/service/material-index.js';
 
 // Unit suite (L1) for the Material Index's two on-request layers (Issue #892): the built-in similarity provider, the vectors
 // and 来源译文 a build keeps beside it, the similarity search an editor and a Task make, and the boundary every Task read keeps.
@@ -71,9 +61,9 @@ describe('the vectors and 来源译文 a build keeps beside it', () => {
   function store(): DatabaseSync {
     const db = new DatabaseSync(':memory:');
     db.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT');
-    initializeLibraryMaterialSchema(db);
-    initializeMaterialIndexSchema(db);
-    initializeMaterialIndexLayerSchema(db, 75);
+    createBaselineRelations(db, LIBRARY_MATERIAL_SCHEMA_SQL);
+    createBaselineRelations(db, MATERIAL_INDEX_SCHEMA_SQL);
+    createBaselineRelations(db, MATERIAL_INDEX_LAYER_SCHEMA_SQL);
     for (const [id, sha, object] of [[MATERIAL, SHA, 'b'.repeat(64)], [OTHER, 'c'.repeat(64), 'd'.repeat(64)]] as const) {
       db.prepare('INSERT INTO library_materials(material_id, object_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?)')
         .run(id, object, '2026-10-09T00:00:00.000Z', '{}', sha);
@@ -93,20 +83,6 @@ describe('the vectors and 来源译文 a build keeps beside it', () => {
     const next = ledger.vectorTargets(materialId, STUB.identity, 100);
     ledger.recordVectors(next, STUB, next.targets.map((target) => ({ ordinal: target.ordinal, sha256: target.sha256, vector: stubEmbedding(target.text) })));
   }
-
-  it('creates revision 76\'s two relations once, exactly, and refuses a store stamped 76 without them', () => {
-    const db = store();
-    expect(Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL)).toEqual(['material_index_vectors', 'material_index_translations']);
-    initializeMaterialIndexLayerSchema(db, 76);
-    const bare = new DatabaseSync(':memory:');
-    bare.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT');
-    initializeLibraryMaterialSchema(bare);
-    initializeMaterialIndexSchema(bare);
-    expect(() => initializeMaterialIndexLayerSchema(bare, 76)).toThrowError(MaterialIndexError);
-    // A relation whose text differs is refused, never used.
-    db.exec('DROP TRIGGER material_index_vectors_no_delete');
-    expect(() => initializeMaterialIndexLayerSchema(db, 76)).toThrowError(/结构不兼容/u);
-  });
 
   it('builds vectors only when asked, keyed to the build and its segments, and says where they stand', () => {
     const db = store();
