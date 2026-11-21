@@ -869,7 +869,7 @@ export class DatabaseReplacements {
 
   /**
    * `只导入其中的图书，与本机合并（重名的另存）` (S86d; ADR 0079 §1.5): the previewed package taken into the staging place and opened
-   * as a store of its own — brought to this AI7's revision and checked whole — the data as it is backed up, and the merge of
+   * as a store of its own — at this AI7's baseline, or refused, and checked whole — the data as it is backed up, and the merge of
    * every Book not already here waiting for AI7's next start. One replacement or merge waits at a time.
    */
   async prepareMerge(previewId: string, now: Date): Promise<DatabaseReplacementsProjection> {

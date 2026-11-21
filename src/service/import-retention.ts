@@ -1329,9 +1329,9 @@ export function validateWordChoice(value: unknown): WordTrackedChoiceInput {
  * DOCX's content can stay with its Source Version and be restored from the original on export.
  *
  * - `import_fidelity_categories` widens to the ten classes (`position` 1 to 10) and the `retained`
- *   status. A store that revision 26 or earlier created is rebuilt to the widened text with every row
- *   copied byte for byte, rowid included (`widenImportFidelityCategories`); revision 26's text is kept
- *   only to recognise such a store (`IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL`).
+ *   status. The storage baseline (#1634) creates the widened text; the byte-for-byte rebuild of a store
+ *   revision 26 or earlier created, and revision 26's text, went with the migration chain: the upgrade
+ *   tool (ADR 0105 §4) is what reads such a store now.
  * - `import_fidelity_choices`: the one choice a review makes for its text boxes — `retain` (保留为文本框,
  *   the default) or `merge` (并入正文) — written with the review at commit (ADR 0086 §2).
  * - `staged_import_block_sources` and `staged_import_text_box_paragraphs`: which `w:p` of the staged
@@ -1341,9 +1341,9 @@ export function validateWordChoice(value: unknown): WordTrackedChoiceInput {
  *   source paragraph every block came from (a body paragraph, or a paragraph of a merged text box) and
  *   the digest it had there, so an unedited block can be restored from its source paragraph (ADR 0086 §3).
  *
- * Nothing existing moves (ADR 0079 §1.1): the rebuild changes no row, and the four relations are added.
- * `EditorialStore.open` runs `initializeImportRetentionSchema` before the version is stamped; it is
- * shape-detected, so it does its work once.
+ * The storage baseline (#1634) creates these relations once, with every other, when it builds an empty store
+ * (`createStoreAtBaseline`); an open checks them exactly against the baseline (`requireBaselineSchema`)
+ * and creates nothing.
  */
 
 type SqlRow = Record<string, SQLOutputValue>;

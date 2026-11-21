@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { readSmallFile, writeAtomic } from './database-replacement.js';
-import { DATA_VERSION_MARKER_UNREADABLE, newerDataVersionMessage, olderDataVersionMessage } from '../shared/data-version-labels.js';
+import { DATA_VERSION_MARKER_UNREADABLE, FOREIGN_DATABASE, newerDataVersionMessage, olderDataVersionMessage } from '../shared/data-version-labels.js';
 import packageMetadata from '../../package.json' with { type: 'json' };
 
 /**
@@ -550,15 +550,26 @@ const USER_VERSION_OFFSET = 60;
 /**
  * The schema revision a store's own files hold, read as bytes without opening SQLite, so reading it changes nothing (#1634): the
  * `user_version` of page 1 — from the last committed copy of page 1 in the write-ahead log when the log holds one (a store whose
- * writer stopped before a checkpoint), else from the database header. `0` for an absent or empty store; `null` when the file
- * is not an SQLite database, which the open itself then refuses.
+ * writer stopped before a checkpoint), else from the database file. `0` for an absent or empty store; `null` when the file is
+ * not an SQLite database, which the open itself then refuses. A database that holds any schema object but no revision was not
+ * made by AI7 — every store AI7 makes is stamped in the transaction that builds it — and is refused here, as it lies.
  */
 export function storeRevisionOnDisk(databasePath: string): number | null {
-  const header = readPrefix(databasePath, 100);
+  const header = readPrefix(databasePath, PAGE_ONE_PREFIX);
   if (header !== null && header.length > 0 && (header.length < 100 || header.toString('latin1', 0, 16) !== SQLITE_MAGIC)) return null;
-  const fromLog = committedPageOneRevision(`${databasePath}-wal`);
-  if (fromLog !== null) return fromLog;
-  return header === null || header.length === 0 ? 0 : header.readUInt32BE(USER_VERSION_OFFSET);
+  const page = committedPageOne(`${databasePath}-wal`) ?? (header === null || header.length === 0 ? null : header);
+  if (page === null) return 0;
+  const revision = page.readUInt32BE(USER_VERSION_OFFSET);
+  if (revision === 0 && !emptySchema(page)) throw new DataVersionError('DATA_STORE_FOREIGN', FOREIGN_DATABASE);
+  return revision;
+}
+
+/** The 100-byte header and page 1's b-tree header: enough to read the revision and whether the schema holds anything. */
+const PAGE_ONE_PREFIX = 108;
+
+/** Page 1 is the schema's b-tree: empty while it is a leaf with no cell. */
+function emptySchema(page: Buffer): boolean {
+  return page.length >= PAGE_ONE_PREFIX && page[100] === 0x0d && page.readUInt16BE(103) === 0;
 }
 
 function readPrefix(path: string, length: number): Buffer | null {
@@ -575,8 +586,11 @@ function readPrefix(path: string, length: number): Buffer | null {
   }
 }
 
-/** The write-ahead log's frames as SQLite itself validates them: its salts, and the running checksum from the log header on. */
-function committedPageOneRevision(walPath: string): number | null {
+/**
+ * The last committed copy of page 1 in the write-ahead log, its frames read as SQLite itself validates them: their salts, and
+ * the running checksum from the log header on. `null` when the log is absent, empty, or commits no page 1.
+ */
+function committedPageOne(walPath: string): Buffer | null {
   let handle: number;
   try { handle = openSync(walPath, 'r'); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
@@ -593,13 +607,13 @@ function committedPageOneRevision(walPath: string): number | null {
     let sum = walChecksum(header.subarray(0, 24), bigEndian, [0, 0]);
     if (sum[0] !== header.readUInt32BE(24) || sum[1] !== header.readUInt32BE(28)) return null;
     const frame = Buffer.alloc(24 + pageSize);
-    let pending: number | null = null;
-    let committed: number | null = null;
+    let pending: Buffer | null = null;
+    let committed: Buffer | null = null;
     for (let offset = 32; readSync(handle, frame, 0, frame.length, offset) === frame.length; offset += frame.length) {
       if (frame.readUInt32BE(8) !== header.readUInt32BE(16) || frame.readUInt32BE(12) !== header.readUInt32BE(20)) break;
       sum = walChecksum(frame.subarray(24), bigEndian, walChecksum(frame.subarray(0, 8), bigEndian, sum));
       if (sum[0] !== frame.readUInt32BE(16) || sum[1] !== frame.readUInt32BE(20)) break;
-      if (frame.readUInt32BE(0) === 1) pending = frame.readUInt32BE(24 + USER_VERSION_OFFSET);
+      if (frame.readUInt32BE(0) === 1) pending = Buffer.from(frame.subarray(24, 24 + PAGE_ONE_PREFIX));
       if (frame.readUInt32BE(4) !== 0) { if (pending !== null) committed = pending; pending = null; }
     }
     return committed;

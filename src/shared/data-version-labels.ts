@@ -3,6 +3,7 @@ export const DATA_VERSION_STARTUP_TITLE = '无法打开数据';
 export const DATA_VERSION_STARTUP_CLOSE = '关闭';
 export const DATA_VERSION_MARKER_UNREADABLE = '这份数据的数据版本标记无法读取：AI7 没有打开这份数据，也没有改动它。请使用写入这份数据的 AI7 打开，或从备份恢复。';
 export const DATA_VERSION_MARKER_UNWRITABLE = '无法写入这份数据的数据版本标记：AI7 没有打开这份数据。请确认数据文件夹可以写入，再启动 AI7。';
+export const FOREIGN_DATABASE = '数据文件夹里有一个不是 AI7 建立的数据库：AI7 没有打开它，也没有改动它。';
 export const UPGRADE_BACKUP_FAILED = '升级前备份没有完成：AI7 没有升级这份数据，也没有打开它。请确认备份位置可以写入、空间足够，再启动 AI7。';
 export const UPGRADE_BACKUP_EXISTS = '备份位置里已经有一个同名的文件，升级前备份没有完成：AI7 没有升级这份数据，也没有打开它。请稍后再启动 AI7。';
 export const UPGRADE_BACKUP_UNSUPPORTED = '备份位置所在的磁盘不能安全地新建文件，升级前备份没有完成：AI7 没有升级这份数据，也没有打开它。';
@@ -21,6 +22,7 @@ export function dataVersionStartupRefusal(code: unknown, message: unknown): { co
   if (typeof code !== 'string' || typeof message !== 'string') return null;
   if ((code === 'DATA_VERSION_MARKER_UNREADABLE' && message === DATA_VERSION_MARKER_UNREADABLE) ||
     (code === 'DATA_VERSION_MARKER_UNWRITABLE' && message === DATA_VERSION_MARKER_UNWRITABLE) ||
+    (code === 'DATA_STORE_FOREIGN' && message === FOREIGN_DATABASE) ||
     (code === 'UPGRADE_BACKUP_FAILED' && message === UPGRADE_BACKUP_FAILED) ||
     (code === 'UPGRADE_BACKUP_EXISTS' && message === UPGRADE_BACKUP_EXISTS) ||
     (code === 'UPGRADE_BACKUP_UNSUPPORTED' && message === UPGRADE_BACKUP_UNSUPPORTED)) return { code, message };

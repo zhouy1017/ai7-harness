@@ -24,6 +24,7 @@ import {
   pinEditorialWorkspaceProfileRevision2,
   recordMissingCredentialConnection,
 } from '../support/sample1-baseline.js';
+import { DATABASE_REPLACEMENT_TRIGGER_SQL, readPendingReplacement, writeReplacementIntent, type ReplacementIntent } from '../../src/service/database-replacement.js';
 
 const sourceRead = vi.hoisted(() => ({ path: null as string | null, atEnd: null as (() => Promise<void>) | null }));
 /** While set, every write into a file opened under this directory fails as a full disk fails. */
@@ -509,8 +510,8 @@ describe('导入数据库 over the real store', () => {
       expect(await refusal(() => store.inspectDatabaseImport(join(roots.inputRoot, 'words.ai7db')))).toBe('DATABASE_PACKAGE_INVALID');
       expect(await refusal(() => store.inspectDatabaseImport(join(roots.inputRoot, 'missing.ai7db')))).toBe('DATABASE_PACKAGE_UNREADABLE');
       expect(await refusal(() => store.inspectDatabaseImport('relative.ai7db'))).toBe('DATABASE_IMPORT_SOURCE_INVALID');
-      // A package from an earlier or a newer Data Version, or from a newer AI7, is previewed and refused: a Data Version 1
-      // package is not converted until the upgrade tool lands (#1634; ADR 0105 §4).
+      // A package from an earlier or a newer Data Version, or from a newer AI7, is previewed, and refused for replacing and for
+      // merging alike: a Data Version 1 package is not converted until the upgrade tool lands (#1634; ADR 0105 §4).
       for (const [name, dataVersion, revision, compatibility] of [
         ['旧数据版本.ai7db', 1, LATEST_SCHEMA_VERSION - 1, 'older-data-version'],
         ['新数据版本.ai7db', 3, LATEST_SCHEMA_VERSION, 'newer-data-version'],
@@ -519,6 +520,7 @@ describe('导入数据库 over the real store', () => {
         const preview = await store.inspectDatabaseImport(await handmade(name, dataVersion, revision));
         expect(preview.compatibility).toBe(compatibility);
         expect(await refusal(() => store.prepareDatabaseReplacement(preview.previewId, T))).toBe('DATABASE_IMPORT_INCOMPATIBLE');
+        expect(await refusal(() => store.prepareDatabaseMerge(preview.previewId, T))).toBe('DATABASE_IMPORT_INCOMPATIBLE');
       }
       // A file that changed after its preview: nothing is taken, and nothing is backed up.
       const first = await exported(store, '第一次.ai7db');
@@ -534,6 +536,155 @@ describe('导入数据库 over the real store', () => {
       store.close();
     }
   }, 180_000);
+  it('retains independent role choices through database replacement', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const connection = store.saveModelServiceConnection('Synthetic account', null, 'ready', 'anthropic-claude');
+    try {
+      store.selectMainRoleModel('anthropic-claude', 'account-opus');
+      store.selectFastRoleModel('anthropic-claude', 'account-haiku');
+      const preview = await store.inspectDatabaseImport(await exported(store, 'independent-roles.ai7db'));
+      await store.prepareDatabaseReplacement(preview.previewId, T);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getConfiguredModelRoleBinding('main-editorial')).toMatchObject({ model: 'account-opus', credentialReference: connection.credentialReference });
+      expect(store.getConfiguredModelRoleBinding('fast-interaction')).toMatchObject({ model: 'account-haiku', credentialReference: connection.credentialReference });
+    } finally { store.close(); }
+  });
+
+  it('keeps 撤销 and 重做 through replacement (#1175)', async () => {
+    const other = join(roots.inputRoot, 'history-data');
+    mkdirSync(join(other, 'objects'), { recursive: true });
+    const source = await EditorialStore.open(other, roots.codeRoot);
+    const book = await importSample1Book(source, roots.codeRoot, '撤销替换合成图书');
+    const view = source.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+    const target = view.blocks.find((block) => block.kind === 'paragraph')!;
+    source.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: view.revisionId,
+      blockId: target.blockId, windowStartBlockId: view.blocks[0]!.blockId, baseBlockDigest: target.digest, expectedJournalSequence: view.journalSequence,
+      fromGrapheme: 0, toGrapheme: 0, insertText: '〔替换前〕' });
+    source.markCleanShutdown(); source.close();
+    const database = new DatabaseSync(join(other, 'store', 'ai7.sqlite'));
+    const path = join(roots.inputRoot, 'history.ai7db');
+    try {
+      await writeDatabasePackage(database, other, path, () => ({ dataVersion: 2, softwareVersion: '0.1.0', schemaRevision: LATEST_SCHEMA_VERSION, createdAt: T.toISOString(),
+        origin: 'database-export', contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 } }));
+    } finally { database.close(); }
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const preview = await store.inspectDatabaseImport(path);
+      expect(preview).toMatchObject({ schemaRevision: LATEST_SCHEMA_VERSION, compatibility: 'compatible' });
+      await store.prepareDatabaseReplacement(preview.previewId, T);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      const text = (): string => store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks.find((block) => block.blockId === target.blockId)!.text;
+      const digest = (): string => store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest;
+      expect(text().startsWith('〔替换前〕')).toBe(true);
+      store.undoManuscript(book.manuscriptId, book.branchId, digest());
+      expect(text() === target.text).toBe(true);
+      store.redoManuscript(book.manuscriptId, book.branchId, digest());
+      expect(text().startsWith('〔替换前〕')).toBe(true);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
+  it('restores peer production documents through a backup', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '多篇文档替换');
+      const first = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release' })).document!;
+      await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '媒体稿' });
+      const before = store.inspectProductionDocuments(book.bookId);
+      const path = await exported(store, 'peer-backup.ai7db');
+      store.renameProductionDocument({ bookId: book.bookId, documentId: first.documentId, title: '本机临时题目' });
+      const preview = await store.inspectDatabaseImport(path);
+      await store.prepareDatabaseReplacement(preview.previewId, new Date());
+      store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.inspectProductionDocuments(book.bookId)).toEqual(before);
+    } finally { store.close(); }
+  });
+
+  it('preserves a Task Intent draft identity through database replacement', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const bookId = createBook(store, '任务草稿替换');
+    const draft = store.saveTaskIntentDraft({ bookId, draftId: null, expectedOrdinal: null, origin: 'composer-book', goal: '审阅本书', target: { kind: 'book' }, outcomeClass: 'review' });
+    try {
+      const preview = await store.inspectDatabaseImport(await exported(store, 'drafts.ai7db'));
+      await store.prepareDatabaseReplacement(preview.previewId);
+    } finally { store.close(); }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try { expect(store.inspectTaskIntentDrafts({ bookId, draftId: draft.draftId }).drafts[0]!.version).toEqual(draft.version); }
+    finally { store.close(); }
+  });
+
+  it('keeps its records as written, and refuses one rewritten by hand', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let intent: ReplacementIntent;
+    try {
+      createBook(store, '甲书');
+      const preview = await store.inspectDatabaseImport(await exported(store, 'AI7 数据库.ai7db'));
+      await store.prepareDatabaseReplacement(preview.previewId, T);
+      intent = (await readPendingReplacement(roots.dataRoot))!;
+    } finally {
+      store.close();
+    }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    store.close();
+    // An open that stopped after the replacement was recorded, before its staging place went: the next open records it once.
+    mkdirSync(replacementStagingFor(roots.dataRoot));
+    await writeReplacementIntent(roots.dataRoot, intent);
+    await writeFile(join(replacementStagingFor(roots.dataRoot), 'phase.json'), JSON.stringify('applied'));
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(await store.inspectDatabaseReplacements()).toMatchObject({ total: 1, replacements: [{ replacementId: intent.replacementId, outcome: 'applied' }] });
+      expect(existsSync(replacementStagingFor(roots.dataRoot))).toBe(false);
+    } finally {
+      store.close();
+    }
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const tamper = async (statement: string): Promise<unknown> => {
+      const tampered = new DatabaseSync(path);
+      let original: string;
+      try {
+        original = (tampered.prepare('SELECT * FROM database_replacements').get() as Record<string, string>).canonical_json!;
+        tampered.exec('DROP TRIGGER database_replacements_no_update');
+        tampered.exec(statement);
+        tampered.exec(DATABASE_REPLACEMENT_TRIGGER_SQL.database_replacements_no_update!);
+      } finally {
+        tampered.close();
+      }
+      const opened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      try {
+        return code(await opened.inspectDatabaseReplacements().then(() => null, (error: unknown) => error));
+      } finally {
+        opened.close();
+        const restore = new DatabaseSync(path);
+        try {
+          restore.exec('DROP TRIGGER database_replacements_no_update');
+          restore.prepare('UPDATE database_replacements SET canonical_json = ?, sha256 = ?, package_file_name = ?').run(
+            original, sha256Hex(original), (parseCanonicalJson(original) as { packageFileName: string }).packageFileName);
+          restore.exec(DATABASE_REPLACEMENT_TRIGGER_SQL.database_replacements_no_update!);
+        } finally {
+          restore.close();
+        }
+      }
+    };
+    let database = new DatabaseSync(path);
+    try {
+      for (const statement of ["UPDATE database_replacements SET outcome = 'failed'", 'DELETE FROM database_replacements']) {
+        expect(() => database.exec(statement)).toThrow(/DATABASE_REPLACEMENT_LEDGER_IMMUTABLE/u);
+      }
+    } finally {
+      database.close();
+    }
+    // A row changed under its record; a record's digest left stale.
+    expect(await tamper("UPDATE database_replacements SET package_file_name = '别的文件.ai7db'")).toBe('DATABASE_REPLACEMENT_RECORD_INVALID');
+    expect(await tamper(`UPDATE database_replacements SET sha256 = '${'c'.repeat(64)}'`)).toBe('DATABASE_REPLACEMENT_RECORD_INVALID');
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect((await store.inspectDatabaseReplacements()).total).toBe(1);
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
 
   it('writes the backup before a replacement alone in the backup location, beside 定期自动备份 (Issue #434, S86c restack)', async () => {
     const hours = (count: number): Date => new Date(T.getTime() + count * 60 * 60 * 1000);

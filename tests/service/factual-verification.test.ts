@@ -34,6 +34,7 @@ import {
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { sample1Seed, type Sample1Seed } from '../support/sample1-seed.js';
+import { mergeClaimEvidenceUnits } from '../../src/service/analysis/factual-review-evidence.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -596,6 +597,82 @@ describe('factual claim occurrence ledger', () => {
     expect(resumed.currentRunState(runRecordId)).toBe('completed');
     expect(resumed.factualVerification.claims(runRecordId)).toEqual(frozen);
   }, 300_000);
+  it.each(['fresh', 'existing-prefix'] as const)('continues a claim-stage pause with %s evidence without replacing prior captures', async (prefix) => {
+    await setup({ claimStages: true, twoAssertions: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
+    const book = await newBook('断言取证暂停后续行');
+    let reviewRunId = '';
+    scenario.atClaimAnswer = () => {
+      delete scenario.atClaimAnswer;
+      const held = store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: reviewRunId, action: 'pause' });
+      owner.pauseRun(held.runRecordId!, held.ledger);
+    };
+    await review(book, undefined, { prepared: (id) => { reviewRunId = id; } });
+    const snapshot = store.inspectReviewWorkspace(book.bookId, reviewRunId).run!;
+    const taskIntentId = snapshot.categories[0]!.taskIntentId!;
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const runRecordId = String(db.prepare('SELECT run_record_id FROM analysis_run_records WHERE task_intent_id=?').get(taskIntentId)!.run_record_id);
+      const ledger = store.executionLedgerForRun(runRecordId);
+      expect(ledger.currentRunState(runRecordId)).toBe('paused');
+      const claims = ledger.factualVerification.claims(runRecordId)!;
+      const session = ledger.factualVerification.claimSession(runRecordId, 'web-verification', claims.claims[0]!.claimId)!;
+      const kept = ledger.factualVerification.claimRounds(session.sessionId);
+      expect(kept).toHaveLength(1);
+      const rows = () => db.prepare('SELECT evidence_id,canonical_json,sha256 FROM research_evidence WHERE run_record_id=? ORDER BY rowid').all(runRecordId);
+      if (prefix === 'fresh') expect(rows()).toHaveLength(0);
+      else if (rows().length === 0) {
+        store.recordResearchEvidence({ bookId: book.bookId, runRecordId, unitOrdinal: claims.claims[0]!.producers[0]!.sourceUnitOrdinal,
+          backendId: TINYFISH.id, unit: kept[0]!.evidence });
+      }
+      const original = rows();
+      const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
+      try { await driver.continue(reviewRunId); } finally { await driver.dispose(); }
+      expect(store.inspectReviewWorkspace(book.bookId, reviewRunId).run!.state).toBe('settled');
+      expect(ledger.currentRunState(runRecordId)).toBe('completed');
+      expect(rows().slice(0, original.length)).toEqual(original);
+      expect(store.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null }).units[0]?.state).toBe('completed');
+      const count = rows().length;
+      const again = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
+      try { await again.continue(reviewRunId); } finally { await again.dispose(); }
+      expect(rows()).toHaveLength(count);
+      const unitOrdinal = claims.claims[0]!.producers[0]!.sourceUnitOrdinal;
+      const retained = claims.claims.filter((c) => c.producers[0]!.sourceUnitOrdinal === unitOrdinal).flatMap((c) => {
+        const session = ledger.factualVerification.claimSession(runRecordId, 'web-verification', c.claimId)!;
+        return ledger.factualVerification.claimRounds(session.sessionId).map((r) => r.evidence);
+      });
+      const revisionCount = () => db.prepare('SELECT COUNT(*) n FROM research_evidence_unit_revisions WHERE run_record_id=?').get(runRecordId)!.n;
+      const revisions = revisionCount();
+      if (prefix === 'existing-prefix') {
+        const write = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+        try {
+          expect(() => write.exec('UPDATE research_evidence_unit_revisions SET search_calls=0')).toThrow(/RESEARCH_EVIDENCE_LEDGER_IMMUTABLE/u);
+          expect(() => write.exec('DELETE FROM research_evidence_unit_revisions')).toThrow(/RESEARCH_EVIDENCE_LEDGER_IMMUTABLE/u);
+        } finally { write.close(); }
+      }
+      const input = { bookId: book.bookId, runRecordId, unitOrdinal, backendId: TINYFISH.id, unit: mergeClaimEvidenceUnits(retained) };
+      store.recordResearchEvidence(input);
+      expect(rows()).toHaveLength(count); expect(revisionCount()).toBe(revisions);
+      expect(() => store.recordResearchEvidence({ ...input, unit: { ...input.unit, searchCalls: input.unit.searchCalls + 1 } }))
+        .toThrow(expect.objectContaining({ code: 'RESEARCH_EVIDENCE_CLAIM_DRIFT' }));
+      const secondFinding = String(db.prepare('SELECT finding_id FROM review_findings WHERE review_run_id=? AND kind_ref=?')
+        .get(reviewRunId, `fnd_${claims.claims[1]!.claimId.slice(0, 24)}`)!.finding_id);
+      expect(store.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null, taskIntentId, reviewFindingId: secondFinding }).findings).toHaveLength(1);
+      const path = join(roots.inputRoot, 'resumed-claim.ai7db');
+      const preparation = await store.prepareDatabaseExport(path, true);
+      expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
+      const targetRoots = await createServiceTestRoots('ai7-resumed-claim-merge-');
+      let target = await EditorialStore.open(targetRoots.dataRoot, roots.codeRoot);
+      try {
+        const preview = await target.inspectDatabaseImport(path);
+        await target.prepareDatabaseMerge(preview.previewId, new Date()); target.close();
+        target = await EditorialStore.open(targetRoots.dataRoot, roots.codeRoot);
+        const evidence = target.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null });
+        expect(evidence.records.map((r) => r.evidenceId)).toEqual(rows().map((r) => r.evidence_id).reverse());
+        expect(evidence.units[0]).toMatchObject({ state: 'completed', searchCalls: input.unit.searchCalls });
+      } finally { target.close(); await targetRoots.dispose(); }
+    } finally { db.close(); }
+  });
+
 
   it('spends an unknown model submission and preserves that claim allowance after reopen', async () => {
     await setup({ claimStages: true, claimModelUnknown: true, relations: [] });

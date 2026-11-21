@@ -85,8 +85,8 @@ import { MARKDOWN_EXPORT_WRITER_IDENTITY, PDF_EXPORT_WRITER_IDENTITY, renderMark
  * rename both check it, so a file put there since is never overwritten (`EXPORT_TARGET_CHANGED`). Cancelling
  * before the approval creates nothing but the preparation (EXP-020). Nothing is sent anywhere (EXP-015).
  *
- * Nothing existing moves (ADR 0079 §1.1): the three relations are added once, shape-detected, by
- * `initializeExportLedgerSchema` before `EditorialStore.open` stamps the version.
+ * The storage baseline (#1634) creates the three relations once, with every other, when it builds an
+ * empty store (`createStoreAtBaseline`); an open checks them exactly and creates nothing.
  */
 const TARGET_KINDS = "'manuscript-revision', 'milestone-version', 'production-document-version', 'book-delivery-package-version', 'report', 'database-export-package'";
 
