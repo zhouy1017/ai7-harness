@@ -50,9 +50,15 @@ function reviewRevision(host: TaskRelaunchHost, bookId: string, ref: string, bou
   return { state: facts.state, groups, revision: `${cursors.join(':')}:${sha256(canonicalJson(prefix))}` };
 }
 
-function requireOfferedSource(host: TaskRelaunchHost, bookId: string, source: TaskRelaunchSource): void {
-  const offered = host.taskPlan({ bookId, kind: source.kind, ref: source.ref }).relaunch?.input.relaunchOf;
-  requireStore(offered !== undefined && canonicalJson(offered) === canonicalJson(source), 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE);
+function requireOfferedSource(host: TaskRelaunchHost, bookId: string, source: TaskRelaunchSource) {
+  const offered = host.taskPlan({ bookId, kind: source.kind, ref: source.ref }).relaunch;
+  requireStore(offered?.input.relaunchOf !== undefined && canonicalJson(offered.input.relaunchOf) === canonicalJson(source), 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE);
+  return offered;
+}
+
+function requirePreviewBeforeCancellation(host: TaskRelaunchHost, bookId: string, source: TaskRelaunchSource): void {
+  const offered = requireOfferedSource(host, bookId, source);
+  requireStore(!('redoOf' in offered.input) || offered.input.redoOf == null, 'TASK_RELAUNCH_PREVIEW_CANCEL_REQUIRED', '先取消这项任务，才能查看重新开始后的计划。');
 }
 
 /** The command replay lookup runs before this read; a new command must still name the offered source. */
@@ -64,7 +70,7 @@ export function requireTaskRelaunchSource(host: TaskRelaunchHost, bookId: string
     requireStore(latest?.review_run_id === source.ref && source.runRecordId === source.ref, 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE);
     const current = reviewRevision(host, bookId, source.ref);
     if (!source.cancelsFirst) { requireStore(current.revision === source.revision, 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE); requireOfferedSource(host, bookId, source); return; }
-    if (preview && current.revision === source.revision) { requireOfferedSource(host, bookId, source); return; }
+    if (preview && current.revision === source.revision) { requirePreviewBeforeCancellation(host, bookId, source); return; }
     const boundary = source.revision.split(':').slice(0, 3).map(Number);
     requireStore(boundary.length === 3 && boundary.every(Number.isSafeInteger) && current.state === 'cancelled' &&
       reviewRevision(host, bookId, source.ref, boundary).revision === source.revision, 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE);
@@ -77,7 +83,7 @@ export function requireTaskRelaunchSource(host: TaskRelaunchHost, bookId: string
   const row = ledgerSource(host, bookId, source.ref);
   requireStore(row !== undefined && row.current === 1 && row.run_record_id === source.runRecordId, 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE);
   requireStore(expected !== 'baseline-analysis' && expected !== 'custom-analysis' || (expected === 'custom-analysis' ? isCustomAnalysisKindId(row.kind) : row.kind === BASELINE_ANALYSIS_KIND), 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE);
-  if (preview && source.cancelsFirst && row.sha256 === source.revision) { requireOfferedSource(host, bookId, source); return; }
+  if (preview && source.cancelsFirst && row.sha256 === source.revision) { requirePreviewBeforeCancellation(host, bookId, source); return; }
   if (!source.cancelsFirst && row.sha256 === source.revision) { requireOfferedSource(host, bookId, source); return; }
   const previous = host.authority.prepare('SELECT sequence FROM analysis_run_states WHERE run_record_id = ? AND sha256 = ?').get(source.runRecordId, source.revision);
   const later = previous === undefined ? [] : host.authority.prepare('SELECT state FROM analysis_run_states WHERE run_record_id = ? AND sequence > ? ORDER BY sequence').all(source.runRecordId, Number(previous.sequence));
@@ -117,7 +123,7 @@ function taskRelaunchPlan(host: TaskRelaunchHost, plan: TaskPlanProjection): Tas
   const redoOf = carries ? relaunchOf.runRecordId : undefined;
   const summary = cancel && (plan.state.key === 'blocked' || plan.state.key === 'plan-moved')
     ? ['先取消这项尚未开始的任务，再重新开始。', '重新开始一项新任务，已完成的内容不会带入。']
-    : [...(cancel ? ['先取消这项未完成的任务，再重新开始。'] : []), carries ? '重新开始一项新任务；可以沿用的已完成部分会保留，其余重新处理。' : plan.state.key === 'settled' ? '按原来的要求重新开始一项新任务。' : '重新开始一项新任务，已完成的内容不会带入。'];
+    : [...(cancel ? ['先取消这项未完成的任务，再重新开始。'] : []), carries ? row?.kind === BASELINE_ANALYSIS_KIND ? '重新开始一项新任务；可以沿用的已完成部分会保留，其余重新处理。' : '重新开始一项新任务，沿用原来的运行选项，内容重新处理。' : plan.state.key === 'settled' ? '按原来的要求重新开始一项新任务。' : '重新开始一项新任务，已完成的内容不会带入。'];
   const request = repeatTaskRequest(host, bookId, { kind, ref }, true);
   const common = { summary, cancelsFirst };
   const input = { bookId, relaunchOf, ...(redoOf === undefined ? {} : { redoOf }) };

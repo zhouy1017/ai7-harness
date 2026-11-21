@@ -2644,6 +2644,13 @@ describe('house preference review consumption (#911)', () => {
 
 
 describe('one-step review launch (#1455)', () => {
+  it('explains a review cancellation refusal without naming only a series stop (#1656)', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const run = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!;
+      await session.driver.drive(run.reviewRunId);
+      expect(() => session.store.cancelReviewRun(book.bookId, run.reviewRunId)).toThrowError(expect.objectContaining({ code: 'REVIEW_RUN_NOT_CANCELLABLE', message: '这次审阅不能在这里取消；如有正在运行或已暂停的任务，请从任务计划中取消。' }));
+    });
+  });
   it.each([false, true])('relaunches a finished review through its original request, remembered=%s (#1656)', async remembered => {
     await withCapturedReviewBook(async (session, book) => {
       const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE };

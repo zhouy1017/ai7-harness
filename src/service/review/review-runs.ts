@@ -4608,7 +4608,7 @@ export class ReviewRunStore {
     requireReview(!this.#driving.has(reviewRunId), 'REVIEW_RUN_ACTIVE', '这次审阅正在进行。');
     const stop = this.#stoppedFor(reviewRunId);
     if (stop === 'cancelled') return;
-    requireReview(stop === 'scope-changed' || !this.paused(reviewRunId) && this.#runStateView(snapshot).canContinue, 'REVIEW_RUN_NOT_CANCELLABLE', `只有显示「${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}」的审阅可以在这里取消任务。`);
+    requireReview(stop === 'scope-changed' || !this.paused(reviewRunId) && this.#runStateView(snapshot).canContinue, 'REVIEW_RUN_NOT_CANCELLABLE', '这次审阅不能在这里取消；如有正在运行或已暂停的任务，请从任务计划中取消。');
     transact(this.#db, () => {
       for (const category of snapshot.categories) {
         const last = this.#events(reviewRunId, category.categoryId).at(-1) ?? null;
