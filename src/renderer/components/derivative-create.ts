@@ -16,7 +16,7 @@ export const DERIVATIVE_CREATE_MODES: ReadonlyArray<readonly [DerivativeCreateMo
   ['blank', '空白新建'],
   ['writing', 'AI 写作生成'],
   ['source', '从来源材料创建'],
-  ['import', '导入文件（DOCX / Markdown）'],
+  ['import', '导入文件（DOCX / Markdown / TXT）'],
 ];
 
 /** The form's words; a document's title and type labels come from the service's projection. */
