@@ -97,11 +97,18 @@ function featureWeight(feature: string): number {
  * non-function single characters (`u:`); a Latin or number run is one word (`w:`). NFKC keeps supplementary-plane Han characters.
  */
 export function retrievalTokens(text: string): string[] {
-  const normalized = text.normalize('NFKC').toLowerCase();
+  return normalizedFeatures(retrievalNormalized(text));
+}
+/** The one normalisation features, verbatim containment and alias matching all read. */
+function retrievalNormalized(text: string): string {
+  return text.normalize('NFKC').toLowerCase();
+}
+const WORD_RUNS = /\p{Script=Han}+|[\p{Script=Latin}\p{N}]+/gu;
+function normalizedFeatures(normalized: string): string[] {
   const words = [...HAN_WORDS.segment(normalized)].filter((part) => /^\p{Script=Han}+$/u.test(part.segment) && [...part.segment].length > 1);
   const features: string[] = [];
   let word = 0;
-  for (const match of normalized.matchAll(/\p{Script=Han}+|[\p{Script=Latin}\p{N}]+/gu)) {
+  for (const match of normalized.matchAll(WORD_RUNS)) {
     const run = match[0];
     if (!/^\p{Script=Han}/u.test(run)) { features.push(WORD + run); continue; }
     const end = match.index + run.length;
@@ -114,10 +121,32 @@ export function retrievalTokens(text: string): string[] {
   return features;
 }
 
-interface LexicalDocument { readonly length: number; readonly terms: ReadonlyMap<string, number> }
+/**
+ * Where a normalised text may be cut between words: the edges of every Han and Latin or number run, and inside a Han run the
+ * segmenter's boundaries (never inside a Latin or number run, so the runtimes' differing break rules cannot move one).
+ */
+function wordBoundaries(normalized: string): ReadonlySet<number> {
+  const boundaries = new Set([0, normalized.length]);
+  for (const match of normalized.matchAll(WORD_RUNS)) { boundaries.add(match.index); boundaries.add(match.index + match[0].length); }
+  for (const part of HAN_WORDS.segment(normalized)) {
+    if (/^\p{Script=Han}+$/u.test(part.segment)) { boundaries.add(part.index); boundaries.add(part.index + part.segment.length); }
+  }
+  return boundaries;
+}
+/** Whether `name` stands in `normalized` as whole words: some occurrence starts and ends on a word boundary. */
+function namesWholeWords(normalized: string, boundaries: ReadonlySet<number>, name: string): boolean {
+  for (let at = normalized.indexOf(name); at !== -1; at = normalized.indexOf(name, at + 1)) {
+    if (boundaries.has(at) && boundaries.has(at + name.length)) return true;
+  }
+  return false;
+}
+
+/** A passage's features with its normalised text, which verbatim containment reads. */
+interface LexicalDocument { readonly length: number; readonly terms: ReadonlyMap<string, number>; readonly normalized: string }
 function lexicalDocument(text: string): LexicalDocument {
-  const tokens = retrievalTokens(text);
-  return { length: tokens.length, terms: termFrequencies(tokens) };
+  const normalized = retrievalNormalized(text);
+  const tokens = normalizedFeatures(normalized);
+  return { length: tokens.length, terms: termFrequencies(tokens), normalized };
 }
 /** Weighted BM25 of each document for one query's features; 0 where no feature occurs. */
 function bm25Scores(documents: readonly LexicalDocument[], query: ReadonlySet<string>): number[] {
@@ -205,15 +234,20 @@ export class RetrievalIndex {
     if (index === -1) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
     return blocks.slice(Math.max(0, index - radius), index + radius + 1);
   }
-  /** Exact: the blocks containing the query, in manuscript order. Tokenized: the blocks ranked by BM25, ties in manuscript order. */
+  /**
+   * Exact: the blocks containing the query, in manuscript order. Tokenized: the blocks that contain the query verbatim (after the
+   * features' normalisation) first, then the rest; BM25 inside each group, ties in manuscript order.
+   */
   searchManuscript(query: string, mode: 'exact' | 'tokenized'): ReturnType<RetrievalSource['read']>['segments'] {
     const blocks = this.#manuscriptBlocks();
     if (mode === 'exact') return blocks.filter((block) => block.text.normalize('NFC').includes(query)).slice(0, RETRIEVAL_MAX_CANDIDATES);
     const features = new Set(retrievalTokens(query));
     if (features.size === 0 || blocks.length === 0) return [];
-    const scores = bm25Scores(blocks.map((block, index) => this.#blockDocument(block.blockId ?? `#${index}`, block.text)), features);
-    return blocks.map((block, index) => ({ block, index, score: scores[index]! })).filter((entry) => entry.score > 0)
-      .sort((a, b) => b.score - a.score || a.index - b.index).slice(0, RETRIEVAL_MAX_CANDIDATES).map((entry) => entry.block);
+    const needle = retrievalNormalized(query);
+    const documents = blocks.map((block, index) => this.#blockDocument(block.blockId ?? `#${index}`, block.text));
+    const scores = bm25Scores(documents, features);
+    return blocks.map((block, index) => ({ block, index, verbatim: documents[index]!.normalized.includes(needle), score: scores[index]! })).filter((entry) => entry.score > 0)
+      .sort((a, b) => Number(b.verbatim) - Number(a.verbatim) || b.score - a.score || a.index - b.index).slice(0, RETRIEVAL_MAX_CANDIDATES).map((entry) => entry.block);
   }
   #blockDocument(key: string, text: string): LexicalDocument {
     const cached = this.#blockDocuments.get(key);
@@ -222,16 +256,22 @@ export class RetrievalIndex {
     this.#blockDocuments.set(key, { text, document });
     return document;
   }
-  /** The other pinned names of every baseline entity or term the query names (ADR 0107 §4 point 2), as features. */
+  /**
+   * The other pinned names of every baseline entity or term the query names (ADR 0107 §4 point 2), as features. A name counts only
+   * where it stands as whole words of the query, so 先生的 does not name 生的.
+   */
   #aliasFeatures(query: string): string[] {
     const { aliasMinLength, aliasExpansionLimit } = RETRIEVAL_LEXICAL;
-    const needle = query.normalize('NFKC').toLowerCase();
+    const rows = [...(this.#records?.baseline?.entities ?? []), ...(this.#records?.terms ?? [])];
+    if (rows.length === 0) return [];
+    const needle = retrievalNormalized(query);
+    const boundaries = wordBoundaries(needle);
     const siblings: string[] = [];
-    for (const row of [...(this.#records?.baseline?.entities ?? []), ...(this.#records?.terms ?? [])]) {
+    for (const row of rows) {
       if (!isRecord(row)) continue;
       const names = [...new Set([row.name, ...(Array.isArray(row.aliases) ? row.aliases : [])]
-        .flatMap((name) => typeof name === 'string' ? [name.normalize('NFKC').toLowerCase().trim()] : []))].filter((name) => [...name].length >= aliasMinLength);
-      if (names.some((name) => needle.includes(name))) siblings.push(...names.filter((name) => !needle.includes(name)));
+        .flatMap((name) => typeof name === 'string' ? [retrievalNormalized(name).trim()] : []))].filter((name) => [...name].length >= aliasMinLength);
+      if (names.some((name) => namesWholeWords(needle, boundaries, name))) siblings.push(...names.filter((name) => !needle.includes(name)));
     }
     return [...new Set(siblings)].slice(0, aliasExpansionLimit).flatMap((name) => retrievalTokens(name));
   }
@@ -283,7 +323,8 @@ export class RetrievalIndex {
   /**
    * BM25 over the pinned chunks, fused with the local vectors by reciprocal rank when they are ready. `queries` are further
    * phrasings of `query` (ADR 0107 §4 point 3): each phrasing ranks on its own and every ranking joins one fusion; without them
-   * the ranking and its scores are exactly the single query's. A query naming a pinned entity or term also matches its other names.
+   * the scores are the single query's. A query naming a pinned entity or term also matches its other names. After the scores, one
+   * rule orders: a passage holding a phrasing verbatim comes first ("literal matches still rank first", #1623).
    */
   async retrieve(query: string, k = RETRIEVAL_MAX_CANDIDATES, sourceKinds?: readonly RetrievalSourceKind[], queries: readonly string[] = []): Promise<RetrievalCandidate[]> {
     if (this.#disposed) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
@@ -301,15 +342,22 @@ export class RetrievalIndex {
             start: range.start + (segment.startOffset ?? 0), end: range.end + (segment.startOffset ?? 0) };
           const identity = { sourceKind: source.sourceKind, sourceId: source.sourceId, revisionOrIndexDigest: source.digest, anchor };
           const text = segment.text.slice(range.start, range.end);
-          return { text, ...lexicalDocument(text), candidate:{ ...identity, candidateId: sha256Hex(canonicalJson(identity)), score: 0, preview: text.slice(0, boundaryEnd(text, Math.min(text.length, RETRIEVAL_PREVIEW_SIZE))) } };
+          // A manuscript block read whole is one chunk: it shares its features with tokenized search's block cache.
+          const document = source.sourceKind === 'manuscript' && segment.blockId !== undefined && text.length === segment.text.length
+            ? this.#blockDocument(segment.blockId, text) : lexicalDocument(text);
+          return { text, ...document, candidate:{ ...identity, candidateId: sha256Hex(canonicalJson(identity)), score: 0, preview: text.slice(0, boundaryEnd(text, Math.min(text.length, RETRIEVAL_PREVIEW_SIZE))) } };
         }));
         this.#chunks.set(key, cached);
       }
       chunks.push(...cached);
     }
     if (chunks.length === 0) return [];
-    // The query first, then its other phrasings in one fixed order, so that the fusion does not depend on how they were listed.
-    const phrasings = [query, ...[...new Set(queries)].filter((phrasing) => phrasing !== query).slice(0, RETRIEVAL_LEXICAL.maxQueries).sort()];
+    // The query first, then its other phrasings (one per normalised form) in one fixed order, so that the fusion does not depend on
+    // how they were listed.
+    const forms = new Map<string, string>([[retrievalNormalized(query), query]]);
+    for (const phrasing of queries) if (forms.size <= RETRIEVAL_LEXICAL.maxQueries && !forms.has(retrievalNormalized(phrasing))) forms.set(retrievalNormalized(phrasing), phrasing);
+    const phrasings = [query, ...[...forms.values()].slice(1).sort()];
+    const needles = [...forms.keys()];
     const lexical = phrasings.map((phrasing) => {
       const scores = bm25Scores(chunks, new Set([...retrievalTokens(phrasing), ...this.#aliasFeatures(phrasing)]));
       return chunks.map((chunk, index) => ({ id: chunk.candidate.candidateId, score: scores[index]! })).filter((entry) => entry.score > 0).sort(rank);
@@ -342,8 +390,12 @@ export class RetrievalIndex {
     // Verify again after an asynchronous embed: withdrawal during ranking cannot leak a cached preview.
     const available = new Set<string>();
     for (const [key, source] of this.#sources) { try { this.#read(source); available.add(key); } catch { this.#chunks.delete(key); } }
+    // A passage that holds the query or another phrasing verbatim comes before every passage that holds none; inside each group,
+    // the ranking above (BM25, or the fusion).
     const results = chunks.filter((chunk) => available.has(this.#sourceKey(chunk.candidate.sourceKind, chunk.candidate.sourceId)) && scores.has(chunk.candidate.candidateId))
-      .map((chunk) => ({ ...chunk.candidate, score: scores.get(chunk.candidate.candidateId)! })).sort((a, b) => rank({ id: a.candidateId, score: a.score }, { id: b.candidateId, score: b.score })).slice(0, k);
+      .map((chunk) => ({ candidate: { ...chunk.candidate, score: scores.get(chunk.candidate.candidateId)! }, verbatim: needles.some((needle) => chunk.normalized.includes(needle)) }))
+      .sort((a, b) => Number(b.verbatim) - Number(a.verbatim) || rank({ id: a.candidate.candidateId, score: a.candidate.score }, { id: b.candidate.candidateId, score: b.candidate.score }))
+      .slice(0, k).map((entry) => entry.candidate);
     for (const candidate of results) this.#candidates.set(candidate.candidateId, candidate);
     return results;
   }

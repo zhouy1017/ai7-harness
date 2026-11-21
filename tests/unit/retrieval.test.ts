@@ -184,6 +184,17 @@ describe('local lexical retrieval over Han text (#1623)', () => {
     expect(SEGMENTER_DICTIONARY_DIFFERENCES).toHaveLength(7);
     expect(PACKAGED_RUNTIME_BOUNDARIES.slice(3)).toEqual(SEGMENTER_DICTIONARY_DIFFERENCES.map((word: string) => [word.length]));
   });
+  it('weights each tier as named: three words, one bigram and two single characters, by hand', async () => {
+    // 'alpha beta修订': w:alpha, w:beta, w:修订, b:修订, u:修, u:订 (6 features); 'gamma delta': 2. Every matched term has df 1 of 2.
+    const [hit, ...rest] = await new RetrievalIndex(words('alpha beta修订', 'gamma delta')).retrieve('alpha beta修订');
+    expect(rest).toEqual([]);
+    expect(hit!.score).toBeCloseTo((1 + 1 + 1 + 0.6 + 0.25 + 0.25) * Math.log(2) * 2.2 / (1 + 1.2 * (0.25 + 0.75 * 6 / 4)), 12);
+  });
+  it('scores a Latin-only corpus exactly as before #1623', async () => {
+    // The base (70550f9c6) scored these two candidates 1.5725612026838964 and 0.4700036292457355.
+    const scored = await new RetrievalIndex([source('one', 'alpha alpha beta'), source('two', 'beta gamma'), source('three', 'delta')]).retrieve('alpha beta');
+    expect(scored.map((candidate) => [candidate.sourceId, candidate.score])).toEqual([['one', 1.5725612026838964], ['two', 0.4700036292457355]]);
+  });
   it('ranks words that share a morpheme, literal matches first, and finds nothing for a query that shares no character', async () => {
     const index = new RetrievalIndex(words('修订', '修改', '改动', '违约', '毁约', '首印', '初印', '印数', '天气'));
     const texts = async (query: string) => (await index.retrieve(query)).map((candidate) => index.exactFetch(candidate.candidateId).text);
@@ -199,20 +210,40 @@ describe('local lexical retrieval over Han text (#1623)', () => {
     const index = new RetrievalIndex(books);
     const text = (candidate: { anchor: { blockId?: string; start: number; end: number } }) =>
       books.map((book) => book.texts.get(candidate.anchor.blockId!)).find((entry) => entry !== undefined)!.slice(candidate.anchor.start, candidate.anchor.end);
-    // None of these words occurs in either book, so the literal ranker found nothing; every passage now found shares a character with it.
-    for (const query of ['修订', '修改', '改动', '违约', '毁约', '首印', '初印', '印数']) {
+    // None of these words occurs in either book, so the literal ranker found nothing. Where the first passage holding a word of the
+    // book that shares a morpheme now ranks, in both tools (measured at #1623; 违约 finds none of 违背 / 违心 / 约定 / 失约 among 8).
+    const printing = /付印|翻印|石印|刻印/u;
+    const related: ReadonlyArray<readonly [string, RegExp, number]> = [['修改', /改正|改变|改了|改过/u, 1], ['改动', /改正|改变|改了|改过/u, 1],
+      ['毁约', /毁坏|毁掉|捣毁|约定/u, 1], ['首印', printing, 1], ['初印', printing, 1], ['印数', printing, 2], ['修订', /订正/u, 6]];
+    for (const [query, sibling, at] of related) {
       expect(books.some((book) => [...book.texts.values()].some((passage) => passage.includes(query))), query).toBe(false);
-      const found = (await index.retrieve(query)).map(text);
-      expect(found.length, query).toBe(8);
-      expect(found.every((passage) => [...query].some((char) => passage.includes(char))), query).toBe(true);
+      expect((await index.retrieve(query)).findIndex((candidate) => sibling.test(books.map((book) => book.texts.get(candidate.anchor.blockId!)).find((entry) => entry !== undefined)!)) + 1,
+        `retrieve ${query}`).toBe(at);
+      expect(index.searchManuscript(query, 'tokenized').findIndex((block) => sibling.test(block.text)) + 1, `search_manuscript ${query}`).toBe(at);
     }
-    // And a word of the book that shares the morpheme ranks among the first: 付印, 翻印, 石印 or 刻印 for 首印.
-    expect((await index.retrieve('首印')).slice(0, 3).map(text).some((passage) => /付印|翻印|石印|刻印/u.test(passage))).toBe(true);
     const rare = String.fromCodePoint(0x2CB3B);
     const found = await index.retrieve(rare);
     expect(found.length).toBeGreaterThan(0);
     expect(text(found[0]!)).toContain(rare);
   }, 60_000);
+  it('ranks a passage that holds the query verbatim first in both tools, for phrases taken from the books at a fixed stride', async () => {
+    const books = [await sampleBook('nahan', 'luxun-nahan.docx'), await sampleBook('zhaohua', 'luxun-zhaohua-xishi.docx')];
+    const index = new RetrievalIndex(books);
+    const blocks = books.flatMap((book) => [...book.texts.values()]);
+    const holds = (passage: string, phrase: string) => passage.normalize('NFKC').toLowerCase().includes(phrase.normalize('NFKC').toLowerCase());
+    let phrases = 0;
+    for (let ordinal = 0; ordinal * 37 < blocks.length; ordinal += 1) {
+      const passage = blocks[ordinal * 37]!;
+      const length = 3 + ordinal % 10;
+      if (passage.length < length + 4) continue;
+      const phrase = passage.slice(4, 4 + length);
+      if (retrievalTokens(phrase).length === 0 || !phrase.isWellFormed()) continue;
+      phrases += 1;
+      expect(holds(index.searchManuscript(phrase, 'tokenized')[0]!.text, phrase), `search_manuscript ${ordinal}`).toBe(true);
+      expect(holds(index.exactFetch((await index.retrieve(phrase))[0]!.candidateId).text, phrase), `retrieve ${ordinal}`).toBe(true);
+    }
+    expect(phrases).toBeGreaterThan(25);
+  }, 120_000);
   it('ranks tokenized manuscript search by BM25 instead of requiring every token, ties in manuscript order', () => {
     const index = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'book', digest: 'a'.repeat(64),
       read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: '改过' }, { blockId: 'two', text: '修改了两处，又修改一处' }, { blockId: 'three', text: '天气' }, { blockId: 'four', text: '改过' }] }) }]);
@@ -220,18 +251,23 @@ describe('local lexical retrieval over Han text (#1623)', () => {
     expect(index.searchManuscript('晴朗', 'tokenized')).toEqual([]);
     expect(index.searchManuscript('修改', 'exact').map((block) => block.blockId)).toEqual(['two']);
   });
-  it('expands a query by the other names of the pinned entity it names, and only then', async () => {
+  it('expands a query by the other names of the pinned entity it names as whole words, at most eight, and only then', async () => {
     const book = await sampleBook('zhaohua', 'luxun-zhaohua-xishi.docx');
-    const records = { baseline: { revisionId: 'fixed', digest: 'b'.repeat(64), entities: [{ kind: 'person', name: '长妈妈', aliases: ['阿长'] }], events: [], settingClaims: [] },
-      guidelines: [], terms: [{ kind: 'term', name: '甲', aliases: ['乙'] }] };
-    const otherNameOnly = async (index: RetrievalIndex) => (await index.retrieve('阿长')).filter((candidate) => {
-      const passage = book.texts.get(candidate.anchor.blockId!)!;
-      return passage.includes('长妈妈') && !passage.includes('阿长');
-    }).length;
-    expect(await otherNameOnly(new RetrievalIndex([book]))).toBe(0);
-    expect(await otherNameOnly(new RetrievalIndex([book], null, null, records))).toBeGreaterThan(0);
-    // No name matches, or only a one-character name: the same ranking as without pinned records.
-    for (const query of ['天气', '甲']) expect(await new RetrievalIndex([book], null, null, records).retrieve(query)).toEqual(await new RetrievalIndex([book]).retrieve(query));
+    // 长姑 is a pinned alias the book never uses; 长妈妈 and 阿长 are the names it does use.
+    const records = { baseline: { revisionId: 'fixed', digest: 'b'.repeat(64), entities: [{ kind: 'person', name: '长妈妈', aliases: ['阿长', '长姑'] }], events: [], settingClaims: [] },
+      guidelines: [], terms: [{ kind: 'term', name: '甲', aliases: ['乙'] }, { kind: 'term', name: '生的', aliases: ['熟的'] }] };
+    const naming = async (index: RetrievalIndex) => (await index.retrieve('长姑')).filter((candidate) => /长妈妈|阿长/u.test(book.texts.get(candidate.anchor.blockId!)!)).length;
+    // Without the records only the shared 长 reaches a few of them; with them all eight candidates name her.
+    expect(await naming(new RetrievalIndex([book]))).toBe(3);
+    expect(await naming(new RetrievalIndex([book], null, null, records))).toBe(8);
+    // No name matches, only a one-character name, or a name that straddles a word boundary (先生的 holds 生的 across 先生|的):
+    // the same ranking as without pinned records.
+    for (const query of ['天气', '甲', '先生的']) expect(await new RetrievalIndex([book], null, null, records).retrieve(query), query).toEqual(await new RetrievalIndex([book]).retrieve(query));
+    // At most eight other names: of nine siblings in the pinned order, the first (夏荷) and eighth (中原) are found, the ninth (上林) not.
+    const names = ['春雨', '夏荷', '秋月', '冬雪', '东风', '西山', '南湖', '北海', '中原', '上林'];
+    const many = { baseline: null, guidelines: [], terms: [{ kind: 'term', name: names[0], aliases: names.slice(1) }] };
+    const found = (await new RetrievalIndex(words(names[1]!, names[8]!, names[9]!), null, null, many).retrieve(names[0]!)).map((candidate) => candidate.sourceId);
+    expect([...found].sort()).toEqual(['w0', 'w1']);
   }, 60_000);
   it('fuses further phrasings deterministically, and one query ranks as before', async () => {
     const book = await sampleBook('nahan', 'luxun-nahan.docx');
