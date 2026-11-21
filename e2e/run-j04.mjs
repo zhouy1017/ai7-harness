@@ -4050,8 +4050,8 @@ async function main() {
     await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.connection?.credentialOperationState==='ready')`, 'dispatch-choice-ready');
     // The official channel currently declares one offline model. As J-12 does, add an independently selected custom
     // fast-role model through Settings, so the chooser has a real second catalogue entry before taking the defaults below.
-    await waitFor(renderer, `document.querySelector('[data-custom-model-id]')`, 'dispatch-choice-custom-model');
-    await fill(renderer, '[data-custom-model-id]', 'account-future-model', 'dispatch-choice-catalogue-model');
+    await waitFor(renderer, `document.querySelector('[data-custom-flash-model-id]')`, 'dispatch-choice-custom-model');
+    await fill(renderer, '[data-custom-flash-model-id]', 'account-future-model', 'dispatch-choice-catalogue-model');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-action="select-fast-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true; })()`, 'dispatch-choice-catalogue-add');
     await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='account-future-model')`, 'dispatch-choice-catalogue-ready');
     const dispatchDefaults = await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`);
