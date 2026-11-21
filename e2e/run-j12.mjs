@@ -1179,7 +1179,21 @@ async function main() {
     // #1371: ordinary mode keeps the native source explanation and unmeasured disclosure, with five manual cards.
     // Production admission/request construction is exercised by composed ordinary-production service tests; this Journey sends nothing.
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='no-policy-lock' && settings.launchPolicy.providerProcessing.version==='v1')`), 'ordinary-search-selected-set');
-    await assertRenderer(primary, `document.querySelectorAll('[data-search-backend]').length===5 && ['openai-native-search-v1','anthropic-native-search-v1'].every(id => { const card=document.querySelector('[data-search-candidate="'+id+'"]'); return card?.textContent.includes('未实测') && card.textContent.includes('自动用于随渠道检索') && !card.textContent.includes('不能用于任务'); })`, 'ordinary-native-source-disclosure');
+    // #1547 retires candidate disclosure paragraphs in ordinary mode; the current source and short fallback rule stay visible.
+    requireJourney((await primary.evaluate(`(async () => {
+      const section=document.querySelector('[data-search-backends]');
+      const note=section?.querySelector(':scope > .field-note');
+      if(!(note instanceof HTMLElement))return false;
+      note.scrollIntoView({block:'center',behavior:'instant'});
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      const box=note.getBoundingClientRect();
+      return box.width>0&&box.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&box.bottom<=innerHeight&&box.left>=0&&box.right<=innerWidth&&
+        note.textContent.includes('当前生效来源：暂不可用')&&note.textContent.includes('当前模型渠道不自带联网搜索')&&note.textContent.includes('可设一个备用来源，出错时自动切换。')&&
+        section.querySelectorAll('[data-search-backend]').length===5&&['openai-native-search-v1','anthropic-native-search-v1'].every(id=>{
+          const card=section.querySelector('[data-search-candidate="'+id+'"]');
+          return card?.textContent.includes('未实测')&&!card.textContent.includes('自动用于随渠道检索');
+        });
+    })()`)) === true, 'ordinary-native-source-disclosure');
 
     await assertRenderer(primary, `(() => { const choice=document.querySelector('[data-action="always-use-selected-search-backend"]'); if(!(choice instanceof HTMLInputElement)||choice.checked)return false; choice.click(); return true; })()`, 'ordinary-search-source-change');
     await waitFor(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===true && document.querySelector('#persistence-status')?.textContent==='联网检索来源偏好已保存。'`, 'ordinary-search-source-saved');

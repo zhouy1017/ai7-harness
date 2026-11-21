@@ -44,6 +44,8 @@ describe('the direct-search candidate in 联网检索', () => {
       settings.searchBackends.alwaysUseSelectedBackend = override;
       const node = render();
       expect(node.textContent).toContain(override ? '编辑指定 · TinyFish' : '随模型渠道 · 官方渠道 自带搜索（未实测）');
+      expect(node.textContent).toContain('可设一个备用来源，出错时自动切换。');
+      expect(node.textContent).not.toContain('自动用于随渠道检索');
       expectNoTechnicalText(node);
       expect(node.querySelectorAll('[data-search-backend]')).toHaveLength(5);
     }
