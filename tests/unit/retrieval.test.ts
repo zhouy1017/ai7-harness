@@ -274,7 +274,7 @@ describe('registered local tools without egress', () => {
     expect(canonicalToolArguments('retrieve', { query: 'alpha', queries: 'beta' })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8 });
     expect(canonicalToolArguments('retrieve', { queries: ['beta'] })).toBeNull();
     // Only the rule-declared set (composition v2) offers them; composition v1 keeps its legacy bytes.
-    const declaredRule = { ...localRetrievalRule(), declarations: [{ name: 'retrieve' as const, readOnly: true, concurrencySafe: true }], parallelCallsAllowed: false };
+    const declaredRule = { ...localRetrievalRule(), declarations: [{ name: 'retrieve', readOnly: true as const, concurrencySafe: true as const }], parallelCallsAllowed: false };
     const declared = ruleNamedToolSchemas(false, declaredRule).find((schema) => schema.name === 'retrieve')!;
     expect(declared.parameters).toMatchObject({ required: ['query'], properties: { queries: { type: 'array', maxItems: 4, items: { type: 'string' } } } });
     expect(typeof (declared.parameters as { properties: { queries: { description: unknown } } }).properties.queries.description).toBe('string');

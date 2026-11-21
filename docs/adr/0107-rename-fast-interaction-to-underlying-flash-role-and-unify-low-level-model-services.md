@@ -97,6 +97,7 @@ All low-level, non-user-facing structured calls converge on the **Underlying Fla
      - full Chinese words from Node v24 built-in `new Intl.Segmenter('zh', { granularity: 'word' })` and Latin/number tokens (weight `1.0`);
      - adjacent Han bigrams (weight `0.6`);
      - stopword-filtered core Han unigram morphemes (weight `0.25`), capturing shared-morpheme synonyms (e.g. `修订 / 修改 / 改动`, `违约 / 毁约`, `首印 / 初印 / 印数`).
+   - *Clarification, 2026-11-20 (Commander, reported to the Owner; [#1623](https://github.com/zhouy1017/ai7-harness/issues/1623)):* the segmenter supplies Han words only, and Latin/number tokens come from a fixed pattern; the packaged runtime's dictionary holds seven more words than the test runtime's, which only moves the word-level feature for text containing one of them (a unit test and J-16 pin both runtimes' segmentation).
    - `searchManuscript(query, 'tokenized')` ranks blocks by BM25 score rather than requiring boolean `tokens.every(...)`.
 2. **Automatic entity and alias expansion from pinned baseline records:**
    - `RetrievalIndex` already holds `PinnedLocalToolSources` (`baseline.entities` and `terms`, each carrying `name` and `aliases`). When a query matches an entity or term name/alias, `retrieve()` automatically expands the query with its sibling aliases at zero model cost.
