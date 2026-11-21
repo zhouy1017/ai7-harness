@@ -93,7 +93,7 @@
     "tests/service/manuscript-structural-edits.test.ts": 6,
     "tests/service/manuscript-structural-reimport.test.ts": 1,
     "tests/service/material-index.test.ts": 8,
-    "tests/service/material-vectors.test.ts": 9,
+    "tests/service/material-layers.test.ts": 5,
     "tests/service/memory-facade-compatibility.test.ts": 16,
     "tests/service/model-clarification-live-replay.test.ts": 1,
     "tests/service/model-clarification.test.ts": 8,
