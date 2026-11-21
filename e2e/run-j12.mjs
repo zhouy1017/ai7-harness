@@ -568,7 +568,7 @@ async function firstRunClick(renderer, selector, label = null, block = 'center')
 async function pressIntoSettingsPage(renderer, selector, pageSelector, headingSelector, name, block = 'center') {
   await renderer.evaluate(`(async () => { const root=document.scrollingElement; root.scrollTop=Math.max(root.scrollTop,240); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); })()`);
   requireJourney((await firstRunClick(renderer, selector, null, block)) > 0, `${name}-scrolled-before`);
-  await waitFor(renderer, pageSelector, name);
+  await waitFor(renderer, `document.querySelector(${JSON.stringify(pageSelector)})`, name);
   await assertRenderer(renderer, `(() => { const box=document.querySelector(${JSON.stringify(headingSelector)})?.getBoundingClientRect(); return !!box && box.top>=-1 && box.bottom<=innerHeight+1 && document.scrollingElement.scrollTop===0; })()`, `${name}-at-top`);
 }
 
