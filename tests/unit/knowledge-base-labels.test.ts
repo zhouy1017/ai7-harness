@@ -12,6 +12,7 @@ import {
   libraryPreviewFacts,
   libraryPreviewHeading,
   libraryReferenceLine,
+  libraryUseRecorded,
   librarySourceLine,
   MATERIAL_INDEX_LAYERS,
   MATERIAL_INDEX_NEEDS_DEPENDENCY,
@@ -261,6 +262,10 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
       } }, initial, answer, () => {});
       expect(calls).toEqual(expected[index]!.map((key, offset) => ({ materialId: 'm', expectedDecisions: 10 + offset, decision: decisions[key as keyof typeof decisions] })));
       if (expected[index]!.length === 0) expect(result).toBe(initial);
+      const recorded = expected[index]!.length !== 0;
+      const expectedStatus = recorded ? `已记录「样书一」的决定：${libraryReferenceLine(result)}。`
+        : start.attribution === null ? '还没有选给谁用，任务不会参考它。' : `「样书一」的使用范围没有变化：${libraryReferenceLine(start)}。`;
+      expect(libraryUseRecorded(result, recorded)).toBe(expectedStatus);
     }
     // The choices as LEARN-004 to LEARN-006 name them, and the wider one's consequence said where it is chosen.
     expect((['book', 'house', 'excluded', 'deferred'] as const).map((choice) => eligibilityChoiceLabel(choice, '甲书')))

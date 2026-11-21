@@ -485,7 +485,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       el('dt', undefined, '文件 SHA-256'), el('dd', 'technical-identity', material.source.sha256),
       el('dt', undefined, '记录摘要'), el('dd', 'technical-identity', material.digest)));
     more.append(history);
-    more.open = chooser?.materialId === material.materialId || options.focusMaterialId === material.materialId;
+    more.open = (chooser?.materialId === material.materialId && chooser.kind !== 'use') || options.focusMaterialId === material.materialId;
     node.append(more);
     return node;
   };
@@ -770,7 +770,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       const now = await recordLibraryUse(api, material, value, (next) => { if (root.isConnected) replace(next); });
       if (!root.isConnected) return;
       chooser = null;
-      setStatus(libraryUseRecorded(now), 'success');
+      setStatus(libraryUseRecorded(now, now.decisionCount !== material.decisionCount), 'success');
     } catch (error) {
       if (!root.isConnected) return;
       chooser = null;

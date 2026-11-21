@@ -329,7 +329,9 @@ export const LIBRARY_USE_CONFIRM = '确认';
 export const LIBRARY_USE_SELECTED = '已选';
 export const LIBRARY_BOOKS_FIRST = '回到图书首页';
 export const libraryBookLabel = (title: string): string => `《${title}》`;
-export const libraryUseRecorded = (material: LibraryMaterialProjection): string => `已记录「${material.title}」的决定：${libraryReferenceLine(material)}。`;
+export const libraryUseRecorded = (material: LibraryMaterialProjection, recorded: boolean): string => recorded
+  ? `已记录「${material.title}」的决定：${libraryReferenceLine(material)}。`
+  : material.attribution === null ? '还没有选给谁用，任务不会参考它。' : `「${material.title}」的使用范围没有变化：${libraryReferenceLine(material)}。`;
 export const LIBRARY_SERIES = '书系';
 /** A Series cannot be named until Series exist (Issue #63, S28); the choice is shown, and says why it is not there. */
 export const LIBRARY_SERIES_UNAVAILABLE = '还没有书系：书系接通后，才能把资料归到书系。';

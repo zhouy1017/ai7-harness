@@ -1001,8 +1001,9 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('[data-library-action="attribute"], [data-library-action="eligibility"]')===null`, 'library-use-simple');
     await pointerClick(renderer, waitFor, 'article.library-material > .knowledge-file-more > summary', 'library-use-details');
     await pointerClick(renderer, waitFor, 'article.library-material [data-library-action="segments"]', 'library-use-read');
+    await waitFor(renderer, `document.querySelector('[data-library-action="segments-close"]') !== null`, 'library-use-read-ready');
     await pointerClick(renderer, waitFor, '[data-library-action="segments-close"]', 'library-use-read-close');
-    const useStart = await renderer.evaluate(`(() => { const card=document.querySelector('article.library-material'); return { count:Number(card.dataset.decisions), attribution:card.dataset.attribution }; })()`);
+    const useStart = await renderer.evaluate(`(() => { const card=document.querySelector('article.library-material'); return { count:Number(card.dataset.decisions), attribution:card.dataset.attribution, materialId:card.dataset.materialId }; })()`);
     let useCount = useStart.count;
     for (const [value, expected] of [['deferred', '暂不使用'], ['house', '本社可参考'], ['book:', null]]) {
       await pointerClick(renderer, waitFor, 'article.library-material [data-library-action="use"]', 'library-use-open');
@@ -1015,6 +1016,13 @@ async function main() {
       useCount += value==='deferred' ? 1 : 2;
       const expectedLine = expected ?? `${bookTitle}的任务可参考`;
       await waitFor(renderer, `(() => { const card=document.querySelector('article.library-material'); return document.querySelector('.library-use-chooser')===null && card?.querySelector(':scope > .knowledge-file-summary')?.textContent.startsWith(${JSON.stringify(expectedLine)}) && card.dataset.attribution===${JSON.stringify(value==='deferred'?useStart.attribution:value==='book:'?'book':'house')} && card.dataset.eligibility===${JSON.stringify(value==='book:'?'book':value)} && Number(card.dataset.decisions)===${useCount}; })()`, 'library-use-recorded');
+      if (value === 'deferred') {
+        await pointerClick(renderer, waitFor, SIDEBAR.destination('attention'), 'library-use-attention');
+        const attentionOpen = `[data-attention-item="library-material:${useStart.materialId}"] button.global-attention-open`;
+        await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionOpen)})?.disabled === false`, 'library-use-attention-ready');
+        await pointerClick(renderer, waitFor, attentionOpen, 'library-use-attention-open');
+        await waitFor(renderer, `(() => { const button=document.querySelector('[data-material-id="${useStart.materialId}"] [data-library-action="use"]'); if (document.activeElement!==button || !button) return false; const r=button.getBoundingClientRect(); return r.width>0 && r.height>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight; })()`, 'library-use-attention-focus');
+      }
     }
     await setDeveloperMode(renderer, waitFor, true, 'library-use-restore');
 

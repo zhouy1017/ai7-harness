@@ -19,7 +19,7 @@ import { RESUMABLE_STOP_REASON_LABELS, TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_B
 import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION } from './proposal-conflict-labels.js';
 import { MAINTENANCE_CLASSIFICATION_LABELS, MAINTENANCE_NEXT_STEP_LABELS } from '../shared/maintenance-wording.js';
-import { LIBRARY_USE, LIBRARY_HOUSE, LIBRARY_KIND_LABELS, LIBRARY_NO_ATTRIBUTION, materialIndexCompletedReason } from './knowledge-base-labels.js';
+import { LIBRARY_USE, LIBRARY_ATTRIBUTE, LIBRARY_ELIGIBILITY, LIBRARY_HOUSE, LIBRARY_KIND_LABELS, LIBRARY_NO_ATTRIBUTION, materialIndexCompletedReason } from './knowledge-base-labels.js';
 import { DIALOGUE_CARD_REASONS, DIALOGUE_OPEN_LABEL, DIALOGUE_STATE_LABELS, DIALOGUE_WAITING_LABEL, dialogueQuestionLine } from './dialogue-labels.js';
 
 /**
@@ -306,8 +306,8 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'maintenance-write-errata': MAINTENANCE_NEXT_STEP_LABELS['write-errata'],
   'maintenance-conclude': MAINTENANCE_NEXT_STEP_LABELS.conclude,
   // A 资料库 item's own two decisions (Issue #427, S79c), in its card's words.
-  'set-library-attribution': LIBRARY_USE,
-  'set-learning-eligibility': LIBRARY_USE,
+  get 'set-library-attribution'() { return technicalWords(LIBRARY_ATTRIBUTE, LIBRARY_USE); },
+  get 'set-learning-eligibility'() { return technicalWords(LIBRARY_ELIGIBILITY, LIBRARY_USE); },
   get 'decide-learning-materials'() { return technicalWords('定学习准入…', '处理学习材料…'); },
   'open-dialogue': DIALOGUE_OPEN_LABEL,
   // A 资料库 item's index (Issue #428, S80a): its card, with the layers and 查看分段.
@@ -529,7 +529,7 @@ function attentionReason(item: GlobalAttentionItemProjection): string {
     case 'learning-eligibility-pending':
       return technicalWords('归属已定，学习准入还没有定：没有你的决定，它不会用来学习，任务也还不能把它列进「允许参考」。', '还没有确认给谁用：确认后，任务才能参考它。');
     case 'learning-eligibility-deferred':
-      return technicalWords('学习准入记为稍后决定：决定之前，它不会用来学习，任务也还不能把它列进「允许参考」。', '是否可用于学习稍后决定：决定之前，它不会用来学习，任务也不能参考它。');
+      return technicalWords('学习准入记为稍后决定：决定之前，它不会用来学习，任务也还不能把它列进「允许参考」。', '你选了暂不使用：确认给谁用之前，任务不会参考它。');
     // A Book's Learning Material (Issue #61, S26b; LEARN-002, LEARN-006): nothing of it is used to learn until the editor says.
     case 'learning-materials-pending':
       return technicalWords('你的反馈与改动里有可以用来学习的材料：学习准入策略还只是建议，没有你的决定，它们不会用来学习。', '你的反馈与改动里有可以用来学习的材料：没有你的决定，它们不会用来学习。');
