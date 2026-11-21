@@ -402,6 +402,30 @@ describe('comments command parity and refresh continuity', () => {
     const blur = vi.mocked(window.addEventListener).mock.calls.find(call => call[0] === 'blur')![1] as () => void;
     blur(); await paint(); expect(node.style.top).not.toBe(held);
   });
+  it.each([false, true])('fits a navigated card inside the pane after final placement (paged=%s, #1604)', async paged => {
+    const ui = mount(suggestion); await paint();
+    if (paged) ui.setPage({ marksTruncated: true, marksPage: { shown: 1, total: 401, nextOrdinal: 1, digest: 'page' } });
+    const pane = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
+    Object.assign(pane, { clientHeight: 300, scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 400, height: 300 }) });
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    node.getBoundingClientRect = () => ({ top: 250 - pane.scrollTop, bottom: 450 - pane.scrollTop, height: 200 }) as DOMRect;
+    ui.setCaret(-1);
+    ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click(); await paint();
+    expect(node.dataset['selected']).toBe('true');
+    expect(node.getBoundingClientRect().top).toBeGreaterThanOrEqual(100);
+    expect(node.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+  });
+  it('reveals the bottom actions of a navigated card taller than the pane (#1604)', async () => {
+    const ui = mount(suggestion); await paint();
+    const pane = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
+    Object.assign(pane, { clientHeight: 300, scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 400, height: 300 }) });
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    node.getBoundingClientRect = () => { const top = 100 + (Number.parseFloat(node.style.top) || 0) - pane.scrollTop; return { top, bottom: top + 400, height: 400 } as DOMRect; };
+    ui.setCaret(-1); ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click(); await paint();
+    expect(node.dataset['selected']).toBe('true');
+    expect(node.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+    expect(pane.scrollTop).toBeGreaterThan(0);
+  });
   it('keeps the chosen pane card through hover, then clears it when filtered out (#1451)', async () => {
     const ui = mount(card, [{ ...card, markId: 'other' }]); await paint();
     await ui.open(); await paint();

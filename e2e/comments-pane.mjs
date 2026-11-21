@@ -775,7 +775,16 @@ async function triageKey(renderer, key, code, windowsVirtualKeyCode, modifiers =
 const TRIAGE_FIRST = `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]').dataset.blockId`;
 
 // The seeded card is selected, holds focus and is read: its single keys act now.
-const triageReady = (index) => `(() => { const node=document.querySelector('[data-comment-card="'+__triage.ids[${index}]+'"]'); return node?.dataset.selected==='true' && document.activeElement===node && node.dataset.revalidating==='false' && node.querySelector('[data-mark-card] [data-mark-action="reject"]')?.disabled===false; })()`;
+const triageReady = (index) => `(() => {
+  const node=document.querySelector('[data-comment-card="'+__triage.ids[${index}]+'"]');
+  const button=node?.querySelector('[data-mark-action="accept-and-apply"]'), scroll=document.querySelector('.manuscript-comments-scroll');
+  if (!button || !scroll) return false;
+  const r=button.getBoundingClientRect(), p=scroll.getBoundingClientRect();
+  const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+  return node?.dataset.selected==='true' && document.activeElement===node && node.dataset.revalidating==='false' && node.querySelector('[data-mark-card] [data-mark-action="reject"]')?.disabled===false
+    && r.width>0 && r.height>0 && r.left>=Math.max(0,p.left) && r.right<=Math.min(innerWidth,p.left+scroll.clientWidth)
+    && r.top>=Math.max(0,p.top) && r.bottom<=Math.min(innerHeight,p.top+scroll.clientHeight) && (hit===button || button.contains(hit));
+})()`;
 
 const triageRecord = (renderer, index, expected) => renderer.evaluate(`(async () => {
   for (let turn = 0; turn < 120; turn++) {

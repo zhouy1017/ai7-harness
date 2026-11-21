@@ -447,7 +447,7 @@ export function stackEditorialComments<T extends { desiredTop: number; measuredH
   const pivot = selected === undefined ? -1 : ordered.indexOf(selected);
   if (pivot < 0) return placed;
   const chosen = placed[pivot]!;
-  chosen.top = viewport ? Math.max(viewport.top, Math.min(chosen.desiredTop, viewport.top + Math.max(0, viewport.height - chosen.measuredHeight))) : chosen.desiredTop;
+  chosen.top = viewport ? Math.min(Math.max(chosen.desiredTop, viewport.top), viewport.top + viewport.height - chosen.measuredHeight) : chosen.desiredTop;
   for (let i = pivot - 1; i >= 0; i--) placed[i]!.top = Math.min(placed[i]!.desiredTop, placed[i + 1]!.top - placed[i]!.measuredHeight - 10);
   for (let i = pivot + 1; i < placed.length; i++) placed[i]!.top = Math.max(placed[i]!.desiredTop, placed[i - 1]!.top + placed[i - 1]!.measuredHeight + 10);
   return placed;
@@ -1240,6 +1240,16 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (hoveredComment !== undefined) for (const node of options.host.querySelectorAll<HTMLElement>(`[data-mark-id="${CSS.escape(hoveredComment)}"]`)) node.dataset['commentHovered'] = 'true';
     const active = selectedIndex < 0 ? undefined : placed.find((item) => item.mark.markId === activeComment);
     if (active) {
+      // Fit the final rendered box too, after expansion and placement. Taller cards
+      // are bottom-aligned by the stack; their heads remain reachable by pane scroll.
+      if (!preservePanePositions && active.measuredHeight <= commentsScroll.clientHeight) {
+        const pane = commentsScroll.getBoundingClientRect();
+        const box = active.node.getBoundingClientRect();
+        const visibleBottom = pane.top + commentsScroll.clientHeight;
+        const delta = box.bottom > visibleBottom ? box.bottom - visibleBottom : box.top < pane.top ? box.top - pane.top : 0;
+        if (delta) commentsScroll.scrollTop += delta;
+        commentsFrameScroll = commentsScroll.scrollTop;
+      }
       const origin = options.comments!.host.parentElement!.getBoundingClientRect();
       const target = active.node.getBoundingClientRect();
       if (target.bottom >= base.top && target.top <= base.bottom) {

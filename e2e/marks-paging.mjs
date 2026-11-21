@@ -22,10 +22,10 @@ const PLACE = `(() => {
   const first=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((node)=>node.getBoundingClientRect().bottom>top+1);
   return {scrollTop:Math.round(scroll.scrollTop), first:first?.dataset.blockId??null, firstTop:first?Math.round(first.getBoundingClientRect().top-top):null,
     selected:document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard??null, active:document.activeElement?.closest('[data-comment-card]')?.dataset.commentCard??null,
-    // The head of the selected card and of the focused element stand inside the window.
+    // The selected card and focused element intersect the window; a tall card scrolls within the pane.
     boxes:(() => { const box=(node)=>{const r=node?.getBoundingClientRect(); return r?[Math.round(r.left),Math.round(r.top),Math.round(r.right),Math.round(r.bottom)]:null;}; return {selected:box(document.querySelector('[data-comment-card][data-selected="true"]')),active:box(document.activeElement),activeTag:document.activeElement?.tagName+'.'+(document.activeElement?.className??'')+'['+(document.activeElement?.dataset?.markAction??'')+']',pane:box(document.querySelector('.manuscript-comments-scroll')),window:[innerWidth,innerHeight]}; })(),
-    selectedInWindow:(() => { const r=document.querySelector('[data-comment-card][data-selected="true"]')?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.top<=innerHeight-40; })(),
-    activeInWindow:(() => { const r=document.activeElement?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.top<=innerHeight-40; })()};
+    selectedInWindow:(() => { const r=document.querySelector('[data-comment-card][data-selected="true"]')?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.bottom>0 && r.top<innerHeight; })(),
+    activeInWindow:(() => { const r=document.activeElement?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.bottom>0 && r.top<innerHeight; })()};
 })()`;
 
 /** The row's words and where it stands: inside the pane, which is inside the window, with its control under the pointer. */
@@ -154,7 +154,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   await pointerClick(renderer, waitFor, '[data-pending-step="previous"]', 'marks-paging-previous');
   // What the page did in the seconds after the press, kept for the failure message.
   const trace = await renderer.evaluate(`(async () => { const rows=[]; for (let turn=0; turn<30; turn++) { rows.push([turn*100, document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId?.slice(-6), document.querySelectorAll('.editor-window [data-mark-id]').length, document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard?.slice(0,6)??null, document.querySelector('#persistence-status')?.textContent??null, document.querySelector('[data-marks-paging] span')?.textContent??null]); await new Promise((done)=>setTimeout(done,100)); } return rows.filter((row,index)=>index===0||JSON.stringify(row.slice(1))!==JSON.stringify(rows[index-1].slice(1))); })()`);
-  // The card of that mark is selected, focused, starts inside the pane and the window with its head readable (a tall card runs on below, and scrolls); its words are drawn inside the text's window; the pane holds
+  // The card is selected and focused, with its action reachable; its words are drawn inside the text's window; the pane holds
   // the pages up to that mark (all of them, and no sentence, when it stands on the last page).
   const held = Math.min(expected.total, Math.ceil((expected.ordinal + 1) / 400) * 400);
   const rowNow = `(() => { const row=document.querySelector('[data-marks-paging]'); return row===null || row.hidden ? 'none' : row.querySelector('span')?.textContent; })()`;
@@ -170,8 +170,11 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     const node=document.querySelector(${JSON.stringify(card)}), scroll=document.querySelector('.manuscript-comments-scroll'), words=document.querySelector('.editor-window [data-mark-id="${expected.markId}"]'), editor=document.querySelector('.editor-window');
     const inside=(a,b)=>a!==null && b!==null && a.width>0 && a.height>0 && a.left>=b.left-1 && a.right<=b.right+1 && a.top>=b.top-1 && a.bottom<=b.bottom+1;
     const rect=(element)=>element?.getBoundingClientRect()??null, view={left:0,top:0,right:innerWidth,bottom:innerHeight};
-    const cardBox=rect(node), paneBox=rect(scroll), startsInPane=cardBox!==null && paneBox!==null && cardBox.left>=paneBox.left-1 && cardBox.right<=paneBox.right+1 && cardBox.top>=paneBox.top-1 && cardBox.top<paneBox.bottom;
-    return {card:startsInPane && cardBox.top>=0 && cardBox.top<=innerHeight-80 && cardBox.left>=0 && cardBox.right<=innerWidth, words:inside(rect(words),rect(editor)) && inside(rect(words),view), row:${rowNow}, cardBox:rect(node)&&[rect(node).left,rect(node).top,rect(node).right,rect(node).bottom], viewport:[innerWidth,innerHeight]};
+    const cardBox=rect(node), paneBox=rect(scroll);
+    const action=node?.querySelector('[data-mark-action="accept-and-apply"]'), button=rect(action);
+    const paneView=paneBox && {left:paneBox.left,top:paneBox.top,right:paneBox.left+scroll.clientWidth,bottom:paneBox.top+scroll.clientHeight};
+    const hit=button && document.elementFromPoint(button.left+button.width/2,button.top+button.height/2);
+    return {card:inside(button,paneView) && button.top>=paneView.top && button.bottom<=paneView.bottom && button.left>=paneView.left && button.right<=paneView.right && inside(button,view) && button.top>=0 && button.bottom<=innerHeight && button.left>=0 && button.right<=innerWidth && (hit===action || action?.contains(hit)), words:inside(rect(words),rect(editor)) && inside(rect(words),view), row:${rowNow}, cardBox:cardBox&&[cardBox.left,cardBox.top,cardBox.right,cardBox.bottom], button:button&&[button.left,button.top,button.right,button.bottom], pane:paneView, viewport:[innerWidth,innerHeight]};
   })()`);
   check(arrived.card && arrived.words && arrived.row === rowWant, 'marks-paging-arrived-beyond-first-page', { ...arrived, rowWant });
   // It can be accepted: 接受并应用 on its card, by a real click (a pointer decision stays on the page); the service records the Apply.
