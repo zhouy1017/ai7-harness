@@ -551,11 +551,30 @@ async function pressF1(renderer) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
 }
 
-async function firstRunClick(renderer, selector, label = null) {
-  const point = await renderer.evaluate(`(async () => { const node=${label === null ? `document.querySelector(${JSON.stringify(selector)})` : `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(node=>node.textContent===${JSON.stringify(label)})`}; if(!node)return null; node.scrollIntoView({block:'center'}); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); const b=node.getBoundingClientRect(); return {x:b.left+b.width/2,y:b.top+b.height/2}; })()`);
+/** A real pointer press on a control; `block: 'nearest'` leaves a control that is already in view where it is. Answers the page's scroll offset at the press. */
+async function firstRunClick(renderer, selector, label = null, block = 'center') {
+  const point = await renderer.evaluate(`(async () => { const node=${label === null ? `document.querySelector(${JSON.stringify(selector)})` : `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(node=>node.textContent===${JSON.stringify(label)})`}; if(!node)return null; node.scrollIntoView({block:${JSON.stringify(block)}}); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); const b=node.getBoundingClientRect(); return {x:b.left+b.width/2,y:b.top+b.height/2,scroll:document.scrollingElement.scrollTop}; })()`);
   requireJourney(point !== null, 'first-run-pointer-target');
-  await renderer.send('Input.dispatchMouseEvent', { type:'mousePressed', ...point, button:'left', clickCount:1 });
-  await renderer.send('Input.dispatchMouseEvent', { type:'mouseReleased', ...point, button:'left', clickCount:1 });
+  await renderer.send('Input.dispatchMouseEvent', { type:'mousePressed', x:point.x, y:point.y, button:'left', clickCount:1 });
+  await renderer.send('Input.dispatchMouseEvent', { type:'mouseReleased', x:point.x, y:point.y, button:'left', clickCount:1 });
+  return point.scroll;
+}
+
+/**
+ * A settings page opens at its top, whatever the screen before it left scrolled (#1548 rework): the screen is scrolled down first
+ * (帮助 arrives scrolled to 第一次审稿 from the first-run card and at the top from F1), the control is pressed with the real
+ * pointer, and the page it opens has its heading inside the window and the document at offset 0 — measured by the engine.
+ */
+async function pressIntoSettingsPage(renderer, selector, pageSelector, headingSelector, name, block = 'center') {
+  await renderer.evaluate(`(async () => { const root=document.scrollingElement; root.scrollTop=Math.max(root.scrollTop,240); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); })()`);
+  requireJourney((await firstRunClick(renderer, selector, null, block)) > 0, `${name}-scrolled-before`);
+  await waitFor(renderer, `document.querySelector(${JSON.stringify(pageSelector)})`, name);
+  await assertRenderer(renderer, `(() => { const box=document.querySelector(${JSON.stringify(headingSelector)})?.getBoundingClientRect(); return !!box && box.top>=-1 && box.bottom<=innerHeight+1 && document.scrollingElement.scrollTop===0; })()`, `${name}-at-top`);
+}
+
+/** The sentence of one 第一次审稿 step as 帮助 shows it, read before the press that leaves 帮助. */
+function helpStepSentence(renderer, key) {
+  return renderer.evaluate(`document.querySelector('[data-help-step="${key}"] .help-paragraph')?.textContent ?? null`);
 }
 
 async function click(renderer, label, name) {
@@ -992,13 +1011,18 @@ async function main() {
     }
     await onboardingPage.send('Emulation.clearDeviceMetricsOverride');
     await firstRunClick(onboardingPage, '[data-onboarding-help]');
-    await firstRunClick(onboardingPage, '[data-help-step-go="model"]');
-    await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"]')`, 'first-run-help-model-step');
+    await pressIntoSettingsPage(onboardingPage, '[data-help-step-go="model"]', '[data-screen="model-service"]', '[data-screen="model-service"] h2', 'first-run-help-model-step');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
     await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, 'first-run-help-model-returned');
     await firstRunClick(onboardingPage, '[data-onboarding-help]');
     await firstRunClick(onboardingPage, '[data-help-step-go="import"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'first-run-help-import-step');
+    // #1548 rework: a switch through the settings navigation opens its page at the top as well.
+    await firstRunClick(onboardingPage, '[data-onboarding-help]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] .settings-navigation')`, 'first-run-help-nav-opened');
+    await pressIntoSettingsPage(onboardingPage, '.settings-navigation [data-settings-nav="data-storage"]', '[data-screen="data-storage"]', '[data-screen="data-storage"] h2', 'first-run-help-nav-data-storage', 'nearest');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'first-run-help-nav-returned');
     at('first-run-data-location-settings');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-settings]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'first-run-settings-ready');
@@ -1058,16 +1082,20 @@ async function main() {
     await firstRunClick(onboardingPage, '[data-help-step-go="process"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="book-findings"]')`, 'first-review-help-process');
     await helpFromManuscript('first-review-help-f1-findings');
+    const exportSentence = await helpStepSentence(onboardingPage, 'export');
     await firstRunClick(onboardingPage, '[data-help-step-go="export"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="book-deliverables"]')`, 'first-review-help-export');
+    // The sentence names the control as 交付物 shows it (#1548 rework: it said 导出… where the page has 导出 ▾).
+    await waitFor(onboardingPage, `Array.from(document.querySelectorAll('[data-screen="book-deliverables"] .export-menu > summary')).some((node)=>${JSON.stringify(exportSentence)}.includes('「'+node.textContent+'」'))`, 'first-review-help-export-label');
     await helpFromManuscript('first-review-help-f1-deliverables');
+    const importSentence = await helpStepSentence(onboardingPage, 'import');
     await firstRunClick(onboardingPage, '[data-help-step-go="import"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] button[data-book-id="${sampleBook.bookId}"]')`, 'first-review-help-import');
+    await waitFor(onboardingPage, `Array.from(document.querySelectorAll('[data-screen="landing"] button')).some((node)=>${JSON.stringify(importSentence)}.includes('「'+node.textContent+'」'))`, 'first-review-help-import-label');
     await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
     await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-review-help-reopened-manuscript');
     await helpFromManuscript('first-review-help-f1-model');
-    await firstRunClick(onboardingPage, '[data-help-step-go="model"]');
-    await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"]')`, 'first-review-help-model');
+    await pressIntoSettingsPage(onboardingPage, '[data-help-step-go="model"]', '[data-screen="model-service"]', '[data-screen="model-service"] h2', 'first-review-help-model');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] button[data-book-id="${sampleBook.bookId}"]')`, 'first-review-help-model-library');
     await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
