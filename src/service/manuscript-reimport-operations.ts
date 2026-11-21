@@ -86,7 +86,7 @@ import {
 export interface ManuscriptReimportOperationsHost {
   readonly control: import('./store-operation-support.js').StoreControl;
   assertAvailable: () => void;
-  reimportLineageSourceVersionPage: (bookId: string, after: string | null) => { items: string[]; previousCursor: string | null; nextCursor: string | null; };
+  reimportLineageSourceVersionPage: (bookId: string, after: string | null) => Pick<ReimportLineageSourceVersionPageProjection, 'items' | 'previousCursor' | 'nextCursor'>;
   requireNoAbandonmentCleanupIntent: (draftId: string) => void;
   loadDraftSnapshot: (draftId: string) => DraftSnapshot;
   selectLegacyWordStaging: (snapshot: DraftSnapshot) => DraftSnapshot;

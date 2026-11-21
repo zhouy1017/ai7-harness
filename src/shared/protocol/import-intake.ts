@@ -27,6 +27,8 @@ export interface ImportIdentityFindingProjection {
   bookId: string;
   bookTitle: string;
   sourceVersionId: string;
+  displayName: string | null;
+  importedAt: string;
   importRecordId: string;
   recordKind: 'manuscript-import' | 'source-import' | 'manuscript-reimport';
   recordLabel: '稿件导入记录' | '来源导入记录' | '稿件重新导入记录';
@@ -251,7 +253,7 @@ export interface StagedImportProjection {
         label: string;
         internalNumber: string | null;
         manuscriptState: 'empty' | 'populated';
-        reimportLineageSourceVersionIds: ReadonlyArray<string>;
+        reimportLineageSourceVersionIds: ReimportLineageSourceVersionPageProjection['items'];
         reimportLineagePageAfter: string | null;
         reimportLineagePreviousCursor: string | null;
         reimportLineageNextCursor: string | null;
