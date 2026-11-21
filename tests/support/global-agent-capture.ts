@@ -49,22 +49,14 @@ const review: typeof fetch = async (_url, init) => {
     usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
 };
 
-/** Random ids, digests and instants read as their first-seen ordinal, so two builds of the same store compare byte for byte. */
-export function normalizeCapture(value: unknown): unknown {
-  const seen = new Map<string, string>();
-  const token = (kind: string) => (match: string) => { if (!seen.has(match)) seen.set(match, `<${kind}${seen.size + 1}>`); return seen.get(match)!; };
-  return JSON.parse(JSON.stringify(value)
-    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu, token('id'))
-    .replace(/[0-9a-f]{64}/gu, token('digest'))
-    .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu, token('at')));
-}
-
 /**
  * Builds the store (accepted memory A, accepted-then-stopped memory B, an editor's rule, an explicit direction), captures what
- * the AI 助手 lists and sends, then runs `afterwards` (the head's 重新启用 of B) and captures again with the same question.
+ * the AI 助手 lists and sends, then with `reenable` (the head only) re-enables B and captures again with the same question. Run it
+ * in a fresh interpreter with a fixed clock and identity sequence (`tests/service/global-agent-request-bytes.test.ts`), so every
+ * id, pin and digest is the same at the base and at the head.
  */
-export async function captureGlobalAgentRequests(afterwards?: (store: EditorialStore, stoppedItemId: string) => void):
-  Promise<{ before: GlobalAgentCapture; after: GlobalAgentCapture | null }> {
+export async function captureGlobalAgentRequests(reenable: boolean):
+  Promise<{ before: GlobalAgentCapture; after: GlobalAgentCapture | null; stoppedItemId: string }> {
   const governor = new ModelRequestGovernor();
   const roots = await createServiceTestRoots('ai7-global-agent-capture-');
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -133,9 +125,10 @@ export async function captureGlobalAgentRequests(afterwards?: (store: EditorialS
         requests: calls.slice(sent) };
     };
     const before = await capture();
-    if (afterwards === undefined) return { before, after: null };
-    afterwards(store, stopped.itemId);
-    return { before, after: await capture() };
+    if (!reenable) return { before, after: null, stoppedItemId: stopped.itemId };
+    const pin = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0, detailItemId: stopped.itemId }).items[0]!.current.versionId;
+    store.reviewPreferenceLifecycle({ itemId: stopped.itemId, expectedRevisionId: pin, actionId: randomUUID() }, 'reactivate');
+    return { before, after: await capture(), stoppedItemId: stopped.itemId };
   } finally {
     await owner?.dispose(); governor.close(); await governor.whenIdle(); store.close(); await roots.dispose();
   }
