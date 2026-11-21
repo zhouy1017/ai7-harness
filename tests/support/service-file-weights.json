@@ -67,6 +67,7 @@
     "tests/service/house-review-preference-materials.test.ts": 3,
     "tests/service/house-review-preference.test.ts": 1,
     "tests/service/house-word-list.test.ts": 1,
+    "tests/service/import-editing-choices.test.ts": 12,
     "tests/service/import-retention.test.ts": 58,
     "tests/service/import-structure.test.ts": 6,
     "tests/service/imported-exemplars.test.ts": 16,

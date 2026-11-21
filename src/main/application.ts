@@ -1,3 +1,4 @@
+import { registerImportEditingHandlers } from './import-editing-handlers.js';
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../shared/runtime-execution-config.js';
 import type { DispatchTaskKind, RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { registerProductionAndPackageHandlers, registerDeliverablesHandlers } from './deliverables-handlers.js';
@@ -751,6 +752,7 @@ export function registerRendererHandlers(
       expectedDraftVersion: input.expectedDraftVersion,
       reviewDigest: input.reviewDigest,
       commitId: input.commitAttemptId,
+      ...(input.acceptDegradation === undefined ? {} : { acceptDegradation: input.acceptDegradation }),
     });
     if (
       proof.draftId !== input.draftId ||
@@ -1358,44 +1360,9 @@ export function registerRendererHandlers(
         return result;
       }),
   );
-  ipcMain.handle(
-    IPC_CHANNELS.acceptReimportDegradation,
-    (event, input: ServiceOperationMap['acceptReimportDegradation']['input']) =>
-      envelope(async () => {
-        const owned = requireSender(event);
-        return serializeEffect(async () => {
-          requireAuthority();
-          const target = await requireImportTarget(owned, input, 'manuscript-reimport');
-          requireDesktop(target.kind === 'existing-book', 'AI7_SERVICE_ROUTE_INVALID');
-          await reserveExistingImportTarget(owned, target);
-          const result = await service.call('acceptReimportDegradation', input);
-          captureImportReviewTarget(owned, result);
-          return result;
-        });
-      }),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.resolveReimportMapping,
-    (event, input: ServiceOperationMap['resolveReimportMapping']['input']) =>
-      envelope(async () => {
-        const owned = requireSender(event);
-        return serializeEffect(async () => {
-          requireAuthority();
-          const target = await requireImportTarget(owned, input, 'manuscript-reimport');
-          requireDesktop(target.kind === 'existing-book', 'AI7_SERVICE_ROUTE_INVALID');
-          await reserveExistingImportTarget(owned, target);
-          const result = await service.call('resolveReimportMapping', input);
-          rememberJobResources(owned, result, {
-            operation: 'reimport',
-            bookId: target.bookId,
-            manuscriptId: null,
-            branchId: null,
-          });
-          captureReimportJob(owned, result);
-          return result;
-        });
-      }),
-  );
+  registerImportEditingHandlers({ requireSender, requireAuthority, serializeEffect, requireImportDraft,
+    requireImportTarget, reserveExistingImportTarget, captureImportReviewTarget, rememberJobResources,
+    captureReimportJob, releaseCommitBinding, leaveBookWorkbench, service });
   ipcMain.handle(IPC_CHANNELS.commitManuscriptReimport, (event, input: CommitManuscriptReimportRendererInput) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -1410,7 +1377,7 @@ export function registerRendererHandlers(
         claims.claimCommit(owned, commit.commitId);
         let result: ServiceOperationMap['commitManuscriptReimport']['output'];
         try {
-          result = await service.call('commitManuscriptReimport', commit);
+          result = await service.call('commitManuscriptReimport', { ...commit, ...(input.acceptDegradation === undefined ? {} : { acceptDegradation: input.acceptDegradation }) });
         } catch (error) {
           const deterministic = releaseNewCommitClaimAfterDeterministicFailure(
             owned,
