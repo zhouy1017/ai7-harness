@@ -27,6 +27,7 @@ import {
   type EvidenceLineageClass,
   type EvidenceRelation,
   type EvidenceSourceCardProjection,
+  type SourceAddressProjection,
   type EvidenceWorkspaceProjection,
   type FactualActionNeed,
   type FactualAssertionCategory,
@@ -993,6 +994,13 @@ export class FactualVerificationLedger {
       decisionCard: this.#decisionCard(result, projected, reader, now),
       matrix: { minPinned: EVIDENCE_MATRIX_MIN_PINNED, maxPinned: EVIDENCE_MATRIX_MAX_PINNED },
     };
+  }
+
+  /** 在浏览器中打开 (Issue #1641): what one source card of this Book's result recorded as its address; an in-Book source has none. */
+  sourceAddress(bookId: string, resultId: string, cardId: string): SourceAddressProjection {
+    const source = this.#requireResult(bookId, resultId).body.sources.find((entry) => entry.cardId === cardId);
+    requireVerification(source !== undefined, 'FACTUAL_VERIFICATION_SOURCE_NOT_FOUND', '这条核查结果里没有这条来源。');
+    return source.sourceKind === 'web' ? { sourceKind: 'web', address: source.sourceRef } : { sourceKind: 'in-book', address: null };
   }
 
   #card(bookId: string, source: SnapshotSource, now: Date): EvidenceSourceCardProjection {

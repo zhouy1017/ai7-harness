@@ -345,20 +345,31 @@ export class ResearchEvidenceLedger {
     return row === undefined ? null : String(row.material_id);
   }
 
-  /** One retained source and its captured text, for 保存为来源材料; refused when the evidence is not this Book's. */
-  source(bookId: string, evidenceId: string): RetainedSourceForMaterial {
+  /** One retained source of this Book; refused when the evidence is not this Book's. */
+  #stored(bookId: string, evidenceId: string): StoredEvidence {
     requireEvidence(UUID_PATTERN.test(evidenceId), 'RESEARCH_EVIDENCE_INVALID', '外部来源标识无效。');
     requireEvidence(this.#present(), 'RESEARCH_EVIDENCE_NOT_FOUND', '没有这条外部来源留存。');
     const row = this.#db.prepare('SELECT rowid, * FROM research_evidence WHERE evidence_id = ?').get(evidenceId) as SqlRow | undefined;
     requireEvidence(row !== undefined, 'RESEARCH_EVIDENCE_NOT_FOUND', '没有这条外部来源留存。');
     const stored = this.#evidence(row);
     requireEvidence(stored.bookId === bookId, 'RESEARCH_EVIDENCE_NOT_FOUND', '这条外部来源留存不属于这本书。');
+    return stored;
+  }
+
+  /** One retained source and its captured text, for 保存为来源材料; refused when the evidence is not this Book's. */
+  source(bookId: string, evidenceId: string): RetainedSourceForMaterial {
+    const stored = this.#stored(bookId, evidenceId);
     return {
       evidenceId: stored.evidenceId, bookId: stored.bookId, url: stored.url, sourceTitle: stored.sourceTitle, capturedAt: stored.capturedAt,
       captureState: stored.captureState, contentSha256: stored.contentSha256, pageSha256: stored.pageSha256, snapshotDigest: stored.snapshotDigest,
       runRecordId: stored.runRecordId, content: this.#content(stored.contentSha256), savedMaterialId: this.#savedMaterial(stored.evidenceId),
       backendId: stored.backendId, fallback: stored.fallback,
     };
+  }
+
+  /** 在浏览器中打开 (Issue #1641): the address one retained source of this Book was captured from; refused for another Book's. */
+  recordedAddress(bookId: string, evidenceId: string): string {
+    return this.#stored(bookId, evidenceId).url;
   }
 
   /** Link the 资料库 item 保存为来源材料 made of a retained source, inside the caller's transaction; once per source. */

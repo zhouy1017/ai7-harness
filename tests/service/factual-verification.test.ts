@@ -989,6 +989,13 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
     expect(source.sourceRef).toBe(MUSEUM);
     expect(source.sourceVersion).toMatch(/^[0-9a-f]{64}$/u);
     expect(source.evidenceId).not.toBeNull();
+    // 在浏览器中打开 (Issue #1641): the card and its retained row answer the same recorded address; another Book's are refused.
+    const card = { bookId: book.bookId, resultId: results[0]!.resultId, cardId: source.cardId };
+    expect(store.inspectSourceAddress(card)).toEqual({ sourceKind: 'web', address: MUSEUM });
+    expect(store.inspectSourceAddress({ bookId: book.bookId, evidenceId: source.evidenceId! })).toEqual({ sourceKind: 'web', address: MUSEUM });
+    expect(storeError(() => store.inspectSourceAddress({ ...card, cardId: `src_${'0'.repeat(20)}` }))).toBe('FACTUAL_VERIFICATION_SOURCE_NOT_FOUND');
+    expect(storeError(() => store.inspectSourceAddress({ ...card, bookId: randomUUID() }))).toBe('FACTUAL_VERIFICATION_NOT_FOUND');
+    expect(storeError(() => store.inspectSourceAddress({ bookId: randomUUID(), evidenceId: source.evidenceId! }))).toBe('RESEARCH_EVIDENCE_NOT_FOUND');
     const before = databaseState(false);
     for (const result of results) expect(store.inspectEvidenceWorkspace({ bookId: book.bookId, resultId: result.resultId, sourcesAfter: null }).result.resultId).toBe(result.resultId);
     expect(databaseState(false)).toEqual(before);

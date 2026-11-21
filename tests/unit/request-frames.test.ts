@@ -2341,6 +2341,26 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 在浏览器中打开’s address read for exactly one source identity and never an address (Issue #1641)', () => {
+    const bookId = randomUUID();
+    const resultId = randomUUID();
+    const evidenceId = randomUUID();
+    const cardId = `src_${'0a'.repeat(10)}`;
+    expectAcceptedInputs([
+      { op: 'inspectSourceAddress', input: { bookId, resultId, cardId } },
+      { op: 'inspectSourceAddress', input: { bookId, evidenceId } },
+    ]);
+    for (const input of [
+      { bookId }, { bookId, resultId }, { bookId, cardId }, { resultId, cardId }, { evidenceId },
+      { bookId, resultId, cardId, evidenceId }, { bookId, evidenceId, resultId }, { bookId, evidenceId, cardId },
+      { bookId, resultId, cardId, address: 'https://example.org/' }, { bookId, evidenceId, url: 'https://example.org/' },
+      { bookId: 'book', evidenceId }, { bookId, evidenceId: 'latest' }, { bookId, resultId: 'latest', cardId },
+      { bookId, resultId, cardId: 'src_0A0A0A0A0A0A0A0A0A0A' }, { bookId, resultId, cardId: `${cardId}0` }, { bookId, resultId, cardId: 7 },
+    ]) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op: 'inspectSourceAddress', input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('rejects a 待我处理 read that names a Book, a group, a filter or anything else', () => {
     const id = randomUUID();
     const refused: ReadonlyArray<unknown> = [
