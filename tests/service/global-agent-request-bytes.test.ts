@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { build } from 'esbuild';
 import { expect, it } from 'vitest';
+import { canonicalJson } from '../../src/service/analysis/canonical.js';
 import type { GlobalAgentCapture } from '../support/global-agent-capture.js';
 
 // What the AI 助手 lists and sends over one ordinary-production `sample1` store holding no 重新启用 / 删除 record, as the base
@@ -49,13 +50,27 @@ async function captured(revision: string | null): Promise<Captured> {
   return JSON.parse(await readFile(result, 'utf8')) as Captured;
 }
 
-/** One request body cut into what may differ after 重新启用 (the sources and the published-preference block) and everything else. */
-function parts(body: string) {
-  const { messages, ...options } = JSON.parse(body) as { messages: Array<{ role: string; content: string }> };
-  const [system, user] = messages;
-  const [header, json] = user!.content.split(/\n(.*)/su) as [string, string];
-  const { sources, ...message } = JSON.parse(json) as { sources: Array<{ itemId: string; revisionId: string; text: string }> };
-  return { options, roles: messages.map((entry) => entry.role), system: system!.content, header, message, sources };
+type Body = { messages: Array<{ role: string; content: string }> } & Record<string, unknown>;
+
+/**
+ * The body a request after 重新启用 must be: the before body with exactly two changes — B's source inserted once, at B's place
+ * among the listed sources, as its new candidate; and B's published line with the publication's version label in the system
+ * prompt (that line must appear exactly once, and removing it with the old label restored must give the before prompt back).
+ * Everything else — every option, every message field, the header and the rest of the message — is the before body's.
+ */
+function expectedAfter(before: string, after: string, source: { itemId: string; revisionId: string; text: string }, index: number, line: string): Body {
+  const expected = JSON.parse(before) as Body;
+  const system = (JSON.parse(after) as Body).messages[0]!.content;
+  const label = /（版本 v[0-9]+）/u;
+  expect(system.split(line)).toHaveLength(2);
+  expect(system.replace(line, '').replace(label, expected.messages[0]!.content.match(label)![0])).toBe(expected.messages[0]!.content);
+  expected.messages[0]!.content = system;
+  const user = expected.messages[1]!;
+  const [header, json] = user.content.split(/\n(.*)/su) as [string, string];
+  const message = JSON.parse(json) as { sources: Array<typeof source> };
+  message.sources.splice(index, 0, source);
+  user.content = `${header}\n${canonicalJson(message)}`;
+  return expected;
 }
 
 it('lists and sends the base\'s exact bytes over a store without lifecycle records, and after 重新启用 only the entry comes back (#1655)', async () => {
@@ -74,20 +89,11 @@ it('lists and sends the base\'s exact bytes over a store without lifecycle recor
   expect(now.sourceCandidates.filter((entry) => entry.itemId !== stoppedItemId)).toEqual(before.sourceCandidates);
   expect(now.items.filter((entry) => entry.itemId !== stoppedItemId)).toEqual(before.items.filter((entry) => entry.itemId !== stoppedItemId));
   expect(now.items.find((entry) => entry.itemId === stoppedItemId)).toMatchObject({ state: 'active' });
-  // Both requests after it (question and regeneration) equal the base's except for B's source, B's published line and the
-  // publication's version label: every option, role, header, question and the rest of the system prompt stay byte for byte.
+  // Both requests after it (question and regeneration) are compared whole with the before body plus the two allowed changes.
   expect(now.requests).toHaveLength(before.requests.length);
-  const line = `- [typos-and-usage] ${added[0]!.text}\n`;
-  now.requests.forEach((body, index) => {
-    const was = parts(before.requests[index]!); const is = parts(body);
-    expect(is.options).toEqual(was.options);
-    expect(is.roles).toEqual(was.roles);
-    expect(is.header).toBe(was.header);
-    expect(is.message).toEqual(was.message);
-    expect(is.sources.filter((source) => source.itemId !== stoppedItemId)).toEqual(was.sources);
-    expect(is.sources.find((source) => source.itemId === stoppedItemId)).toEqual({ itemId: stoppedItemId, revisionId: added[0]!.revisionId, text: added[0]!.text });
-    expect(is.system).toContain(line);
-    const label = /（版本 v[0-9]+）/u;
-    expect(is.system.replace(line, '').replace(label, was.system.match(label)![0])).toBe(was.system);
+  const source = { itemId: stoppedItemId, revisionId: added[0]!.revisionId, text: added[0]!.text };
+  const index = now.sourceCandidates.findIndex((entry) => entry.itemId === stoppedItemId);
+  now.requests.forEach((body, at) => {
+    expect(JSON.parse(body)).toEqual(expectedAfter(before.requests[at]!, body, source, index, `- [typos-and-usage] ${source.text}\n`));
   });
 }, 180_000);
