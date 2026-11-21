@@ -259,7 +259,7 @@ describe('the words of 发稿', () => {
       { key: 'publication' as const, typeId: null, label: '发稿版本', met: true, stateLabel: `发稿版本「${wide(80)}」 · r9999`, notice: wide(120), route: 'publication' as const, routeLabel: '设为发稿版本…' },
       ...Array.from({ length: 5 }, (_, index) => ({
         key: 'document' as const, typeId: `type-${index}`, label: wide(40), met: true, stateLabel: '第 9999 次交付 · 版本 9999', notice: wide(120),
-        route: 'document' as const, routeLabel: '再交付…',
+        route: null, routeLabel: null,
       })),
       { key: 'work-records' as const, typeId: null, label: '工作记录', met: false, stateLabel: '第 9999 次审阅尚未生成报告', notice: null, route: 'review' as const, routeLabel: '前往审阅' },
     ];

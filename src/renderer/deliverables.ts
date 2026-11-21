@@ -1,3 +1,4 @@
+import { DEFAULT_MILESTONE_PURPOSE, defaultMilestoneLabel } from './milestone-defaults.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import {
   MAX_PUBLICATION_BASIS_CHARACTERS,
@@ -126,7 +127,7 @@ type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProduct
   'approveBookDeliveryPackageExport' | 'cancelBookDeliveryPackageExport' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
   'inspectMaintenanceCase' | 'listMaintenanceCases' | 'recordMaintenanceCase' | 'appendMaintenanceCaseRevision' | 'saveMaintenanceErrata' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
-  'decideProductionDocumentType' | 'recordProductionDocumentDelivery'>;
+  'decideProductionDocumentType' | 'recordProductionDocumentDelivery' | 'getManuscriptWindow' | 'saveMilestone'>;
 
 export interface MountDeliverablesOptions {
   /** The destination's panel: the surface appends its heading and its host, and the caller its persistent actions after them. */
@@ -261,7 +262,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   }
   options.root.append(
     el('h2', undefined, DELIVERABLES_SECTION_LABEL),
-    el('p', 'lede', DELIVERABLES_LEDE),
+    ...DELIVERABLES_LEDE.split('\n').map((line) => el('p', 'field-note deliverables-definition', line)),
     host,
   );
   // Each designation's 维护事项 (Issue #426, S68a) are drawn inside its item from the surface's own state.
@@ -313,22 +314,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         options.openReview();
         return;
       }
-      // Ordinary 交付物 holds no document card (Issue #1405): a document's route leads to 稿件, where it is written.
-      if (route.kind === 'document' && !technicalLayerVisible) {
-        options.openManuscript();
-        return;
-      }
-      // The 发稿 block's 设为发稿版本…, or the type card's own next action: the editor acts there, on this page.
-      let target: HTMLElement | null = null;
-      if (route.kind === 'publication') target = block?.querySelector<HTMLElement>('[data-publication-action="designate"]') ?? null;
-      else {
-        const typeCard = documentsBlock?.querySelector<HTMLElement>(`li.production-document-card[data-document-type-id="${CSS.escape(route.typeId)}"]`) ?? null;
-        const scope = route.documentId === undefined ? typeCard
-          : typeCard?.querySelector<HTMLElement>(`li.production-document-row[data-document-id="${CSS.escape(route.documentId)}"]`) ?? null;
-        target = (['deliver', 'redeliver', 'notForThisBook'] as const)
-          .map((action) => scope?.querySelector<HTMLButtonElement>(`[data-document-action="${action}"]`) ?? null)
-          .find((button) => button !== null && !button.disabled) ?? null;
-      }
+      const target = block?.querySelector<HTMLElement>('[data-publication-action="designate"]');
       target?.scrollIntoView({ block: 'center' });
       target?.focus();
     },
@@ -586,13 +572,14 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   function renderDesignate(next: DeliverablesProjection): HTMLElement {
     const area = el('div', 'publication-designate-area');
     const row = el('div', 'button-row publication-designate-row');
-    const open = el('button', 'secondary', PUBLICATION_ACTION_LABELS.designate);
+    const saveFirst = next.manuscript !== null && next.publication.milestones.length === 0;
+    const open = el('button', saveFirst ? 'primary' : 'secondary', saveFirst ? PUBLICATION_ACTION_LABELS.saveAndDesignate : PUBLICATION_ACTION_LABELS.designate);
     open.type = 'button';
     open.dataset['publicationAction'] = 'designate';
     row.append(open);
     area.append(row);
     const availability = next.publication.designate;
-    if (!availability.available) {
+    if (!availability.available && !saveFirst) {
       open.disabled = true;
       const why = el('span', 'publication-unavailable-reason', availability.unavailableReason ?? '');
       why.id = uid('designate-reason');
@@ -603,7 +590,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     }
     open.disabled = working;
     open.setAttribute('aria-expanded', form === null ? 'false' : 'true');
-    open.addEventListener('click', () => openForm());
+    open.addEventListener('click', () => { if (saveFirst) void saveAndDesignate(); else openForm(); });
     if (form !== null) {
       const node = renderForm(next, form);
       node.id = uid('form');
@@ -767,6 +754,36 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     if (destroyed || working || projection === null || !projection.publication.designate.available) return;
     form ??= { milestoneId: projection.publication.milestones[0]?.milestoneId ?? null, scope: PUBLICATION_SCOPE_DEFAULT, basis: PUBLICATION_BASIS_DEFAULT, problem: null };
     render('form');
+  }
+
+  /** Save with the manuscript save menu's defaults, then select that exact milestone in place. */
+  async function saveAndDesignate(): Promise<void> {
+    if (destroyed || working || projection?.manuscript == null) return;
+    const { manuscriptId, branchId } = projection.manuscript;
+    working = true;
+    generation += 1;
+    render('keep');
+    try {
+      await api.getManuscriptWindow({ manuscriptId, branchId, cursor: null });
+      if (destroyed) return;
+      const saved = await api.saveMilestone({ manuscriptId, branchId,
+        label: defaultMilestoneLabel('阶段留档', new Date()), purposeKind: DEFAULT_MILESTONE_PURPOSE, purpose: null, note: '' });
+      if (destroyed) return;
+      const next = await api.inspectDeliverables();
+      if (destroyed) return;
+      if (next.bookId !== bookId) throw new Error(DELIVERABLES_UNAVAILABLE);
+      projection = next;
+      form = { milestoneId: saved.milestoneId, scope: PUBLICATION_SCOPE_DEFAULT, basis: PUBLICATION_BASIS_DEFAULT, problem: null };
+      working = false;
+      render('form');
+      bundle.refresh();
+      options.setStatus(saved.completionLabel, 'success');
+    } catch (error) {
+      working = false;
+      if (destroyed) return;
+      render('designate');
+      options.setStatus(options.errorMessage(error, '里程碑未保存。'), 'error');
+    }
   }
 
   /** What 设为发稿版本 records for the form as it stands: an empty field is its default. */

@@ -26,8 +26,8 @@ import {
 export const DELIVERABLES_SECTION_LABEL = '工作 · 交付物';
 /** The editor toolbar's entry in IA-006's 工作 group, after 审阅, and the heading of 工作概览's one line. */
 export const DELIVERABLES_ENTRY_LABEL = '交付物';
-/** Issue #1410 item 22: the newest milestone is chosen and 发稿范围 / 依据 are written in, so the editor only changes what differs. */
-export const DELIVERABLES_LEDE = '默认选中最新的里程碑版本，发稿范围和依据已按常规填好，可按需改写后设为发稿版本；之后稿件再有修改，这里会提示。';
+/** Issue #1550: the three deliverables and how they relate, one plain line each. */
+export const DELIVERABLES_LEDE = '里程碑版本：你认可的稿件版本。\n发稿版本：交给后续生产使用的里程碑版本。\n图书交付包：发稿版本与勾选的衍生稿件一起导出的包。';
 /** The one block S65 reaches: the manuscript's 发稿 (editor-surfaces §9's first row). */
 export const DELIVERABLES_PUBLICATION_HEADING = '发稿 · 稿件';
 export const DELIVERABLES_UNAVAILABLE = '无法读取这本书的交付物。';
@@ -35,7 +35,7 @@ export const DELIVERABLES_UNAVAILABLE = '无法读取这本书的交付物。';
 export const DELIVERABLES_DESTINATION_ACTIONS = ['打开稿件', '工作概览'] as const;
 
 export const MILESTONE_LIST_HEADING = '里程碑版本';
-export const MILESTONE_LIST_EMPTY = '还没有里程碑版本，可在稿件导航面板中保存。';
+export const MILESTONE_LIST_EMPTY = '还没有里程碑版本。';
 export const PUBLICATION_HISTORY_HEADING = '设为发稿版本的记录';
 export const PUBLICATION_HISTORY_EMPTY = '还没有设为发稿版本。';
 /** The newest designation in the history is the Book's current 发稿版本; the older ones stay as they were. */
@@ -44,6 +44,7 @@ export const PUBLICATION_CURRENT_MARK = '当前发稿版本';
 /** The label of every `data-publication-action` the destination carries, and of 工作概览's `data-deliverables-action`. */
 export const PUBLICATION_ACTION_LABELS = {
   designate: '设为发稿版本…',
+  saveAndDesignate: '存为里程碑并设为发稿版本',
   confirm: '设为发稿版本',
   cancel: '取消',
   open: '打开交付物',
