@@ -21,3 +21,13 @@ export async function envelope<Result>(operation: () => Promise<Result> | Result
     return safeFailure(error);
   }
 }
+
+/** A launch's one-shot answer (a Save or folder dialog under a Journey): the first call takes it, every later call gets nothing. */
+export function takeOnce<Value>(value: Value | undefined): () => Value | undefined {
+  let pending = value;
+  return () => {
+    const taken = pending;
+    pending = undefined;
+    return taken;
+  };
+}

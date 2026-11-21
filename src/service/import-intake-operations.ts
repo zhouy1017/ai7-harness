@@ -1613,3 +1613,27 @@ export async function commitSourceImport(host: ImportIntakeOperationsHost, input
     requireStore(result !== undefined, 'COMMIT_FAILED', '来源导入提交未产生结果。');
     return result;
   }
+
+export function invalidateReview(host: ImportIntakeOperationsHost, snapshot: DraftSnapshot): DraftSnapshot {
+    requireStore(snapshot.state === 'reviewed', 'DRAFT_STATE_CHANGED', '只有已复核草稿可以失效旧复核。');
+    const nextVersion = snapshot.version + 1;
+    host.transaction(host.authority, () => {
+      host.authority.prepare('DELETE FROM manuscript_reimport_comparisons WHERE draft_id = ?').run(snapshot.draftId);
+      const update = host.authority
+        .prepare(
+          `UPDATE import_drafts
+           SET state = 'staged', draft_version = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+               reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
+               reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
+               reviewed_reuse_source_version_id = NULL,
+               reviewed_lineage_status = NULL, reviewed_lineage_source_version_id = NULL,
+               reviewed_checkpoint_revision_id = NULL, reviewed_manuscript_id = NULL, reviewed_branch_id = NULL,
+               review_digest = NULL, reviewed_at = NULL
+           WHERE draft_id = ? AND draft_version = ? AND state = 'reviewed'`,
+        )
+        .run(nextVersion, snapshot.draftId, snapshot.version);
+      requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在复核失效时已变化。');
+      host.authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(snapshot.draftId);
+    });
+    return host.loadDraftSnapshot(snapshot.draftId);
+}

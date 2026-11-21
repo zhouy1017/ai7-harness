@@ -2341,6 +2341,26 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 在浏览器中打开’s address read for exactly one source identity and never an address (Issue #1641)', () => {
+    const bookId = randomUUID();
+    const resultId = randomUUID();
+    const evidenceId = randomUUID();
+    const cardId = `src_${'0a'.repeat(10)}`;
+    expectAcceptedInputs([
+      { op: 'inspectSourceAddress', input: { bookId, resultId, cardId } },
+      { op: 'inspectSourceAddress', input: { bookId, evidenceId } },
+    ]);
+    for (const input of [
+      { bookId }, { bookId, resultId }, { bookId, cardId }, { resultId, cardId }, { evidenceId },
+      { bookId, resultId, cardId, evidenceId }, { bookId, evidenceId, resultId }, { bookId, evidenceId, cardId },
+      { bookId, resultId, cardId, address: 'https://example.org/' }, { bookId, evidenceId, url: 'https://example.org/' },
+      { bookId: 'book', evidenceId }, { bookId, evidenceId: 'latest' }, { bookId, resultId: 'latest', cardId },
+      { bookId, resultId, cardId: 'src_0A0A0A0A0A0A0A0A0A0A' }, { bookId, resultId, cardId: `${cardId}0` }, { bookId, resultId, cardId: 7 },
+    ]) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op: 'inspectSourceAddress', input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('rejects a 待我处理 read that names a Book, a group, a filter or anything else', () => {
     const id = randomUUID();
     const refused: ReadonlyArray<unknown> = [
@@ -2477,4 +2497,16 @@ it('decodes the Pro / Flash tier selectors and the Flash clear with their own in
   }
   expect(decode('clearFlashModel', {})).toMatchObject({ op: 'clearFlashModel', input: {} });
   for (const input of [{ route: 'opencode-go' }, { modelId: 'kimi-k3' }]) expect(() => decode('clearFlashModel', input)).toThrow(ProtocolError);
+});
+
+it('accepts return-to-editing and optional fidelity acceptance only on reimport submissions (#1638)', () => {
+  const input = { draftId: '11111111-1111-4111-8111-111111111111', expectedDraftVersion: 2 };
+  const frame = (op: string, value: object) => Buffer.from(JSON.stringify({ id: randomUUID(), op, input: value }));
+  expect(decodeRequest(frame('returnImportToEditing', input)).op).toBe('returnImportToEditing');
+  const commit = { ...input, reviewDigest: 'a'.repeat(64), commitId: '22222222-2222-4222-8222-222222222222' };
+  for (const value of [commit, { ...commit, acceptDegradation: true }, { ...commit, acceptDegradation: false }]) {
+    expect(decodeRequest(frame('commitManuscriptReimport', value)).op).toBe('commitManuscriptReimport');
+  }
+  expect(() => decodeRequest(frame('commitManuscriptReimport', { ...commit, acceptDegradation: 'yes' }))).toThrow();
+  expect(() => decodeRequest(frame('commitSourceImport', { ...commit, acceptDegradation: true }))).toThrow();
 });

@@ -4,6 +4,8 @@ import {
 } from '../../src/renderer/help-labels.js';
 import { HELP_PRIVACY_SECTIONS, helpUsageSections } from '../../src/renderer/help-text.js';
 import { COMMANDS } from '../../src/renderer/commands.js';
+import { visibleKnowledgeBaseTabs } from '../../src/renderer/knowledge-base-labels.js';
+import { EXPORT_MENU_LABEL } from '../../src/renderer/manuscript-export-labels.js';
 import { SETTINGS_HUB_GROUPS, SHELL_BOOK_GROUPS, SHELL_DESTINATIONS, SHELL_SETTINGS } from '../../src/renderer/shell-labels.js';
 
 // #939 slice 11f: 帮助's words. The entry sits beside 设置, the tabs are fixed, the 关于 line carries the three version
@@ -85,6 +87,17 @@ describe('使用帮助', () => {
       expect(step.sentence.endsWith('。')).toBe(true);
     }
     expect(first.steps!.map((step) => step.sentence).join('')).toContain(sectionLabelOf('findings'));
+    // The last step names the control 交付物 shows (「导出 ▾」), not the 导出… of a version's card.
+    expect(first.steps!.find((step) => step.key === 'export')!.sentence).toContain(`「${EXPORT_MENU_LABEL}」`);
+  });
+
+  it('says how many knowledge-base kinds it lists, in both modes', () => {
+    for (const developerMode of [false, true]) {
+      const paragraph = helpUsageSections(developerMode).find((section) => section.heading === '知识库与工序')!.paragraphs[0]!;
+      const listed = paragraph.split('：')[1]!.split('；')[0]!.split('、');
+      expect(listed).toEqual(visibleKnowledgeBaseTabs(developerMode).map((entry) => entry.label));
+      expect('零一二三四五六七八九十'.indexOf(/分为(.)类/u.exec(paragraph)![1]!), paragraph).toBe(listed.length);
+    }
   });
 });
 

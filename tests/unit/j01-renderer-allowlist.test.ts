@@ -11,7 +11,11 @@ describe('J-01 renderer isolation assertion', () => {
   it('retains Node isolation and pins the exact sorted preload API, including new Skill and recommendation operations', () => {
     const runner = readFileSync(new URL('../../e2e/run-j01.mjs', import.meta.url), 'utf8');
     const marker = "Object.keys(window.ai7).sort().join(',') === '";
-    const line = runner.split(/\r?\n/u).find((line) => line.includes(marker))!;
+    // The list may continue over `+ '…'` lines, one per later addition (#1641), so a slice's member sits on its own line.
+    const lines = runner.split(/\r?\n/u);
+    const start = lines.findIndex((entry) => entry.includes(marker));
+    let line = lines[start]!;
+    for (let next = start + 1; /^\s*\+ '/u.test(lines[next] ?? ''); next += 1) line = line.replace(/'$/u, '') + lines[next]!.replace(/^\s*\+ '/u, '');
     expect(line).toContain("typeof globalThis.process === 'undefined'");
     expect(line).toContain("typeof globalThis.require === 'undefined'");
     const list = line.slice(line.indexOf(marker) + marker.length).split("'")[0]!.split(',');

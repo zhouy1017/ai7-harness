@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { insertLegacyPackageVersion, LEGACY_PACKAGE_EXCLUSIONS } from '../support/legacy-package-version.js';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -85,11 +86,6 @@ describe('图书交付包 (S67a)', () => {
       let bundle = store.inspectBookDeliveryPackage(book.bookId);
       expect(conditionsOf(bundle)).toEqual([
         ['publication', false, '尚未设发稿版本', 'publication'],
-        ['news-release', false, '尚未创建', 'document'],
-        ['promotion-article', false, '尚未创建', 'document'],
-        ['review-article', false, '尚未创建', 'document'],
-        ['launch-materials', false, '尚未创建', 'document'],
-        ['marketing-points', false, '尚未创建', 'document'],
         ['work-records', true, '暂无审阅记录', null],
       ]);
       expect([bundle.ready, bundle.unmet, bundle.versions, bundle.changedSinceLatest]).toEqual([
@@ -104,12 +100,15 @@ describe('图书交付包 (S67a)', () => {
       store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
       bundle = store.inspectBookDeliveryPackage(book.bookId);
       expect([bundle.ready, bundle.unmet]).toEqual([true, []]);
-      expect(bundle.content.excluded.filter(item => item.detail === '尚未创建')).toHaveLength(5);
+      // Nothing is itemised as left out (Issue #1639), and a type with no document has no row.
+      expect(bundle.content.excluded).toEqual([]);
       const sourceVersionId = await importSource(store, book.bookId, await compose('新闻稿初稿', [21, 22, 23]));
       const news = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId })).document!;
       bundle = store.inspectBookDeliveryPackage(book.bookId);
-      expect(conditionsOf(bundle)[1]).toEqual(['news-release', false, '尚未交付', 'document']);
-      expect(bundle.conditions[1]!.routeLabel).toBe('交付…');
+      // Nobody delivered it: a document with a saved version is ticked by default all the same, and no sentence calls it undelivered.
+      expect(conditionsOf(bundle)[1]).toEqual(['news-release', true, '版本 1', null]);
+      expect(bundle.documents.map((entry) => [entry.documentId, entry.selectedRevisionId])).toEqual([[news.documentId, news.versions[0]!.revisionId]]);
+      expect(bundle.content.limitations).toEqual([]);
       await store.recordProductionDocumentDelivery({
         bookId: book.bookId, documentId: news.documentId, version: { kind: 'saved', revisionId: news.versions[0]!.revisionId },
         recipient: { kind: 'publicity', custom: null }, note: null,
@@ -120,7 +119,7 @@ describe('图书交付包 (S67a)', () => {
       bundle = store.inspectBookDeliveryPackage(book.bookId);
       expect(conditionsOf(bundle)).toEqual([
         ['publication', true, '发稿版本「一审稿」 · r1', null],
-        ['news-release', true, '第 1 次交付 · 版本 1', null],
+        ['news-release', true, '版本 1', null],
         ['promotion-article', true, '本书不做', null],
         ['review-article', true, '本书不做', null],
         ['launch-materials', true, '本书不做', null],
@@ -130,14 +129,10 @@ describe('图书交付包 (S67a)', () => {
       expect([bundle.ready, bundle.unmet]).toEqual([true, []]);
       expect(bundle.content.included).toEqual([
         { kind: 'publication', label: '发稿版本「一审稿」 · r1', detail: '发稿范围：纸质版首印' },
-        { kind: 'document', label: '新闻稿 · 版本 1', detail: '第 1 次交付 · 版本 1 · 宣传部；交付记录 1 条' },
+        { kind: 'document', label: '新闻稿 · 版本 1', detail: null },
       ]);
-      // A Book with no 定稿 评估记录 and no 审稿意见 lists both under 不包含 with the reason, and neither holds the package (Issue #429).
-      expect(bundle.content.excluded.map((item) => [item.kind, item.label, item.detail])).toEqual([
-        ['not-for-this-book', '宣传文章', '本书不做'], ['not-for-this-book', '评论文章', '本书不做'], ['not-for-this-book', '发布会材料', '本书不做'], ['not-for-this-book', '营销要点', '本书不做'],
-        ['evaluation-record', '评估记录', BOOK_DELIVERY_PACKAGE_WORDS.evaluationMissing], ['readers-report', '审稿意见', BOOK_DELIVERY_PACKAGE_WORDS.readersReportMissing],
-        ['exclusion', '备注', '稿件与文档上的备注只供编辑自己参考'], ['exclusion', '资料库原件', null], ['exclusion', '中间修订版', '稿件只含发稿版本，文档只含交付过的版本'],
-      ]);
+      // The 不包含 list is gone from what is shown; a Book with no 定稿 评估记录 or 审稿意见 simply has none of either (Issue #429, #1639).
+      expect(bundle.content.excluded).toEqual([]);
       expect(bundle.content.limitations).toEqual([]);
 
       // A purpose within its bound, and the content the editor saw: a stale digest is refused.
@@ -158,7 +153,7 @@ describe('图书交付包 (S67a)', () => {
       expect(v2.package.versions[0]!.technical.priorVersionId).toBe(v1.package.versions[0]!.packageVersionId);
       expect(v2.package.versions[1]).toEqual({ ...v1.package.versions[0], current: false });
 
-      // An edit after the delivery: the row still holds, with a notice and a route, and the content moved past v2.
+      // An edit after the delivery changes nothing the package holds: it holds saved versions, and the edit is not one.
       const window = store.getManuscriptWindow(news.documentId, news.branchId, null);
       const block = window.blocks[0]!;
       store.flushJournalEdit({
@@ -167,28 +162,33 @@ describe('图书交付包 (S67a)', () => {
         expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '（修订）',
       });
       bundle = store.inspectBookDeliveryPackage(book.bookId);
-      expect(bundle.conditions[1]).toMatchObject({
-        met: true, notice: '交付后有修改：可以再交付，也可以按交付过的版本打包。', route: 'document', routeLabel: '再交付…',
-      });
-      expect([bundle.ready, bundle.changedSinceLatest]).toEqual([true, true]);
-      expect(bundle.content.limitations).toContain('新闻稿：交付后有修改，本包按交付时的版本 1。');
-      // Saved and delivered as 版本 2, then 版本 1 delivered once more with no edit: delivering an earlier version is no
-      // edit (DELIV-004), so the row reads as the document's card does — no 交付后有修改 — and takes the version last delivered.
+      expect(conditionsOf(bundle)[1]).toEqual(['news-release', true, '版本 1', null]);
+      expect([bundle.ready, bundle.changedSinceLatest]).toEqual([true, false]);
+      expect(bundle.content.limitations).toEqual([]);
+      // Saved as 版本 2 and delivered at 版本 1 only (an older version than the newest saved one): the default takes the NEWEST saved
+      // version whatever was delivered (Issue #1639), the option list still offers every saved version, and choosing the older one
+      // holds exactly that version.
       const version2 = (await store.saveProductionDocumentVersion({ bookId: book.bookId, documentId: news.documentId, branchId: news.branchId })).document!.versions[0]!;
-      const deliver = (revisionId: string, kind: 'publicity' | 'editorial') => store.recordProductionDocumentDelivery({
-        bookId: book.bookId, documentId: news.documentId, version: { kind: 'saved', revisionId }, recipient: { kind, custom: null }, note: null,
-      });
-      await deliver(version2.revisionId, 'publicity');
-      await deliver(news.versions[0]!.revisionId, 'editorial');
       bundle = store.inspectBookDeliveryPackage(book.bookId);
-      expect(bundle.conditions[1]).toMatchObject({ met: true, stateLabel: '第 3 次交付 · 版本 1', notice: null, route: null });
-      expect(bundle.content.limitations.filter((line) => line.includes('交付后有修改'))).toEqual([]);
+      expect(conditionsOf(bundle)[1]).toEqual(['news-release', true, '版本 2', null]);
+      expect(bundle.changedSinceLatest).toBe(true);
+      expect(bundle.documents.map((entry) => [entry.versions.map((version) => version.label), entry.selectedRevisionId])).toEqual([[['版本 2', '版本 1'], version2.revisionId]]);
+      const older = store.inspectBookDeliveryPackage(book.bookId, [{ documentId: news.documentId, revisionId: news.versions[0]!.revisionId }]);
+      expect(older.content.included.map((item) => item.label)).toEqual(['发稿版本「一审稿」 · r1', '新闻稿 · 版本 1']);
+      expect(older.documents.map((entry) => entry.selectedRevisionId)).toEqual([news.versions[0]!.revisionId]);
+      const olderChoice = [{ documentId: news.documentId, revisionId: news.versions[0]!.revisionId }];
+      expect(prepare('交印厂', bundle.content.digest)).toMatchObject({ outcome: 'prepared', version: 3 });
+      expect(store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交印厂', expectedContentDigest: older.content.digest, documents: olderChoice }))
+        .toMatchObject({ outcome: 'prepared', version: 4 });
+      // What the older choice froze is that version and no other: preparing it again is the same package.
+      expect(store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交印厂', expectedContentDigest: older.content.digest, documents: olderChoice }))
+        .toMatchObject({ outcome: 'unchanged', version: 4 });
       // Restoring an optional type changes the preview without blocking the manuscript package.
       store.decideProductionDocumentType({ bookId: book.bookId, typeId: 'marketing-points', notForThisBook: false });
       bundle = store.inspectBookDeliveryPackage(book.bookId);
       expect([bundle.ready, bundle.unmet]).toEqual([true, []]);
-      expect(bundle.content.excluded).toContainEqual({ kind: 'exclusion', label: '营销要点', detail: '尚未创建' });
-      expect(prepare('交印厂', bundle.content.digest)).toMatchObject({ outcome: 'prepared', version: 3 });
+      expect(bundle.conditions.some((condition) => condition.typeId === 'marketing-points')).toBe(false);
+      expect(prepare('交印厂', bundle.content.digest)).toMatchObject({ outcome: 'prepared', version: 5 });
       bundle = store.inspectBookDeliveryPackage(book.bookId);
 
       // No word of the package says it was sent, published or delivered.
@@ -205,7 +205,7 @@ describe('图书交付包 (S67a)', () => {
     try {
       expect(() => database.prepare("UPDATE book_delivery_package_versions SET purpose = '改'").run()).toThrow(/BOOK_DELIVERY_PACKAGE_LEDGER_IMMUTABLE/);
       expect(() => database.prepare('DELETE FROM book_delivery_package_versions').run()).toThrow(/BOOK_DELIVERY_PACKAGE_LEDGER_IMMUTABLE/);
-      expect((database.prepare('SELECT count(*) count FROM book_delivery_package_versions').get() as { count: number }).count).toBe(3);
+      expect((database.prepare('SELECT count(*) count FROM book_delivery_package_versions').get() as { count: number }).count).toBe(5);
     } finally {
       database.close();
     }
@@ -218,7 +218,7 @@ describe('图书交付包 (S67a)', () => {
     }
   }, 180_000);
 
-  it('holds ticked saved versions of derivative documents with no delivery or phase, and keeps the default reading as it was (Issue #1405)', async () => {
+  it('holds ticked saved versions of derivative documents with no delivery or phase, every one with a saved version ticked by default (Issues #1405, #1639)', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const book = await importBook(store, await compose('勾选打包组稿', [1, 2, 3]));
@@ -227,10 +227,11 @@ describe('图书交付包 (S67a)', () => {
       const first = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '首发通稿' })).document!;
       const second = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '书展宣传稿' })).document!;
       const legacy = store.inspectBookDeliveryPackage(book.bookId);
-      // Without a choice the package reads as it always did: nothing delivered, nothing held.
-      expect(legacy.content.included.map((item) => item.kind)).toEqual(['publication']);
+      // Without a choice every derivative with a saved version is held at its latest saved version: nothing delivered, and still held.
+      expect(legacy.content.included.map((item) => item.kind)).toEqual(['publication', 'document', 'document']);
       expect(legacy.documents.map((entry) => [entry.typeLabel, entry.title, entry.versions.map((version) => version.label), entry.selectedRevisionId]))
-        .toEqual([['新闻稿', '首发通稿', ['版本 1'], null], ['新闻稿', '书展宣传稿', ['版本 1'], null]]);
+        .toEqual([['新闻稿', '首发通稿', ['版本 1'], first.versions[0]!.revisionId], ['新闻稿', '书展宣传稿', ['版本 1'], second.versions[0]!.revisionId]]);
+      expect(legacy.content.limitations).toEqual([]);
       const documents = [{ documentId: second.documentId, revisionId: second.versions[0]!.revisionId }];
       const chosen = store.inspectBookDeliveryPackage(book.bookId, documents);
       expect(chosen.content.included.map((item) => [item.kind, item.label])).toEqual([
@@ -254,6 +255,97 @@ describe('图书交付包 (S67a)', () => {
       store.markCleanShutdown();
     } finally {
       store.close();
+    }
+  });
+
+  it('reads a package made before Issue #1639 exactly as it was stored: its delivery sentence, exclusions and digests are returned untouched, and it still verifies', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId: string;
+    let first: string;
+    try {
+      const book = await importBook(store, await compose('旧交付包组稿', [1, 2, 3]));
+      bookId = book.bookId;
+      const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '定稿', 'stage-archive', null, '');
+      store.designatePublicationVersion({ bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+      const news = (await store.createProductionDocument({ bookId, typeId: 'news-release', title: '首发通稿' })).document!;
+      await store.recordProductionDocumentDelivery({ bookId, documentId: news.documentId, version: { kind: 'saved', revisionId: news.versions[0]!.revisionId },
+        recipient: { kind: 'publicity', custom: null }, note: null });
+      const prepared = store.prepareBookDeliveryPackage({ bookId, purpose: '交出版社存档', expectedContentDigest: store.inspectBookDeliveryPackage(bookId).content.digest });
+      first = prepared.package.versions[0]!.packageVersionId;
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    // A package made now carries no delivery sentence and no 不会做 list.
+    const database = new DatabaseSync(path, { readOnly: true });
+    let made: { limitations: string[]; exclusions: string[] };
+    try {
+      made = (JSON.parse(String((database.prepare('SELECT canonical_json FROM book_delivery_package_versions WHERE package_version_id = ?').get(first!) as { canonical_json: string }).canonical_json)) as { content: typeof made }).content;
+    } finally {
+      database.close();
+    }
+    expect([made.exclusions, made.limitations]).toEqual([[], []]);
+    // The same package in the shape it had before: delivery-based, its delivery sentence and its three exclusion keys stored.
+    const legacy = insertLegacyPackageVersion(path, first!, '2026-03-04T05:06:07.000Z');
+    expect(legacy.content['limitations']).toEqual(['新闻稿：交付后有修改，本包按交付时的版本 1。']);
+    expect(legacy.content['exclusions']).toEqual(LEGACY_PACKAGE_EXCLUSIONS);
+    expect((legacy.content['documents'] as Array<{ deliveryId?: string }>).some((entry) => typeof entry.deliveryId === 'string')).toBe(true);
+
+    // The record the store reads back is the record that was inserted: every stored sentence, key and digest, unchanged.
+    const reading = new DatabaseSync(path, { readOnly: true });
+    try {
+      const packages = new BookDeliveryPackages(reading, { publication: () => null, documents: () => [], reviewRuns: () => [] });
+      const found = packages.record(bookId!, legacy.packageVersionId)!;
+      expect(found.record.content).toEqual(legacy.content);
+      expect(found.record.content.limitations).toEqual(['新闻稿：交付后有修改，本包按交付时的版本 1。']);
+      expect(found.record.content.exclusions).toEqual(LEGACY_PACKAGE_EXCLUSIONS);
+      expect([found.record.contentDigest, found.digest, found.record.preparedAt]).toEqual([legacy.contentDigest, legacy.digest, '2026-03-04T05:06:07.000Z']);
+      expect(JSON.stringify(found.record)).toBe(JSON.stringify(JSON.parse(legacy.canonicalJson)));
+    } finally {
+      reading.close();
+    }
+
+    // And the store lists it, verified, beside the package made now.
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const versions = reopened.inspectBookDeliveryPackage(bookId!).versions;
+      expect(versions.map((version) => version.label)).toEqual(['v2', 'v1']);
+      expect([versions[0]!.packageVersionId, versions[0]!.technical.contentDigest, versions[0]!.technical.digest, versions[0]!.preparedAt])
+        .toEqual([legacy.packageVersionId, legacy.contentDigest, legacy.digest, '2026-03-04T05:06:07.000Z']);
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+  }, 180_000);
+
+  it('offers no derivative that has no saved version, says why in plain words, and holds only the ones that have one (Issue #1639)', () => {
+    // Stand-in readings: the store always saves a first version, so a document without one is read from the source directly.
+    const database = new DatabaseSync(':memory:', { enableForeignKeyConstraints: false });
+    try {
+      database.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT');
+      for (const sql of Object.values(BOOK_DELIVERY_PACKAGE_SCHEMA_SQL)) database.exec(sql);
+      const bookId = randomUUID();
+      database.prepare('INSERT INTO books(book_id) VALUES (?)').run(bookId);
+      const saved = (version: number) => ({ version, versionLabel: `版本 ${version}`, revisionId: randomUUID(), revisionDigest: String(version).repeat(64).slice(0, 64), recordedAt: '2026-11-20T08:00:00.000Z' });
+      const [v2, v1] = [saved(2), saved(1)];
+      const reading = (title: string, versions: ReadonlyArray<ReturnType<typeof saved>>) => ({
+        typeId: 'news-release', typeLabel: `新闻稿 · 《${title}》`, notForThisBook: false, multiple: true,
+        document: { documentId: randomUUID(), title, changedSinceDelivery: false, deliveries: [], versions },
+      });
+      const readings = [reading('已有版本', [v2, v1]), reading('尚无版本', [])];
+      const packages = new BookDeliveryPackages(database, { publication: () => null, documents: () => readings, reviewRuns: () => [] });
+      const bundle = packages.inspect(bookId);
+      expect(bundle.documents.map((entry) => [entry.title, entry.selectedRevisionId, entry.versions.map((version) => version.label)])).toEqual([['已有版本', v2.revisionId, ['版本 2', '版本 1']]]);
+      expect(bundle.conditions.filter((condition) => condition.key === 'document').map((condition) => [condition.documentId, condition.met, condition.stateLabel]))
+        .toEqual([[readings[0]!.document.documentId, true, '版本 2'], [readings[1]!.document.documentId, true, '还没有保存过版本，保存后才能放进交付包']]);
+      expect(bundle.content.included.map((item) => item.label)).toEqual(['新闻稿 · 《已有版本》 · 版本 2']);
+      expect(bundle.content.limitations).toEqual([]);
+      // The one without a version cannot be ticked.
+      expect(() => packages.inspect(bookId, [{ documentId: readings[1]!.document.documentId, revisionId: v1.revisionId }]))
+        .toThrow(expect.objectContaining({ code: 'BOOK_DELIVERY_PACKAGE_SELECTION_INVALID' }));
+    } finally {
+      database.close();
     }
   });
 

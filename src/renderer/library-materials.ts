@@ -16,6 +16,13 @@ import {
   type RendererApi,
 } from '../shared/protocol.js';
 import {
+  LIBRARY_USE,
+  LIBRARY_USE_LATER,
+  LIBRARY_USE_CONFIRM,
+  LIBRARY_USE_SELECTED,
+  LIBRARY_BOOKS_FIRST,
+  libraryBookLabel,
+  libraryUseRecorded,
   LIBRARY_ADD,
   LIBRARY_ADD_CONFIRM,
   LIBRARY_ATTRIBUTE,
@@ -118,6 +125,7 @@ export interface MountLibraryMaterialsOptions {
 
 type Chooser =
   | { readonly materialId: string; readonly kind: 'attribution'; choice: string | null; book: { bookId: string; title: string } | null }
+  | { readonly materialId: string; readonly kind: 'use'; choice: string | null; book: { bookId: string; title: string } | null }
   | { readonly materialId: string; readonly kind: 'eligibility'; choice: LearningEligibilityChoice | null; reason: string };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -183,6 +191,27 @@ function indexSignature(material: LibraryMaterialProjection): string {
   const { index } = material;
   return JSON.stringify([index.state, index.digest, index.vectors?.state ?? null, index.vectors?.built ?? null, index.translation?.state ?? null,
     index.translation?.translated ?? null, index.translation?.request.available ?? null, index.translation?.lastFailure ?? null]);
+}
+
+/** Record the same decisions offered by the developer choosers, using each returned revision. */
+export async function recordLibraryUse(
+  api: Pick<RendererApi, 'decideLibraryMaterial'>, material: LibraryMaterialProjection, value: string,
+  updated: (material: LibraryMaterialProjection) => void,
+): Promise<LibraryMaterialProjection> {
+  let now = material;
+  const target = value.startsWith('book:') ? { scope: 'book' as const, bookId: value.slice(5) } : { scope: 'house' as const };
+  const same = now.attribution?.scope === target.scope && (target.scope === 'house' ||
+    (now.attribution?.scope === 'book' && now.attribution.bookId === target.bookId));
+  const send = async (decision: LibraryMaterialDecisionInput): Promise<void> => {
+    now = await api.decideLibraryMaterial({ materialId: now.materialId, expectedDecisions: now.decisionCount, decision });
+    updated(now);
+  };
+  if (value === 'deferred' && (now.attribution === null || now.eligibility?.choice === 'deferred')) return now;
+  if (value !== 'deferred' && same && now.reference.state === 'available') return now;
+  if (value !== 'deferred' && !same) await send({ kind: 'attribution', attribution: target });
+  const eligibility = value === 'deferred' ? 'deferred' : target.scope;
+  if (now.eligibility?.choice !== eligibility || now.eligibility.reason !== null) await send({ kind: 'eligibility', choice: eligibility, reason: null });
+  return now;
 }
 
 export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { load(): Promise<void> } {
@@ -296,7 +325,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       const section = root.querySelector<HTMLElement>(`article.library-material[data-material-id="${next.materialId}"] > details.knowledge-file-more > section.material-index`);
       section?.replaceWith(indexSection(next));
       const warning = root.querySelector<HTMLElement>(`article.library-material[data-material-id="${next.materialId}"] .knowledge-file-index`);
-      if (warning) warning.textContent = `索引：${materialIndexStateLine(next.index)}`;
+      if (warning) warning.textContent = `${technicalWords('索引：')}${materialIndexStateLine(next.index)}`;
     }
     pollDelay = nextIndexPollDelay(pollDelay, moved);
     schedulePoll();
@@ -401,7 +430,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     heading.append(title, el('span', 'status-pill library-kind', LIBRARY_KIND_LABELS[material.kind]));
     node.append(heading);
     const summary = el('p', 'knowledge-file-summary', libraryReferenceLine(material));
-    summary.append(' · ', el('span', 'knowledge-file-index', `索引：${materialIndexStateLine(material.index)}`));
+    summary.append(' · ', el('span', 'knowledge-file-index', `${technicalWords('索引：')}${materialIndexStateLine(material.index)}`));
     node.append(summary);
     const more = el('details', 'knowledge-file-more');
     more.append(el('summary', undefined, '查看资料'), el('p', 'library-source', librarySourceLine(material, localInstantLabel)));
@@ -410,13 +439,25 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       el('dt', undefined, LIBRARY_ATTRIBUTION_TERM), el('dd', 'library-attribution', libraryAttributionLine(material)),
       el('dt', undefined, LIBRARY_ELIGIBILITY_TERM), el('dd', 'library-eligibility', libraryEligibilityLine(material)),
     );
-    more.append(facts);
+    if (technicalLayerVisible) more.append(facts);
     if (material.eligibility?.reasonHasMore) more.append(reasonReader(material.materialId, material.eligibility.ordinal));
-    if (material.eligibilityReset) more.append(el('p', 'attention-note library-reset', LIBRARY_ELIGIBILITY_RESET));
+    if (technicalLayerVisible && material.eligibilityReset) more.append(el('p', 'attention-note library-reset', LIBRARY_ELIGIBILITY_RESET));
     more.append(el('p', `library-reference library-reference-${material.reference.state}`, libraryReferenceLine(material)));
     more.append(indexSection(material));
-    if (refusal?.materialId === material.materialId) more.append(alert(refusal.message));
-    if (chooser?.materialId === material.materialId) {
+    if (technicalLayerVisible && refusal?.materialId === material.materialId) more.append(alert(refusal.message));
+    if (!technicalLayerVisible) {
+      const use = action(LIBRARY_USE, 'secondary', 'use', () => {
+        chooser = { materialId: material.materialId, kind: 'use', choice: null, book: null };
+        if (books === null) void loadBooks(material);
+        else paint(`[data-material-id="${material.materialId}"] .library-use-chooser input`);
+      });
+      use.disabled = busy || preview !== null || chooser !== null;
+      const row = el('div', 'button-row library-card-actions');
+      row.append(use);
+      node.append(row);
+      if (chooser?.materialId === material.materialId && chooser.kind === 'use') node.append(useChooser(material, chooser));
+      if (refusal?.materialId === material.materialId) node.append(alert(refusal.message));
+    } else if (chooser?.materialId === material.materialId && chooser.kind !== 'use') {
       more.append(chooser.kind === 'attribution' ? attributionChooser(material, chooser) : eligibilityChooser(material, chooser));
     } else {
       const row = el('div', 'button-row library-card-actions');
@@ -444,7 +485,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       el('dt', undefined, '文件 SHA-256'), el('dd', 'technical-identity', material.source.sha256),
       el('dt', undefined, '记录摘要'), el('dd', 'technical-identity', material.digest)));
     more.append(history);
-    more.open = chooser?.materialId === material.materialId || options.focusMaterialId === material.materialId;
+    more.open = (chooser?.materialId === material.materialId && chooser.kind !== 'use') || options.focusMaterialId === material.materialId;
     node.append(more);
     return node;
   };
@@ -683,12 +724,63 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const cancel = action(LIBRARY_CANCEL, 'quiet', 'cancel-decision', () => {
       const kind = chooser?.kind;
       chooser = null;
-      paint(`[data-material-id="${material.materialId}"] [data-library-action="${kind === 'eligibility' ? 'eligibility' : 'attribute'}"]`);
+      paint(`[data-material-id="${material.materialId}"] [data-library-action="${kind === 'use' ? 'use' : kind === 'eligibility' ? 'eligibility' : 'attribute'}"]`);
     });
     cancel.disabled = busy;
     row.append(confirm, cancel);
     section.append(row);
     return confirm;
+  };
+
+  const useChooser = (material: LibraryMaterialProjection, state: Extract<Chooser, { kind: 'use' }>): HTMLElement => {
+    const section = el('section', 'library-chooser library-use-chooser');
+    const fieldset = el('fieldset');
+    fieldset.append(el('legend', undefined, LIBRARY_ATTRIBUTION_TERM));
+    let confirm: HTMLButtonElement;
+    const chosen = (value: string): void => {
+      state.choice = value;
+      state.book = books?.find((book) => `book:${book.bookId}` === value) ?? state.book;
+      confirm.disabled = busy;
+    };
+    const name = `library-use-${material.materialId}`;
+    fieldset.append(choice(name, 'house', LIBRARY_HOUSE, state.choice === 'house', busy, chosen),
+      choice(name, 'deferred', LIBRARY_USE_LATER, state.choice === 'deferred', busy, chosen));
+    const bookList = el('div', 'library-use-books');
+    if (state.book !== null && state.choice === `book:${state.book.bookId}` && !books?.some((book) => book.bookId === state.book!.bookId)) {
+      bookList.append(choice(name, state.choice, `${LIBRARY_USE_SELECTED}：${libraryBookLabel(state.book.title)}`, true, busy, chosen));
+    }
+    for (const book of books ?? []) bookList.append(choice(name, `book:${book.bookId}`, libraryBookLabel(book.title), state.choice === `book:${book.bookId}`, busy, chosen));
+    if (booksCursor !== null) bookList.append(action(LIBRARY_BOOKS_MORE, 'quiet', 'more-books', () => void loadBooks(material)));
+    if (!onFirstBooksPage) bookList.append(action(LIBRARY_BOOKS_FIRST, 'quiet', 'first-books', () => void loadBooks(material, true)));
+    fieldset.append(bookList);
+    section.append(fieldset);
+    confirm = chooserActions(section, material, LIBRARY_USE_CONFIRM, 'confirm-use', () => { if (state.choice !== null) void decideUse(material, state.choice); });
+    confirm.disabled = busy || state.choice === null;
+    return section;
+  };
+
+  // Attribution resets eligibility; each subsequent request uses the returned count.
+  const decideUse = async (material: LibraryMaterialProjection, value: string): Promise<void> => {
+    if (busy) return;
+    busy = true;
+    refusal = null;
+    setStatus(LIBRARY_STATUS.deciding, 'busy');
+    paint(null);
+    try {
+      const now = await recordLibraryUse(api, material, value, (next) => { if (root.isConnected) replace(next); });
+      if (!root.isConnected) return;
+      chooser = null;
+      setStatus(libraryUseRecorded(now, now.decisionCount !== material.decisionCount), 'success');
+    } catch (error) {
+      if (!root.isConnected) return;
+      chooser = null;
+      refusal = { materialId: material.materialId, message: errorMessage(error, LIBRARY_STATUS.decideFailed) };
+      setStatus(refusal.message, 'error');
+      try { const now = await api.inspectLibraryMaterial({ materialId: material.materialId }); if (!root.isConnected) return; replace(now); } catch { /* The refusal remains visible. */ }
+      if (!root.isConnected) return;
+    }
+    busy = false;
+    paint(`[data-material-id="${material.materialId}"] h3`);
   };
 
   /** 定归属: one Book, a Series once Series exist, or the house — the first Book listed chosen to begin with. */
@@ -991,7 +1083,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
         const target = options.focusMaterialId === null ? undefined : shown().find((material) => material.materialId === options.focusMaterialId);
         paint(target === undefined
           ? null
-          : `[data-material-id="${target.materialId}"] [data-library-action="${target.attribution === null ? 'attribute' : 'eligibility'}"]`);
+          : `[data-material-id="${target.materialId}"] [data-library-action="${!technicalLayerVisible ? 'use' : target.attribution === null ? 'attribute' : 'eligibility'}"]`);
       } catch (error) {
         if (!root.isConnected) return;
         root.dataset['library'] = 'failed';

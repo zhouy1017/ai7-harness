@@ -47,6 +47,20 @@ it('has no page of its own for 设置, lays a settings page with its navigation 
   expect(settings.settingsLayout('landing', other)).toBe(other);
 });
 
+it('opens a settings page at the top of the window when it follows another screen and keeps the place on a repaint (#1548)', () => {
+  const { settings } = mount(false);
+  const page = { scrollTop: 300 };
+  Object.defineProperty(miniDocument, 'scrollingElement', { configurable: true, value: page });
+  const lay = (state: string, offset: number): number => { page.scrollTop = offset; settings.settingsLayout(state, element('section')); return page.scrollTop; };
+  try {
+    expect(lay('help', 300)).toBe(0); // from another screen
+    expect(lay('help', 300)).toBe(300); // a repaint of the same page
+    expect(lay('appearance', 300)).toBe(0); // a switch to another settings page
+    expect(lay('book-review', 300)).toBe(300); // any other screen keeps its own
+    expect(lay('appearance', 300)).toBe(0); // back to a settings page
+  } finally { Reflect.deleteProperty(miniDocument, 'scrollingElement'); }
+});
+
 it('opens 帮助 on 第一次审稿 with its heading focused, and a step button runs its registry command (#1548)', () => {
   const run = vi.fn();
   let shown: MiniElement | null = null;

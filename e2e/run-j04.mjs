@@ -903,6 +903,8 @@ async function main() {
   let loopback;
   let loopbackAcquisition;
   let runRoot;
+  let browserRecordPath;
+  const browserRecord = () => readFile(browserRecordPath, 'utf8').catch((error) => { if (error?.code === 'ENOENT') return ''; throw error; });
   let runRootAcquisition;
   let tempParent;
   let dataRoot;
@@ -1108,12 +1110,16 @@ async function main() {
     // Issue #1430: the overlap relaunch answers its Save dialog with the one-step 导出审阅报告（DOCX）'s file instead.
     const bookReportExportPath = resolve(exportsRoot, BOOK_REPORT_EXPORT_FILE);
     let saveAnswerPath = reportExportPath;
+    // Issue #1641: under the bare --j04-browser-record switch, 在浏览器中打开 appends each address it hands over to this fixed
+    // file the main process places inside the data root, instead of opening the system browser.
+    browserRecordPath = resolve(dataRoot, 'e2e-browser-record', 'addresses.txt');
     const launchArgs = () => [
       '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
       '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
       resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       '--j04-picker-path', SAMPLE1_PATH, '--j04-model-adapter', modelAdapterIdentity, '--j04-connectivity-path', connectivityPath,
       '--j04-save-path', saveAnswerPath, '--j10-unit-hold-path', unitHoldPath,
+      '--j04-browser-record', 'on',
     ];
     requireJourney(!launchArgs().some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
     launchForCleanup = async (forCleanup = false) => {
@@ -3441,6 +3447,20 @@ async function main() {
     const expectedEvidence = JSON.stringify((attached?.sources ?? []).filter((source) => source.excluded !== true)
       .map((source) => [`${source.checkLabel} · ${source.relation}`, source.sourceKind === 'web' ? source.sourceRef : null, false]));
     requireJourney(attached?.sources?.length === 3 && UUID_PATTERN.test(sourced.markId ?? ''), 'factual-card-evidence-sources', attached?.sources);
+    // Issue #1641: 在浏览器中打开 hands exactly the address the service recorded for a card to the opener — the record file stands
+    // in for the system browser — and answers its host; a source no record holds, by either identity, opens nothing.
+    const webCard = attached.sources.find((source) => source.sourceKind === 'web');
+    const openSource = (input) => renderer.evaluate(`window.ai7.openSourceInBrowser(${JSON.stringify(input)}).then((result)=>({ok:true,result}),(error)=>({ok:false,code:error?.code}))`);
+    const recordBefore = await browserRecord();
+    const opened = await openSource({ bookId: factualBook.bookId, resultId: sourced.resultId, cardId: webCard?.cardId });
+    requireJourney(opened?.ok === true && opened.result.host === new URL(webCard.sourceRef).host && await browserRecord() === `${recordBefore}${webCard.sourceRef}
+`,
+      'source-open-in-browser', { opened });
+    const unknownCard = await openSource({ bookId: factualBook.bookId, resultId: sourced.resultId, cardId: `src_${'0'.repeat(20)}` });
+    const unknownEvidence = await openSource({ bookId: factualBook.bookId, evidenceId: '00000000-0000-4000-8000-000000000000' });
+    requireJourney(unknownCard?.code === 'FACTUAL_VERIFICATION_SOURCE_NOT_FOUND' && unknownEvidence?.code === 'RESEARCH_EVIDENCE_NOT_FOUND' &&
+      await browserRecord() === `${recordBefore}${webCard.sourceRef}
+`, 'source-open-in-browser-unknown-refused', { unknownCard, unknownEvidence });
     const evidenceRows = (root) => `(() => { const list=${root}?.querySelector('.finding-evidence'); return list ? JSON.stringify(Array.from(list.querySelectorAll('li.finding-evidence-source')).map((item)=>[item.querySelector('.finding-evidence-note')?.textContent ?? '', item.querySelector('.finding-evidence-url')?.textContent ?? null, item.querySelector('.finding-evidence-snippet')!==null])) : null; })()`;
     const factualCard = `document.querySelector('article.review-finding[data-finding-id="${sourced.reviewFindingId}"]')`;
     await waitFor(renderer, `${evidenceRows(factualCard)}===${JSON.stringify(expectedEvidence)}`, 'factual-card-evidence', 30_000);
@@ -4030,8 +4050,8 @@ async function main() {
     await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.connection?.credentialOperationState==='ready')`, 'dispatch-choice-ready');
     // The official channel currently declares one offline model. As J-12 does, add an independently selected custom
     // fast-role model through Settings, so the chooser has a real second catalogue entry before taking the defaults below.
-    await waitFor(renderer, `document.querySelector('[data-custom-model-id]')`, 'dispatch-choice-custom-model');
-    await fill(renderer, '[data-custom-model-id]', 'account-future-model', 'dispatch-choice-catalogue-model');
+    await waitFor(renderer, `document.querySelector('[data-custom-flash-model-id]')`, 'dispatch-choice-custom-model');
+    await fill(renderer, '[data-custom-flash-model-id]', 'account-future-model', 'dispatch-choice-catalogue-model');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-action="select-fast-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true; })()`, 'dispatch-choice-catalogue-add');
     await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='account-future-model')`, 'dispatch-choice-catalogue-ready');
     const dispatchDefaults = await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`);

@@ -65,6 +65,7 @@
     "tests/service/global-attention.test.ts": 10,
     "tests/service/house-review-preference-materials.test.ts": 4,
     "tests/service/house-word-list.test.ts": 1,
+    "tests/service/import-editing-choices.test.ts": 12,
     "tests/service/import-retention.test.ts": 41,
     "tests/service/import-structure.test.ts": 3,
     "tests/service/imported-exemplars.test.ts": 7,

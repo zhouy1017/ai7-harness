@@ -21,6 +21,8 @@ import {
   type FactualVerificationLensProjection,
   type InspectEvidenceWorkspaceInput,
   type InspectFactualVerificationInput,
+  type SourceAddressProjection,
+  type SourceIdentityInput,
   type PlanEditsProjection,
   type PrepareCorrectionProposalInput,
   type RecordVerificationReviewDecisionInput,
@@ -449,6 +451,12 @@ export function inspectEvidenceWorkspace(host: FactualVerificationOperationsHost
     const { reader } = internalResultBinding(host, input.bookId, input.resultId);
     return host.factualVerification.workspace(input.bookId, input.resultId, input.sourcesAfter, reader);
   });
+}
+
+/** 在浏览器中打开 (Issue #1641): the recorded address of one source card or one retained source of this Book; a read. */
+export function inspectSourceAddress(host: FactualVerificationOperationsHost, input: SourceIdentityInput): SourceAddressProjection {
+  if ('evidenceId' in input) return host.evidenceCall(() => ({ sourceKind: 'web', address: host.researchEvidence.recordedAddress(input.bookId, input.evidenceId) }));
+  return internalVerificationCall(host, () => host.factualVerification.sourceAddress(input.bookId, input.resultId, input.cardId));
 }
 
 export function recordVerificationReviewDecision(host: FactualVerificationOperationsHost, input: RecordVerificationReviewDecisionInput): VerificationReviewDecisionRecordedProjection {

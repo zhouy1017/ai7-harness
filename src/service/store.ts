@@ -1,3 +1,4 @@
+import * as importEditingOperations from './import-editing-operations.js';
 import { inspectManuscriptExportReceipt as inspectExportReceipt } from './manuscript-export.js';
 import * as importRetentionOperations from './import-retention.js';
 import type { ReimportPreparationProgress, ReimportResolutionProgress, ReimportCommitProgress } from './manuscript-reimport-operations.js';
@@ -1097,6 +1098,7 @@ export class EditorialStore {
   #manuscriptReimportOperationsHostOf(): manuscriptReimportOperations.ManuscriptReimportOperationsHost {
     const store = this;
     return {
+      get control() { return store.#control; },
       assertAvailable: this.#assertAvailable.bind(this),
       reimportLineageSourceVersionPage: this.#reimportLineageSourceVersionPage.bind(this),
       requireNoAbandonmentCleanupIntent: this.#requireNoAbandonmentCleanupIntent.bind(this),
@@ -5608,15 +5610,6 @@ export class EditorialStore {
     return factualVerificationOperations.internalBookManuscript(this.#factualVerificationOperationsHost, bookId);
   }
 
-  /**
-   * The Versioned Verification Results of one Review Run's completed or eligible retained 事实核查 output (FREV-001), recorded once it has put its
-   * findings on the manuscript: each finding with the relations and Correction Variants the Run's model stated for its
-   * assertions, which the ledger checks against what the Run captured. Repeating it records nothing more.
-   */
-  #materializeFactualVerification(reviewRunId: string): void {
-    return factualVerificationOperations.internalMaterializeFactualVerification(this.#factualVerificationOperationsHost, reviewRunId);
-  }
-
   /** Record the results of a Review Run's 事实核查 category if it has formed them and they are not yet recorded. */
   materializeFactualVerification(reviewRunId: string): void {
     return factualVerificationOperations.materializeFactualVerification(this.#factualVerificationOperationsHost, reviewRunId);
@@ -5634,6 +5627,11 @@ export class EditorialStore {
   /** The Evidence Workspace of one result (EVID-001 to EVID-013): a read; it creates no mutation of any kind (EVID-012). */
   inspectEvidenceWorkspace(input: InspectEvidenceWorkspaceInput): EvidenceWorkspaceProjection {
     return factualVerificationOperations.inspectEvidenceWorkspace(this.#factualVerificationOperationsHost, input);
+  }
+
+  /** 在浏览器中打开 (Issue #1641): the address recorded for one source of this Book; a read. */
+  inspectSourceAddress(input: ServiceOperationMap['inspectSourceAddress']['input']): ServiceOperationMap['inspectSourceAddress']['output'] {
+    return factualVerificationOperations.inspectSourceAddress(this.#factualVerificationOperationsHost, input);
   }
 
   /**
@@ -7497,6 +7495,8 @@ export class EditorialStore {
     return manuscriptOperations.restoreRecovery(this.#manuscriptOperationsHost, restorationId, attentionId, expectedAttentionVersion, selection);
   }
 
+  returnImportToEditing(draftId: string, expectedDraftVersion: number) { return importEditingOperations.returnImportToEditing(this.#importIntakeOperationsHost, this.#manuscriptReimportOperationsHost, draftId, expectedDraftVersion); }
+
   async continueImportDraft(draftId: string, expectedDraftVersion: number): Promise<ContinueImportProjection> { return importIntakeOperations.continueImportDraft(this.#importIntakeOperationsHost, draftId, expectedDraftVersion); }
 
   async reselectImportDraft(
@@ -7768,11 +7768,11 @@ export class EditorialStore {
   ): Promise<SourceImportCommitProjection> { return importIntakeOperations.commitSourceImport(this.#importIntakeOperationsHost, input, options); }
 
   resolveAcknowledgedManuscriptReimportReplay(
-    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string },
+    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string; acceptDegradation?: boolean },
   ): { draftId: string; commitId: string; bookId: string } { return manuscriptReimportOperations.resolveAcknowledgedManuscriptReimportReplay(this.#manuscriptReimportOperationsHost, input); }
 
   async createManuscriptReimportCommitWork(
-    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string },
+    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string; acceptDegradation?: boolean },
     options: {
       interruptAfterAttempt?: boolean;
       interruptAfterCommit?: boolean;
@@ -10619,29 +10619,7 @@ export class EditorialStore {
     for (const draft of drafts) this.#invalidateReview(this.#loadDraftSnapshot(asString(draft.draft_id)));
   }
 
-  #invalidateReview(snapshot: DraftSnapshot): DraftSnapshot {
-    requireStore(snapshot.state === 'reviewed', 'DRAFT_STATE_CHANGED', '只有已复核草稿可以失效旧复核。');
-    const nextVersion = snapshot.version + 1;
-    this.#transaction(this.#authority, () => {
-      this.#authority.prepare('DELETE FROM manuscript_reimport_comparisons WHERE draft_id = ?').run(snapshot.draftId);
-      const update = this.#authority
-        .prepare(
-          `UPDATE import_drafts
-           SET state = 'staged', draft_version = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
-               reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
-               reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
-               reviewed_reuse_source_version_id = NULL,
-               reviewed_lineage_status = NULL, reviewed_lineage_source_version_id = NULL,
-               reviewed_checkpoint_revision_id = NULL, reviewed_manuscript_id = NULL, reviewed_branch_id = NULL,
-               review_digest = NULL, reviewed_at = NULL
-           WHERE draft_id = ? AND draft_version = ? AND state = 'reviewed'`,
-        )
-        .run(nextVersion, snapshot.draftId, snapshot.version);
-      requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在复核失效时已变化。');
-      this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(snapshot.draftId);
-    });
-    return this.#loadDraftSnapshot(snapshot.draftId);
-  }
+  #invalidateReview(snapshot: DraftSnapshot): DraftSnapshot { return importIntakeOperations.invalidateReview(this.#importIntakeOperationsHost, snapshot); }
 
   /** The retained original keeps the extension of the format it was identified as (ADR 0072 §2). */
   async #persistRetainedOriginal(

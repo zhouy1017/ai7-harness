@@ -1,7 +1,9 @@
 import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
 import { mountDeliverables } from '../../src/renderer/deliverables.js';
 import { mountManuscriptSwitcher } from '../../src/renderer/manuscript-switcher.js';
+import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { insertLegacyPackageVersion } from '../support/legacy-package-version.js';
 import { installMiniDom } from '../support/mini-dom.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
@@ -301,21 +303,28 @@ describe('Production Documents', () => {
     });
   });
 
-  it('focuses the package condition document rather than the first same-type document', async () => {
+  it('shows a derivative with a saved version ticked, and a package stored before Issue #1639 with its times in the local format', async () => {
     await withBook(async (store, book) => {
-      const first = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: 'A' })).document!;
-      const second = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: 'B' })).document!;
+      const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '定稿', 'stage-archive', null, '');
+      store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+      const news = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '首发通稿' })).document!;
+      await store.recordProductionDocumentDelivery({ bookId: book.bookId, documentId: news.documentId, version: { kind: 'saved', revisionId: news.versions[0]!.revisionId },
+        recipient: { kind: 'publicity', custom: null }, note: null });
+      const prepared = store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交出版社存档', expectedContentDigest: store.inspectBookDeliveryPackage(book.bookId).content.digest });
+      // The package as it was stored before: delivery-based, its time the raw instant of its record.
+      const storedAt = '2026-03-04T05:06:07.000Z';
+      insertLegacyPackageVersion(join(roots.dataRoot, 'store', 'ai7.sqlite'), prepared.package.versions[0]!.packageVersionId, storedAt);
       const view = documentSurface(store, book);
-      const { root, surface } = view;
       try {
-        surface.start(); await new Promise((resolve) => setTimeout(resolve, 0));
-        expect(root.querySelector<HTMLButtonElement>(`.production-document-row[data-document-id="${first.documentId}"] [data-document-action="deliver"]`)!.disabled).toBe(false);
-        root.querySelector<HTMLButtonElement>(`.package-condition-list li[data-document-id="${second.documentId}"] [data-package-route="document"]`)!.click();
-        expect(document.activeElement?.closest<HTMLElement>('.production-document-row')?.dataset['documentId']).toBe(second.documentId);
-        expect((document.activeElement as HTMLElement).dataset['documentAction']).toBe('deliver');
-        // New documents are made on 稿件 (Issue #1403): the technical card of a type without one keeps 本书不做.
-        root.querySelector<HTMLButtonElement>('.package-condition-list li[data-type-id="promotion-article"] [data-package-route="document"]')!.click();
-        expect((document.activeElement as HTMLElement).dataset['documentAction']).toBe('notForThisBook');
+        view.surface.start(); await vi.waitFor(() => expect(view.root.querySelector('.package-version-meta')).not.toBeNull());
+        const box = view.root.querySelector<HTMLInputElement>(`.package-document-choices li[data-document-id="${news.documentId}"] [data-package-field="document"]`)!;
+        expect(box.checked).toBe(true);
+        // No 不包含 list, and the stored package's time reads in the local format, never as the stored instant.
+        expect(view.root.querySelector('.package-excluded')).toBeNull();
+        const stored = Array.from(view.root.querySelectorAll('.package-version-meta'), (meta) => meta.textContent ?? '');
+        expect(stored).toHaveLength(2);
+        expect(stored[0]).toContain(localInstantLabel(storedAt));
+        expect(stored[0]).not.toContain(storedAt);
       } finally { view.close(); }
     });
   });

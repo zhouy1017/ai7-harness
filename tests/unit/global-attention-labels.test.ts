@@ -340,6 +340,13 @@ describe('each item', () => {
       // A Task Intent Draft beside its own Book's manuscript (Issue #423, slice 7a).
       'continue-draft': '继续编辑草稿',
     });
+    setTechnicalLayerVisible(false);
+    try {
+      expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['set-library-attribution']).toBe('给谁用…');
+      expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['set-learning-eligibility']).toBe('给谁用…');
+    } finally { setTechnicalLayerVisible(true); }
+    expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['set-library-attribution']).toBe('定给谁用…');
+    expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['set-learning-eligibility']).toBe('定是否可用于学习…');
     // The drawer's own words for the way on from a Run the ceiling stopped (Issue #51, S16a).
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['adjust-budget-redo']).toBe(TASK_BAR_ADJUST_BUDGET_REDO);
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-budget-reached'].shape).not.toBe(GLOBAL_ATTENTION_STATE_PILLS['analysis-running'].shape);

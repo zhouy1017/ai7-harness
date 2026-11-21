@@ -1,6 +1,8 @@
+import { registerImportEditingHandlers } from './import-editing-handlers.js';
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../shared/runtime-execution-config.js';
 import type { DispatchTaskKind, RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { registerProductionAndPackageHandlers, registerDeliverablesHandlers } from './deliverables-handlers.js';
+import { registerMilestoneHandlers } from './milestone-handlers.js';
 import { registerReviewHandlers } from './review-handlers.js';
 import { registerReviewGuidelineVersionHandlers, registerKnowledgeBaseHandlers } from './knowledge-base-handlers.js';
 import { registerLearningDecisionHandlers, registerLibraryLearningHandlers } from './library-learning-handlers.js';
@@ -8,6 +10,7 @@ import { registerDataVersionHandler, registerDataStorageHandlers } from './data-
 import { registerSeriesKnowledgeHandlers, registerSeriesHandlers } from './series-handlers.js';
 import { registerEvaluationHandlers } from './evaluation-handlers.js';
 import { createFilePickers } from './file-pickers.js';
+import { createSourceOpener, lockWindowNavigation, registerSourceBrowserHandler, type SourceOpener } from './source-browser.js';
 import { randomUUID } from 'node:crypto';
 import { registerModelConnectionTestHandler } from './model-connection-test-handler.js';
 import { MODEL_SELECTION_OPERATIONS, modelServiceSettingsProjection } from './model-service-settings-projection.js';
@@ -116,7 +119,7 @@ import {
   requireStartupChoiceOutsideDataRoot,
   storeStartupDataChoice,
 } from '../shared/data-root.js';
-import { UUID_PATTERN, envelope, requireDesktop } from './handler-guards.js';
+import { UUID_PATTERN, envelope, requireDesktop, takeOnce } from './handler-guards.js';
 import type {
   ApplicationAuthorityClaims,
   EditorResourceCapability,
@@ -149,8 +152,7 @@ async function printStagedPage(stagingRoot: string, printSession: Session, pageP
       webgl: false,
     },
   });
-  printer.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  printer.webContents.on('will-navigate', (event) => event.preventDefault());
+  lockWindowNavigation(printer.webContents);
   try {
     await printer.loadFile(pagePath);
     const pdf = await printer.webContents.printToPDF({ pageSize: 'A4', printBackground: true, preferCSSPageSize: true });
@@ -216,6 +218,7 @@ export function registerRendererHandlers(
   notificationWindows: () => ReadonlyArray<OwnedRendererWindow>,
   journalFaultArmed: boolean,
   navigationAnswerHoldPath?: string,
+  sourceOpener: SourceOpener = (address) => shell.openExternal(address),
 ): () => void {
   const notifier = createNotifier({
     preferences: () => preferences.read().values,
@@ -749,6 +752,7 @@ export function registerRendererHandlers(
       expectedDraftVersion: input.expectedDraftVersion,
       reviewDigest: input.reviewDigest,
       commitId: input.commitAttemptId,
+      ...(input.acceptDegradation === undefined ? {} : { acceptDegradation: input.acceptDegradation }),
     });
     if (
       proof.draftId !== input.draftId ||
@@ -1356,44 +1360,9 @@ export function registerRendererHandlers(
         return result;
       }),
   );
-  ipcMain.handle(
-    IPC_CHANNELS.acceptReimportDegradation,
-    (event, input: ServiceOperationMap['acceptReimportDegradation']['input']) =>
-      envelope(async () => {
-        const owned = requireSender(event);
-        return serializeEffect(async () => {
-          requireAuthority();
-          const target = await requireImportTarget(owned, input, 'manuscript-reimport');
-          requireDesktop(target.kind === 'existing-book', 'AI7_SERVICE_ROUTE_INVALID');
-          await reserveExistingImportTarget(owned, target);
-          const result = await service.call('acceptReimportDegradation', input);
-          captureImportReviewTarget(owned, result);
-          return result;
-        });
-      }),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.resolveReimportMapping,
-    (event, input: ServiceOperationMap['resolveReimportMapping']['input']) =>
-      envelope(async () => {
-        const owned = requireSender(event);
-        return serializeEffect(async () => {
-          requireAuthority();
-          const target = await requireImportTarget(owned, input, 'manuscript-reimport');
-          requireDesktop(target.kind === 'existing-book', 'AI7_SERVICE_ROUTE_INVALID');
-          await reserveExistingImportTarget(owned, target);
-          const result = await service.call('resolveReimportMapping', input);
-          rememberJobResources(owned, result, {
-            operation: 'reimport',
-            bookId: target.bookId,
-            manuscriptId: null,
-            branchId: null,
-          });
-          captureReimportJob(owned, result);
-          return result;
-        });
-      }),
-  );
+  registerImportEditingHandlers({ requireSender, requireAuthority, serializeEffect, requireImportDraft,
+    requireImportTarget, reserveExistingImportTarget, captureImportReviewTarget, rememberJobResources,
+    captureReimportJob, releaseCommitBinding, leaveBookWorkbench, service });
   ipcMain.handle(IPC_CHANNELS.commitManuscriptReimport, (event, input: CommitManuscriptReimportRendererInput) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -1408,7 +1377,7 @@ export function registerRendererHandlers(
         claims.claimCommit(owned, commit.commitId);
         let result: ServiceOperationMap['commitManuscriptReimport']['output'];
         try {
-          result = await service.call('commitManuscriptReimport', commit);
+          result = await service.call('commitManuscriptReimport', { ...commit, ...(input.acceptDegradation === undefined ? {} : { acceptDegradation: input.acceptDegradation }) });
         } catch (error) {
           const deterministic = releaseNewCommitClaimAfterDeterministicFailure(
             owned,
@@ -2852,6 +2821,7 @@ export function registerRendererHandlers(
   registerKnowledgeBaseHandlers({ chooseDeveloperProposalFile, requireSender, requireAuthority, service, serializeEffect, requireCurrentBookRoute, requireCurrentRouteReadEpoch, requireCurrentRouteGeneration });
   registerEvaluationHandlers({ requireSender, requireAuthority, service, requireCurrentBookRoute, requireCurrentRouteReadEpoch, serializeEffect, requireCurrentRouteGeneration, rememberEditorResource });
   registerLibraryLearningHandlers({ chooseLibraryMaterialFile, requireSender, requireAuthority, service, serializeEffect, preferences });
+  registerSourceBrowserHandler({ requireSender, requireAuthority, requireCurrentBookRoute, requireCurrentRouteGeneration, service, opener: sourceOpener });
   registerSeriesHandlers({ requireSender, requireAuthority, service, serializeEffect });
   registerDataStorageHandlers({ chooseDatabaseExportFile, chooseUsageCsvFile, chooseDatabaseImportFile, requireSender, serializeEffect, requireAuthority, service, preferences, requireNothingUnsaved, quitApplication });
   registerSeriesKnowledgeHandlers({ requireSender, serializeEffect, requireAuthority, requireManuscriptCapability, service });
@@ -3442,18 +3412,7 @@ export function registerRendererHandlers(
       });
     }),
   );
-  ipcMain.handle(IPC_CHANNELS.saveMilestone, (event, input: ServiceOperationMap['saveMilestone']['input']) =>
-    envelope(async () => {
-      const owned = requireSender(event);
-      return serializeEffect(async () => {
-        requireAuthority();
-        const capability = requireManuscriptCapability(owned, input);
-        const result = await service.call('saveMilestone', input);
-        requireResourceIdentity(capability, result);
-        return result;
-      });
-    }),
-  );
+  registerMilestoneHandlers({ requireSender, requireAuthority, requireCurrentBookRoute, requireManuscriptCapability, rememberManuscriptCapability, requireResourceIdentity, service, serializeEffect });
   ipcMain.handle(IPC_CHANNELS.undoManuscript, (event, input: ServiceOperationMap['undoManuscript']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -3772,7 +3731,7 @@ export async function runApplication(): Promise<void> {
     if (packaged !== null) {
       launch = {
         dataRoot: undefined, allowFirstRunChooser: false, launchForm: packaged.launchForm,
-        injectedPickerPath: undefined, injectedSavePath: undefined, injectedFolderPath: undefined,
+        injectedPickerPath: undefined, injectedSavePath: undefined, injectedFolderPath: undefined, browserRecord: false,
         injectedDiagnosticsFolder: undefined, importControl: undefined, foregroundExecutionControl: undefined,
         recoveryControl: undefined, modelAdapterControl: undefined, connectivityPath: undefined, unitHoldPath: undefined,
         answerHoldPath: undefined, navigationAnswerHoldPath: undefined, backgroundQuietMs: undefined, calibrationMinBooks: undefined,
@@ -4046,9 +4005,7 @@ export async function runApplication(): Promise<void> {
         requireDesktop(!bookWindows.has(route.bookId), 'AI7_WORKBENCH_DUPLICATE_BOOK');
         assignRoute(owned, route);
       }
-      window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-      window.webContents.on('will-navigate', (event) => event.preventDefault());
-      window.webContents.on('will-attach-webview', (event) => event.preventDefault());
+      lockWindowNavigation(window.webContents);
       window.webContents.on('render-process-gone', (_event, detail) =>
         crashHook(crashes, 'render-process-gone', terminate)(detail));
       window.on('close', (event: ElectronEvent) => {
@@ -4434,24 +4391,10 @@ export async function runApplication(): Promise<void> {
         };
       })(),
       // J-07's Save-dialog answer is single-use, like the picker's: every later choice is the platform's own.
-      (() => {
-        let pending = launch.injectedSavePath;
-        return (): string | undefined => {
-          const path = pending;
-          pending = undefined;
-          return path;
-        };
-      })(),
+      takeOnce(launch.injectedSavePath),
       (pagePath, pdfPath) => printStagedPage(exportStagingRoot, exportPrintSession, pagePath, pdfPath),
       // J-07's folder-dialog answer for a package export (Issue #416, S67b) is single-use too.
-      (() => {
-        let pending = launch.injectedFolderPath;
-        return (): string | undefined => {
-          const path = pending;
-          pending = undefined;
-          return path;
-        };
-      })(),
+      takeOnce(launch.injectedFolderPath),
       // 现在关闭 AI7 (Issue #434, S86c): a window still holding changes not yet saved keeps AI7 open and says so, as when the
       // editor closes AI7 themselves; otherwise AI7 closes once the answer is on its way.
       () => {
@@ -4469,6 +4412,7 @@ export async function runApplication(): Promise<void> {
       () => [...ownedWindows.values()],
       launch.journalFaultArmed,
       launch.navigationAnswerHoldPath,
+      await createSourceOpener(dataRoot, launch.browserRecord),
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

@@ -321,6 +321,8 @@ async function dispatch(
         op: request.op,
         result: await store.stageSelectedManuscript(request.input.selectionToken, request.input.selectedPath),
       };
+    case 'returnImportToEditing':
+      return { id: request.id, ok: true, op: request.op, result: store.returnImportToEditing(request.input.draftId, request.input.expectedDraftVersion) };
     case 'continueImportDraft':
       return {
         id: request.id,
@@ -881,6 +883,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectFactualVerification(request.input) };
     case 'inspectEvidenceWorkspace':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvidenceWorkspace(request.input) };
+    case 'inspectSourceAddress':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSourceAddress(request.input) };
     case 'recordVerificationReviewDecision':
       return { id: request.id, ok: true, op: request.op, result: store.recordVerificationReviewDecision(request.input) };
     case 'prepareCorrectionProposal':
