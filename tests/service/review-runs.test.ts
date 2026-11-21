@@ -2793,6 +2793,28 @@ async function openLaunchedLifecycle(scope: 'development-ci' | 'ordinary-product
 }
 
 describe.each(['development-ci', 'ordinary-production'] as const)('%s launched review lifecycle regressions (#1455)', scope => {
+  it('cancels a review stopped between categories before relaunch (#1656)', async () => {
+    const session = await openLaunchedLifecycle(scope, undefined, true);
+    try {
+      const book = await importBook(session);
+      const first = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+      const steps = session.store.reviewRunDriveSteps;
+      const firstCategory = new ReviewRunDriver({ ...steps, begin: id => steps.begin(id).slice(0, 1) }, session.owner);
+      try { await firstCategory.drive(first.reviewRunId); } finally { await firstCategory.dispose(); }
+      expect(workspace(session, book, first.reviewRunId).run).toMatchObject({ state: 'partial', canContinue: true });
+      const recipe = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch!;
+      expect(recipe.cancelsFirst).toEqual({ operation: 'cancelReviewRun', input: { bookId: book.bookId, reviewRunId: first.reviewRunId } });
+      expect(recipe.summary).toEqual(['先取消这项未完成的任务，再重新开始。', '重新开始一项新任务，已完成的内容不会带入。']);
+      if (recipe.operation !== 'launchReviewRun') throw new Error('expected review launch');
+      const request = { ...recipe.input, clientCommandId: randomUUID() };
+      expect(() => session.store.launchReviewRun(request, launchPolicy)).toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      session.store.cancelReviewRun(book.bookId, first.reviewRunId);
+      expect(workspace(session, book, first.reviewRunId).run).toMatchObject({ state: 'cancelled', canContinue: false });
+      const next = session.store.launchReviewRun(request, launchPolicy).projection.run!;
+      await session.driver.drive(next.reviewRunId);
+    } finally { await close(session); }
+  });
+
   it('relaunches a paused review only after its own cancellation settles (#1656)', async () => {
     let gated: GatedOwner | null = null;
     const session = await openLaunchedLifecycle(scope, inner => (gated = new GatedOwner(inner, 2)), true);

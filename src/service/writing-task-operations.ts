@@ -487,7 +487,7 @@ function buildWritingTask(host: WritingTaskOperationsHost, bookId: string, reque
   requireStore(!host.documentCall(() => host.productionDocuments.notForThisBook(bookId, type.typeId)),
       'WRITING_NOT_FOR_THIS_BOOK', writingNotForThisBook(type.label));
   const latest = internalLatestWriting(host, bookId);
-  requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'WRITING_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null, WRITING_KIND));
+  requireStore(createPlan.previewAfterCancellation === true || !runIsActive(latest?.projection.run?.state ?? null), 'WRITING_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null, WRITING_KIND));
   const synopsis = internalWritingSynopsis(host, bookId);
   const evaluation = internalWritingEvaluation(host, bookId);
   const exemplars = internalWritingExemplars(host, bookId, type.typeId);

@@ -3122,10 +3122,10 @@ export class BaselineAnalysisStore {
 
   /** Build the same frozen components in memory, then let the kind's editorial plan owner describe them. */
   previewLaunch(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, edits: PlanEditsProjection | undefined,
-    describe: (projection: AnalysisProjection, blocks: ReadonlyArray<ManifestBlockInput>) => never): never {
+    describe: (projection: AnalysisProjection, blocks: ReadonlyArray<ManifestBlockInput>) => never, afterCancellation = false): never {
     this.#requireDeniedPolicy(input.launchPolicy);
     requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
-    const existing = this.inspect(input.bookId);
+    const inspected = this.inspect(input.bookId), existing = afterCancellation && inspected.run !== null ? { ...inspected, run: { ...inspected.run, state: 'cancelled' as const } } : inspected;
     requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null, this.#definition.kind));
     const binding = this.#binding(input.bookId), head = this.#workingHead(binding.manuscriptId, input.bookId);
     const blocks = this.readWorkingBlocks(head.branchId), update = this.#resolveSelectedBlocks(input.bookId, input.update);

@@ -4600,7 +4600,7 @@ export class ReviewRunStore {
   /**
    * 取消任务 of a Run an exclusion stopped (Issue #64, S29b; SER-024): every category not finished, and the stopped one, records
    * the cancellation, so the Run reads 已取消 and offers nothing more. What it put on the manuscript and what it formed stay as
-   * they are (SER-025). Refused for a Run the exclusion did not stop.
+   * they are (SER-025). Also ends a review stopped between categories (#1656); a paused category keeps its Run control.
    */
   cancelStoppedRun(bookId: string, reviewRunId: string): void {
     if (localOnly(this.#runOfBook(bookId, reviewRunId))) { this.cancelRemaining(bookId, reviewRunId); return; }
@@ -4608,7 +4608,7 @@ export class ReviewRunStore {
     requireReview(!this.#driving.has(reviewRunId), 'REVIEW_RUN_ACTIVE', '这次审阅正在进行。');
     const stop = this.#stoppedFor(reviewRunId);
     if (stop === 'cancelled') return;
-    requireReview(stop === 'scope-changed', 'REVIEW_RUN_NOT_CANCELLABLE', `只有显示「${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}」的审阅可以在这里取消任务。`);
+    requireReview(stop === 'scope-changed' || !this.paused(reviewRunId) && this.#runStateView(snapshot).canContinue, 'REVIEW_RUN_NOT_CANCELLABLE', `只有显示「${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}」的审阅可以在这里取消任务。`);
     transact(this.#db, () => {
       for (const category of snapshot.categories) {
         const last = this.#events(reviewRunId, category.categoryId).at(-1) ?? null;

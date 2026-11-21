@@ -56,14 +56,15 @@ function requireOfferedSource(host: TaskRelaunchHost, bookId: string, source: Ta
 }
 
 /** The command replay lookup runs before this read; a new command must still name the offered source. */
-export function requireTaskRelaunchSource(host: TaskRelaunchHost, bookId: string, source: TaskRelaunchSource | undefined, expected?: TaskRelaunchSource['kind']): void {
+export function requireTaskRelaunchSource(host: TaskRelaunchHost, bookId: string, source: TaskRelaunchSource | undefined, expected?: TaskRelaunchSource['kind'] | 'custom-analysis', preview = false): void {
   if (source === undefined) return;
-  requireStore(expected === undefined || source.kind === expected, 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE);
+  requireStore(expected === undefined || source.kind === (expected === 'custom-analysis' ? 'baseline-analysis' : expected), 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE);
   if (source.kind === 'review-run') {
     const latest = host.authority.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(bookId);
     requireStore(latest?.review_run_id === source.ref && source.runRecordId === source.ref, 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE);
     const current = reviewRevision(host, bookId, source.ref);
     if (!source.cancelsFirst) { requireStore(current.revision === source.revision, 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE); requireOfferedSource(host, bookId, source); return; }
+    if (preview && current.revision === source.revision) { requireOfferedSource(host, bookId, source); return; }
     const boundary = source.revision.split(':').slice(0, 3).map(Number);
     requireStore(boundary.length === 3 && boundary.every(Number.isSafeInteger) && current.state === 'cancelled' &&
       reviewRevision(host, bookId, source.ref, boundary).revision === source.revision, 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE);
@@ -75,6 +76,8 @@ export function requireTaskRelaunchSource(host: TaskRelaunchHost, bookId: string
   }
   const row = ledgerSource(host, bookId, source.ref);
   requireStore(row !== undefined && row.current === 1 && row.run_record_id === source.runRecordId, 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE);
+  requireStore(expected !== 'baseline-analysis' && expected !== 'custom-analysis' || (expected === 'custom-analysis' ? isCustomAnalysisKindId(row.kind) : row.kind === BASELINE_ANALYSIS_KIND), 'TASK_RELAUNCH_STALE', TASK_RELAUNCH_STALE);
+  if (preview && source.cancelsFirst && row.sha256 === source.revision) { requireOfferedSource(host, bookId, source); return; }
   if (!source.cancelsFirst && row.sha256 === source.revision) { requireOfferedSource(host, bookId, source); return; }
   const previous = host.authority.prepare('SELECT sequence FROM analysis_run_states WHERE run_record_id = ? AND sha256 = ?').get(source.runRecordId, source.revision);
   const later = previous === undefined ? [] : host.authority.prepare('SELECT state FROM analysis_run_states WHERE run_record_id = ? AND sequence > ? ORDER BY sequence').all(source.runRecordId, Number(previous.sequence));
@@ -83,10 +86,17 @@ export function requireTaskRelaunchSource(host: TaskRelaunchHost, bookId: string
 
 /** Add a launch recipe without changing the legacy redo projection or writing anything. */
 export function withTaskRelaunch(host: TaskRelaunchHost, plan: TaskPlanProjection): TaskPlanProjection {
+  try { return taskRelaunchPlan(host, plan); } catch (error) {
+    if (error !== null && typeof error === 'object' && 'code' in error && ['TASK_REPEAT_UNAVAILABLE', 'REVIEW_MANUSCRIPT_ABSENT'].includes(String(error.code))) return { ...plan, relaunch: null };
+    throw error;
+  }
+}
+
+function taskRelaunchPlan(host: TaskRelaunchHost, plan: TaskPlanProjection): TaskPlanProjection {
   if (plan.kind === 'fixed-task') return plan;
   const absent = (): TaskPlanProjection => ({ ...plan, relaunch: null });
   if (!['settled', 'stopped', 'cancelled', 'cancelled-after-start', 'blocked', 'plan-moved', 'paused', 'resumable', 'awaiting-clarification', 'budget-reached', 'account-limit'].includes(plan.state.key) ||
-    plan.runControl?.outcomeUnknown != null || plan.state.stopReason === 'outcome-unknown' || plan.runControl?.stopReason === 'outcome-unknown' || plan.unconfirmed !== null || plan.state.key === 'outcome-unknown') return absent();
+    plan.runControl?.outcomeUnknown != null || plan.state.stopReason === 'outcome-unknown' || plan.runControl?.stopReason === 'outcome-unknown' || plan.state.key === 'outcome-unknown') return absent();
   const { bookId, ref, kind } = plan;
   const row = kind === 'review-run' ? null : ledgerSource(host, bookId, ref);
   if (kind !== 'review-run' && (row === undefined || row === null || row.current !== 1)) return absent();
@@ -95,10 +105,11 @@ export function withTaskRelaunch(host: TaskRelaunchHost, plan: TaskPlanProjectio
   if (kind === 'review-run' && host.reviewFacts(bookId, ref).categories.some(category => category.task !== null &&
     ['authorized', 'admitted', 'executing', 'awaiting-connectivity', 'cancelling', 'pausing'].includes(String(host.authority.prepare(`SELECT state FROM analysis_run_states s JOIN analysis_run_records r USING(run_record_id)
       WHERE r.task_intent_id = ? ORDER BY r.rowid DESC, s.sequence DESC LIMIT 1`).get(category.task.taskIntentId)?.state)))) return absent();
-  const cancel = row !== null && row !== undefined && ['paused', 'resumable', 'awaiting-clarification', 'blocked-before-dispatch'].includes(String(row.state)) || kind === 'review-run' && plan.runControl?.resume != null;
+  const betweenCategories = kind === 'review-run' && plan.runControl?.resume == null && host.reviewFacts(bookId, ref).canContinue;
+  const cancel = betweenCategories || row !== null && row !== undefined && ['paused', 'resumable', 'awaiting-clarification', 'blocked-before-dispatch'].includes(String(row.state)) || kind === 'review-run' && plan.runControl?.resume != null;
   const relaunchOf: TaskRelaunchSource = { kind, ref, runRecordId: row == null ? ref : String(row.run_record_id), revision: row == null ? reviewRevision(host, bookId, ref).revision : String(row.sha256), cancelsFirst: cancel };
   const blocked = row?.state === 'blocked-before-dispatch';
-  const cancelsFirst = !cancel ? null : kind === 'baseline-analysis'
+  const cancelsFirst = !cancel ? null : betweenCategories ? { operation: 'cancelReviewRun' as const, input: { bookId, reviewRunId: ref } } : kind === 'baseline-analysis'
     ? { operation: blocked ? 'cancelWaitingBaselineAnalysis' as const : 'cancelBaselineAnalysisRun' as const, input: { bookId, taskIntentId: ref } }
     : blocked ? { operation: 'cancelWaitingTask' as const, input: { bookId, kind, ref } }
       : { operation: 'controlTaskRun' as const, input: { bookId, kind, ref, action: 'cancel' as const } };
@@ -106,7 +117,7 @@ export function withTaskRelaunch(host: TaskRelaunchHost, plan: TaskPlanProjectio
   const redoOf = carries ? relaunchOf.runRecordId : undefined;
   const summary = cancel && (plan.state.key === 'blocked' || plan.state.key === 'plan-moved')
     ? ['先取消这项尚未开始的任务，再重新开始。', '重新开始一项新任务，已完成的内容不会带入。']
-    : carries ? plan.redo!.summary : [plan.state.key === 'settled' ? '按原来的要求重新开始一项新任务。' : '重新开始一项新任务，已完成的内容不会带入。'];
+    : [...(cancel ? ['先取消这项未完成的任务，再重新开始。'] : []), carries ? '重新开始一项新任务；可以沿用的已完成部分会保留，其余重新处理。' : plan.state.key === 'settled' ? '按原来的要求重新开始一项新任务。' : '重新开始一项新任务，已完成的内容不会带入。'];
   const request = repeatTaskRequest(host, bookId, { kind, ref }, true);
   const common = { summary, cancelsFirst };
   const input = { bookId, relaunchOf, ...(redoOf === undefined ? {} : { redoOf }) };
