@@ -797,6 +797,28 @@ it('names earlier lineage files with their first import times in every import-pa
     const { displayName: _name, importedAt: _time, ...legacyFinding } = finding;
     expect(JSON.stringify(legacyFinding)).toBe(JSON.stringify({ bookId: book.bookId, bookTitle: '章节对应组稿', sourceVersionId: initial.sourceVersionId,
       importRecordId: initial.importRecordId, recordKind: 'manuscript-import', recordLabel: '稿件导入记录', identityClass: { kind: 'immutable-original', label: '精确原始文件身份' } }));
+    const distinct = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+      { kind: 'new-book', choiceId: 'new-book-distinct-intended-work', confirmedTitle: '另一部作品' }, false);
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      database.prepare('UPDATE source_versions SET display_name = ? WHERE source_version_id = ?').run('改过的记录名.docx', initial.sourceVersionId);
+      const continued = await store.continueImportDraft(staged.draftId, distinct.draftVersion);
+      expect(continued).toMatchObject({ state: 'review-ready', review: { draftVersion: distinct.draftVersion, reviewDigest: distinct.reviewDigest } });
+      database.prepare('UPDATE source_versions SET display_name = ? WHERE source_version_id = ?').run('   ', initial.sourceVersionId);
+      expect(store.getReimportLineageSourceVersionPage(book.bookId, null).items.find((item) => item.sourceVersionId === initial.sourceVersionId)!.displayName).toBeNull();
+      const unnamed = await store.stageSelectedManuscript(randomUUID(), first);
+      expect(unnamed.identityFindings.find((item) => item.sourceVersionId === initial.sourceVersionId)!.displayName).toBeNull();
+      database.prepare('UPDATE source_versions SET display_name = ? WHERE source_version_id = ?').run('earlier-original.docx', initial.sourceVersionId);
+    } finally { database.close(); }
+    const alias = join(roots.inputRoot, 'earlier-renamed-copy.docx');
+    await cp(first, alias);
+    const reuse = await store.stageSelectedManuscript(randomUUID(), alias);
+    const sourceReview = store.prepareSourceImportReview(reuse.draftId, reuse.draftVersion,
+      { kind: 'existing-book', bookId: book.bookId, relationship: 'source-only', reuseSourceVersionId: initial.sourceVersionId });
+    const reused = await store.commitSourceImport({ draftId: reuse.draftId, expectedDraftVersion: sourceReview.draftVersion, reviewDigest: sourceReview.reviewDigest, commitId: randomUUID() });
+    expect(reused.importedAt).not.toBe(initial.importedAt);
+    expect(store.getReimportLineageSourceVersionPage(book.bookId, null).items.find((item) => item.sourceVersionId === initial.sourceVersionId))
+      .toEqual({ sourceVersionId: initial.sourceVersionId, displayName: 'earlier-original.docx', importedAt: initial.importedAt });
     store.markCleanShutdown();
   } finally { store.close(); }
 });
