@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { createBaselineSchema } from '../../src/service/baseline-schema.js';
 import {
-  installPreinstalledStandardTables, PREINSTALLED_TABLE_KEYS, preinstalledEntries, preinstalledKind, standardTableDigest, STANDARD_TABLE_SCHEMA_SQL,
+  installPreinstalledStandardTables, PREINSTALLED_TABLE_KEYS, preinstalledEntries, preinstalledKind, requireStandardTableEntries, standardTableDigest, standardTableEntryOrphans,
+  STANDARD_TABLE_SCHEMA_SQL,
   type PreinstalledTableKey,
 } from '../../src/service/standard-tables.js';
 import { cycb2SeedText } from '../../src/service/standard-tables/seed/cycb-2.js';
@@ -161,6 +163,44 @@ describe('the 字表与词表 library (R5-L1)', () => {
       expect(references.filter(([from, target]) => !own.has(from) && own.has(target))).toEqual([]);
       expect(references.filter(([from, target]) => own.has(from) && !own.has(target))).toEqual([['standard_table_versions', 'content_objects']]);
       expect(db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND tbl_name LIKE 'standard_table%'").all()).toEqual([]);
+    } finally { db.close(); }
+  });
+
+  it('guards the version of its entries itself, since no whole-database pass walks it: an orphan entry is found, a deleted version is found', () => {
+    const db = library();
+    try {
+      expect(standardTableEntryOrphans(db)).toBe(0);
+      db.exec('PRAGMA foreign_keys = OFF');
+      db.prepare("INSERT INTO standard_table_entries(version_id, position, recommended, discouraged, strength, status) VALUES (?, 1, 'x', '[]', 'house', 'applied')").run(randomUUID());
+      expect(standardTableEntryOrphans(db)).toBe(1);
+      expect(() => requireStandardTableEntries(db)).toThrow(/找不到所属的版本/u);
+      db.exec("DELETE FROM standard_table_entries WHERE recommended = 'x'");
+      const version = String(db.prepare("SELECT v.version_id id FROM standard_table_versions v JOIN standard_tables t ON t.table_id = v.table_id WHERE t.preinstalled_key = 'gf-1001-2001'").get()!.id);
+      db.prepare('DELETE FROM standard_table_versions WHERE version_id = ?').run(version); // its 382 entries stay
+      expect(standardTableEntryOrphans(db)).toBe(1);
+      expect(() => requireStandardTableEntries(db)).toThrow(/找不到所属的版本/u);
+    } finally { db.close(); }
+  });
+
+  it('finds orphan entries in a time that does not grow with the number of entries (500,000 entries, 5 versions)', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      createBaselineSchema(db);
+      db.exec('PRAGMA foreign_keys = OFF');
+      const insert = (versions: number, perVersion: number): void => db.exec(`WITH RECURSIVE v(k) AS (SELECT 1 UNION ALL SELECT k + 1 FROM v WHERE k < ${versions}),
+        n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${perVersion})
+        INSERT INTO standard_table_entries(version_id, position, recommended, discouraged, strength, status) SELECT 'version-' || k, i, 'w', '[]', 'house', 'applied' FROM v, n`);
+      const best = (): number => { let least = Infinity; for (let run = 0; run < 7; run++) { const t = performance.now(); standardTableEntryOrphans(db); least = Math.min(least, performance.now() - t); } return least; };
+      insert(5, 1000);
+      const small = best();
+      db.exec('DELETE FROM standard_table_entries');
+      insert(5, 100_000);
+      expect(Number(db.prepare('SELECT count(*) n FROM standard_table_entries').get()!.n)).toBe(500_000);
+      expect(standardTableEntryOrphans(db)).toBe(5);
+      const large = best();
+      const wholePass = (() => { const t = performance.now(); db.prepare('PRAGMA foreign_key_check(standard_table_entries)').all(); return performance.now() - t; })();
+      console.log(`ENTRY_ORPHANS 5,000 entries ${small.toFixed(3)} ms; 500,000 entries ${large.toFixed(3)} ms (a walk of the rows: ${wholePass.toFixed(1)} ms)`);
+      expect(large).toBeLessThan(Math.max(2, small * 10));
     } finally { db.close(); }
   });
 

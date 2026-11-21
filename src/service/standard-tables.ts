@@ -17,6 +17,14 @@ import { tgh2013SeedText } from './standard-tables/seed/tgh-2013.js';
  * `(version_id, position)`; `position` is the order of the table. Only `source_object_digest` leaves the library: the imported
  * file is an object in the data root, and R5-L2 owns writing it, retaining it and deleting it with its table.
  *
+ * The entries' `version_id` is deliberately NOT a declared reference. The entries are the one relation an editor can grow
+ * without limit, and a whole-database `PRAGMA foreign_key_check` walks every row that declares a reference, so a declared one
+ * would make every open, every creation and every post-write check cost more with each table imported. The owner guards it
+ * instead (`standardTableEntryOrphans`): the entries are clustered by `(version_id, position)`, so one seek per version finds
+ * an entry whose version is gone, at a cost that does not depend on how many entries there are. It runs after every library
+ * write and at every open (`requireBaselineSchema`). A writer — R5-L2's import, update and delete — must call it, or write a
+ * version and its entries, or delete them, in one transaction.
+ *
  * `name` is not unique (two imports may share a name; the editor tells them apart by file and date). `preinstalled_key` is: a
  * deleted pre-installed table leaves no row, so 恢复预装字表 can install it again, and an installed key is never installed twice.
  */
@@ -52,7 +60,7 @@ export const STANDARD_TABLE_SCHEMA_SQL = {
   CHECK((source_file_name IS NULL) = (source_object_digest IS NULL))
 ) STRICT`,
   standard_table_entries: `CREATE TABLE standard_table_entries (
-  version_id TEXT NOT NULL REFERENCES standard_table_versions(version_id),
+  version_id TEXT NOT NULL,
   position INTEGER NOT NULL CHECK(position >= 1),
   recommended TEXT NOT NULL,
   discouraged TEXT NOT NULL CHECK(json_type(discouraged) = 'array'),
@@ -91,6 +99,25 @@ export const STANDARD_TABLE_FORMAT = 'ai7.standard-table/1';
  */
 export function standardTableDigest(kind: StandardTableKind, entries: readonly StandardEntry[]): string {
   return sha256Hex(canonicalJson({ schema: STANDARD_TABLE_FORMAT, kind, entries }));
+}
+
+/**
+ * How many distinct `version_id` values of the entries have no version: one seek on the entries' key per version (the next
+ * greater `version_id` each time), never a walk of the entries. A store with such an entry is damaged.
+ */
+export function standardTableEntryOrphans(db: DatabaseSync): number {
+  return Number(db.prepare(`WITH RECURSIVE v(version_id) AS (
+      SELECT min(version_id) FROM standard_table_entries
+      UNION ALL
+      SELECT (SELECT min(e.version_id) FROM standard_table_entries e WHERE e.version_id > v.version_id) FROM v WHERE v.version_id IS NOT NULL
+    )
+    SELECT count(*) AS orphans FROM v
+    WHERE v.version_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM standard_table_versions s WHERE s.version_id = v.version_id)`).get()!.orphans);
+}
+
+/** Refuse a store whose entries name a version that is not there. */
+export function requireStandardTableEntries(db: DatabaseSync): void {
+  requireStore(standardTableEntryOrphans(db) === 0, 'STANDARD_TABLE_INVALID', '字表与词表里有条目找不到所属的版本，数据已损坏。');
 }
 
 export type PreinstalledTableKey = 'tgh-2013' | 'tgh-2013-annex-1' | 'gf-1001-2001' | 'cycb-2';
@@ -180,5 +207,6 @@ export function installPreinstalledStandardTables(db: DatabaseSync, keys: readon
     db.prepare(INSERT_ENTRIES).run(versionId, JSON.stringify(entries));
     installed.push(key);
   }
+  requireStandardTableEntries(db);
   return installed;
 }

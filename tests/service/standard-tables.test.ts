@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -87,6 +88,20 @@ describe('the 字表与词表 library over the real store', () => {
     (await EditorialStore.open(roots.dataRoot, roots.codeRoot)).close();
     expect(seedReads.names).toEqual([]); // opening an existing store parses no seed, and a deleted table stays deleted
     expect((await withDb(roots.dataRoot, library)).map((row) => row.key)).toEqual(['gf-1001-2001', 'tgh-2013', 'tgh-2013-annex-1']);
+  }, 120_000);
+
+  it('refuses to open a store with an orphan entry or with a version deleted under its entries', async () => {
+    (await EditorialStore.open(roots.dataRoot, roots.codeRoot)).close();
+    const edit = (run: (db: DatabaseSync) => void): void => {
+      const db = new DatabaseSync(storeOf(roots.dataRoot));
+      try { db.exec('PRAGMA foreign_keys = OFF'); run(db); } finally { db.close(); }
+    };
+    edit((db) => db.prepare("INSERT INTO standard_table_entries(version_id, position, recommended, discouraged, strength, status) VALUES (?, 1, 'x', '[]', 'house', 'applied')").run(randomUUID()));
+    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toMatchObject({ code: 'STANDARD_TABLE_INVALID' });
+    edit((db) => db.exec("DELETE FROM standard_table_entries WHERE recommended = 'x'"));
+    (await EditorialStore.open(roots.dataRoot, roots.codeRoot)).close();
+    edit((db) => db.exec("DELETE FROM standard_table_versions WHERE table_id = (SELECT table_id FROM standard_tables WHERE preinstalled_key = 'gf-1001-2001')"));
+    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toMatchObject({ code: 'STANDARD_TABLE_INVALID' });
   }, 120_000);
 
   it('carries the library through export and replace-all with equal digests', async () => {

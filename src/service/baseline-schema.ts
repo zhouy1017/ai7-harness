@@ -76,7 +76,7 @@ import { SCHEDULED_BACKUP_SCHEMA_SQL, SCHEDULED_BACKUP_TRIGGER_SQL } from './sch
 import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL, SERIES_RETRIEVAL_EXCLUSION_TRIGGER_SQL } from './series-exclusions.js';
 import { SERIES_KNOWLEDGE_SCHEMA_SQL, SERIES_KNOWLEDGE_TRIGGER_SQL } from './series-knowledge.js';
 import { SERIES_SCHEMA_SQL, SERIES_TRIGGER_SQL } from './series.js';
-import { STANDARD_TABLE_SCHEMA_SQL, installPreinstalledStandardTables } from './standard-tables.js';
+import { STANDARD_TABLE_SCHEMA_SQL, installPreinstalledStandardTables, requireStandardTableEntries } from './standard-tables.js';
 import { StoreError, requireStore } from './store-records.js';
 import { seedSearchBackends } from './store-schema.js';
 import {
@@ -199,7 +199,8 @@ type SqlRow = Record<string, SQLOutputValue>;
 /**
  * The exact check of a store at the baseline revision: every object the baseline defines is there with the same SQL (compared
  * as `canonicalSchemaSql` folds it), the trigram index's shadow tables are as SQLite makes them, and nothing else stands —
- * no table, index, trigger or view the baseline does not name. Equal SQL means equal columns, keys, checks and references.
+ * no table, index, trigger or view the baseline does not name. Equal SQL means equal columns, keys, checks and references. The
+ * 字表与词表 entries' version is the one reference not declared, so it is checked here, by one seek per version.
  */
 export function requireBaselineSchema(db: DatabaseSync): void {
   const expected = new Map<string, string>();
@@ -212,6 +213,7 @@ export function requireBaselineSchema(db: DatabaseSync): void {
     requireStore(sql !== undefined && typeof row.sql === 'string' && canonicalSchemaSql(row.sql) === sql,
       'SCHEMA_INVALID', `数据库结构对象 ${String(row.name)} 与当前版本不一致。`);
   }
+  requireStandardTableEntries(db); // the one reference no whole-database pass walks (see standard-tables.ts)
 }
 
 /**
