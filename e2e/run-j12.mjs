@@ -2423,12 +2423,11 @@ async function main() {
       requireJourney(index>=0, 'model-choice-offered');
       await pointerClick(primary, waitFor, 'select[aria-label="AI7 使用的模型"] + .ui-select-trigger', 'model-choice-open');
       await assertRenderer(primary, `Array.from(document.querySelectorAll('.ui-select-popover:not([hidden]) .field-note')).some(node=>node.textContent==='推荐 · 主要模型')`, 'model-choice-recommendation-visible');
-      await pointerClick(primary, waitFor, '.ui-select-popover:not([hidden]) input', 'model-choice-filter-focus');
-      await primary.send('Input.dispatchKeyEvent', {type:'keyDown',key:'a',code:'KeyA',modifiers:2,windowsVirtualKeyCode:65});
-      await primary.send('Input.dispatchKeyEvent', {type:'keyUp',key:'a',code:'KeyA',modifiers:2,windowsVirtualKeyCode:65});
-      const text = await primary.evaluate(`document.querySelector('select[aria-label="AI7 使用的模型"]').options[${index}].text`);
-      await primary.send('Input.insertText', {text});
-
+      // Small catalogues have no search field. Arrow keys navigate the actual popup in either form.
+      for (const key of ['ArrowDown', 'ArrowUp']) {
+        await primary.send('Input.dispatchKeyEvent', {type:'keyDown',key});
+        await primary.send('Input.dispatchKeyEvent', {type:'keyUp',key});
+      }
       await pointerClick(primary, waitFor, `.ui-select-popover:not([hidden]) [role="option"][data-index="${index}"]`, 'model-choice-option');
     };
     const alternative = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.channels.find(channel=>channel.route==='deepseek-open-platform').models.find(model=>model.main==='eligible'&&model.fast==='eligible'&&model.modelId!=='deepseek-flash').modelId)`);
