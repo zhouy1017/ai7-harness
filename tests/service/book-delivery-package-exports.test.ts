@@ -117,6 +117,29 @@ async function preparePackageOf(store: EditorialStore, book: { bookId: string; m
   return { ...book, title, packageVersionId: prepared.package.versions[0]!.packageVersionId };
 }
 
+/**
+ * The next version of a package in the shape packages had before Issue #1639: its three exclusion keys stored, so its 交付包清单 keeps
+ * the 不包含 list. Stored export records bind a manifest by its digest, so a record like this must write the manifest it always did.
+ */
+function legacyShapedVersion(packageVersionId: string): string {
+  const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    const row = database.prepare('SELECT * FROM book_delivery_package_versions WHERE package_version_id = ?').get(packageVersionId) as Record<string, string | number>;
+    const record = JSON.parse(String(row['canonical_json'])) as { content: Record<string, unknown>; [key: string]: unknown };
+    const content = { ...record.content, exclusions: ['editor-notes', 'library-originals', 'intermediate-revisions'] };
+    const forged = { ...record, packageVersionId: randomUUID(), version: Number(row['version']) + 1, priorVersionId: packageVersionId,
+      contentDigest: canonicalRecord(content).digest, content };
+    const canonical = canonicalRecord(forged);
+    database.prepare(`INSERT INTO book_delivery_package_versions(package_version_id, package_id, book_id, version, prior_version_id, purpose,
+      publication_version_id, content_sha256, actor, prepared_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(forged.packageVersionId, row['package_id']!, row['book_id']!, forged.version, packageVersionId, row['purpose']!, row['publication_version_id']!,
+        forged.contentDigest, row['actor']!, row['prepared_at']!, canonical.json, canonical.digest);
+    return forged.packageVersionId;
+  } finally {
+    database.close();
+  }
+}
+
 /** A 批注 on the manuscript's longest paragraph, as the editor makes one: the milestone's file then carries it. */
 function annotate(store: EditorialStore, book: { manuscriptId: string; branchId: string }): void {
   const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
@@ -630,10 +653,10 @@ describe('图书交付包 · 导出 (S67b)', () => {
       expect(store.inspectDeliverables(bookId).exports).toEqual([]);
     }, 240_000);
 
-    it('writes the frozen manifest with its delivery records and exclusions', async () => {
+    it('writes the frozen manifest with its delivery records and no 不包含 list for a package made now (Issue #1639)', async () => {
       const first = await prepare(folder);
       await store.approveBookDeliveryPackageExport({ bookId, exportId: first.exportId }, true);
-      // The 交付包清单 is the version's own words: what it holds, each document's Delivery Records, what it leaves out.
+      // The 交付包清单 is the version's own words: what it holds and each document's Delivery Records.
       const manifest = await readFile(join(folder, '交付包清单.md'), 'utf8');
       expect(manifest.split('\n')).toEqual([
         `# ${title} · 图书交付包 v1`,
@@ -653,6 +676,22 @@ describe('图书交付包 · 导出 (S67b)', () => {
         '',
         expect.stringMatching(/^- 第 1 次交付 · 宣传部 · 版本 1 · \d{4}-\d{2}-\d{2}T.*（备注：首发稿）$/u),
         '',
+        '## 说明',
+        '',
+        '- 图书交付包把已完成的工作放在一起：它不是发稿，也不是交付；准备它不改变任何记录，也不生成文件。',
+        '',
+      ]);
+      for (const forbidden of PUBLICATION_FORBIDDEN_WORDS) expect(manifest).not.toContain(forbidden);
+    }, 240_000);
+
+    it('keeps the 交付包清单 of a package made before Issue #1639 byte for byte, its 不包含 list included', async () => {
+      const legacyId = legacyShapedVersion(packageVersionId);
+      const legacyReview = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId: legacyId, options: ALL }, true);
+      const prepared = await store.prepareBookDeliveryPackageExport({ bookId, packageVersionId: legacyId, options: ALL,
+        memberKeys: ['manifest'], reviewDigest: legacyReview.reviewDigest, folder }, true);
+      await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
+      const manifest = (await readFile(join(folder, '交付包清单.md'), 'utf8')).split('\n');
+      expect(manifest.slice(manifest.indexOf('## 不包含'), manifest.indexOf('## 说明'))).toEqual([
         '## 不包含',
         '',
         '- 备注：稿件与文档上的备注只供编辑自己参考',
@@ -662,12 +701,9 @@ describe('图书交付包 · 导出 (S67b)', () => {
         '- 评估记录：本书没有定稿评估记录',
         '- 审稿意见：本书没有审稿意见',
         '',
-        '## 说明',
-        '',
-        '- 图书交付包把已完成的工作放在一起：它不是发稿，也不是交付；准备它不改变任何记录，也不生成文件。',
-        '',
       ]);
-      for (const forbidden of PUBLICATION_FORBIDDEN_WORDS) expect(manifest).not.toContain(forbidden);
+      // The record verifies and lists beside the package made now.
+      expect(store.inspectBookDeliveryPackage(bookId).versions.map((version) => version.label)).toEqual(['v2', 'v1']);
     }, 240_000);
 
     it('refuses the whole set when a rival file appears after preparation', async () => {
@@ -778,7 +814,9 @@ describe('图书交付包 · 导出 (S67b)', () => {
   it('writes the 交付包清单 from the frozen version alone, whatever changes after it', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      const { bookId, packageVersionId } = await preparedPackage(store);
+      const prepared1 = await preparedPackage(store);
+      const { bookId } = prepared1;
+      const packageVersionId = legacyShapedVersion(prepared1.packageVersionId);
       const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL }, true);
       // 恢复 of a type moves the package's content past v1; v1's files and their review stay exactly as they were.
       store.decideProductionDocumentType({ bookId, typeId: 'marketing-points', notForThisBook: false });
@@ -1001,7 +1039,9 @@ describe('图书交付包 · 导出 (S67b)', () => {
     const words = BOOK_DELIVERY_PACKAGE_WORDS as { libraryOriginals: string };
     const original = words.libraryOriginals;
     try {
-      const { bookId, packageVersionId } = await preparedPackage(store);
+      const prepared1 = await preparedPackage(store);
+      const { bookId } = prepared1;
+      const packageVersionId = legacyShapedVersion(prepared1.packageVersionId);
       const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL }, true);
       const exportTo = async (name: string) => {
         const folder = join(roots.inputRoot, name);

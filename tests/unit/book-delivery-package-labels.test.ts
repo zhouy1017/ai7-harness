@@ -18,7 +18,6 @@ import {
   BOOK_DELIVERY_PACKAGE_STATEMENT,
   BOOK_DELIVERY_PACKAGE_WORDS,
   evaluationRecordLabel,
-  evaluationUnreadableDetail,
   bookDeliveryPackageNotReady,
 } from '../../src/service/book-delivery-packages.js';
 import { PUBLICATION_FORBIDDEN_WORDS } from '../../src/shared/protocol.js';
@@ -59,13 +58,8 @@ describe('the words of 图书交付包', () => {
       publicationNotice: '自发稿版本后有修改：可以另设发稿版本，也可以按当前发稿版本打包。',
       publicationRoute: '设为发稿版本…',
       notForThisBook: '本书不做',
-      documentMissing: '尚未创建',
-      documentUndelivered: '尚未交付',
+      documentNoSavedVersion: '还没有保存过版本，保存后才能放进交付包',
       documentUnchosen: '未选入本包',
-      documentNotice: '交付后有修改：可以再交付，也可以按交付过的版本打包。',
-      documentCreateRoute: '前往衍生稿件',
-      documentDeliverRoute: '交付…',
-      documentRedeliverRoute: '再交付…',
       noReviews: '暂无审阅记录',
       reviewRoute: '前往审阅',
       exportHistoryNone: '暂无导出记录',
@@ -83,7 +77,6 @@ describe('the words of 图书交付包', () => {
     });
     // The two records a package names since Issue #429, and how a Book without them reads (BUNDLE-001).
     expect(evaluationRecordLabel(2)).toBe('评估记录 · 第 2 版定稿');
-    expect(evaluationUnreadableDetail('评估记录已损坏。')).toBe('评估记录无法读取：评估记录已损坏。');
     expect(BOOK_DELIVERY_PACKAGE_REFUSALS).toEqual({
       changed: '图书交付包的内容在查看后又有变化，请看过新的内容再准备。',
       selection: '所选稿件或版本已不在本书中，请重新勾选。',

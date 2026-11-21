@@ -473,6 +473,10 @@ export class BookDeliveryPackageExports {
     if (publication !== null) {
       lines.push(`- 稿件 · 发稿版本「${publication.milestoneLabel}」 · ${publication.revisionLabel}（发稿范围：${publication.scope}）`);
     }
+    // A package made since Issue #1639 stores no 不会做 list (`exclusions` is empty) and its manifest has no 不包含 section, nor a heading
+    // for a document that was never delivered; every earlier record keeps its own keys and its manifest bytes, which stored export
+    // records bind by digest.
+    const madeSinceRetiredLists = Array.isArray(record.content.exclusions) && record.content.exclusions.length === 0;
     const deliveries: string[] = [];
     for (const entry of record.content.documents) {
       if (entry.disposition !== 'included') continue;
@@ -480,7 +484,7 @@ export class BookDeliveryPackageExports {
       const peers = record.content.documents.filter((candidate) => candidate.typeId === entry.typeId && candidate.disposition === 'included').length;
       const typeLabel = entry.title === undefined || (entry.title === baseLabel && peers === 1) ? baseLabel : `${baseLabel} · 《${entry.title}》`;
       lines.push(`- ${typeLabel} · 版本 ${entry.version}`);
-      deliveries.push('', `### ${typeLabel}`, '');
+      if (!madeSinceRetiredLists || entry.deliveryIds.length > 0) deliveries.push('', `### ${typeLabel}`, '');
       for (const deliveryId of entry.deliveryIds) {
         const row = this.#db.prepare(
           'SELECT ordinal, version, recipient_label, note, recorded_at FROM production_document_deliveries WHERE delivery_id = ? AND book_id = ?',
@@ -506,6 +510,7 @@ export class BookDeliveryPackageExports {
       .filter((entry) => entry.disposition === 'not-for-this-book')
       .map((entry) => productionDocumentType(entry.typeId, this.#db)?.label ?? '衍生稿件');
     lines.push(
+      ...(madeSinceRetiredLists ? [] : [
       '',
       '## 不包含',
       '',
@@ -518,6 +523,7 @@ export class BookDeliveryPackageExports {
         ? [`- ${BOOK_DELIVERY_PACKAGE_WORDS.evaluationRecord}：${BOOK_DELIVERY_PACKAGE_WORDS.evaluationMissing}`] : []),
       ...(record.content.schema === 'ai7.book-delivery-package-content/2' && readersReports.length === 0
         ? [`- ${BOOK_DELIVERY_PACKAGE_WORDS.readersReport}：${BOOK_DELIVERY_PACKAGE_WORDS.readersReportMissing}`] : []),
+      ]),
       '',
       '## 说明',
       '',

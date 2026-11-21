@@ -1,6 +1,7 @@
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../shared/runtime-execution-config.js';
 import type { DispatchTaskKind, RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { registerProductionAndPackageHandlers, registerDeliverablesHandlers } from './deliverables-handlers.js';
+import { registerMilestoneHandlers } from './milestone-handlers.js';
 import { registerReviewHandlers } from './review-handlers.js';
 import { registerReviewGuidelineVersionHandlers, registerKnowledgeBaseHandlers } from './knowledge-base-handlers.js';
 import { registerLearningDecisionHandlers, registerLibraryLearningHandlers } from './library-learning-handlers.js';
@@ -3442,18 +3443,7 @@ export function registerRendererHandlers(
       });
     }),
   );
-  ipcMain.handle(IPC_CHANNELS.saveMilestone, (event, input: ServiceOperationMap['saveMilestone']['input']) =>
-    envelope(async () => {
-      const owned = requireSender(event);
-      return serializeEffect(async () => {
-        requireAuthority();
-        const capability = requireManuscriptCapability(owned, input);
-        const result = await service.call('saveMilestone', input);
-        requireResourceIdentity(capability, result);
-        return result;
-      });
-    }),
-  );
+  registerMilestoneHandlers({ requireSender, requireAuthority, requireCurrentBookRoute, requireManuscriptCapability, rememberManuscriptCapability, requireResourceIdentity, service, serializeEffect });
   ipcMain.handle(IPC_CHANNELS.undoManuscript, (event, input: ServiceOperationMap['undoManuscript']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
