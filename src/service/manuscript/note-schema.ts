@@ -16,14 +16,6 @@ export const NOTE_BLOCK_KIND_TABLES = [
   'manuscript_reimport_mappings',
 ] as const;
 
-const BLOCK_KINDS = /IN\s*\(\s*'title'\s*,\s*'heading'\s*,\s*'paragraph'\s*\)/gu;
-const WIDENED_BLOCK_KINDS = "IN ('title', 'heading', 'paragraph', 'note')";
-
-/** A relation's text with every block-kind CHECK widened to the note kind. */
-export function widenBlockKinds<T extends string | ReadonlyArray<string>>(sql: T): T {
-  return (typeof sql === 'string' ? sql.replace(BLOCK_KINDS, WIDENED_BLOCK_KINDS) : sql.map((entry) => entry.replace(BLOCK_KINDS, WIDENED_BLOCK_KINDS))) as T;
-}
-
 export const NOTE_BLOCK_SCHEMA_SQL = {
   staged_import_note_sources: `CREATE TABLE staged_import_note_sources (
     draft_id TEXT NOT NULL REFERENCES staged_import_snapshots(draft_id) ON DELETE CASCADE,
