@@ -17,6 +17,7 @@ import { openPackageStore } from './database-exports.js';
  * Known differences R5-6 must expect between the old store and the upgraded one (not implemented here):
  * - `tables.manuscript_revisions`: one 「升级时的稿件」 revision more per manuscript (ADR 0105 §5), so old + `manuscripts` rows;
  * - `tables.working_offset_nodes`: dropped by the position conversion (ADR 0105 §6), so 0 after the upgrade;
+ * - `tables.model_role_choices`: 0 before; 0, 1 or 2 after, from mapping the two selected connection groups (R5-F1a);
  * - `tables.store_versions`: one more row, the Data Version 2 record;
  * - the other position-keyed tables are converted (ADR 0105 §6); R5-6 states any further difference when it lands.
  * `entities` carries none of these, so it is compared by plain equality.
@@ -361,7 +362,7 @@ export function inventoryStore(path: string): string {
     // The D7 entities. Relations the upgrade changes by design (revisions, offset nodes, store versions) are left out.
     const relations = ['books', 'production_documents', 'production_document_versions', 'content_objects', 'source_versions', 'editorial_mark_replies',
       'milestone_versions', 'publication_versions', 'analysis_result_sets', 'review_runs', 'review_findings', 'review_reports', 'review_run_synthesis',
-      'evaluation_records', 'readers_report_drafts', 'writing_drafts', 'model_service_connections', 'model_role_choices', 'search_backend_connections', 'backup_preferences', 'evaluation_preferences'];
+      'evaluation_records', 'readers_report_drafts', 'writing_drafts', 'model_service_connections', 'search_backend_connections', 'backup_preferences', 'evaluation_preferences'];
     return JSON.stringify({
       entities: {
         relations: Object.fromEntries(relations.map((table) => [table, tables[table]])),

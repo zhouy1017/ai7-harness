@@ -217,8 +217,10 @@ it('stores four independent choices and efforts without changing channel default
 it('moves every following role with Pro, and underlying Flash follows foreground Flash first (#1650)', () => {
   store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
   store.selectMainRoleModel('anthropic-claude', 'claude-opus-5', 'high');
+  expect(storedRoles()).toEqual(['foreground-pro']);
   expect(store.getModelRoles().map(role => role.binding?.modelId)).toEqual(Array(4).fill('claude-opus-5'));
   store.selectMainRoleModel('anthropic-claude', 'claude-sonnet-5', 'medium');
+  expect(storedRoles()).toEqual(['foreground-pro']);
   expect(store.getModelRoles().map(role => role.binding?.modelId)).toEqual(Array(4).fill('claude-sonnet-5'));
   choose('foreground-flash', 'claude-haiku-4-5');
   expect(binding('fast-interaction')?.model).toBe('claude-haiku-4-5');
@@ -258,4 +260,44 @@ it('connection deletion cascades its choices and a later save inherits afresh (#
   store.saveModelServiceConnection('Synthetic Claude again', null, 'ready', 'anthropic-claude');
   expect(binding('fast-interaction')).toEqual(binding('main-editorial'));
   expect(store.getConfiguredModelRoleBinding('underlying-pro')).toEqual(binding('main-editorial'));
+});
+
+function storedRoles(): string[] {
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  try { return db.prepare('SELECT role_id FROM model_role_choices ORDER BY role_id').all().map(row => String(row.role_id)); }
+  finally { db.close(); }
+}
+
+it('every legacy tier request stores only chosen foreground roles, never follower copies (#1650)', () => {
+  store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+  expect(storedRoles()).toEqual(['foreground-pro']);
+  store.selectMainRoleModel('anthropic-claude', 'claude-opus-5');
+  expect(storedRoles()).toEqual(['foreground-pro']);
+  store.selectFastRoleModel('anthropic-claude', 'claude-haiku-4-5');
+  expect(storedRoles()).toEqual(['foreground-flash', 'foreground-pro']);
+  store.selectBothRoleModels('anthropic-claude', 'claude-sonnet-5');
+  expect(storedRoles()).toEqual(['foreground-flash', 'foreground-pro']);
+  store.clearFlashModel();
+  expect(storedRoles()).toEqual(['foreground-pro']);
+  store.selectModelServiceRoute('anthropic-claude');
+  expect(storedRoles()).toEqual(['foreground-pro']);
+});
+
+it('INSERT OR REPLACE deletes old connection choices through the FK cascade (#1650)', () => {
+  store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+  store.selectFastRoleModel('anthropic-claude', 'claude-haiku-4-5');
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  try { db.exec('PRAGMA foreign_keys = ON'); db.exec('INSERT OR REPLACE INTO model_service_connections SELECT * FROM model_service_connections'); }
+  finally { db.close(); }
+  expect(storedRoles()).toEqual([]);
+  expect(binding('main-editorial')).toBeNull();
+  expect(binding('fast-interaction')).toBeNull();
+});
+
+it('an internal role choice does not expand the legacy channel model catalogue (#1650)', () => {
+  store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+  const before = store.getModelServiceModels('anthropic-claude');
+  choose('underlying-pro', 'synthetic-role-only-model');
+  expect(store.getModelServiceModels('anthropic-claude')).toEqual(before);
+  expect(store.getConfiguredModelRoleBinding('underlying-pro')?.model).toBe('synthetic-role-only-model');
 });

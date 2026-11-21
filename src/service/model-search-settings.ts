@@ -124,6 +124,7 @@ export function getModelServiceRouteConnection(host: ModelSearchSettingsHost, ro
       'STORE_CORRUPT',
       '模型服务凭据引用无效。',
   );
+  const choices = readModelRoleChoices(host.authority);
   return {
     connectionId: target.connectionId,
     roleId: 'main-editorial',
@@ -136,8 +137,8 @@ export function getModelServiceRouteConnection(host: ModelSearchSettingsHost, ro
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
     credentialUpdatedAt: asString(row.credential_updated_at),
-    selected: readModelRoleChoices(host.authority).some(choice => choice.roleId === 'foreground-pro' && choice.connectionId === target.connectionId),
-    fastSelected: readModelRoleChoices(host.authority).some(choice => choice.roleId === 'foreground-flash' && choice.connectionId === target.connectionId),
+    selected: choices.some(choice => choice.roleId === 'foreground-pro' && choice.connectionId === target.connectionId),
+    fastSelected: choices.some(choice => choice.roleId === 'foreground-flash' && choice.connectionId === target.connectionId),
     connectionTest: readModelConnectionTest(row),
   };
 }
@@ -367,9 +368,6 @@ export function getModelServiceModels(host: ModelSearchSettingsHost, route: Mode
   const models = cached.length > 0 ? cached : modelServiceModels(route).map(({ modelId, modelLabel }) => ({ modelId, modelLabel }));
   if (row !== undefined) for (const modelId of [asString(row.model_id), asString(row.fast_model_id)]) {
     if (modelId && !models.some((model) => model.modelId === modelId)) models.push({ modelId, modelLabel: modelId });
-  }
-  if (row !== undefined) for (const choice of readModelRoleChoices(host.authority).filter(choice => choice.connectionId === MODEL_SERVICE_CONNECTION_IDS[route])) {
-    if (!models.some(model => model.modelId === choice.modelId)) models.push({ modelId: choice.modelId, modelLabel: choice.modelId });
   }
   return models;
 }

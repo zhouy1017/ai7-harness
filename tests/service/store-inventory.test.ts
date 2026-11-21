@@ -1,3 +1,4 @@
+import { writeModelRoleChoice } from '../../src/service/model-service-connections.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -42,6 +43,24 @@ async function importSample1(store: EditorialStore): Promise<void> {
 const POLICY_CLASSES: readonly MergeTablePolicy[] = ['seed', 'owned', 'dependent', 'shared', 'excluded', 'transient', 'house', 'derived'];
 
 describe('read-only business inventory', () => {
+  it('counts role choices as an expected physical difference, outside equal D7 entities (#1650)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const connection = store.saveModelServiceConnection('Synthetic inventory connection', null, 'ready', 'anthropic-claude');
+      const db = new DatabaseSync(path);
+      try {
+        writeModelRoleChoice(db, 'foreground-pro', null);
+        const before = JSON.parse(inventoryStore(path));
+        writeModelRoleChoice(db, 'foreground-pro', { connectionId: connection.connectionId, modelId: connection.binding.modelId });
+        writeModelRoleChoice(db, 'foreground-flash', { connectionId: connection.connectionId, modelId: connection.binding.modelId });
+        const after = JSON.parse(inventoryStore(path));
+        expect([before.tables.model_role_choices, after.tables.model_role_choices]).toEqual([0, 2]);
+        expect(after.entities).toEqual(before.entities);
+        expect(after.entities.relations).not.toHaveProperty('model_role_choices');
+      } finally { db.close(); }
+    } finally { store.close(); }
+  });
+
   it('requires every merge-policy table and every table of a real store to be counted or listed as not counted', async () => {
     const schemaRoots = await createServiceTestRoots('ai7-inventory-schema-');
     try {

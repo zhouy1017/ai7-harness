@@ -1,3 +1,4 @@
+import { writeModelRoleChoice } from '../../src/service/model-service-connections.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { SCOPED_EDIT_AUTHORED_ANSWER, scopedEditJourneyInput } from '../support/scoped-edit.js';
@@ -427,7 +428,7 @@ it('refuses at launch a stored model its channel cannot send, before any transpo
   store.close();
   // A Pro choice 0.7.3 accepted: OpenCode Go declares this model on its /responses route only.
   const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-  try { database.prepare('UPDATE model_service_connections SET model_id = ? WHERE connection_id = ?').run('gpt-5.6-luna', connection.connectionId); } finally { database.close(); }
+  try { database.prepare('UPDATE model_service_connections SET model_id = ? WHERE connection_id = ?').run('gpt-5.6-luna', connection.connectionId); writeModelRoleChoice(database, 'foreground-pro', { connectionId: connection.connectionId, modelId: 'gpt-5.6-luna' }); } finally { database.close(); }
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, null);
   store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy, live: null });

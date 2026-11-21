@@ -1,3 +1,5 @@
+import sequenceAnswers from '../fixtures/model-role-m1-sequences.json' with { type: 'json' };
+import { captureModelRoleSequences } from '../support/model-role-storage-sequences.js';
 import expected from '../fixtures/model-role-m1.json' with { type: 'json' };
 import { mapRevision116ModelRoleChoices, writeModelRoleChoice } from '../../src/service/model-service-connections.js';
 import { join } from 'node:path';
@@ -48,4 +50,8 @@ it.each(['requests', 'revision-116 mapping'])('keeps M1 answers through %s (#165
   }
   vi.useRealTimers();
   expect(answers).toEqual(expected);
+});
+
+it('keeps M1 answers through route, credential, selection and effort sequences (#1650)', async () => {
+  expect(await captureModelRoleSequences()).toEqual(sequenceAnswers);
 });
