@@ -121,7 +121,12 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     return false;
   })()`), 'marks-paging-accepted-beyond-first-page');
   // The decision does not throw the loaded pages away: the same pages are still held and its card stays where the editor left it.
-  await waitFor(renderer, `${rowNow}===${JSON.stringify(rowWant)} && document.querySelector(${JSON.stringify(card)})!==null && document.querySelector('.editor-window [data-mark-id="${expected.markId}"]')!==null`, 'marks-paging-decision-keeps-pages', 60_000);
+  const kept = `${rowNow}===${JSON.stringify(rowWant)} && document.querySelector(${JSON.stringify(card)})!==null && document.querySelector('.editor-window [data-mark-id="${expected.markId}"]')!==null`;
+  try {
+    await waitFor(renderer, kept, 'marks-paging-decision-keeps-pages', 60_000);
+  } catch {
+    check(false, 'marks-paging-decision-keeps-pages', await renderer.evaluate(`({row:${rowNow},rowWant:${JSON.stringify(rowWant)},card:document.querySelector(${JSON.stringify(card)})!==null,words:document.querySelector('.editor-window [data-mark-id="${expected.markId}"]')!==null,anyWords:document.querySelector('[data-mark-id="${expected.markId}"]')!==null,first:document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId,drawn:document.querySelectorAll('.editor-window [data-mark-id]').length,status:document.querySelector('#persistence-status')?.textContent??null})`));
+  }
   await pointerClick(renderer, waitFor, '[data-mark-filter-toggle]', 'marks-paging-reset-open');
   await waitFor(renderer, isOpen, 'marks-paging-reset-opened');
   await pointerClick(renderer, waitFor, '[data-mark-category-filter="all"]', 'marks-paging-reset-category');
