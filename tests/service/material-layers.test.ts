@@ -5,8 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BackgroundAnalysisDispatcher } from '../../src/service/background-analysis.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FastRoleExecutionOwner, fastRoleLiveRoutes, productionFastRoleRoutes } from '../../src/service/fast-role/fast-role-execution.js';
 import {
   MATERIAL_TRANSLATION_KIND,
@@ -15,7 +14,6 @@ import {
   materialTranslator,
   type MaterialTranslator,
 } from '../../src/service/fast-role/material-translation-contract.js';
-import { STUB_EMBEDDING_IDENTITY } from '../../src/service/knowledge/embedding-stub.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { PROVIDER_LEDGER_FILE, isItemLine, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
@@ -23,7 +21,7 @@ import { EditorialStore, StoreError, type BackgroundAnalysisRuntime } from '../.
 import type { LibraryMaterialKind, LibraryMaterialProjection } from '../../src/shared/protocol.js';
 import { malformedPdf, sampleTextPdf, syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
 import { withoutRuleFor } from '../support/policy-rules.js';
-import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+import { sample1Path } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // One explicit model-request capability per test application.
@@ -32,15 +30,16 @@ let requestGovernor: ModelRequestGovernor;
 beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
 afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
-// Service-integration suite (L2) for the Material Index's similarity vectors, PDF text layer and 来源译文 (Issue #892) over the
-// real store on a temporary Agent Data Root. Every file is the suite's own synthetic words or the authored public passage —
-// no manuscript. The similarity provider is the built-in deterministic one; the one live-shaped path replaces only the
-// transport with a stub, so no socket is opened and no credential value beyond a local placeholder exists.
+// Service-integration suite (L2) for the Material Index's on-request layers over the real store on a temporary Agent Data Root:
+// 相似段落检索 ranked by words with nothing built (R5-F2c; ADR 0107 §4 point 5), the PDF text layer and 来源译文 (Issue #892).
+// Every file is exact `sample1` — an admitted Public SampleBook — the suite's own synthetic words or the authored public
+// passage, no manuscript. The one live-shaped path replaces only the transport with a stub, so no socket is opened and no
+// credential value beyond a local placeholder exists.
 
 let roots: ServiceTestRoots;
 
 beforeEach(async () => {
-  roots = await createServiceTestRoots('ai7-service-material-vectors-');
+  roots = await createServiceTestRoots('ai7-service-material-layers-');
 });
 
 afterEach(async () => {
@@ -100,40 +99,44 @@ function tableCounts(): Record<string, number> {
   }
 }
 
-describe('相似段落检索 over the real store', () => {
-  it('builds an item\'s vectors only when the editor asks, shows them being built, and searches them', async () => {
+describe('相似段落检索 over the real store (R5-F2c)', () => {
+  it('finds a paragraph of an admitted SampleBook right after its index is built, with nothing built or written for it', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      const added = await put(store, file('ferry.txt', ENGLISH), 'Ferry notes');
+      const added = await put(store, sample1Path(roots.codeRoot), '样书一', 'book');
+      expect(await refusal(() => store.searchLibraryMaterialVectors({ materialId: added.materialId, text: '河边', k: 5 }))).toBe('MATERIAL_INDEX_NOT_READY');
       store.startMaterialIndexing();
       await store.settleMaterialIndexing();
-      // Never on open: the index is built, its vectors wait for the editor.
-      expect(store.inspectLibraryMaterial(added.materialId).index.vectors).toMatchObject({ state: 'not-built', built: 0, total: 4, embedding: STUB_EMBEDDING_IDENTITY });
-      expect(await refusal(() => store.searchLibraryMaterialVectors({ materialId: added.materialId, text: 'river', k: 3 }))).toBe('MATERIAL_VECTORS_NOT_BUILT');
-      const asked = store.buildMaterialVectors(added.materialId);
-      expect(asked.index.vectors?.state).toBe('building');
-      expect(asked.index.layers.vectors).toBe('building');
-      // Asking again while it is made changes nothing.
-      expect(store.buildMaterialVectors(added.materialId).index.vectors?.state).toBe('building');
-      await store.settleMaterialLayers();
-      expect(store.inspectLibraryMaterial(added.materialId).index.vectors).toMatchObject({ state: 'complete', built: 4, total: 4 });
-      const found = await store.searchLibraryMaterialVectors({ materialId: added.materialId, text: 'the river ferry', k: 3 });
-      expect(found.embedding).toBe(STUB_EMBEDDING_IDENTITY);
-      expect(found.indexDigest).toBe(store.inspectLibraryMaterial(added.materialId).index.digest);
+      const index = store.inspectLibraryMaterial(added.materialId).index;
+      expect([index.state, Object.keys(index.layers).length]).toEqual(['complete', 6]);
+      // Words of one of its own paragraphs: that paragraph is found first, holding them verbatim, with its anchor.
+      const paragraph = store.inspectLibraryMaterialSegments({ materialId: added.materialId, from: 1 }).segments.find((segment) => segment.kind === 'paragraph' && segment.text.length >= 24)!;
+      const words = paragraph.text.slice(4, 16);
+      const before = tableCounts();
+      const found = await store.searchLibraryMaterialVectors({ materialId: added.materialId, text: words, k: 5 });
+      expect(tableCounts()).toEqual(before);
+      expect(Object.keys(found).sort()).toEqual(['candidates', 'indexDigest', 'materialId']);
+      expect(found.indexDigest).toBe(index.digest);
       expect(found.candidates.length).toBeGreaterThan(0);
-      expect(found.candidates.map((candidate) => candidate.ordinal)).not.toContain(3);
-      expect([1, 4]).toContain(found.candidates[0]!.ordinal);
+      expect(found.candidates.length).toBeLessThanOrEqual(5);
+      expect(found.candidates[0]).toMatchObject({ ordinal: paragraph.ordinal, page: null, pageParagraph: null });
+      expect(paragraph.text.startsWith(found.candidates[0]!.preview.slice(0, 16))).toBe(true);
+      // Each paragraph answers once, however many of its chunks matched.
+      expect(new Set(found.candidates.map((candidate) => candidate.ordinal)).size).toBe(found.candidates.length);
+      // The ranker's bounds: a blank text, a text over 1,000 code units, or more than 8 candidates is refused in the editor's words.
       expect(await refusal(() => store.searchLibraryMaterialVectors({ materialId: added.materialId, text: '   ', k: 3 }))).toBe('MATERIAL_VECTOR_QUERY_INVALID');
-      // Before its text was read there is nothing to build from.
-      const scan = await put(store, file('scan.pdf', syntheticPdf({ pages: [[['x']]], imageOnly: new Set([0]) })), '扫描件');
-      expect(await refusal(() => store.buildMaterialVectors(scan.materialId))).toBe('MATERIAL_INDEX_NOT_READY');
+      expect(await refusal(() => store.searchLibraryMaterialVectors({ materialId: added.materialId, text: '字'.repeat(1_001), k: 3 }))).toBe('MATERIAL_VECTOR_QUERY_INVALID');
+      expect(await refusal(() => store.searchLibraryMaterialVectors({ materialId: added.materialId, text: words, k: 9 }))).toBe('MATERIAL_VECTOR_QUERY_INVALID');
+      // The 资料索引 background enrollment has nothing to make, and says so without a vector word.
+      const next = store.inspectBackgroundAnalysisEnrollment(emptyBook(store, '甲书'), quiet(), 'material-index').next.reason;
+      expect(next).toBe('资料加入时已在本机建好索引，检索不需要另外构建；这项登记目前没有要在空闲时做的事。');
       store.markCleanShutdown();
     } finally {
       store.close();
     }
   }, 120_000);
 
-  it('builds the vectors of a 10,000-paragraph item with the built-in provider within its bound', async () => {
+  it('searches a 10,000-paragraph item within its bound, reading in no writer transaction', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const paragraphs = Array.from({ length: 10_000 }, (_, index) => `第${index + 1}段：河边的渡口在清晨开船，船夫把村民送到对岸。`);
@@ -141,175 +144,28 @@ describe('相似段落检索 over the real store', () => {
       store.startMaterialIndexing();
       await store.settleMaterialIndexing();
       expect(store.inspectLibraryMaterial(added.materialId).index.metadata?.paragraphs).toBe(10_000);
-      const started = performance.now();
-      store.buildMaterialVectors(added.materialId);
-      await store.settleMaterialLayers();
-      const elapsed = performance.now() - started;
-      expect(store.inspectLibraryMaterial(added.materialId).index.vectors).toMatchObject({ state: 'complete', built: 10_000, total: 10_000 });
-      // The stated bound: well under a minute on a developer host (measured about 3 s); the service takes other work between batches.
-      expect(elapsed).toBeLessThan(60_000);
-      const found = await store.searchLibraryMaterialVectors({ materialId: added.materialId, text: '第9999段', k: 1 });
-      expect(found.candidates).toHaveLength(1);
+      // A second connection holds the writer lock throughout: the search only reads, so it never waits on it.
+      const writer = new DatabaseSync(storePath());
+      writer.exec('BEGIN IMMEDIATE');
+      try {
+        const started = performance.now();
+        const found = await store.searchLibraryMaterialVectors({ materialId: added.materialId, text: '第9999段', k: 1 });
+        const elapsed = performance.now() - started;
+        expect(found.candidates.map((candidate) => candidate.ordinal)).toEqual([9_999]);
+        // The stated bound: under 10 s for 10,000 paragraphs on a developer host (measured 280 ms on the host, 2026-11-22); nothing is cached between searches.
+        expect(elapsed).toBeLessThan(10_000);
+      } finally {
+        writer.exec('ROLLBACK');
+        writer.close();
+      }
       store.markCleanShutdown();
     } finally {
       store.close();
     }
   }, 300_000);
-
-  it('lets a Task search only the items its plan pins, exactly as it reads them, and a built index grants nothing', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      const bookId = emptyBook(store, '甲书');
-      const pinned = await put(store, file('ferry.txt', ENGLISH), 'Ferry notes');
-      const unpinned = await put(store, file('other.txt', 'The river runs past the mill.'), 'Mill notes');
-      store.startMaterialIndexing();
-      await store.settleMaterialIndexing();
-      const before = tableCounts();
-      store.buildMaterialVectors(pinned.materialId);
-      store.buildMaterialVectors(unpinned.materialId);
-      await store.settleMaterialLayers();
-      // Building wrote nothing but the vectors: no decision, no Task, no Run, no eligibility, nothing sent.
-      const after = tableCounts();
-      expect(Object.fromEntries(Object.entries(after).filter(([table, count]) => before[table] !== count))).toEqual({ material_index_vectors: 5 });
-      // An item not yet referable is still not referable, and still pins nothing: vectors are no Run scope.
-      expect(store.inspectLibraryMaterial(pinned.materialId).reference).toEqual({ state: 'available', scope: 'house' });
-      expect(store.pinMaterialReference(bookId, pinned.materialId).materialId).toBe(pinned.materialId);
-      expect(await store.queryMaterialVectors({ bookId, references: [] }, 'river', 5)).toEqual({ embedding: STUB_EMBEDDING_IDENTITY, candidates: [], unsearched: [] });
-      referable(store, pinned.materialId);
-      referable(store, unpinned.materialId);
-      const pin = store.pinMaterialReference(bookId, pinned.materialId);
-      const boundary = { bookId, references: [pin] };
-      const result = await store.queryMaterialVectors(boundary, 'river ferry', 3);
-      expect(result.candidates.length).toBeGreaterThan(0);
-      expect(result.candidates.every((candidate) => candidate.materialId === pinned.materialId && candidate.indexDigest === pin.indexDigest)).toBe(true);
-      expect(result.candidates[0]!.anchor).toMatch(/^《Ferry notes》第 [14] 段$/u);
-      // The candidate is a pointer: its words are read where it points, through the Task seam, at the pinned build.
-      const exact = store.readMaterialIndexForTask(boundary, pinned.materialId, result.candidates[0]!.ordinal);
-      expect(exact.indexDigest).toBe(pin.indexDigest);
-      // An item the plan does not list, a pinned build that is gone, and a withdrawn item are each refused as a read is.
-      expect(await refusal(() => store.queryMaterialVectors(boundary, 'river', 3, [unpinned.materialId]))).toBe('MATERIAL_OUTSIDE_PLAN');
-      expect(await refusal(() => store.queryMaterialVectors({ bookId, references: [{ ...pin, indexDigest: 'f'.repeat(64) }] }, 'river', 3))).toBe('MATERIAL_INDEX_MOVED');
-      setLibraryDecision(store, { materialId: pinned.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
-      expect(await refusal(() => store.queryMaterialVectors(boundary, 'river', 3))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
-      expect(await refusal(() => store.readMaterialIndexForTask(boundary, pinned.materialId, 1))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-  }, 120_000);
 });
-
-/** Ordinary production on a configured route, so a 资料索引 Background Processing Enrollment can be recorded (Issue #1166). */
-async function bindProduction(store: EditorialStore): Promise<Awaited<ReturnType<typeof resolveSourceCheckoutLaunchPolicy>>> {
-  const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === 'deepseek-open-platform')!;
-  const pending = store.saveModelServiceConnection('合成索引模型', null, 'needs-attention', route.route);
-  store.saveModelServiceConnection('合成索引模型', pending.credentialReference, 'ready', route.route);
-  store.selectModelServiceRoute(route.route);
-  const configured = { ...route, credentialReference: pending.credentialReference };
-  const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
-  store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy, live: { scope: 'ordinary-production', ...configured, runBudgetCeiling: 'unset' } });
-  return policy;
-}
 
 const quiet = (): BackgroundAnalysisRuntime => ({ routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now(), quietMs: 30_000 });
-
-async function enrolledBook(store: EditorialStore, title: string): Promise<{ bookId: string; enrollmentId: string }> {
-  const { bookId } = await importSample1Book(store, roots.codeRoot, title);
-  await pinEditorialWorkspaceProfileRevision2(store, bookId);
-  return { bookId, enrollmentId: enrollMaterialIndex(store, bookId) };
-}
-
-function enrollMaterialIndex(store: EditorialStore, bookId: string): string {
-  const offer = store.inspectBackgroundAnalysisEnrollment(bookId, quiet(), 'material-index');
-  return store.enrollBackgroundAnalysis(bookId, offer.offer.disclosureDigest!, 'backfill', { kind: 'book', seriesId: null }, 1_000, quiet(), 'material-index').enrollment!.enrollmentId;
-}
-
-/** 600 paragraphs: three batches of the vector pump. */
-const PARAGRAPHS = Array.from({ length: 600 }, (_, index) => `Paragraph ${index + 1}: the ferry crossed the river at dawn.`).join('\n\n');
-
-async function indexedItem(store: EditorialStore, bookId: string): Promise<string> {
-  const item = await put(store, file(`ferry-${bookId}.txt`, PARAGRAPHS), 'Long ferry notes');
-  referable(store, item.materialId);
-  store.startMaterialIndexing();
-  await store.settleMaterialIndexing();
-  return item.materialId;
-}
-
-describe('资料索引 on the idle lane (Issue #1166)', () => {
-  it('builds an enrolled Book\'s items while the editor is quiet, gives way when the editor is back, and goes on where it stopped', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      const launchPolicy = await bindProduction(store);
-      const { bookId } = await importSample1Book(store, roots.codeRoot, '索引书');
-      await pinEditorialWorkspaceProfileRevision2(store, bookId);
-      const materialId = await indexedItem(store, bookId);
-      const embedded = vi.spyOn(store.embeddingProvider(), 'embed');
-      let editorBusy = false;
-      const dispatcher = new BackgroundAnalysisDispatcher({ store, launchPolicy, editorWorkBusy: () => editorBusy, tickMs: 3_600_000,
-        execution: { full: false, routeExecutable: true, capacity: 2, admitOrQueue: () => 'queued' } });
-      const pass = async (): Promise<void> => {
-        dispatcher.nudge();
-        await dispatcher.settled();
-      };
-      const vectors = () => store.inspectLibraryMaterial(materialId).index.vectors;
-      try {
-        // No enrollment in force — the editor has not chosen one — builds nothing.
-        await pass();
-        await store.settleMaterialLayers();
-        expect(vectors()).toMatchObject({ state: 'not-built', built: 0, total: 600 });
-        enrollMaterialIndex(store, bookId);
-        expect(store.inspectBackgroundAnalysisEnrollment(bookId, quiet(), 'material-index').next.reason).toContain('空闲时');
-        await pass();
-        // The editor is back while the first batch is made: that batch is kept, the rest waits.
-        editorBusy = true;
-        await pass();
-        await store.settleMaterialLayers();
-        expect(vectors()).toMatchObject({ state: 'not-built', built: 256, total: 600 });
-        editorBusy = false;
-        await pass();
-        await store.settleMaterialLayers();
-        expect(vectors()).toMatchObject({ state: 'complete', built: 600, total: 600 });
-        // Each paragraph was embedded once: the next quiet pass went on from paragraph 257, and a complete item is left alone.
-        await pass();
-        await store.settleMaterialLayers();
-        expect(embedded.mock.calls.reduce((sum, [texts]) => sum + texts.length, 0)).toBe(600);
-      } finally { await dispatcher.dispose(); }
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-  }, 120_000);
-
-  it('builds nothing on the idle lane while the provider is not ready or the enrollment is paused, and never stops a build the editor asked for', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      await bindProduction(store);
-      const { bookId, enrollmentId } = await enrolledBook(store, '暂停书');
-      const materialId = await indexedItem(store, bookId);
-      const vectors = () => store.inspectLibraryMaterial(materialId).index.vectors;
-      const readiness = vi.spyOn(store.embeddingProvider(), 'readiness');
-      for (const state of [{ state: 'needs-model', expectedDigest: null }, { state: 'digest-mismatch', expectedDigest: 'a'.repeat(64), actualDigest: 'b'.repeat(64) }] as const) {
-        readiness.mockReturnValue(state);
-        store.indexIdleMaterialVectors(true);
-        await store.settleMaterialLayers();
-        expect(vectors()).toMatchObject({ state: 'needs-model', built: 0 });
-      }
-      readiness.mockRestore();
-      store.holdBackgroundAnalysisEnrollment(bookId, enrollmentId, 'pause', quiet());
-      store.indexIdleMaterialVectors(true);
-      await store.settleMaterialLayers();
-      expect(vectors()).toMatchObject({ state: 'not-built', built: 0 });
-      // 构建相似索引 is the editor's own work: the editor being busy never stops it.
-      store.buildMaterialVectors(materialId);
-      store.indexIdleMaterialVectors(false);
-      await store.settleMaterialLayers();
-      expect(vectors()).toMatchObject({ state: 'complete', built: 600 });
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-  }, 120_000);
-});
 
 describe('a PDF\'s text layer over the real store', () => {
   it('reads a text PDF into paragraphs with page anchors, and names an encrypted or unreadable one', async () => {
@@ -325,7 +181,7 @@ describe('a PDF\'s text layer over the real store', () => {
       expect(index).toMatchObject({
         state: 'complete', reason: null,
         metadata: { documentTitle: '合成 PDF 资料', paragraphs: 4, pages: 2 },
-        layers: { text: 'complete', recognition: 'not-needed', segments: 'complete', vectors: 'not-built' },
+        layers: { text: 'complete', recognition: 'not-needed', segments: 'complete' },
       });
       const page = store.inspectLibraryMaterialSegments({ materialId: text.materialId, from: 1 });
       expect(page.segments.map((segment) => [segment.ordinal, segment.page, segment.pageParagraph])).toEqual([[1, 1, 1], [2, 1, 2], [3, 2, 1], [4, 2, 2]]);

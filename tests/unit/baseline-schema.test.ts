@@ -37,6 +37,11 @@ const INTENDED_DELTA: ReadonlyArray<{ readonly object: string; readonly change: 
   { object: 'index:sqlite_autoindex_model_service_connections_4', change: 'removed', slice: 'R5-F1a' },
   { object: 'table:model_role_choices', change: 'added', slice: 'R5-F1a' },
   { object: 'index:sqlite_autoindex_model_role_choices_1', change: 'added', slice: 'R5-F1a' },
+  // R5-F2c: the similarity vectors retired (ADR 0107 §4 point 5): the table, the autoindex of its key and its two append-only triggers.
+  { object: 'table:material_index_vectors', change: 'removed', slice: 'R5-F2c' },
+  { object: 'index:sqlite_autoindex_material_index_vectors_1', change: 'removed', slice: 'R5-F2c' },
+  { object: 'trigger:material_index_vectors_no_update', change: 'removed', slice: 'R5-F2c' },
+  { object: 'trigger:material_index_vectors_no_delete', change: 'removed', slice: 'R5-F2c' },
 ];
 
 const reference = JSON.parse(readFileSync('tests/fixtures/database/revision-116-schema.json', 'utf8')) as { userVersion: number; rows: DumpRow[] };
@@ -92,7 +97,8 @@ describe('storage baseline (revision 117)', () => {
     }
   });
 
-  it('keeps all 408 RAISE(ABORT) triggers: 382 append-only ledger, 12 insert-time guards, 14 import abandonment-cleanup', () => {
+  // 408 at revision 116; R5-F2c drops the vector table and its two ledger triggers (Commander decision, 2026-11-21).
+  it('keeps 406 RAISE(ABORT) triggers: 380 append-only ledger, 12 insert-time guards, 14 import abandonment-cleanup', () => {
     const db = baseline();
     try {
       const kinds = { ledger: 0, guard: 0, cleanup: 0 };
@@ -102,7 +108,7 @@ describe('storage baseline (revision 117)', () => {
         else if (/IMMUTABLE$/.test(message) && /BEFORE (UPDATE|DELETE)/.test(row.sql!) && !/\bWHEN\b/.test(row.sql!)) kinds.ledger += 1;
         else kinds.guard += 1;
       }
-      expect(kinds).toEqual({ ledger: 382, guard: 12, cleanup: 14 });
+      expect(kinds).toEqual({ ledger: 380, guard: 12, cleanup: 14 });
     } finally {
       db.close();
     }

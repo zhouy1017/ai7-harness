@@ -521,7 +521,6 @@ import { EditorialMarkError, EditorialMarkStore, followReimportedMarks, resolveB
 import {
   RetrievalIndex,
   RetrievalError,
-  type RetrievalMaterialVectorQuery,
   type RetrievalSource,
 } from './retrieval/index.js';
 import { materialRetrievalSources } from './retrieval/source-readers.js';
@@ -711,9 +710,7 @@ import { RESEARCH_EVIDENCE_INCOMPLETE, RESEARCH_EVIDENCE_READ_ONLY, ResearchEvid
 import { FactualVerificationLedger, type ManuscriptReader } from './factual-verification.js';
 import { planEditAssuranceLevel } from './analysis/plan-edits.js';
 import { LibraryMaterialError, LibraryMaterialLedger, libraryMaterialTitle } from './library-materials.js';
-import { MaterialIndexError, MaterialIndexLedger, sweepMaterialIndexWork, type MaterialEmbeddingFacts, type MaterialLayerActivity, type MaterialReferenceBoundary, type MaterialReferencePin, type MaterialTaskReading, type MaterialVectorQuery } from './material-index.js';
-import type { EmbeddingProvider } from './knowledge/embedding.js';
-import { StubEmbeddingProvider } from './knowledge/embedding-stub.js';
+import { MaterialIndexError, MaterialIndexLedger, sweepMaterialIndexWork, type MaterialLayerActivity, type MaterialReferenceBoundary, type MaterialReferencePin, type MaterialTaskReading } from './material-index.js';
 import type { MaterialTranslator } from './fast-role/material-translation-contract.js';
 import { BUILTIN_EVALUATION_PROFILE, EvaluationError, EvaluationRecords, evaluationProfileDigest, type InitialEvaluationFacts } from './evaluation-records.js';
 import { AnalysisFeedbackError, AnalysisFeedbackLedger } from './analysis-feedback.js';
@@ -1374,10 +1371,6 @@ export class EditorialStore {
     return {
       get authority() { return store.#authority; },
       get dataRoot() { return store.#dataRoot; },
-      get embedding() { return store.#embedding; },
-      enrollmentCall: this.#enrollmentCall.bind(this),
-      get enrollments() { return store.#enrollments; },
-      get idleVectorItems() { return store.#idleVectorItems; },
       get indexController() { return store.#indexController; },
       set indexController(value) { store.#indexController = value; },
       get indexEnabled() { return store.#indexEnabled; },
@@ -1401,13 +1394,6 @@ export class EditorialStore {
       set translationRun(value) { store.#translationRun = value; },
       get translator() { return store.#translator; },
       set translator(value) { store.#translator = value; },
-      get vectorBuilding() { return store.#vectorBuilding; },
-      set vectorBuilding(value) { store.#vectorBuilding = value; },
-      get vectorLaneIdle() { return store.#vectorLaneIdle; },
-      set vectorLaneIdle(value) { store.#vectorLaneIdle = value; },
-      get vectorQueue() { return store.#vectorQueue; },
-      get vectorRun() { return store.#vectorRun; },
-      set vectorRun(value) { store.#vectorRun = value; },
       get inspectLibraryMaterial() { return store.inspectLibraryMaterial.bind(store); },
       get replacementFrozen() { return store.replacementFrozen.bind(store); },
       get startMaterialIndexing() { return store.startMaterialIndexing.bind(store); },
@@ -1512,14 +1498,6 @@ export class EditorialStore {
   #indexStopped = false;
   /** Set once the service serves (`startMaterialIndexing`): a store opened for any other purpose builds no index by itself. */
   #indexEnabled = false;
-  /**
-   * 相似段落检索 (Issue #892): what makes the similarity vectors on this machine — the deterministic built-in provider until a
-   * model adapter is admitted — and the items whose vectors the editor asked for, in order, and the one being built now.
-   */
-  readonly #embedding: EmbeddingProvider = new StubEmbeddingProvider();
-  readonly #vectorQueue: string[] = [];
-  #vectorBuilding: string | null = null;
-  #vectorRun: Promise<void> | null = null;
   /** 来源译文 (Issue #892): who makes it, if this launch can; the item being translated now; why an item's last request stopped. */
   #translator: MaterialTranslator | null = null;
   #translating: string | null = null;
@@ -4231,7 +4209,7 @@ export class EditorialStore {
     const state = read === 'damaged' ? 'damaged' : record === null ? 'none' : record.state === 'active' && record.paused ? 'paused' : record.state;
     const next = this.#analysisCall(() => kind === BACKGROUND_ANALYSIS_KIND ? this.#backgroundDecision(bookId, read, runtime) : { kind: 'none' as const,
       reason: kind === 'factual-recheck' ? '空闲时按最新的要求补充证据决定复核一条冻结断言；未决结果不会自动重新排队。'
-        : kind === 'material-index' ? '空闲时在本机为这本书可参考的资料建立相似索引，从上次停下的段落接着建；你回来编辑时让开。'
+        : kind === 'material-index' ? '资料加入时已在本机建好索引，检索不需要另外构建；这项登记目前没有要在空闲时做的事。'
         : '登记已保留；相应工序接入后台处理后，才会按登记开始。' });
     const binding = backgroundEnrollments.enrollmentBinding(this.#backgroundEnrollmentHost, bookId, kind);
     const nextOrdinal = record === null ? 1 : record.version.ordinal + 1;
@@ -4576,8 +4554,6 @@ export class EditorialStore {
     this.#indexStopped = true;
     this.#indexQueue.length = 0;
     this.#indexController?.abort();
-    // Vectors and 来源译文 asked for stop after the batch under way; what was recorded stays, the rest is asked for again (#892).
-    this.#vectorQueue.length = 0;
     // A backup still under way stops at its next chunk rather than write on past the store (Issue #434 review).
     void this.#scheduledBackups.stop();
     // A database export still under way stops as 取消导出 stops it (Issue #434 review).
@@ -5736,7 +5712,7 @@ export class EditorialStore {
     return materialIndexOperations.settleMaterialIndexing(this.#materialIndexOperationsHost);
   }
 
-  /** Resolves once no similarity vectors or 来源译文 are being made (Issue #892): for a caller that must see them recorded. */
+  /** Resolves once no 来源译文 is being made (Issue #892): for a caller that must see it recorded. */
   async settleMaterialLayers(): Promise<void> {
     return materialIndexOperations.settleMaterialLayers(this.#materialIndexOperationsHost);
   }
@@ -5783,15 +5759,6 @@ export class EditorialStore {
 
   // ---- 相似段落检索 and 来源译文 (Issue #892; editor-surfaces §8.4, V2-UX-KB-009) ---------------------------------------------
 
-  /** The store's similarity provider: the built-in one in every test, CI run and test guest, and until a model adapter is admitted. */
-  embeddingProvider(): EmbeddingProvider {
-    return materialIndexOperations.embeddingProvider(this.#materialIndexOperationsHost);
-  }
-
-  #embeddingFacts(): MaterialEmbeddingFacts {
-    return materialIndexOperations.internalEmbeddingFacts(this.#materialIndexOperationsHost);
-  }
-
   /** Who makes 来源译文 under this launch — the service sets it once it serves; `null` refuses every request. */
   useMaterialTranslator(translator: MaterialTranslator | null): void {
     return materialIndexOperations.useMaterialTranslator(this.#materialIndexOperationsHost, translator);
@@ -5807,62 +5774,12 @@ export class EditorialStore {
   }
 
   /**
-   * 构建相似索引 (Issue #892; KB-009): the item's current build gets its similarity vectors, made on this machine by the
-   * store's provider, a batch at a time beside the service's other work — never on open, only when the editor asks. Refused
-   * before its text was read, while the provider's model files are missing, or while a database replacement waits; asking
-   * again for vectors already complete or under way changes nothing. Nothing is sent.
-   */
-  buildMaterialVectors(materialId: string): LibraryMaterialProjection {
-    return materialIndexOperations.buildMaterialVectors(this.#materialIndexOperationsHost, materialId);
-  }
-
-  #startVectorPump(): void {
-    return materialIndexOperations.internalStartVectorPump(this.#materialIndexOperationsHost);
-  }
-
-  /** The items the idle lane queued, which give way while the editor works; and whether the lane is idle now (Issue #1166). */
-  readonly #idleVectorItems = new Set<string>();
-  #vectorLaneIdle = true;
-
-  /**
-   * 资料索引 on the idle lane (Issue #1166; ADR 0095 §3): each pass of the background dispatcher says whether the editor is
-   * quiet. While quiet, every Book with an active 资料索引 Background Processing Enrollment has the items it may refer to —
-   * retained research sources saved as 来源材料 among them — queued for their similarity vectors, beside any the editor asked
-   * for; once the editor is back, those items stop after the batch under way, and the next quiet pass goes on from the first
-   * paragraph still without its vector. A provider that is not ready, or no enrollment in force, builds nothing, and retrieval
-   * ranks those items lexically. Nothing is sent.
-   */
-  indexIdleMaterialVectors(idle: boolean): void {
-    return materialIndexOperations.indexIdleMaterialVectors(this.#materialIndexOperationsHost, idle);
-  }
-
-  /**
-   * One item's vectors after another, `MATERIAL_VECTOR_BATCH` paragraphs at a time: each batch embedded outside any
-   * transaction, then written in one, the service taking its other work between two. A stop, a replacement waiting or a
-   * store that can no longer write ends the item's run; what was recorded stays and the next request goes on from there.
-   */
-  async #pumpMaterialVectors(): Promise<void> {
-    return materialIndexOperations.internalPumpMaterialVectors(this.#materialIndexOperationsHost);
-  }
-
-  /**
-   * 相似段落检索 in an item's 查看索引 (Issue #892): its paragraphs nearest the editor's text, by the vectors the editor built;
-   * read-only, on this machine. The ranking finds candidates; the words are read where each anchor points (ADR 0026).
+   * 相似段落检索 in an item's 查看索引 (Issue #892; since R5-F2c on R5-F2a's local lexical ranking, ADR 0107 §4 point 5): its
+   * paragraphs that best match the editor's words, as soon as its index is built; read-only, on this machine, nothing built or
+   * written. The ranking finds candidates; the words are read where each anchor points (ADR 0026).
    */
   async searchLibraryMaterialVectors(input: ServiceOperationMap['queryMaterialVectors']['input']): Promise<MaterialVectorSearchProjection> {
     return materialIndexOperations.searchLibraryMaterialVectors(this.#materialIndexOperationsHost, input);
-  }
-
-  /**
-   * A Task's similarity search over the 资料库 items its plan lists (Issue #892; KB-009, ADR 0026, ADR 0047): read-only, within
-   * its plan boundary exactly as `readMaterialIndexForTask` — every item searched is one its plan lists (`materialIds`, when
-   * given, must each be one), at the build its plan pinned, which this Book's Tasks may still list. Each pinned build is
-   * searched by its own vectors; one without them is listed as not searched, never built here. Candidates are pointers:
-   * their words are read through `readMaterialIndexForTask` from the candidate's paragraph. Nothing is written, sent or
-   * scheduled, and a built index grants no Run scope, egress or learning eligibility.
-   */
-  async queryMaterialVectors(boundary: MaterialReferenceBoundary, text: string, k: number, materialIds?: readonly string[]): Promise<MaterialVectorQuery> {
-    return materialIndexOperations.queryMaterialVectors(this.#materialIndexOperationsHost, boundary, text, k, materialIds);
   }
 
   /**
@@ -5900,16 +5817,16 @@ export class EditorialStore {
     return this.#runRetrieval(runRecordId, ledger).sources;
   }
 
-  /** A Run's disposable index over exactly its pinned sources, ranked lexically and by this store's local vectors (#892). */
+  /** A Run's disposable index over exactly its pinned sources and records, ranked lexically (#1623; ADR 0107 §4 point 5). */
   retrievalIndexForRun(runRecordId: string, ledger: BaselineAnalysisStore): RetrievalIndex {
-    const { boundary, sources } = this.#runRetrieval(runRecordId, ledger);
+    const { sources } = this.#runRetrieval(runRecordId, ledger);
     const facts = ledger.loadExecutionPlan(runRecordId);
     const submitted = facts.update === null ? null : new Set(facts.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
     const allowed = new Set(facts.manifest.units.filter((unit) => submitted === null || submitted.has(unit.ordinal)).flatMap((unit) => [...unit.blockIds, ...unit.overlapBlockIds]));
     const scoped = facts.compositionOptions?.version !== 2 ? sources : sources.map((source) => source.sourceKind !== 'manuscript' ? source : {
       ...source, read: () => { const reading = source.read(); return { ...reading, segments: reading.segments.filter((segment) => segment.blockId !== undefined && allowed.has(segment.blockId)) }; },
     });
-    return new RetrievalIndex(scoped, this.#embedding, this.#materialVectorQuery(boundary), ledger.pinnedToolSourcesForRun(runRecordId));
+    return new RetrievalIndex(scoped, ledger.pinnedToolSourcesForRun(runRecordId));
   }
 
   #runRetrieval(runRecordId: string, ledger: BaselineAnalysisStore): { boundary: MaterialReferenceBoundary; sources: RetrievalSource[] } {
@@ -5920,12 +5837,6 @@ export class EditorialStore {
       ...materialRetrievalSources(boundary, (scope, id, from) => this.readMaterialIndexForTask(scope, id, from))] };
   }
 
-  /** The pinned builds' own vectors through the Task seam; an item without them is ranked lexically only. */
-  #materialVectorQuery(boundary: MaterialReferenceBoundary): RetrievalMaterialVectorQuery {
-    return async (query, k) => (await this.queryMaterialVectors(boundary, query, k)).candidates
-      .map(({ materialId, indexDigest, ordinal, score }) => ({ materialId, indexDigest, ordinal, score }));
-  }
-
   dialogueRetrievalSources(dialogueId: string): RetrievalSource[] {
     const task = this.#dialogues.task(dialogueId);
     if (task === null) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
@@ -5933,7 +5844,7 @@ export class EditorialStore {
   }
 
   dialogueRetrievalIndex(dialogueId: string): RetrievalIndex {
-    return new RetrievalIndex(this.dialogueRetrievalSources(dialogueId), this.#embedding);
+    return new RetrievalIndex(this.dialogueRetrievalSources(dialogueId));
   }
 
   /** Editor-side discovery: no Run, no model, no persisted projection or implicit reference selection. */
@@ -5944,8 +5855,7 @@ export class EditorialStore {
       try { return [this.pinMaterialReference(input.bookId, item.materialId)]; } catch { return []; }
     });
     const boundary = { bookId: input.bookId, references };
-    const index = new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => this.readMaterialIndexForTask(scope, id, from)),
-      this.#embedding, this.#materialVectorQuery(boundary));
+    const index = new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => this.readMaterialIndexForTask(scope, id, from)));
     try { return { candidates: await index.retrieve(input.query, input.k, ['material']) }; } finally { index.dispose(); }
   }
 

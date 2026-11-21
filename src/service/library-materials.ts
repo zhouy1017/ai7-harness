@@ -359,8 +359,8 @@ export interface LibraryMaterialPlace {
 export type LibraryMaterialIndexReader = (material: LibraryMaterialOriginal) => MaterialIndexProjection;
 
 const UNBUILT_INDEX: MaterialIndexProjection = {
-  state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, vectors: null, translation: null,
-  layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending', vectors: 'pending' },
+  state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, translation: null,
+  layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending' },
 };
 
 export class LibraryMaterialLedger {

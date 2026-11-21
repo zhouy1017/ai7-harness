@@ -863,9 +863,7 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: await store.searchReferableMaterials(request.input) };
     case 'inspectLibraryMaterialSegments':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterialSegments(request.input) };
-    // 构建相似索引, 相似段落检索 and 生成来源译文 (Issue #892).
-    case 'buildMaterialVectors':
-      return { id: request.id, ok: true, op: request.op, result: store.buildMaterialVectors(request.input.materialId) };
+    // 相似段落检索 and 生成来源译文 (Issue #892).
     case 'queryMaterialVectors':
       return { id: request.id, ok: true, op: request.op, result: await store.searchLibraryMaterialVectors(request.input) };
     case 'requestMaterialTranslation':

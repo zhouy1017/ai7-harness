@@ -15,7 +15,7 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 
 // The storage baseline's open (#1634; ADR 0105 §4) over the real store: an empty Agent Data Root is built at revision 117 with
 // one Data Version 2 record; a store of an earlier Data Version is refused before anything touches it, its files left byte for
-// byte; a baseline store that is not exactly the baseline is refused; and the 408 RAISE(ABORT) triggers stand and refuse.
+// byte; a baseline store that is not exactly the baseline is refused; and the RAISE(ABORT) triggers stand and refuse (408 at revision 116; 406 since R5-F2c retired the vector table's two).
 
 let roots: ServiceTestRoots;
 beforeEach(async () => { roots = await createServiceTestRoots('ai7-baseline-open-'); });
@@ -149,7 +149,7 @@ describe('opening the storage baseline', () => {
     await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toMatchObject({ code: 'SCHEMA_INVALID' });
   });
 
-  it('keeps all 408 triggers over imported sample1, and each kind refuses as it did at revision 116', async () => {
+  it('keeps all 406 triggers (408 less the two of the retired vector table, R5-F2c) over imported sample1, and each kind refuses as it did at revision 116', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let staged: Awaited<ReturnType<EditorialStore['stageSelectedManuscript']>>;
     try {
@@ -163,7 +163,7 @@ describe('opening the storage baseline', () => {
     const db = new DatabaseSync(storePath(roots.dataRoot));
     try {
       const triggers = db.prepare("SELECT count(*) total FROM sqlite_schema WHERE type = 'trigger' AND sql LIKE '%RAISE(ABORT%'").get()!.total;
-      expect(triggers).toBe(408);
+      expect(triggers).toBe(406);
       // Append-only ledger: update and delete.
       expect(() => db.exec("UPDATE store_versions SET software_version = '9.9.9'")).toThrow(baseMessage('store_versions_no_update'));
       expect(() => db.exec('DELETE FROM store_versions')).toThrow(baseMessage('store_versions_no_delete'));

@@ -105,6 +105,8 @@ The version list in 工作概览 holds milestones, saved revisions and publicati
 
 **Triggers.** All 408 `RAISE(ABORT)` triggers of a schema-115/116 store stay. They are counted on the admitted SampleBook fixture; schema 116 adds none.
 
+> Clarification, 2026-11-21 (Commander decision; R5-F2c, #1653): the similarity-vector table that ADR 0107 §4 point 5 retires owned two of the 382 append-only ledger triggers, so the 117 baseline holds 406 — 380 ledger, 12 guards, 14 cleanup; every trigger of a table that stays, stays.
+
 | Kind | Triggers | Reason to keep |
 | --- | --- | --- |
 | Append-only ledgers | 382 | Now emitted by one helper. No R5 write path updates or deletes a ledger row. |

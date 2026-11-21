@@ -2301,12 +2301,6 @@
   },
   {
    "type": "index",
-   "name": "sqlite_autoindex_material_index_vectors_1",
-   "tbl_name": "material_index_vectors",
-   "sql": null
-  },
-  {
-   "type": "index",
    "name": "sqlite_autoindex_material_translation_attempts_1",
    "tbl_name": "material_translation_attempts",
    "sql": null
@@ -4689,12 +4683,6 @@
   },
   {
    "type": "table",
-   "name": "material_index_vectors",
-   "tbl_name": "material_index_vectors",
-   "sql": "CREATE TABLE material_index_vectors (\n  index_id TEXT NOT NULL REFERENCES material_index_builds(index_id),\n  index_sha256 TEXT NOT NULL CHECK(length(index_sha256) = 64),\n  embedding TEXT NOT NULL CHECK(length(embedding) BETWEEN 1 AND 256),\n  ordinal INTEGER NOT NULL CHECK(ordinal >= 1),\n  segment_sha256 TEXT NOT NULL CHECK(length(segment_sha256) = 64),\n  dimensions INTEGER NOT NULL CHECK(dimensions BETWEEN 1 AND 4096),\n  vector BLOB NOT NULL CHECK(length(vector) = dimensions * 4),\n  norm REAL NOT NULL CHECK(norm >= 0),\n  recorded_at TEXT NOT NULL,\n  PRIMARY KEY(index_id, embedding, ordinal)\n) STRICT"
-  },
-  {
-   "type": "table",
    "name": "material_translation_attempts",
    "tbl_name": "material_translation_attempts",
    "sql": "CREATE TABLE material_translation_attempts (\n  attempt_id TEXT PRIMARY KEY CHECK(length(attempt_id) = 36),\n  index_id TEXT NOT NULL REFERENCES material_index_builds(index_id),\n  outcome TEXT NOT NULL CHECK(outcome IN ('translated', 'failed', 'outcome-unknown')),\n  recorded_at TEXT NOT NULL,\n  canonical_json TEXT NOT NULL CHECK(length(canonical_json) BETWEEN 1 AND 16384 AND json_valid(canonical_json)),\n  sha256 TEXT NOT NULL CHECK(length(sha256) = 64)\n) STRICT"
@@ -6906,18 +6894,6 @@
    "name": "material_index_translations_no_update",
    "tbl_name": "material_index_translations",
    "sql": "CREATE TRIGGER material_index_translations_no_update\n    BEFORE UPDATE ON material_index_translations\n    BEGIN\n      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');\n    END"
-  },
-  {
-   "type": "trigger",
-   "name": "material_index_vectors_no_delete",
-   "tbl_name": "material_index_vectors",
-   "sql": "CREATE TRIGGER material_index_vectors_no_delete\n    BEFORE DELETE ON material_index_vectors\n    BEGIN\n      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');\n    END"
-  },
-  {
-   "type": "trigger",
-   "name": "material_index_vectors_no_update",
-   "tbl_name": "material_index_vectors",
-   "sql": "CREATE TRIGGER material_index_vectors_no_update\n    BEFORE UPDATE ON material_index_vectors\n    BEGIN\n      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');\n    END"
   },
   {
    "type": "trigger",

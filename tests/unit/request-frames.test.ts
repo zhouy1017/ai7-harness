@@ -2251,22 +2251,20 @@ describe('decodeRequest rejects malformed frames', () => {
     ]);
   });
 
-  it('decodes material vector and translation requests without model or embedding fields', () => {
+  it('decodes 相似段落检索 within the lexical ranker bounds and translation requests without model fields; 构建相似索引 is gone (R5-F2c)', () => {
     const materialId = randomUUID();
     expectAcceptedInputs([
-      { op: 'buildMaterialVectors', input: { materialId } },
       { op: 'requestMaterialTranslation', input: { materialId } },
       { op: 'queryMaterialVectors', input: { materialId, text: '河边的老人', k: 5 } },
-      { op: 'queryMaterialVectors', input: { materialId, text: '字'.repeat(2_000), k: 32 } },
+      { op: 'queryMaterialVectors', input: { materialId, text: '字'.repeat(1_000), k: 8 } },
     ]);
     expectRejectedInputs([
-      ['buildMaterialVectors', { materialId: 'first' }],
-      ['buildMaterialVectors', { materialId, embedding: 'other' }],
+      ['buildMaterialVectors', { materialId }],
       ['requestMaterialTranslation', {}],
       ['requestMaterialTranslation', { materialId, model: 'x' }],
-      ['queryMaterialVectors', { materialId, text: '字'.repeat(2_001), k: 5 }],
+      ['queryMaterialVectors', { materialId, text: '字'.repeat(1_001), k: 5 }],
       ['queryMaterialVectors', { materialId, text: '河边', k: 0 }],
-      ['queryMaterialVectors', { materialId, text: '河边', k: 33 }],
+      ['queryMaterialVectors', { materialId, text: '河边', k: 9 }],
       ['queryMaterialVectors', { materialId, text: '河边' }],
       ['queryMaterialVectors', { materialId: 'first', text: '河边', k: 5 }],
     ]);

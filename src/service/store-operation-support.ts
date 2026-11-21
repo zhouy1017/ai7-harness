@@ -111,10 +111,7 @@ export const EVALUATION_PROFILE_UNKNOWN_ID = 'unknown/merged-profile';
 
 export const EVALUATION_PROFILE_UNKNOWN_TITLE = '未知版本';
 
-/** How many paragraphs 构建相似索引 embeds and writes at a time (Issue #892): the service takes its other work between two. */
-export const MATERIAL_VECTOR_BATCH = 256;
-
-/** Why the two on-request layers are not made while a database replacement waits (Issue #892). */
+/** Why 来源译文, the on-request layer, is not made while a database replacement waits (Issue #892). */
 export const MATERIAL_LAYERS_READ_ONLY = '数据库替换正在等待：资料索引暂不建立新的层。';
 
 /** 准备计划's draft as a preparation carries it (Issue #423, slice 7a): its version, its sentence, and how the promotion is recorded. */
