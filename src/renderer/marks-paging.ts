@@ -16,7 +16,7 @@ export interface MarksPagingHost {
   changed(): void;
   alive(): boolean;
   /** Where focus goes when 显示更多 is pressed for the last time and the row leaves. */
-  focusAfter(): void;
+  focusAfter(markId?: string): void;
   errorMessage(error: unknown, fallback: string): string;
   setStatus(message: string, tone: 'error'): void;
 }
@@ -76,6 +76,7 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
   let lastKey = windowKey(host.window());
   let restoreDone: Promise<void> | null = null;
   let failure: string | null = null;
+  let moreFocusFrom: Set<string> | null = null;
 
   /**
    * Reads following pages in ascending order until `target` marks are held or the last page is read, then sets them in one move.
@@ -195,18 +196,22 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
     if (page === undefined || page.nextOrdinal === null) {
       row.hidden = true;
       failed.hidden = true;
-      if (hadFocus) host.focusAfter();
+      if (hadFocus) host.focusAfter(moreFocusFrom === null ? undefined : window.marks.find(mark => mark.kind !== 'personal-highlight' && !moreFocusFrom!.has(mark.markId))?.markId);
       return;
     }
     row.hidden = false;
     const text = marksShownLine(window.marks.length, page.total);
     if (line.textContent !== text) line.textContent = text;
-    button.disabled = reading !== null;
+    button.setAttribute('aria-disabled', String(reading !== null));
     row.setAttribute('aria-busy', String(reading !== null));
     failed.hidden = failure === null;
     if (failure !== null && failed.textContent !== failure) failed.textContent = failure;
   }
 
-  button.addEventListener('click', () => void more());
+  button.addEventListener('click', () => {
+    if (reading !== null) return;
+    moreFocusFrom = document.activeElement === button ? new Set(host.window().marks.map(mark => mark.markId)) : null;
+    void more().finally(() => { moreFocusFrom = null; });
+  });
   return { row, observe, more, hold, restoring: () => restoring, generation: () => epoch, settled: () => restoreDone ?? Promise.resolve(), paint };
 }

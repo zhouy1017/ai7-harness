@@ -29,7 +29,7 @@ const PLACE = `(() => {
 })()`;
 
 /** Check final engine geometry; Tab reaches a taller card's action while the pane follows focus. */
-export async function assertCardActionReachable(renderer, check, waitFor, selector, name) {
+export async function assertCardActionReachable(renderer, check, waitFor, selector, name, { returnToCard = false } = {}) {
   const facts = `(() => {
     const card=document.querySelector(${JSON.stringify(selector)}), pane=document.querySelector('.manuscript-comments-scroll');
     const button=card?.querySelector('[data-mark-action="accept-and-apply"]');
@@ -39,9 +39,8 @@ export async function assertCardActionReachable(renderer, check, waitFor, select
     const inside=r=>r.width>0 && r.height>0 && r.left>=view.left && r.right<=view.right && r.top>=view.top && r.bottom<=view.bottom;
     const hit=document.elementFromPoint(b.left+b.width/2,b.top+b.height/2);
     const line=parseFloat(getComputedStyle(card).lineHeight)||parseFloat(getComputedStyle(card).fontSize)*1.2;
-    return {branch:c.height<=view.bottom-view.top?'fits':'tall',cardHeight:c.height,paneHeight:view.bottom-view.top,whole:inside(c),head:c.top>=view.top && c.top+line<=view.bottom,
-      action:inside(b) && (hit===button || button.contains(hit)),card:[c.left,c.top,c.right,c.bottom],button:[b.left,b.top,b.right,b.bottom],pane:view,window:[innerWidth,innerHeight],scrollTop:pane.scrollTop,
-      x:(view.left+view.right)/2,y:(view.top+view.bottom)/2,delta:Math.max(40,Math.min((view.bottom-view.top)*0.7,b.bottom-view.bottom+8))};
+    return {branch:c.height<=view.bottom-view.top?'fits':'tall',cardHeight:c.height,paneHeight:view.bottom-view.top,whole:inside(c),head:c.left>=p.left-1 && c.right<=p.right+1 && c.left>=0 && c.right<=innerWidth && c.top<=innerHeight-80 && c.top>=view.top && c.top+line<=view.bottom,
+      action:inside(b) && (hit===button || button.contains(hit)),card:[c.left,c.top,c.right,c.bottom],button:[b.left,b.top,b.right,b.bottom],pane:view,window:[innerWidth,innerHeight],scrollTop:pane.scrollTop};
   })()`;
   await waitFor(renderer, `new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`, name+'-rest');
   const before=await renderer.evaluate(facts);
@@ -63,6 +62,43 @@ export async function assertCardActionReachable(renderer, check, waitFor, select
   const after=await renderer.evaluate(facts);
   console.log('COMMENTS_ACTION/'+name+'/'+JSON.stringify({arrival:before,after}));
   check(after?.action===true,name+'-action',{...after,branch:before.branch,arrival:before});
+  if (before.branch==='tall') {
+    const text=await renderer.evaluate(`(() => {const node=document.querySelector('.editor-window'),r=node.getBoundingClientRect();return {x:r.left+16,y:(Math.max(0,r.top)+Math.min(innerHeight,r.bottom))/2,top:node.scrollTop,delta:node.scrollTop+node.clientHeight<node.scrollHeight?1:-1};})()`);
+    await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:text.x,y:text.y,deltaX:0,deltaY:text.delta});
+    await waitFor(renderer,`document.querySelector('.editor-window').scrollTop!==${text.top}`,name+'-text-wheel');
+    await waitFor(renderer,`new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`,name+'-layout-rest');
+    const held=await renderer.evaluate(facts);
+    check(held?.action===true,name+'-held-through-layout',held);
+    await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:text.x,y:text.y,deltaX:0,deltaY:-text.delta});
+    await waitFor(renderer,`document.querySelector('.editor-window').scrollTop===${text.top}`,name+'-text-restored');
+    await waitFor(renderer,`new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`,name+'-restored-layout-rest');
+    const restored=await renderer.evaluate(facts);
+    check(restored?.action===true,name+'-action-after-layout',restored);
+    {
+      const onCard=`document.activeElement===document.querySelector(${JSON.stringify(selector)})`;
+      const trail=[];
+      for(let turn=0;turn<40 && !(await renderer.evaluate(onCard));turn++) {
+        trail.push(await renderer.evaluate(`({tag:document.activeElement?.tagName,action:document.activeElement?.dataset?.markAction??null})`));
+        await renderer.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',modifiers:8,windowsVirtualKeyCode:9,nativeVirtualKeyCode:9});
+        await renderer.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',modifiers:8,windowsVirtualKeyCode:9,nativeVirtualKeyCode:9});
+      }
+      check(await renderer.evaluate(onCard),name+'-back-to-card',{trail});
+      await waitFor(renderer,`new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`,name+'-head-rest');
+      const head=await renderer.evaluate(facts);
+      check(head?.head===true && Math.abs(head.card[1]-head.pane.top)<=1,name+'-head-returned',head);
+      if (!returnToCard) {
+        const onAction=`document.activeElement===document.querySelector(${JSON.stringify(selector)})?.querySelector('[data-mark-action="accept-and-apply"]')`;
+        for(let turn=0;turn<40 && !(await renderer.evaluate(onAction));turn++) {
+          await renderer.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,nativeVirtualKeyCode:9});
+          await renderer.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,nativeVirtualKeyCode:9});
+        }
+        check(await renderer.evaluate(onAction),name+'-tab-return-to-action');
+        await waitFor(renderer,`new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`,name+'-press-rest');
+        const ready=await renderer.evaluate(facts);
+        check(ready?.action===true,name+'-ready-to-press',ready);
+      }
+    }
+  }
 }
 
 /** The action was revealed by the reader already: measure and press without moving either pane. */
@@ -163,6 +199,8 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     await pointerClick(renderer, waitFor, '[data-marks-paging] [data-marks-more]', 'marks-paging-more');
     const now = Math.min(facts.total, shown + 400);
     await waitFor(renderer, now >= facts.total ? `document.querySelector('[data-marks-paging]')?.hidden===true` : `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(`已显示 ${now} / ${facts.total} 条。`)} && document.querySelector('[data-marks-more]').disabled===false`, 'marks-paging-page-loaded', 60_000);
+    await waitFor(renderer, `document.querySelector('[data-marks-paging]').hidden ? document.activeElement?.matches('[data-comment-card]')===true : document.activeElement===document.querySelector('[data-marks-more]')`, 'marks-paging-more-focus');
+    check(await renderer.evaluate(`document.querySelector('[data-marks-paging]').hidden ? document.activeElement?.matches('[data-comment-card]')===true : document.activeElement===document.querySelector('[data-marks-more]')`),'marks-paging-more-focus');
   }
   // The marks the pane did not have before the press: those past the first page (an earlier stage's mark may stand undrawn on page 1).
   const open = facts.marks.slice(400).filter((mark) => mark.status === 'open' && mark.anchorState === 'exact' && mark.kind !== 'personal-highlight');
@@ -229,7 +267,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     const rect=(element)=>element?.getBoundingClientRect()??null, view={left:0,top:0,right:innerWidth,bottom:innerHeight};
     const cardBox=rect(node), paneBox=rect(scroll);
     const visibleHeight=Math.min(innerHeight,paneBox.top+scroll.clientHeight)-Math.max(0,paneBox.top);
-    return {card:cardBox.height<=visibleHeight?inside(cardBox,paneBox) && inside(cardBox,view):cardBox.top>=Math.max(0,paneBox.top) && cardBox.top+24<=Math.min(innerHeight,paneBox.bottom), words:inside(rect(words),rect(editor)) && inside(rect(words),view), row:${rowNow}, cardBox:[cardBox.left,cardBox.top,cardBox.right,cardBox.bottom], cardHeight:cardBox.height,paneHeight:visibleHeight,branch:cardBox.height<=visibleHeight?'fits':'tall',viewport:[innerWidth,innerHeight]};
+    return {card:cardBox.height<=visibleHeight?inside(cardBox,paneBox) && inside(cardBox,view):cardBox.left>=paneBox.left-1 && cardBox.right<=paneBox.right+1 && cardBox.left>=0 && cardBox.right<=innerWidth && cardBox.top<=innerHeight-80 && cardBox.top>=Math.max(0,paneBox.top) && cardBox.top+24<=Math.min(innerHeight,paneBox.bottom), words:inside(rect(words),rect(editor)) && inside(rect(words),view), row:${rowNow}, cardBox:[cardBox.left,cardBox.top,cardBox.right,cardBox.bottom], cardHeight:cardBox.height,paneHeight:visibleHeight,branch:cardBox.height<=visibleHeight?'fits':'tall',viewport:[innerWidth,innerHeight]};
   })()`);
   check(arrived.card && arrived.words && arrived.row === rowWant, 'marks-paging-arrived-beyond-first-page', { ...arrived, rowWant });
   // It can be accepted: 接受并应用 on its card, by a real click (a pointer decision stays on the page); the service records the Apply.
@@ -268,6 +306,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   console.log('COMMENTS_DECISION_PLACE/'+JSON.stringify({placeBefore,placeAfter,next:around}));
   check(placeAfter.first === placeBefore.first && Math.abs(placeAfter.scrollTop - placeBefore.scrollTop) <= Math.round((await renderer.evaluate('innerHeight')) / 4) && placeAfter.selected === wantSelected && (around === null || placeAfter.active === wantSelected) && placeAfter.selectedInWindow && placeAfter.activeInWindow,
     'marks-paging-decision-keeps-place', { placeBefore, placeAfter, next: around });
+  if (around!==null) await assertCardActionReachable(renderer,check,waitFor,`[data-comment-card="${around}"]`,'marks-paging-decision-next',{returnToCard:true});
   await pointerClick(renderer, waitFor, '[data-mark-filter-toggle]', 'marks-paging-reset-open');
   await waitFor(renderer, isOpen, 'marks-paging-reset-opened');
   await pointerClick(renderer, waitFor, '[data-mark-category-filter="all"]', 'marks-paging-reset-category');

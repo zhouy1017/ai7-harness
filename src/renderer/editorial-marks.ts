@@ -801,7 +801,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     read: (input) => api.getManuscriptWindowAt(input),
     changed: () => refreshComments(),
     alive: () => !destroyed,
-    focusAfter: () => filterButton.focus(),
+    focusAfter: (markId) => { if (markId === undefined) filterButton.focus(); else void revealRevision(markId); },
     errorMessage: (error, fallback) => options.errorMessage(error, fallback),
     setStatus: (message, tone) => options.setStatus(message, tone),
   });
@@ -965,12 +965,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     setTimeout(() => { if (pressSequence === sequence) releaseCommentPress(); }, 100);
   };
   function focusComment(mark: EditorialMarkAnchorProjection): void {
-    // Tab within the selected card may scroll its controls into view; keep that pane position.
     if (pressedComment !== undefined) return;
-    if (activeComment === mark.markId) {
-      if (document.activeElement === commentNodes.get(mark.markId)?.node) scheduleCommentsLayout();
-      return;
-    }
     const rect = commentAnchor(mark)?.getBoundingClientRect();
     const viewport = options.scroll.getBoundingClientRect();
     if (rect && (rect.bottom < viewport.top || rect.top > viewport.bottom)) commentAnchor(mark)?.scrollIntoView({ block: 'center', behavior: 'instant' });
@@ -1202,7 +1197,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const selectedIndex = items.findIndex(item => item.mark.markId === activeComment && item.anchor.bottom >= viewport.top && item.anchor.top <= viewport.bottom);
     const paneTop = commentsScroll.scrollTop || 0;
     const selectedNode = activeComment === undefined ? undefined : commentNodes.get(activeComment)?.node;
-    const holdingControl = selectedNode !== undefined && document.activeElement !== selectedNode && selectedNode.contains(document.activeElement);
+    const holdingControl = selectedNode !== undefined && selectedNode.getBoundingClientRect().height > commentsScroll.clientHeight && document.activeElement !== selectedNode && selectedNode.contains(document.activeElement);
     const holdingFrame = preservePanePositions || holdingControl || (activeComment === undefined && paneTop > 0);
     const placed = holdingFrame ? (() => {
       const existing = items.filter(item => Number.isFinite(Number.parseFloat(item.node.style.top)))
@@ -1249,14 +1244,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (active) {
       // Expansion can change the height after the stack measured it. Correct only cards
       // that fit their final visible box; taller cards retain the stack's head alignment.
-      if (!preservePanePositions && !holdingControl) {
+      if (!preservePanePositions) {
         const pane = commentsScroll.getBoundingClientRect();
-        const box = active.node.getBoundingClientRect();
+        const box = (holdingControl ? document.activeElement! : active.node).getBoundingClientRect();
         if (box.height <= commentsScroll.clientHeight) {
           const visibleBottom = pane.top + commentsScroll.clientHeight;
           const delta = box.bottom > visibleBottom ? box.bottom - visibleBottom : box.top < pane.top ? box.top - pane.top : 0;
           // Browser scroll offsets can round fractional pixels back outside the visible box.
-          if (delta) commentsScroll.scrollTop += delta > 0 ? Math.ceil(delta) : Math.floor(delta);
+          if (delta) {
+            const step = delta > 0 ? Math.ceil(delta) : Math.floor(delta);
+            commentsCanvas.style.height = `${Math.max(Number.parseFloat(commentsCanvas.style.height), commentsScroll.scrollTop + step + commentsScroll.clientHeight)}px`;
+            commentsScroll.scrollTop += step;
+          }
           commentsFrameScroll = commentsScroll.scrollTop;
         }
       }

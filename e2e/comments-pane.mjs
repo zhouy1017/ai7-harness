@@ -866,27 +866,27 @@ async function commentsTriage(renderer, check, waitFor, form, keyword) {
   // 下一条待处理 on the page, then across it; the card there stays selected once read.
   await nextClick('comments-triage-next-click');
   await waitFor(renderer, `${triageReady(0)} && ${TRIAGE_FIRST}===__triage.start`, 'comments-triage-next-on-page', 60_000);
-  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[0]') + '"]', 'comments-triage-next-on-page');
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[0]') + '"]', 'comments-triage-next-on-page', {returnToCard:true});
   await nextClick('comments-triage-cross-click');
   await waitFor(renderer, `${TRIAGE_FIRST}!==__triage.start && ${triageReady(1)}`, 'comments-triage-crossed-selected', 60_000);
-  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[1]') + '"]', 'comments-triage-crossed-selected');
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[1]') + '"]', 'comments-triage-crossed-selected', {returnToCard:true});
   check(await renderer.evaluate(`(async () => { await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); await new Promise(done=>setTimeout(done,400)); return ${triageReady(1)}; })()`), 'comments-triage-crossed-stays-selected');
   // 上一条待处理 (Alt+↑) goes back across the page to the first seed.
   await triageKey(renderer, 'ArrowUp', 'ArrowUp', 38, 1);
   await waitFor(renderer, `${TRIAGE_FIRST}===__triage.start && ${triageReady(0)}`, 'comments-triage-previous-crossed', 60_000);
-  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[0]') + '"]', 'comments-triage-previous-crossed');
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[0]') + '"]', 'comments-triage-previous-crossed', {returnToCard:true});
   // Keyboard only: R on the page's last match walks on across the page; A and R then decide the next two, each next card focused.
   await triageKey(renderer, 'r', 'KeyR', 82);
   await waitFor(renderer, `${TRIAGE_FIRST}!==__triage.start && ${triageReady(1)}`, 'comments-triage-key-reject-crossed', 60_000);
-  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[1]') + '"]', 'comments-triage-key-reject-crossed');
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[1]') + '"]', 'comments-triage-key-reject-crossed', {returnToCard:true});
   check(await triageRecord(renderer, 0, 'rejected'), 'comments-triage-key-reject-recorded');
   await triageKey(renderer, 'a', 'KeyA', 65);
   await waitFor(renderer, triageReady(2), 'comments-triage-key-accept-next', 60_000);
-  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[2]') + '"]', 'comments-triage-key-accept-next');
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[2]') + '"]', 'comments-triage-key-accept-next', {returnToCard:true});
   check(await triageRecord(renderer, 1, 'applied'), 'comments-triage-key-accept-applied');
   await triageKey(renderer, 'r', 'KeyR', 82);
   await waitFor(renderer, triageReady(3), 'comments-triage-key-reject-next', 60_000);
-  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[3]') + '"]', 'comments-triage-key-reject-next');
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[3]') + '"]', 'comments-triage-key-reject-next', {returnToCard:true});
   check(await triageRecord(renderer, 2, 'rejected'), 'comments-triage-key-second-reject-recorded');
   // 接受 on the last seed's compact card, by pointer: hovered, its controls stand beside the preview, never over it.
   check(await renderer.evaluate(`(() => { document.querySelector('.editor-window [data-mark-id="'+__triage.ids[4]+'"]').scrollIntoView({block:'center',behavior:'instant'}); return true; })()`), 'comments-triage-quick-reveal');
