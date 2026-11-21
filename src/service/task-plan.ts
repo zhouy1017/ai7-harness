@@ -2725,7 +2725,7 @@ export function reviewRunPlan(input: {
       adaptable: tasks.map(category => {
         const edits = planEditsOf(category.task!.components['execution-plan'], Number.MAX_SAFE_INTEGER);
         return { id: 'safe-retry', label: SAFE_RETRY_ADAPTATION, removable: true,
-          removed: edits.disallowedAdaptations.includes('safe-retry'), movable: true, askFirst: edits.askFirstAdaptations?.includes('safe-retry') ?? false };
+          removed: edits.disallowedAdaptations.includes('safe-retry'), movable: false, askFirst: edits.askFirstAdaptations?.includes('safe-retry') ?? false };
       }).filter((entry, index, entries) => entries.findIndex(other => other.removed === entry.removed && other.askFirst === entry.askFirst) === index)
         .concat(tasks.some(category => category.categoryId === 'factual-review') ? [{ id: 'factual-tool-retry',
           label: '事实核查的联网检索保留核查本身的重试规则', removable: false, removed: false, movable: false, askFirst: false }] : []),

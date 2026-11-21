@@ -174,6 +174,7 @@ describe('review launch options and read-only preview (#1657)', () => {
       const launched = session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy);
       const run = launched.projection.run!;
       const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
+      expect(plan.boundary.adaptable.every(entry => entry.movable === false)).toBe(true);
       expect(preview).toEqual(launchPreviewProjection(plan, frozenReviewUnits(roots.dataRoot, run.reviewRunId)));
       expect(preview.adaptations.some(line => line.endsWith('不允许'))).toBe(true);
       expect(session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy).repeated).toBe(true);
