@@ -1,7 +1,9 @@
+import { frozenReviewOptions, frozenReviewUnits } from '../support/review-launch-inputs.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { startQuickTasks } from '../support/quick-tasks.js';
+import { launchPreviewProjection } from '../../src/service/task-launch-preview.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
@@ -95,6 +97,125 @@ const STYLE = STYLE_AND_FORMAT.categoryId;
 const LITERARY = LITERARY_EXPRESSION.categoryId;
 const PLOT = 'plot-consistency';
 const FACTUAL = 'factual-review';
+
+/** Count every relation around a preview, without reading editorial payloads. */
+function previewRowCounts(): unknown {
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try { return db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map(row =>
+    [row.name, db.prepare(`SELECT count(*) n FROM "${String(row.name).replaceAll('"', '""')}"`).get()!.n]); }
+  finally { db.close(); }
+}
+
+describe('review launch options and read-only preview (#1657)', () => {
+  it('waits for quiet before admitting an idle launch', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      session.owner.setBackgroundIdle(false);
+      const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE, startWhen: 'idle' }, launchPolicy);
+      expect(launched.projection.run!.state).toBe('waiting');
+      await driveLaunchedReviewRun(session.driver, launched);
+      expect(session.driver.driving).toBe(false);
+      let loop: Promise<void> | null = null;
+      const ready = session.owner.whenBackgroundIdle().then(() => session.store.admitIdleReview(launched.projection.run!.reviewRunId,
+        () => { loop = session.driver.drive(launched.projection.run!.reviewRunId); }));
+      await Promise.resolve();
+      expect(loop).toBeNull();
+      session.owner.setBackgroundIdle(true);
+      await ready; await loop;
+      expect(workspace(session, book, launched.projection.run!.reviewRunId).run!.state).toBe('settled');
+    });
+  });
+
+  it('keeps the existing restart refusal for an idle approval that never began', async () => {
+    const first = await open('sample1-review-cross-chapter-authored');
+    let book!: Book, reviewRunId!: string;
+    try {
+      book = await importBook(first);
+      reviewRunId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE, startWhen: 'idle' }, launchPolicy).projection.run!.reviewRunId;
+    } finally { await close(first); }
+    const second = await open('sample1-review-cross-chapter-authored');
+    try {
+      second.store.reconcileStoppedReviewCategoryRuns();
+      const before = previewRowCounts();
+      second.store.admitIdleReview(reviewRunId, () => { throw new Error('must not restart'); });
+      expect(previewRowCounts()).toEqual(before);
+      expect(workspace(second, book, reviewRunId).run!.state).toBe('failed');
+    } finally { await close(second); }
+  });
+  const choices: import('../../src/shared/protocol.js').PlanEditsProjection[] = [
+    { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 10000 } },
+    { removedSteps: [], disallowedAdaptations: ['safe-retry'] },
+    { removedSteps: ['assurance-sampling'], disallowedAdaptations: [] },
+    { removedSteps: ['assurance-sampling'], disallowedAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 10000 } },
+  ];
+  it.each(choices.flatMap(planEdits => [[TYPOS], [TYPOS, STYLE, FACTUAL]].map(categoryIds => ({ planEdits, categoryIds }))))
+    ('freezes the same options as prepared, edited and authorized review: %j', async ({ planEdits, categoryIds }) => {
+      await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+        const prepared = prepare(session, book, categoryIds, WHOLE);
+        const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: prepared.reviewRunId });
+        session.store.editTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: prepared.reviewRunId,
+          planEnvelopeDigest: plan.edit.planEnvelopeDigest!, ...planEdits });
+        const edited = workspace(session, book, prepared.reviewRunId).run!;
+        session.store.authorizeReviewRun(book.bookId, edited.reviewRunId, approvals(edited));
+        const expected = frozenReviewOptions(roots.dataRoot, edited.reviewRunId);
+        const another = await importSample1Book(session.store, roots.codeRoot, 'sample1 启动选项');
+        await pinEditorialWorkspaceProfileRevision2(session.store, another.bookId);
+        const launched = session.store.launchReviewRun({ bookId: another.bookId, clientCommandId: randomUUID(), categoryIds, scope: WHOLE, planEdits }, launchPolicy);
+        expect(frozenReviewOptions(roots.dataRoot, launched.projection.run!.reviewRunId)).toEqual(expected);
+      });
+    });
+  it.each([{ categoryIds: [TYPOS] }, { categoryIds: [TYPOS, STYLE, FACTUAL] }])('previews and freezes the same category choices: %j', async ({ categoryIds }) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const input = { clientCommandId: randomUUID(), categoryIds, scope: WHOLE, startWhen: 'idle' as const,
+        planEdits: { removedSteps: ['assurance-sampling'] as const, disallowedAdaptations: ['safe-retry'] as const,
+          runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 10000 } } };
+      const before = previewRowCounts();
+      const preview = session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input } }, launchPolicy);
+      expect(previewRowCounts()).toEqual(before);
+      const launched = session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy);
+      const run = launched.projection.run!;
+      const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
+      expect(preview).toEqual(launchPreviewProjection(plan, frozenReviewUnits(roots.dataRoot, run.reviewRunId)));
+      expect(preview.adaptations.some(line => line.endsWith('不允许'))).toBe(true);
+      expect(session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy).repeated).toBe(true);
+      expect(() => session.store.launchReviewRun({ ...input, bookId: book.bookId, startWhen: 'now' }, launchPolicy))
+        .toThrowError(expect.objectContaining({ code: 'TASK_LAUNCH_COMMAND_CHANGED' }));
+    });
+  });
+
+  it('refuses ask-first identically in launch and preview before writing', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const input = { clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE,
+        planEdits: { removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] as const } };
+      const before = previewRowCounts();
+      const refusal = expect.objectContaining({ code: 'REVIEW_RETRY_CHOICE_UNAVAILABLE', message: '审阅暂不支持“失败时先问我”；可以选自动重试或不重试。' });
+      expect(() => session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input } }, launchPolicy)).toThrowError(refusal);
+      expect(() => session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy)).toThrowError(refusal);
+      expect(previewRowCounts()).toEqual(before);
+    });
+  });
+
+  it('previews a local review without writes, keeps old options and refuses only new model options', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: ['local-text-check'], scope: WHOLE,
+        localCheck: { punctuation: 'chinese-prose' as const, numerals: 'off' as const, publication: 'unknown' as const,
+          numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [] } };
+      const before = previewRowCounts();
+      const preview = session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input } }, launchPolicy);
+      expect(preview.units).toBeGreaterThan(0);
+      expect(previewRowCounts()).toEqual(before);
+      for (const options of [{ startWhen: 'idle' as const }, { planEdits: { removedSteps: [], disallowedAdaptations: [] } },
+        { planEdits: { removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] as const } }]) {
+        expect(() => session.store.launchReviewRun({ ...input, ...options }, launchPolicy)).toThrowError(expect.objectContaining({
+          code: 'REVIEW_LAUNCH_OPTIONS_UNAVAILABLE', message: '这次审阅不使用模型，无需选择运行选项。' }));
+        expect(() => session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input: { ...input, ...options } } }, launchPolicy))
+          .toThrowError(expect.objectContaining({ code: 'REVIEW_LAUNCH_OPTIONS_UNAVAILABLE' }));
+        expect(previewRowCounts()).toEqual(before);
+      }
+      const run = session.store.launchReviewRun({ ...input, executionConfig: { modelId: 'ignored-choice' }, rememberedChoice: true, startWhen: 'when-online' }, launchPolicy).projection.run!;
+      expect(preview).toEqual(launchPreviewProjection(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }), frozenReviewUnits(roots.dataRoot, run.reviewRunId)));
+    });
+  });
+});
 
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;

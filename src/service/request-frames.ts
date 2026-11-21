@@ -459,7 +459,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = value.input;
       if (!isRecord(input) || Object.keys(input).some(key => key !== 'bookId' && key !== 'launch') || !validUuid(input.bookId) ||
           !isRecord(input.launch) || Object.keys(input.launch).some(key => key !== 'operation' && key !== 'input') ||
-          !['launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite'].includes(String(input.launch.operation)) ||
+          !['launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite', 'launchReviewRun', 'startScopedAiEdit'].includes(String(input.launch.operation)) ||
           !isRecord(input.launch.input) || Object.hasOwn(input.launch.input, 'bookId')) throw new ProtocolError(tentativeId);
       decodeRequest(Buffer.from(JSON.stringify({ id: tentativeId, op: input.launch.operation, input: { ...input.launch.input, bookId: input.bookId } })));
       break;
@@ -1856,14 +1856,18 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'launchReviewRun':
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig', 'rememberedChoice', 'evidenceAssuranceLevel', 'startWhen', 'relaunchOf'] : [])], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig', 'rememberedChoice', 'evidenceAssuranceLevel', 'startWhen', 'relaunchOf', 'planEdits'] : [])], tentativeId);
       if (input.relaunchOf !== undefined && !validTaskRelaunchSource(input.relaunchOf)) throw new ProtocolError(tentativeId);
       if (input.rememberedChoice !== undefined && typeof input.rememberedChoice !== 'boolean') throw new ProtocolError(tentativeId);
       if (input.decisionId !== undefined && (!validUuid(input.decisionId) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'factual-review')) throw new ProtocolError(tentativeId);
       if (value.op === 'launchReviewRun' && (!validUuid(input.clientCommandId) || (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)))) throw new ProtocolError(tentativeId);
-      if (value.op === 'launchReviewRun' && ((input.startWhen !== undefined && input.startWhen !== 'now' && input.startWhen !== 'when-online') ||
+      if (value.op === 'launchReviewRun' && ((input.startWhen !== undefined && input.startWhen !== 'now' && input.startWhen !== 'idle' && input.startWhen !== 'when-online') ||
           (input.evidenceAssuranceLevel !== undefined && (!EVIDENCE_ASSURANCE_LEVELS.some(level => level === input.evidenceAssuranceLevel) ||
             !Array.isArray(input.categoryIds) || !input.categoryIds.includes('factual-review'))))) throw new ProtocolError(tentativeId);
+      if (input.planEdits !== undefined && (!isRecord(input.planEdits) ||
+          !Object.keys(input.planEdits).every(key => ['removedSteps', 'disallowedAdaptations', 'askFirstAdaptations', 'runBudgetCeiling'].includes(key)) ||
+          canonicalPlanEdits({ removedSteps: input.planEdits.removedSteps, disallowedAdaptations: input.planEdits.disallowedAdaptations,
+            askFirstAdaptations: input.planEdits.askFirstAdaptations, runBudgetCeiling: input.planEdits.runBudgetCeiling }) === null)) throw new ProtocolError(tentativeId);
       // A composite version (Issue #1173) names the exact Procedure Definition; its members, 确定性检查 first, are the categories.
       const composite = input.procedureDefinition != null;
       if (!optionalOrNull(input, 'procedureDefinition', procedureDefinitionPin) || (composite && (input.capturedProcedure != null || input.decisionId !== undefined))) throw new ProtocolError(tentativeId);

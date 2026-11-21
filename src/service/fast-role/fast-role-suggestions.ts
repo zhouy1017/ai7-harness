@@ -54,7 +54,7 @@ import type { ScopedAiEditProjection, StartScopedAiEditInput } from '../../share
  * on its own.
  */
 export type FastRoleStore = Pick<EditorialStore,
-  'getManuscriptWindowAt' | 'verifySelectionSpan' | 'dialogueSourceDigest' | 'createProducedEditorialMarks' | 'inspectProposalConflict' | 'saveRegeneratedProposalConflictDraft'> & Partial<Pick<EditorialStore, 'editorialMemory' | 'captureScopedAiEditLaunch'>> &
+  'getManuscriptWindowAt' | 'verifySelectionSpan' | 'dialogueSourceDigest' | 'createProducedEditorialMarks' | 'inspectProposalConflict' | 'saveRegeneratedProposalConflictDraft'> & Partial<Pick<EditorialStore, 'editorialMemory' | 'captureScopedAiEditLaunch' | 'scopedAiEditLaunchChoice'>> &
   // 就选中部分让 AI 修改 (Issue #1412) reads the working state and applies through the store; a store without them refuses it.
   Partial<Pick<EditorialStore, 'getManuscriptWindow' | 'scopedEditWorkingBlocks' | 'applyChangeSuggestion'>>;
 
@@ -396,6 +396,26 @@ export class FastRoleRequests {
       entry.projection = await finishRegeneration(this.#owner, this.#store, prepared, this.#now);
     }, (message) => { entry.projection = { ...prepared.pending, outcome: 'failed', label: message }; });
     return entry.projection;
+  }
+
+  /** The launch's resolver and scope check, without a snapshot, request entry, or send. */
+  previewScopedEdit(bookId: string, input: StartScopedAiEditInput): import('../../shared/runtime-execution-config.js').TaskLaunchPreviewProjection {
+    const store = this.#store;
+    require(store.getManuscriptWindow !== undefined && store.scopedEditWorkingBlocks !== undefined && store.applyChangeSuggestion !== undefined,
+      'FAST_ROLE_ROUTE_UNAVAILABLE', '这次运行不能进行 AI 局部修改。');
+    const choice = store.scopedAiEditLaunchChoice?.(input);
+    const owner = (input.clientCommandId !== undefined || input.executionConfig !== undefined) && choice !== undefined
+      ? this.scopedOwner?.(choice.binding) ?? this.#owner : this.#owner;
+    try {
+      const prepared = prepareScopedEdit(owner, store as ScopedEditStore, bookId, input);
+      const model = choice?.binding?.model;
+      const scope = input.scope.mode === 'selected-only' ? '所选文字中未锁定的部分'
+        : input.scope.range.kind === 'section' ? '所选章节中未锁定的段落' : '稿件中未锁定的段落';
+      return { steps: ['检查修改范围和锁定状态', '按修改要求修改未锁定的文字'], scope, units: prepared.targets.length,
+        reference: ['相邻文字与锁定的段落只供参考'],
+        send: `修改要求、可修改的文字和只供参考的上下文${model === undefined ? '' : `；使用 ${model}${choice?.binding?.reasoningEffort == null ? '' : `@${choice.binding.reasoningEffort}`}`}`,
+        usage: '调用模型 1 次；实际用量在完成后确定。', adaptations: ['只修改范围内未锁定的文字'] };
+    } finally { if (owner !== this.#owner) owner.dispose(); }
   }
 
   /** 就选中部分让 AI 修改 (Issue #1412): checked and frozen at once — a refusal is thrown before anything is sent — then requested beside the loop. */

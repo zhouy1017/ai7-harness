@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { frozenReviewOptions, frozenReviewUnits } from '../support/review-launch-inputs.js';
+import { launchPreviewProjection } from '../../src/service/task-launch-preview.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
@@ -66,6 +68,31 @@ async function ordinaryProduction(target: EditorialStore): Promise<LaunchPolicyP
 }
 
 describe('composite procedures and 全文审校 (#1173)', () => {
+  it.each([
+    { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 10000 } },
+    { removedSteps: [], disallowedAdaptations: ['safe-retry'] as const },
+    { removedSteps: ['assurance-sampling'] as const, disallowedAdaptations: [] },
+    { removedSteps: ['assurance-sampling'] as const, disallowedAdaptations: ['safe-retry'] as const, runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 10000 } },
+  ])('previews and freezes composite launch options like prepared edits (#1657): %j', async planEdits => {
+    const target = await open('ai7-composite-launch-options-'), policy = await ordinaryProduction(target);
+    const first = await book(target, 'sample1 组合计划'), second = await book(target, 'sample1 组合启动'), pin = fullReview(target);
+    for (const bookId of [first, second]) target.procedureLibrary({ action: 'select', bookId, procedure: pin });
+    const prepared = prepare(target, first, policy, pin);
+    const plan = target.inspectTaskPlan({ bookId: first, kind: 'review-run', ref: prepared.reviewRunId });
+    target.editTaskPlan({ bookId: first, kind: 'review-run', ref: prepared.reviewRunId, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, ...planEdits });
+    const edited = target.inspectTaskPlan({ bookId: first, kind: 'review-run', ref: prepared.reviewRunId });
+    target.authorizeReviewRun(first, prepared.reviewRunId, edited.start.categoryDigests);
+    const input = { clientCommandId: randomUUID(), categoryIds: MEMBERS, scope: WHOLE, localCheck: LOCAL, procedureDefinition: pin, planEdits };
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    const count = () => db.prepare("SELECT (SELECT count(*) FROM review_runs) reviews, (SELECT count(*) FROM analysis_plan_records) plans, (SELECT count(*) FROM task_launch_snapshots) launches").get();
+    try {
+      const before = count(), preview = target.previewTaskLaunch({ bookId: second, launch: { operation: 'launchReviewRun', input } }, policy);
+      expect(count()).toEqual(before);
+      const launched = target.launchReviewRun({ ...input, bookId: second }, policy).projection.run!;
+      expect(frozenReviewOptions(roots.dataRoot, launched.reviewRunId)).toEqual(frozenReviewOptions(roots.dataRoot, prepared.reviewRunId));
+      expect(preview).toEqual(launchPreviewProjection(target.inspectTaskPlan({ bookId: second, kind: 'review-run', ref: launched.reviewRunId }), frozenReviewUnits(roots.dataRoot, launched.reviewRunId)));
+    } finally { db.close(); }
+  });
   it('lists 全文审校 v1 last, edits it into a new version, chooses it on any Book and recommends it from the library', async () => {
     const target = await open('ai7-procedure-composite-library-');
     const [first, second] = [await book(target, '全文审校公开样书一'), await book(target, '全文审校公开样书二')];

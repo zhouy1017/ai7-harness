@@ -122,7 +122,28 @@ async function settled(requests: FastRoleRequests, projection: ScopedAiEditProje
 
 const primary = (): Target => ({ manuscriptId: book.manuscriptId, branchId: book.branchId });
 
+function rowCounts() {
+  return db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map(row =>
+    [row.name, db.prepare(`SELECT count(*) n FROM "${String(row.name).replaceAll('"', '""')}"`).get()!.n]);
+}
+
 describe('就选中部分让 AI 修改: the scoped splice guard', () => {
+  it('previews the frozen selection without rows, request entries or a send, with unchanged refusals (#1657)', async () => {
+    const target = primary(), { blocks } = threeParagraphs(target);
+    const input = { ...base(target, '检查选中的文字', spanOver(blocks)), clientCommandId: randomUUID() };
+    const prepared = frozen(input), requests = answering(prepared, { schema: SCOPED_EDIT_RESULT_SCHEMA, targets: [] });
+    const before = rowCounts();
+    const preview = requests.previewScopedEdit(book.bookId, input);
+    expect(preview).toMatchObject({ units: prepared.targets.length, scope: '所选文字中未锁定的部分', usage: '调用模型 1 次；实际用量在完成后确定。' });
+    await requests.settled();
+    expect(rowCounts()).toEqual(before);
+    expect(() => requests.inspectScopedEdit(book.bookId, prepared.requestId)).toThrow(expect.objectContaining({ code: 'FAST_ROLE_REQUEST_NOT_FOUND' }));
+    const stale = { ...input, expectedLocksDigest: '0'.repeat(64) };
+    expect(() => requests.previewScopedEdit(book.bookId, stale)).toThrow(expect.objectContaining({ code: 'AI_EDIT_LOCKS_STALE' }));
+    expect(() => requests.scopedEdit(book.bookId, stale)).toThrow(expect.objectContaining({ code: 'AI_EDIT_LOCKS_STALE' }));
+    expect(rowCounts()).toEqual(before);
+    expect((await settled(requests, requests.scopedEdit(book.bookId, input))).state).toBe('unchanged');
+  });
   it('replays a scoped launch command once and refuses changed input without another edit (#1455)', async () => {
     const target = primary();
     const { blocks } = threeParagraphs(target);
@@ -272,6 +293,10 @@ describe('🔒 锁定 on a derivative document: unlocked-only rounds', () => {
     // also tries to sneak the locked paragraph's words in under a target of its own.
     const round1 = base(target, '第一轮：语气更正式', { mode: 'unlocked-only', range: { kind: 'section', headingBlockId: headingId } });
     const prepared1 = frozen(round1);
+    const sectionPreview = answering(prepared1, { schema: SCOPED_EDIT_RESULT_SCHEMA, targets: [] });
+    const beforePreview = rowCounts();
+    expect(sectionPreview.previewScopedEdit(book.bookId, round1)).toMatchObject({ units: prepared1.targets.length, scope: '所选章节中未锁定的段落' });
+    expect(rowCounts()).toEqual(beforePreview);
     expect(prepared1.targets.some((item) => item.blockId === first)).toBe(false);
     expect(prepared1.targets.some((item) => item.blockId === second)).toBe(true);
     // The heading itself is the section's; the next heading of its level ends it and is only context.

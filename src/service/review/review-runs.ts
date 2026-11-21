@@ -1,3 +1,6 @@
+import { launchPreviewProjection } from '../task-launch-preview.js';
+import { reviewRunPlan } from '../task-plan.js';
+import { reviewLaunchEdits, type ReviewLaunchOptions } from './review-launch-options.js';
 import { reviewSynthesisOmissionLabel, reviewSynthesisOrdinalRanges } from '../../shared/review-synthesis-wording.js';
 import { readClosedBaselineSynopses, reviewSynthesisRequestBytes } from '../analysis/baseline-synopsis.js';
 import { REVIEW_UNCHECKED_DISCLOSURE } from '../../shared/review-basis.js';
@@ -1262,7 +1265,7 @@ export class ReviewRunStore {
       .map((row) => ({ blockId: text(row.block_id), position: integer(row.position), text: text(row.text) }));
   }
 
-  #prepareLocal(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, head: ManuscriptHead): ReviewRunPreparationProgress {
+  #localWork(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, head: ManuscriptHead): PreparationWork {
     requireReview(input.categoryIds.length === 1 && input.categoryIds[0] === LOCAL_CHECK_CATEGORY && input.procedure == null && input.intentDraft === undefined &&
       input.seriesId == null && input.materialReferences === undefined, 'LOCAL_OPTIONS_INVALID', '本地文字检查请单独运行，只读取所选稿件。');
     requireReview(validLocalOptions(input.localCheck), 'LOCAL_OPTIONS_INVALID', '请明确选择本次本地检查的中文正文与数字适用范围。');
@@ -1281,8 +1284,12 @@ export class ReviewRunStore {
     const entry = version === 1 ? LOCAL_REVIEW_CATEGORY : LOCAL_REVIEW_CATEGORY_V3;
     const category: SnapshotCategory = { position: 1, categoryId: LOCAL_CHECK_CATEGORY, executor: 'local-text-check', entry,
       basisStatement: localBasisStatement(entry, localPlan.options), selectedRange: scope.selectedRange, task: null };
-    const reviewRunId = this.#writeRun({ workId: randomUUID(), bookId: input.bookId, configuration: { schema: REVIEW_CATEGORY_CONFIGURATION_SCHEMA, version: '1', categories: [entry] },
-      launchPolicy: input.launchPolicy, scope, planned: [], prepared: [category], procedure: null, index: 0, ledgerWorkId: null, redoOf: input.redoOf ?? null, localPlan });
+    return { workId: randomUUID(), bookId: input.bookId, configuration: { schema: REVIEW_CATEGORY_CONFIGURATION_SCHEMA, version: '1', categories: [entry] },
+      launchPolicy: input.launchPolicy, scope, planned: [], prepared: [category], procedure: null, index: 0, ledgerWorkId: null, redoOf: input.redoOf ?? null, localPlan };
+  }
+
+  #prepareLocal(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, head: ManuscriptHead): ReviewRunPreparationProgress {
+    const reviewRunId = this.#writeRun(this.#localWork(input, head));
     return { done: true, workId: null, completed: 1, total: 1, bookId: input.bookId, reviewRunId };
   }
 
@@ -1445,7 +1452,7 @@ export class ReviewRunStore {
   /** Direct launch freezes all category plans; the driver starts each from that choice at its turn. */
   launch(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, snapshotId: string,
     binding: import('../launch-policy.js').ConfiguredProviderBinding | null,
-    options: { evidenceAssuranceLevel?: import('../../shared/protocol.js').EvidenceAssuranceLevel; startWhen?: 'now' | 'when-online' } = {}): { reviewRunId: string; manuscript: unknown } {
+    options: ReviewLaunchOptions = {}): { reviewRunId: string; manuscript: unknown } {
     requireReview(options.evidenceAssuranceLevel === undefined || input.categoryIds.includes('factual-review'),
       'REVIEW_ASSURANCE_INVALID', '只有事实核查任务可以选择证据保证级别。');
     const execution = this.#ledgers.baseline().withExecutionChoice(binding, input.launchPolicy).launch;
@@ -1462,11 +1469,9 @@ export class ReviewRunStore {
         if (planned.plan.kind === 'leads') { work.prepared.push(this.#snapshotCategory(planned, null)); continue; }
         const ledger = this.#preparationLedger(work, planned);
         const request = this.#ledgerRequest(work, planned.plan.mode, planned.plan.selectedRange, ledger);
-        const level = planned.entry.executor === 'factual-review-kind' ? options.evidenceAssuranceLevel : undefined;
-        const ceiling = planned.entry.synthesisSource?.budgetCeiling;
-        const edits = (level !== undefined && level !== 'standard') || (ceiling !== undefined && ceiling !== 'unset')
-          ? { removedSteps: [], disallowedAdaptations: [], ...(level === undefined || level === 'standard' ? {} : { evidenceAssuranceLevel: level }),
-            ...(ceiling === undefined || ceiling === 'unset' ? {} : { runBudgetCeiling: ceiling }) } : undefined;
+        const edits = reviewLaunchEdits(options, planned.entry.categoryId,
+          work.composite === undefined ? work.planned.filter(category => category.plan.kind !== 'leads' && category.entry.categoryId !== 'run-synthesis').length : 1,
+          planned.entry.synthesisSource?.budgetCeiling, ledger.definition.assurance !== null);
         const projection = ledger.launchTask({ ...request, reconfirm: false,
           ...(work.factualDecision === undefined ? {} : { factualDecision: work.factualDecision }) }, snapshotId, execution, true, edits);
         work.prepared.push(this.#snapshotCategory(planned, projection));
@@ -1476,7 +1481,7 @@ export class ReviewRunStore {
     const snapshot = this.#runOfBook(input.bookId, reviewRunId);
     const authorizedAt = new Date().toISOString();
     const record = canonicalRecord({ schema: AUTHORIZATION_SCHEMA, reviewRunId, authorizedAt, actor: 'editor',
-      interaction: 'authorize-review-run', startWhen: 'now', launchSnapshotId: snapshotId,
+      interaction: 'authorize-review-run', startWhen: options.startWhen === 'idle' ? 'idle' : 'now', launchSnapshotId: snapshotId,
       ...(waitingForNetwork ? { start: 'when-online' } : {}),
       approvals: snapshot.categories.flatMap<{ categoryId: string; taskIntentId: string | null; planEnvelopeDigest: string }>(category => category.task === null
         ? snapshot.localPlan === undefined ? [] : [{ categoryId: category.categoryId, taskIntentId: null, planEnvelopeDigest: snapshot.localPlan.digest }]
@@ -1487,7 +1492,69 @@ export class ReviewRunStore {
     return { reviewRunId, manuscript: snapshot.manuscript };
   }
 
-  #buildWork(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, execution?: LaunchBinding): PreparationWork | ReviewRunPreparationProgress {
+  /** Resolve the same plans in memory; no checkpoint, preparation registration or persistence is entered. */
+  preview(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, binding: import('../launch-policy.js').ConfiguredProviderBinding | null,
+    options: ReviewLaunchOptions, bookTitle: string): import('../../shared/runtime-execution-config.js').TaskLaunchPreviewProjection {
+    requireReview(options.evidenceAssuranceLevel === undefined || input.categoryIds.includes('factual-review'),
+      'REVIEW_ASSURANCE_INVALID', '只有事实核查任务可以选择证据保证级别。');
+    const execution = this.#ledgers.baseline().withExecutionChoice(binding, input.launchPolicy).launch;
+    const work = this.#buildWork(input, execution, true);
+    requireReview(!('done' in work), 'REVIEW_PLAN_UNAVAILABLE', '审阅未能启动。');
+    const projections = new Map<string, { projection: AnalysisProjection; components: Readonly<Record<string, unknown>> }>();
+    const budgetMembers = work.composite === undefined ? work.planned.filter(category => category.plan.kind !== 'leads' && category.entry.categoryId !== 'run-synthesis').length : 1;
+    for (const planned of work.planned) {
+      if (planned.plan.kind === 'leads') { work.prepared.push(this.#snapshotCategory(planned, null)); continue; }
+      const source = planned.entry.synthesisSource;
+      if (source !== undefined && source.budgetCeiling === undefined) {
+        const ceilings = [...projections.values()].map(({ projection }) => projection.providerResolutionPlan!.runBudgetCeiling);
+        source.budgetCeiling = ceilings.length === 0 || ceilings.some(ceiling => ceiling === 'unset') ? 'unset'
+          : { kind: 'tokens', maxTotalTokens: work.composite === undefined
+            ? ceilings.reduce((sum, ceiling) => sum + (ceiling === 'unset' ? 0 : ceiling.maxTotalTokens), 0)
+            : Math.max(...ceilings.map(ceiling => ceiling === 'unset' ? 0 : ceiling.maxTotalTokens)) };
+      }
+      const ledger = this.#preparationLedger(work, planned).forkForLaunch(execution);
+      const captured = {};
+      try {
+        ledger.previewLaunch({ ...this.#ledgerRequest(work, planned.plan.mode, planned.plan.selectedRange, ledger), reconfirm: false },
+          reviewLaunchEdits(options, planned.entry.categoryId, budgetMembers, source?.budgetCeiling, ledger.definition.assurance !== null), (projection, _blocks, components) => {
+            projections.set(planned.entry.categoryId, { projection, components });
+            work.prepared.push(this.#snapshotCategory(planned, projection));
+            throw captured;
+          });
+      } catch (error) { if (error !== captured) throw error; }
+    }
+    const head = this.#head(input.bookId)!;
+    const categories: ReviewRunPlanFacts['categories'] = work.prepared.map(category => {
+      const captured = projections.get(category.categoryId);
+      return { categoryId: category.categoryId, label: category.entry.label, output: category.entry.output,
+        riskPointsOnly: category.entry.riskPointsOnly, modelFree: category.task === null, basisStatement: category.basisStatement,
+        procedure: category.entry.procedure, guidelineDocuments: category.entry.guidelineDocuments,
+        state: 'prepared', stateLabel: '尚未开始', detail: null,
+        task: captured === undefined ? null : { taskIntentId: captured.projection.taskIntent!.taskIntentId,
+          modeLabel: captured.projection.taskIntent!.modeLabel, planEnvelopeDigest: captured.projection.planEnvelope!.digest,
+          planVersion: 1, plan: planSummary(captured.projection), components: captured.components,
+          ...(captured.projection.planEnvelope!.procedureContent === undefined ? {} : { procedureContent: captured.projection.planEnvelope!.procedureContent }) } };
+    });
+    const facts: ReviewRunPlanFacts = { reviewRunId: work.workId, ordinal: 1, label: '本次审阅', createdAt: new Date().toISOString(),
+      state: 'prepared', stateLabel: '计划就绪', canContinue: false, authorizedAt: null, manuscript: head,
+      scope: { ...work.scope, label: reviewScopeLabel(work.scope) }, configuration: this.#configurationPin(work.configuration),
+      inputRevision: { revisionId: head.revisionId, revisionLabel: head.revisionLabel, createdForDirtyJournal: false }, live: execution.live,
+      categories: categories.filter(category => category.categoryId !== RUN_SYNTHESIS_CATEGORY),
+      ...(categories.find(category => category.categoryId === RUN_SYNTHESIS_CATEGORY) === undefined ? {} : { synthesis: categories.find(category => category.categoryId === RUN_SYNTHESIS_CATEGORY)! }),
+      ...(work.localPlan === undefined ? {} : { localPlan: { ...work.localPlan, paragraphs: work.localPlan.blocks.length } }),
+      ...(work.composite === undefined ? {} : { composite: { procedure: work.composite.procedure, title: work.composite.document.title } }),
+      ...(work.materialReferences === undefined ? {} : { materials: this.#ledgers.materialReadings!(work.materialReferences) }),
+      ...(work.housePreferences === undefined ? {} : { housePreferences: work.prepared.flatMap(category => {
+        const preference = category.task === null || category.entry.synthesisKey !== undefined ? undefined : work.housePreferences![category.task.kind];
+        return preference === undefined ? [] : [{ categoryLabel: category.entry.label, preference }];
+      }) }), staleReasons: [] };
+    const blocks = work.localPlan?.blocks.map(block => ({ ...block, kind: 'paragraph' as const, level: null, digest: sha256Hex(block.text), graphemes: graphemeCount(block.text) }))
+      ?? this.#ledgers.baseline().readWorkingBlocks(head.branchId);
+    return launchPreviewProjection(reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }),
+      projections.size === 0 ? work.localPlan?.blocks.length ?? 0 : [...projections.values()].reduce((sum, { projection }) => sum + projection.coverageManifest!.units.length, 0));
+  }
+
+  #buildWork(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, execution?: LaunchBinding, preview = false): PreparationWork | ReviewRunPreparationProgress {
     const bookId = input.bookId;
     this.#requireBook(bookId);
     const head = this.#head(bookId);
@@ -1498,7 +1565,7 @@ export class ReviewRunStore {
     // Two preparations of one Book would prepare the same category ledgers' Tasks under each other.
     requireReview(!Array.from(this.#work.values()).some((work) => work.bookId === bookId), 'REVIEW_RUN_PREPARING', '这本书有一次审阅正在准备计划；准备完成后再新建。');
     // A composite (Issue #1173) runs 确定性检查 as its first member; every other Run asking for it runs it alone.
-    if (input.procedureDefinition == null && input.categoryIds.includes(LOCAL_CHECK_CATEGORY)) return this.#prepareLocal(input, head);
+    if (input.procedureDefinition == null && input.categoryIds.includes(LOCAL_CHECK_CATEGORY)) return preview ? this.#localWork(input, head) : this.#prepareLocal(input, head);
     requireReview(input.procedureDefinition != null || input.localCheck === undefined, 'LOCAL_OPTIONS_INVALID', '本地检查选项只能用于本地文字检查。');
     // The configuration a preparation starts under is the one its Run snapshots, whatever is imported meanwhile (REV-012);
     // its 书系一致性 is this Book's, with the Series Knowledge revisions it would use pinned (Issue #64, S29a).

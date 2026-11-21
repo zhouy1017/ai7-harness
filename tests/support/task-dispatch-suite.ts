@@ -438,6 +438,7 @@ function commitLaunch(target: { bookId: string }, launch: import('../../src/shar
       case 'launchInitialEvaluation': return store.launchInitialEvaluation({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
       case 'launchReadersReport': return store.launchReadersReport({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
       case 'launchEvaluationRewrite': return store.launchEvaluationRewrite({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
+      default: throw new Error('expected a ledger task launch');
     }
 }
 
