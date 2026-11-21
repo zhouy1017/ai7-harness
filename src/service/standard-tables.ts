@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { canonicalJson, sha256Hex } from './analysis/canonical.js';
 import { requireStore } from './store-records.js';
@@ -176,16 +176,23 @@ export function preinstalledEntries(key: PreinstalledTableKey): StandardEntry[] 
 export function preinstalledDigest(key: PreinstalledTableKey): string { return PREINSTALLED[key].digest; }
 export function preinstalledKind(key: PreinstalledTableKey): StandardTableKind { return PREINSTALLED[key].kind; }
 
+/** The fixed namespace of the pre-installed tables' ids (a name-based, version-5 UUID is made under it). Never change it. */
+const PREINSTALLED_NAMESPACE = '6f1c3a52-8d47-4b9e-9a21-5c7e0d4b8f13';
+
 /**
- * A version-4 UUID from the system's random bytes, not from `randomUUID`: the memory compatibility packets (#1498) pin the order of
- * every `randomUUID` a store hands out, and a store's creation draws eight of these ids. A seed's ids mean nothing by themselves
- * (the key and the digest identify what was installed), so they stay out of that sequence.
+ * A pre-installed table's ids come from its key, not from the store's id source: the same in every store, unique within one, and
+ * given back when a deleted table is installed again (its old rows are gone). A seed that drew random ids would shift every
+ * later id of a store by eight, and the memory compatibility packets (#1498) pin those. An imported table (R5-L2) draws ordinary
+ * ids. The table's id is `standard-table:<key>`, its version 1's `standard-table-version:<key>:1`.
  */
-function newId(): string {
-  const bytes = randomBytes(16);
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = bytes.toString('hex');
+export function preinstalledTableId(key: PreinstalledTableKey): string { return nameBasedId(`standard-table:${key}`); }
+export function preinstalledVersionId(key: PreinstalledTableKey): string { return nameBasedId(`standard-table-version:${key}:1`); }
+
+function nameBasedId(name: string): string {
+  const hash = createHash('sha1').update(Buffer.from(PREINSTALLED_NAMESPACE.replaceAll('-', ''), 'hex')).update(name, 'utf8').digest();
+  hash[6] = (hash[6]! & 0x0f) | 0x50;
+  hash[8] = (hash[8]! & 0x3f) | 0x80;
+  const hex = hash.subarray(0, 16).toString('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
@@ -212,8 +219,8 @@ export function installPreinstalledStandardTables(db: DatabaseSync, keys: readon
     if (db.prepare('SELECT 1 FROM standard_tables WHERE preinstalled_key = ?').get(key) !== undefined) continue;
     const entries = table.entries();
     requireStore(entries.length === table.entryCount, 'STANDARD_TABLE_INVALID', '预装字表的内容与记录不符。');
-    const tableId = newId();
-    const versionId = newId();
+    const tableId = preinstalledTableId(key);
+    const versionId = preinstalledVersionId(key);
     db.prepare('INSERT INTO standard_tables VALUES (?, ?, ?, ?, ?, 1, ?, ?)').run(tableId, table.kind, table.name, 'preinstalled', key, versionId, now);
     db.prepare('INSERT INTO standard_table_versions VALUES (?, ?, 1, ?, ?, ?, NULL, ?, NULL, NULL, NULL, ?)')
       .run(versionId, tableId, table.versionLabel, table.sourceDescription, table.digest, entries.length, now);

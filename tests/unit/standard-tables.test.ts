@@ -60,16 +60,33 @@ describe('the 字表与词表 library (R5-L1)', () => {
     } finally { db.close(); }
   });
 
-  it('gives every installed table and version its own version-4 UUID, different in every store', () => {
-    const ids = (): string[] => {
-      const db = library();
-      try { return (db.prepare('SELECT table_id id FROM standard_tables UNION ALL SELECT version_id FROM standard_table_versions').all() as { id: string }[]).map((row) => row.id); } finally { db.close(); }
+  it('gives every pre-installed table and version a stable id of its key — the same in every store and after a delete and restore', () => {
+    const IDS: Record<PreinstalledTableKey, [string, string]> = {
+      'tgh-2013': ['9c940a7a-a371-5b19-96d4-d47901421c6b', '8518a998-2fc6-5917-81f6-2c8a50817122'],
+      'tgh-2013-annex-1': ['cc7ee4c6-24c0-54ea-8e08-47a87523af2c', 'edd7d6ea-fc06-59b8-9b35-d14d524b1151'],
+      'gf-1001-2001': ['b56f71c7-d3f9-5576-8f95-dd140484e3ea', '34d88731-a70e-5ff1-9aa0-34636b6637fc'],
+      'cycb-2': ['394996c0-7546-53ef-aedf-225b05c4bbdb', 'b4b53a7a-d39b-5a9c-a317-579d0f44e568'],
     };
-    const first = ids();
-    const second = ids();
-    expect(first).toHaveLength(8);
-    expect(new Set([...first, ...second]).size).toBe(16);
-    expect([...first, ...second].every((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(id))).toBe(true);
+    const idsOf = (db: DatabaseSync): Record<string, string[]> => Object.fromEntries(
+      (db.prepare('SELECT t.preinstalled_key key, t.table_id, t.current_version_id FROM standard_tables t').all() as { key: string; table_id: string; current_version_id: string }[])
+        .map((row) => [row.key, [row.table_id, row.current_version_id]]));
+    const db = library();
+    try {
+      expect(idsOf(db)).toEqual(IDS);
+      expect(new Set(Object.values(IDS).flat()).size).toBe(8);
+      expect(Object.values(IDS).flat().every((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(id))).toBe(true);
+    } finally { db.close(); }
+    const other = library();
+    try {
+      expect(idsOf(other)).toEqual(IDS);
+      other.exec('BEGIN IMMEDIATE');
+      other.exec("DELETE FROM standard_table_entries WHERE version_id IN (SELECT current_version_id FROM standard_tables WHERE preinstalled_key = 'cycb-2')");
+      other.exec("DELETE FROM standard_table_versions WHERE table_id IN (SELECT table_id FROM standard_tables WHERE preinstalled_key = 'cycb-2')");
+      other.exec("DELETE FROM standard_tables WHERE preinstalled_key = 'cycb-2'");
+      installPreinstalledStandardTables(other, ['cycb-2']);
+      other.exec('COMMIT');
+      expect(idsOf(other)).toEqual(IDS);
+    } finally { other.close(); }
   });
 
   it('pins each version-1 digest to the digest the shared function computes from the seed, whatever the installation order', () => {
