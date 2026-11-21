@@ -37,6 +37,7 @@ import { WRITING_REQUEST } from '../support/writing-task.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { FACTUAL_REVIEW_TASK_GOAL } from '../../src/shared/protocol.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { writeDatabasePackage } from '../../src/service/database-exports.js';
 
 // Service-integration suite (L2) for merging a Book (Issue #434, plan slice S86d; V2-UX-DSTO-017; ADR 0079 §1.5) over two real
 // stores: a Book with a manuscript and its history, an edit, a mark, a milestone, a 发稿版本, a Production Document delivered
@@ -779,6 +780,20 @@ describe('Book learning controls across database merge (#1115)', () => {
 });
 
 describe('只导入其中的图书 over the store', () => {
+  it('keeps a Task Intent draft when its Book is merged', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const bookId = emptyBook(source, '任务草稿合并');
+    const draft = source.saveTaskIntentDraft({ bookId, draftId: null, expectedOrdinal: null, origin: 'composer-book', goal: '审阅本书', target: { kind: 'book' }, outcomeClass: 'review' });
+    let path: string;
+    try { path = await exportedFrom(source, 'drafts-merge.ai7db'); } finally { source.close(); }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try { const preview = await target.inspectDatabaseImport(path); await target.prepareDatabaseMerge(preview.previewId, T); }
+    finally { target.close(); }
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try { expect(target.inspectTaskIntentDrafts({ bookId, draftId: draft.draftId }).drafts[0]!.version).toEqual(draft.version); }
+    finally { target.close(); }
+  });
+
   it('selected policy profile merge preserves exact frozen Book metadata without importing House authority', async () => {
     const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-factual-authored');
     const control = { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
@@ -1165,6 +1180,43 @@ describe('what a merge refuses, puts back and brings forward', () => {
       target.markCleanShutdown();
     } finally { target.close(); }
   }, 180_000);
+
+  it('keeps command history on selected-Book merge, where 撤销 and Enter work (#1175)', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let book: { bookId: string; manuscriptId: string; branchId: string };
+    try {
+      book = await importBook(source, await compose('撤销合并图书', [21, 22, 23]));
+      const view = source.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      source.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: view.revisionId,
+        blockId: view.blocks[1]!.blockId, windowStartBlockId: view.blocks[0]!.blockId, baseBlockDigest: view.blocks[1]!.digest,
+        expectedJournalSequence: view.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '〔合并前〕' });
+      source.markCleanShutdown();
+    } finally { source.close(); }
+    const db = new DatabaseSync(storeOf(roots.dataRoot));
+    const path = join(roots.inputRoot, 'history.ai7db');
+    try {
+      await writeDatabasePackage(db, roots.dataRoot, path, () => ({ dataVersion: 2, softwareVersion: '0.1.0', schemaRevision: LATEST_SCHEMA_VERSION,
+        createdAt: T.toISOString(), origin: 'database-export', contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 } }));
+    } finally { db.close(); }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      const preview = await target.inspectDatabaseImport(path);
+      expect(preview).toMatchObject({ schemaRevision: LATEST_SCHEMA_VERSION, compatibility: 'compatible' });
+      await target.prepareDatabaseMerge(preview.previewId, T);
+      target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
+      const merged = target.getManuscriptWindow(book!.manuscriptId, book!.branchId, null);
+      expect(merged.blocks[1]!.text.startsWith('〔合并前〕')).toBe(true);
+      target.undoManuscript(book!.manuscriptId, book!.branchId, merged.workingDigest);
+      const undone = target.getManuscriptWindow(book!.manuscriptId, book!.branchId, null);
+      expect(undone.blocks[1]!.text.startsWith('〔合并前〕')).toBe(false);
+      const split = target.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book!.manuscriptId, branchId: book!.branchId,
+        baseRevisionId: undone.revisionId, blockId: undone.blocks[1]!.blockId, windowStartBlockId: undone.blocks[0]!.blockId,
+        baseBlockDigest: undone.blocks[1]!.digest, expectedJournalSequence: undone.journalSequence, fromGrapheme: 4, toGrapheme: 4, insertText: '',
+        structure: { kind: 'split', newBlockId: `blk_${'0123456789ab'.repeat(2)}` } });
+      expect(split.window.blocks).toHaveLength(merged.blocks.length + 1);
+      target.markCleanShutdown();
+    } finally { target.close(); }
+  });
 
   it('keeps an imported Run exact without installing the source house procedure library (#1170)', async () => {
     const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

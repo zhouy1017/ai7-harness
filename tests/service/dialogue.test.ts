@@ -20,6 +20,7 @@ import { DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIG
 import { dialogueReasoningLine } from '../../src/renderer/dialogue-labels.js';
 import { AgentWorkspace } from '../../src/service/agent-workspace/workspace.js';
 import { pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -642,6 +643,50 @@ describe('就这段提问… at its edges (PR #658 review)', () => {
     await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null), (value) => value.attempts[0]!.state !== 'answering', 'settled');
     return { bookId: book.bookId, dialogueId: turn.dialogueId };
   }
+  it('keeps its relations append-only and a row altered by hand unread', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    store.close();
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    let database: DatabaseSync;
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const stepped = steppedHold();
+    const dialogues = owner(store, stepped.hold);
+    let dialogueId = '';
+    let bookId = '';
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '对话账本');
+      bookId = book.bookId;
+      const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+      dialogueId = turn.dialogueId;
+      stepped.allow(99);
+      dialogues.begin(turn);
+      await waitFor(() => store.inspectDialogue(book.bookId, dialogueId, 0, () => null), (value) => value.attempts[0]!.state === 'completed', 'completed');
+    } finally {
+      await dialogues.dispose();
+      store.close();
+    }
+    database = new DatabaseSync(path);
+    try {
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
+      expect(() => database.prepare('UPDATE dialogue_tasks SET asked_at = asked_at').run()).toThrowError(/DIALOGUE_LEDGER_IMMUTABLE/u);
+      expect(() => database.prepare('DELETE FROM dialogue_attempt_outcomes').run()).toThrowError(/DIALOGUE_LEDGER_IMMUTABLE/u);
+      // A row altered by hand does not read.
+      database.exec('DROP TRIGGER dialogue_harness_spans_no_update');
+      database.prepare('UPDATE dialogue_harness_spans SET start_seq = start_seq + 1').run();
+      database.exec(DIALOGUE_TRIGGER_SQL.dialogue_harness_spans_no_update!);
+    } finally {
+      database.close();
+    }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot).catch((error: unknown) => {
+      throw error;
+    });
+    try {
+      expect(refusal(() => store.inspectDialogue(bookId, dialogueId, 0, () => null))).toBe('DIALOGUE_RECORD_INVALID');
+    } finally {
+      store.close();
+    }
+  });
+
 
   it('honours a stop asked before the turn began, once the answer streams', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
