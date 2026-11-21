@@ -15,7 +15,17 @@ interface DumpRow { readonly type: string; readonly name: string; readonly tbl_n
  * Every change of the 117 shape the R5 storage train makes on purpose, named here until the train lands (#1540): each entry
  * is an object (`type:name`) the baseline adds, drops or changes against revision 116, with the train slice that owns it.
  */
-const INTENDED_DELTA: ReadonlyArray<{ readonly object: string; readonly change: 'added' | 'removed' | 'changed'; readonly slice: string }> = [];
+const INTENDED_DELTA: ReadonlyArray<{ readonly object: string; readonly change: 'added' | 'removed' | 'changed'; readonly slice: string }> = [
+  // R5-L1: the 字表与词表 library (ADR 0106 §9): three tables and the autoindexes SQLite makes for their keys.
+  { object: 'table:standard_tables', change: 'added', slice: 'R5-L1' },
+  { object: 'table:standard_table_versions', change: 'added', slice: 'R5-L1' },
+  { object: 'table:standard_table_entries', change: 'added', slice: 'R5-L1' },
+  { object: 'index:sqlite_autoindex_standard_tables_1', change: 'added', slice: 'R5-L1' },
+  { object: 'index:sqlite_autoindex_standard_tables_2', change: 'added', slice: 'R5-L1' },
+  { object: 'index:sqlite_autoindex_standard_table_versions_1', change: 'added', slice: 'R5-L1' },
+  { object: 'index:sqlite_autoindex_standard_table_versions_2', change: 'added', slice: 'R5-L1' },
+  { object: 'index:sqlite_autoindex_standard_table_versions_3', change: 'added', slice: 'R5-L1' },
+];
 
 const reference = JSON.parse(readFileSync('tests/fixtures/database/revision-116-schema.json', 'utf8')) as { userVersion: number; rows: DumpRow[] };
 

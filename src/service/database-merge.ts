@@ -182,6 +182,10 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   default_execution_rule_versions: 'owned',
   default_execution_rule_states: 'owned',
   house_word_list_versions: 'house', // House settings stay local; a Book carries its frozen Run snapshot.
+  // R5-L1: the 字表与词表 library (ADR 0106 §9): house settings, never taken; a merged Book keeps its findings' own text.
+  standard_tables: 'house',
+  standard_table_versions: 'house',
+  standard_table_entries: 'house',
   review_runs: 'owned',
   review_run_synthesis: 'owned',
   review_run_authorizations: 'owned',
