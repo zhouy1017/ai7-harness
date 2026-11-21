@@ -30,7 +30,8 @@ export interface MarksPaging {
   more(): Promise<boolean>;
   /**
    * Pages are read until the mark is held, then set in one move; `false` when it is not held at the end. There is no ceiling on the
-   * pages: it goes on while a next page exists and each one makes progress, and stops when the editor leaves the window.
+   * pages: it goes on while a next page exists and each one makes progress. It belongs to the window it was asked in: once the editor
+   * is in another window it reads nothing more and answers `false`, whatever that window holds.
    */
   hold(markId: string): Promise<boolean>;
   /** Pages are being read back after a reload that brought only the first: what the window holds meanwhile is not the whole list. */
@@ -158,15 +159,21 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
   }
 
   async function hold(markId: string): Promise<boolean> {
+    // The window this hold was asked for: once the editor is anywhere else, whatever that window holds is none of its business.
+    const key = windowKey(host.window());
+    const gone = (): boolean => !host.alive() || windowKey(host.window()) !== key;
     const holds = (): boolean => host.window().marks.some((mark) => mark.markId === markId);
     // Each turn must add marks, so this ends with the pages; a read already under way is waited for, then looked at again.
-    while (!holds() && host.alive() && host.window().marksPage?.nextOrdinal != null) {
+    while (!holds() && host.window().marksPage?.nextOrdinal != null) {
+      if (gone()) return false;
       const before = host.window().marks.length;
-      if (!(await run(() => pages(Number.POSITIVE_INFINITY, (marks) => marks.some((mark) => mark.markId === markId))))) break;
-      if (host.alive()) host.changed();
+      const done = await run(() => pages(Number.POSITIVE_INFINITY, (marks) => marks.some((mark) => mark.markId === markId)));
+      if (gone()) return false;
+      if (!done) break;
+      host.changed();
       if (host.window().marks.length <= before) break;
     }
-    return holds();
+    return !gone() && holds();
   }
 
   function paint(): void {

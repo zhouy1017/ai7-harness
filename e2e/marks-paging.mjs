@@ -21,7 +21,10 @@ const PLACE = `(() => {
   const scroll=document.querySelector('.editor-window'), top=scroll.getBoundingClientRect().top;
   const first=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((node)=>node.getBoundingClientRect().bottom>top+1);
   return {scrollTop:Math.round(scroll.scrollTop), first:first?.dataset.blockId??null, firstTop:first?Math.round(first.getBoundingClientRect().top-top):null,
-    selected:document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard??null, active:document.activeElement?.closest('[data-comment-card]')?.dataset.commentCard??null};
+    selected:document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard??null, active:document.activeElement?.closest('[data-comment-card]')?.dataset.commentCard??null,
+    // The head of the selected card and of the focused element stand inside the window.
+    selectedInWindow:(() => { const r=document.querySelector('[data-comment-card][data-selected="true"]')?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.top<=innerHeight-40; })(),
+    activeInWindow:(() => { const r=document.activeElement?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.top<=innerHeight-40; })()};
 })()`;
 
 /** The row's words and where it stands: inside the pane, which is inside the window, with its control under the pointer. */
@@ -33,6 +36,31 @@ const SENTENCE = `(() => {
   const hit=document.elementFromPoint(b.left+b.width/2,b.top+b.height/2);
   return {text:row.querySelector('span')?.textContent??null, inPane:r.left>=p.left-1 && r.right<=p.right+1 && r.top>=p.top-1 && r.bottom<=p.bottom+1, rowInWindow:inWindow(r), buttonInWindow:inWindow(b), buttonOnTop:button.contains(hit), label:button.textContent, viewport:[innerWidth,innerHeight], row:[r.left,r.top,r.right,r.bottom], pane:[p.left,p.top,p.right,p.bottom]};
 })()`;
+
+/**
+ * The Book's position rail moved by real input: a pointer press on a point of the track at `fraction` of its length (a point no rail
+ * marker covers: a press on a marker jumps to its block instead), and for the start of the Book the Home key on the track the press
+ * focused. The track stands inside the window and is topmost at the point pressed.
+ */
+export async function railJump(renderer, waitFor, check, fraction, name) {
+  const TRACK = '#manuscript-position[role="slider"]';
+  const point = `(() => { const track=document.querySelector(${JSON.stringify(TRACK)}); if(!track) return null; const r=track.getBoundingClientRect();
+    if (r.width<=0 || r.height<=0 || r.left<0 || r.top<0 || r.right>innerWidth || r.bottom>innerHeight) return null;
+    const x=r.left+r.width/2, wanted=r.top+Math.min(r.height-2, Math.max(2, r.height*${fraction}));
+    for (let step=0; step<=40; step+=1) for (const y of [wanted+step, wanted-step]) { if (y<r.top+1 || y>r.bottom-1) continue; const hit=document.elementFromPoint(x,y); if (hit && track.contains(hit) && !hit.closest('.rail-marker')) return {x,y}; }
+    return null; })()`;
+  await waitFor(renderer, `${point}!==null`, `${name}-track-in-window`);
+  const at = await renderer.evaluate(point);
+  check(at !== null, `${name}-track-point`);
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...at, button: 'none', buttons: 0 });
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at, button: 'left', buttons: 1, clickCount: 1 });
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at, button: 'left', buttons: 0, clickCount: 1 });
+  if (fraction === 0) {
+    await waitFor(renderer, `document.activeElement===document.querySelector(${JSON.stringify(TRACK)})`, `${name}-track-focused`);
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 });
+  }
+}
 
 /** 显示更多 by real clicks until the window holds every mark; nothing to do for a window that carries them all. */
 export async function loadEveryMark(renderer, waitFor) {
@@ -165,13 +193,13 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   }
   // The editor's place is kept: the same paragraph at the top of the text and the scroll where it was (to a few lines, as the applied
   // words reflow), and the next pending card is selected and focused (a pointer decision stays on the page), as in a window that
-  // holds every mark.
+  // holds every mark; both stand inside the window.
   try {
     await waitFor(renderer, `(() => { const place=${PLACE}; return place.selected===${JSON.stringify(wantSelected)} && place.active===${JSON.stringify(wantSelected)}; })()`, 'marks-paging-decision-keeps-place', 60_000);
   } catch { /* said below with what stood */ }
   await waitFor(renderer, `new Promise((resolve)=>{const box=()=>JSON.stringify(${PLACE});const first=box();requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(box()===first)));})`, 'marks-paging-decision-place-rest');
   const placeAfter = await renderer.evaluate(PLACE);
-  check(placeAfter.first === placeBefore.first && Math.abs(placeAfter.scrollTop - placeBefore.scrollTop) <= Math.round((await renderer.evaluate('innerHeight')) / 4) && placeAfter.selected === wantSelected && placeAfter.active === wantSelected,
+  check(placeAfter.first === placeBefore.first && Math.abs(placeAfter.scrollTop - placeBefore.scrollTop) <= Math.round((await renderer.evaluate('innerHeight')) / 4) && placeAfter.selected === wantSelected && placeAfter.active === wantSelected && placeAfter.selectedInWindow && placeAfter.activeInWindow,
     'marks-paging-decision-keeps-place', { placeBefore, placeAfter, next: around });
   await pointerClick(renderer, waitFor, '[data-mark-filter-toggle]', 'marks-paging-reset-open');
   await waitFor(renderer, isOpen, 'marks-paging-reset-opened');

@@ -984,89 +984,121 @@ describe('comments command parity and refresh continuity', () => {
       expect(ui.find).not.toHaveBeenCalled(); expect(ui.pageAt).not.toHaveBeenCalled();
     });
 
-    // A decision in a dense stretch (#1604): three pages of two. After the answer brings only the first page, the others are read
-    // back; the card the pointer decided stays put in the list and the next pending card is selected and focused, exactly as in a
-    // window that holds everything (a pointer decision stays on the page: Issue #1523). A reply is no decision: its card stays selected.
-    describe('a decision on a page of a three-page window', () => {
+    // A decision in a dense stretch (#1604): three pages of two. The answer brings only the first page and the others are read back. The
+    // slice must not change what a decision does: after each action the selected card and the focused element are exactly what the same
+    // action gives in an ordinary window that holds all six marks (accept and reject move on to the next pending card, as a pointer
+    // decision does today; editing and replying stay on the card), and the pages and the card list are whole again.
+    describe('a decision on a page of a three-page window, against the same decision in an ordinary window', () => {
       const suggested = (index: number): EditorialMarkCardProjection => ({ ...suggestion, markId: `m${index}`, fromGrapheme: index, toGrapheme: index + 1 });
       const decidedAs = (value: EditorialMarkCardProjection, how: 'rejected' | 'applied' | 'replied'): EditorialMarkCardProjection =>
         how === 'rejected' ? { ...value, status: 'resolved', suggestion: { ...value.suggestion!, decision: { disposition: 'rejected' } as never } }
           : how === 'applied' ? { ...value, status: 'applied' } : { ...value, replies: [{ replyId: 'reply', body: '一条回复', createdAt: card.createdAt }] };
       /** What the service holds now, for the pages read back: the decided mark as the command left it. */
       const latest = new Map<string, EditorialMarkCardProjection>();
+      let paged = true;
       const after = (input: Record<string, unknown>): number => (input['marks'] as { afterOrdinal: number }).afterOrdinal;
-      const run = async (action: (ui: ReturnType<typeof mount>, list: EditorialMarkCardProjection[]) => Promise<EditorialMarkCardProjection>, kinds?: (index: number) => EditorialMarkCardProjection) => {
-        const list = [0, 1, 2, 3, 4, 5].map(kinds ?? suggested); latest.clear();
+      const focusOf = () => {
+        const active = document.activeElement as unknown as { dataset?: Record<string, string>; tagName?: string; closest?: (selector: string) => { dataset: Record<string, string> } | null } | null;
+        return { card: active?.closest?.('[data-comment-card]')?.dataset['commentCard'] ?? null, control: active?.dataset?.['markAction'] ?? active?.tagName ?? null };
+      };
+      const run = async (dense: boolean, action: (ui: ReturnType<typeof mount>, list: EditorialMarkCardProjection[]) => Promise<void>, kinds?: (index: number) => EditorialMarkCardProjection) => {
+        paged = dense; latest.clear();
+        const list = [0, 1, 2, 3, 4, 5].map(kinds ?? suggested);
         const ui = mount(list[0]!, list.slice(1), { bookPending: { read: () => ({ places: [], truncated: false }), windowAt: async () => windowOf(), go: async () => true } }); await paint();
         const served = (start: number, digest: string) => ({ ...pageOf([start, start + 1], 2, start + 2 < 6 ? start + 2 : null, digest, 6), marks: [start, start + 1].map((index) => anchor(latest.get(list[index]!.markId) ?? list[index]!)) });
-        ui.setPage({ marks: [anchor(list[0]!)] }); await paint();
-        ui.setPage(served(0, 'd1')); await paint();
-        ui.pageAt.mockImplementation(async (input) => served(after(input), 'd1'));
-        press(ui); await paint(); press(ui); await paint();
-        expect(ui.held()).toEqual(['m0', 'm1', 'm2', 'm3', 'm4', 'm5']); expect(rowOf(ui).hidden).toBe(true);
-        ui.pageAt.mockClear();
-        ui.pageAt.mockImplementation(async (input) => served(after(input), 'd2'));
-        const answered = await action(ui, list); await paint(); await paint();
-        return { ui, list, answered };
+        if (dense) {
+          ui.setPage({ marks: [anchor(list[0]!)] }); await paint();
+          ui.setPage(served(0, 'd1')); await paint();
+          ui.pageAt.mockImplementation(async (input) => served(after(input), 'd1'));
+          press(ui); await paint(); press(ui); await paint();
+          expect(rowOf(ui).hidden).toBe(true);
+          ui.pageAt.mockClear();
+          ui.pageAt.mockImplementation(async (input) => served(after(input), 'd2'));
+        }
+        expect(ui.held()).toEqual(['m0', 'm1', 'm2', 'm3', 'm4', 'm5']);
+        await action(ui, list); await paint(); await paint();
+        return ui;
       };
-      /** What the command's answer carries: the first page of the window with the decided mark as it is now. */
-      const answer = (list: EditorialMarkCardProjection[], decided: EditorialMarkCardProjection) => (latest.set(decided.markId, decided), {
-        markId: decided.markId, card: decided, marks: [0, 1].map((index) => anchor(list[index]!.markId === decided.markId ? decided : list[index]!)), marksTruncated: true,
-        marksPage: { shown: 2, total: 6, nextOrdinal: 2, digest: 'd2' },
-      });
-      const restored = (ui: ReturnType<typeof mount>) => {
-        expect(ui.held()).toEqual(['m0', 'm1', 'm2', 'm3', 'm4', 'm5']); expect(rowOf(ui).hidden).toBe(true);
-        expect(ui.pageAt.mock.calls.map((call) => call[0]['marks'])).toEqual([{ afterOrdinal: 2, digest: 'd2' }, { afterOrdinal: 4, digest: 'd2' }]);
-        expect(cardIds(ui)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4', 'm5']);
+      /** What the command's answer carries: the whole window in an ordinary one, its first page in a paged one. */
+      const answer = (list: EditorialMarkCardProjection[], decided: EditorialMarkCardProjection) => {
+        latest.set(decided.markId, decided);
+        const now = (index: number) => anchor(latest.get(list[index]!.markId) ?? list[index]!);
+        return paged
+          ? { markId: decided.markId, card: decided, marks: [now(0), now(1)], marksTruncated: true, marksPage: { shown: 2, total: 6, nextOrdinal: 2, digest: 'd2' } }
+          : { markId: decided.markId, card: decided, marks: [0, 1, 2, 3, 4, 5].map(now), marksTruncated: false };
+      };
+      const both = async (action: (ui: ReturnType<typeof mount>, list: EditorialMarkCardProjection[]) => Promise<void>, kinds?: (index: number) => EditorialMarkCardProjection) => {
+        const dense = await run(true, action, kinds);
+        const seen = { selected: selectedCard(dense.pane), focus: focusOf(), held: dense.held(), cards: cardIds(dense), row: rowOf(dense).hidden, reads: dense.pageAt.mock.calls.map((call) => call[0]['marks']), dense };
+        mounted?.destroy(); mounted = undefined;
+        const ordinary = await run(false, action, kinds);
+        const base = { selected: selectedCard(ordinary.pane), focus: focusOf(), cards: cardIds(ordinary) };
+        // The pages are whole again, read back in order with the answer's digest, and the list is the ordinary window's.
+        expect(seen.held).toEqual(['m0', 'm1', 'm2', 'm3', 'm4', 'm5']); expect(seen.row).toBe(true);
+        expect(seen.reads).toEqual([{ afterOrdinal: 2, digest: 'd2' }, { afterOrdinal: 4, digest: 'd2' }]);
+        expect(seen.cards).toEqual(base.cards);
+        // Selection and focus are the ordinary window's, whatever that is.
+        expect(seen.selected).not.toBeNull();
+        expect({ selected: seen.selected, focus: seen.focus }).toEqual({ selected: base.selected, focus: base.focus });
+        return { seen, base, ordinary };
       };
 
-      it('rejecting a mark of the first page: the pages come back and the next pending card is selected and focused', async () => {
-        const { ui } = await run(async (mounted, list) => {
-          const rejected = decidedAs(list[0]!, 'rejected'); mounted.decide.mockResolvedValueOnce(answer(list, rejected) as never);
+      it('rejecting a mark of the first page', async () => {
+        const { seen } = await both(async (mounted, list) => {
+          mounted.decide.mockResolvedValueOnce(answer(list, decidedAs(list[0]!, 'rejected')) as never);
           row(mounted.pane, 'm0').click(); await paint();
           row(mounted.pane, 'm0').querySelector<HTMLButtonElement>('[data-mark-action="reject"]')!.click();
-          return rejected;
         });
-        restored(ui); expect(selectedCard(ui.pane)).toBe('m1'); expect(document.activeElement).toBe(row(ui.pane, 'm1'));
+        expect(seen.dense.decide.mock.calls[0]?.[0]).toMatchObject({ markId: 'm0', disposition: 'rejected' });
       });
 
-      it('accepting a mark of the third page: the pages come back, and the next pending card is found in the whole list', async () => {
-        const { ui } = await run(async (mounted, list) => {
-          const applied = decidedAs(list[4]!, 'applied'); mounted.apply.mockImplementationOnce(async () => ({ ...answer(list, applied), window: windowOf(), application: {} }) as never);
+      it('accepting a mark of the third page', async () => {
+        const { seen } = await both(async (mounted, list) => {
+          mounted.apply.mockImplementationOnce(async () => ({ ...answer(list, decidedAs(list[4]!, 'applied')), window: windowOf(), application: {} }) as never);
           row(mounted.pane, 'm4').click(); await paint();
           row(mounted.pane, 'm4').querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!.click();
-          return applied;
         });
-        restored(ui); expect(selectedCard(ui.pane)).toBe('m5'); expect(document.activeElement).toBe(row(ui.pane, 'm5'));
+        expect(seen.dense.apply.mock.calls[0]?.[0]).toMatchObject({ markId: 'm4', interaction: 'accept-and-apply' });
       });
 
-      it('accepting an edited suggestion on the first page: the pages come back and the same card stays selected', async () => {
-        const { ui } = await run(async (mounted, list) => {
-          const applied = decidedAs(list[1]!, 'applied'); mounted.apply.mockImplementationOnce(async () => ({ ...answer(list, applied), window: windowOf(), application: {} }) as never);
+      it('accepting an edited suggestion on the first page', async () => {
+        const { seen } = await both(async (mounted, list) => {
+          mounted.apply.mockImplementationOnce(async () => ({ ...answer(list, decidedAs(list[1]!, 'applied')), window: windowOf(), application: {} }) as never);
           row(mounted.pane, 'm1').click(); await paint();
           row(mounted.pane, 'm1').querySelector<HTMLButtonElement>('[data-mark-action="accept-with-edit"]')!.click(); await paint();
           const form = document.querySelector('[data-mark-form="accept-with-edit"]')!;
-          const field = form.querySelector<HTMLTextAreaElement>('[data-mark-field="proposedText"]')!; field.value = '改过的字';
+          form.querySelector<HTMLTextAreaElement>('[data-mark-field="proposedText"]')!.value = '改过的字';
           (form as unknown as MiniElement).dispatchEvent({ type: 'submit' });
-          return applied;
         });
-        expect(ui.apply.mock.calls[0]?.[0]).toMatchObject({ markId: 'm1', interaction: 'accept-edited-and-apply', editedText: '改过的字' });
-        // 修改后接受 has no walk-on (its own form submits): the card stays selected, now in a list that holds all six marks again.
-        restored(ui); expect(selectedCard(ui.pane)).toBe('m1');
+        expect(seen.dense.apply.mock.calls[0]?.[0]).toMatchObject({ markId: 'm1', interaction: 'accept-edited-and-apply', editedText: '改过的字' });
       });
 
-      it('replying on the third page: the pages come back and the same card stays selected', async () => {
-        const { ui } = await run(async (mounted, list) => {
-          const replied = decidedAs(list[4]!, 'replied'); mounted.update.mockResolvedValueOnce(answer(list, replied) as never);
+      it('replying on the third page', async () => {
+        const { seen } = await both(async (mounted, list) => {
+          mounted.update.mockResolvedValueOnce(answer(list, decidedAs(list[4]!, 'replied')) as never);
           row(mounted.pane, 'm4').click(); await paint();
           row(mounted.pane, 'm4').querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
-          const input = row(mounted.pane, 'm4').querySelector<HTMLTextAreaElement>('[data-comment-reply]')!; input.value = '一条回复';
+          row(mounted.pane, 'm4').querySelector<HTMLTextAreaElement>('[data-comment-reply]')!.value = '一条回复';
           (row(mounted.pane, 'm4').querySelector('form') as unknown as MiniElement).dispatchEvent({ type: 'submit' });
-          return replied;
         }, (index) => (index === 4 ? marked(4) : suggested(index)));
-        restored(ui); expect(selectedCard(ui.pane)).toBe('m4');
-        expect(ui.update.mock.calls[0]?.[0]).toMatchObject({ markId: 'm4', action: 'reply', body: '一条回复' });
+        expect(seen.dense.update.mock.calls[0]?.[0]).toMatchObject({ markId: 'm4', action: 'reply', body: '一条回复' });
       });
+    });
+
+    it('does not select a mark the editor was taken to find once the editor is in another window that already holds it', async () => {
+      const ui = await dense();
+      const page = deferred<unknown>();
+      ui.pageAt.mockImplementation(() => page.promise);
+      ui.find.mockResolvedValueOnce({ mark: { markId: 'm4', blockId: 'block', fromGrapheme: 4 } });
+      ui.pane.querySelector<HTMLButtonElement>('[data-mark-category-filter="editor"]')!.click(); await paint();
+      ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click(); await paint();
+      expect(ui.pageAt).toHaveBeenCalledTimes(1);
+      // Another window, which starts at another block and already holds m4, replaces this one while the page is on its way.
+      ui.setPage({ blocks: [{ ...windowOf().blocks[0]!, blockId: 'elsewhere', position: 9 }], marks: [0, 1, 2, 3, 4].map((index) => anchor(cards[index]!)) }); await paint();
+      page.resolve(pageOf([3, 4], 2, null)); await paint(); await paint();
+      expect(selectedCard(ui.pane)).toBeUndefined(); expect(ui.pageAt).toHaveBeenCalledTimes(1);
+      // The step is over without a word: the editor is somewhere else, not failing to find a mark.
+      expect(ui.status).not.toHaveBeenCalledWith('没能读取其他位置的待处理批注；没有移动。', 'error');
     });
 
     it('goes straight to a filtered match beyond the pages it holds, reading pages until the mark is held and its card works (#1604)', async () => {

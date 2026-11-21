@@ -32,7 +32,7 @@ function hosted(total: number, size: number) {
     },
     changed: vi.fn(), alive: () => true, focusAfter: vi.fn(), errorMessage: (_error, fallback) => fallback, setStatus: vi.fn(),
   };
-  return { host, sets, reads, replace: () => { window = { ...window, marks: [...window.marks] } as typeof window; }, current: () => window };
+  return { host, sets, reads, replace: () => { window = { ...window, marks: [...window.marks] } as typeof window; }, put: (next: unknown) => { window = next as typeof window; }, current: () => window };
 }
 
 it('reaches a mark beyond any fixed number of pages, painting the list once when it is held', async () => {
@@ -64,4 +64,41 @@ it('stops when a page makes no progress instead of reading it for ever', async (
   host.read = async (input) => { reads.push(input.marks?.afterOrdinal ?? 0); return { ...host.window(), journalSequence: 3, blocks: [{ blockId: 'block' }], marks: page(0, 400, 1600).marks, marksPage: { shown: 400, total: 1600, nextOrdinal: 400, digest: 'd' } } as unknown as ManuscriptWindowProjection; };
   expect(await createMarksPaging(host).hold('m1500')).toBe(false);
   expect(reads.length).toBeLessThan(5); expect(sets.length).toBeLessThanOrEqual(1);
+});
+
+// The editor moves to ANOTHER window while a page is on its way (review round 1, finding 1): the hold is over, whatever that window
+// holds, and it reads nothing more.
+function gated(total: number, size: number) {
+  const made = hosted(total, size);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const read = made.host.read;
+  made.host.read = async (input) => { const answered = await read(input); await gate; return answered; };
+  const elsewhere = (marks: EditorialMarkAnchorProjection[], marksPage?: ManuscriptMarksPage) =>
+    ({ manuscriptId: 'm', branchId: 'b', blocks: [{ blockId: 'elsewhere' }], journalSequence: 3, marks, ...(marksPage === undefined ? {} : { marksPage }) });
+  return { ...made, release, elsewhere };
+}
+
+it('is over when the editor moves to a distinct window: nothing is set, nothing more is read', async () => {
+  const { host, sets, reads, put, release, elsewhere } = gated(10 * 400, 400);
+  const held = createMarksPaging(host).hold('m3999');
+  await Promise.resolve(); put(elsewhere([]));
+  release();
+  expect(await held).toBe(false); expect(reads).toEqual([400]); expect(sets).toHaveLength(0);
+});
+
+it('is over when the editor moves to an overlapping window that already holds the target, which it does not select', async () => {
+  const { host, sets, reads, put, release, elsewhere } = gated(10, 2);
+  const held = createMarksPaging(host).hold('m4');
+  await Promise.resolve(); put(elsewhere([0, 1, 2, 3, 4].map(mark)));
+  release();
+  expect(await held).toBe(false); expect(reads).toEqual([2]); expect(sets).toHaveLength(0);
+});
+
+it('is over when the editor moves to a window with a larger held prefix, and reads none of its pages', async () => {
+  const { host, sets, reads, put, release, elsewhere } = gated(10 * 400, 400);
+  const held = createMarksPaging(host).hold('m3999');
+  await Promise.resolve(); put(elsewhere(Array.from({ length: 800 }, (_, index) => mark(index)), { shown: 800, total: 1600, nextOrdinal: 800, digest: 'other' }));
+  release();
+  expect(await held).toBe(false); expect(reads).toEqual([400]); expect(sets).toHaveLength(0);
 });

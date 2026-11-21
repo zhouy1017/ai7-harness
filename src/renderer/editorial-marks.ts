@@ -1398,7 +1398,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       try {
         arrived = await book.go(found.mark.blockId);
         // A mark beyond the first page of a dense window is read before the pane looks for it.
-        if (arrived && !destroyed) await paging.hold(found.mark.markId);
+        if (arrived && !destroyed) { const here = editor.currentWindow().blocks[0]?.blockId; if (!(await paging.hold(found.mark.markId)) && editor.currentWindow().blocks[0]?.blockId !== here) return; }
       } finally { jumping -= 1; }
       if (!arrived || destroyed) return;
       const now = editor.currentWindow().marks.find((mark) => mark.markId === found.mark.markId);
@@ -1430,13 +1430,16 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (moved()) return;
     if (mark === null) { options.setStatus(noFurtherPendingLine(direction, filtering()), 'success'); return; }
     let held = false;
+    // The window the mark is held in: if the editor is anywhere else when the pages are in, this step is over (whatever that window holds).
+    let landed: string | undefined;
     jumping += 1;
     try {
       if (!editor.currentWindow().blocks.some((block) => block.blockId === mark.blockId) && !(await book.go(mark.blockId))) return;
       if (destroyed) return;
+      landed = editor.currentWindow().blocks[0]?.blockId;
       held = await paging.hold(mark.markId);
     } finally { jumping -= 1; }
-    if (destroyed) return;
+    if (destroyed || editor.currentWindow().blocks[0]?.blockId !== landed) return;
     if (held) bringPending(mark.markId);
     else options.setStatus(COMMENTS_TRIAGE_WORDS.searchFailed, 'error');
   }
