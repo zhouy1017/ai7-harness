@@ -23,6 +23,7 @@ const PLACE = `(() => {
   return {scrollTop:Math.round(scroll.scrollTop), first:first?.dataset.blockId??null, firstTop:first?Math.round(first.getBoundingClientRect().top-top):null,
     selected:document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard??null, active:document.activeElement?.closest('[data-comment-card]')?.dataset.commentCard??null,
     // The head of the selected card and of the focused element stand inside the window.
+    boxes:(() => { const box=(node)=>{const r=node?.getBoundingClientRect(); return r?[Math.round(r.left),Math.round(r.top),Math.round(r.right),Math.round(r.bottom)]:null;}; return {selected:box(document.querySelector('[data-comment-card][data-selected="true"]')),active:box(document.activeElement),activeTag:document.activeElement?.tagName+'.'+(document.activeElement?.className??'')+'['+(document.activeElement?.dataset?.markAction??'')+']',pane:box(document.querySelector('.manuscript-comments-scroll')),window:[innerWidth,innerHeight]}; })(),
     selectedInWindow:(() => { const r=document.querySelector('[data-comment-card][data-selected="true"]')?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.top<=innerHeight-40; })(),
     activeInWindow:(() => { const r=document.activeElement?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.top<=innerHeight-40; })()};
 })()`;
