@@ -478,6 +478,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 /* A list read in part (Issue #1592): how much is shown, 显示更多, and a failed page said beside it. */
 .review-part-paging { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; margin: .45rem 0 0; font-size: .86rem; color: var(--text-subdued); }
 .review-page-failed { flex-basis: 100%; color: var(--status-blocked); font-weight: 700; }
+/* The same row above the 批注栏's cards when a window holds more marks than were loaded (Issue #1604). */
+.marks-paging { margin: .3rem 0; padding-inline: .55rem; }
+.marks-paging[hidden] { display: none; }
 .review-chapter-page { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
 .review-report-part { margin-top: .8rem; }
 .review-report-table { width: 100%; margin-top: .45rem; border-collapse: collapse; font-size: .9rem; }

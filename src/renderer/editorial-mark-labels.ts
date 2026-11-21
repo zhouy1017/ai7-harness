@@ -24,6 +24,15 @@ export const COMMENTS_TRIAGE_WORDS = {
   pageEnd: '本页没有待处理的了；点「下一条待处理」到后面继续。',
 } as const;
 
+/**
+ * A window that holds more marks than the 批注栏 has loaded says so in the words a 审阅 list read in part uses (Issue #1604):
+ * 「已显示 N / M 条。」 with 显示更多, which reads the next page of them.
+ */
+export { reviewShownLine as marksShownLine } from './review-labels.js';
+export const MARKS_MORE = '显示更多';
+export const MARKS_MORE_NAME = '显示更多批注';
+export const MARKS_PAGE_FAILED = '没能读取更多批注；已显示的保持原样，可以再试。';
+
 /** The header's count: the Book's pending marks, `2000+` once the list stops there. */
 export function bookPendingLabel(count: number, truncated: boolean): string {
   return `全书待处理 ${count}${truncated ? '+' : ''}`;
