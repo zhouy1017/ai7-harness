@@ -1,7 +1,9 @@
+import type { ImportReviewServiceOperations, ReturnImportToEditingProjection } from './protocol/import-intake.js';
+export type { ReturnImportToEditingProjection, ImportEditingChoices } from './protocol/import-intake.js';
 import { type FidelityCategoryKey, type FidelityStatus, type FidelityCategoryProjection, type TextBoxDisposition, fidelityStatusLabel, type ImportDegradationItemProjection, type ImportDegradationDecisionReviewProjection, type ImportFidelityOutcome, type NewBookImportTargetChoiceId, type ImportTargetSelection, type SourceImportTargetSelection, type ReimportLineageSelection, type ManuscriptReimportTargetSelection, type SourceFormat, type SourceImportRetainedBoundaryLabel, sourceImportRetainedBoundaryLabel, acceptedSourceImportRetainedBoundaryLabels, type WordTrackedChangesChoice, type WordIntakeRefusalCode, type WordTrackedChangesIntakeProjection, type StagedImportProjection, type ReviewBeforeImportProjection, type ReviewBeforeSourceImportProjection, type ManuscriptImportCommitProjection, type SourceImportCommitProjection, type ManuscriptReimportCommitProjection, type ImportCommitProjection, type OriginalFileAccessProjection, type ImportDraftRecoveryProjection, type ImportStartupProjection, type ContinueImportProjection, type CommitNewBookRendererInput, type CommitSourceImportRendererInput, type CommitManuscriptReimportRendererInput } from './protocol/import-intake.js';
 export { type FidelityCategoryKey, type FidelityStatus, type FidelityCategoryProjection, type TextBoxDisposition, fidelityStatusLabel, type ImportDegradationItemProjection, type ImportDegradationDecisionReviewProjection, type ImportFidelityOutcome, type NewBookImportTargetChoiceId, type ImportTargetSelection, type SourceImportTargetSelection, type ReimportLineageSelection, type ManuscriptReimportTargetSelection, type SourceFormat, type SourceImportRetainedBoundaryLabel, sourceImportRetainedBoundaryLabel, acceptedSourceImportRetainedBoundaryLabels, type WordTrackedChangesChoice, type WordIntakeRefusalCode, type WordTrackedChangesIntakeProjection, type StagedImportProjection, type ReviewBeforeImportProjection, type ReviewBeforeSourceImportProjection, type ManuscriptImportCommitProjection, type SourceImportCommitProjection, type ManuscriptReimportCommitProjection, type ImportCommitProjection, type OriginalFileAccessProjection, type ImportDraftRecoveryProjection, type ImportStartupProjection, type ContinueImportProjection, type CommitNewBookRendererInput, type CommitSourceImportRendererInput, type CommitManuscriptReimportRendererInput } from './protocol/import-intake.js';
-import { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
-export { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
+import { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportResolutionProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
+export { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportResolutionProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
 import { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
 export { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
 import type { BookFindingsProjection } from './protocol/review.js';
@@ -183,6 +185,11 @@ import type {
   ServiceWireOutput,
 } from './protocol/analysis.js';
 import type {
+  AdmittedFactualClaimStages,
+  AdmittedFactualRecheck,
+  InspectSourceAddressOperation,
+  SourceIdentityInput,
+  SourceOpenedProjection,
   CorrectionProposalDraftProjection,
   CorrectionProposalSavedProjection,
   EvidenceAssuranceLevel,
@@ -522,6 +529,7 @@ export const IPC_CHANNELS = {
   getImportStartup: 'ai7:j01:get-import-startup',
   selectAndStageManuscript: 'ai7:j01:select-and-stage-manuscript',
   importBundledSampleBook: 'ai7:onboarding:import-bundled-sample-book',
+  returnImportToEditing: 'ai7:j01:return-import-to-editing',
   continueImportDraft: 'ai7:j01:continue-import-draft',
   reselectImportDraft: 'ai7:j01:reselect-import-draft',
   abandonImportDraft: 'ai7:j01:abandon-import-draft',
@@ -627,6 +635,7 @@ export const IPC_CHANNELS = {
   saveEvidenceAsMaterial: 'ai7:j04:save-evidence-as-material',
   inspectFactualVerification: 'ai7:j04:inspect-factual-verification',
   inspectEvidenceWorkspace: 'ai7:j04:inspect-evidence-workspace',
+  openSourceInBrowser: 'ai7:j04:open-source-in-browser',
   recordVerificationReviewDecision: 'ai7:j04:record-verification-review-decision',
   prepareCorrectionProposal: 'ai7:j04:prepare-correction-proposal',
   saveCorrectionProposal: 'ai7:j04:save-correction-proposal',
@@ -1922,52 +1931,6 @@ export type OutboundDataCategoryId =
  * admits, the Model Role it binds, that role's exact route, endpoint, model and credential slot, and the outbound data categories
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
-export interface AdmittedFactualVerificationStage {
-  readonly contractId: 'ai7.factual-claim-verification/1';
-  readonly stageId: 'web-verification';
-  readonly maximumInitialSessionsPerEligibleClaim: number;
-  readonly maximumModelRequestsPerSession: number;
-  readonly maximumPlatformToolRoundsPerSession: number;
-  readonly maximumSearchSubmissionsPerClaim: number;
-  readonly maximumMetadataUtf8Bytes: number;
-  readonly tools: readonly string[];
-  readonly automaticTransportRetryAllowed: false;
-  readonly contractRetryAllowed: false;
-  readonly counterResetOnResumeAllowed: false;
-}
-
-export interface AdmittedFactualClaimStages {
-  readonly taskKind: 'factual-review';
-  readonly taskMode: 'whole-manuscript';
-  readonly evidenceAssuranceLevels: readonly EvidenceAssuranceLevel[];
-  readonly procedureId: string;
-  readonly procedureVersion: number;
-  readonly claimArtifactSchema: 'ai7.factual-claim-ledger/1';
-  readonly claimExtraction: {
-    readonly contractId: 'ai7.factual-claim-extraction/1';
-    readonly stageId: 'claim-extraction';
-    readonly maximumInitialSessionsPerCoverageUnit: number;
-    readonly maximumModelRequestsPerSession: number;
-    readonly maximumAssertionsPerCoverageUnit: number;
-    readonly tools: readonly string[];
-    readonly automaticTransportRetryAllowed: false;
-    readonly contractRetryAllowed: false;
-  };
-  readonly claimVerification: AdmittedFactualVerificationStage;
-}
-
-export interface AdmittedFactualRecheck {
-  readonly maximumClaims: number;
-  readonly maximumAutomaticRunsPerOnceKey: number;
-  readonly requestedLevels: readonly EvidenceAssuranceLevel[];
-  readonly onlyContractId: 'ai7.factual-claim-verification/1';
-  readonly onlyStageId: 'web-verification';
-  readonly verificationContract: AdmittedFactualVerificationStage;
-  readonly onceKeyPersistedBeforeDispatch: true;
-  readonly latestStillCurrentEditorDecisionRequired: true;
-  readonly sameBookActiveMatchingEnrollmentRequired: true;
-}
-
 export interface AdmittedProviderRule {
   readonly claimScopedFactualStages?: AdmittedFactualClaimStages;
   readonly factualRecheck?: AdmittedFactualRecheck;
@@ -3828,7 +3791,7 @@ export interface ServiceJobProjection {
     'initial-evaluation-preparation' | 'readers-report-preparation' | 'evaluation-rewrite-preparation' | 'writing-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
-  result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
+  result: SearchSummaryProjection | ReplacementPreviewProjection | ReimportResolutionProjection | ReviewBeforeManuscriptReimportProjection |
     ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | BookDeliveryPackageExportResultProjection |
     EvaluationWorkspaceProjection | WritingTaskProjection | null;
   failure: null | { code: string; message: string };
@@ -3945,7 +3908,7 @@ export interface UsageProjection {
 /** The result of 导出为 CSV…: a file of numbers and ids, written where the editor chose. */
 export type UsageCsvExportResult = { outcome: 'cancelled' } | { outcome: 'written'; rows: number };
 
-export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations {
+export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations, ImportReviewServiceOperations {
   getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
   selectSearchBackend: { input: SearchBackendSelectionInput; output: SearchBackendSettingsProjection };
   probeSearchBackend: { input: { backendId: string; candidateId?: SearchCandidateId }; output: SearchBackendProbeProjection };
@@ -4411,6 +4374,8 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: InspectEvidenceWorkspaceInput;
     output: EvidenceWorkspaceProjection;
   };
+  /** 在浏览器中打开 (Issue #1641): the recorded address of one source named by its identity; read-only. */
+  inspectSourceAddress: InspectSourceAddressOperation;
   /** 记录核查审阅决定 (Issue #901; FREV-006): one immutable Review Decision bound to one result version. */
   recordVerificationReviewDecision: {
     input: RecordVerificationReviewDecisionInput;
@@ -4644,48 +4609,6 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   commitSourceImport: {
     input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
     output: SourceImportCommitProjection;
-  };
-  prepareManuscriptReimport: {
-    input: {
-      draftId: string;
-      expectedDraftVersion: number;
-      target: ManuscriptReimportTargetSelection;
-    };
-    output: ServiceJobProjection;
-  };
-  getReimportMappingPage: {
-    input: { draftId: string; expectedDraftVersion: number; after: number | null };
-    output: ReimportMappingPageProjection;
-  };
-  getReimportLineageSourceVersionPage: {
-    input: { bookId: string; after: string | null };
-    output: ReimportLineageSourceVersionPageProjection;
-  };
-  acceptReimportDegradation: {
-    input: { draftId: string; expectedDraftVersion: number };
-    output: ReviewBeforeManuscriptReimportProjection;
-  };
-  /** One row of the chapter-level comparison resolved by one verb (Issue #412, S63): never preselected, never guessed. */
-  resolveReimportMapping: {
-    input: {
-      draftId: string;
-      expectedDraftVersion: number;
-      groupId: string;
-      verb: ReimportGroupVerb;
-    };
-    output: ServiceJobProjection;
-  };
-  resolveAcknowledgedManuscriptReimportReplay: {
-    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
-    output: { draftId: string; commitId: string; bookId: string };
-  };
-  commitManuscriptReimport: {
-    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
-    output: ServiceJobProjection;
-  };
-  acknowledgeImportCompletion: {
-    input: { commitId: string };
-    output: { state: 'acknowledged' };
   };
   getManuscriptWindow: {
     input: { manuscriptId: string; branchId: string; cursor: string | null };
@@ -5087,6 +5010,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   selectAndStageManuscript(): Promise<PickerStageResult>;
   stageDroppedManuscript(file: File): Promise<PickerStageResult>;
   importBundledSampleBook(): Promise<PickerStageResult>;
+  returnImportToEditing(input: ServiceOperationMap['returnImportToEditing']['input']): Promise<ServiceWireOutput<ReturnImportToEditingProjection>>;
   continueImportDraft(input: ServiceOperationMap['continueImportDraft']['input']): Promise<ContinueImportProjection>;
   reselectImportDraft(input: {
     draftId: string;
@@ -5244,6 +5168,8 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   saveEvidenceAsMaterial(input: { bookId: string; evidenceId: string; title?: string | null }): Promise<ServiceOperationMap['saveEvidenceAsMaterial']['output']>;
   inspectFactualVerification(input: InspectFactualVerificationInput): Promise<FactualVerificationLensProjection>;
   inspectEvidenceWorkspace(input: InspectEvidenceWorkspaceInput): Promise<EvidenceWorkspaceProjection>;
+  /** 在浏览器中打开 (Issue #1641): the system browser gets the address the service recorded for this source, if the rule admits it. */
+  openSourceInBrowser(input: SourceIdentityInput): Promise<SourceOpenedProjection>;
   recordVerificationReviewDecision(input: RecordVerificationReviewDecisionInput): Promise<VerificationReviewDecisionRecordedProjection>;
   prepareCorrectionProposal(input: PrepareCorrectionProposalInput): Promise<CorrectionProposalDraftProjection>;
   saveCorrectionProposal(input: SaveCorrectionProposalInput): Promise<CorrectionProposalSavedProjection>;

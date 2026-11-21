@@ -10,6 +10,7 @@ import { TASK_BAR_START } from './task-drawer-labels.js';
 import { visibleKnowledgeBaseTabs } from './knowledge-base-labels.js';
 import { visibleQualityLearningTabs } from './quality-learning-labels.js';
 import { MILESTONE_FORM_WORDS, PUBLICATION_ACTION_LABELS } from './deliverables-labels.js';
+import { EXPORT_MENU_LABEL } from './manuscript-export-labels.js';
 
 /** One step of 第一次审稿: a sentence and the button that goes there, through the command the palette and F1 also use (#1548). */
 export interface HelpStep {
@@ -41,13 +42,18 @@ function firstReviewSection(): HelpSection {
       { key: 'import', title: '导入稿件', sentence: `在「${destinationLabel('library')}」点「导入稿件」，选择本机的 DOCX 文件。`, button: `打开${destinationLabel('library')}`, command: 'nav.library', needsBook: false },
       { key: 'review', title: '新建审阅', sentence: `打开这本书的「${sectionLabel('review')}」，新建审阅并选好要查的类别。`, button: '新建审阅', command: 'review.new', needsBook: true },
       { key: 'process', title: '逐条处理建议', sentence: `在「${sectionLabel('findings')}」里逐条查看建议，要采纳就点「接受并应用」。`, button: `打开${sectionLabel('findings')}`, command: 'nav.book.findings', needsBook: true },
-      { key: 'export', title: '导出', sentence: `在「${sectionLabel('deliverables')}」找到要交付的稿件，点「导出…」生成文件。`, button: `打开${sectionLabel('deliverables')}`, command: 'nav.book.deliverables', needsBook: true },
+      { key: 'export', title: '导出', sentence: `在「${sectionLabel('deliverables')}」找到要交付的稿件，点「${EXPORT_MENU_LABEL}」，选一种格式生成文件。`, button: `打开${sectionLabel('deliverables')}`, command: 'nav.book.deliverables', needsBook: true },
     ],
   };
 }
 
 function destinationLabel(key: (typeof SHELL_DESTINATIONS)[number]['key']): string {
   return SHELL_DESTINATIONS.find((entry) => entry.key === key)!.label;
+}
+
+/** A count as the prose says it: 四, 五, 七, 八. */
+function countWord(count: number): string {
+  return '零一二三四五六七八九十'[count] ?? String(count);
 }
 
 function sectionLabel(key: string): string {
@@ -70,10 +76,10 @@ export function helpUsageSections(developerMode: boolean): ReadonlyArray<HelpSec
     `${sectionLabel('review')}按类别给出结果与审阅报告，${sectionLabel('evaluation')}给出评估与审稿意见；两者都要你在原页面作出决定。`,
   ] },
   { heading: '交付物', paragraphs: [
-    `${sectionLabel('deliverables')}管理发稿、交付与图书交付包：先在稿件里选「${MILESTONE_FORM_WORDS.summary}」，再到交付物选「${PUBLICATION_ACTION_LABELS.designate}」，然后按关口推进。`,
+    `${sectionLabel('deliverables')}管理发稿、交付与图书交付包：先在稿件里选「${MILESTONE_FORM_WORDS.summary}」，再到交付物选「${PUBLICATION_ACTION_LABELS.designate}」，然后按关口推进。还没有里程碑时，可在交付物点「${PUBLICATION_ACTION_LABELS.saveAndDesignate}」就地保存，再确认设为发稿版本。`,
   ] },
   { heading: '知识库与工序', paragraphs: [
-    `${destinationLabel('knowledge')}${developerMode ? '七类' : '分为四类'}：${knowledgeTabs.map((entry) => entry.label).join('、')}；任务只选用并记版本。`,
+    `${destinationLabel('knowledge')}分为${countWord(knowledgeTabs.length)}类：${knowledgeTabs.map((entry) => entry.label).join('、')}；任务只选用并记版本。`,
   ] },
   { heading: '书系', paragraphs: [
     `${destinationLabel('series')}管理成员与共享范围、书系知识${developerMode ? '与检索排除' : ''}；书系一致性审阅在成员图书的「${sectionLabel('review')}」里。`,

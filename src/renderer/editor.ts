@@ -32,6 +32,7 @@ import {
   type JournalAcknowledgement,
   type JournalEditInput,
   type ManuscriptBlockProjection,
+  type ManuscriptMarksPage,
   type ManuscriptWindowProjection,
   type RendererApi,
 } from '../shared/protocol.js';
@@ -77,7 +78,7 @@ export interface BoundedEditor {
    * answers with the window's marks and they are set here. They are decorations: the document the
    * bounded transaction filter guards never changes for a mark.
    */
-  setMarks(marks: ReadonlyArray<EditorialMarkAnchorProjection>, truncated: boolean): void;
+  setMarks(marks: ReadonlyArray<EditorialMarkAnchorProjection>, truncated: boolean, page: ManuscriptMarksPage | undefined): void;
   /** The mark whose card is open, and the replacement a Change Suggestion previews in place (预览 · 未应用). */
   setActiveMark(active: { markId: string; previewText: string | null } | null): void;
   /** Highlight a range linked to a supporting card without changing the active card's preview or the selection. */
@@ -1301,9 +1302,10 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     isComposing: () => composing,
     isOwnScroll: () =>
       smoothJump || focusReveal !== undefined || (ownScroll !== undefined && options.scrollContainer.scrollTop === ownScroll.top),
-    setMarks: (marks, truncated) => {
+    setMarks: (marks, truncated, page) => {
       if (destroyed) return;
-      windowProjection = { ...windowProjection, marks, marksTruncated: truncated };
+      const { marksPage: _held, ...rest } = windowProjection;
+      windowProjection = { ...rest, marks, marksTruncated: truncated, ...(page === undefined ? {} : { marksPage: page }) };
       view.dispatch(view.state.tr.setMeta(MARK_DECORATIONS_META, true));
     },
     setActiveMark: (active) => {

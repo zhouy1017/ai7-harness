@@ -696,7 +696,7 @@ export interface BookDeliveryPackageConditionProjection {
   stateLabel: string;
   notice: string | null;
   /** Where the row's route leads, when it is unmet or carries a notice; `null` when there is nothing to do. */
-  route: 'publication' | 'document' | 'review' | null;
+  route: 'publication' | 'review' | null;
   routeLabel: string | null;
 }
 

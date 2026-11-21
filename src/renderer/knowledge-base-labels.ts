@@ -323,6 +323,15 @@ export const LIBRARY_KIND_LEGEND = '这是什么';
 export const LIBRARY_ATTRIBUTION_TERM = '给谁用';
 export const LIBRARY_ELIGIBILITY_TERM = '是否可用于学习';
 export const LIBRARY_HOUSE = '本社';
+export const LIBRARY_USE = '给谁用…';
+export const LIBRARY_USE_LATER = '暂不使用';
+export const LIBRARY_USE_CONFIRM = '确认';
+export const LIBRARY_USE_SELECTED = '已选';
+export const LIBRARY_BOOKS_FIRST = '回到图书首页';
+export const libraryBookLabel = (title: string): string => `《${title}》`;
+export const libraryUseRecorded = (material: LibraryMaterialProjection, recorded: boolean): string => recorded
+  ? `已记录「${material.title}」的决定：${libraryReferenceLine(material)}。`
+  : material.attribution === null ? '还没有选给谁用，任务不会参考它。' : `「${material.title}」的使用范围没有变化：${libraryReferenceLine(material)}。`;
 export const LIBRARY_SERIES = '书系';
 /** A Series cannot be named until Series exist (Issue #63, S28); the choice is shown, and says why it is not there. */
 export const LIBRARY_SERIES_UNAVAILABLE = '还没有书系：书系接通后，才能把资料归到书系。';
@@ -419,15 +428,11 @@ export function libraryEligibilityLine(material: Pick<LibraryMaterialProjection,
 }
 
 /** Whose Tasks may list it under 允许参考 (KB-007), or what it still waits for. */
-export function libraryReferenceLine(material: Pick<LibraryMaterialProjection, 'reference' | 'eligibility'>): string {
+export function libraryReferenceLine(material: Pick<LibraryMaterialProjection, 'reference' | 'eligibility' | 'attribution'>): string {
   if (material.reference.state === 'available') {
-    return material.reference.scope === 'book'
-      ? `《${material.reference.bookTitle}》的任务可以把它列进「允许参考」。`
-      : '每本书的任务都可以把它列进「允许参考」。';
+    return material.reference.scope === 'book' ? `《${material.reference.bookTitle}》的任务可参考` : '本社可参考';
   }
-  return material.eligibility?.choice === 'deferred'
-    ? '是否可用于学习记为稍后决定：决定之前，任务还不能把它列进「允许参考」。'
-    : '定了给谁用与是否可用于学习，任务才能把它列进「允许参考」。';
+  return material.eligibility?.choice === 'deferred' ? LIBRARY_USE_LATER : material.attribution === null ? '还不能参考：先选给谁用' : '还不能参考：请确认给谁用';
 }
 
 /** The decisions on record: how many, and — past the latest the card names — that only those are listed. */
@@ -445,7 +450,7 @@ export function libraryDecisionLine(entry: LibraryMaterialDecisionProjection, in
 }
 
 export function libraryAdded(title: string): string {
-  return `已放入资料库：「${title}」；已允许任务参考。`;
+  return `已放入资料库：「${title}」。`;
 }
 
 export function libraryAttributed(title: string, where: string): string {

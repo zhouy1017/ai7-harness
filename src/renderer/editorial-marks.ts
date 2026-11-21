@@ -2,6 +2,7 @@ import { editorialMarkCardMoreOpen as moreOpen, renderEditorialMarkCard, settleE
 import { EDITORIAL_MARK_CATEGORIES, editorialMarkFilterModel, type EditorialMarkCategoryKey } from '../shared/editorial-mark-category.js';
 import { matchesEditorialMarkFilter, type EditorialMarkFilter } from './editorial-mark-filter.js';
 import { windowStep } from './components/controls.js';
+import { createMarksPaging } from './marks-paging.js';
 import { showToast } from './components/toast.js';
 import { shortcutHint } from './commands.js';
 import { inTextEntry, triageKeyAction } from './triage-keys.js';
@@ -41,6 +42,7 @@ import type {
   EditorialMarkCommandProjection,
   EditorialMarkKind,
   ManuscriptApplyCommandProjection,
+  ManuscriptMarksPage,
   ManuscriptWindowProjection,
   PersonalHighlightColor,
   ProposalItemDecisionProjection,
@@ -182,7 +184,7 @@ interface MountOptions {
   editor: BoundedEditor;
   api: Pick<
     RendererApi,
-    'createEditorialMark' | 'getEditorialMarkCard' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
+    'createEditorialMark' | 'getEditorialMarkCard' | 'getManuscriptWindowAt' | 'findPendingMark' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
     'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'recordLearningReasonAsk' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'reverseAppliedChangeSuggestion' |
     'inspectProposalWorkspace' | 'inspectApplyReceipt' | 'prepareReverseApply' | 'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark' |
     // A factual finding's sources on its card (Issue #1174), read as its review card reads them.
@@ -221,7 +223,7 @@ interface MountOptions {
     routes(): Promise<FastInteractionRoutesProjection>;
     polish(input: PolishSelectionInput): Promise<EditorialPolishProjection>;
     inspect(taskId: string): Promise<EditorialPolishProjection>;
-    marks(): Promise<{ readonly journalSequence: number; readonly marks: ReadonlyArray<EditorialMarkAnchorProjection>; readonly truncated: boolean } | null>;
+    marks(): Promise<{ readonly journalSequence: number; readonly marks: ReadonlyArray<EditorialMarkAnchorProjection>; readonly truncated: boolean; readonly page: ManuscriptMarksPage | undefined } | null>;
   };
   /**
    * 就这段发起任务… (Issue #423, S77b; TASK-001, TASK-046): the Tasks the selected words' paragraph can start now, and the one
@@ -792,7 +794,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (heading) heading.insertBefore(node, heading.lastElementChild);
     else filterBar.append(node);
   }
-  filterBar.append(disclosureLine, filterSummary, filterPopover);
+  /** 「已显示 N / M 条」 and 显示更多 while the window holds more marks than the pane has loaded (Issue #1604). */
+  const paging = createMarksPaging({
+    window: () => editor.currentWindow(),
+    setMarks: (marks, truncated, page) => editor.setMarks(marks, truncated, page),
+    read: (input) => api.getManuscriptWindowAt(input),
+    changed: () => refreshComments(),
+    alive: () => !destroyed,
+    focusAfter: () => filterButton.focus(),
+    errorMessage: (error, fallback) => options.errorMessage(error, fallback),
+    setStatus: (message, tone) => options.setStatus(message, tone),
+  });
+  filterBar.append(disclosureLine, filterSummary, paging.row, filterPopover);
   const commentsCanvas = el('div', 'manuscript-comments-canvas');
   commentsCanvas.setAttribute('role', 'list');
   commentsCanvas.setAttribute('aria-label', '当前可见区域批注');
@@ -966,6 +979,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   }
   function layoutComments(): void {
     paintBookPending();
+    // Pages are being read back after a reload: the window holds only part of the list, so the pane keeps what it shows until the rest is there.
+    if (paging.restoring()) return;
     if (pressedComment !== undefined || textPointerDown) { layoutAfterPress = true; return; }
     const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
     leaders.replaceChildren();
@@ -1264,8 +1279,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       for (const node of commentsCanvas.querySelectorAll('[data-comment-pending]')) node.remove();
       activateComment(undefined);
     }
+    // A reload that brought only the first page of a dense window reads the pages the editor had loaded again (Issue #1604).
+    paging.observe();
     // While the pane's own command or Apply is under way the reload answers it; any other snapshot reads every card again.
-    cardCache.sync(current, !working);
+    if (!paging.restoring()) cardCache.sync(current, !working);
     scheduleCommentsLayout();
     if (!options.comments?.enabled()) { activateComment(undefined); return; }
     for (const mark of current.marks) {
@@ -1345,6 +1362,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    * holds one. A mark decided or gone while its page loaded is passed over, and the walk goes on from where it stood.
    */
   async function walkPending(direction: 'next' | 'previous', from: PendingKey): Promise<void> {
+    // A category or model filter, or a window that holds marks the pane has not loaded, is answered by the service in one read,
+    // however dense the stretch (Issue #1604). A keyword is on the card and keeps the probing; an ordinary window reads nothing more.
+    const unloaded = editor.currentWindow().marksPage?.nextOrdinal != null;
+    if (options.bookPending !== undefined && markFilter.keyword.trim() === '' && markFilter.status !== 'handled' && (unloaded || markFilter.selectedCategories.size > 0 || markFilter.selectedModels.size > 0)) {
+      await walkFilteredPending(direction, from, options.bookPending);
+      return;
+    }
     const forward = direction === 'next';
     let origin = from;
     // One bound for the whole step: the pages read beyond the page, and the cards a model or keyword filter reads.
@@ -1371,7 +1395,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       if (found === null) { options.setStatus(noFurtherPendingLine(direction, filtering()), 'success'); return; }
       let arrived = false;
       jumping += 1;
-      try { arrived = await book.go(found.mark.blockId); } finally { jumping -= 1; }
+      try {
+        arrived = await book.go(found.mark.blockId);
+        // A mark beyond the first page of a dense window is read before the pane looks for it.
+        if (arrived && !destroyed) { const born = paging.generation(); await paging.hold(found.mark.markId); if (paging.generation() !== born) return; }
+      } finally { jumping -= 1; }
       if (!arrived || destroyed) return;
       const now = editor.currentWindow().marks.find((mark) => mark.markId === found.mark.markId);
       if (now !== undefined && !markIsHandled(now)) {
@@ -1385,6 +1413,35 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       origin = found.key;
     }
     options.setStatus(noFurtherPendingLine(direction, filtering()), 'success');
+  }
+  /**
+   * 下一条 / 上一条待处理 under a category or model filter (Issue #1604): the service names the mark, the text goes to its paragraph,
+   * and pages are read until the pane holds it, so the mark that is drawn is the mark that is handled. `null` is the end: nothing wraps.
+   */
+  async function walkFilteredPending(direction: 'next' | 'previous', from: PendingKey, book: NonNullable<MountOptions['bookPending']>): Promise<void> {
+    const start = editor.currentWindow();
+    const origin = start.blocks.find((block) => block.position === from[0]);
+    const moved = (): boolean => destroyed || editor.currentWindow().blocks[0]?.blockId !== start.blocks[0]?.blockId;
+    const { mark } = await api.findPendingMark({
+      manuscriptId: start.manuscriptId, branchId: start.branchId,
+      from: origin === undefined ? { blockId: start.blocks[0]!.blockId, grapheme: -1, markId: null } : { blockId: origin.blockId, grapheme: from[1], markId: from[2] === '' ? null : from[2] },
+      direction, categories: [...markFilter.selectedCategories], models: [...markFilter.selectedModels],
+    });
+    if (moved()) return;
+    if (mark === null) { options.setStatus(noFurtherPendingLine(direction, filtering()), 'success'); return; }
+    let held = false;
+    // The window the mark is held in: if the editor was anywhere else meanwhile, even if it came back, this step is over.
+    let born = -1;
+    jumping += 1;
+    try {
+      if (!editor.currentWindow().blocks.some((block) => block.blockId === mark.blockId) && !(await book.go(mark.blockId))) return;
+      if (destroyed) return;
+      born = paging.generation();
+      held = await paging.hold(mark.markId);
+    } finally { jumping -= 1; }
+    if (destroyed || paging.generation() !== born) return;
+    if (held) bringPending(mark.markId);
+    else options.setStatus(COMMENTS_TRIAGE_WORDS.searchFailed, 'error');
   }
   /**
    * The pages beyond `start` that hold pending marks, nearest first, read without moving the text until one holds a mark that
@@ -1427,6 +1484,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    * here, else the card stays and 下一条待处理 is offered — or, at the Book's end, that is said once.
    */
   function advanceAfter(decided: EditorialMarkCardProjection, input: DecisionInput): void {
+    // The next pending card is looked for in the whole list: after the pages the editor had loaded are read back (Issue #1604).
+    if (paging.restoring()) { void paging.settled().then(() => advanceAfter(decided, input)); return; }
     if (destroyed || !options.comments?.enabled() || (activeComment !== undefined && activeComment !== decided.markId) || inTextEntry(document.activeElement)) return;
     const current = editor.currentWindow();
     const now = current.marks.find((mark) => mark.markId === decided.markId);
@@ -1558,9 +1617,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
 
   const applyCommand = (result: EditorialMarkCommandProjection): void => {
     if (destroyed) return;
-    editor.setMarks(result.marks, result.marksTruncated);
-    // The pane's own command: its card comes back with the answer, and the others need no second read for it.
-    cardCache.sync(editor.currentWindow(), false);
+    editor.setMarks(result.marks, result.marksTruncated, result.marksPage);
+    // The pane's own command: its card comes back with the answer, and the others need no second read for it. A dense window reads
+    // its other pages back first, and its cards are looked at once the whole list is there.
+    paging.observe();
+    if (!paging.restoring()) cardCache.sync(editor.currentWindow(), false);
     if (result.card) {
       const card = result.card;
       cardCache.put(card);
@@ -2949,7 +3010,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     await editor.flush();
     const read = await polishOptions.marks().catch(() => null);
     if (read === null || destroyed || read.journalSequence !== editor.currentWindow().journalSequence) return;
-    editor.setMarks(read.marks, read.truncated);
+    editor.setMarks(read.marks, read.truncated, read.page);
     refreshComments();
     options.marksChanged?.();
   };

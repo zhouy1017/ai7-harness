@@ -108,6 +108,8 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
 
   let modelServiceChannel: ModelServiceChannelId | null = null;
   const modelChoices = new Map<ModelServiceChannelId, string>();
+  const effortOtherDrafts = new Map<string, boolean>();
+  const flashModelChoices = new Map<ModelServiceChannelId, string>();
   const effortDrafts = new Map<string, string>();
   const modelFilters = new Map<ModelServiceChannelId, string>();
   let favourites: ModelFavourites = {};
@@ -131,9 +133,10 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     if (mounted?.isConnected) paintModelServiceSettings(projection, passive);
   }
 
-  function paintModelServiceSettings(projection: ModelServiceSettingsProjection, passive = false): void {
-    const searchHadFocus = document.activeElement !== null && document.activeElement === document.querySelector('[data-search-backends="true"] h3');
-    const previous = document.querySelector<HTMLElement>('.model-service-settings');
+  function paintModelServiceSettings(projection: ModelServiceSettingsProjection, passive = false, entry = false): void {
+    const searchHadFocus = !entry && document.activeElement !== null && document.activeElement === document.querySelector('[data-search-backends="true"] h3');
+    // Explicit navigation keeps the shell's top-of-page reset; only updates retain the old interaction.
+    const previous = entry ? null : document.querySelector<HTMLElement>('.model-service-settings');
     const restoreInteraction = previous ? retainPollInteraction(previous, passive) : () => {};
     stopFollow?.();
     const content = panel();
@@ -144,9 +147,13 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     );
     content.append(
       element('h2', undefined, '模型服务'),
-      element('p', 'lede', technicalLayerVisible ? '选择渠道，保存密钥并获取模型，再分别指定主编辑与快速交互模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
+      element('p', 'lede', technicalLayerVisible ? '选择渠道，保存密钥并获取模型，再选择使用的模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
     );
     content.append(modelServiceFlow(projection, { api: rendererApi, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
+      get flashModelId() { return modelServiceChannel === null ? '' : flashModelChoices.get(modelServiceChannel) ?? ''; },
+      chooseFlashModel: model => { if (modelServiceChannel !== null) flashModelChoices.set(modelServiceChannel, model); },
+      effortOtherDraft: (channel, role) => effortOtherDrafts.get(`${channel}/${role}`),
+      setEffortOtherDraft: (channel, role, value) => { const key = `${channel}/${role}`; if (value === undefined) effortOtherDrafts.delete(key); else effortOtherDrafts.set(key, value); },
       effortDraft: (channel, role) => effortDrafts.get(`${channel}/${role}`),
       setEffortDraft: (channel, role, value) => { const key = `${channel}/${role}`; if (value === undefined) effortDrafts.delete(key); else effortDrafts.set(key, value); },
       channel: modelServiceChannel, chooseChannel: (channel) => { modelServiceChannel = channel; },
@@ -163,15 +170,19 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
         return favourites;
       } }));
     const currentRoles = element('section', 'model-service-current-roles');
-    currentRoles.setAttribute('aria-label', '当前角色模型');
-    for (const role of projection.roles.filter((role) => role.roleId === 'main-editorial' || role.roleId === 'fast-interaction')) {
-      const effort = role.binding?.reasoningEffort;
-      const mark = effort === undefined || effort === 'off' ? ' · 服务默认' : `@${effort}`;
-      const line = element('p', undefined, `${role.roleLabel}：${role.binding === null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}${mark}`} · ${role.statusLabel}`);
-      line.dataset['modelRole'] = role.roleId; line.dataset['modelRoleStatus'] = role.status;
-      currentRoles.append(line);
+    currentRoles.setAttribute('aria-label', '当前使用的模型');
+    const main = projection.modelRoles.find(role => role.roleId === 'foreground-pro');
+    const name = (role: typeof main): string => role?.binding == null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}`;
+    for (const role of projection.modelRoles) {
+      const reason = role.statusDetail?.split('。')[0];
+      if (technicalLayerVisible) {
+        const effort = role.binding?.reasoningEffort;
+        const line = element('p', undefined, `${role.roleLabel}：${name(role)} · 思考强度：${effort === undefined || effort === 'off' ? '服务默认' : effort} · ${role.sourceLabel} · ${role.statusLabel}${reason ? ` · ${reason}。` : ''}`);
+        line.dataset['modelRole'] = role.roleId === 'foreground-pro' ? 'main-editorial' : role.roleId === 'foreground-flash' ? 'fast-interaction' : role.roleId; line.dataset['modelRoleStatus'] = role.status;
+        currentRoles.append(line);
+      }
     }
-    content.append(currentRoles);
+    if (technicalLayerVisible) content.append(currentRoles);
     const unsupported = element('section', 'review-section model-unsupported-providers');
     unsupported.dataset['unsupportedProviders'] = 'true';
     unsupported.setAttribute('aria-label', '尚未支持的模型服务');
@@ -230,6 +241,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     replaceScreen('model-service', content);
     mounted = content;
     restoreInteraction(content);
+    if (entry && document.scrollingElement) document.scrollingElement.scrollTop = 0;
     if (searchHadFocus) focusSearchSettings();
     let reading = false, draftEdited = false;
     content.addEventListener('input', (event) => { const target = event.target as HTMLElement; if (target.closest('.model-credential-form, .model-service-proxy-form, .model-service-effort') || target instanceof HTMLInputElement && target.type === 'password') draftEdited = true; });
@@ -268,6 +280,9 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     setStatus('正在读取模型服务状态…', 'busy');
     modelServiceChannel = null;
     modelChoices.clear();
+    flashModelChoices.clear();
+    effortOtherDrafts.clear();
+    effortDrafts.clear();
     modelFilters.clear();
     let read: [ModelServiceSettingsProjection, Awaited<ReturnType<typeof rendererApi.getPreferences>>];
     try {
@@ -287,7 +302,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       const [projection, preferences] = read;
       if (!route.isCurrent()) return;
       favourites = preferences.values['model.favourites'];
-      paintModelServiceSettings(projection);
+      paintModelServiceSettings(projection, false, true);
       setStatus('模型服务设置已打开');
       if (focus === 'search') focusSearchSettings();
     } catch (error) {

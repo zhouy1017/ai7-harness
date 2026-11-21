@@ -8,11 +8,12 @@ import type { DatabaseSync } from 'node:sqlite';
  *   comparison without one was prepared before this revision; its review is prepared again, never guessed at.
  * - `manuscript_reimport_groups` and `manuscript_reimport_group_members`: each run of changed blocks between two exact
  *   ones, with the mappings on each side — written once, when the comparison is prepared.
- * - `manuscript_reimport_group_resolutions`: the one verb the editor chose for a group, recorded with the identities it
+ * - `manuscript_reimport_group_resolutions`: the current verb the editor chose for a group, recorded with the identities it
  *   wrote into `manuscript_reimport_mapping_resolutions`, which the commit reads as before.
  * - `manuscript_reimport_mark_outcomes`: for a changed reimport, each editorial mark of a changed group — followed to
  *   its words in the new paragraphs, or listed as unable to follow — beside the Manuscript Reimport Record.
  *
+ * Until commit, a re-choice atomically replaces only its group and mapping resolution work; it records no decision history.
  * A review that is invalidated takes its comparison with it, so the first four cascade from the comparison; an
  * outcome stays with the record it belongs to.
  */
