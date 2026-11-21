@@ -2337,6 +2337,12 @@
   },
   {
    "type": "index",
+   "name": "sqlite_autoindex_model_role_choices_1",
+   "tbl_name": "model_role_choices",
+   "sql": null
+  },
+  {
+   "type": "index",
    "name": "sqlite_autoindex_model_service_connections_1",
    "tbl_name": "model_service_connections",
    "sql": null
@@ -2344,18 +2350,6 @@
   {
    "type": "index",
    "name": "sqlite_autoindex_model_service_connections_2",
-   "tbl_name": "model_service_connections",
-   "sql": null
-  },
-  {
-   "type": "index",
-   "name": "sqlite_autoindex_model_service_connections_3",
-   "tbl_name": "model_service_connections",
-   "sql": null
-  },
-  {
-   "type": "index",
-   "name": "sqlite_autoindex_model_service_connections_4",
    "tbl_name": "model_service_connections",
    "sql": null
   },
@@ -4689,9 +4683,15 @@
   },
   {
    "type": "table",
+   "name": "model_role_choices",
+   "tbl_name": "model_role_choices",
+   "sql": "CREATE TABLE model_role_choices (\n  role_id TEXT PRIMARY KEY CHECK(role_id IN ('foreground-pro', 'foreground-flash', 'underlying-pro', 'underlying-flash')),\n  connection_id TEXT NOT NULL REFERENCES model_service_connections(connection_id) ON DELETE CASCADE,\n  model_id TEXT NOT NULL CHECK(length(model_id) BETWEEN 1 AND 128),\n  reasoning_effort TEXT CHECK(reasoning_effort IS NULL OR length(reasoning_effort) BETWEEN 1 AND 40)\n) STRICT"
+  },
+  {
+   "type": "table",
    "name": "model_service_connections",
    "tbl_name": "model_service_connections",
-   "sql": "CREATE TABLE model_service_connections (\n  connection_id TEXT PRIMARY KEY CHECK(connection_id IN ('main-editorial-deepseek-v4-pro', 'main-editorial-opencode-go', 'openai-platform', 'opencode-zen', 'anthropic-claude', 'google-gemini')),\n  role_id TEXT NOT NULL CHECK(role_id = 'main-editorial'),\n  connection_name TEXT NOT NULL CHECK(length(connection_name) BETWEEN 1 AND 80),\n  provider_id TEXT NOT NULL CHECK(provider_id IN ('deepseek-open-platform', 'opencode-go', 'openai-platform', 'opencode-zen', 'anthropic-claude', 'google-gemini')),\n  model_id TEXT NOT NULL CHECK(length(model_id) BETWEEN 1 AND 128),\n  fast_model_id TEXT NOT NULL DEFAULT '' CHECK(length(fast_model_id) <= 128),\n  cached_models TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(cached_models)),\n  reasoning_effort TEXT CHECK(reasoning_effort IS NULL OR length(reasoning_effort) BETWEEN 1 AND 40),\n  fast_reasoning_effort TEXT CHECK(fast_reasoning_effort IS NULL OR length(fast_reasoning_effort) BETWEEN 1 AND 40),\n  adapter_revision INTEGER NOT NULL CHECK(adapter_revision = 1),\n  configuration_revision INTEGER NOT NULL CHECK(configuration_revision = 1),\n  approved_fallback_chain TEXT NOT NULL CHECK(approved_fallback_chain = '[]'),\n  credential_slot TEXT NOT NULL CHECK(credential_slot IN ('deepseek-api-key', 'opencode-go', 'openai-platform', 'opencode-zen', 'anthropic-claude', 'google-gemini')),\n  credential_reference TEXT NOT NULL UNIQUE CHECK(length(credential_reference) = 36),\n  credential_operation_state TEXT NOT NULL CHECK(credential_operation_state IN ('ready', 'missing', 'needs-attention')),\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL,\n  credential_updated_at TEXT NOT NULL,\n  -- At most one selected row; unselected rows coexist as NULL (#811 brief revision 8).\n  selected INTEGER UNIQUE CHECK(selected = 1),\n  fast_selected INTEGER UNIQUE CHECK(fast_selected = 1),\n  connection_test TEXT CHECK(connection_test IS NULL OR json_valid(connection_test)),\n  CHECK((connection_id = 'main-editorial-deepseek-v4-pro' AND provider_id = 'deepseek-open-platform' AND credential_slot = 'deepseek-api-key') OR\n    (connection_id = 'main-editorial-opencode-go' AND provider_id = 'opencode-go' AND credential_slot = 'opencode-go') OR\n    (connection_id = 'openai-platform' AND provider_id = 'openai-platform' AND credential_slot = 'openai-platform') OR\n    (connection_id = 'opencode-zen' AND provider_id = 'opencode-zen' AND credential_slot = 'opencode-zen') OR\n    (connection_id = 'anthropic-claude' AND provider_id = 'anthropic-claude' AND credential_slot = 'anthropic-claude') OR\n    (connection_id = 'google-gemini' AND provider_id = 'google-gemini' AND credential_slot = 'google-gemini'))\n) STRICT"
+   "sql": "CREATE TABLE model_service_connections (\n  connection_id TEXT PRIMARY KEY CHECK(connection_id IN ('main-editorial-deepseek-v4-pro', 'main-editorial-opencode-go', 'openai-platform', 'opencode-zen', 'anthropic-claude', 'google-gemini')),\n  role_id TEXT NOT NULL CHECK(role_id = 'main-editorial'),\n  connection_name TEXT NOT NULL CHECK(length(connection_name) BETWEEN 1 AND 80),\n  provider_id TEXT NOT NULL CHECK(provider_id IN ('deepseek-open-platform', 'opencode-go', 'openai-platform', 'opencode-zen', 'anthropic-claude', 'google-gemini')),\n  model_id TEXT NOT NULL CHECK(length(model_id) BETWEEN 1 AND 128),\n  fast_model_id TEXT NOT NULL DEFAULT '' CHECK(length(fast_model_id) <= 128),\n  cached_models TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(cached_models)),\n  reasoning_effort TEXT CHECK(reasoning_effort IS NULL OR length(reasoning_effort) BETWEEN 1 AND 40),\n  fast_reasoning_effort TEXT CHECK(fast_reasoning_effort IS NULL OR length(fast_reasoning_effort) BETWEEN 1 AND 40),\n  adapter_revision INTEGER NOT NULL CHECK(adapter_revision = 1),\n  configuration_revision INTEGER NOT NULL CHECK(configuration_revision = 1),\n  approved_fallback_chain TEXT NOT NULL CHECK(approved_fallback_chain = '[]'),\n  credential_slot TEXT NOT NULL CHECK(credential_slot IN ('deepseek-api-key', 'opencode-go', 'openai-platform', 'opencode-zen', 'anthropic-claude', 'google-gemini')),\n  credential_reference TEXT NOT NULL UNIQUE CHECK(length(credential_reference) = 36),\n  credential_operation_state TEXT NOT NULL CHECK(credential_operation_state IN ('ready', 'missing', 'needs-attention')),\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL,\n  credential_updated_at TEXT NOT NULL,\n  connection_test TEXT CHECK(connection_test IS NULL OR json_valid(connection_test)),\n  CHECK((connection_id = 'main-editorial-deepseek-v4-pro' AND provider_id = 'deepseek-open-platform' AND credential_slot = 'deepseek-api-key') OR\n    (connection_id = 'main-editorial-opencode-go' AND provider_id = 'opencode-go' AND credential_slot = 'opencode-go') OR\n    (connection_id = 'openai-platform' AND provider_id = 'openai-platform' AND credential_slot = 'openai-platform') OR\n    (connection_id = 'opencode-zen' AND provider_id = 'opencode-zen' AND credential_slot = 'opencode-zen') OR\n    (connection_id = 'anthropic-claude' AND provider_id = 'anthropic-claude' AND credential_slot = 'anthropic-claude') OR\n    (connection_id = 'google-gemini' AND provider_id = 'google-gemini' AND credential_slot = 'google-gemini'))\n) STRICT"
   },
   {
    "type": "table",

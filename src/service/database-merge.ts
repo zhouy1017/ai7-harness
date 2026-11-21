@@ -298,6 +298,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   manuscript_replacement_matches: 'transient',
   // The house's own records.
   model_service_connections: 'house',
+  model_role_choices: 'house', // R5-F1a: choices are this house's settings, never a merged Book's
   search_backend_connections: 'house',
   search_backend_fallback: 'house',
   // The house's own versions of its guideline documents: a Book brings those its Runs applied as the snapshots they hold.

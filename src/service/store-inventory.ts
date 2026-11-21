@@ -17,6 +17,7 @@ import { openPackageStore } from './database-exports.js';
  * Known differences R5-6 must expect between the old store and the upgraded one (not implemented here):
  * - `tables.manuscript_revisions`: one 「升级时的稿件」 revision more per manuscript (ADR 0105 §5), so old + `manuscripts` rows;
  * - `tables.working_offset_nodes`: dropped by the position conversion (ADR 0105 §6), so 0 after the upgrade;
+ * - `tables.model_role_choices`: 0 before; 0, 1 or 2 after, from mapping the two selected connection groups (R5-F1a);
  * - `tables.store_versions`: one more row, the Data Version 2 record;
  * - the other position-keyed tables are converted (ADR 0105 §6); R5-6 states any further difference when it lands.
  * `entities` carries none of these, so it is compared by plain equality.
@@ -178,6 +179,7 @@ export const INVENTORY_TABLES = [
   'milestone_signoff_records',
   'milestone_versions',
   'model_service_connections',
+  'model_role_choices', // R5-F1a
   'native_artifact_book_enablements',
   'native_artifact_installations',
   'plan_envelopes',

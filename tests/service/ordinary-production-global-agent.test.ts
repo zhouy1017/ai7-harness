@@ -577,6 +577,16 @@ describe('v31 scoped Global Agent tools (#1171)', () => {
   }
   const propose = (text: string) => () => ({ name: 'propose_learning_supervision', args: { categoryId: 'typos-and-usage', scope: 'house', effect: 'guide', text } });
 
+  it('refuses the other remembered model of the same connection at the AI assistant gate (#1650)', () => {
+    store.selectMainRoleModel(binding.route, 'glm-5.3');
+    store.selectFastRoleModel(binding.route, binding.model);
+    const pro = store.getConfiguredModelRoleBinding('main-editorial')!;
+    const configured = store.getConfiguredModelRoleBinding.bind(store);
+    vi.spyOn(store, 'getConfiguredModelRoleBinding').mockImplementation((role, override) => role === 'fast-interaction' ? pro : configured(role, override));
+    expect(() => store.globalAgentModelConnection()).toThrowError(expect.objectContaining({ code: 'GLOBAL_AGENT_POLICY_BLOCKED' }));
+    expect(calls).toHaveLength(0);
+  });
+
   it('answers both AI 助手 kinds on the Pro model when only a Pro model is chosen (#1620)', async () => {
     store.selectMainRoleModel(binding.route, 'glm-5.3');
     const main = store.getConfiguredModelRoleBinding('main-editorial')!;
