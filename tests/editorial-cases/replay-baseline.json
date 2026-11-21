@@ -427,17 +427,24 @@
             "state": "settled"
           }
         ],
-        "unitsClosed": 8,
+        "unitsClosed": 2,
         "unitsTotal": 8,
-        "gaps": []
+        "gaps": [
+          "literary-expression/1:adapter-failure",
+          "literary-expression/2:adapter-failure",
+          "literary-expression/3:adapter-failure",
+          "literary-expression/4:adapter-failure",
+          "literary-expression/7:adapter-failure",
+          "literary-expression/8:adapter-failure"
+        ]
       },
       "findings": {
-        "listed": 74,
-        "located": 74,
+        "listed": 21,
+        "located": 21,
         "excluded": 0,
         "useful": 1,
         "precise": 1,
-        "unclassified": 73,
+        "unclassified": 20,
         "falsePositives": 0
       },
       "concerns": {
@@ -459,7 +466,7 @@
         "adopted": 0,
         "edited": 1,
         "rejected": 0,
-        "left": 73,
+        "left": 20,
         "applied": 1,
         "appliedCorrect": 1,
         "reversed": 1,
@@ -473,8 +480,8 @@
         "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 29,
-        "unmatched": 3
+        "answered": 8,
+        "unmatched": 10
       },
       "recordedUsage": {
         "requests": 29,
@@ -563,17 +570,20 @@
             "state": "settled"
           }
         ],
-        "unitsClosed": 8,
+        "unitsClosed": 6,
         "unitsTotal": 8,
-        "gaps": []
+        "gaps": [
+          "style-and-format/6:adapter-failure",
+          "style-and-format/7:adapter-failure"
+        ]
       },
       "findings": {
-        "listed": 12,
-        "located": 12,
+        "listed": 9,
+        "located": 9,
         "excluded": 0,
         "useful": 2,
         "precise": 2,
-        "unclassified": 9,
+        "unclassified": 6,
         "falsePositives": 1
       },
       "concerns": {
@@ -596,7 +606,7 @@
         "adopted": 2,
         "edited": 0,
         "rejected": 1,
-        "left": 9,
+        "left": 6,
         "applied": 0,
         "appliedCorrect": 0,
         "reversed": 0,
@@ -610,8 +620,8 @@
         "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 20,
-        "unmatched": 1
+        "answered": 12,
+        "unmatched": 4
       },
       "recordedUsage": {
         "requests": 20,
@@ -776,17 +786,20 @@
             "state": "settled"
           }
         ],
-        "unitsClosed": 8,
+        "unitsClosed": 6,
         "unitsTotal": 8,
-        "gaps": []
+        "gaps": [
+          "typos-and-usage/2:adapter-failure",
+          "typos-and-usage/8:adapter-failure"
+        ]
       },
       "findings": {
-        "listed": 32,
-        "located": 32,
+        "listed": 27,
+        "located": 27,
         "excluded": 0,
-        "useful": 7,
-        "precise": 7,
-        "unclassified": 25,
+        "useful": 6,
+        "precise": 6,
+        "unclassified": 21,
         "falsePositives": 0
       },
       "concerns": {
@@ -794,14 +807,15 @@
         "met": [
           "s1-missing-de",
           "s1-circle-1990",
-          "s1-circle-1980",
           "s1-stray-shang",
           "s1-missing-object",
           "s1-missing-lai",
           "s1-missing-ta"
         ],
         "missed": [],
-        "unmeasured": [],
+        "unmeasured": [
+          "s1-circle-1980"
+        ],
         "excludedOnly": []
       },
       "checks": {
@@ -810,12 +824,12 @@
       },
       "effort": {
         "adopted": 5,
-        "edited": 2,
+        "edited": 1,
         "rejected": 0,
-        "left": 25,
-        "applied": 7,
-        "appliedCorrect": 7,
-        "reversed": 7,
+        "left": 21,
+        "applied": 6,
+        "appliedCorrect": 6,
+        "reversed": 6,
         "restoredExactly": true
       },
       "delivery": null,
@@ -826,8 +840,8 @@
         "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 22,
-        "unmatched": 1
+        "answered": 12,
+        "unmatched": 6
       },
       "recordedUsage": {
         "requests": 22,

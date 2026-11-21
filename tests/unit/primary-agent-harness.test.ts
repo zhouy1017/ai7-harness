@@ -11,6 +11,8 @@ import { Ai7LocalDeterministicAdapter } from '../../src/service/provider/local-d
 import { fixtureEntryKey, loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { HARNESS_PACKAGE_PINS, describeComposition, prepareExecution } from '../../src/service/harness/primary-agent-harness.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { LOCAL_TOOL_SCHEMAS, LOCAL_TOOL_SCHEMA_DIGEST } from '../../src/service/provider/platform-tools.js';
 import { EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST } from '../../src/service/fast-role/polish-contract.js';
 import { CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST } from '../../src/service/fast-role/conflict-regenerate-contract.js';
 import { DIALOGUE_PROMPT_CONTRACT_DIGEST } from '../../src/service/dialogue/contract.js';
@@ -56,6 +58,10 @@ describe('PrimaryAgentHarness', () => {
     expect(local.digest).toBe('da9f4c83be90b1f69c58d440ae35f608b69cccade962614a780945fca41f638c');
     expect(both.tools.registeredTools).toBe(4);
     expect(both.digest).toBe('92045be31732b194b935434de5e8cd179218917c93be329359786da930776bb0');
+    // A frozen plan pins the declared tools' bytes: an archived review re-derives its composition from them when it opens (#1623).
+    // Neither set may change until tool schemas are versioned per plan.
+    expect(LOCAL_TOOL_SCHEMA_DIGEST).toBe('b4db5afc99a9c4816ad68c986d33bdae8adfb75166d6b3aebc999303391623a4');
+    expect(sha256Hex(canonicalJson(LOCAL_TOOL_SCHEMAS))).toBe('ea619deecea39fc6ef178a5f951d7d05666a38c3c372dfd9ba33723f4fadd006');
   });
   it('pins the research declaration in tool compositions and preserves non-web compositions (#744)', () => {
     const plain = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST);
