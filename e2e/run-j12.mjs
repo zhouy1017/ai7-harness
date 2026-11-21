@@ -493,7 +493,7 @@ async function assertModelEffortDefaults(renderer) {
     const label = role === 'main' ? '主编辑思考强度' : '快速交互思考强度';
     await pointerClick(renderer, waitFor, `select[aria-label="${label}"] + .ui-select-trigger`, 'model-effort-open');
     const index = await renderer.evaluate(`Array.from(document.querySelector('select[aria-label="${label}"]').options).findIndex(option=>option.value===${JSON.stringify(effort === 'off' ? '' : effort)})`);
-    await pointerClick(renderer, waitFor, `.ui-select-popup:not([hidden]) [role="option"][data-index="${index}"]`, 'model-effort-option');
+    await pointerClick(renderer, waitFor, `.ui-select-popover:not([hidden]) [role="option"][data-index="${index}"]`, 'model-effort-option');
     await pointerClick(renderer, waitFor, role === 'main' ? '[data-action="use-model-for-both-roles"]' : '[data-action="select-fast-role-model"]', 'model-effort-save');
     const roleId = role === 'main' ? 'foreground-pro' : 'foreground-flash';
     await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => (settings.modelRoles.find(role => role.roleId===${JSON.stringify(roleId)})?.binding?.reasoningEffort ?? 'off')===${JSON.stringify(effort)})`, 'model-effort-saved');
@@ -2422,14 +2422,14 @@ async function main() {
       const index = await primary.evaluate(`Array.from(document.querySelector('select[aria-label="AI7 使用的模型"]').options).findIndex(option=>option.value===${JSON.stringify(id)})`);
       requireJourney(index>=0, 'model-choice-offered');
       await pointerClick(primary, waitFor, 'select[aria-label="AI7 使用的模型"] + .ui-select-trigger', 'model-choice-open');
-      await assertRenderer(primary, `Array.from(document.querySelectorAll('.ui-select-popup:not([hidden]) .field-note')).some(node=>node.textContent==='推荐 · 主要模型')`, 'model-choice-recommendation-visible');
-      await pointerClick(primary, waitFor, '.ui-select-popup:not([hidden]) input', 'model-choice-filter-focus');
+      await assertRenderer(primary, `Array.from(document.querySelectorAll('.ui-select-popover:not([hidden]) .field-note')).some(node=>node.textContent==='推荐 · 主要模型')`, 'model-choice-recommendation-visible');
+      await pointerClick(primary, waitFor, '.ui-select-popover:not([hidden]) input', 'model-choice-filter-focus');
       await primary.send('Input.dispatchKeyEvent', {type:'keyDown',key:'a',code:'KeyA',modifiers:2,windowsVirtualKeyCode:65});
       await primary.send('Input.dispatchKeyEvent', {type:'keyUp',key:'a',code:'KeyA',modifiers:2,windowsVirtualKeyCode:65});
       const text = await primary.evaluate(`document.querySelector('select[aria-label="AI7 使用的模型"]').options[${index}].text`);
       await primary.send('Input.insertText', {text});
 
-      await pointerClick(primary, waitFor, `.ui-select-popup:not([hidden]) [role="option"][data-index="${index}"]`, 'model-choice-option');
+      await pointerClick(primary, waitFor, `.ui-select-popover:not([hidden]) [role="option"][data-index="${index}"]`, 'model-choice-option');
     };
     const alternative = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.channels.find(channel=>channel.route==='deepseek-open-platform').models.find(model=>model.main==='eligible'&&model.fast==='eligible'&&model.modelId!=='deepseek-flash').modelId)`);
     await chooseModel(alternative);
