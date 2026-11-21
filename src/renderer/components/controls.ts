@@ -165,11 +165,17 @@ export function enhanceSelect(select: HTMLSelectElement): EnhancedSelect | null 
     visible = []; rows = [];
     list.replaceChildren();
     let previousGroup: Element | null = null;
+    let optionContainer = list;
     options.forEach((option, index) => {
       if (option.hidden || option.parentElement?.hidden || !option.text.toLocaleLowerCase().includes(query)) return;
       const group = option.parentElement;
-      if (group?.tagName === 'OPTGROUP' && group !== previousGroup) {
-        const heading = doc.createElement('div'); heading.className = 'field-note'; heading.textContent = group.getAttribute('label'); list.append(heading);
+      if (group !== previousGroup) {
+        optionContainer = list;
+        if (select.dataset['showOptionGroups'] === 'true' && group?.tagName === 'OPTGROUP') {
+          optionContainer = doc.createElement('div'); optionContainer.setAttribute('role', 'group'); optionContainer.setAttribute('aria-label', group.getAttribute('label') ?? '');
+          const heading = doc.createElement('div'); heading.className = 'field-note'; heading.setAttribute('aria-hidden', 'true'); heading.textContent = group.getAttribute('label');
+          optionContainer.append(heading); list.append(optionContainer);
+        }
       }
       previousGroup = group;
       const row = doc.createElement('div');
@@ -186,7 +192,7 @@ export function enhanceSelect(select: HTMLSelectElement): EnhancedSelect | null 
       row.addEventListener('click', (event) => { event.preventDefault(); choose(index); });
       row.addEventListener('pointermove', () => { if (!optionDisabled(option)) setActive(index, false); });
       if (!optionDisabled(option)) visible.push(index);
-      rows.push(row); list.append(row);
+      rows.push(row); optionContainer.append(row);
     });
     empty.hidden = rows.length > 0;
     if (!visible.includes(active)) active = visible.includes(select.selectedIndex) ? select.selectedIndex : visible[0] ?? -1;

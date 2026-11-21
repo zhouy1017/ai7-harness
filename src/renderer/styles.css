@@ -2600,7 +2600,7 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .model-service-flow-feedback [data-connection-test-outcome="passed"] { color: var(--status-good); }
 .model-service-flow-feedback [data-connection-test-outcome="failed"],
 .model-service-flow-feedback [data-connection-test-outcome="outcome-unknown"] { color: var(--status-blocked); }
-.model-route-option { display: flex; flex-direction: column; gap: .7rem; min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 10px; }
+.model-route-option { display: grid; gap: .7rem; min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 10px; }
 .model-route-option .model-credential-form { margin: 0; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); align-items: end; }
 .model-credential-form label { display: grid; gap: .4rem; min-width: 0; }
 .model-credential-form .field-note, .model-credential-form .button-row { grid-column: 1 / -1; }

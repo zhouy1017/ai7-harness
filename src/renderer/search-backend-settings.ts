@@ -113,7 +113,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   section.dataset['searchBackends'] = 'true';
   const heading = element('h3', undefined, '联网检索');
   heading.tabIndex = -1;
-  section.append(heading, element('p', 'field-note', `${effectiveSearchSourceLine(projection)} ${technicalLayerVisible ? `新任务优先用主编辑模型自带搜索，否则用已配置的检索服务；已开始的任务继续使用原来源；${SEARCH_FALLBACK_NOTE}` : '可设一个备用来源，出错时自动切换。'}`));
+  section.append(heading, element('p', 'field-note', `${effectiveSearchSourceLine(projection).replace(/。$/u, '')}；${technicalLayerVisible ? `新任务优先用主编辑模型自带搜索，否则用已配置的检索服务；已开始的任务继续使用原来源；${SEARCH_FALLBACK_NOTE}` : '可设一个备用来源，出错时自动切换。'}`));
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
   const override = element('input'); override.type = 'checkbox'; override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false;
   override.dataset['action'] = 'always-use-selected-search-backend';

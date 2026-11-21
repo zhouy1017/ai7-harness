@@ -452,7 +452,7 @@ async function assertOrdinaryModelReachability(renderer) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: false });
     await waitFor(renderer, `innerWidth===${viewport.width} && innerHeight===${viewport.height}`, 'ordinary-model-supported-viewport');
     const geometry = await renderer.evaluate(`(async () => {
-      const selectors=['select[aria-label="渠道"]','.model-credential-form input[type="password"]','[data-action="save-channel-credential"]','[data-action="retry-model-list"]','[data-action="remove-model-service-credential"]','input[aria-label="筛选模型"]','select[aria-label="AI7 使用的模型"]','select[aria-label="主编辑思考强度"]', 'select[aria-label="快速交互思考强度"]','[data-favorite-model]','[data-action="select-fast-role-model"]','[data-action="use-model-for-both-roles"]','[data-action="test-flow-connection"]','[data-model-summary]'];
+      const selectors=['select[aria-label="渠道"]','.model-credential-form input[type="password"]','[data-action="save-channel-credential"]','[data-action="retry-model-list"]','[data-action="remove-model-service-credential"]','input[aria-label="筛选模型"]','select[aria-label="AI7 使用的模型"]','select[aria-label="思考强度"]', 'select[aria-label="较轻模型的思考强度"]','[data-favorite-model]','[data-action="select-fast-role-model"]','[data-action="use-model-for-both-roles"]','[data-action="test-flow-connection"]','[data-action="clear-flash-model"]','select[data-flash-model]','[data-model-summary]'];
       const heading=document.querySelector('[data-flow-step="credential"] h4').getBoundingClientRect();
       const form=document.querySelector('.model-credential-form').getBoundingClientRect();
       if(heading.bottom>form.top+1)return {ok:false,width:innerWidth,height:innerHeight,overlap:true};
@@ -472,10 +472,22 @@ async function assertOrdinaryModelReachability(renderer) {
         controls.push({index,top:Math.round(box.top),bottom:Math.round(box.bottom),left:Math.round(box.left),right:Math.round(box.right),disabled:Number(Boolean(node.disabled)),visible:Number(visible),focused:Number(focused)});
         if(!visible||!focused)return {ok:false,width:innerWidth,height:innerHeight,controls};
       }
-      return {ok:document.documentElement.scrollWidth<=innerWidth+1,width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,controls};
+      return {ok:document.documentElement.scrollWidth<=innerWidth+1,width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,credentialHeading:{top:heading.top,bottom:heading.bottom},credentialForm:{top:form.top,bottom:form.bottom},controls};
     })()`);
     if (localDebugEnabled()) recordDebugDetail('J-12', `model-layout-reachability ${JSON.stringify(geometry)}`);
     requireJourney(geometry.ok, 'ordinary-model-controls-reachable', geometry);
+    if ((await renderer.evaluate(`document.querySelector('select[aria-label="思考强度"]')?.disabled===false`)) === true) {
+      await pointerClick(renderer, waitFor, 'select[aria-label="思考强度"] + .ui-select-trigger', 'model-other-open');
+      const other = await renderer.evaluate(`Array.from(document.querySelector('select[aria-label="思考强度"]').options).findIndex(option=>option.value==='__other')`);
+      await pointerClick(renderer, waitFor, `.ui-select-popover:not([hidden]) [role="option"][data-index="${other}"]`, 'model-other-option');
+      await pointerClick(renderer, waitFor, 'input[data-reasoning-effort="main"]', 'model-other-input');
+      await renderer.send('Input.insertText', {text:'low'});
+      requireJourney((await renderer.evaluate(`(() => {const input=document.querySelector('input[data-reasoning-effort="main"]'),b=input.getBoundingClientRect();return !input.hidden&&getComputedStyle(input).display!=='none'&&b.width>0&&b.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&b.bottom<=innerHeight&&b.left>=0&&b.right<=innerWidth&&document.querySelector('select[aria-label="思考强度"]').value==='__other';})()`)) === true, 'model-other-field-visible');
+      await pointerClick(renderer, waitFor, 'select[aria-label="思考强度"] + .ui-select-trigger', 'model-other-close-open');
+      await pointerClick(renderer, waitFor, '.ui-select-popover:not([hidden]) [role="option"][data-index="0"]', 'model-other-default');
+      requireJourney((await renderer.evaluate(`document.querySelector('input[data-reasoning-effort="main"]').getClientRects().length===0`)) === true, 'model-other-field-hidden');
+    }
+
   }
   await renderer.send('Emulation.clearDeviceMetricsOverride');
   await renderer.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo({top:0,left:0,behavior:'instant'}); })()`);
@@ -490,14 +502,14 @@ async function dispatchTab(renderer) {
 async function assertModelEffortDefaults(renderer) {
   const original = await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => Object.fromEntries(settings.roles.filter(role => ['main-editorial','fast-interaction'].includes(role.roleId)).map(role => [role.roleId,role.binding?.reasoningEffort ?? 'off'])))`);
   const save = async (role, effort) => {
-    const label = role === 'main' ? '主编辑思考强度' : '快速交互思考强度';
+    const label = role === 'main' ? '思考强度' : '较轻模型的思考强度';
     await pointerClick(renderer, waitFor, `select[aria-label="${label}"] + .ui-select-trigger`, 'model-effort-open');
     const index = await renderer.evaluate(`Array.from(document.querySelector('select[aria-label="${label}"]').options).findIndex(option=>option.value===${JSON.stringify(effort === 'off' ? '' : effort)})`);
     await pointerClick(renderer, waitFor, `.ui-select-popover:not([hidden]) [role="option"][data-index="${index}"]`, 'model-effort-option');
     await pointerClick(renderer, waitFor, role === 'main' ? '[data-action="use-model-for-both-roles"]' : '[data-action="select-fast-role-model"]', 'model-effort-save');
     const roleId = role === 'main' ? 'foreground-pro' : 'foreground-flash';
     await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => (settings.modelRoles.find(role => role.roleId===${JSON.stringify(roleId)})?.binding?.reasoningEffort ?? 'off')===${JSON.stringify(effort)})`, 'model-effort-saved');
-    await waitFor(renderer, `document.querySelector('input[data-reasoning-effort="${role}"]')?.value===${JSON.stringify(effort === 'off' ? '' : effort)}`, 'model-effort-role-label');
+    await waitFor(renderer, `document.querySelector('select[aria-label="${label}"] + .ui-select-trigger')?.textContent.includes(${JSON.stringify(effort === 'off' ? '服务默认' : effort)})`, 'model-effort-role-label');
   };
   try {
     for (const [width, height] of [[1280,800],[1008,681]]) {
@@ -511,8 +523,8 @@ async function assertModelEffortDefaults(renderer) {
       await assertRenderer(renderer, `(() => { const page = document.querySelector('[data-screen="model-service"] .model-service-settings'); if (!page) return false; page.dataset.stale = ''; return true; })()`, 'model-effort-mark-old-page');
       await pointerClick(renderer, waitFor, SIDEBAR.settings, 'model-effort-leave');
       await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation') && document.querySelector('[data-screen="model-service"] .model-service-settings:not([data-stale])')`, 'model-effort-settings-ready');
-      await assertRenderer(renderer, `(() => {const b=document.querySelector('.model-service-settings h2').getBoundingClientRect();return b.top>=0&&b.bottom<=innerHeight;})()`, 'model-heading-inside-window');
-      await waitFor(renderer, `document.querySelector('input[data-reasoning-effort="main"]')?.value==='high' && document.querySelector('input[data-reasoning-effort="fast"]')?.value==='low'`, 'model-effort-reopened-defaults');
+      await assertRenderer(renderer, `(() => {const b=document.querySelector('.model-service-settings h2').getBoundingClientRect();return b.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&b.bottom<=innerHeight;})()`, 'model-heading-inside-window');
+      await waitFor(renderer, `document.querySelector('select[aria-label="思考强度"] + .ui-select-trigger')?.textContent.includes('high') && document.querySelector('select[aria-label="较轻模型的思考强度"] + .ui-select-trigger')?.textContent.includes('low')`, 'model-effort-reopened-defaults');
       await save('fast', 'low');
       await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => settings.roles.find(role=>role.roleId==='main-editorial')?.binding?.reasoningEffort==='high')`, 'model-effort-other-role-kept');
       await save('main', original['main-editorial']);
@@ -2413,16 +2425,18 @@ async function main() {
     await assertOrdinaryModelReachability(primary);
     await assertModelEffortDefaults(primary);
     at('model-one-model-setup');
+    await primary.evaluate(`document.querySelector('.model-service-settings').dataset.choiceEntryOld='true'`);
     await pointerClick(primary, waitFor, SIDEBAR.settings, 'model-choice-entry');
-    await waitFor(primary, `document.querySelector('[data-model-service-mode="ordinary"]')`, 'model-choice-entry-ready');
-    await assertRenderer(primary, `(() => {const b=document.querySelector('.model-service-settings h2').getBoundingClientRect();return b.top>=0&&b.bottom<=innerHeight;})()`, 'model-choice-heading-visible');
+    await waitFor(primary, `document.querySelector('[data-model-service-mode="ordinary"]') && document.querySelector('.model-service-settings:not([data-choice-entry-old])')`, 'model-choice-entry-ready');
+    await assertRenderer(primary, `(() => {const b=document.querySelector('.model-service-settings h2').getBoundingClientRect();return b.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&b.bottom<=innerHeight;})()`, 'model-choice-heading-visible');
     await pointerClick(primary, waitFor, '[data-action="clear-flash-model"]', 'model-choice-clear');
     await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('也使用同一个模型')`, 'model-choice-one-sentence');
-    const chooseModel = async (id) => {
-      const index = await primary.evaluate(`Array.from(document.querySelector('select[aria-label="AI7 使用的模型"]').options).findIndex(option=>option.value===${JSON.stringify(id)})`);
+    const chooseModel = async (id, lighter = false) => {
+      const selector = lighter ? 'select[data-flash-model]' : 'select[aria-label="AI7 使用的模型"]';
+      const index = await primary.evaluate(`Array.from(document.querySelector(${JSON.stringify(selector)}).options).findIndex(option=>option.value===${JSON.stringify(id)})`);
       requireJourney(index>=0, 'model-choice-offered');
-      await pointerClick(primary, waitFor, 'select[aria-label="AI7 使用的模型"] + .ui-select-trigger', 'model-choice-open');
-      await assertRenderer(primary, `Array.from(document.querySelectorAll('.ui-select-popover:not([hidden]) .field-note')).some(node=>node.textContent==='推荐 · 主要模型')`, 'model-choice-recommendation-visible');
+      await pointerClick(primary, waitFor, selector + ' + .ui-select-trigger', 'model-choice-open');
+      if (!lighter) await assertRenderer(primary, `Array.from(document.querySelectorAll('.ui-select-popover:not([hidden]) [role="group"][aria-label="推荐 · 主要模型"] .field-note')).some(node=>{const b=node.getBoundingClientRect();return node.textContent==='推荐 · 主要模型'&&b.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&b.bottom<=innerHeight;})`, 'model-choice-recommendation-visible');
       // Small catalogues have no search field. Arrow keys navigate the actual popup in either form.
       for (const key of ['ArrowDown', 'ArrowUp']) {
         await primary.send('Input.dispatchKeyEvent', {type:'keyDown',key});
@@ -2431,17 +2445,22 @@ async function main() {
       await pointerClick(primary, waitFor, `.ui-select-popover:not([hidden]) [role="option"][data-index="${index}"]`, 'model-choice-option');
     };
     const alternative = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.channels.find(channel=>channel.route==='deepseek-open-platform').models.find(model=>model.main==='eligible'&&model.fast==='eligible'&&model.modelId!=='deepseek-flash').modelId)`);
+    const flashBefore = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.modelRoles.find(role=>role.roleId==='foreground-flash').source))`);
     await chooseModel(alternative);
     await pointerClick(primary, waitFor, '[data-action="use-model-for-both-roles"]', 'model-choice-use');
     await waitFor(primary, `window.ai7.getModelServiceSettings().then(settings=>settings.modelRoles.find(role=>role.roleId==='foreground-pro').binding.modelId===${JSON.stringify(alternative)})`, 'model-choice-primary-saved');
-    await chooseModel('deepseek-flash');
+    requireJourney((await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.modelRoles.find(role=>role.roleId==='foreground-flash').source))`))===flashBefore, 'model-choice-primary-keeps-light');
+    await chooseModel('deepseek-flash', true);
     await pointerClick(primary, waitFor, '[data-action="select-fast-role-model"]', 'model-choice-light');
     await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('AI 助手使用：')`, 'model-choice-two-sentence');
     await pointerClick(primary, waitFor, '[data-action="clear-flash-model"]', 'model-choice-remove-light');
     await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('也使用同一个模型')`, 'model-choice-return-one');
+    await waitFor(primary, `document.activeElement===document.querySelector('select[data-flash-model]')?.nextElementSibling && document.querySelector('[data-action="clear-flash-model"]')?.disabled===true`, 'model-choice-clear-focus');
+    await chooseModel('deepseek-flash');
     await pointerClick(primary, waitFor, '[data-action="use-model-for-both-roles"]', 'model-choice-restore-primary');
     await waitFor(primary, `window.ai7.getModelServiceSettings().then(settings=>settings.modelRoles.find(role=>role.roleId==='foreground-pro').binding.modelId==='deepseek-flash')`, 'model-choice-primary-restored');
     await pointerClick(primary, waitFor, '[data-action="select-fast-role-model"]', 'model-choice-restore-light');
+    await waitFor(primary, `(async()=>{const settings=await window.ai7.getModelServiceSettings();return settings.modelRoles.find(role=>role.roleId==='foreground-flash').source==='flash-tier' && document.querySelector('[data-action="clear-flash-model"]')?.disabled===false;})()`, 'model-choice-light-restored');
 
     await assertRenderer(primary, `(() => {
       const select=document.querySelector('select[aria-label="AI7 使用的模型"]');
@@ -2474,14 +2493,15 @@ async function main() {
     await assertRenderer(primary, `(() => { const button=document.querySelector('[data-action="select-main-role-model"]'); if(button.disabled)return false; button.click(); return true; })()`, 'ordinary-main-role');
     await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.match(/J12 Ordinary Main|j12-ordinary-main/u)`, 'ordinary-main-visible');
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.binding?.modelId==='j12-ordinary-main' && settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='deepseek-flash')`), 'ordinary-main-independent');
-    await fill(primary, '[data-custom-model-id]', 'j12-ordinary-fast', 'ordinary-fast-model');
+    await fill(primary, '[data-custom-flash-model-id]', 'j12-ordinary-fast', 'ordinary-fast-model');
     await assertRenderer(primary, `(() => { document.querySelector('[data-action="select-fast-role-model"]').click(); return true; })()`, 'ordinary-fast-role');
     await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.match(/J12 Ordinary Fast|j12-ordinary-fast/u)`, 'ordinary-fast-visible');
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.binding?.modelId==='j12-ordinary-main' && settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='j12-ordinary-fast')`), 'ordinary-fast-independent');
     await fill(primary, '[data-custom-model-id]', 'deepseek-flash', 'ordinary-shared-model');
-    await assertRenderer(primary, `(() => { document.querySelector('[data-action="use-model-for-both-roles"]').click(); return true; })()`, 'ordinary-shared-role');
+    await pointerClick(primary, waitFor, '[data-action="use-model-for-both-roles"]', 'ordinary-shared-role');
+    await waitFor(primary, `(async()=>{const settings=await window.ai7.getModelServiceSettings();return settings.modelRoles.find(role=>role.roleId==='foreground-pro').binding.modelId==='deepseek-flash' && document.querySelector('[data-action="use-model-for-both-roles"]')?.disabled===true;})()`, 'ordinary-shared-primary-saved');
     await pointerClick(primary, waitFor, '[data-action="clear-flash-model"]', 'ordinary-shared-clear-second');
-    await waitFor(primary, `document.querySelector('.model-service-current-roles') && !document.querySelector('.model-service-current-roles').textContent.match(/J12 Ordinary|j12-ordinary/u)`, 'ordinary-shared-role-visible');
+    await waitFor(primary, `document.querySelector('[data-model-summary]') && !document.querySelector('[data-model-summary]').textContent.match(/J12 Ordinary|j12-ordinary/u)`, 'ordinary-shared-role-visible');
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.roles.filter(role=>['main-editorial','fast-interaction'].includes(role.roleId)).every(role=>role.binding?.modelId==='deepseek-flash'))`), 'ordinary-shared-role-saved');
     await assertProgressiveSelect(primary);
     at('model-service-search-backends');
@@ -2524,7 +2544,7 @@ async function main() {
     requireJourney(candidateSettings.every((candidate) => candidate.measurement === 'not-measured' && candidate.selectable === false), 'search-native-candidates-unmeasured');
     await assertRenderer(primary, `['openai-native-search-v1','anthropic-native-search-v1'].every(id => {
       const card=document.querySelector('[data-search-candidate="'+id+'"]');
-      return card?.textContent.includes('未实测') && card.textContent.includes('不作为独立排名默认后端或备用来源') && card.querySelector('[data-action="probe-search-candidate"]')?.disabled===true;
+      return card?.textContent.includes('未实测') && card.textContent.includes('不作为独立排名默认后端或备用来源') && card.textContent.includes('自动用于随渠道检索') && card.querySelector('[data-action="probe-search-candidate"]')?.disabled===true;
     })`, 'search-native-candidates-disclosed');
     await assertRenderer(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===false`, 'search-native-follow-default');
     requireJourney(await primary.evaluate(`window.ai7.selectSearchBackend({backendId:'search-brave',alwaysUseSelectedBackend:true}).then(settings=>settings.searchBackends.alwaysUseSelectedBackend===true)`), 'search-source-override-saved');
@@ -2998,7 +3018,7 @@ async function main() {
         credentialMutationReached = true; productCredentialCleanupSucceeded = false;
         await click(primary, '保存并获取模型', 'dispatch-credential-save');
         await waitFor(primary, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.connection?.credentialOperationState==='ready')`, 'dispatch-credential-ready');
-        await fill(primary, '[data-custom-model-id]', 'j12-ordinary-fast', 'dispatch-alternative-model');
+        await fill(primary, '[data-custom-flash-model-id]', 'j12-ordinary-fast', 'dispatch-alternative-model');
         await assertRenderer(primary, `(() => {const button=document.querySelector('[data-action="select-fast-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true;})()`, 'dispatch-alternative-save');
         await waitFor(primary, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='j12-ordinary-fast')`, 'dispatch-alternative-ready');
         const defaults = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`);

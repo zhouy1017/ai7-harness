@@ -108,6 +108,8 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
 
   let modelServiceChannel: ModelServiceChannelId | null = null;
   const modelChoices = new Map<ModelServiceChannelId, string>();
+  const effortOtherDrafts = new Map<string, boolean>();
+  const flashModelChoices = new Map<ModelServiceChannelId, string>();
   const effortDrafts = new Map<string, string>();
   const modelFilters = new Map<ModelServiceChannelId, string>();
   let favourites: ModelFavourites = {};
@@ -148,6 +150,10 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       element('p', 'lede', technicalLayerVisible ? '选择渠道，保存密钥并获取模型，再选择使用的模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
     );
     content.append(modelServiceFlow(projection, { api: rendererApi, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
+      get flashModelId() { return modelServiceChannel === null ? '' : flashModelChoices.get(modelServiceChannel) ?? ''; },
+      chooseFlashModel: model => { if (modelServiceChannel !== null) flashModelChoices.set(modelServiceChannel, model); },
+      effortOtherDraft: (channel, role) => effortOtherDrafts.get(`${channel}/${role}`),
+      setEffortOtherDraft: (channel, role, value) => { const key = `${channel}/${role}`; if (value === undefined) effortOtherDrafts.delete(key); else effortOtherDrafts.set(key, value); },
       effortDraft: (channel, role) => effortDrafts.get(`${channel}/${role}`),
       setEffortDraft: (channel, role, value) => { const key = `${channel}/${role}`; if (value === undefined) effortDrafts.delete(key); else effortDrafts.set(key, value); },
       channel: modelServiceChannel, chooseChannel: (channel) => { modelServiceChannel = channel; },
@@ -166,20 +172,14 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     const currentRoles = element('section', 'model-service-current-roles');
     currentRoles.setAttribute('aria-label', '当前使用的模型');
     const main = projection.modelRoles.find(role => role.roleId === 'foreground-pro');
-    const flash = projection.modelRoles.find(role => role.roleId === 'foreground-flash');
     const name = (role: typeof main): string => role?.binding == null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}`;
-    const summary = element('p', undefined, `AI7 当前使用：${name(main)}；${flash?.source === 'follows-foreground-pro' ? '对话、润色和 AI 助手也使用同一个模型。' : `对话、润色和 AI 助手使用：${name(flash)}。`}`);
-    summary.dataset['modelSummary'] = 'true'; currentRoles.append(summary);
-    const shownReasons = new Set<string>();
     for (const role of projection.modelRoles) {
       const reason = role.statusDetail?.split('。')[0];
       if (technicalLayerVisible) {
         const effort = role.binding?.reasoningEffort;
-        const line = element('p', undefined, `${role.roleLabel}：${name(role)} · 思考强度：${effort === undefined || effort === 'off' ? '服务默认' : effort} · ${role.sourceLabel} · ${role.statusLabel}${reason ? ` · ${reason}。请选择其他模型。` : ''}`);
+        const line = element('p', undefined, `${role.roleLabel}：${name(role)} · 思考强度：${effort === undefined || effort === 'off' ? '服务默认' : effort} · ${role.sourceLabel} · ${role.statusLabel}${reason ? ` · ${reason}。` : ''}`);
         line.dataset['modelRole'] = role.roleId === 'foreground-pro' ? 'main-editorial' : role.roleId === 'foreground-flash' ? 'fast-interaction' : role.roleId; line.dataset['modelRoleStatus'] = role.status;
         currentRoles.append(line);
-      } else if (reason && !shownReasons.has(reason)) {
-        currentRoles.append(element('p', 'attention-note', `${role.statusLabel}：${reason}。请选择其他模型。`)); shownReasons.add(reason);
       }
     }
     content.append(currentRoles);

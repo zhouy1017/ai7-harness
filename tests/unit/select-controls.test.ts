@@ -103,3 +103,22 @@ it('keeps Space in an active typeahead phrase without committing its first match
   for (const key of [' ', 't']) keydown({ key, target: {}, preventDefault: () => {}, stopPropagation: () => {} });
   expect(chosen).toEqual([]); expect(active.at(-1)).toBe(1);
 });
+
+
+it('renders labelled option groups only for callers that opt in', () => {
+  const source = readFileSync('src/renderer/components/controls.ts', 'utf8');
+  const renderer = source.slice(source.indexOf('  const renderOptions = ():'), source.indexOf('  const sync = ():'));
+  for (const optIn of [false, true]) {
+    const list = document.createElement('div'), group = document.createElement('optgroup'); group.setAttribute('label', '推荐');
+    const render = runInNewContext(transpileModule(`let signature='',visible=[],rows=[],active=-1; ${renderer}; renderOptions;`, {}).outputText, {
+      select: { dataset: { showOptionGroups: String(optIn) }, selectedIndex: 0, options: [{ text: '合成模型', value: 'synthetic', selected: true, hidden: false, parentElement: group }] },
+      filter: { value: '' }, list, doc: document, optionDisabled: () => false, empty: {}, setActive: () => {}, position: () => {},
+    });
+    render();
+    const node = list as unknown as MiniElement;
+    expect(node.querySelectorAll('[role="option"]')).toHaveLength(1);
+    expect(node.querySelectorAll('[role="group"]')).toHaveLength(optIn ? 1 : 0);
+    if (optIn) expect(node.querySelector('[role="group"]')!.getAttribute('aria-label')).toBe('推荐');
+    else expect(node.textContent).not.toContain('推荐');
+  }
+});

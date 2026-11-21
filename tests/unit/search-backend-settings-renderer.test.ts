@@ -214,3 +214,13 @@ describe('the 备用来源 control in 联网检索 (#1226)', () => {
     expect(node.querySelector('[data-search-candidate="deepseek-direct-search-v1"]')!.querySelectorAll('button').map((item) => item.textContent)).toEqual([SEARCH_CANDIDATE_PROBE_LABEL]);
   });
 });
+
+
+it('keeps the complete fallback rule and native candidate disclosure in developer mode', () => {
+  setTechnicalLayerVisible(true);
+  const { node } = section(async () => SUCCESS);
+  expect(node.textContent).toContain('设置备用来源后');
+  expect(node.textContent).toContain('余额或套餐额度不足时，直接切换一次');
+  expect(node.textContent).toContain('其他认证错误不会切换');
+  expect(node.textContent).toContain('自动用于随渠道检索');
+});
