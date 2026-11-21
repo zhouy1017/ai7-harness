@@ -191,6 +191,17 @@ describe('comments command parity and refresh continuity', () => {
   });
   afterEach(() => { mounted?.destroy(); mounted = undefined; setTechnicalLayerVisible(technicalBefore); vi.restoreAllMocks(); vi.unstubAllGlobals(); restore(); });
   async function paint() { for (let n = 0; n < 24; n++) { await Promise.resolve(); frames.splice(0).forEach((fn) => fn()); } }
+  function measuredPane(ui: ReturnType<typeof mount>, id: string, height: () => number) {
+    const pane = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
+    const canvas = ui.pane.querySelector<HTMLElement>('.manuscript-comments-canvas')!;
+    const node = ui.pane.querySelector<HTMLElement>(`[data-comment-card="${id}"]`)!;
+    canvas.style.height = '300px'; let offset = 0;
+    Object.assign(pane, { clientHeight: 300, getBoundingClientRect: () => ({ top: 100, bottom: 400, height: 300 }) });
+    Object.defineProperty(pane, 'scrollTop', { get: () => offset, set: (value: number) => { offset = Math.max(0, Math.min(Math.round(value), Number.parseFloat(canvas.style.height) - 300)); } });
+    node.getBoundingClientRect = () => { const top = 100 + (Number.parseFloat(node.style.top) || 0) - offset, size = height(); return { top, bottom: top + size, height: size } as DOMRect; };
+    Object.assign(ui.block, { getBoundingClientRect: () => ({ top: 220, bottom: 230, height: 10 }) });
+    return { pane, node, canvas };
+  }
   function mount(value = card, others: EditorialMarkCardProjection[] = [], extra: Record<string, unknown> = {}) {
     let page: ManuscriptWindowProjection = { ...windowOf(), marks: [anchor(value), ...others.map(anchor)] }; let latest = value; let enabled = true; let caret = 10; let nativeCaret = 10; let rangeKind = 'none';
     const host = document.createElement('div'); const scroll = document.createElement('div'); const pane = document.createElement('aside');
@@ -401,6 +412,220 @@ describe('comments command parity and refresh continuity', () => {
     ui.refresh(); await paint(); expect(node.style.top).toBe(held);
     const blur = vi.mocked(window.addEventListener).mock.calls.find(call => call[0] === 'blur')![1] as () => void;
     blur(); await paint(); expect(node.style.top).not.toBe(held);
+  });
+  it.each([false, true])('fits a navigated card inside the pane after final placement (paged=%s, #1604)', async paged => {
+    const ui = mount(suggestion); await paint();
+    if (paged) ui.setPage({ marksTruncated: true, marksPage: { shown: 1, total: 401, nextOrdinal: 1, digest: 'page' } });
+    let reads = 0;
+    const { pane, node } = measuredPane(ui, 'comment', () => ++reads === 1 ? 100 : 250);
+    ui.setCaret(-1);
+    ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click();
+    for (let turn = 0; turn < 24; turn++) await Promise.resolve();
+    frames.splice(0).forEach(fn => fn());
+    expect(node.dataset['selected']).toBe('true');
+    expect(node.getBoundingClientRect().top).toBeGreaterThanOrEqual(100);
+    expect(node.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+  });
+  it('rounds a fractional fitting correction inward despite browser scroll rounding (#1604)', async () => {
+    const ui = mount(suggestion); await paint();
+    const pane = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
+    let offset = 0;
+    Object.defineProperty(pane, 'scrollTop', { get: () => offset, set: (value: number) => { offset = Math.round(value); } });
+    Object.assign(pane, { clientHeight: 300, getBoundingClientRect: () => ({ top: 100, bottom: 400, height: 300 }) });
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    node.getBoundingClientRect = () => ({ top: 208.234375 - pane.scrollTop, bottom: 408.234375 - pane.scrollTop, height: 200 }) as DOMRect;
+    ui.setCaret(-1); ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click(); await paint();
+    expect(node.dataset['selected']).toBe('true');
+    expect(node.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+  });
+  it('keeps the head of a navigated tall card readable and its bottom scrollable (#1604)', async () => {
+    const ui = mount(suggestion); await paint();
+    const pane = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
+    Object.assign(pane, { clientHeight: 300, scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 400, height: 300 }) });
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    node.getBoundingClientRect = () => { const top = 100 + (Number.parseFloat(node.style.top) || 0) - pane.scrollTop; return { top, bottom: top + 400, height: 400 } as DOMRect; };
+    ui.setCaret(-1); ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click(); await paint();
+    expect(node.dataset['selected']).toBe('true');
+    expect(node.getBoundingClientRect().top).toBe(100);
+    const canvas = ui.pane.querySelector<HTMLElement>('.manuscript-comments-canvas')!;
+    expect(Number.parseFloat(canvas.style.height)).toBeGreaterThanOrEqual(Number.parseFloat(node.style.top) + 400);
+    pane.scrollTop += 100;
+    expect(node.getBoundingClientRect().bottom).toBe(400);
+  });
+  it('fits a card whose rendered height grows after the stack measured it (#1604)', async () => {
+    const ui = mount(suggestion); await paint();
+    let reads = 0;
+    const { pane, node } = measuredPane(ui, 'comment', () => ++reads === 1 ? 100 : 250);
+    ui.setCaret(-1); ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click();
+    for (let turn = 0; turn < 24; turn++) await Promise.resolve();
+    frames.splice(0).forEach(fn => fn());
+    expect(node.dataset['selected']).toBe('true');
+    expect(reads).toBeGreaterThan(1);
+    expect(node.getBoundingClientRect().top).toBeGreaterThanOrEqual(100);
+    expect(node.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+  });
+  it('fits the next card after accepting when its rendered height grows (#1604)', async () => {
+    const next = { ...suggestion, markId: 'next', fromGrapheme: 3, toGrapheme: 5 };
+    const ui = mount(suggestion, [next]); await paint(); await ui.open(); await paint();
+    let selectedReads = 0;
+    const { pane, node } = measuredPane(ui, 'next', () => node.dataset['selected'] === 'true' && ++selectedReads > 1 ? 250 : 100);
+    const applied: EditorialMarkCardProjection = { ...suggestion, status: 'applied', suggestion: { ...suggestion.suggestion!, application: null } };
+    const marks = [anchor(applied), anchor(next)];
+    ui.apply.mockResolvedValueOnce({ markId: applied.markId, card: applied, marks, marksTruncated: false, window: { ...windowOf(), marks }, application: {} } as never);
+    ui.pane.querySelector<HTMLButtonElement>('[data-comment-card="comment"] [data-mark-action="accept-and-apply"]')!.click();
+    for (let turn = 0; turn < 24; turn++) await Promise.resolve();
+    frames.splice(0).forEach(fn => fn());
+    expect(ui.apply).toHaveBeenCalledTimes(1);
+    expect(node.dataset['selected']).toBe('true');
+    expect(document.activeElement).toBe(node);
+    expect(selectedReads).toBeGreaterThan(1);
+    expect(node.getBoundingClientRect().top).toBeGreaterThanOrEqual(100);
+    expect(node.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+  });
+  it('keeps a focused tall-card control visible across layouts and returns to the head (#1604)', async () => {
+    const ui = mount(suggestion); await paint(); await ui.open(); await paint();
+    const pane = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    Object.assign(pane, { clientHeight: 300, scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 400, height: 300 }) });
+    node.getBoundingClientRect = () => { const top = 100 + Number.parseFloat(node.style.top) - pane.scrollTop; return { top, bottom: top + 400, height: 400 } as DOMRect; };
+    const button = node.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!;
+    button.getBoundingClientRect = () => { const top = node.getBoundingClientRect().top + 350; return { top, bottom: top + 28, height: 28 } as DOMRect; };
+    ui.refresh(); await paint();
+    button.focus(); (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true });
+    pane.scrollTop += 100; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    ui.refresh(); await paint();
+    expect(document.activeElement).toBe(button);
+    expect(button.getBoundingClientRect().top).toBeGreaterThanOrEqual(100);
+    expect(button.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+    node.focus(); (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true }); await paint();
+    expect(node.getBoundingClientRect().top).toBe(100);
+  });
+  it('corrects fractional browser focus scrolling on a tall card without moving the card (#1661)', async () => {
+    const ui = mount(suggestion); await paint(); await ui.open(); await paint();
+    const { pane, node } = measuredPane(ui, 'comment', () => 400);
+    const button = node.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!;
+    button.getBoundingClientRect = () => { const top = node.getBoundingClientRect().top + 350.234375; return { top, bottom: top + 28, height: 28 } as DOMRect; };
+    ui.refresh(); await paint(); const top = node.style.top;
+    button.focus(); (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true });
+    pane.scrollTop += 78; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    expect(node.style.top).toBe(top);
+    expect(button.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+  });
+  it('reveals offscreen words when navigation focuses the already selected card (#1661 B1)', async () => {
+    const ui = mount(suggestion); await paint();
+    Object.assign(ui.block, { getBoundingClientRect: () => ({ top: 300, bottom: 320, height: 20 }) });
+    const reveal = vi.fn(); ui.block.scrollIntoView = reveal;
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    node.focus = () => { miniDocument.activeElement = node as unknown as MiniElement; (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true }); };
+    ui.setCaret(-1); ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click(); await paint();
+    expect(reveal).toHaveBeenCalledTimes(1);
+  });
+  it('refits a fitting card growing with focus in its reply textarea (#1661 B2)', async () => {
+    const ui = mount(card); await paint(); await ui.open(); await paint();
+    let height = 200;
+    const { node } = measuredPane(ui, 'comment', () => height);
+    ui.refresh(); await paint();
+    node.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    height = 280; await paint();
+    expect(document.activeElement).toBe(node.querySelector('[data-comment-reply]'));
+    expect(node.getBoundingClientRect().top).toBe(120);
+    expect(node.getBoundingClientRect().bottom).toBe(400);
+  });
+  it('keeps a fitting focused card following its words when the text scrolls (#1661 B2)', async () => {
+    const ui = mount(suggestion); await paint(); await ui.open(); await paint();
+    const { node } = measuredPane(ui, 'comment', () => 200);
+    ui.refresh(); await paint();
+    node.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!.focus();
+    Object.assign(ui.block, { getBoundingClientRect: () => ({ top: 170, bottom: 180, height: 10 }) });
+    (ui.scroll as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    expect(node.getBoundingClientRect().top).toBe(170);
+  });
+  it('does not fight a hand scroll of the selected pane card (#1661 NB2)', async () => {
+    const ui = mount(suggestion); await paint(); await ui.open(); await paint();
+    const pane = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    Object.assign(pane, { clientHeight: 300 });
+    node.getBoundingClientRect = () => ({ top: 350, bottom: 550, height: 200 }) as DOMRect;
+    pane.scrollTop = 37; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    expect(pane.scrollTop).toBe(37);
+  });
+  it('keeps 显示更多 focus through a read, ignores a second press, and returns focus to the header (#1661)', async () => {
+    const next = { ...suggestion, markId: 'next' }, last = { ...suggestion, markId: 'last' };
+    const ui = mount(suggestion); await paint();
+    ui.get.mockImplementation(async input => input.markId === 'next' ? next : input.markId === 'last' ? last : suggestion);
+    ui.setPage({ marks: [anchor(suggestion)], marksTruncated: true, marksPage: { shown: 1, total: 3, nextOrdinal: 1, digest: 'd' } }); await paint();
+    const answer = deferred<ManuscriptWindowProjection>(); ui.pageAt.mockReturnValueOnce(answer.promise);
+    const button = ui.pane.querySelector<HTMLButtonElement>('[data-marks-more]')!;
+    let disabled = false;
+    Object.defineProperty(button, 'disabled', { get: () => disabled, set: (value: boolean) => { disabled = value; if (value && document.activeElement === button) miniDocument.activeElement = miniDocument.body; } });
+    button.focus(); button.click(); button.click(); await paint();
+    expect(ui.pageAt).toHaveBeenCalledTimes(1);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(button);
+    answer.resolve({ ...windowOf(), marks: [anchor(next)], marksTruncated: true, marksPage: { shown: 1, total: 3, nextOrdinal: 2, digest: 'd' } }); await paint();
+    expect(document.activeElement).toBe(button);
+    ui.pageAt.mockResolvedValueOnce({ ...windowOf(), marks: [anchor(last)], marksTruncated: false, marksPage: { shown: 1, total: 3, nextOrdinal: null, digest: 'd' } });
+    button.click(); await paint();
+    expect(document.activeElement).toBe(ui.pane.querySelector('[data-mark-filter-toggle]'));
+  });
+  it.each(['command', 'reload'])('keeps focus on the last decided card when its action disappears (%s, #1661)', async path => {
+    const remove = MiniElement.prototype.remove;
+    vi.spyOn(MiniElement.prototype, 'remove').mockImplementation(function (this: MiniElement) {
+      const owned = this.contains(miniDocument.activeElement); remove.call(this);
+      if (owned) miniDocument.activeElement = miniDocument.body;
+    });
+    vi.spyOn(MiniElement.prototype, 'focus').mockImplementation(function (this: MiniElement) {
+      if (this.disabled || miniDocument.activeElement === this) return;
+      miniDocument.activeElement = this; this.dispatchEvent({ type: 'focusin', bubbles: true });
+    });
+    const ui = mount(suggestion); ui.setPage({ position: { startCharacter: 0, endCharacter: 10, totalCharacters: 10 } } as never); await paint(); await ui.open(); await paint();
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    const button = node.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!; button.focus();
+    const application = { effectId: 'effect', kind: 'apply' as const, interaction: 'accept-and-apply' as const,
+      approvalId: 'approval', dispatchId: 'dispatch', receiptId: 'receipt', changeCount: 1, payloadDigest: 'a'.repeat(64), receiptDigest: 'b'.repeat(64),
+      before: { revisionId: 'revision', journalSequence: 0, workingDigest: 'c'.repeat(64) }, after: { revisionId: 'revision', journalSequence: 1, workingDigest: 'd'.repeat(64) },
+      committedAt: card.createdAt, reversesEffectId: null, reversedByEffectId: null };
+    const applied = { ...suggestion, status: 'applied' as const, suggestion: { ...suggestion.suggestion!, application } };
+    ui.get.mockResolvedValue(applied);
+    if (path === 'command') {
+      const marks = [anchor(applied)];
+      ui.apply.mockResolvedValueOnce({ markId: applied.markId, card: applied, marks, marksTruncated: false, window: { ...windowOf(), marks }, application: {} } as never);
+      button.click();
+    } else ui.setPage({ journalSequence: 1, marks: [anchor(applied)] });
+    await paint();
+    expect(node.querySelector('[data-mark-action="accept-and-apply"]') === null).toBe(true);
+    expect(node.dataset['selected']).toBe('true');
+    expect(document.activeElement === node).toBe(true);
+  });
+  it('keeps the selected card and text place after the last 显示更多 press (#1661 R1)', async () => {
+    const far = { ...suggestion, markId: 'far', blockId: 'far-block' };
+    const ui = mount(suggestion); await paint(); await ui.open(); await paint();
+    const paragraph = document.createElement('p'); paragraph.dataset['blockId'] = 'far-block'; ui.host.append(paragraph);
+    Object.assign(paragraph, { getBoundingClientRect: () => ({ top: 3000, bottom: 3020, height: 20 }), scrollIntoView: vi.fn(() => { ui.scroll.scrollTop = 2000; }) });
+    ui.get.mockImplementation(async input => input.markId === 'far' ? far : suggestion);
+    ui.setPage({ marksPage: { shown: 1, total: 2, nextOrdinal: 1, digest: 'd' }, marksTruncated: true }); await paint();
+    ui.pageAt.mockResolvedValueOnce({ ...windowOf(), marks: [anchor(far)], marksPage: { shown: 1, total: 2, nextOrdinal: null, digest: 'd' }, marksTruncated: false });
+    ui.scroll.scrollTop = 37;
+    const first = ui.host.querySelector('[data-block-id]');
+    const button = ui.pane.querySelector<HTMLButtonElement>('[data-marks-more]')!; button.focus(); button.click(); await paint();
+    expect(ui.pane.querySelector('[data-comment-card="comment"]')?.getAttribute('data-selected')).toBe('true');
+    expect(ui.scroll.scrollTop).toBe(37);
+    expect(ui.host.querySelector('[data-block-id]') === first).toBe(true);
+    expect(paragraph.scrollIntoView).not.toHaveBeenCalled();
+    expect(document.activeElement === ui.pane.querySelector('[data-mark-filter-toggle]')).toBe(true);
+  });
+  it('keeps a hand scroll to the tall-card head after focus reveal (#1661 N1)', async () => {
+    const ui = mount(suggestion); await paint(); await ui.open(); await paint();
+    const { pane, node } = measuredPane(ui, 'comment', () => 400);
+    const button = node.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!;
+    button.getBoundingClientRect = () => { const top = node.getBoundingClientRect().top + 350; return { top, bottom: top + 28, height: 28 } as DOMRect; };
+    ui.refresh(); await paint(); expect(pane.scrollTop).toBe(8);
+    button.focus(); (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true });
+    pane.scrollTop = 86; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    pane.scrollTop = 8; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    ui.refresh(); await paint();
+    expect(pane.scrollTop).toBe(8);
+    expect(document.activeElement === button).toBe(true);
   });
   it('keeps the chosen pane card through hover, then clears it when filtered out (#1451)', async () => {
     const ui = mount(card, [{ ...card, markId: 'other' }]); await paint();
@@ -954,7 +1179,7 @@ describe('comments command parity and refresh continuity', () => {
       press(stuck); await paint();
       expect(cardIds(stuck)).toEqual(['m0', 'm1', 'm2']); expect(rowOf(stuck).hidden).toBe(false);
       expect(rowOf(stuck).querySelector('[role="alert"]')?.hasAttribute('hidden')).toBe(false);
-      expect(stuck.pane.querySelector<HTMLButtonElement>('[data-marks-more]')!.disabled).toBe(false);
+      expect(stuck.pane.querySelector<HTMLButtonElement>('[data-marks-more]')!.getAttribute('aria-disabled')).toBe('false');
     });
 
     // 下一条 / 上一条待处理 with no filter in a window that holds marks the pane has not loaded (#1604): the service names the mark.
