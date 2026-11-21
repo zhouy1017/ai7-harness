@@ -76,7 +76,7 @@ export function helpUsageSections(developerMode: boolean): ReadonlyArray<HelpSec
     `${sectionLabel('review')}按类别给出结果与审阅报告，${sectionLabel('evaluation')}给出评估与审稿意见；两者都要你在原页面作出决定。`,
   ] },
   { heading: '交付物', paragraphs: [
-    `${sectionLabel('deliverables')}管理发稿、交付与图书交付包：先在稿件里选「${MILESTONE_FORM_WORDS.summary}」，再到交付物选「${PUBLICATION_ACTION_LABELS.designate}」，然后按关口推进。`,
+    `${sectionLabel('deliverables')}管理发稿、交付与图书交付包：先在稿件里选「${MILESTONE_FORM_WORDS.summary}」，再到交付物选「${PUBLICATION_ACTION_LABELS.designate}」，然后按关口推进。还没有里程碑时，可在交付物点「${PUBLICATION_ACTION_LABELS.saveAndDesignate}」就地保存，再确认设为发稿版本。`,
   ] },
   { heading: '知识库与工序', paragraphs: [
     `${destinationLabel('knowledge')}分为${countWord(knowledgeTabs.length)}类：${knowledgeTabs.map((entry) => entry.label).join('、')}；任务只选用并记版本。`,

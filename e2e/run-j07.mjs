@@ -689,7 +689,7 @@ const READ_PUBLICATION = `window.ai7.inspectDeliverables().then((deliverables) =
   prompt: deliverables.publication.actualsPrompt === null ? null : deliverables.publication.actualsPrompt.label + ' · ' + deliverables.publication.actualsPrompt.stateLabel,
 }))`;
 
-async function importAndOpen(renderer, title, distinct = false, start = 'landing') {
+async function importAndOpen(renderer, title, distinct = false, start = 'landing', stayOnOverview = false) {
   requireJourney(start === 'landing' || start === 'target', 'import-entry-stage');
   if (start === 'landing') {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'import-landing');
@@ -704,6 +704,7 @@ async function importAndOpen(renderer, title, distinct = false, start = 'landing
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'import-committed', 180_000);
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'import-acknowledged', 180_000);
+  if (stayOnOverview) return;
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'import-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'import-editor');
 }
@@ -1238,6 +1239,26 @@ async function main() {
     await nativeWordExport('suggestions', 'word-suggestions-export');
     await nativeWordExport('accepted-baseline', 'word-accepted-export');
 
+    at('deliverables-save-in-place');
+    const inlineRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'inline-deliverables-data'), checkout);
+    const inline = await launch({ root: inlineRoot, picker: manuscript });
+    await importAndOpen(inline, EXCERPT.title, false, 'landing', true);
+    await pointerClick(inline, waitFor, SIDEBAR.section('deliverables'), 'inline-deliverables-entry');
+    await waitFor(inline, `document.querySelector('[data-publication-action="designate"]')?.textContent === '存为里程碑并设为发稿版本…'`, 'inline-save-ready');
+    await assertRenderer(inline, `(() => { const lines = Array.from(document.querySelectorAll('.deliverables-definition')); return lines.length === 3 && lines.every(line => { const r=line.getBoundingClientRect(); return r.width>0 && r.top>=0 && r.bottom<=innerHeight && r.left>=0 && r.right<=innerWidth; }); })()`, 'inline-definitions-in-window');
+    await assertRenderer(inline, `(() => { const button=document.querySelector('[data-publication-action="designate"]'); const r=button?.getBoundingClientRect(); return r && r.width>0 && r.height>0 && r.top>=0 && r.left>=0 && r.bottom<=innerHeight && r.right<=innerWidth; })()`, 'inline-save-in-first-screenful');
+    await inline.evaluate(`document.querySelector('[data-publication-action="designate"]').addEventListener('click', (event) => { const style=getComputedStyle(event.currentTarget); window.__j07InlineBusy=event.currentTarget.getAttribute('aria-disabled')==='true' && style.opacity==='0.5' && style.cursor==='default'; }, { once: true })`);
+    await pointerClick(inline, waitFor, '[data-publication-action="designate"]', 'inline-save-milestone');
+    await assertRenderer(inline, `window.__j07InlineBusy === true`, 'inline-saving-disabled-style');
+    await waitFor(inline, `document.querySelector('form.publication-designate input[type="radio"]')?.checked === true`, 'inline-saved-form');
+    await assertRenderer(inline, `document.querySelector('[data-publication-field="scope"]')?.value === '全书定稿' && document.querySelector('[data-publication-field="basis"]')?.value === '编辑审定通过' && !document.querySelector('[data-testid="manuscript-editor"]')`, 'inline-defaults');
+    await assertRenderer(inline, `(() => { const confirm=document.querySelector('[data-publication-action="confirm"]'); const r=confirm?.getBoundingClientRect(); return confirm===document.activeElement && r && r.width>0 && r.height>0 && r.top>=0 && r.left>=0 && r.bottom<=innerHeight && r.right<=innerWidth; })()`, 'inline-confirm-focused-in-window');
+    await pressEnter(inline);
+    await waitFor(inline, `document.querySelector('.publication-versions > li') !== null && document.querySelector('form.publication-designate') === null`, 'inline-designated');
+    await assertRenderer(inline, `(async () => { const value=await window.ai7.inspectDeliverables(); const milestones=value.publication.milestones; const designations=value.publication.designations; return milestones.length===1 && milestones[0].label.startsWith('阶段留档 · ') && designations.length===1 && designations[0].current && designations[0].milestoneId===milestones[0].milestoneId; })()`, 'inline-single-saved-designation');
+    await waitFor(inline, `document.querySelector('[data-package-ready="true"] [data-package-action="prepare"]')?.disabled === false`, 'inline-package-preparable');
+    await close();
+
     at('import-and-open');
     let renderer = await launch({ picker: manuscript, save: exportPath });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'product-ready');
@@ -1274,7 +1295,7 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('deliverables-before-milestone');
-    // Before any milestone 设为发稿版本 is there, unavailable, with its reason in words beside it (PUB-002).
+    // Before any milestone the in-place save action is ready (Issue #1550).
     await openDeliverables(renderer, 'before-milestone');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
     await runJ14DarkPass({ renderer, journey: 'J-07', at, representative: '#screen[data-screen="book-deliverables"] > .page-content', returnTo: SIDEBAR.section('deliverables') });
@@ -1283,13 +1304,12 @@ async function main() {
       const page = document.querySelector('[data-screen="book-deliverables"] > .book-deliverables');
       const block = window.__j07.block();
       const designate = window.__j07.action('designate');
-      const reason = document.getElementById(designate?.getAttribute('aria-describedby') ?? '');
       const actions = Array.from(page?.querySelectorAll(':scope > .workbench-actions button') ?? []).map((item) => item.textContent);
       return page?.dataset.bookId === ${JSON.stringify(bookId)} && !page.querySelector(':scope > .section-label') &&
         page.querySelector(':scope > h2')?.textContent === '工作 · 交付物' && !page.querySelector('.workbench-actions') &&
         actions.length === 0 && block.querySelector(':scope > h3')?.firstChild?.textContent === '发稿 · 稿件' &&
         block.dataset.publicationState === 'no-milestone' && window.__j07.items().length === 0 && block.querySelector('.milestone-list-empty') !== null &&
-        designate instanceof HTMLButtonElement && designate.disabled && designate.getAttribute('aria-label') === '设为发稿版本…' && reason?.textContent === '先保存里程碑版本' &&
+        designate instanceof HTMLButtonElement && !designate.disabled && designate.textContent === '存为里程碑并设为发稿版本…' &&
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
         block.querySelector('.publication-change-notice') === null &&
         window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 衍生稿件' &&
@@ -1297,7 +1317,7 @@ async function main() {
         Array.from(window.__j07.documents().querySelectorAll('li.production-document-card')).every((card) =>
           card.dataset.documentState === 'none' && card.querySelector('[data-document-action="create"], [data-document-action="blank"], [data-document-action="import"]') === null &&
           card.querySelector('[data-document-action="notForThisBook"]') instanceof HTMLButtonElement);
-    })()`, 'designate-unavailable-before-a-milestone');
+    })()`, 'save-and-designate-available-before-a-milestone');
     // Issue #416 (S67a): 图书交付包 comes last and waits for everything, naming what is missing.
     await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'false'`, 'package-before-milestone');
     await assertRenderer(renderer, `(() => {

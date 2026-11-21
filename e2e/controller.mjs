@@ -1289,7 +1289,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'controller-loopback-sentinel',
     'controller-imports',
     'import-and-open',
-    'deliverables-before-milestone',
+    'deliverables-save-in-place', 'deliverables-before-milestone',
     'milestone-needs-a-purpose',
     'milestone-first-saved',
     'milestone-changed-since',

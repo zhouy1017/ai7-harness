@@ -82,8 +82,8 @@ import { serviceWords } from './service-wording.js';
 /** 含批注 and 含修改建议（作为修订）, in S64's order, both on until the editor turns one off (EXP-023). */
 const PACKAGE_EXPORT_OPTION_ORDER: ReadonlyArray<keyof BookDeliveryPackageExportOptions> = ['includeAnnotations', 'includeSuggestions'];
 
-/** Where a condition row's route leads: the 发稿 block, one type's card, or 审阅. */
-export type BookDeliveryPackageRoute = { kind: 'publication' } | { kind: 'document'; typeId: string; documentId?: string } | { kind: 'review' };
+/** Where a condition row's route leads: the 发稿 block or 审阅. */
+export type BookDeliveryPackageRoute = { kind: 'publication' } | { kind: 'review' };
 
 export interface MountBookDeliveryPackageOptions {
   root: HTMLElement;
@@ -364,9 +364,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         route.dataset['packageRoute'] = condition.route;
         route.setAttribute('aria-label', `${condition.routeLabel}：${condition.label}`);
         route.disabled = busy();
-        const target: BookDeliveryPackageRoute = condition.route === 'document' && condition.typeId !== null
-          ? { kind: 'document', typeId: condition.typeId, ...(condition.documentId === undefined ? {} : { documentId: condition.documentId }) }
-          : condition.route === 'review' ? { kind: 'review' } : { kind: 'publication' };
+        const target: BookDeliveryPackageRoute = condition.route === 'review' ? { kind: 'review' } : { kind: 'publication' };
         route.addEventListener('click', () => options.route(target));
         item.append(route);
       }
