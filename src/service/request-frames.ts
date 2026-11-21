@@ -748,6 +748,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'returnImportToEditing':
     case 'continueImportDraft':
     case 'abandonImportDraft': {
       const input = requireInput(value.input, ['draftId', 'expectedDraftVersion'], tentativeId);
@@ -2256,7 +2257,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'resolveAcknowledgedManuscriptReimportReplay':
     case 'commitManuscriptReimport': {
-      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion', 'reviewDigest', 'commitId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['draftId', 'expectedDraftVersion', 'reviewDigest', 'commitId'], ['acceptDegradation'], tentativeId);
+      if (input.acceptDegradation !== undefined && typeof input.acceptDegradation !== 'boolean') throw new ProtocolError(tentativeId);
       if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
           !isSafeInteger(input.expectedDraftVersion, 1) ||
           !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||

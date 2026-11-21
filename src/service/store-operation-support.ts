@@ -44,6 +44,8 @@ export function one<T extends SqlRow>(rows: T[], code: string, message: string):
 }
 
 export interface StoreControl {
+  /** Service-suite fault at the transactional replacement boundary; never armed by service startup. */
+  interruptReimportResolutionAfterDelete?: boolean;
   induceUnprovableReconciliation: boolean;
   persistLegacyReviewedDraft: boolean;
   induceReimportProofTamper: boolean;

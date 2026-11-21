@@ -1,3 +1,4 @@
+import type { ServiceJobProjection, ReimportGroupVerb, ReimportMappingPageProjection, ReimportLineageSourceVersionPageProjection } from '../protocol.js';
 import type { BookRecordPresentation, BookSummaryCursor, BookWorkOverviewProjection, ImportStructureChoice, ImportStructureProjection, ManuscriptWindowProjection, ReviewBeforeManuscriptReimportProjection, ServiceOperationMap } from '../protocol.js';
 /**
  * What a staged import says about how its file was read and what it resembles (ADR 0072 §2, §3), moved out of `protocol.ts`
@@ -542,3 +543,57 @@ export type CommitSourceImportRendererInput = Omit<ServiceOperationMap['commitSo
 export type CommitManuscriptReimportRendererInput = Omit<ServiceOperationMap['commitManuscriptReimport']['input'], 'commitId'> & {
   commitAttemptId: string | null;
 };
+
+/** The page to reopen after returning from import details. */
+export type ReturnImportToEditingProjection =
+  | { state: 'staged'; draftVersion: number; staged: StagedImportProjection }
+  | { state: 'reimport'; draftVersion: number; review: ReviewBeforeManuscriptReimportProjection };
+
+export interface ImportReviewServiceOperations {
+  returnImportToEditing: {
+    input: { draftId: string; expectedDraftVersion: number };
+    output: ReturnImportToEditingProjection;
+  };
+  prepareManuscriptReimport: {
+    input: {
+      draftId: string;
+      expectedDraftVersion: number;
+      target: ManuscriptReimportTargetSelection;
+    };
+    output: ServiceJobProjection;
+  };
+  getReimportMappingPage: {
+    input: { draftId: string; expectedDraftVersion: number; after: number | null };
+    output: ReimportMappingPageProjection;
+  };
+  getReimportLineageSourceVersionPage: {
+    input: { bookId: string; after: string | null };
+    output: ReimportLineageSourceVersionPageProjection;
+  };
+  acceptReimportDegradation: {
+    input: { draftId: string; expectedDraftVersion: number };
+    output: ReviewBeforeManuscriptReimportProjection;
+  };
+  /** One row of the chapter-level comparison resolved by one verb (Issue #412, S63): never preselected, never guessed. */
+  resolveReimportMapping: {
+    input: {
+      draftId: string;
+      expectedDraftVersion: number;
+      groupId: string;
+      verb: ReimportGroupVerb;
+    };
+    output: ServiceJobProjection;
+  };
+  resolveAcknowledgedManuscriptReimportReplay: {
+    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string; acceptDegradation?: boolean };
+    output: { draftId: string; commitId: string; bookId: string };
+  };
+  commitManuscriptReimport: {
+    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string; acceptDegradation?: boolean };
+    output: ServiceJobProjection;
+  };
+  acknowledgeImportCompletion: {
+    input: { commitId: string };
+    output: { state: 'acknowledged' };
+  };
+}

@@ -1,7 +1,9 @@
+import type { ImportReviewServiceOperations, ReturnImportToEditingProjection } from './protocol/import-intake.js';
+export type { ReturnImportToEditingProjection } from './protocol/import-intake.js';
 import { type FidelityCategoryKey, type FidelityStatus, type FidelityCategoryProjection, type TextBoxDisposition, fidelityStatusLabel, type ImportDegradationItemProjection, type ImportDegradationDecisionReviewProjection, type ImportFidelityOutcome, type NewBookImportTargetChoiceId, type ImportTargetSelection, type SourceImportTargetSelection, type ReimportLineageSelection, type ManuscriptReimportTargetSelection, type SourceFormat, type SourceImportRetainedBoundaryLabel, sourceImportRetainedBoundaryLabel, acceptedSourceImportRetainedBoundaryLabels, type WordTrackedChangesChoice, type WordIntakeRefusalCode, type WordTrackedChangesIntakeProjection, type StagedImportProjection, type ReviewBeforeImportProjection, type ReviewBeforeSourceImportProjection, type ManuscriptImportCommitProjection, type SourceImportCommitProjection, type ManuscriptReimportCommitProjection, type ImportCommitProjection, type OriginalFileAccessProjection, type ImportDraftRecoveryProjection, type ImportStartupProjection, type ContinueImportProjection, type CommitNewBookRendererInput, type CommitSourceImportRendererInput, type CommitManuscriptReimportRendererInput } from './protocol/import-intake.js';
 export { type FidelityCategoryKey, type FidelityStatus, type FidelityCategoryProjection, type TextBoxDisposition, fidelityStatusLabel, type ImportDegradationItemProjection, type ImportDegradationDecisionReviewProjection, type ImportFidelityOutcome, type NewBookImportTargetChoiceId, type ImportTargetSelection, type SourceImportTargetSelection, type ReimportLineageSelection, type ManuscriptReimportTargetSelection, type SourceFormat, type SourceImportRetainedBoundaryLabel, sourceImportRetainedBoundaryLabel, acceptedSourceImportRetainedBoundaryLabels, type WordTrackedChangesChoice, type WordIntakeRefusalCode, type WordTrackedChangesIntakeProjection, type StagedImportProjection, type ReviewBeforeImportProjection, type ReviewBeforeSourceImportProjection, type ManuscriptImportCommitProjection, type SourceImportCommitProjection, type ManuscriptReimportCommitProjection, type ImportCommitProjection, type OriginalFileAccessProjection, type ImportDraftRecoveryProjection, type ImportStartupProjection, type ContinueImportProjection, type CommitNewBookRendererInput, type CommitSourceImportRendererInput, type CommitManuscriptReimportRendererInput } from './protocol/import-intake.js';
-import { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
-export { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
+import { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportResolutionProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
+export { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportResolutionProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
 import { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
 export { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
 import type { BookFindingsProjection } from './protocol/review.js';
@@ -522,6 +524,7 @@ export const IPC_CHANNELS = {
   getImportStartup: 'ai7:j01:get-import-startup',
   selectAndStageManuscript: 'ai7:j01:select-and-stage-manuscript',
   importBundledSampleBook: 'ai7:onboarding:import-bundled-sample-book',
+  returnImportToEditing: 'ai7:j01:return-import-to-editing',
   continueImportDraft: 'ai7:j01:continue-import-draft',
   reselectImportDraft: 'ai7:j01:reselect-import-draft',
   abandonImportDraft: 'ai7:j01:abandon-import-draft',
@@ -3828,7 +3831,7 @@ export interface ServiceJobProjection {
     'initial-evaluation-preparation' | 'readers-report-preparation' | 'evaluation-rewrite-preparation' | 'writing-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
-  result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
+  result: SearchSummaryProjection | ReplacementPreviewProjection | ReimportResolutionProjection | ReviewBeforeManuscriptReimportProjection |
     ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | BookDeliveryPackageExportResultProjection |
     EvaluationWorkspaceProjection | WritingTaskProjection | null;
   failure: null | { code: string; message: string };
@@ -3945,7 +3948,7 @@ export interface UsageProjection {
 /** The result of 导出为 CSV…: a file of numbers and ids, written where the editor chose. */
 export type UsageCsvExportResult = { outcome: 'cancelled' } | { outcome: 'written'; rows: number };
 
-export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations {
+export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations, ImportReviewServiceOperations {
   getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
   selectSearchBackend: { input: SearchBackendSelectionInput; output: SearchBackendSettingsProjection };
   probeSearchBackend: { input: { backendId: string; candidateId?: SearchCandidateId }; output: SearchBackendProbeProjection };
@@ -4645,48 +4648,6 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
     output: SourceImportCommitProjection;
   };
-  prepareManuscriptReimport: {
-    input: {
-      draftId: string;
-      expectedDraftVersion: number;
-      target: ManuscriptReimportTargetSelection;
-    };
-    output: ServiceJobProjection;
-  };
-  getReimportMappingPage: {
-    input: { draftId: string; expectedDraftVersion: number; after: number | null };
-    output: ReimportMappingPageProjection;
-  };
-  getReimportLineageSourceVersionPage: {
-    input: { bookId: string; after: string | null };
-    output: ReimportLineageSourceVersionPageProjection;
-  };
-  acceptReimportDegradation: {
-    input: { draftId: string; expectedDraftVersion: number };
-    output: ReviewBeforeManuscriptReimportProjection;
-  };
-  /** One row of the chapter-level comparison resolved by one verb (Issue #412, S63): never preselected, never guessed. */
-  resolveReimportMapping: {
-    input: {
-      draftId: string;
-      expectedDraftVersion: number;
-      groupId: string;
-      verb: ReimportGroupVerb;
-    };
-    output: ServiceJobProjection;
-  };
-  resolveAcknowledgedManuscriptReimportReplay: {
-    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
-    output: { draftId: string; commitId: string; bookId: string };
-  };
-  commitManuscriptReimport: {
-    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
-    output: ServiceJobProjection;
-  };
-  acknowledgeImportCompletion: {
-    input: { commitId: string };
-    output: { state: 'acknowledged' };
-  };
   getManuscriptWindow: {
     input: { manuscriptId: string; branchId: string; cursor: string | null };
     output: ManuscriptWindowProjection;
@@ -5087,6 +5048,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   selectAndStageManuscript(): Promise<PickerStageResult>;
   stageDroppedManuscript(file: File): Promise<PickerStageResult>;
   importBundledSampleBook(): Promise<PickerStageResult>;
+  returnImportToEditing(input: ServiceOperationMap['returnImportToEditing']['input']): Promise<ServiceWireOutput<ReturnImportToEditingProjection>>;
   continueImportDraft(input: ServiceOperationMap['continueImportDraft']['input']): Promise<ContinueImportProjection>;
   reselectImportDraft(input: {
     draftId: string;

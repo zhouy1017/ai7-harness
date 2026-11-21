@@ -1551,12 +1551,7 @@ export type StoredImportCommitProjection =
 
 export type ImmutableManuscriptImportResult = Omit<ManuscriptImportCommitProjection, 'firstWindow' | 'overview'>;
 
-export function commitRequestFingerprint(
-  operationKind: 'manuscript-import' | 'source-import' | 'manuscript-reimport',
-  input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string },
-): string {
-  return sha256(canonicalJson({ schema: 'ai7.import-commit-request/1', operationKind, input }));
-}
+export { commitRequestFingerprint } from './import-review-request.js';
 
 export function immutableCommitResult(result: StoredImportCommitProjection): Record<string, unknown> {
   if ('reimportRecordId' in result) {
@@ -2042,7 +2037,7 @@ export interface ReimportResolutionWork {
 export interface ReimportCommitWork {
   readonly mode: 'commit';
   readonly workId: string;
-  readonly input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
+  readonly input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string; acceptDegradation?: boolean };
   readonly requestFingerprint: string;
   readonly snapshot: DraftSnapshot;
   readonly target: ResolvedReimportTarget;
@@ -2076,7 +2071,7 @@ export interface ReimportCommitWork {
 export interface ReimportReplayWork {
   readonly mode: 'committed-replay';
   readonly workId: string;
-  readonly input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
+  readonly input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string; acceptDegradation?: boolean };
   readonly attempt: CommitAttempt;
   readonly result: ManuscriptReimportCommitProjection;
   readonly objectPath: string;

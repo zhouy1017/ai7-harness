@@ -217,6 +217,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['getImportStartup']['output']>(IPC_CHANNELS.getImportStartup),
   selectAndStageManuscript: () => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageManuscript),
   stageDroppedManuscript: (file: File) => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageManuscript, { droppedPath: webUtils.getPathForFile(file) }),
+  returnImportToEditing: (input: ServiceOperationMap['returnImportToEditing']['input']) => invoke<ServiceOperationMap['returnImportToEditing']['output']>(IPC_CHANNELS.returnImportToEditing, input),
   continueImportDraft: (input: ServiceOperationMap['continueImportDraft']['input']) =>
     invoke<ServiceOperationMap['continueImportDraft']['output']>(IPC_CHANNELS.continueImportDraft, input),
   reselectImportDraft: (input: { draftId: string; expectedDraftVersion: number }) =>
