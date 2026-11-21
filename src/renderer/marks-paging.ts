@@ -28,8 +28,15 @@ export interface MarksPaging {
   observe(): void;
   /** 显示更多: the next page. `false` when it could not be read (the row says so). */
   more(): Promise<boolean>;
-  /** Pages are read until the mark is held; `false` when it is not held at the end. */
+  /**
+   * Pages are read until the mark is held, then set in one move; `false` when it is not held at the end. There is no ceiling on the
+   * pages: it goes on while a next page exists and each one makes progress, and stops when the editor leaves the window.
+   */
   hold(markId: string): Promise<boolean>;
+  /** Pages are being read back after a reload that brought only the first: what the window holds meanwhile is not the whole list. */
+  restoring(): boolean;
+  /** Resolves once no read-back is under way (at once when none is). */
+  settled(): Promise<void>;
   paint(): void;
 }
 
@@ -60,15 +67,16 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
   let abandoned = false;
   /** Pages being read back after a reload: the row stays as it was, so the pane's header does not move under the editor's hand. */
   let restoring = false;
+  let restoreDone: Promise<void> | null = null;
   let failure: string | null = null;
 
   /**
    * Reads following pages in ascending order until `target` marks are held or the last page is read, then sets them in one move.
    * A refused digest, or a reply at another journal position or window, starts again from the first page once; then it stops
    * and says so, keeping what the screen holds. A window that changed on screen meanwhile discards the read: whoever changed it
-   * observes again.
+   * observes again. `until` ends the read as soon as what is carried satisfies it (a mark that must be held): one move however many pages.
    */
-  async function pages(target: number): Promise<void> {
+  async function pages(target: number, until?: (marks: ReadonlyArray<EditorialMarkAnchorProjection>) => boolean): Promise<void> {
     const start = host.window();
     const first = start.blocks[0]?.blockId;
     if (first === undefined || start.marksPage === undefined || start.marksPage.nextOrdinal === null) return;
@@ -79,7 +87,7 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
     let restarted = false;
     const at = { manuscriptId: start.manuscriptId, branchId: start.branchId, target: { kind: 'window-start', blockId: first } } as const;
     const stillThere = (): boolean => host.alive() && host.window().marks === start.marks;
-    while (next !== null && carried.length < target) {
+    while (next !== null && carried.length < target && !(until?.(carried) ?? false)) {
       let read: ManuscriptWindowProjection | null = null;
       try {
         read = await host.read({ ...at, marks: { afterOrdinal: next, digest } });
@@ -99,7 +107,10 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
       }
       const known = new Set(carried.map((mark) => mark.markId));
       for (const mark of read.marks) if (!known.has(mark.markId)) carried.push(mark);
+      const advanced = read.marksPage.nextOrdinal === null || read.marksPage.nextOrdinal > next;
       ({ nextOrdinal: next, digest, total } = read.marksPage);
+      // A page that does not move the next ordinal on would be read again for ever: stop with what is carried.
+      if (!advanced) next = null;
     }
     host.setMarks(carried, next !== null, { shown: carried.length, total, nextOrdinal: next, digest });
   }
@@ -133,7 +144,7 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
     if (loaded !== null && loaded.key === key && page !== undefined && page.nextOrdinal !== null && window.marks.length < loaded.count) {
       const want = loaded.count;
       restoring = true;
-      void run(() => pages(want)).then(() => { restoring = false; if (host.alive()) { paint(); host.changed(); } });
+      restoreDone = run(() => pages(want)).then(() => { restoring = false; restoreDone = null; if (host.alive()) { paint(); host.changed(); } });
       return;
     }
     loaded = { key, count: window.marks.length };
@@ -148,9 +159,12 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
 
   async function hold(markId: string): Promise<boolean> {
     const holds = (): boolean => host.window().marks.some((mark) => mark.markId === markId);
-    for (let reads = 0; !holds() && reads < 64; reads++) {
+    // Each turn must add marks, so this ends with the pages; a read already under way is waited for, then looked at again.
+    while (!holds() && host.alive() && host.window().marksPage?.nextOrdinal != null) {
       const before = host.window().marks.length;
-      if (host.window().marksPage?.nextOrdinal == null || !(await more()) || host.window().marks.length <= before) break;
+      if (!(await run(() => pages(Number.POSITIVE_INFINITY, (marks) => marks.some((mark) => mark.markId === markId))))) break;
+      if (host.alive()) host.changed();
+      if (host.window().marks.length <= before) break;
     }
     return holds();
   }
@@ -176,5 +190,5 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
   }
 
   button.addEventListener('click', () => void more());
-  return { row, observe, more, hold, paint };
+  return { row, observe, more, hold, restoring: () => restoring, settled: () => restoreDone ?? Promise.resolve(), paint };
 }

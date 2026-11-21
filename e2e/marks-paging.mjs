@@ -16,6 +16,14 @@ const READ_WINDOW = `(async () => {
   return {shown:first.marks.length,total:first.marksPage?.total??first.marks.length,marks:marks.map((mark)=>({markId:mark.markId,kind:mark.kind,status:mark.status,anchorState:mark.anchorState,blockId:mark.blockId,categoryKey:mark.categoryKey,from:mark.fromGrapheme,to:mark.toGrapheme,source:mark.sourceKind}))};
 })()`;
 
+/** Where the editor stands: the text's scroll position, the first block in view and its top, the selected card and the focused card. */
+const PLACE = `(() => {
+  const scroll=document.querySelector('.editor-window'), top=scroll.getBoundingClientRect().top;
+  const first=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((node)=>node.getBoundingClientRect().bottom>top+1);
+  return {scrollTop:Math.round(scroll.scrollTop), first:first?.dataset.blockId??null, firstTop:first?Math.round(first.getBoundingClientRect().top-top):null,
+    selected:document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard??null, active:document.activeElement?.closest('[data-comment-card]')?.dataset.commentCard??null};
+})()`;
+
 /** The row's words and where it stands: inside the pane, which is inside the window, with its control under the pointer. */
 const SENTENCE = `(() => {
   const row=document.querySelector('[data-marks-paging]'), pane=${PANE}, button=row?.querySelector('[data-marks-more]');
@@ -134,6 +142,11 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   })()`);
   check(arrived.card && arrived.words && arrived.row === rowWant, 'marks-paging-arrived-beyond-first-page', { ...arrived, rowWant });
   // It can be accepted: 接受并应用 on its card, by a real click (a pointer decision stays on the page); the service records the Apply.
+  // The next pending card of the marks' category after this one, in the window's reading order: where a pointer decision goes on to.
+  const around = await renderer.evaluate(`(async () => { const read=await (${READ_WINDOW}); const at=read.marks.findIndex((mark)=>mark.markId===${JSON.stringify(expected.markId)});
+    return read.marks.slice(at+1).find((mark)=>mark.kind!=='personal-highlight' && mark.status==='open' && mark.categoryKey===${JSON.stringify(expected.category)})?.markId??null; })()`);
+  const wantSelected = around ?? expected.markId;
+  const placeBefore = await renderer.evaluate(PLACE);
   await pointerClick(renderer, waitFor, `${card} [data-mark-action="accept-and-apply"]`, 'marks-paging-accept');
   check(await renderer.evaluate(`(async () => {
     for (let turn=0; turn<120; turn++) {
@@ -150,6 +163,16 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   } catch {
     check(false, 'marks-paging-decision-keeps-pages', await renderer.evaluate(`({row:${rowNow},rowWant:${JSON.stringify(rowWant)},card:document.querySelector(${JSON.stringify(card)})!==null,words:document.querySelector('.editor-window [data-mark-id="${expected.markId}"]')!==null,anyWords:document.querySelector('[data-mark-id="${expected.markId}"]')!==null,first:document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId,drawn:document.querySelectorAll('.editor-window [data-mark-id]').length,status:document.querySelector('#persistence-status')?.textContent??null})`));
   }
+  // The editor's place is kept: the same paragraph at the top of the text and the scroll where it was (to a few lines, as the applied
+  // words reflow), and the next pending card is selected and focused (a pointer decision stays on the page), as in a window that
+  // holds every mark.
+  try {
+    await waitFor(renderer, `(() => { const place=${PLACE}; return place.selected===${JSON.stringify(wantSelected)} && place.active===${JSON.stringify(wantSelected)}; })()`, 'marks-paging-decision-keeps-place', 60_000);
+  } catch { /* said below with what stood */ }
+  await waitFor(renderer, `new Promise((resolve)=>{const box=()=>JSON.stringify(${PLACE});const first=box();requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(box()===first)));})`, 'marks-paging-decision-place-rest');
+  const placeAfter = await renderer.evaluate(PLACE);
+  check(placeAfter.first === placeBefore.first && Math.abs(placeAfter.scrollTop - placeBefore.scrollTop) <= Math.round((await renderer.evaluate('innerHeight')) / 4) && placeAfter.selected === wantSelected && placeAfter.active === wantSelected,
+    'marks-paging-decision-keeps-place', { placeBefore, placeAfter, next: around });
   await pointerClick(renderer, waitFor, '[data-mark-filter-toggle]', 'marks-paging-reset-open');
   await waitFor(renderer, isOpen, 'marks-paging-reset-opened');
   await pointerClick(renderer, waitFor, '[data-mark-category-filter="all"]', 'marks-paging-reset-category');

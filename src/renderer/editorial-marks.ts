@@ -979,6 +979,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   }
   function layoutComments(): void {
     paintBookPending();
+    // Pages are being read back after a reload: the window holds only part of the list, so the pane keeps what it shows until the rest is there.
+    if (paging.restoring()) return;
     if (pressedComment !== undefined || textPointerDown) { layoutAfterPress = true; return; }
     const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
     leaders.replaceChildren();
@@ -1280,7 +1282,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     // A reload that brought only the first page of a dense window reads the pages the editor had loaded again (Issue #1604).
     paging.observe();
     // While the pane's own command or Apply is under way the reload answers it; any other snapshot reads every card again.
-    cardCache.sync(current, !working);
+    if (!paging.restoring()) cardCache.sync(current, !working);
     scheduleCommentsLayout();
     if (!options.comments?.enabled()) { activateComment(undefined); return; }
     for (const mark of current.marks) {
@@ -1360,8 +1362,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    * holds one. A mark decided or gone while its page loaded is passed over, and the walk goes on from where it stood.
    */
   async function walkPending(direction: 'next' | 'previous', from: PendingKey): Promise<void> {
-    // A category or model filter is answered by the service in one read, however dense the stretch (Issue #1604).
-    if (options.bookPending !== undefined && markFilter.keyword.trim() === '' && markFilter.status !== 'handled' && (markFilter.selectedCategories.size > 0 || markFilter.selectedModels.size > 0)) {
+    // A category or model filter, or a window that holds marks the pane has not loaded, is answered by the service in one read,
+    // however dense the stretch (Issue #1604). A keyword is on the card and keeps the probing; an ordinary window reads nothing more.
+    const unloaded = editor.currentWindow().marksPage?.nextOrdinal != null;
+    if (options.bookPending !== undefined && markFilter.keyword.trim() === '' && markFilter.status !== 'handled' && (unloaded || markFilter.selectedCategories.size > 0 || markFilter.selectedModels.size > 0)) {
       await walkFilteredPending(direction, from, options.bookPending);
       return;
     }
@@ -1424,7 +1428,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       direction, categories: [...markFilter.selectedCategories], models: [...markFilter.selectedModels],
     });
     if (moved()) return;
-    if (mark === null) { options.setStatus(noFurtherPendingLine(direction, true), 'success'); return; }
+    if (mark === null) { options.setStatus(noFurtherPendingLine(direction, filtering()), 'success'); return; }
     let held = false;
     jumping += 1;
     try {
@@ -1477,6 +1481,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    * here, else the card stays and 下一条待处理 is offered — or, at the Book's end, that is said once.
    */
   function advanceAfter(decided: EditorialMarkCardProjection, input: DecisionInput): void {
+    // The next pending card is looked for in the whole list: after the pages the editor had loaded are read back (Issue #1604).
+    if (paging.restoring()) { void paging.settled().then(() => advanceAfter(decided, input)); return; }
     if (destroyed || !options.comments?.enabled() || (activeComment !== undefined && activeComment !== decided.markId) || inTextEntry(document.activeElement)) return;
     const current = editor.currentWindow();
     const now = current.marks.find((mark) => mark.markId === decided.markId);
@@ -1609,8 +1615,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const applyCommand = (result: EditorialMarkCommandProjection): void => {
     if (destroyed) return;
     editor.setMarks(result.marks, result.marksTruncated, result.marksPage);
-    // The pane's own command: its card comes back with the answer, and the others need no second read for it.
-    cardCache.sync(editor.currentWindow(), false);
+    // The pane's own command: its card comes back with the answer, and the others need no second read for it. A dense window reads
+    // its other pages back first, and its cards are looked at once the whole list is there.
+    paging.observe();
+    if (!paging.restoring()) cardCache.sync(editor.currentWindow(), false);
     if (result.card) {
       const card = result.card;
       cardCache.put(card);
