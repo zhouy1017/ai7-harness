@@ -301,10 +301,9 @@ const READ_LIBRARY = `(() => {
         indexLine: card.querySelector('.material-index-state')?.textContent ?? null,
         layers: Array.from(card.querySelectorAll('.material-index-layer'), (line) => [line.dataset.indexLayer, line.dataset.layerState, line.textContent]),
         layerActions: (() => {
-          const build = card.querySelector('[data-library-action="build-vectors"]');
           const request = card.querySelector('[data-library-action="request-translation"]');
           return {
-            build: build instanceof HTMLButtonElement ? build.disabled : null,
+            build: card.querySelector('[data-library-action="build-vectors"]') !== null,
             translation: request instanceof HTMLButtonElement ? request.disabled : null,
             translationNote: card.querySelector('.material-translation-note')?.textContent ?? null,
             described: request instanceof HTMLElement ? request.getAttribute('aria-describedby') === card.querySelector('.material-translation-note')?.id : null,
@@ -314,6 +313,7 @@ const READ_LIBRARY = `(() => {
           const section = card.querySelector('.material-vector-search');
           if (!(section instanceof HTMLElement)) return null;
           return {
+            label: section.querySelector('label')?.textContent ?? null,
             heading: section.querySelector('.material-vector-results-heading')?.textContent ?? null,
             candidates: Array.from(section.querySelectorAll('.material-vector-candidate'), (item) => [item.dataset.candidateOrdinal, item.querySelector('.material-anchor')?.textContent ?? null]),
           };
@@ -409,6 +409,45 @@ async function readLibrary(renderer, predicate, name) {
 async function clickSelector(renderer, selector, name) {
   await assertRenderer(renderer, `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.disabled)return false; const more=node.closest('.knowledge-file-more'); if(more instanceof HTMLDetailsElement&&!more.open)more.querySelector(':scope > summary').click(); node.click(); return true; })()`, name);
 }
+/**
+ * Where a control stands, measured by the engine: its rectangle, whether it lies inside the window and inside the visible box of
+ * its nearest scrolling ancestor, and whether it is topmost at its centre. Nothing is scrolled by script.
+ */
+function reachableExpression(selector) {
+  return `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement))return null;
+    let scroller=node.parentElement; while(scroller&&!(/(auto|scroll)/u.test(getComputedStyle(scroller).overflowY)&&scroller.scrollHeight>scroller.clientHeight))scroller=scroller.parentElement;
+    const r=node.getBoundingClientRect(), box=scroller?scroller.getBoundingClientRect():{left:0,top:0,right:innerWidth,bottom:innerHeight};
+    const x=r.left+r.width/2, y=r.top+r.height/2;
+    const inWindow=r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;
+    const inScroller=r.left>=box.left-1&&r.top>=box.top-1&&r.right<=box.right+1&&r.bottom<=box.bottom+1;
+    const hit=inWindow&&node.contains(document.elementFromPoint(x,y));
+    const visible={left:Math.max(0,box.left),top:Math.max(0,box.top),right:Math.min(innerWidth,box.right),bottom:Math.min(innerHeight,box.bottom)};
+    return {x,y,top:r.top,bottom:r.bottom,inWindow,inScroller,hit,reachable:inWindow&&inScroller&&hit,wheelX:Math.round((visible.left+visible.right)/2),wheelY:Math.round((visible.top+visible.bottom)/2),
+      down:r.bottom>Math.min(innerHeight,box.bottom)}; })()`;
+}
+
+/** The editor's own mouse wheel over the control's scroller, a turn at a time, until the control is reachable. */
+async function wheelIntoView(renderer, selector, name) {
+  for (let turn = 0; turn < 60; turn += 1) {
+    const at = await renderer.evaluate(reachableExpression(selector));
+    requireJourney(at !== null, `${name}-present`, at);
+    if (at.reachable) return;
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.wheelX, y: at.wheelY, deltaX: 0, deltaY: at.down ? 120 : -120 });
+    await renderer.evaluate('new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)))');
+  }
+  requireJourney(false, `${name}-wheel-reachable`, await renderer.evaluate(reachableExpression(selector)));
+}
+
+/** A real press at the centre of a control asserted reachable, two frames apart, with no scripted scroll before it. */
+async function pressReachable(renderer, selector, name) {
+  const before = await renderer.evaluate(reachableExpression(selector));
+  await renderer.evaluate('new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)))');
+  const at = await renderer.evaluate(reachableExpression(selector));
+  requireJourney(at?.reachable === true && before?.x === at.x && before?.y === at.y, `${name}-reachable`, { before, at });
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: 'left', buttons: 1, clickCount: 1 });
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: 'left', buttons: 0, clickCount: 1 });
+}
+
 async function pressKey(renderer, key) {
   const codes = { ArrowRight: 39, ArrowLeft: 37, Enter: 13 };
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: codes[key] });
@@ -764,21 +803,21 @@ async function main() {
 
     // ---- 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) ----------------------------
     at('knowledge-library-index');
-    // Built on this machine as it arrived, nothing asked: four layers read — recognition is not needed for a Word file, sample1
-    // is Chinese so it needs no 来源译文, and similarity vectors wait for the editor to ask (Issue #892), never built on open.
-    // The anchors are positions: a Word file has no page numbers.
+    // Built on this machine as it arrived, nothing asked: six layers — recognition is not needed for a Word file, sample1 is
+    // Chinese so it needs no 来源译文 — and 相似段落检索 is there at once, with nothing to build (R5-F2c). The anchors are
+    // positions: a Word file has no page numbers.
     const libraryIndexed = await readLibrary(renderer, (page) => page.cards[0]?.index === 'complete', 'library-index-built');
     const layers = new Map(libraryIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
     await assertRenderer(renderer, `(() => { const card=document.querySelector('article.library-material'); const warning=card?.querySelector(':scope > .knowledge-file-summary .knowledge-file-index'); return warning?.textContent==='索引：已在本机建好' && !warning.closest('.knowledge-file-more'); })()`, 'library-folded-index-warning');
-    requireJourney(libraryIndexed.cards[0].indexLine === '已在本机建好' && layers.size === 7 &&
+    requireJourney(libraryIndexed.cards[0].indexLine === '已在本机建好' && layers.size === 6 &&
       JSON.stringify(layers.get('original')) === JSON.stringify(['complete', '已原样保存在本机']) &&
       layers.get('metadata')?.[0] === 'complete' && /^中文 · \d+ 段 · \d+ 个标题/u.test(layers.get('metadata')?.[1] ?? '') &&
       layers.get('text')?.[0] === 'complete' && /^已提取 \d+ 字$/u.test(layers.get('text')?.[1] ?? '') &&
       JSON.stringify(layers.get('recognition')) === JSON.stringify(['not-needed', '不需要：文件里就是文字']) &&
       JSON.stringify(layers.get('translation')) === JSON.stringify(['not-needed', '不需要：中文资料']) &&
       layers.get('segments')?.[0] === 'complete' && /^\d+ 段 · \d+ 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）$/u.test(layers.get('segments')?.[1] ?? '') &&
-      JSON.stringify(layers.get('vectors')) === JSON.stringify(['not-built', '未构建：可以「构建相似索引」（在本机建立，不发送任何内容）']) &&
-      libraryIndexed.cards[0].layerActions.build === false && libraryIndexed.cards[0].layerActions.translation === null && libraryIndexed.cards[0].vectorSearch === null,
+      !layers.has('vectors') && libraryIndexed.cards[0].layerActions.build === false && libraryIndexed.cards[0].layerActions.translation === null &&
+      libraryIndexed.cards[0].vectorSearch?.label === '相似段落检索 · 本机相似搜索仅供参考，原文以分段为准。' && libraryIndexed.cards[0].vectorSearch.heading === null,
     'library-index-layers', libraryIndexed.cards[0].layers);
     const indexService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(materialId)} }).then((material)=>[material.index.state, material.index.reason, /^[0-9a-f]{64}$/u.test(material.index.digest ?? ''), material.index.metadata?.language ?? null, material.index.metadata?.paragraphs ?? 0])`);
     requireJourney(indexService[0] === 'complete' && indexService[1] === null && indexService[2] === true && indexService[3] === 'zh' && indexService[4] > 16,
@@ -812,23 +851,26 @@ async function main() {
     await clickSelector(renderer, `${indexSelector} button.global-attention-open`, 'library-index-attention-open');
     await readLibrary(renderer, (page) => page.state === 'ready' && page.cards.some((card) => card.id === materialId && card.index === 'complete'), 'library-index-attention-opened');
 
-    // 相似段落检索 (Issue #892): built on this machine only when the editor asks, by the built-in provider on this guest, then
-    // searched with the runner's own words. Only anchors are read back here, never the paragraphs' words.
-    at('knowledge-library-index-vectors');
-    const vectorCard = `article.library-material[data-material-id="${materialId}"]`;
-    await clickSelector(renderer, `${vectorCard} [data-library-action="build-vectors"]`, 'library-vectors-build');
-    const vectorsBuilt = await readLibrary(renderer, (page) => page.cards.find((card) => card.id === materialId)?.layers.some(([layer, state]) => layer === 'vectors' && state === 'complete') === true, 'library-vectors-built');
-    const vectorsLayer = vectorsBuilt.cards.find((card) => card.id === materialId).layers.find(([layer]) => layer === 'vectors');
-    requireJourney(vectorsLayer[2] === `已构建：${indexService[4]} 段 · 本机内置相似向量（按字词相近）`, 'library-vectors-layer', vectorsLayer);
-    const vectorsService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(materialId)} }).then((material)=>[material.index.vectors?.state ?? null, material.index.vectors?.embedding ?? null, material.index.vectors?.built ?? null, material.index.vectors?.total ?? null])`);
-    requireJourney(vectorsService[0] === 'complete' && vectorsService[1] === 'ai7-embedding/stub-1' && vectorsService[2] === indexService[4] && vectorsService[3] === indexService[4],
-      'library-vectors-service', vectorsService);
-    await fill(renderer, `${vectorCard} [data-library-field="vector-query"]`, '他们说话', 'library-vectors-query');
-    await clickSelector(renderer, `${vectorCard} [data-library-action="vector-search"]`, 'library-vectors-search');
-    const vectorsFound = await readLibrary(renderer, (page) => (page.cards.find((card) => card.id === materialId)?.vectorSearch?.candidates.length ?? 0) > 0, 'library-vectors-found');
-    const search = vectorsFound.cards.find((card) => card.id === materialId).vectorSearch;
+    // 相似段落检索 (Issue #892; R5-F2c): there as soon as the index is built, nothing to build, ranked on this machine by words.
+    // The editor wheels the page to the field, writes the runner's own words and presses 检索. Each control is asserted inside
+    // the window, inside its scroller's visible box and topmost at its centre before it is pressed — no scripted scroll.
+    // Only anchors are read back here, never the paragraphs' words.
+    at('knowledge-library-index-search');
+    const searchCard = `article.library-material[data-material-id="${materialId}"]`;
+    const searchField = `${searchCard} [data-library-field="vector-query"]`;
+    const searchButton = `${searchCard} [data-library-action="vector-search"]`;
+    await wheelIntoView(renderer, searchField, 'library-search-field');
+    await pressReachable(renderer, searchField, 'library-search-field');
+    await renderer.send('Input.insertText', { text: '他们说话' });
+    await pressReachable(renderer, searchButton, 'library-search-button');
+    const searchFound = await readLibrary(renderer, (page) => (page.cards.find((card) => card.id === materialId)?.vectorSearch?.candidates.length ?? 0) > 0, 'library-search-found');
+    const search = searchFound.cards.find((card) => card.id === materialId).vectorSearch;
     requireJourney(/^相近段落：[1-5] 条（按相近程度排序；原文以分段为准）$/u.test(search.heading ?? '') && search.candidates.length <= 5 &&
-      search.candidates.every(([ordinal, anchor]) => /^\d+$/u.test(ordinal ?? '') && anchor === `第 ${ordinal} 段`), 'library-vectors-candidates', search);
+      new Set(search.candidates.map(([ordinal]) => ordinal)).size === search.candidates.length &&
+      search.candidates.every(([ordinal, anchor]) => /^\d+$/u.test(ordinal ?? '') && anchor === `第 ${ordinal} 段`), 'library-search-candidates', search);
+    // Nothing was built for it: the item's index reads as it did, with no vector layer on the service either.
+    const searchService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(materialId)} }).then((material)=>[material.index.state, Object.keys(material.index.layers).length, 'vectors' in material.index])`);
+    requireJourney(JSON.stringify(searchService) === JSON.stringify(['complete', 6, false]), 'library-search-service', searchService);
 
     at('j14-library-reflow-forced-colors');
     // At 200% the item, its decisions and an open choice reflow into the width; under forced colours the card and the choice keep

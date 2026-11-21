@@ -922,8 +922,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'knowledge-library-decide',
     // 资料索引 (Issue #428, S80a).
     'knowledge-library-index',
-    // 相似段落检索 built on request (Issue #892).
-    'knowledge-library-index-vectors',
+    // 相似段落检索 at once, nothing to build (Issue #892; R5-F2c).
+    'knowledge-library-index-search',
     'j14-library-reflow-forced-colors',
     'knowledge-library-bounded-readers',
     'knowledge-library-index-translation',
