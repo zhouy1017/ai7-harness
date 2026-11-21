@@ -26,6 +26,16 @@ const SENTENCE = `(() => {
   return {text:row.querySelector('span')?.textContent??null, inPane:r.left>=p.left-1 && r.right<=p.right+1 && r.top>=p.top-1 && r.bottom<=p.bottom+1, rowInWindow:inWindow(r), buttonInWindow:inWindow(b), buttonOnTop:button.contains(hit), label:button.textContent, viewport:[innerWidth,innerHeight], row:[r.left,r.top,r.right,r.bottom], pane:[p.left,p.top,p.right,p.bottom]};
 })()`;
 
+/** 显示更多 by real clicks until the window holds every mark; nothing to do for a window that carries them all. */
+export async function loadEveryMark(renderer, waitFor) {
+  const row = `document.querySelector('[data-marks-paging]')`;
+  for (let page = 0; page < 8 && await renderer.evaluate(`${row}!==null && ${row}.hidden===false`); page += 1) {
+    const before = await renderer.evaluate(`${row}.querySelector('span')?.textContent`);
+    await pointerClick(renderer, waitFor, '[data-marks-paging] [data-marks-more]', 'marks-paging-load-every-mark');
+    await waitFor(renderer, `${row}.hidden===true || (${row}.querySelector('span')?.textContent!==${JSON.stringify(before)} && ${row}.querySelector('[data-marks-more]').disabled===false)`, 'marks-paging-every-mark-page', 60_000);
+  }
+}
+
 export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   at(wide ? 'marks-paging-wide' : 'marks-paging-gate');
   const opened = async () => {
