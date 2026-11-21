@@ -62,6 +62,7 @@
     "tests/service/fast-role-span.test.ts": 2,
     "tests/service/fast-role.test.ts": 6,
     "tests/service/feedback-history.test.ts": 9,
+    "tests/service/global-agent-request-bytes.test.ts": 6,
     "tests/service/global-agent.test.ts": 4,
     "tests/service/global-attention.test.ts": 6,
     "tests/service/house-review-preference-materials.test.ts": 3,

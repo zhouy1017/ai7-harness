@@ -71,7 +71,7 @@ describe('the Book-less Global Agent', () => {
     const original = first.items.find((item) => item.state === 'active')!;
     const corrected = subject.recordLearningSupervision({ ...create('短句不一概补主语。'), operation: 'correct', targets: [pinOf(original)] });
     expect(corrected.items.find((item) => item.state === 'active')?.text).toBe('短句不一概补主语。');
-    expect(() => subject.recordLearningSupervision({ ...create('旧版本不得覆盖。'), operation: 'correct', targets: [pinOf(original)] })).toThrow('版本已经变化');
+    expect(() => subject.recordLearningSupervision({ ...create('旧版本不得覆盖。'), operation: 'correct', targets: [pinOf(original)] })).toThrow('刚在别处改过');
     const current = corrected.items.find((item) => item.state === 'active')!;
     subject.recordLearningSupervision({ ...create('先停止使用这条概括。'), operation: 'supervise', targets: [pinOf(current)], effect: 'freeze' });
     await subject.close(); store = undefined;

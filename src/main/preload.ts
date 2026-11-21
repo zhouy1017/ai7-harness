@@ -548,6 +548,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   createEditorialMemory: (input: ServiceOperationMap['createEditorialMemory']['input']) => invoke<ServiceOperationMap['createEditorialMemory']['output']>(IPC_CHANNELS.createEditorialMemory, input),
   acceptEditorialMemory: (input: ServiceOperationMap['acceptEditorialMemory']['input']) => invoke<ServiceOperationMap['acceptEditorialMemory']['output']>(IPC_CHANNELS.acceptEditorialMemory, input),
   deactivateEditorialMemory: (input: ServiceOperationMap['deactivateEditorialMemory']['input']) => invoke<ServiceOperationMap['deactivateEditorialMemory']['output']>(IPC_CHANNELS.deactivateEditorialMemory, input),
+  reenableReviewPreference: (input: ServiceOperationMap['reenableReviewPreference']['input']) => invoke<ServiceOperationMap['reenableReviewPreference']['output']>(IPC_CHANNELS.reenableReviewPreference, input),
+  deleteReviewPreference: (input: ServiceOperationMap['deleteReviewPreference']['input']) => invoke<ServiceOperationMap['deleteReviewPreference']['output']>(IPC_CHANNELS.deleteReviewPreference, input),
   inspectHouseReviewPreference: () => invoke<ServiceOperationMap['inspectHouseReviewPreference']['output']>(IPC_CHANNELS.inspectHouseReviewPreference, {}),
   rebuildHouseReviewPreference: () => invoke<ServiceOperationMap['rebuildHouseReviewPreference']['output']>(IPC_CHANNELS.rebuildHouseReviewPreference, {}),
   inspectEditQualitySignals: (input: ServiceOperationMap['inspectEditQualitySignals']['input']) => invoke<ServiceOperationMap['inspectEditQualitySignals']['output']>(IPC_CHANNELS.inspectEditQualitySignals, input),

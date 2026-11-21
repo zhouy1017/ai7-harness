@@ -2499,6 +2499,23 @@ it('decodes the Pro / Flash tier selectors and the Flash clear with their own in
   for (const input of [{ route: 'opencode-go' }, { modelId: 'kimi-k3' }]) expect(() => decode('clearFlashModel', input)).toThrow(ProtocolError);
 });
 
+it('decodes 重新启用 / 删除 of one 审阅偏好 row by its own pin, and keeps both out of the supervision request (#1655)', () => {
+  const decode = (op: string, input: unknown) => decodeRequest(new TextEncoder().encode(JSON.stringify({ id: randomUUID(), op, input })));
+  const actionId = randomUUID();
+  for (const op of ['reenableReviewPreference', 'deleteReviewPreference']) {
+    for (const input of [{ itemId: randomUUID(), expectedRevisionId: randomUUID(), actionId }, { itemId: 'preference:house:typos-and-usage', expectedRevisionId: randomUUID(), actionId }])
+      expect(decode(op, input)).toMatchObject({ op, input });
+    for (const input of [{ itemId: randomUUID(), expectedRevisionId: randomUUID() }, { itemId: randomUUID(), expectedRevisionId: randomUUID(), actionId: 'again' },
+      { itemId: '', expectedRevisionId: randomUUID(), actionId }, { itemId: randomUUID(), expectedRevisionId: 'x'.repeat(181), actionId },
+      { itemId: randomUUID(), expectedRevisionId: randomUUID(), actionId, state: 'retired' }])
+      expect(() => decode(op, input), `${op} ${JSON.stringify(input)}`).toThrow(ProtocolError);
+  }
+  const directive = { actionId, targets: [{ itemId: 'preference:house:typos-and-usage', revisionId: randomUUID() }],
+    scope: { kind: 'category', categoryId: 'typos-and-usage' }, categoryId: 'typos-and-usage', text: '', effect: 'guide' };
+  expect(decode('recordLearningSupervision', { ...directive, operation: 'deactivate' })).toMatchObject({ op: 'recordLearningSupervision' });
+  for (const operation of ['reactivate', 'retire']) expect(() => decode('recordLearningSupervision', { ...directive, operation })).toThrow(ProtocolError);
+});
+
 it('accepts return-to-editing and optional fidelity acceptance only on reimport submissions (#1638)', () => {
   const input = { draftId: '11111111-1111-4111-8111-111111111111', expectedDraftVersion: 2 };
   const frame = (op: string, value: object) => Buffer.from(JSON.stringify({ id: randomUUID(), op, input: value }));

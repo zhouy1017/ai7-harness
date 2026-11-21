@@ -12,7 +12,7 @@ import { composeEditorialMemoryBlock, type EditorialMemorySnapshot } from './lea
 import { EDITORIAL_MEMORY_LIBRARY_LINES, EDITORIAL_MEMORY_LIBRARY_GRAPHEMES, type EditorialMemoryContext, selectPreferenceLines, type PreferenceLineCandidate } from './learning/retrieval.js';
 import { EditorialLearningLedger, LearningReads, validateEditorialMemorySourceShape } from './learning/ledger.js';
 import { REVIEW_CATEGORY_SELECTED_PREFERENCE_PROMPT_SCHEMA } from './review/review-category-contract.js';
-import type { ReferencedRuleVersion, InspectEditorialLearningInput, EditorialLearningProjection, LearningCurationBudget, EnabledLearningEnvelope, LearningCurationBundle, LearningReasonAskInput, LearningReasonAskProjection, ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput } from '../shared/protocol/learning.js';
+import type { ReferencedRuleVersion, InspectEditorialLearningInput, EditorialLearningProjection, LearningCurationBudget, EnabledLearningEnvelope, LearningCurationBundle, LearningReasonAskInput, LearningReasonAskProjection, ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, ReviewPreferenceLifecycleInput } from '../shared/protocol/learning.js';
 import { liveMaterialContract, materialContractDefinition } from './task-material-references.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
@@ -555,7 +555,8 @@ export class HouseReviewPreferenceLedger {
       .filter((entry) => entry.line.text.length > 0);
     const over = (): boolean => entries.length > EDITORIAL_MEMORY_LIBRARY_LINES ||
       entries.reduce((sum, entry) => sum + graphemesOf(entry.line.text).length, 0) > EDITORIAL_MEMORY_LIBRARY_GRAPHEMES;
-    const addsText = head.operation === 'create' || head.operation === 'merge' || head.operation === 'correct' ||
+    // 重新启用 is strict only when it brings an editor's own words back (Issue #1655).
+    const addsText = head.operation === 'create' || head.operation === 'merge' || head.operation === 'correct' || head.operation === 'reactivate' ||
       head.operation === 'supervise' && head.effect === 'correct';
     const limit = (): never => { throw new LearningEligibilityError('GLOBAL_AGENT_MEMORY_LIMIT', '本社审阅偏好最多 64 条，合计最多 6,000 字；请先合并或停用已有条目。'); };
     if (strict && addsText && over()) limit();
@@ -1139,13 +1140,17 @@ export function learningAuditPage(
   bookId: string,
   after: LearningMaterialCursor | null,
   limit: number,
-  matches: (candidate: LearningMaterialCandidate, standing: string) => boolean,
+  matches: (candidate: LearningMaterialCandidate, standing: string, automatic: boolean) => boolean,
+  withAdmissions = false,
 ): { page: Array<{ material: LearningAuditMaterialProjection; orderedAt: string }>; count: number } {
   const kept: Array<{ candidate: LearningMaterialCandidate; material: LearningAuditMaterialProjection }> = [];
   let count = 0;
+  // Read once for the Book, and only for a filter that tells a material AI7 already uses by default apart (Issue #1655).
+  const admitted = withAdmissions ? host.memoryFacade().automaticAdmissions(bookId, host.baselineAnalysis.launch.operationalScope) : null;
   for (const [candidate, projection] of host.learningEligibility.projectCandidates(bookId, host.learningCandidates(bookId, true))) {
     const standing = learningAuditStanding(projection);
-    if (!matches(candidate, standing)) continue;
+    if (!matches(candidate, standing, standing === 'pending' && admitted?.has(`${projection.materialKey}
+${projection.digest}`) === true)) continue;
     count += 1;
     if (after !== null && learningMaterialOrder(candidate, after) <= 0) continue;
     const material: LearningAuditMaterialProjection = {
@@ -1751,6 +1756,14 @@ export function deactivateEditorialMemory(host: EditorialLearningStoreHost, inpu
   }));
 }
 
+/** 审阅偏好's 重新启用 and 删除 of one stopped row, memory or preference line (Issue #1655), answered as accepting is. */
+export function reviewPreferenceLifecycle(host: EditorialLearningStoreHost, input: ReviewPreferenceLifecycleInput, action: 'reactivate' | 'retire'): EditorialLearningProjection {
+  return host.learningCall(() => host.transaction(host.authority, () => {
+    host.memoryFacade().lifecycle(host.baselineAnalysis.launch.operationalScope, input, action);
+    return host.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
+  }));
+}
+
 export function inspectLearningAudit(host: LearningSupervisionStoreHost, input: LearningAuditInput = {}): LearningAuditProjection {
   return host.learningCall(() => {
     const after = input.after ?? null;
@@ -1766,9 +1779,10 @@ export function inspectLearningAudit(host: LearningSupervisionStoreHost, input: 
       ? null
       : new Set(Array.from(host.series.members(host.requireSeries(input.seriesId).seriesId), (entry) => entry.bookId));
     const query = input.query == null ? '' : input.query.trim().toLocaleLowerCase('zh-CN');
-    const matches = (candidate: LearningMaterialCandidate, standing: string): boolean =>
+    // A pending material AI7 already uses by default is listed under 本社, not as undecided; its row is unchanged (Issue #1655).
+    const matches = (candidate: LearningMaterialCandidate, standing: string, automatic: boolean): boolean =>
       (input.kind == null || candidate.kind === input.kind) &&
-      (input.standing == null || standing === input.standing) &&
+      (input.standing == null || (automatic ? 'house' : standing) === input.standing) &&
       (input.recordedFrom == null || candidate.recordedAt >= input.recordedFrom) &&
       (input.recordedBefore == null || candidate.recordedAt < input.recordedBefore) &&
       (query.length === 0 || [candidate.originLabel, ...candidate.excerpt].join('\n').toLocaleLowerCase('zh-CN').includes(query));
@@ -1785,7 +1799,8 @@ export function inspectLearningAudit(host: LearningSupervisionStoreHost, input: 
       const id = asString(row.book_id);
       if (members !== null && !members.has(id)) continue;
       const title = asString(row.title);
-      const { page, count } = learningAuditPage(host, id, id === after?.bookId ? after : null, MAX_LEARNING_AUDIT_PAGE + 1 - collected.length, matches);
+      const { page, count } = learningAuditPage(host, id, id === after?.bookId ? after : null, MAX_LEARNING_AUDIT_PAGE + 1 - collected.length, matches,
+        input.standing === 'pending' || input.standing === 'house');
       counts.set(id, count);
       for (const { material, orderedAt } of page) {
         collected.push({ bookId: id, title, material, orderedAt });

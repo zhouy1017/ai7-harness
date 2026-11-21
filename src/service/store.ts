@@ -512,7 +512,7 @@ import type {
   WordTrackedEditLearningSource,
   ChangeEditorialLearningInput,
   CreateEditorialMemoryInput,
-  DeactivateEditorialMemoryInput,
+  DeactivateEditorialMemoryInput, AcceptEditorialMemoryInput, ReviewPreferenceLifecycleInput,
   InspectEditorialLearningInput,
   EditorialLearningProjection,
   LearningReasonAskInput,
@@ -7273,20 +7273,13 @@ export class EditorialStore {
     return learningSupervision.recordLearningReasonAsk(this.#editorialLearningHost, input, frequency);
   }
 
-  changeEditorialLearning(input: ChangeEditorialLearningInput): EditorialLearningProjection {
-    return learningSupervision.changeEditorialLearning(this.#editorialLearningHost, input);
-  }
-
-  createEditorialMemory(input: CreateEditorialMemoryInput): EditorialLearningProjection {
-    return learningSupervision.createEditorialMemory(this.#editorialLearningHost, input);
-  }
-
-  acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {
-    return learningSupervision.acceptEditorialMemory(this.#editorialLearningHost, input);
-  }
-
-  deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection {
-    return learningSupervision.deactivateEditorialMemory(this.#editorialLearningHost, input);
+  changeEditorialLearning(input: ChangeEditorialLearningInput): EditorialLearningProjection { return learningSupervision.changeEditorialLearning(this.#editorialLearningHost, input); }
+  createEditorialMemory(input: CreateEditorialMemoryInput): EditorialLearningProjection { return learningSupervision.createEditorialMemory(this.#editorialLearningHost, input); }
+  acceptEditorialMemory(input: AcceptEditorialMemoryInput): EditorialLearningProjection { return learningSupervision.acceptEditorialMemory(this.#editorialLearningHost, input); }
+  deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection { return learningSupervision.deactivateEditorialMemory(this.#editorialLearningHost, input); }
+  /** 审阅偏好's 重新启用 (`reactivate`) and 删除 (`retire`), Issue #1655. */
+  reviewPreferenceLifecycle(input: ReviewPreferenceLifecycleInput, action: 'reactivate' | 'retire'): EditorialLearningProjection {
+    return learningSupervision.reviewPreferenceLifecycle(this.#editorialLearningHost, input, action);
   }
 
   /**
