@@ -69,11 +69,12 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   await pointerClick(renderer, waitFor, '[data-nav-book-section="manuscript"]', 'marks-paging-return');
   await opened();
   await waitFor(renderer, `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(sentence)}`, 'marks-paging-sentence-again');
-  // The caret in the paragraph of the last mark, by a real click: the step then starts from the card the click selects (or the caret
-  // it leaves), in the middle of the window, so reading its place does not carry the text past the window's end.
+  // The caret in the paragraph after the last mark's, by a real click: the step then goes back to that mark. The caret stands in the
+  // middle of the window, so reading the mark's place does not carry the text past the window's end into the next window.
   const LAST = `Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).at(-1)`;
   const lastMark = facts.marks.filter((mark) => mark.status === 'open' && mark.kind === 'change-suggestion').at(-1);
-  const BLOCK = `[data-testid="manuscript-editor"] > [data-block-id="${lastMark.blockId}"]`;
+  const after = await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"] > [data-block-id="${lastMark.blockId}"]')?.nextElementSibling?.dataset.blockId??'${lastMark.blockId}'`);
+  const BLOCK = `[data-testid="manuscript-editor"] > [data-block-id="${after}"]`;
   await pointerClick(renderer, waitFor, BLOCK, 'marks-paging-caret-click');
   await waitFor(renderer, `(() => { const selection=getSelection(), block=document.querySelector(${JSON.stringify(BLOCK)}); return selection?.isCollapsed===true && block!==null && block.contains(selection.focusNode); })()`, 'marks-paging-caret-in-paragraph');
   // The expectation, from the service's own read of the same step: where it lands and where that stands among the window's marks.
