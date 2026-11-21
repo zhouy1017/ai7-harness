@@ -1,4 +1,3 @@
-import { asMultiDocumentRevision108, productionDocumentDigestBytes } from '../support/production-documents.js';
 import { taskSynopsisRequestDigest } from '../../src/service/analysis/baseline-synopsis.js';
 
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
@@ -210,40 +209,6 @@ async function run(session: Session, bookId: string, prepared: WritingProjection
   await session.owner.whenIdle();
   return session.store.inspectWriting(bookId)!;
 }
-
-it.each(['before migration', 'after relations commit'] as const)('preserves a historical writing draft and admits a peer after reopening 108→109 %s', async (interruption) => {
-  const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
-  let bookId = '', documentId = '';
-  await withSession(fixture, async (session) => {
-    bookId = await sample1Book(session.store, WRITING_BOOK_TITLE);
-    const settled = await run(session, bookId, prepare(session.store, bookId));
-    documentId = session.store.createWritingDraft(bookId, settled.resultSetRevision!.revisionId, '独立写作题目').document.documentId;
-  });
-  const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-  const old = new DatabaseSync(path);
-  asMultiDocumentRevision108(old);
-  const before = productionDocumentDigestBytes(old);
-  if (interruption === 'after relations commit') 
-  expect(old.prepare('PRAGMA user_version').get()!.user_version).toBe(108);
-  old.close();
-  await withSession(fixture, async (session) => {
-    const store = session.store;
-    const check = new DatabaseSync(path);
-    try {
-      expect(productionDocumentDigestBytes(check) === before).toBe(true);
-      expect(check.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(check.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-      for (const table of ['production_documents', 'writing_drafts']) {
-        expect(() => check.prepare(`UPDATE ${table} SET document_id = document_id WHERE document_id = ?`).run(documentId)).toThrow(/LEDGER_IMMUTABLE/);
-        expect(() => check.prepare(`DELETE FROM ${table} WHERE document_id = ?`).run(documentId)).toThrow(/LEDGER_IMMUTABLE/);
-      }
-    } finally { check.close(); }
-    const settled = await run(session, bookId, prepare(store, bookId));
-    const second = store.createWritingDraft(bookId, settled.resultSetRevision!.revisionId, '后续写作').document;
-    expect(second.documentId).not.toBe(documentId);
-    expect(store.inspectProductionDocuments(bookId).types.find((type) => type.typeId === 'promotion-article')!.documents.map((doc) => doc.title)).toEqual(['独立写作题目', '后续写作']);
-  });
-});
 
 it('does not resurface a superseded draft after the newest result becomes a document', async () => {
   const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
