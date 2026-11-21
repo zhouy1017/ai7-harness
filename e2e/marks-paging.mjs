@@ -101,7 +101,11 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   const rowNow = `(() => { const row=document.querySelector('[data-marks-paging]'); return row===null || row.hidden ? 'none' : row.querySelector('span')?.textContent; })()`;
   const rowWant = held >= expected.total ? 'none' : `已显示 ${held} / ${expected.total} 条。`;
   const card = `[data-comment-card="${expected.markId}"]`;
-  await waitFor(renderer, `(() => { const node=document.querySelector(${JSON.stringify(card)}); return node?.dataset.selected==='true' && node.dataset.revalidating==='false' && document.activeElement===node; })()`, 'marks-paging-card-selected', 60_000);
+  try {
+    await waitFor(renderer, `(() => { const node=document.querySelector(${JSON.stringify(card)}); return node?.dataset.selected==='true' && node.dataset.revalidating==='false' && document.activeElement===node; })()`, 'marks-paging-card-selected', 60_000);
+  } catch {
+    check(false, 'marks-paging-card-selected', await renderer.evaluate(`(() => { const node=document.querySelector(${JSON.stringify(card)}); return {card:node!==null,selected:node?.dataset.selected??null,revalidating:node?.dataset.revalidating??null,hidden:node?.hidden??null,active:document.activeElement?.tagName+'.'+(document.activeElement?.className??'')+'['+(document.activeElement?.dataset?.commentCard??'')+']',selectedCard:document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard??null,status:document.querySelector('#persistence-status')?.textContent??null,row:${rowNow},first:document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId,paneHidden:${PANE}?.hidden,viewport:[innerWidth,innerHeight],filter:document.querySelector('[data-mark-filter-toggle]')?.textContent}; })()`));
+  }
   await waitFor(renderer, `new Promise((resolve)=>{const box=()=>JSON.stringify([document.querySelector(${JSON.stringify(card)})?.getBoundingClientRect(),document.querySelector('.editor-window [data-mark-id="${expected.markId}"]')?.getBoundingClientRect()]);const first=box();requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(box()===first)));})`, 'marks-paging-card-rest');
   const arrived = await renderer.evaluate(`(() => {
     const node=document.querySelector(${JSON.stringify(card)}), scroll=document.querySelector('.manuscript-comments-scroll'), words=document.querySelector('.editor-window [data-mark-id="${expected.markId}"]'), editor=document.querySelector('.editor-window');
