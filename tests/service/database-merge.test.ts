@@ -36,6 +36,7 @@ import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissing
 import { WRITING_REQUEST } from '../support/writing-task.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { FACTUAL_REVIEW_TASK_GOAL } from '../../src/shared/protocol.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 
 // Service-integration suite (L2) for merging a Book (Issue #434, plan slice S86d; V2-UX-DSTO-017; ADR 0079 §1.5) over two real
 // stores: a Book with a manuscript and its history, an edit, a mark, a milestone, a 发稿版本, a Production Document delivered
@@ -803,7 +804,7 @@ describe('只导入其中的图书 over the store', () => {
       categoryId: 'typos-and-usage', text: '目标本社保留的合成偏好。', effect: 'guide' });
     const targetHouse = target.inspectGlobalAgent();
     const preview = await target.inspectDatabaseImport(packagePath);
-    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 116, dataVersion: 1 });
+    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: LATEST_SCHEMA_VERSION, dataVersion: 2 });
     await target.prepareDatabaseMerge(preview.previewId, T);
     target.close();
     target = await EditorialStore.open(otherRoot, roots.codeRoot, control);

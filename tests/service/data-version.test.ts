@@ -60,11 +60,11 @@ describe('数据版本 over the real store', () => {
     const first = await reopened((store) => store.inspectDataVersion());
     expect(first).toEqual({
       softwareVersion: version,
-      dataVersion: 1,
+      dataVersion: 2,
       frozen: true,
       schemaRevision: LATEST_SCHEMA_VERSION,
       update: null,
-      history: [{ softwareVersion: version, dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, recordedAt: first.history[0]!.recordedAt }],
+      history: [{ softwareVersion: version, dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, recordedAt: first.history[0]!.recordedAt }],
       historyTruncated: false,
       upgrades: [],
       backupLocation: `${roots.dataRoot}-backups`,
@@ -82,16 +82,16 @@ describe('数据版本 over the real store', () => {
       database.exec(DATA_VERSION_TRIGGER_SQL.store_versions_no_delete!);
       const recordedAt = '2026-09-01T00:00:00.000Z';
       const earlier = canonicalRecord({
-        schema: 'ai7.store-version/1', recordId: '00000000-0000-4000-8000-000000000001', ordinal: 1, softwareVersion: '0.0.9', dataVersion: 1,
+        schema: 'ai7.store-version/1', recordId: '00000000-0000-4000-8000-000000000001', ordinal: 1, softwareVersion: '0.0.9', dataVersion: 2,
         schemaRevision: LATEST_SCHEMA_VERSION, supersedes: null, recordedAt,
       });
       database.prepare(`INSERT INTO store_versions(record_id, ordinal, software_version, data_version, schema_revision, supersedes_record_id, recorded_at, canonical_json, sha256)
-        VALUES (?, 1, '0.0.9', 1, ?, NULL, ?, ?, ?)`).run('00000000-0000-4000-8000-000000000001', LATEST_SCHEMA_VERSION, recordedAt, earlier.json, earlier.digest);
+        VALUES (?, 1, '0.0.9', 2, ?, NULL, ?, ?, ?)`).run('00000000-0000-4000-8000-000000000001', LATEST_SCHEMA_VERSION, recordedAt, earlier.json, earlier.digest);
     } finally {
       database.close();
     }
     const updated = await reopened((store) => store.inspectDataVersion());
-    expect([updated.update?.from, updated.update?.to, updated.update?.fromDataVersion, updated.update?.toDataVersion]).toEqual(['0.0.9', version, 1, 1]);
+    expect([updated.update?.from, updated.update?.to, updated.update?.fromDataVersion, updated.update?.toDataVersion]).toEqual(['0.0.9', version, 2, 2]);
     expect(updated.history.map((entry) => entry.softwareVersion)).toEqual([version, '0.0.9']);
     // The version the service entry hands the store is the one recorded: here, a later software opening the same data.
     const parts = version.split('.').map(Number);
@@ -322,7 +322,7 @@ describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => 
     const originalMarker = await readFile(markerPath(), 'utf8');
     const snapshot = () => Promise.all([roots.dataRoot, replacementStagingFor(roots.dataRoot), `${roots.dataRoot}-backups`].map(treeBytes));
     for (const [text, code] of [
-      [JSON.stringify({ dataVersion: 2, schemaRevision: 90, softwareVersion: '2.0.0', writtenAt: '2027-01-01T00:00:00.000Z' }), 'DATA_VERSION_NEWER'],
+      [JSON.stringify({ dataVersion: 3, schemaRevision: 90, softwareVersion: '2.0.0', writtenAt: '2027-01-01T00:00:00.000Z' }), 'DATA_VERSION_NEWER'],
       ['{', 'DATA_VERSION_MARKER_UNREADABLE'],
     ]) {
       await writeFile(markerPath(), text!);
@@ -354,15 +354,15 @@ describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => 
     await reopened(() => undefined);
     const written = await readMarker();
     expect(Object.keys(written).sort()).toEqual(['dataVersion', 'schemaRevision', 'softwareVersion', 'writtenAt']);
-    expect(written).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: version });
+    expect(written).toMatchObject({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: version });
     for (const place of [roots.dataRoot, JSON.stringify(roots.dataRoot).slice(1, -1)]) expect(await readFile(markerPath(), 'utf8')).not.toContain(place);
     // A later software opening the data replaces it, and an earlier one of the same Data Version opens it as ever.
     await reopened(() => undefined, '0.2.0');
-    expect(await readMarker()).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '0.2.0' });
+    expect(await readMarker()).toMatchObject({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '0.2.0' });
     await reopened(() => undefined, '0.1.0');
     expect((await readMarker()).softwareVersion).toBe('0.1.0');
-    // A marker of an earlier schema revision — data an earlier AI7 of the same Data Version wrote — opens and is replaced.
-    await writeFile(markerPath(), JSON.stringify({ dataVersion: 1, schemaRevision: 60, softwareVersion: '0.0.9', writtenAt: '2026-09-01T00:00:00.000Z' }));
+    // A marker an earlier AI7 of the same Data Version wrote opens and is replaced (an earlier Data Version is refused: #1634).
+    await writeFile(markerPath(), JSON.stringify({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '0.0.9', writtenAt: '2026-09-01T00:00:00.000Z' }));
     await reopened(() => undefined);
     expect(await readMarker()).toMatchObject({ schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: version });
     // An existing store without a marker — one from before this software, or a store a replacement brought in — opens, and
@@ -386,12 +386,12 @@ describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => 
 
   it('refuses a newer Data Version, an unknown schema revision or a corrupt marker before anything opens, and writes nothing', async () => {
     await reopened(() => undefined);
-    const newer = '这份数据来自更新的 AI7（数据版本 2 / 数据库修订 90），请使用更新的 AI7 打开。';
-    const unknown = `这份数据来自更新的 AI7（数据版本 1 / 数据库修订 ${LATEST_SCHEMA_VERSION + 1}），请使用更新的 AI7 打开。`;
+    const newer = '这份数据来自更新的 AI7（数据版本 3 / 数据库修订 90），请使用更新的 AI7 打开。';
+    const unknown = `这份数据来自更新的 AI7（数据版本 2 / 数据库修订 ${LATEST_SCHEMA_VERSION + 1}），请使用更新的 AI7 打开。`;
     const corrupt = '这份数据的数据版本标记无法读取：AI7 没有打开这份数据，也没有改动它。请使用写入这份数据的 AI7 打开，或从备份恢复。';
     for (const [text, expected] of [
-      [JSON.stringify({ dataVersion: 2, schemaRevision: 90, softwareVersion: '2.0.0', writtenAt: '2027-01-01T00:00:00.000Z' }), ['DATA_VERSION_NEWER', newer]],
-      [JSON.stringify({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION + 1, softwareVersion: '1.1.0', writtenAt: '2027-01-01T00:00:00.000Z' }), ['DATA_VERSION_NEWER', unknown]],
+      [JSON.stringify({ dataVersion: 3, schemaRevision: 90, softwareVersion: '2.0.0', writtenAt: '2027-01-01T00:00:00.000Z' }), ['DATA_VERSION_NEWER', newer]],
+      [JSON.stringify({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION + 1, softwareVersion: '1.1.0', writtenAt: '2027-01-01T00:00:00.000Z' }), ['DATA_VERSION_NEWER', unknown]],
       ['{"dataVersion":1', ['DATA_VERSION_MARKER_UNREADABLE', corrupt]],
       [JSON.stringify({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '1.0.0', writtenAt: '2027-01-01T00:00:00.000Z', dataRoot: 'C:/AI7' }), ['DATA_VERSION_MARKER_UNREADABLE', corrupt]],
       ['x'.repeat(8192), ['DATA_VERSION_MARKER_UNREADABLE', corrupt]],

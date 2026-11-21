@@ -290,7 +290,7 @@ describe('durable request reader compatibility', () => {
     const crash = await admittedCrash(); const path = join(crash.snapshot, 'store', 'ai7.sqlite'); const db = new DatabaseSync(path);
     rewriteRequestRows(db, 'analysis_run_states', (record, index) => { if (index === 0) record.requestRefusal = null; });
     const destination = join(crash.roots.inputRoot, 'invalid-request-evidence.ai7db');
-    try { await writeDatabasePackage(db, crash.snapshot, destination, () => ({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '0.1.0',
+    try { await writeDatabasePackage(db, crash.snapshot, destination, () => ({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '0.1.0',
       createdAt: new Date().toISOString(), origin: 'database-export' })); } finally { db.close(); }
     const targetRoot = join(crash.roots.dataRoot, '..', 'request-target'); let target = await EditorialStore.open(targetRoot, crash.roots.codeRoot);
     crash.opened.push(target);

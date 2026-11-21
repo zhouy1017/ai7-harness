@@ -154,7 +154,7 @@ describe('导入数据库 over the real store', () => {
       expect(original.localFixtureProfile).toBeUndefined();
       const packagePath = await exported(store, 'selected-v1.ai7db');
       const preview = await store.inspectDatabaseImport(packagePath);
-      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 116, dataVersion: 1 });
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: LATEST_SCHEMA_VERSION, dataVersion: 2 });
       await store.prepareDatabaseReplacement(preview.previewId, T); await store.close();
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
       expect(store.inspectFactualReview(book.bookId).providerResolutionPlan).toEqual(original);
@@ -367,8 +367,8 @@ describe('导入数据库 over the real store', () => {
         fileName: 'AI7 数据库.ai7db',
         source: packagePath,
         origin: 'database-export',
-        dataVersion: 1,
-        localDataVersion: 1,
+        dataVersion: 2,
+        localDataVersion: 2,
         schemaRevision: LATEST_SCHEMA_VERSION,
         compatibility: 'compatible',
         contents: { books: 1, sourceVersions: 0, libraryMaterials: 0, series: 0 },
@@ -390,7 +390,7 @@ describe('导入数据库 over the real store', () => {
       replacementId = waiting.pending!.replacementId;
       const backup = unzipSync(await readFile(join(backups(), preReplaceBackupFileName(T))));
       expect(parseCanonicalJson(strFromU8(backup['manifest.json']!))).toMatchObject({
-        origin: 'pre-replace-backup', dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, credentials: 'excluded',
+        origin: 'pre-replace-backup', dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, credentials: 'excluded',
         contents: { books: 2 },
       });
       expect((await readdir(backups())).filter((name) => name.includes('.partial'))).toEqual([]);
@@ -408,7 +408,7 @@ describe('导入数据库 over the real store', () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       expect(JSON.parse(await readFile(join(roots.dataRoot, 'store', 'ai7-data-version.json'), 'utf8')))
-        .toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: store.inspectDataVersion().softwareVersion });
+        .toMatchObject({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: store.inspectDataVersion().softwareVersion });
       expect(titles(store)).toEqual(['甲书']);
       expect(existsSync(replacementStagingFor(roots.dataRoot))).toBe(false);
       const replaced = await store.inspectDatabaseReplacements();
@@ -444,7 +444,7 @@ describe('导入数据库 over the real store', () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       expect(JSON.parse(await readFile(join(roots.dataRoot, 'store', 'ai7-data-version.json'), 'utf8')))
-        .toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: store.inspectDataVersion().softwareVersion });
+        .toMatchObject({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: store.inspectDataVersion().softwareVersion });
       expect(titles(store)).toEqual(['乙书', '甲书']);
       const rolledBack = await store.inspectDatabaseReplacements();
       expect(rolledBack).toMatchObject({ pending: null, total: 1, rollBackOf: null });
