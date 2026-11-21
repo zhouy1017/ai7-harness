@@ -59,14 +59,77 @@ function pinnedRowTexts(row: unknown, fields: readonly string[]): string[] {
   }).map((text) => text.normalize('NFC').toLowerCase());
 }
 
-/** Runs of Han characters become adjacent bigrams; Latin words and numbers remain whole tokens. */
+/** The local lexical ranker's weights and limits (ADR 0107 §4 points 1–3, #1623). */
+export const RETRIEVAL_LEXICAL = Object.freeze({
+  /** A whole word: a Han word of two or more characters from the word segmenter, or a Latin or number token. */
+  wordWeight: 1,
+  /** Two adjacent Han characters. */
+  bigramWeight: 0.6,
+  /** One Han character that is not a function word, so that 修订 / 修改 / 改动 share a feature. */
+  morphemeWeight: 0.25,
+  bm25K1: 1.2,
+  bm25B: 0.75,
+  /** The further phrasings one `retrieve` call fuses beside its `query`. */
+  maxQueries: 4,
+  /** A pinned name or alias shorter than this never expands a query. */
+  aliasMinLength: 2,
+  /** The sibling names one query gains at most. */
+  aliasExpansionLimit: 8,
+});
+/** Function-word characters that carry no topic: they never form a single-character feature. */
+export const RETRIEVAL_STOPWORD_MORPHEMES: ReadonlySet<string> = new Set('的了是在和与及或也就都而之其这那着过把被让对为以于从到将等吗呢吧啊么个');
+/**
+ * Han word boundaries come from the runtime's ICU dictionary; Latin and number tokens never do (the regex below makes them), so
+ * the word-break rules Chromium patches (`.` and `:` between letters) cannot move a token. The packaged runtime's dictionary holds
+ * seven words more than the test runtime's (七国集团, 七國集團, 五大湖, 五大连池, 五大連池, 春运, 调控; ADR 0107 §4 point 1), which
+ * moves only the word feature of a text containing one of them. No feature is stored, so nothing persisted depends on the runtime.
+ */
+const HAN_WORDS = new Intl.Segmenter('zh', { granularity: 'word' });
+const WORD = 'w:';
+const BIGRAM = 'b:';
+const MORPHEME = 'u:';
+function featureWeight(feature: string): number {
+  return feature.startsWith(WORD) ? RETRIEVAL_LEXICAL.wordWeight : feature.startsWith(BIGRAM) ? RETRIEVAL_LEXICAL.bigramWeight : RETRIEVAL_LEXICAL.morphemeWeight;
+}
+
+/**
+ * A text's weighted lexical features, in text order: per Han run its segmenter words (`w:`), adjacent bigrams (`b:`) and
+ * non-function single characters (`u:`); a Latin or number run is one word (`w:`). NFKC keeps supplementary-plane Han characters.
+ */
 export function retrievalTokens(text: string): string[] {
-  const runs = text.normalize('NFC').toLowerCase().match(/\p{Script=Han}+|[\p{Script=Latin}\p{N}]+/gu) ?? [];
-  return runs.flatMap((run) => {
-    if (!/^\p{Script=Han}/u.test(run)) return [run];
+  const normalized = text.normalize('NFKC').toLowerCase();
+  const words = [...HAN_WORDS.segment(normalized)].filter((part) => /^\p{Script=Han}+$/u.test(part.segment) && [...part.segment].length > 1);
+  const features: string[] = [];
+  let word = 0;
+  for (const match of normalized.matchAll(/\p{Script=Han}+|[\p{Script=Latin}\p{N}]+/gu)) {
+    const run = match[0];
+    if (!/^\p{Script=Han}/u.test(run)) { features.push(WORD + run); continue; }
+    const end = match.index + run.length;
+    while (word < words.length && words[word]!.index < match.index) word += 1;
+    for (; word < words.length && words[word]!.index + words[word]!.segment.length <= end; word += 1) features.push(WORD + words[word]!.segment);
     const chars = [...run];
-    return chars.length === 1 ? chars : chars.slice(0, -1).map((char, index) => char + chars[index + 1]!);
-  });
+    for (let index = 0; index + 1 < chars.length; index += 1) features.push(BIGRAM + chars[index]! + chars[index + 1]!);
+    for (const char of chars) if (!RETRIEVAL_STOPWORD_MORPHEMES.has(char)) features.push(MORPHEME + char);
+  }
+  return features;
+}
+
+interface LexicalDocument { readonly length: number; readonly terms: ReadonlyMap<string, number> }
+function lexicalDocument(text: string): LexicalDocument {
+  const tokens = retrievalTokens(text);
+  return { length: tokens.length, terms: termFrequencies(tokens) };
+}
+/** Weighted BM25 of each document for one query's features; 0 where no feature occurs. */
+function bm25Scores(documents: readonly LexicalDocument[], query: ReadonlySet<string>): number[] {
+  const { bm25K1: k1, bm25B: b } = RETRIEVAL_LEXICAL;
+  const average = documents.reduce((sum, document) => sum + document.length, 0) / documents.length || 1;
+  const frequencies = new Map([...query].map((term) => [term, documents.filter((document) => document.terms.has(term)).length]));
+  return documents.map((document) => [...query].reduce((sum, term) => {
+    const tf = document.terms.get(term) ?? 0;
+    if (tf === 0) return sum;
+    const df = frequencies.get(term)!;
+    return sum + featureWeight(term) * Math.log(1 + (documents.length - df + 0.5) / (df + 0.5)) * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * document.length / average));
+  }, 0));
 }
 
 export function chunkRanges(length: number): Array<{ start: number; end: number }> {
@@ -80,7 +143,7 @@ export function chunkRanges(length: number): Array<{ start: number; end: number 
   return ranges;
 }
 
-interface Chunk { readonly candidate: RetrievalCandidate; readonly text: string; readonly tokenCount: number; readonly terms: ReadonlyMap<string, number> }
+interface Chunk extends LexicalDocument { readonly candidate: RetrievalCandidate; readonly text: string }
 function termFrequencies(tokens: readonly string[]): Map<string, number> {
   const result = new Map<string, number>();
   for (const token of tokens) result.set(token, (result.get(token) ?? 0) + 1);
@@ -116,6 +179,8 @@ export class RetrievalIndex {
   readonly #fetched = new Set<string>();
   readonly #readingDigests = new Map<string, string>();
   readonly #vectors = new Map<string, Float32Array>();
+  /** Tokenized `search_manuscript`'s block features, by block identity, kept with the text they were read from. */
+  readonly #blockDocuments = new Map<string, { readonly text: string; readonly document: LexicalDocument }>();
   readonly #embedding: RetrievalEmbeddingProvider | null;
   readonly #materialVectors: RetrievalMaterialVectorQuery | null;
   #disposed = false;
@@ -140,10 +205,35 @@ export class RetrievalIndex {
     if (index === -1) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
     return blocks.slice(Math.max(0, index - radius), index + radius + 1);
   }
+  /** Exact: the blocks containing the query, in manuscript order. Tokenized: the blocks ranked by BM25, ties in manuscript order. */
   searchManuscript(query: string, mode: 'exact' | 'tokenized'): ReturnType<RetrievalSource['read']>['segments'] {
-    const tokens = retrievalTokens(query);
-    return this.#manuscriptBlocks().filter((block) => mode === 'exact' ? block.text.normalize('NFC').includes(query)
-      : tokens.length > 0 && tokens.every((token) => retrievalTokens(block.text).includes(token))).slice(0, RETRIEVAL_MAX_CANDIDATES);
+    const blocks = this.#manuscriptBlocks();
+    if (mode === 'exact') return blocks.filter((block) => block.text.normalize('NFC').includes(query)).slice(0, RETRIEVAL_MAX_CANDIDATES);
+    const features = new Set(retrievalTokens(query));
+    if (features.size === 0 || blocks.length === 0) return [];
+    const scores = bm25Scores(blocks.map((block, index) => this.#blockDocument(block.blockId ?? `#${index}`, block.text)), features);
+    return blocks.map((block, index) => ({ block, index, score: scores[index]! })).filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score || a.index - b.index).slice(0, RETRIEVAL_MAX_CANDIDATES).map((entry) => entry.block);
+  }
+  #blockDocument(key: string, text: string): LexicalDocument {
+    const cached = this.#blockDocuments.get(key);
+    if (cached?.text === text) return cached.document;
+    const document = lexicalDocument(text);
+    this.#blockDocuments.set(key, { text, document });
+    return document;
+  }
+  /** The other pinned names of every baseline entity or term the query names (ADR 0107 §4 point 2), as features. */
+  #aliasFeatures(query: string): string[] {
+    const { aliasMinLength, aliasExpansionLimit } = RETRIEVAL_LEXICAL;
+    const needle = query.normalize('NFKC').toLowerCase();
+    const siblings: string[] = [];
+    for (const row of [...(this.#records?.baseline?.entities ?? []), ...(this.#records?.terms ?? [])]) {
+      if (!isRecord(row)) continue;
+      const names = [...new Set([row.name, ...(Array.isArray(row.aliases) ? row.aliases : [])]
+        .flatMap((name) => typeof name === 'string' ? [name.normalize('NFKC').toLowerCase().trim()] : []))].filter((name) => [...name].length >= aliasMinLength);
+      if (names.some((name) => needle.includes(name))) siblings.push(...names.filter((name) => !needle.includes(name)));
+    }
+    return [...new Set(siblings)].slice(0, aliasExpansionLimit).flatMap((name) => retrievalTokens(name));
   }
   /**
    * `guideline_clause` names one clause or all. `baseline_facts` and `term_table` answer a query section by section — entities,
@@ -190,7 +280,12 @@ export class RetrievalIndex {
       throw new RetrievalError(code === 'MATERIAL_REFERENCE_UNAVAILABLE' ? code : 'RETRIEVAL_SOURCE_MOVED');
     }
   }
-  async retrieve(query: string, k = RETRIEVAL_MAX_CANDIDATES, sourceKinds?: readonly RetrievalSourceKind[]): Promise<RetrievalCandidate[]> {
+  /**
+   * BM25 over the pinned chunks, fused with the local vectors by reciprocal rank when they are ready. `queries` are further
+   * phrasings of `query` (ADR 0107 §4 point 3): each phrasing ranks on its own and every ranking joins one fusion; without them
+   * the ranking and its scores are exactly the single query's. A query naming a pinned entity or term also matches its other names.
+   */
+  async retrieve(query: string, k = RETRIEVAL_MAX_CANDIDATES, sourceKinds?: readonly RetrievalSourceKind[], queries: readonly string[] = []): Promise<RetrievalCandidate[]> {
     if (this.#disposed) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
     if (!query.isWellFormed() || query.trim().length === 0 || query.length > 1_000 || !Number.isSafeInteger(k) || k < 1 || k > RETRIEVAL_MAX_CANDIDATES) throw new Error('RETRIEVAL_ARGUMENTS_INVALID');
     const chunks: Chunk[] = [];
@@ -206,44 +301,40 @@ export class RetrievalIndex {
             start: range.start + (segment.startOffset ?? 0), end: range.end + (segment.startOffset ?? 0) };
           const identity = { sourceKind: source.sourceKind, sourceId: source.sourceId, revisionOrIndexDigest: source.digest, anchor };
           const text = segment.text.slice(range.start, range.end);
-          const tokens = retrievalTokens(text);
-          return { text, tokenCount: tokens.length, terms: termFrequencies(tokens), candidate: { ...identity, candidateId: sha256Hex(canonicalJson(identity)), score: 0, preview: text.slice(0, boundaryEnd(text, Math.min(text.length, RETRIEVAL_PREVIEW_SIZE))) } };
+          return { text, ...lexicalDocument(text), candidate:{ ...identity, candidateId: sha256Hex(canonicalJson(identity)), score: 0, preview: text.slice(0, boundaryEnd(text, Math.min(text.length, RETRIEVAL_PREVIEW_SIZE))) } };
         }));
         this.#chunks.set(key, cached);
       }
       chunks.push(...cached);
     }
     if (chunks.length === 0) return [];
-    const terms = [...new Set(retrievalTokens(query))];
-    const average = chunks.reduce((sum, chunk) => sum + chunk.tokenCount, 0) / chunks.length || 1;
-    const frequencies = new Map(terms.map((term) => [term, chunks.filter((chunk) => chunk.terms.has(term)).length]));
-    const lexical = chunks.map((chunk) => {
-      const score = terms.reduce((sum, term) => {
-        const tf = chunk.terms.get(term) ?? 0;
-        if (tf === 0) return sum;
-        const df = frequencies.get(term)!;
-        return sum + Math.log(1 + (chunks.length - df + 0.5) / (df + 0.5)) * (tf * 2.2) / (tf + 1.2 * (0.25 + 0.75 * chunk.tokenCount / average));
-      }, 0);
-      return { id: chunk.candidate.candidateId, score };
-    }).filter((entry) => entry.score > 0).sort(rank);
-    let scores = new Map(lexical.map((entry) => [entry.id, entry.score]));
+    // The query first, then its other phrasings in one fixed order, so that the fusion does not depend on how they were listed.
+    const phrasings = [query, ...[...new Set(queries)].filter((phrasing) => phrasing !== query).slice(0, RETRIEVAL_LEXICAL.maxQueries).sort()];
+    const lexical = phrasings.map((phrasing) => {
+      const scores = bm25Scores(chunks, new Set([...retrievalTokens(phrasing), ...this.#aliasFeatures(phrasing)]));
+      return chunks.map((chunk, index) => ({ id: chunk.candidate.candidateId, score: scores[index]! })).filter((entry) => entry.score > 0).sort(rank);
+    });
+    let scores = phrasings.length === 1 ? new Map(lexical[0]!.map((entry) => [entry.id, entry.score])) : reciprocalRankFusion(lexical.map((ranking) => ranking.map((entry) => entry.id)));
     if (this.#embedding !== null && this.#embedding.readiness().state === 'ready') {
       try {
         const embeddedChunks = this.#materialVectors === null ? chunks : chunks.filter((chunk) => chunk.candidate.sourceKind !== 'material');
         const missing = embeddedChunks.filter((chunk) => !this.#vectors.has(chunk.candidate.candidateId));
-        const vectors = await this.#embedding.embed([query, ...missing.map((chunk) => chunk.text)]);
+        const vectors = await this.#embedding.embed([...phrasings, ...missing.map((chunk) => chunk.text)]);
         if (this.#disposed) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
-        if (vectors.length === missing.length + 1 && vectors.every((vector) => vector.length === this.#embedding!.dimensions)) {
-          missing.forEach((chunk, index) => this.#vectors.set(chunk.candidate.candidateId, vectors[index + 1]!));
-          const vector = embeddedChunks.map((chunk) => ({ id: chunk.candidate.candidateId, score: cosine(vectors[0]!, this.#vectors.get(chunk.candidate.candidateId)!) }));
-          const material = this.#materialVectors === null || !chunks.some((chunk) => chunk.candidate.sourceKind === 'material') ? [] : await this.#materialVectors(query, k);
-          for (const hit of material) for (const chunk of chunks) {
-            if (chunk.candidate.sourceKind === 'material' && chunk.candidate.sourceId === hit.materialId && chunk.candidate.revisionOrIndexDigest === hit.indexDigest && chunk.candidate.anchor.segmentOrdinal === hit.ordinal) {
-              vector.push({ id: chunk.candidate.candidateId, score: hit.score });
+        if (vectors.length === missing.length + phrasings.length && vectors.every((vector) => vector.length === this.#embedding!.dimensions)) {
+          missing.forEach((chunk, index) => this.#vectors.set(chunk.candidate.candidateId, vectors[index + phrasings.length]!));
+          const rankings: string[][] = [];
+          for (const [ordinal, phrasing] of phrasings.entries()) {
+            const vector = embeddedChunks.map((chunk) => ({ id: chunk.candidate.candidateId, score: cosine(vectors[ordinal]!, this.#vectors.get(chunk.candidate.candidateId)!) }));
+            const material = this.#materialVectors === null || !chunks.some((chunk) => chunk.candidate.sourceKind === 'material') ? [] : await this.#materialVectors(phrasing, k);
+            for (const hit of material) for (const chunk of chunks) {
+              if (chunk.candidate.sourceKind === 'material' && chunk.candidate.sourceId === hit.materialId && chunk.candidate.revisionOrIndexDigest === hit.indexDigest && chunk.candidate.anchor.segmentOrdinal === hit.ordinal) {
+                vector.push({ id: chunk.candidate.candidateId, score: hit.score });
+              }
             }
+            rankings.push(lexical[ordinal]!.map((entry) => entry.id), vector.filter((entry) => Number.isFinite(entry.score) && entry.score > 0).sort(rank).map((entry) => entry.id));
           }
-          const ranked = vector.filter((entry) => Number.isFinite(entry.score) && entry.score > 0).sort(rank);
-          scores = reciprocalRankFusion([lexical.map((entry) => entry.id), ranked.map((entry) => entry.id)]);
+          scores = reciprocalRankFusion(rankings);
         }
       } catch { /* The always-available lexical ranker remains usable when local embeddings are unavailable. */ }
     }
@@ -277,6 +368,6 @@ export class RetrievalIndex {
   exactFetchedCandidates(): ReadonlyMap<string, RetrievalCandidate> {
     return new Map([...this.#fetched].flatMap((id) => { const candidate = this.citation(id); return candidate === null ? [] : [[id, candidate] as const]; }));
   }
-  dispose(): void { this.#disposed = true; this.#chunks.clear(); this.#candidates.clear(); this.#fetched.clear(); this.#readingDigests.clear(); this.#vectors.clear(); }
+  dispose(): void { this.#disposed = true; this.#chunks.clear(); this.#candidates.clear(); this.#fetched.clear(); this.#readingDigests.clear(); this.#vectors.clear(); this.#blockDocuments.clear(); }
 }
 function rank(a: { id: string; score: number }, b: { id: string; score: number }): number { return b.score - a.score || a.id.localeCompare(b.id, 'en'); }
