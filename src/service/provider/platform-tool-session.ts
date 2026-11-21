@@ -436,7 +436,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     try {
       let value: unknown;
       switch (args.tool) {
-        case 'retrieve': value = await this.#retrieval.retrieve(args.query, args.k, args.sourceKinds); break;
+        case 'retrieve': value = await this.#retrieval.retrieve(args.query, args.k, args.sourceKinds, args.queries); break;
         case 'exact_fetch': value = this.#retrieval.exactFetch(args.candidateId); break;
         case 'read_blocks': value = this.#retrieval.readBlocks(args.blockId, args.radius); break;
         case 'search_manuscript': value = this.#retrieval.searchManuscript(args.query, args.mode); break;

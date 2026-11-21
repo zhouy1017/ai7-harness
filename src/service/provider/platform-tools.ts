@@ -1,5 +1,6 @@
 import { hasKeys, canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { isPublicHostName } from '../../shared/network-denial.js';
+import { RETRIEVAL_LEXICAL } from '../retrieval/index.js';
 import { GLOBAL_AGENT_SCOPED_TOOL_NAMES, LOCAL_TOOL_DECLARATION_NAMES, type LocalToolsRule } from './local-tools.js';
 
 /**
@@ -292,8 +293,16 @@ export const LEGACY_LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Obje
       sourceKinds: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['manuscript', 'material', 'retained-source'] } } }, required: ['query'], additionalProperties: false } }),
 ]);
 export const LOCAL_TOOL_SCHEMA_DIGEST = sha256Hex(canonicalJson(LEGACY_LOCAL_TOOL_SCHEMAS));
+/** The rule-declared tool set's (composition v2) `retrieve`: the legacy one plus further phrasings fused locally (#1623, ADR 0107 §4 point 3). */
+const RULE_RETRIEVE_SCHEMA = { name: 'retrieve' as const, description: LEGACY_LOCAL_TOOL_SCHEMAS[1]!.description,
+  parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 },
+    queries: { type: 'array', maxItems: RETRIEVAL_LEXICAL.maxQueries, items: { type: 'string', minLength: 1, maxLength: 1000 },
+      description: `同一检索意图的其他说法，最多 ${RETRIEVAL_LEXICAL.maxQueries} 条；与 query 一并检索后合并排序。` },
+    k: { type: 'integer', minimum: 1, maximum: 8 },
+    sourceKinds: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['manuscript', 'material', 'retained-source'] } } }, required: ['query'], additionalProperties: false } };
 export const LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.freeze([
-  ...LEGACY_LOCAL_TOOL_SCHEMAS,
+  LEGACY_LOCAL_TOOL_SCHEMAS[0]!,
+  RULE_RETRIEVE_SCHEMA,
   { name: 'read_blocks', description: '读取固定稿件中指定内容块及其相邻段落；只在本次授权范围内读取。',
     parameters: { type: 'object', properties: { blockId: { type: 'string' }, radius: { type: 'integer', minimum: 0, maximum: 3 } }, required: ['blockId', 'radius'], additionalProperties: false } },
   { name: 'baseline_facts', description: '按名称或文字查询本次计划固定的本书基线实体、设定与事件；每类最多返回 8 条并注明其余条数；未固定来源或没有匹配时返回空结果。',
@@ -355,7 +364,7 @@ export function toolSetEqualsPlatformSchemas(tools: ReadonlyArray<unknown>, sche
 export type PlatformToolArguments =
   | { readonly tool: 'websearch'; readonly query: string }
   | { readonly tool: 'webfetch'; readonly url: string }
-  | { readonly tool: 'retrieve'; readonly query: string; readonly k: number; readonly sourceKinds?: ReadonlyArray<'manuscript' | 'material' | 'retained-source'> }
+  | { readonly tool: 'retrieve'; readonly query: string; readonly k: number; readonly sourceKinds?: ReadonlyArray<'manuscript' | 'material' | 'retained-source'>; readonly queries?: ReadonlyArray<string> }
   | { readonly tool: 'exact_fetch'; readonly candidateId: string }
   | { readonly tool: 'read_blocks'; readonly blockId: string; readonly radius: number }
   | { readonly tool: 'baseline_facts'; readonly query: string }
@@ -445,7 +454,11 @@ export function canonicalToolArguments(name: string, input: unknown): PlatformTo
     const kinds = args.sourceKinds;
     if (kinds !== undefined && (!Array.isArray(kinds) || kinds.length < 1 || kinds.length > 3 || new Set(kinds).size !== kinds.length ||
         !kinds.every((kind) => ['manuscript', 'material', 'retained-source'].includes(String(kind))))) return null;
-    return { tool: 'retrieve', query, k, ...(kinds === undefined ? {} : { sourceKinds: [...kinds].sort() as Array<'manuscript' | 'material' | 'retained-source'> }) };
+    // Loose by design: a junk, empty or repeated phrasing is dropped and only the first four that remain are used; only `query` refuses.
+    const queries = [...new Set((Array.isArray(args.queries) ? args.queries : []).flatMap((entry: unknown) => typeof entry === 'string' && entry.isWellFormed()
+      ? [entry.normalize('NFC').trim().slice(0, 1000)] : []))].filter((entry) => entry.length > 0 && entry !== query).slice(0, RETRIEVAL_LEXICAL.maxQueries).sort();
+    return { tool: 'retrieve', query, k, ...(kinds === undefined ? {} : { sourceKinds: [...kinds].sort() as Array<'manuscript' | 'material' | 'retained-source'> }),
+      ...(queries.length === 0 ? {} : { queries }) };
   }
   if (name === 'websearch') {
     if (!hasKeys(args, ['query']) || typeof args['query'] !== 'string') return null;
