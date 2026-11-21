@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -70,33 +71,11 @@ export const DEFAULT_EXECUTION_RULE_SCHEMA_SQL = {
 } as const;
 
 /** Every rule relation is a ledger: a row is appended once and never rewritten or removed. */
-export const DEFAULT_EXECUTION_RULE_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(DEFAULT_EXECUTION_RULE_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'DEFAULT_EXECUTION_RULE_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'DEFAULT_EXECUTION_RULE_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the three relations, in the exact-schema validator's own spelling. */
-export const DEFAULT_EXECUTION_RULE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  default_execution_rules: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE'],
-  default_execution_rule_versions: [
-    'rule_id>default_execution_rules.rule_id:NO ACTION/NO ACTION/NONE',
-    'source_task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
-  ],
-  default_execution_rule_states: [
-    'rule_id>default_execution_rules.rule_id:NO ACTION/NO ACTION/NONE',
-    'rule_version_id>default_execution_rule_versions.rule_version_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const DEFAULT_EXECUTION_RULE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  default_execution_rules: 'DEFAULT_EXECUTION_RULE_IMMUTABLE',
+  default_execution_rule_versions: 'DEFAULT_EXECUTION_RULE_IMMUTABLE',
+  default_execution_rule_states: 'DEFAULT_EXECUTION_RULE_IMMUTABLE',
+});
 
 export class DefaultExecutionRuleError extends Error {
   constructor(readonly code: string, message: string) {
@@ -107,28 +86,6 @@ export class DefaultExecutionRuleError extends Error {
 
 export function requireRule(condition: unknown, code: string, message: string): asserts condition {
   if (!condition) throw new DefaultExecutionRuleError(code, message);
-}
-
-/**
- * Revision 31's three relations and their ledger triggers, created once and never rebuilt: a store that predates
- * them gains three empty relations and nothing existing moves. Shape-detected like revisions 21 to 29, and run
- * before the version is stamped in `task-authorization.ts`.
- */
-export function initializeDefaultExecutionRuleSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'default_execution_rules'").get();
-  if (existing !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(DEFAULT_EXECUTION_RULE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(DEFAULT_EXECUTION_RULE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Default execution rule schema rollback failed.');
-    }
-    throw error;
-  }
-  requireRule(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
 // ---- the ledger ------------------------------------------------------------------------------------------

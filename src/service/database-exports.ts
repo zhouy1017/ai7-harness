@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { TASK_LAUNCH_TRIGGER_SQL } from './task-launch-snapshots.js';
 import { IMPORTED_EXEMPLAR_OBJECT_DIRECTORY } from './imported-exemplars.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -125,28 +126,11 @@ export const DATABASE_EXPORT_SCHEMA_SQL = {
 } as const;
 
 /** Every database export relation is a ledger: a row is appended once and never rewritten or removed. */
-export const DATABASE_EXPORT_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(DATABASE_EXPORT_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_EXPORT_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_EXPORT_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const DATABASE_EXPORT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  database_export_approvals: ['preparation_id>database_export_preparations.preparation_id:NO ACTION/NO ACTION/NONE'],
-  database_export_receipts: [
-    'approval_id>database_export_approvals.approval_id:NO ACTION/NO ACTION/NONE',
-    'preparation_id>database_export_preparations.preparation_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const DATABASE_EXPORT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  database_export_preparations: 'DATABASE_EXPORT_LEDGER_IMMUTABLE',
+  database_export_approvals: 'DATABASE_EXPORT_LEDGER_IMMUTABLE',
+  database_export_receipts: 'DATABASE_EXPORT_LEDGER_IMMUTABLE',
+});
 
 export class DatabaseExportError extends Error {
   constructor(readonly code: string, message: string) {
@@ -160,24 +144,6 @@ function requireDatabaseExport(condition: unknown, code: string, message: string
 }
 
 type SqlRow = Record<string, SQLOutputValue>;
-
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'database_export_preparations'";
-
-/** Revision 55's relations, created once: a store that predates them gains three empty ledgers and nothing existing moves. */
-export function initializeDatabaseExportSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(DATABASE_EXPORT_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(DATABASE_EXPORT_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Database export schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 // ---- the package --------------------------------------------------------------------------------------
 

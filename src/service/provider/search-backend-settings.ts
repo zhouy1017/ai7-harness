@@ -4,7 +4,6 @@ import { SEARCH_BACKENDS, SEARCH_BACKEND_CANDIDATES, type SearchBackendCandidate
 import { searchBackend, searchBackendCandidateConfigurationDigest, searchBackendConfigurationDigest } from './search-backends/index.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { StoreError } from '../store-records.js';
-import { SEARCH_BACKEND_FALLBACK_SQL, SEARCH_FALLBACK_SCHEMA_VERSION } from '../task-authorization.js';
 
 /** A plain price line: a token-billed backend shows its measured cost per call, never the vendor's English basis. */
 function priceLine(price: { readonly amount: number | null; readonly currency: string; readonly per: number }, measuredUsd: number | null): string {
@@ -55,18 +54,6 @@ export function readSearchBackendConnections(db: DatabaseSync): SearchBackendCon
 
 export function readSearchOverride(db: DatabaseSync): boolean {
   return db.prepare('SELECT always_use_selected FROM search_backend_connections WHERE selected = 1').get()?.always_use_selected === 1;
-}
-
-/** Revision 104 (Issue #1226): the one 备用来源 row; an existing table is checked, never rebuilt; it starts empty. */
-export function initializeSearchFallbackSchema(db: DatabaseSync): void {
-  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'search_backend_fallback'").get();
-  const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
-  if (row !== undefined) {
-    if (fold(String(row.sql)) !== fold(SEARCH_BACKEND_FALLBACK_SQL)) throw new StoreError('SCHEMA_INVALID', '联网检索备用来源表结构不兼容。');
-    return;
-  }
-  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= SEARCH_FALLBACK_SCHEMA_VERSION) throw new StoreError('SCHEMA_INVALID', '联网检索备用来源表缺失。');
-  db.exec(SEARCH_BACKEND_FALLBACK_SQL);
 }
 
 /** The editor's 备用来源, or `null` when none is chosen. */

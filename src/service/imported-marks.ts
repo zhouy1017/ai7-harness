@@ -1,8 +1,6 @@
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { IMPORTED_MARK_ORIGINS, type ImportedMarkOrigin, type ParsedImportedMark } from './docx-marks.js';
 import {
-  proposalChangeItemsShape,
-  widenProposalChangeItems,
   type EditorialMarkStore,
   type ProducedEditorialMarkInput,
 } from './editorial-marks.js';
@@ -56,11 +54,6 @@ export const IMPORTED_MARK_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-/** The foreign key of the staged relation, in the exact-schema validator's own spelling. */
-export const IMPORTED_MARK_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  staged_import_marks: ['draft_id>staged_import_snapshots.draft_id:NO ACTION/CASCADE/NONE'],
-};
-
 export class ImportedMarkError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
@@ -80,43 +73,6 @@ function integer(value: SQLOutputValue | undefined): number {
 function text(value: SQLOutputValue | undefined): string {
   requireImported(typeof value === 'string' && value.isWellFormed(), 'SNAPSHOT_INCOMPLETE', '暂存批注与修订的文字无效。');
   return value;
-}
-
-/**
- * Revision 28, once per store and in one transaction: `proposal_change_items` is rebuilt while it holds
- * revision 27's exact text, with foreign keys off around the transaction; then the staged relation is
- * created, and every reference is checked before anything commits. Shape-detected: once
- * `staged_import_marks` exists this has been done.
- */
-export function initializeImportedMarkSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'staged_import_marks'").get();
-  if (existing !== undefined) return;
-  const widen = proposalChangeItemsShape(db) === 'revision-27';
-  const foreignKeys = (): number => integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
-  const restoreForeignKeys = widen && foreignKeys() === 1;
-  if (widen) {
-    db.exec('PRAGMA foreign_keys = OFF');
-    requireImported(foreignKeys() === 0, 'SCHEMA_MIGRATION_FAILED', '无法暂时停用引用校验以迁移数据库。');
-  }
-  try {
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      if (widen) widenProposalChangeItems(db);
-      for (const sql of Object.values(IMPORTED_MARK_SCHEMA_SQL)) db.exec(sql);
-      requireImported(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-      db.exec('COMMIT');
-    } catch (error) {
-      try { db.exec('ROLLBACK'); } catch (rollbackError) {
-        throw new AggregateError([error, rollbackError], 'Imported mark schema rollback failed.');
-      }
-      throw error;
-    }
-  } finally {
-    if (restoreForeignKeys) {
-      db.exec('PRAGMA foreign_keys = ON');
-      requireImported(foreignKeys() === 1, 'SCHEMA_MIGRATION_FAILED', '无法恢复引用校验。');
-    }
-  }
 }
 
 /** Stage the marks of one parse beside its staged blocks, in the caller's transaction. */

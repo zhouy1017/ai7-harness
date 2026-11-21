@@ -1,25 +1,4 @@
-import {
-  schemaObjectSql,
-  requireContinuitySchema,
-  requireTargetSchema,
-  requireSourceImportTargetSchema,
-  requireManuscriptReimportTargetSchema,
-  requireV7TargetSchema,
-  requireV6TargetSchema,
-} from './manuscript/bounded-schema-check.js';
-import {
-  MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL,
-  COMMON_SCHEMA_SQL,
-  TARGET_BASE_SCHEMA_SQL,
-  V6_TARGET_SCHEMA_SQL,
-  RECOVERY_SCHEMA_SQL,
-  TARGET_INDEX_SQL,
-  IMPORT_DRAFT_TRIGGER_SQL,
-} from './manuscript/bounded-schema-sql.js';
-export { MODEL_SERVICE_CONNECTION_REVISION_11_SQL, MODEL_SERVICE_CONNECTION_REVISION_72_SQL, MODEL_SERVICE_CONNECTION_REVISION_84_SQL, MODEL_SERVICE_CONNECTION_SCHEMA_SQL, MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL } from './manuscript/bounded-schema-sql.js';
 import type { ManualCommandRequestPin, ManualCommandSource } from '../shared/protocol/learning.js';
-import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION } from './task-authorization.js';
-import { GLOBAL_AGENT_SCHEMA_VERSION } from './task-authorization.js';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { BoundedStoreError, BoundedStoreFatalError, requireBounded, one, asString, asNumber, canonicalJson, sha256, graphemes, fenwickSpan, appendOffsetSegment,
   lastWorkingPosition, workingOffsetPrefix, updateWorkingOffsetNodes, transact, stagedBlockLength, UUID_PATTERN, DIGEST_PATTERN, BLOCK_PATTERN,
@@ -87,69 +66,6 @@ import {
 } from '../shared/protocol.js';
 import { DOCX_PARSER_IDENTITY_V1, deriveImportFidelityPlan, type FidelityConversionIdentity } from './docx.js';
 import type { BuiltInWorkflowProfile } from './native-workflow-profile.js';
-import { REVIEW_CONTRACT_SCHEMA_VERSION,
-  J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
-  J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
-  EDITORIAL_MARK_SCHEMA_VERSION,
-  EDITORIAL_REVIEW_SCHEMA_VERSION,
-  MANUSCRIPT_EFFECT_SCHEMA_VERSION,
-  MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
-  MANUSCRIPT_INTAKE_SCHEMA_VERSION,
-  PUBLICATION_VERSION_SCHEMA_VERSION,
-  PROPOSAL_CONFLICT_SCHEMA_VERSION,
-  IMPORT_RETENTION_SCHEMA_VERSION,
-  IMPORTED_MARK_SCHEMA_VERSION,
-  EXPORT_LEDGER_SCHEMA_VERSION,
-  CONNECTIVITY_WAIT_SCHEMA_VERSION,
-  DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
-  RUN_CANCELLATION_SCHEMA_VERSION,
-  RUN_CONTINUATION_SCHEMA_VERSION,
-  PLAN_EDIT_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION,
-  REIMPORT_GROUP_SCHEMA_VERSION,
-  PRODUCTION_DOCUMENT_SCHEMA_VERSION,
-  PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
-  BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
-  PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
-  BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
-  PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
-  MAINTENANCE_CASE_SCHEMA_VERSION,
-  BOOK_PEOPLE_SCHEMA_VERSION,
-  REVIEW_GUIDELINE_SCHEMA_VERSION,
-  LIBRARY_MATERIAL_SCHEMA_VERSION,
-  EVALUATION_RECORD_SCHEMA_VERSION,
-  ANALYSIS_FEEDBACK_SCHEMA_VERSION,
-  DECISION_FEEDBACK_SCHEMA_VERSION,
-  LEARNING_ELIGIBILITY_SCHEMA_VERSION,
-  EVALUATION_CALIBRATION_SCHEMA_VERSION,
-  SERIES_SCHEMA_VERSION,
-  SERIES_KNOWLEDGE_SCHEMA_VERSION,
-  STORE_VERSION_SCHEMA_VERSION,
-  DATABASE_EXPORT_SCHEMA_VERSION,
-  SCHEDULED_BACKUP_SCHEMA_VERSION,
-  DATABASE_REPLACEMENT_SCHEMA_VERSION,
-  DATABASE_MERGE_SCHEMA_VERSION,
-  INITIAL_EVALUATION_SCHEMA_VERSION,
-  DIALOGUE_SCHEMA_VERSION,
-  SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
-  READERS_REPORT_SCHEMA_VERSION,
-  CAPTURED_PROCEDURE_SCHEMA_VERSION,
-  EVALUATION_REWRITE_SCHEMA_VERSION,
-  WRITING_TASK_SCHEMA_VERSION,
-  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
-  MATERIAL_INDEX_SCHEMA_VERSION,
-  OUTCOME_RESOLUTION_SCHEMA_VERSION,
-  IMPORTED_EXEMPLAR_SCHEMA_VERSION,
-  EVALUATION_PROFILE_SCHEMA_VERSION,
-  DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
-  MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
-  MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_UPDATE_SCHEMA_VERSION, MODEL_SELECTION_SCHEMA_VERSION, PROCEDURE_DEFINITION_SCHEMA_VERSION, EDITORIAL_LEARNING_SCHEMA_VERSION,
-  EDITORIAL_MEMORY_SCHEMA_VERSION, MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, WORD_TRACKED_IMPORT_SCHEMA_VERSION, POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION, LEARNING_CURATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION,
-  SUCCESSIVE_TASK_SCHEMA_VERSION,
-  TASK_AUTHORIZATION_SCHEMA_VERSION,
-  TEXT_CONVERSION_SCHEMA_VERSION,
-  FACTUAL_REVIEW_SCHEMA_VERSION,
-} from './task-authorization.js';
 import {
   followBlockTextChangeForMarks,
   marksOfWindow,
@@ -158,15 +74,6 @@ import {
   workingBlockDigests,
 } from './editorial-marks.js';
 
-const CONTINUITY_SCHEMA_VERSION = 5;
-const EDITOR_SCHEMA_VERSION = 6;
-const RECOVERY_SCHEMA_VERSION = 7;
-const SCHEMA_VERSION = 8;
-const SOURCE_IMPORT_SCHEMA_VERSION = 9;
-const MANUSCRIPT_REIMPORT_SCHEMA_VERSION = 10;
-const MODEL_SERVICE_SCHEMA_VERSION = 11;
-const NATIVE_ARTIFACT_SCHEMA_VERSION = 12;
-const AUTHORITY_SIDECAR_SCHEMA_VERSION = 13;
 const SEARCH_BATCH = 128;
 const WINDOW_STRIDE = Math.floor(MAX_WINDOW_BLOCKS / 2);
 const MAX_RETAINED_TRANSIENT_SEARCHES = 32;
@@ -329,41 +236,6 @@ function validateWorkflowSemanticTruth(db: DatabaseSync, profile: BuiltInWorkflo
       asString(row.state) === 'active'),
     'SCHEMA_INVALID',
     '工作流程实例的精确 Profile 绑定或当前阶段无法解释。',
-  );
-}
-
-function validateImportDraftTargetTruth(db: DatabaseSync): void {
-  const rows = db.prepare(
-    `SELECT state, reviewed_title, reviewed_target_choice_id, review_digest,
-            reviewed_target_kind, reviewed_existing_book_id, reviewed_relationship,
-            reviewed_book_state_digest
-     FROM import_drafts ORDER BY draft_id`,
-  ).all() as SqlRow[];
-  requireBounded(
-    rows.every((row) => {
-      const state = asString(row.state);
-      const isNull = (value: SQLOutputValue | undefined): boolean => value === null;
-      if (state === 'staged') {
-        return isNull(row.reviewed_title) && isNull(row.reviewed_target_choice_id) && isNull(row.review_digest) &&
-          isNull(row.reviewed_target_kind) && isNull(row.reviewed_existing_book_id) &&
-          isNull(row.reviewed_relationship) && isNull(row.reviewed_book_state_digest);
-      }
-      if (state !== 'reviewed' && state !== 'committed') return false;
-      if (typeof row.review_digest !== 'string' || !/^[0-9a-f]{64}$/.test(row.review_digest)) return false;
-      if (row.reviewed_target_kind === 'new-book') {
-        return typeof row.reviewed_title === 'string' && row.reviewed_title.length > 0 &&
-          (row.reviewed_target_choice_id === null || row.reviewed_target_choice_id === 'new-book' ||
-            row.reviewed_target_choice_id === 'new-book-distinct-intended-work') &&
-          row.reviewed_existing_book_id === null && row.reviewed_relationship === 'new-book-first-manuscript' &&
-          row.reviewed_book_state_digest === null;
-      }
-      return row.reviewed_target_kind === 'existing-book' && row.reviewed_title === null &&
-        row.reviewed_target_choice_id === null && typeof row.reviewed_existing_book_id === 'string' &&
-        UUID_PATTERN.test(row.reviewed_existing_book_id) && row.reviewed_relationship === 'first-manuscript' &&
-        typeof row.reviewed_book_state_digest === 'string' && /^[0-9a-f]{64}$/.test(row.reviewed_book_state_digest);
-    }),
-    'SCHEMA_INVALID',
-    '导入草稿的目标、关系与复核证据组合矛盾。',
   );
 }
 
@@ -601,7 +473,6 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
     );
     requireBounded(targetKind !== 'new-book' || disposition === 'created', 'SCHEMA_INVALID', '来源绑定新图书不能复用既有来源版本。');
   }
-  const hasReimport = schemaObjectSql(db, 'table', 'manuscript_reimport_records') !== undefined;
   const invalidCommits = db.prepare(
     `SELECT ic.commit_id
      FROM import_commits ic
@@ -609,11 +480,11 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
              EXISTS (SELECT 1 FROM manuscript_import_records mir WHERE mir.commit_id = ic.commit_id)
         OR (ic.operation_kind = 'source-import') !=
              EXISTS (SELECT 1 FROM source_import_records sir WHERE sir.commit_id = ic.commit_id)
-        ${hasReimport ? `OR (ic.operation_kind = 'manuscript-reimport') !=
-             EXISTS (SELECT 1 FROM manuscript_reimport_records mrr WHERE mrr.commit_id = ic.commit_id)` : ''}
+        OR (ic.operation_kind = 'manuscript-reimport') !=
+             EXISTS (SELECT 1 FROM manuscript_reimport_records mrr WHERE mrr.commit_id = ic.commit_id)
         OR (SELECT count(*) FROM manuscript_import_records mir WHERE mir.commit_id = ic.commit_id) +
            (SELECT count(*) FROM source_import_records sir WHERE sir.commit_id = ic.commit_id)
-           ${hasReimport ? `+ (SELECT count(*) FROM manuscript_reimport_records mrr WHERE mrr.commit_id = ic.commit_id)` : ''} != 1`,
+           + (SELECT count(*) FROM manuscript_reimport_records mrr WHERE mrr.commit_id = ic.commit_id) != 1`,
   ).all() as SqlRow[];
   requireBounded(invalidCommits.length === 0, 'SCHEMA_INVALID', '导入提交类型与结果记录不一致。');
   const invalidAttempts = db.prepare(
@@ -623,7 +494,7 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
      LEFT JOIN import_commits ic ON ic.commit_id = a.attempt_id
      WHERE a.operation_kind != CASE d.reviewed_relationship
        WHEN 'source-only' THEN 'source-import'
-       ${hasReimport ? "WHEN 'reimport' THEN 'manuscript-reimport'" : ''}
+       WHEN 'reimport' THEN 'manuscript-reimport'
        ELSE 'manuscript-import' END
        OR (ic.commit_id IS NOT NULL AND ic.operation_kind != a.operation_kind)`,
   ).all() as SqlRow[];
@@ -803,59 +674,6 @@ function validateShortText(value: string, maximum: number, code: string, message
   return normalized;
 }
 
-function recreateImportDraftTable(db: DatabaseSync): void {
-  const replacementSql = COMMON_SCHEMA_SQL.import_drafts.replace(
-    'CREATE TABLE import_drafts (',
-    'CREATE TABLE import_drafts_v6 (',
-  );
-  requireBounded(replacementSql !== COMMON_SCHEMA_SQL.import_drafts, 'SCHEMA_MIGRATION_FAILED', '导入草稿目标结构无法建立。');
-  db.exec(`
-    PRAGMA legacy_alter_table = ON;
-    DROP TRIGGER abandonment_cleanup_block_draft_insert;
-    DROP TRIGGER abandonment_cleanup_block_draft_update;
-    DROP TRIGGER abandonment_cleanup_block_draft_update_v5;
-    ${replacementSql};
-    INSERT INTO import_drafts_v6(
-      draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
-      reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id,
-      staged_at, reviewed_at, committed_at
-    )
-    SELECT draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
-           reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id,
-           staged_at, reviewed_at, committed_at
-    FROM import_drafts;
-    DROP TABLE import_drafts;
-    ALTER TABLE import_drafts_v6 RENAME TO import_drafts;
-    ${IMPORT_DRAFT_TRIGGER_SQL.abandonment_cleanup_block_draft_insert};
-    ${IMPORT_DRAFT_TRIGGER_SQL.abandonment_cleanup_block_draft_update};
-    ${IMPORT_DRAFT_TRIGGER_SQL.abandonment_cleanup_block_draft_update_v5};
-    PRAGMA legacy_alter_table = OFF;
-  `);
-}
-
-function recreateRevisionTable(db: DatabaseSync): void {
-  db.exec(`
-    PRAGMA legacy_alter_table = ON;
-    CREATE TABLE manuscript_revisions_v3 (
-      revision_id TEXT PRIMARY KEY,
-      manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-      branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-      ordinal INTEGER NOT NULL CHECK(ordinal > 0),
-      revision_label TEXT NOT NULL,
-      parent_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
-      source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
-      revision_digest TEXT NOT NULL CHECK(length(revision_digest) = 64),
-      created_at TEXT NOT NULL,
-      UNIQUE(manuscript_id, ordinal),
-      UNIQUE(manuscript_id, revision_label)
-    ) STRICT;
-    INSERT INTO manuscript_revisions_v3 SELECT * FROM manuscript_revisions;
-    DROP TABLE manuscript_revisions;
-    ALTER TABLE manuscript_revisions_v3 RENAME TO manuscript_revisions;
-    PRAGMA legacy_alter_table = OFF;
-  `);
-}
-
 function requirePersistedBlockTextBounds(
   db: DatabaseSync,
   table: 'manuscript_block_versions' | 'working_blocks',
@@ -944,103 +762,6 @@ function validateStagedDraftContentTruth(db: DatabaseSync, draftId: string, requ
   );
 }
 
-function rekeyStagedDraftBlocks(db: DatabaseSync, draftId: string): void {
-  requireBounded(UUID_PATTERN.test(draftId), 'SCHEMA_MIGRATION_FAILED', '暂存稿件草稿标识无效。');
-  let position = 0;
-  let expectedPosition = 1;
-  while (true) {
-    const rows = db.prepare(
-      `SELECT staged_block_id, position, digest FROM staged_import_blocks
-       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      position = asNumber(row.position);
-      requireBounded(
-        position === expectedPosition && BLOCK_PATTERN.test(asString(row.staged_block_id)) && DIGEST_PATTERN.test(asString(row.digest)),
-        'SCHEMA_MIGRATION_FAILED',
-        '旧暂存稿件内容块身份、顺序或摘要无效。',
-      );
-      expectedPosition += 1;
-    }
-  }
-  requireBounded(expectedPosition > 1, 'SCHEMA_MIGRATION_FAILED', '暂存稿件没有内容块。');
-  db.prepare(
-    `UPDATE staged_import_blocks SET staged_block_id = '_ai7_migration_' || staged_block_id
-     WHERE draft_id = ?`,
-  ).run(draftId);
-  position = 0;
-  const update = db.prepare(
-    'UPDATE staged_import_blocks SET staged_block_id = ? WHERE draft_id = ? AND position = ?',
-  );
-  while (true) {
-    const rows = db.prepare(
-      `SELECT position, digest FROM staged_import_blocks
-       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      position = asNumber(row.position);
-      const expected = stagedBlockId(draftId, position, asString(row.digest));
-      requireBounded(
-        update.run(expected, draftId, position).changes === 1,
-        'SCHEMA_MIGRATION_FAILED',
-        '暂存稿件稳定内容块身份无法重建。',
-      );
-    }
-  }
-}
-
-function rebuildStagedDraftDerived(db: DatabaseSync, draftId: string): void {
-  rekeyStagedDraftBlocks(db, draftId);
-  const updateBlock = db.prepare(
-    `UPDATE staged_import_blocks SET start_offset = ?, grapheme_length = ?
-     WHERE draft_id = ? AND position = ?`,
-  );
-  let position = 0;
-  let expectedPosition = 1;
-  let offset = 0;
-  while (true) {
-    const rows = db.prepare(
-      `SELECT position, text FROM staged_import_blocks
-       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      position = asNumber(row.position);
-      requireBounded(position === expectedPosition, 'SCHEMA_MIGRATION_FAILED', '暂存稿件内容块顺序不连续。');
-      const length = stagedBlockLength(asString(row.text));
-      requireBounded(Number.isSafeInteger(offset + length), 'SCHEMA_MIGRATION_FAILED', '暂存稿件字符总数无效。');
-      requireBounded(
-        updateBlock.run(offset, length, draftId, position).changes === 1,
-        'SCHEMA_MIGRATION_FAILED',
-        '暂存稿件派生偏移无法重建。',
-      );
-      offset += length;
-      expectedPosition += 1;
-    }
-  }
-  const snapshot = one(
-    db.prepare(
-      `SELECT s.block_count, d.state FROM staged_import_snapshots s
-       JOIN import_drafts d ON d.draft_id = s.draft_id WHERE s.draft_id = ?`,
-    ).all(draftId) as SqlRow[],
-    'SCHEMA_MIGRATION_FAILED',
-    '暂存稿件快照或草稿状态缺失。',
-  );
-  requireBounded(
-    asString(snapshot.state) === 'staged' || asString(snapshot.state) === 'reviewed',
-    'SCHEMA_MIGRATION_FAILED',
-    '已提交导入草稿仍保留不可达暂存内容。',
-  );
-  requireBounded(expectedPosition - 1 === asNumber(snapshot.block_count), 'SCHEMA_MIGRATION_FAILED', '暂存稿件内容块计数不一致。');
-  requireBounded(
-    db.prepare('UPDATE staged_import_snapshots SET character_count = ? WHERE draft_id = ?').run(offset, draftId).changes === 1,
-    'SCHEMA_MIGRATION_FAILED',
-    '暂存稿件字符总数无法重建。',
-  );
-}
-
 function validateStagedDraftDerived(db: DatabaseSync, draftId: string): void {
   validateStagedDraftContentTruth(db, draftId);
   const snapshot = one(
@@ -1104,31 +825,6 @@ function validateStagedDraftInventory(db: DatabaseSync): void {
     '无法校验暂存稿件快照清单。',
   ).total);
   requireBounded(missingSnapshots === 0, 'SCHEMA_MIGRATION_FAILED', '暂存或已复核草稿缺少权威快照。');
-}
-
-function rebuildRevisionOffsets(db: DatabaseSync, revisionId: string): number {
-  requirePersistedBlockTextBounds(db, 'manuscript_block_versions', revisionId, 'SCHEMA_MIGRATION_FAILED', '不可变修订版文字超出有界校验范围。');
-  const updateVersion = db.prepare(
-    `UPDATE manuscript_block_versions SET start_offset = ?, grapheme_length = ?
-     WHERE revision_id = ? AND block_id = ?`,
-  );
-  let position = 0;
-  let offset = 0;
-  while (true) {
-    const rows = db.prepare(
-      `SELECT block_id, position, text FROM manuscript_block_versions
-       WHERE revision_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(revisionId, position, MIGRATION_BATCH) as SqlRow[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      const blockId = asString(row.block_id);
-      position = asNumber(row.position);
-      const length = stagedBlockLength(asString(row.text));
-      updateVersion.run(offset, length, revisionId, blockId);
-      offset += length;
-    }
-  }
-  return offset;
 }
 
 function validateRevisionOffsets(db: DatabaseSync, revisionId: string): void {
@@ -1268,14 +964,11 @@ function validateSchemaAuthorityIds(db: DatabaseSync): void {
   forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', () => undefined);
   forEachSchemaId(db, 'manuscript_revisions', 'revision_id', () => undefined);
   forEachSchemaId(db, 'branch_working_state', 'branch_id', () => undefined);
-  const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
-  if (version >= RECOVERY_SCHEMA_VERSION) {
-    forEachSchemaId(db, 'service_lifetimes', 'lifetime_id', () => undefined);
-    forEachSchemaId(db, 'recovery_snapshots', 'snapshot_id', () => undefined);
-    forEachSchemaId(db, 'recovery_attention', 'attention_id', () => undefined);
-    forEachSchemaId(db, 'recovery_decisions', 'decision_id', () => undefined);
-    forEachSchemaId(db, 'recovery_restorations', 'restoration_id', () => undefined);
-  }
+  forEachSchemaId(db, 'service_lifetimes', 'lifetime_id', () => undefined);
+  forEachSchemaId(db, 'recovery_snapshots', 'snapshot_id', () => undefined);
+  forEachSchemaId(db, 'recovery_attention', 'attention_id', () => undefined);
+  forEachSchemaId(db, 'recovery_decisions', 'decision_id', () => undefined);
+  forEachSchemaId(db, 'recovery_restorations', 'restoration_id', () => undefined);
 }
 
 function validateAllDerivedOffsets(db: DatabaseSync): void {
@@ -1502,70 +1195,6 @@ function snapshotWorkingRevision(
     'MILESTONE_INVALID',
     '工作稿偏移索引与里程碑修订版不一致。',
   );
-}
-
-function migrateLegacyJournal(db: DatabaseSync, branchId: string): number {
-  const state = one(
-    db.prepare('SELECT base_revision_id FROM branch_working_state WHERE branch_id = ?').all(branchId) as SqlRow[],
-    'SCHEMA_MIGRATION_FAILED',
-    '稿件工作状态缺失。',
-  );
-  db.exec(`
-    CREATE TEMP TABLE IF NOT EXISTS migration_block_state (
-      branch_id TEXT NOT NULL,
-      block_id TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      level INTEGER,
-      text TEXT NOT NULL,
-      digest TEXT NOT NULL,
-      PRIMARY KEY(branch_id, block_id)
-    ) STRICT;
-  `);
-  db.prepare('DELETE FROM migration_block_state WHERE branch_id = ?').run(branchId);
-  db.prepare(
-    `INSERT INTO migration_block_state(branch_id, block_id, kind, level, text, digest)
-     SELECT ?, block_id, kind, level, text, digest FROM manuscript_block_versions WHERE revision_id = ?`,
-  ).run(branchId, asString(state.base_revision_id));
-  let sequence = 0;
-  let previousWorkingDigest = stableRevisionWorkingDigest(db, asString(state.base_revision_id));
-  while (true) {
-    const rows = db.prepare(
-      `SELECT journal_entry_id, sequence, block_id, from_grapheme, to_grapheme, insert_text,
-              resulting_block_digest, resulting_working_digest, durable_at
-       FROM edit_journal_entries WHERE branch_id = ? AND sequence > ? ORDER BY sequence LIMIT ?`,
-    ).all(branchId, sequence, MIGRATION_BATCH) as SqlRow[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      const groupId = asString(row.journal_entry_id);
-      sequence = asNumber(row.sequence);
-      const blockId = asString(row.block_id);
-      const block = one(db.prepare('SELECT kind, level, text, digest FROM migration_block_state WHERE branch_id = ? AND block_id = ?').all(branchId, blockId) as SqlRow[], 'SCHEMA_MIGRATION_FAILED', '旧修订日志内容块缺失。');
-      const beforeText = asString(block.text);
-      const parts = graphemes(beforeText);
-      const from = asNumber(row.from_grapheme);
-      const to = asNumber(row.to_grapheme);
-      const afterText = [...parts.slice(0, from), asString(row.insert_text), ...parts.slice(to)].join('');
-      const afterDigest = blockDigest(asString(block.kind) as ManuscriptBlockProjection['kind'], block.level === null ? null : asNumber(block.level), afterText);
-      requireBounded(afterDigest === asString(row.resulting_block_digest), 'SCHEMA_MIGRATION_FAILED', '旧修订日志无法精确重建。');
-      const afterWorkingDigest = asString(row.resulting_working_digest);
-      db.prepare(
-        `INSERT INTO manuscript_command_groups(
-           command_group_id, branch_id, ordinal, kind, status, source_group_id,
-           before_working_digest, after_working_digest, created_at
-         ) VALUES (?, ?, ?, 'edit', 'applied', NULL, ?, ?, ?)`,
-      ).run(groupId, branchId, sequence, previousWorkingDigest, afterWorkingDigest, asString(row.durable_at));
-      db.prepare(
-        `INSERT INTO manuscript_command_edits(
-           command_group_id, position, block_id, before_text, before_digest, after_text, after_digest
-         ) VALUES (?, 1, ?, ?, ?, ?, ?)`,
-      ).run(groupId, blockId, beforeText, asString(block.digest), afterText, afterDigest);
-      db.prepare('UPDATE edit_journal_entries SET command_group_id = ?, command_kind = ? WHERE journal_entry_id = ?').run(groupId, 'edit', groupId);
-      db.prepare('UPDATE migration_block_state SET text = ?, digest = ? WHERE branch_id = ? AND block_id = ?').run(afterText, afterDigest, branchId, blockId);
-      previousWorkingDigest = afterWorkingDigest;
-    }
-  }
-  db.prepare('DELETE FROM migration_block_state WHERE branch_id = ?').run(branchId);
-  return sequence;
 }
 
 function legacyHistoryRoot(db: DatabaseSync, branchId: string): { groupId: string; baseRevisionId: string } | undefined {
@@ -1869,262 +1498,6 @@ function validateRecoveryTruth(db: DatabaseSync): void {
      ) LIMIT 1`,
   ).get() as SqlRow | undefined;
   requireBounded(invalidAttention === undefined, 'SCHEMA_MIGRATION_FAILED', '恢复待确认状态与稿件工作状态不一致。');
-}
-
-function createMilestoneSignoffTable(db: DatabaseSync): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS milestone_signoff_records (
-      signoff_record_id TEXT PRIMARY KEY,
-      milestone_id TEXT NOT NULL UNIQUE REFERENCES milestone_versions(milestone_id),
-      manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-      branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-      revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-      workflow_instance_id TEXT NOT NULL REFERENCES workflow_instances(workflow_instance_id),
-      workflow_evidence_digest TEXT NOT NULL CHECK(length(workflow_evidence_digest) = 64),
-      actor TEXT NOT NULL CHECK(actor = '本机编辑'),
-      signed_at TEXT NOT NULL,
-      label TEXT NOT NULL,
-      stated_next_use TEXT NOT NULL
-    ) STRICT;
-  `);
-}
-
-function createWorkingOffsetTable(db: DatabaseSync): void {
-  db.exec(V6_TARGET_SCHEMA_SQL.working_offset_nodes);
-}
-
-function migrateEditorSchemaV6ToV7(db: DatabaseSync): void {
-  requireV6TargetSchema(db);
-  transact(db, () => {
-    db.exec(`
-      ALTER TABLE branch_working_state
-        ADD COLUMN history_boundary_sequence INTEGER NOT NULL DEFAULT 0 CHECK(history_boundary_sequence >= 0);
-      ALTER TABLE edit_journal_entries ADD COLUMN service_lifetime_id TEXT;
-
-      ${RECOVERY_SCHEMA_SQL.service_lifetimes};
-      ${RECOVERY_SCHEMA_SQL.service_lifetime_branch_writes};
-      ${RECOVERY_SCHEMA_SQL.recovery_snapshots};
-      ${RECOVERY_SCHEMA_SQL.recovery_attention};
-      ${RECOVERY_SCHEMA_SQL.recovery_restore_stages};
-      ${RECOVERY_SCHEMA_SQL.recovery_restore_stage_blocks};
-      ${RECOVERY_SCHEMA_SQL.recovery_decisions};
-      ${RECOVERY_SCHEMA_SQL.recovery_restorations};
-      ${RECOVERY_SCHEMA_SQL.manuscript_recovery_review_status};
-
-      ${TARGET_INDEX_SQL.lifetime_outcome_order};
-      ${TARGET_INDEX_SQL.recovery_attention_startup};
-      ${TARGET_INDEX_SQL.recovery_snapshot_branch};
-      PRAGMA user_version = ${RECOVERY_SCHEMA_VERSION};
-    `);
-  });
-  requireV7TargetSchema(db);
-}
-
-function migrateRecoverySchemaV7ToV8(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
-  requireV7TargetSchema(db);
-  const legacyProfiles = db.prepare(
-    `SELECT profile_id, profile_version, profile_name, profile_digest, definition_json
-     FROM workflow_profiles ORDER BY profile_id, profile_version`,
-  ).all() as SqlRow[];
-  requireBounded(
-    legacyProfiles.length <= 1 && legacyProfiles.every((row) =>
-      asString(row.profile_id) === profile.legacy.id &&
-      asString(row.profile_version) === profile.legacy.version &&
-      asString(row.profile_name) === profile.legacy.name &&
-      asString(row.profile_digest) === profile.legacy.digest &&
-      asString(row.definition_json) === profile.legacy.definitionJson),
-    'SCHEMA_MIGRATION_FAILED',
-    '旧版工作流配置无法精确映射到内置原生 DSH Profile。',
-  );
-  const legacyInstances = db.prepare(
-    `SELECT workflow_instance_id, profile_id, profile_version, current_phase, state
-     FROM workflow_instances ORDER BY workflow_instance_id`,
-  ).all() as SqlRow[];
-  const legacyPhaseLabels = new Set<string>(profile.projection.phases.map((phase) => phase.label));
-  requireBounded(
-    legacyInstances.every((row) =>
-      legacyProfiles.length === 1 &&
-      asString(row.profile_id) === profile.legacy.id &&
-      asString(row.profile_version) === profile.legacy.version &&
-      legacyPhaseLabels.has(asString(row.current_phase)) &&
-      asString(row.state) === 'active'),
-    'SCHEMA_MIGRATION_FAILED',
-    '旧版工作流实例无法精确映射到内置原生 DSH Profile。',
-  );
-
-  const legacyAlterTable = asNumber(one(
-    db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[],
-    'SCHEMA_INVALID',
-    '无法读取旧式改表状态。',
-  ).legacy_alter_table);
-  db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = OFF');
-  let migrationError: unknown;
-  try {
-    db.exec('BEGIN IMMEDIATE');
-    const disabledForeignKeys = one(
-      db.prepare('PRAGMA foreign_keys').all() as SqlRow[],
-      'SCHEMA_INVALID',
-      '无法读取引用校验状态。',
-    );
-    requireBounded(
-      asNumber(disabledForeignKeys.foreign_keys) === 0,
-      'SCHEMA_INVALID',
-      '无法暂时停用引用校验以迁移数据库。',
-    );
-    const modernAlterTable = one(
-      db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[],
-      'SCHEMA_INVALID',
-      '无法读取改表语义。',
-    );
-    requireBounded(
-      asNumber(modernAlterTable.legacy_alter_table) === 0,
-      'SCHEMA_INVALID',
-      '无法启用可校验的改表语义。',
-    );
-    db.exec(`
-      ALTER TABLE books ADD COLUMN internal_number TEXT;
-      ALTER TABLE import_drafts ADD COLUMN reviewed_target_kind TEXT
-        CHECK(reviewed_target_kind IS NULL OR reviewed_target_kind IN ('new-book', 'existing-book'));
-      ALTER TABLE import_drafts ADD COLUMN reviewed_existing_book_id TEXT REFERENCES books(book_id);
-      ALTER TABLE import_drafts ADD COLUMN reviewed_relationship TEXT
-        CHECK(reviewed_relationship IS NULL OR reviewed_relationship IN ('new-book-first-manuscript', 'first-manuscript'));
-      ALTER TABLE import_drafts ADD COLUMN reviewed_book_state_digest TEXT
-        CHECK(reviewed_book_state_digest IS NULL OR length(reviewed_book_state_digest) = 64);
-      UPDATE import_drafts
-      SET reviewed_target_kind = 'new-book', reviewed_relationship = 'new-book-first-manuscript'
-      WHERE state IN ('reviewed', 'committed');
-      ${TARGET_INDEX_SQL.book_internal_number_unique};
-
-      CREATE TABLE workflow_profiles_v8 (
-        profile_id TEXT NOT NULL,
-        profile_version TEXT NOT NULL,
-        profile_name TEXT NOT NULL,
-        profile_digest TEXT NOT NULL CHECK(length(profile_digest) = 64),
-        projection_schema TEXT NOT NULL CHECK(projection_schema = 'ai7.workflow-profile-projection/1'),
-        projection_json TEXT NOT NULL,
-        native_profile_id TEXT NOT NULL,
-        native_profile_version TEXT NOT NULL,
-        native_profile_digest TEXT NOT NULL CHECK(length(native_profile_digest) = 64),
-        PRIMARY KEY(profile_id, profile_version)
-      ) STRICT;
-      CREATE TABLE workflow_instances_v8 (
-        workflow_instance_id TEXT PRIMARY KEY,
-        book_id TEXT NOT NULL REFERENCES books(book_id),
-        manuscript_id TEXT NOT NULL UNIQUE REFERENCES manuscripts(manuscript_id),
-        profile_id TEXT NOT NULL,
-        profile_version TEXT NOT NULL,
-        profile_digest TEXT NOT NULL CHECK(length(profile_digest) = 64),
-        native_profile_id TEXT NOT NULL,
-        native_profile_version TEXT NOT NULL,
-        native_profile_digest TEXT NOT NULL CHECK(length(native_profile_digest) = 64),
-        current_phase TEXT NOT NULL,
-        state TEXT NOT NULL CHECK(state = 'active'),
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(profile_id, profile_version) REFERENCES workflow_profiles_v8(profile_id, profile_version)
-      ) STRICT;
-    `);
-    if (legacyProfiles.length === 1) {
-      db.prepare(
-        `INSERT INTO workflow_profiles_v8(
-          profile_id, profile_version, profile_name, profile_digest, projection_schema, projection_json,
-          native_profile_id, native_profile_version, native_profile_digest
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        profile.projection.id,
-        profile.projection.version,
-        profile.projection.name,
-        profile.projection.digest,
-        profile.projection.schema,
-        canonicalJson({
-          schema: profile.projection.schema,
-          id: profile.projection.id,
-          name: profile.projection.name,
-          version: profile.projection.version,
-          phases: profile.projection.phases,
-          gates: profile.projection.gates,
-        }),
-        profile.native.id,
-        profile.native.version,
-        profile.native.digest,
-      );
-      db.prepare(
-        `INSERT INTO workflow_instances_v8(
-          workflow_instance_id, book_id, manuscript_id, profile_id, profile_version, profile_digest,
-          native_profile_id, native_profile_version, native_profile_digest, current_phase, state, created_at
-        )
-        SELECT workflow_instance_id, book_id, manuscript_id, ?, ?, ?, ?, ?, ?, current_phase, state, created_at
-        FROM workflow_instances`,
-      ).run(
-        profile.projection.id,
-        profile.projection.version,
-        profile.projection.digest,
-        profile.native.id,
-        profile.native.version,
-        profile.native.digest,
-      );
-    }
-    db.exec(`
-      DROP TABLE workflow_instances;
-      DROP TABLE workflow_profiles;
-      ALTER TABLE workflow_profiles_v8 RENAME TO workflow_profiles;
-      ALTER TABLE workflow_instances_v8 RENAME TO workflow_instances;
-      PRAGMA user_version = ${SCHEMA_VERSION};
-    `);
-    const violations = db.prepare('PRAGMA foreign_key_check').all();
-    requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
-    validateWorkflowSemanticTruth(db, profile);
-    validateImportDraftTargetTruth(db);
-    db.exec('COMMIT');
-  } catch (error) {
-    migrationError = error;
-    try {
-      db.exec('ROLLBACK');
-    } catch (rollbackError) {
-      migrationError = new AggregateError([error, rollbackError], 'SQLite workflow profile migration rollback failed.');
-    }
-  } finally {
-    try {
-      db.exec(`PRAGMA legacy_alter_table = ${legacyAlterTable}`);
-      const restoredLegacyAlterTable = one(
-        db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[],
-        'SCHEMA_INVALID',
-        '无法读取旧式改表状态。',
-      );
-      requireBounded(
-        asNumber(restoredLegacyAlterTable.legacy_alter_table) === legacyAlterTable,
-        'SCHEMA_INVALID',
-        '无法恢复旧式改表状态。',
-      );
-      db.exec('PRAGMA foreign_keys = ON');
-      const restoredForeignKeys = one(
-        db.prepare('PRAGMA foreign_keys').all() as SqlRow[],
-        'SCHEMA_INVALID',
-        '无法读取引用校验状态。',
-      );
-      requireBounded(asNumber(restoredForeignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '无法恢复引用校验。');
-    } catch (restoreError) {
-      migrationError = migrationError
-        ? new AggregateError([migrationError, restoreError], 'SQLite workflow profile migration and foreign-key restoration failed.')
-        : restoreError;
-    }
-  }
-  if (migrationError) throw migrationError;
-  requireTargetSchema(db);
-}
-
-export function validateSourceImportSchemaTruth(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
-  requireSourceImportTargetSchema(db);
-  validateSchemaAuthorityIds(db);
-  validateWorkflowSemanticTruth(db, profile);
-  validateSourceImportDraftTargetTruth(db);
-  validateSourceImportRecordTruth(db);
-  validateAllDerivedOffsets(db);
-  validateLegacyHistoryRoots(db);
-  validateAllCommandHistory(db);
-  validateMilestoneSignoffTruth(db);
-  validateRecoveryTruth(db);
-  const violations = db.prepare('PRAGMA foreign_key_check').all();
-  requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
 function validateManuscriptReimportTruth(db: DatabaseSync): void {
@@ -2722,559 +2095,30 @@ ${canonicalJson({ groupId: asString(row.group_id), verb: asString(row.verb) })}`
   requireBounded(invalidRecords === undefined, 'SCHEMA_INVALID', '稿件重新导入记录图无效。');
 }
 
-export function validateManuscriptReimportSchemaTruth(
-  db: DatabaseSync,
-  profile: BuiltInWorkflowProfile,
-  includeModelServiceTable = false,
-  includeNativeArtifactTables = false,
-  includeAuthoritySidecarTables = false,
-  includeTaskAuthorizationTables = false,
-  includeAnalysisLedgerTables = false,
-  includePlanVersionTables = false,
-  includeManuscriptEntryPositionTable = false,
-  includeEditorialMarkTables = false,
-  includeManuscriptEffectTables = false,
-  includeReviewRunTables = false,
-  includePublicationVersionTables = false,
-  includeProposalConflictTables = false,
-  includeImportRetentionTables = false,
-  includeImportedMarkTables = false,
-  includeExportLedgerTables = false,
-  includeDefaultExecutionRuleTables = false,
-  includeRunCheckpointTables = false,
-  includeClarificationTables = false,
-  includeReimportGroupTables = false,
-  includeProductionDocumentTables = false,
-  includeProductionDocumentDeliveryTables = false,
-  includeBookDeliveryPackageTables = false,
-  includeProductionDocumentWorkflowTables = false,
-  includeBookDeliveryPackageExportTables = false,
-  includeProductionDocumentOriginTables = false,
-  includeMaintenanceCaseTables = false,
-  includeBookPeopleTables = false,
-  includeReviewGuidelineTables = false,
-  includeLibraryMaterialTables = false,
-  includeEvaluationRecordTables = false,
-  includeAnalysisFeedbackTables = false,
-  includeDecisionFeedbackTables = false,
-  includeLearningEligibilityTables = false,
-  includeEvaluationCalibrationTables = false,
-  includeSeriesTables = false,
-  includeSeriesKnowledgeTables = false,
-  includeDataVersionTables = false,
-  includeDatabaseExportTables = false,
-  includeScheduledBackupTables = false,
-  includeDatabaseReplacementTables = false,
-  includeDatabaseMergeTables = false,
-  includeEvaluationInitialDraftTables = false,
-  includeDialogueTables = false,
-  includeSeriesRetrievalExclusionTables = false,
-  includeReadersReportTables = false,
-  includeCapturedProcedureTables = false,
-  includeEvaluationRewriteTables = false,
-  includeWritingTaskTables = false,
-  includeBackgroundAnalysisEnrollmentTables = false,
-  includeMaterialIndexTables = false,
-  includeOutcomeResolutionTables = false,
-): void {
-  requireManuscriptReimportTargetSchema(
-    db,
-    includeModelServiceTable,
-    includeNativeArtifactTables,
-    includeAuthoritySidecarTables,
-    includeTaskAuthorizationTables,
-    includeAnalysisLedgerTables,
-    includePlanVersionTables,
-    includeManuscriptEntryPositionTable,
-    includeEditorialMarkTables,
-    includeManuscriptEffectTables,
-    includeReviewRunTables,
-    includePublicationVersionTables,
-    includeProposalConflictTables,
-    includeImportRetentionTables,
-    includeImportedMarkTables,
-    includeExportLedgerTables,
-    includeDefaultExecutionRuleTables,
-    includeRunCheckpointTables,
-    includeClarificationTables,
-    includeReimportGroupTables,
-    includeProductionDocumentTables,
-    includeProductionDocumentDeliveryTables,
-    includeBookDeliveryPackageTables,
-    includeProductionDocumentWorkflowTables,
-    includeBookDeliveryPackageExportTables,
-    includeProductionDocumentOriginTables,
-    includeMaintenanceCaseTables,
-    includeBookPeopleTables,
-    includeReviewGuidelineTables,
-    includeLibraryMaterialTables,
-    includeEvaluationRecordTables,
-    includeAnalysisFeedbackTables,
-    includeDecisionFeedbackTables,
-    includeLearningEligibilityTables,
-    includeEvaluationCalibrationTables,
-    includeSeriesTables,
-    includeSeriesKnowledgeTables,
-    includeDataVersionTables,
-    includeDatabaseExportTables,
-    includeScheduledBackupTables,
-    includeDatabaseReplacementTables,
-    includeDatabaseMergeTables,
-    includeEvaluationInitialDraftTables,
-    includeDialogueTables,
-    includeSeriesRetrievalExclusionTables,
-    includeReadersReportTables,
-    includeCapturedProcedureTables,
-    includeEvaluationRewriteTables,
-    includeWritingTaskTables,
-    includeBackgroundAnalysisEnrollmentTables,
-    includeMaterialIndexTables,
-    includeOutcomeResolutionTables,
-  );
-  validateSchemaAuthorityIds(db);
-  validateWorkflowSemanticTruth(db, profile);
-  validateSourceImportDraftTargetTruth(db);
-  validateSourceImportRecordTruth(db);
-  validateManuscriptReimportTruth(db);
-  validateAllDerivedOffsets(db);
-  validateLegacyHistoryRoots(db);
-  validateAllCommandHistory(db);
-  validateMilestoneSignoffTruth(db);
-  validateRecoveryTruth(db);
-  const violations = db.prepare('PRAGMA foreign_key_check').all();
-  requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-}
-
 /**
- * Revision 21's entry-position relation (Issue #467). It is created and never rebuilt: no existing
- * relation is touched, no row is copied, and a store that predates the revision simply gains one
- * empty table. Like revisions 18 and 19 this runs before the version moves in `task-authorization.ts`
- * and is shape-detected, so a store created fresh at revision 21 does no work here and an
- * interruption between the creation and the version bump repeats only the bump on the next open.
+ * What every open checks and tidies over the manuscript core (#1634): the records' identities, the workflow semantics, the
+ * import and reimport record graphs, every derived offset, the command and recovery histories and the references, then the
+ * search sessions and replacement previews a stopped lifetime left open. The shape itself is `requireBaselineSchema`'s.
  */
-export function initializeManuscriptEntryPositionSchema(db: DatabaseSync): void {
-  const existing = db.prepare(
-    "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_entry_positions'",
-  ).get();
-  if (existing !== undefined) return;
+export function validateBoundedStore(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
   transact(db, () => {
-    db.exec(MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL);
-  });
-  requireBounded(
-    db.prepare('PRAGMA foreign_key_check').all().length === 0,
-    'SCHEMA_MIGRATION_FAILED',
-    '数据库引用校验失败。',
-  );
-}
-
-/**
- * `validateStoreTruth` may be set to false only by a caller that already runs the terminal-version
- * store-truth validation at an earlier and a later position of the same `EditorialStore.open`, so
- * that a store already at the terminal version pays for the whole-store validation twice instead of
- * once per layered initializer. Every migrating branch, and every version below the terminal one,
- * validates exactly as it does when the flag is absent.
- */
-export function initializeBoundedSchema(
-  db: DatabaseSync,
-  profile: BuiltInWorkflowProfile,
-  validateStoreTruth = true,
-): void {
-  const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
-  requireBounded(
-    version === CONTINUITY_SCHEMA_VERSION || version === EDITOR_SCHEMA_VERSION ||
-      version === RECOVERY_SCHEMA_VERSION || version === SCHEMA_VERSION ||
-      version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
-      version === MODEL_SERVICE_SCHEMA_VERSION || version === NATIVE_ARTIFACT_SCHEMA_VERSION ||
-      version === AUTHORITY_SIDECAR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION ||
-      version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION ||
-      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === 106 || version === 107 || version === 108 || version === 109 || version === 110 || version === 111 || version === 112 || version === 113 || version === 114 || version === 115 || version === LATEST_SCHEMA_VERSION),
-    'SCHEMA_UNSUPPORTED',
-    '数据库版本不受支持。',
-  );
-  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
-      version === NATIVE_ARTIFACT_SCHEMA_VERSION || version === AUTHORITY_SIDECAR_SCHEMA_VERSION ||
-      version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION || version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
-      version === SUCCESSIVE_TASK_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === MANUSCRIPT_INTAKE_SCHEMA_VERSION || version === TEXT_CONVERSION_SCHEMA_VERSION ||
-      version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
-      version === EDITORIAL_MARK_SCHEMA_VERSION || version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION ||
-      version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION ||
-      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === 106 || version === 107 || version === 108 || version === 109 || version === 110 || version === 111 || version === 112 || version === 113 || version === 114 || version === 115 || version === LATEST_SCHEMA_VERSION)) {
-    transact(db, () => {
-      if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
-        validateManuscriptReimportSchemaTruth(
-          db,
-          profile,
-          version >= MODEL_SERVICE_SCHEMA_VERSION,
-          version >= NATIVE_ARTIFACT_SCHEMA_VERSION,
-          version >= AUTHORITY_SIDECAR_SCHEMA_VERSION,
-          version >= J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
-          version >= J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
-          version >= TASK_AUTHORIZATION_SCHEMA_VERSION,
-          version >= MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
-          version >= EDITORIAL_MARK_SCHEMA_VERSION,
-          version >= MANUSCRIPT_EFFECT_SCHEMA_VERSION,
-          version >= EDITORIAL_REVIEW_SCHEMA_VERSION,
-          version >= PUBLICATION_VERSION_SCHEMA_VERSION,
-          version >= PROPOSAL_CONFLICT_SCHEMA_VERSION,
-          version >= IMPORT_RETENTION_SCHEMA_VERSION,
-          version >= IMPORTED_MARK_SCHEMA_VERSION,
-          version >= EXPORT_LEDGER_SCHEMA_VERSION,
-          version >= DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
-          version >= RUN_CONTINUATION_SCHEMA_VERSION,
-          version >= CLARIFICATION_SCHEMA_VERSION,
-          version >= REIMPORT_GROUP_SCHEMA_VERSION,
-          version >= PRODUCTION_DOCUMENT_SCHEMA_VERSION,
-          version >= PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
-          version >= BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
-          version >= PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
-          version >= BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
-          version >= PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
-          version >= MAINTENANCE_CASE_SCHEMA_VERSION,
-          version >= BOOK_PEOPLE_SCHEMA_VERSION,
-          version >= REVIEW_GUIDELINE_SCHEMA_VERSION,
-          version >= LIBRARY_MATERIAL_SCHEMA_VERSION,
-          version >= EVALUATION_RECORD_SCHEMA_VERSION,
-          version >= ANALYSIS_FEEDBACK_SCHEMA_VERSION,
-          version >= DECISION_FEEDBACK_SCHEMA_VERSION,
-          version >= LEARNING_ELIGIBILITY_SCHEMA_VERSION,
-          version >= EVALUATION_CALIBRATION_SCHEMA_VERSION,
-          version >= SERIES_SCHEMA_VERSION,
-          version >= SERIES_KNOWLEDGE_SCHEMA_VERSION,
-          version >= STORE_VERSION_SCHEMA_VERSION,
-          version >= DATABASE_EXPORT_SCHEMA_VERSION,
-          version >= SCHEDULED_BACKUP_SCHEMA_VERSION,
-          version >= DATABASE_REPLACEMENT_SCHEMA_VERSION,
-          version >= DATABASE_MERGE_SCHEMA_VERSION,
-          version >= INITIAL_EVALUATION_SCHEMA_VERSION,
-          version >= DIALOGUE_SCHEMA_VERSION,
-          version >= SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
-          version >= READERS_REPORT_SCHEMA_VERSION,
-          version >= CAPTURED_PROCEDURE_SCHEMA_VERSION,
-          version >= EVALUATION_REWRITE_SCHEMA_VERSION,
-          version >= WRITING_TASK_SCHEMA_VERSION,
-          version >= BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
-          version >= MATERIAL_INDEX_SCHEMA_VERSION,
-          version >= OUTCOME_RESOLUTION_SCHEMA_VERSION,
-        );
-      }
-      terminalizeOrphanedReplacementPreviews(db);
-      reclaimOrphanedSearchSessions(db);
-    });
-    return;
-  }
-  if (version === SOURCE_IMPORT_SCHEMA_VERSION) {
-    transact(db, () => {
-      validateSourceImportSchemaTruth(db, profile);
-      terminalizeOrphanedReplacementPreviews(db);
-      reclaimOrphanedSearchSessions(db);
-    });
-    return;
-  }
-  if (version === SCHEMA_VERSION) {
-    requireTargetSchema(db);
-    transact(db, () => {
-      validateSchemaAuthorityIds(db);
-      validateWorkflowSemanticTruth(db, profile);
-      validateImportDraftTargetTruth(db);
-      validateAllDerivedOffsets(db);
-      validateLegacyHistoryRoots(db);
-      validateAllCommandHistory(db);
-      validateMilestoneSignoffTruth(db);
-      validateRecoveryTruth(db);
-      const violations = db.prepare('PRAGMA foreign_key_check').all();
-      requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-      terminalizeOrphanedReplacementPreviews(db);
-      reclaimOrphanedSearchSessions(db);
-    });
-    return;
-  }
-  if (version === RECOVERY_SCHEMA_VERSION) {
-    migrateRecoverySchemaV7ToV8(db, profile);
-    return initializeBoundedSchema(db, profile);
-  }
-  if (version === EDITOR_SCHEMA_VERSION) {
-    migrateEditorSchemaV6ToV7(db);
-    return initializeBoundedSchema(db, profile);
-  }
-  requireContinuitySchema(db);
-  const legacyAlterTable = asNumber(one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table);
-  db.exec('PRAGMA foreign_keys = OFF');
-  let migrationError: unknown;
-  try {
-    db.exec('BEGIN IMMEDIATE');
-    const disabledForeignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
-    requireBounded(asNumber(disabledForeignKeys.foreign_keys) === 0, 'SCHEMA_INVALID', '无法暂时停用引用校验以迁移数据库。');
     validateSchemaAuthorityIds(db);
-    recreateImportDraftTable(db);
-    recreateRevisionTable(db);
-    db.exec(`
-      ${TARGET_BASE_SCHEMA_SQL.import_ingest_blocks};
-
-      ALTER TABLE staged_import_snapshots ADD COLUMN character_count INTEGER NOT NULL DEFAULT 0 CHECK(character_count >= 0);
-      ALTER TABLE staged_import_blocks ADD COLUMN start_offset INTEGER NOT NULL DEFAULT 0 CHECK(start_offset >= 0);
-      ALTER TABLE staged_import_blocks ADD COLUMN grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0);
-      ALTER TABLE manuscript_block_versions ADD COLUMN start_offset INTEGER NOT NULL DEFAULT 0 CHECK(start_offset >= 0);
-      ALTER TABLE manuscript_block_versions ADD COLUMN grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0);
-      ALTER TABLE working_blocks ADD COLUMN grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0);
-      ALTER TABLE branch_working_state ADD COLUMN total_graphemes INTEGER NOT NULL DEFAULT 0 CHECK(total_graphemes >= 0);
-      ALTER TABLE branch_working_state ADD COLUMN history_sequence INTEGER NOT NULL DEFAULT 0 CHECK(history_sequence >= 0);
-      ALTER TABLE branch_working_state ADD COLUMN last_checkpoint_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_checkpoint_sequence >= 0);
-      ALTER TABLE edit_journal_entries ADD COLUMN command_group_id TEXT;
-      ALTER TABLE edit_journal_entries ADD COLUMN command_kind TEXT NOT NULL DEFAULT 'edit';
-
-      CREATE TABLE manuscript_outline (
-        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-        block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
-        position INTEGER NOT NULL CHECK(position > 0),
-        kind TEXT NOT NULL CHECK(kind IN ('title', 'heading')),
-        level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 6),
-        text TEXT NOT NULL,
-        digest TEXT NOT NULL CHECK(length(digest) = 64),
-        PRIMARY KEY(branch_id, block_id),
-        UNIQUE(branch_id, position)
-      ) STRICT;
-      CREATE INDEX manuscript_outline_order ON manuscript_outline(branch_id, position);
-
-      CREATE VIRTUAL TABLE working_block_search USING fts5(
-        branch_id UNINDEXED,
-        block_id UNINDEXED,
-        text,
-        tokenize='trigram'
-      );
-
-      CREATE TABLE manuscript_command_groups (
-        command_group_id TEXT PRIMARY KEY,
-        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-        ordinal INTEGER NOT NULL CHECK(ordinal > 0),
-        kind TEXT NOT NULL CHECK(kind IN ('edit', 'replacement')),
-        status TEXT NOT NULL CHECK(status IN ('applied', 'undone', 'superseded')),
-        source_group_id TEXT,
-        before_working_digest TEXT NOT NULL CHECK(length(before_working_digest) = 64),
-        after_working_digest TEXT NOT NULL CHECK(length(after_working_digest) = 64),
-        created_at TEXT NOT NULL,
-        UNIQUE(branch_id, ordinal)
-      ) STRICT;
-      CREATE TABLE manuscript_command_edits (
-        command_group_id TEXT NOT NULL REFERENCES manuscript_command_groups(command_group_id),
-        position INTEGER NOT NULL CHECK(position > 0),
-        block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
-        before_text TEXT NOT NULL,
-        before_digest TEXT NOT NULL CHECK(length(before_digest) = 64),
-        after_text TEXT NOT NULL,
-        after_digest TEXT NOT NULL CHECK(length(after_digest) = 64),
-        PRIMARY KEY(command_group_id, position),
-        UNIQUE(command_group_id, block_id)
-      ) STRICT;
-      CREATE INDEX command_history_state ON manuscript_command_groups(branch_id, status, ordinal);
-
-      CREATE TABLE milestone_versions (
-        milestone_id TEXT PRIMARY KEY,
-        manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-        revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-        label TEXT NOT NULL,
-        purpose TEXT NOT NULL,
-        note TEXT,
-        actor TEXT NOT NULL CHECK(actor = '本机编辑'),
-        created_at TEXT NOT NULL,
-        UNIQUE(branch_id, label)
-      ) STRICT;
-
-      CREATE TABLE manuscript_search_sessions (
-        search_id TEXT PRIMARY KEY,
-        manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-        revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-        journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
-        working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
-        query TEXT NOT NULL,
-        state TEXT NOT NULL CHECK(state IN ('running', 'completed', 'cancelled', 'failed')),
-        scanned_position INTEGER NOT NULL DEFAULT 0 CHECK(scanned_position >= 0),
-        total_blocks INTEGER NOT NULL CHECK(total_blocks > 0),
-        total_matches INTEGER NOT NULL DEFAULT 0 CHECK(total_matches >= 0),
-        created_at TEXT NOT NULL,
-        completed_at TEXT
-      ) STRICT;
-      CREATE TABLE manuscript_search_results (
-        search_id TEXT NOT NULL REFERENCES manuscript_search_sessions(search_id) ON DELETE CASCADE,
-        ordinal INTEGER NOT NULL CHECK(ordinal > 0),
-        match_id TEXT NOT NULL,
-        block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
-        from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
-        to_grapheme INTEGER NOT NULL CHECK(to_grapheme > from_grapheme),
-        global_character INTEGER NOT NULL CHECK(global_character >= 0),
-        heading_label TEXT NOT NULL,
-        context TEXT NOT NULL,
-        range_digest TEXT NOT NULL CHECK(length(range_digest) = 64),
-        PRIMARY KEY(search_id, ordinal),
-        UNIQUE(search_id, match_id)
-      ) STRICT;
-
-      CREATE TABLE manuscript_replacement_previews (
-        preview_id TEXT PRIMARY KEY,
-        search_id TEXT NOT NULL REFERENCES manuscript_search_sessions(search_id),
-        manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-        revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-        journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
-        working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
-        query TEXT NOT NULL,
-        replacement TEXT NOT NULL,
-        state TEXT NOT NULL CHECK(state IN ('reviewing', 'frozen', 'committed', 'cancelled', 'failed')),
-        total_matches INTEGER NOT NULL CHECK(total_matches > 0),
-        included_matches INTEGER NOT NULL CHECK(included_matches >= 0),
-        validated_ordinal INTEGER NOT NULL DEFAULT 0 CHECK(validated_ordinal >= 0),
-        created_at TEXT NOT NULL,
-        committed_at TEXT
-      ) STRICT;
-      CREATE TABLE manuscript_replacement_matches (
-        preview_id TEXT NOT NULL REFERENCES manuscript_replacement_previews(preview_id) ON DELETE CASCADE,
-        ordinal INTEGER NOT NULL CHECK(ordinal > 0),
-        match_id TEXT NOT NULL,
-        block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
-        from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
-        to_grapheme INTEGER NOT NULL CHECK(to_grapheme > from_grapheme),
-        range_digest TEXT NOT NULL CHECK(length(range_digest) = 64),
-        included INTEGER NOT NULL CHECK(included IN (0, 1)),
-        PRIMARY KEY(preview_id, ordinal),
-        UNIQUE(preview_id, match_id)
-      ) STRICT;
-      CREATE INDEX replacement_matches_block ON manuscript_replacement_matches(preview_id, included, block_id, from_grapheme);
-    `);
-    createMilestoneSignoffTable(db);
-    createWorkingOffsetTable(db);
-    requireV6TargetSchema(db);
-    reclaimOrphanedSearchSessions(db);
-
-    validateStagedDraftInventory(db);
-    forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => {
-      validateStagedDraftContentTruth(db, draftId, false);
-      rebuildStagedDraftDerived(db, draftId);
-    });
-
-    forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => rebuildRevisionOffsets(db, revisionId));
-
-    forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => {
-      const history = migrateLegacyJournal(db, branchId);
-      db.prepare('UPDATE branch_working_state SET history_sequence = ? WHERE branch_id = ?').run(history, branchId);
-      rebuildBranchDerived(db, branchId);
-    });
-    db.exec('DROP TABLE IF EXISTS temp.migration_block_state');
+    validateWorkflowSemanticTruth(db, profile);
+    validateSourceImportDraftTargetTruth(db);
+    validateSourceImportRecordTruth(db);
+    validateManuscriptReimportTruth(db);
     validateAllDerivedOffsets(db);
     validateLegacyHistoryRoots(db);
     validateAllCommandHistory(db);
     validateMilestoneSignoffTruth(db);
+    validateRecoveryTruth(db);
     const violations = db.prepare('PRAGMA foreign_key_check').all();
-    requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
-    db.exec(`PRAGMA user_version = ${EDITOR_SCHEMA_VERSION}; COMMIT;`);
-  } catch (error) {
-    migrationError = error;
-    try {
-      db.exec('ROLLBACK');
-    } catch (rollbackError) {
-      migrationError = new AggregateError([error, rollbackError], 'SQLite bounded schema migration rollback failed.');
-    }
-  } finally {
-    try {
-      db.exec(`PRAGMA legacy_alter_table = ${legacyAlterTable}`);
-      const restoredLegacyAlterTable = one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。');
-      requireBounded(asNumber(restoredLegacyAlterTable.legacy_alter_table) === legacyAlterTable, 'SCHEMA_INVALID', '无法恢复旧式改表状态。');
-      db.exec('PRAGMA foreign_keys = ON');
-      const restoredForeignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
-      requireBounded(asNumber(restoredForeignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '无法恢复引用校验。');
-    } catch (restoreError) {
-      migrationError = migrationError
-        ? new AggregateError([migrationError, restoreError], 'SQLite bounded schema migration and foreign-key restoration failed.')
-        : restoreError;
-    }
-  }
-  if (migrationError) throw migrationError;
-  migrateEditorSchemaV6ToV7(db);
-  initializeBoundedSchema(db, profile);
+    requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+    terminalizeOrphanedReplacementPreviews(db);
+    reclaimOrphanedSearchSessions(db);
+  });
 }
+
 
 interface BranchBinding {
   bookId: string;

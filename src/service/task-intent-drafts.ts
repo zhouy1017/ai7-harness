@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -69,63 +70,11 @@ export const TASK_INTENT_DRAFT_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const TASK_INTENT_DRAFT_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(TASK_INTENT_DRAFT_SCHEMA_SQL).flatMap((table) => ['update', 'delete'].map((op) => [
-    `${table}_no_${op}`, `CREATE TRIGGER ${table}_no_${op} BEFORE ${op.toUpperCase()} ON ${table}
-    BEGIN SELECT RAISE(ABORT, 'TASK_INTENT_DRAFT_IMMUTABLE'); END`,
-  ])),
-);
-
-export const TASK_INTENT_DRAFT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  task_intent_drafts: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE'],
-  task_intent_draft_versions: ['draft_id>task_intent_drafts.draft_id:NO ACTION/NO ACTION/NONE'],
-  task_intent_draft_promotions: [
-    'draft_id>task_intent_drafts.draft_id:NO ACTION/NO ACTION/NONE',
-    'review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE',
-    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
-    'version_id>task_intent_draft_versions.version_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
-
-/** Revision 106 widens draft targets and origins; historical JSON, row order and promotions are preserved. */
-export function initializeDeliverableDraftSchema(db: DatabaseSync): void {
-  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 106) return;
-  const existing = db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'task_intent_drafts'").get()?.sql;
-  if (typeof existing !== 'string' || existing.includes("'composer-deliverable'")) return;
-  const foreignKeys = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
-  db.exec('PRAGMA foreign_keys = OFF');
-  try {
-    db.exec('BEGIN IMMEDIATE');
-    for (const table of ['task_intent_drafts', 'task_intent_draft_versions'] as const) {
-      const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)).join(', ');
-      db.exec(`CREATE TEMP TABLE migrate_${table} AS SELECT rowid AS prior_rowid, * FROM ${table}`);
-      db.exec(`DROP TABLE ${table}`);
-      db.exec(TASK_INTENT_DRAFT_SCHEMA_SQL[table]);
-      db.exec(`INSERT INTO ${table}(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM temp.migrate_${table} ORDER BY prior_rowid`);
-      db.exec(`DROP TABLE temp.migrate_${table}`);
-      for (const op of ['update', 'delete']) db.exec(TASK_INTENT_DRAFT_TRIGGER_SQL[`${table}_no_${op}`]!);
-    }
-    requireDraft(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '交付物任务草稿迁移后引用校验失败。');
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
-  finally { if (foreignKeys) db.exec('PRAGMA foreign_keys = ON'); }
-}
-
-/** Revision 80's relations, created once before the version is stamped: an older store gains them empty and nothing moves. */
-export function initializeTaskIntentDraftSchema(db: DatabaseSync, version: number): void {
-  if (version >= 80 || Object.keys(TASK_INTENT_DRAFT_SCHEMA_SQL).some((name) => db.prepare('SELECT 1 FROM sqlite_schema WHERE name = ?').get(name) !== undefined)) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(TASK_INTENT_DRAFT_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(TASK_INTENT_DRAFT_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Task Intent Draft schema rollback failed.');
-    }
-    throw error;
-  }
-}
+export const TASK_INTENT_DRAFT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  task_intent_drafts: 'TASK_INTENT_DRAFT_IMMUTABLE',
+  task_intent_draft_versions: 'TASK_INTENT_DRAFT_IMMUTABLE',
+  task_intent_draft_promotions: 'TASK_INTENT_DRAFT_IMMUTABLE',
+});
 
 export class TaskIntentDraftError extends Error {
   constructor(readonly code: string, message: string) {

@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -55,27 +56,9 @@ export const ANALYSIS_FEEDBACK_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const ANALYSIS_FEEDBACK_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(ANALYSIS_FEEDBACK_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'ANALYSIS_FEEDBACK_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'ANALYSIS_FEEDBACK_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const ANALYSIS_FEEDBACK_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  analysis_feedback_signals: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'supersedes_signal_id>analysis_feedback_signals.signal_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const ANALYSIS_FEEDBACK_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  analysis_feedback_signals: 'ANALYSIS_FEEDBACK_LEDGER_IMMUTABLE',
+});
 
 export class AnalysisFeedbackError extends Error {
   constructor(readonly code: string, message: string) {
@@ -95,24 +78,7 @@ const ITEM_SCHEMA = 'ai7.analysis-feedback-item/1';
 const LINEAGE_SCHEMA = 'ai7.analysis-quality-metric-lineage/1';
 /** Who judges, as the other editor records of this device name it. */
 export const ANALYSIS_FEEDBACK_ACTOR = '本机编辑' as const;
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_feedback_signals'";
 const CONTROL_CHARACTER = /[\p{Zl}\p{Zp}]|(?![\n])\p{Cc}/u;
-
-/** Revision 48's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
-export function initializeAnalysisFeedbackSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(ANALYSIS_FEEDBACK_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(ANALYSIS_FEEDBACK_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Analysis feedback schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 /** One item of a revision as feedback names it, with the evidence it cites. */
 export interface AnalysisFeedbackItem {

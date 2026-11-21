@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import { open, opendir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
@@ -42,17 +43,11 @@ export const IMPORTED_EXEMPLAR_SCHEMA_SQL = {
   UNIQUE(revision_id, ordinal)
 ) STRICT`,
 } as const;
-export const IMPORTED_EXEMPLAR_TRIGGER_SQL = Object.fromEntries(Object.keys(IMPORTED_EXEMPLAR_SCHEMA_SQL).flatMap((table) =>
-  ['update', 'delete'].map((operation) => [`${table}_no_${operation}`, `CREATE TRIGGER ${table}_no_${operation}
-    BEFORE ${operation.toUpperCase()} ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'IMPORTED_EXEMPLAR_LEDGER_IMMUTABLE');
-    END`])));
-export const IMPORTED_EXEMPLAR_FOREIGN_KEYS = {
-  earlier_exemplar_books: [],
-  earlier_exemplar_versions: ['book_id>earlier_exemplar_books.book_id:NO ACTION/NO ACTION/NONE'],
-  earlier_exemplar_eligibility: ['revision_id>earlier_exemplar_versions.revision_id:NO ACTION/NO ACTION/NONE'],
-};
+export const IMPORTED_EXEMPLAR_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  earlier_exemplar_books: 'IMPORTED_EXEMPLAR_LEDGER_IMMUTABLE',
+  earlier_exemplar_versions: 'IMPORTED_EXEMPLAR_LEDGER_IMMUTABLE',
+  earlier_exemplar_eligibility: 'IMPORTED_EXEMPLAR_LEDGER_IMMUTABLE',
+});
 export const IMPORTED_EXEMPLAR_OBJECT_DIRECTORY = 'exemplar-objects';
 export const IMPORTED_EXEMPLAR_TYPES = [...READERS_REPORT_DOCUMENT_TYPES.types, ...BUILTIN_PRODUCTION_DOCUMENT_TYPES.types];
 const CORRUPT = '以前图书的范例记录无法读取。';
@@ -78,15 +73,6 @@ function record(row: Row): Record<string, unknown> {
   const value = parseStoredJson(row.canonical_json, () => new ImportedExemplarError('EXEMPLAR_RECORD_INVALID', CORRUPT));
   requireExemplar(isRecord(value) && canonicalJson(value) === row.canonical_json, CORRUPT, 'EXEMPLAR_RECORD_INVALID');
   return value;
-}
-export function initializeImportedExemplarSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'earlier_exemplar_books'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(IMPORTED_EXEMPLAR_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(IMPORTED_EXEMPLAR_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
 /** Validates immutable content on every exact read, including the writing Task's frozen reference. */

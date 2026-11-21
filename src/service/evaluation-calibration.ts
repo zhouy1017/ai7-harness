@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -48,29 +49,10 @@ export const EVALUATION_CALIBRATION_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const EVALUATION_CALIBRATION_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(EVALUATION_CALIBRATION_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'EVALUATION_CALIBRATION_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'EVALUATION_CALIBRATION_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const EVALUATION_CALIBRATION_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  publication_actuals: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'publication_version_id>publication_versions.publication_version_id:NO ACTION/NO ACTION/NONE',
-    'supersedes_actual_id>publication_actuals.actual_id:NO ACTION/NO ACTION/NONE',
-  ],
-  evaluation_preferences: ['supersedes_preference_id>evaluation_preferences.preference_id:NO ACTION/NO ACTION/NONE'],
-};
+export const EVALUATION_CALIBRATION_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  publication_actuals: 'EVALUATION_CALIBRATION_LEDGER_IMMUTABLE',
+  evaluation_preferences: 'EVALUATION_CALIBRATION_LEDGER_IMMUTABLE',
+});
 
 export class EvaluationCalibrationError extends Error {
   constructor(readonly code: string, message: string) {
@@ -88,25 +70,8 @@ type SqlRow = Record<string, SQLOutputValue>;
 const ACTUALS_SCHEMA = 'ai7.publication-actuals/1';
 const PREFERENCES_SCHEMA = 'ai7.evaluation-preferences/1';
 const ACTOR = '本机编辑';
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'publication_actuals'";
 /** What the house starts with: no prediction, and calibration on, to begin once there are enough adjustments. */
 const DEFAULT_PREFERENCES = { predictionEnabled: false, calibrationEnabled: true } as const;
-
-/** Revision 51's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
-export function initializeEvaluationCalibrationSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(EVALUATION_CALIBRATION_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(EVALUATION_CALIBRATION_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Evaluation calibration schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 /** One 定价与首印 entry as the chain holds it. */
 export interface StoredActuals {

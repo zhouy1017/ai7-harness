@@ -1,6 +1,4 @@
-import { WORD_TRACKED_IMPORT_SCHEMA_VERSION } from './task-authorization.js';
-import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION } from './task-authorization.js';
-import { GLOBAL_AGENT_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from './task-authorization.js';
+import { appendOnly } from './append-only.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import { open, opendir, readFile, readdir, realpath, rename, rm } from 'node:fs/promises';
@@ -8,7 +6,6 @@ import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type { EditorialWorkspaceProfileProjection, ProposalReviewReturnPosition } from '../shared/protocol.js';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
-import { EDITORIAL_MARK_SCHEMA_VERSION, EDITORIAL_REVIEW_SCHEMA_VERSION, PUBLICATION_VERSION_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION, IMPORT_RETENTION_SCHEMA_VERSION, IMPORTED_MARK_SCHEMA_VERSION, EXPORT_LEDGER_SCHEMA_VERSION, CONNECTIVITY_WAIT_SCHEMA_VERSION, DEFAULT_EXECUTION_RULE_SCHEMA_VERSION, RUN_CANCELLATION_SCHEMA_VERSION, RUN_CONTINUATION_SCHEMA_VERSION, PLAN_EDIT_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, REIMPORT_GROUP_SCHEMA_VERSION, PRODUCTION_DOCUMENT_SCHEMA_VERSION, PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION, BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION, BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION, PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION, MAINTENANCE_CASE_SCHEMA_VERSION, BOOK_PEOPLE_SCHEMA_VERSION, REVIEW_GUIDELINE_SCHEMA_VERSION, LIBRARY_MATERIAL_SCHEMA_VERSION, EVALUATION_RECORD_SCHEMA_VERSION, ANALYSIS_FEEDBACK_SCHEMA_VERSION, DECISION_FEEDBACK_SCHEMA_VERSION, LEARNING_ELIGIBILITY_SCHEMA_VERSION, EVALUATION_CALIBRATION_SCHEMA_VERSION, SERIES_SCHEMA_VERSION, SERIES_KNOWLEDGE_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION, DATABASE_EXPORT_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION, DIALOGUE_SCHEMA_VERSION, SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, READERS_REPORT_SCHEMA_VERSION, CAPTURED_PROCEDURE_SCHEMA_VERSION, EVALUATION_REWRITE_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION, BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, MATERIAL_INDEX_SCHEMA_VERSION, OUTCOME_RESOLUTION_SCHEMA_VERSION, IMPORTED_EXEMPLAR_SCHEMA_VERSION, EVALUATION_PROFILE_SCHEMA_VERSION, DIALOGUE_LIVE_BINDING_SCHEMA_VERSION, MODEL_SERVICE_ROUTES_SCHEMA_VERSION, MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_UPDATE_SCHEMA_VERSION, MODEL_SELECTION_SCHEMA_VERSION, PROCEDURE_DEFINITION_SCHEMA_VERSION, EDITORIAL_LEARNING_SCHEMA_VERSION, MANUSCRIPT_EFFECT_SCHEMA_VERSION, J03_TASK_AUTHORIZATION_SCHEMA_VERSION, J04_BASELINE_ANALYSIS_SCHEMA_VERSION, MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION, MANUSCRIPT_INTAKE_SCHEMA_VERSION, SUCCESSIVE_TASK_SCHEMA_VERSION, TASK_AUTHORIZATION_SCHEMA_VERSION, TEXT_CONVERSION_SCHEMA_VERSION, FACTUAL_REVIEW_SCHEMA_VERSION, EDITORIAL_MEMORY_SCHEMA_VERSION, MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, LEARNING_CURATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION } from './task-authorization.js';
 
 /**
  * Proposal Review Return Position (Issue #902, V2-UX-PROP-010): review progress is a profile preference, never a
@@ -29,8 +26,6 @@ export function proposalReviewPosition(db: DatabaseSync, branchId: string, resul
   return row === undefined ? null : JSON.parse(String(row.position_json)) as ProposalReviewReturnPosition;
 }
 
-export const EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION = 12;
-export const EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION = 13;
 export const EDITORIAL_WORKSPACE_PROFILE_ID = '@ai7/editorial-workspace-profile';
 export const EDITORIAL_WORKSPACE_PROFILE_VERSION = '1.0.0';
 export const EDITORIAL_WORKSPACE_PROFILE_DIGEST =
@@ -109,30 +104,10 @@ export const EDITORIAL_WORKSPACE_PROFILE_BOOK_PINS_SCHEMA_SQL =
 ) STRICT`;
 
 export const EDITORIAL_WORKSPACE_PROFILE_SIDECAR_TRIGGER_SQL = {
-  editorial_workspace_profile_sidecar_revisions_no_update:
-    `CREATE TRIGGER editorial_workspace_profile_sidecar_revisions_no_update
-    BEFORE UPDATE ON editorial_workspace_profile_sidecar_revisions
-    BEGIN
-      SELECT RAISE(ABORT, 'SIDECAR_REVISION_IMMUTABLE');
-    END`,
-  editorial_workspace_profile_sidecar_revisions_no_delete:
-    `CREATE TRIGGER editorial_workspace_profile_sidecar_revisions_no_delete
-    BEFORE DELETE ON editorial_workspace_profile_sidecar_revisions
-    BEGIN
-      SELECT RAISE(ABORT, 'SIDECAR_REVISION_IMMUTABLE');
-    END`,
-  editorial_workspace_profile_book_pins_no_update:
-    `CREATE TRIGGER editorial_workspace_profile_book_pins_no_update
-    BEFORE UPDATE ON editorial_workspace_profile_book_pins
-    BEGIN
-      SELECT RAISE(ABORT, 'SIDECAR_PIN_IMMUTABLE');
-    END`,
-  editorial_workspace_profile_book_pins_no_delete:
-    `CREATE TRIGGER editorial_workspace_profile_book_pins_no_delete
-    BEFORE DELETE ON editorial_workspace_profile_book_pins
-    BEGIN
-      SELECT RAISE(ABORT, 'SIDECAR_PIN_IMMUTABLE');
-    END`,
+  ...appendOnly({
+    editorial_workspace_profile_sidecar_revisions: 'SIDECAR_REVISION_IMMUTABLE',
+    editorial_workspace_profile_book_pins: 'SIDECAR_PIN_IMMUTABLE',
+  }),
   editorial_workspace_profile_book_pins_revision_order:
     `CREATE TRIGGER editorial_workspace_profile_book_pins_revision_order
     BEFORE INSERT ON editorial_workspace_profile_book_pins
@@ -493,168 +468,6 @@ function insertSidecarDefinitions(db: DatabaseSync): void {
       revision.byteLength,
       revision.sha256,
     );
-  }
-}
-
-export function initializeEditorialWorkspaceProfileSchema(db: DatabaseSync): void {
-  const row = db.prepare('PRAGMA user_version').get() as SqlRow;
-  let version = asNumber(row.user_version);
-  requireProfile(
-    version === 11 || version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION ||
-      version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION ||
-      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === 106 || version === 107 || version === 108 || version === 109 || version === 110 || version === 111 || version === 112 || version === 113 || version === 114 || version === 115 || version === LATEST_SCHEMA_VERSION),
-    'SCHEMA_UNSUPPORTED',
-    '数据库版本不受支持。',
-  );
-  if (version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION ||
-      version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION ||
-      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === 106 || version === 107 || version === 108 || version === 109 || version === 110 || version === 111 || version === 112 || version === 113 || version === 114 || version === 115 || version === LATEST_SCHEMA_VERSION)) {
-    validateEditorialWorkspaceProfileSchema(db);
-    return;
-  }
-  if (version === 11) {
-    try {
-      db.exec(`
-        BEGIN IMMEDIATE;
-        ${NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL};
-        ${NATIVE_ARTIFACT_BOOK_ENABLEMENTS_SCHEMA_SQL};
-        PRAGMA user_version = ${EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION};
-      `);
-      validateEditorialWorkspaceProfileNativeSchema(db);
-      db.exec('COMMIT;');
-      version = EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION;
-    } catch (error) {
-      try {
-        db.exec('ROLLBACK;');
-      } catch (rollbackError) {
-        throw new AggregateError([error, rollbackError], 'SQLite native-artifact schema migration rollback failed.');
-      }
-      throw error;
-    }
-  }
-  requireProfile(
-    version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION,
-    'SCHEMA_UNSUPPORTED',
-    '数据库版本不受支持。',
-  );
-  validateEditorialWorkspaceProfileNativeSchema(db);
-  try {
-    db.exec(`
-      BEGIN IMMEDIATE;
-      ${EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISIONS_SCHEMA_SQL};
-      ${EDITORIAL_WORKSPACE_PROFILE_BOOK_PINS_SCHEMA_SQL};
-      ${Object.values(EDITORIAL_WORKSPACE_PROFILE_SIDECAR_TRIGGER_SQL).join(';\n')};
-    `);
-    insertSidecarDefinitions(db);
-    db.prepare(
-      `INSERT INTO editorial_workspace_profile_book_pins(
-         book_id, native_artifact_id, sidecar_id, sidecar_revision, sidecar_sha256, pinned_at
-       )
-       SELECT book_id, artifact_id, ?, 1, ?, enabled_at
-       FROM native_artifact_book_enablements ORDER BY book_id`,
-    ).run(
-      EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID,
-      EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_1_DIGEST,
-    );
-    db.exec(`PRAGMA user_version = ${EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION};`);
-    validateEditorialWorkspaceProfileSchema(db);
-    db.exec('COMMIT;');
-  } catch (error) {
-    try {
-      db.exec('ROLLBACK;');
-    } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'SQLite authority-sidecar schema migration rollback failed.');
-    }
-    throw error;
   }
 }
 

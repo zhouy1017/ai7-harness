@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { canonicalJson, sha256Hex } from './analysis/canonical.js';
@@ -37,27 +38,9 @@ export const AI_EDIT_LOCK_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const AI_EDIT_LOCK_TRIGGER_SQL: Readonly<Record<string, string>> = {
-  ai_edit_lock_events_no_update: `CREATE TRIGGER ai_edit_lock_events_no_update
-    BEFORE UPDATE ON ai_edit_lock_events
-    BEGIN
-      SELECT RAISE(ABORT, 'AI_EDIT_LOCK_LEDGER_IMMUTABLE');
-    END`,
-  ai_edit_lock_events_no_delete: `CREATE TRIGGER ai_edit_lock_events_no_delete
-    BEFORE DELETE ON ai_edit_lock_events
-    BEGIN
-      SELECT RAISE(ABORT, 'AI_EDIT_LOCK_LEDGER_IMMUTABLE');
-    END`,
-};
-
-/** The foreign keys of the relation, in the exact-schema validator's own spelling. */
-export const AI_EDIT_LOCK_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  ai_edit_lock_events: [
-    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
-    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
-    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const AI_EDIT_LOCK_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  ai_edit_lock_events: 'AI_EDIT_LOCK_LEDGER_IMMUTABLE',
+});
 
 type SqlRow = Record<string, SQLOutputValue>;
 
@@ -71,22 +54,6 @@ function relationExists(db: DatabaseSync): boolean {
   const exists = db.prepare(TABLE_PRESENT).get() !== undefined;
   if (exists) relationSeen.add(db);
   return exists;
-}
-
-/** Revision 111's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
-export function initializeAiEditLockSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(AI_EDIT_LOCK_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(AI_EDIT_LOCK_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'AI edit lock schema rollback failed.');
-    }
-    throw error;
-  }
 }
 
 /** The lock set as it stands: the blocks locked one by one and the sections locked whole, each still in the working state. */

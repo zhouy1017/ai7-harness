@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { basename } from 'node:path';
@@ -53,24 +54,9 @@ export const REVIEW_GUIDELINE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const REVIEW_GUIDELINE_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(REVIEW_GUIDELINE_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'REVIEW_GUIDELINE_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'REVIEW_GUIDELINE_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const REVIEW_GUIDELINE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  review_guideline_versions: [],
-};
+export const REVIEW_GUIDELINE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  review_guideline_versions: 'REVIEW_GUIDELINE_LEDGER_IMMUTABLE',
+});
 
 export class ReviewGuidelineError extends Error {
   constructor(readonly code: string, message: string) {
@@ -87,7 +73,6 @@ const RECORD_SCHEMA = 'ai7.review-guideline-version/1';
 const BUILTIN_SCHEMA = 'ai7.review-guideline-builtin/1';
 /** Who issues an imported version: the house, whatever AI7 issued before it (KB-003 keeps that provenance in the chain). */
 export const HOUSE_GUIDELINE_ISSUER = '本社' as const;
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'review_guideline_versions'";
 /** The contract's own bounds on what a category may hand the model (`review-category-contract.ts`). */
 export const MAX_GUIDELINE_CLAUSES = 40;
 export const MAX_GUIDELINE_CLAUSE_GRAPHEMES = 300;
@@ -124,22 +109,6 @@ const CHINESE_CLAUSE = /^\s*第\s*([0-9０-９一二三四五六七八九十百]
 /** Full-width digits read as the digits they are. */
 function asciiDigits(text: string): string {
   return text.replace(/[０-９]/gu, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0));
-}
-
-/** Revision 45's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
-export function initializeReviewGuidelineSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(REVIEW_GUIDELINE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(REVIEW_GUIDELINE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Review guideline schema rollback failed.');
-    }
-    throw error;
-  }
 }
 
 /** A number written in Chinese, 一 to 九百九十九, as a clause may be numbered. */

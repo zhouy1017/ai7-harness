@@ -2,7 +2,7 @@
   "name": "ai7-harness",
   "version": "0.7.3",
   "ai7": {
-    "dataVersion": 1
+    "dataVersion": 2
   },
   "private": true,
   "description": "AI7 Chinese-first editorial desktop application",

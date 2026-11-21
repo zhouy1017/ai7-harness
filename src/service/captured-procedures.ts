@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
@@ -163,38 +164,13 @@ export const CAPTURED_PROCEDURE_SCHEMA_SQL = {
 
 /** Every relation is a ledger; a stopped version takes no further state, whoever writes it (ADR 0087 §5). */
 export const CAPTURED_PROCEDURE_TRIGGER_SQL: Readonly<Record<string, string>> = {
-  ...Object.fromEntries(
-    Object.keys(CAPTURED_PROCEDURE_SCHEMA_SQL).flatMap((table) => [
-      [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'CAPTURED_PROCEDURE_LEDGER_IMMUTABLE');
-    END`],
-      [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'CAPTURED_PROCEDURE_LEDGER_IMMUTABLE');
-    END`],
-    ]),
-  ),
+  ...appendOnly(Object.fromEntries(Object.keys(CAPTURED_PROCEDURE_SCHEMA_SQL).map((table) => [table, 'CAPTURED_PROCEDURE_LEDGER_IMMUTABLE']))),
   captured_procedure_states_after_stopped: `CREATE TRIGGER captured_procedure_states_after_stopped
     BEFORE INSERT ON captured_procedure_states
     WHEN EXISTS (SELECT 1 FROM captured_procedure_states s WHERE s.version_id = NEW.version_id AND s.state = 'stopped')
     BEGIN
       SELECT RAISE(ABORT, 'CAPTURED_PROCEDURE_STOPPED');
     END`,
-};
-
-/** The foreign keys of the six relations, in the exact-schema validator's own spelling. */
-export const CAPTURED_PROCEDURE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  captured_procedure_versions: [
-    'procedure_id>captured_procedures.procedure_id:NO ACTION/NO ACTION/NONE',
-    'source_book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'source_review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE',
-  ],
-  captured_procedure_states: ['version_id>captured_procedure_versions.version_id:NO ACTION/NO ACTION/NONE'],
-  review_run_procedure_pins: ['review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE'],
-  developer_capability_proposal_exports: ['proposal_version_id>developer_capability_proposals.proposal_version_id:NO ACTION/NO ACTION/NONE'],
 };
 
 export class CapturedProcedureError extends Error {
@@ -206,26 +182,6 @@ export class CapturedProcedureError extends Error {
 
 export function requireProcedure(condition: unknown, code: string, message: string): asserts condition {
   if (!condition) throw new CapturedProcedureError(code, message);
-}
-
-/**
- * Revision 63's six relations and their triggers, created once and never rebuilt: a store that predates them gains six empty
- * relations and nothing existing moves. Shape-detected, and run before the version is stamped in `task-authorization.ts`.
- */
-export function initializeCapturedProcedureSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'captured_procedures'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(CAPTURED_PROCEDURE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(CAPTURED_PROCEDURE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Captured procedure schema rollback failed.');
-    }
-    throw error;
-  }
-  requireProcedure(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
 // ---- the document ----------------------------------------------------------------------------------------

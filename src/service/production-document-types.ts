@@ -21,24 +21,10 @@ export const DERIVATIVE_WORKSPACE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const DERIVATIVE_WORKSPACE_FOREIGN_KEYS = {
-  production_document_categories: [],
-  production_document_metadata: [
-    'document_id>production_documents.document_id:NO ACTION/NO ACTION/NONE',
-    'type_id>production_document_categories.type_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
-
-export function initializeDerivativeWorkspaceSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'production_document_categories'").get()) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(DERIVATIVE_WORKSPACE_SCHEMA_SQL)) db.exec(sql);
-    BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.forEach((type, position) => db.prepare(
-      'INSERT INTO production_document_categories VALUES (?, ?, ?, ?)',
-    ).run(type.typeId, type.label, '', position));
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+/** The baseline's seed (#1634): the built-in document categories, in their order. */
+export function seedProductionDocumentCategories(db: DatabaseSync): void {
+  const insert = db.prepare('INSERT INTO production_document_categories VALUES (?, ?, ?, ?)');
+  BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.forEach((type, position) => insert.run(type.typeId, type.label, '', position));
 }
 
 export function listProductionDocumentTypes(db: DatabaseSync): ProductionDocumentTypesProjection {

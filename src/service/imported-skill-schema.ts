@@ -1,5 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
-import { IMPORTED_SKILL_SCHEMA_VERSION, IMPORTED_SKILL_UPDATE_SCHEMA_VERSION } from './task-authorization.js';
+import { appendOnly } from './append-only.js';
 
 /** ADR 0090: sibling ledgers; the sole native_artifact_installations carrier CHECK never changes. */
 export const IMPORTED_SKILL_SCHEMA_SQL = {
@@ -47,10 +46,7 @@ export const IMPORTED_SKILL_SCHEMA_SQL = {
 } as const;
 
 export const IMPORTED_SKILL_TRIGGER_SQL: Readonly<Record<string, string>> = {
-  ...Object.fromEntries(Object.keys(IMPORTED_SKILL_SCHEMA_SQL).flatMap((table) => ['update', 'delete'].map((op) => [
-    `${table}_no_${op}`, `CREATE TRIGGER ${table}_no_${op} BEFORE ${op.toUpperCase()} ON ${table}
-    BEGIN SELECT RAISE(ABORT, 'IMPORTED_SKILL_IMMUTABLE'); END`,
-  ]))),
+  ...appendOnly(Object.fromEntries(Object.keys(IMPORTED_SKILL_SCHEMA_SQL).map((table) => [table, 'IMPORTED_SKILL_IMMUTABLE']))),
   imported_skill_states_transition: `CREATE TRIGGER imported_skill_states_transition BEFORE INSERT ON imported_skill_states
     WHEN NEW.sequence != (SELECT coalesce(max(sequence), 0) + 1 FROM imported_skill_states WHERE revision_id = NEW.revision_id)
       OR (NEW.state IN ('validated', 'restricted', 'rejected') AND EXISTS (SELECT 1 FROM imported_skill_states WHERE revision_id = NEW.revision_id))
@@ -58,39 +54,6 @@ export const IMPORTED_SKILL_TRIGGER_SQL: Readonly<Record<string, string>> = {
       OR (NEW.state = 'enabled' AND coalesce((SELECT state FROM imported_skill_states WHERE revision_id = NEW.revision_id ORDER BY sequence DESC LIMIT 1), '') NOT IN ('installed-disabled', 'enabled'))
     BEGIN SELECT RAISE(ABORT, 'IMPORTED_SKILL_TRANSITION_INVALID'); END`,
 };
-
-export const IMPORTED_SKILL_FOREIGN_KEYS = {
-  imported_skill_snapshots: ['skill_id>imported_skills.skill_id:NO ACTION/NO ACTION/NONE'],
-  imported_skill_revisions: [
-    'skill_id>imported_skills.skill_id:NO ACTION/NO ACTION/NONE',
-    'previous_revision_id>imported_skill_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    // A revision names a snapshot of its own Skill only: the pair is one reference.
-    'snapshot_id>imported_skill_snapshots.snapshot_id:NO ACTION/NO ACTION/NONE',
-    'skill_id>imported_skill_snapshots.skill_id:NO ACTION/NO ACTION/NONE',
-  ],
-  imported_skill_states: [
-    'revision_id>imported_skill_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
-
-/**
- * Revision 81 adds the four relations to an earlier store. A store already at 81 or later is never given them anew: one that
- * lacks them is refused by the exact schema check, as every revision's missing relations are.
- */
-export function initializeImportedSkillSchema(db: DatabaseSync, version: number): void {
-  if (version >= IMPORTED_SKILL_SCHEMA_VERSION ||
-    Object.keys(IMPORTED_SKILL_SCHEMA_SQL).some((name) => db.prepare('SELECT 1 FROM sqlite_schema WHERE name = ?').get(name) !== undefined)) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(IMPORTED_SKILL_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(IMPORTED_SKILL_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}
 
 /**
  * The line the editor confirms to create the Artifact Update Rule (ADR 0045 § Update and rollback; REUSE-034). The rule relation's
@@ -158,10 +121,7 @@ export const IMPORTED_SKILL_UPDATE_SCHEMA_SQL = {
 } as const;
 
 export const IMPORTED_SKILL_UPDATE_TRIGGER_SQL: Readonly<Record<string, string>> = {
-  ...Object.fromEntries(Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL).flatMap((table) => ['update', 'delete'].map((op) => [
-    `${table}_no_${op}`, `CREATE TRIGGER ${table}_no_${op} BEFORE ${op.toUpperCase()} ON ${table}
-    BEGIN SELECT RAISE(ABORT, 'IMPORTED_SKILL_UPDATE_IMMUTABLE'); END`,
-  ]))),
+  ...appendOnly(Object.fromEntries(Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL).map((table) => [table, 'IMPORTED_SKILL_UPDATE_IMMUTABLE']))),
   imported_skill_update_rules_transition: `CREATE TRIGGER imported_skill_update_rules_transition BEFORE INSERT ON imported_skill_update_rules
     WHEN NEW.sequence != (SELECT coalesce(max(sequence), 0) + 1 FROM imported_skill_update_rules WHERE skill_id = NEW.skill_id)
       OR (NEW.action = 'create' AND coalesce((SELECT action FROM imported_skill_update_rules WHERE skill_id = NEW.skill_id ORDER BY sequence DESC LIMIT 1), 'revoke') != 'revoke')
@@ -193,41 +153,3 @@ export const IMPORTED_SKILL_UPDATE_TRIGGER_SQL: Readonly<Record<string, string>>
       OR (NEW.candidate_id IS NOT NULL AND (SELECT skill_id FROM imported_skill_update_candidates WHERE candidate_id = NEW.candidate_id AND sequence = 1) IS NOT NEW.skill_id)
     BEGIN SELECT RAISE(ABORT, 'IMPORTED_SKILL_SELECTION_INVALID'); END`,
 };
-
-export const IMPORTED_SKILL_UPDATE_FOREIGN_KEYS = {
-  imported_skill_update_rules: [
-    'skill_id>imported_skills.skill_id:NO ACTION/NO ACTION/NONE',
-    'revokes_rule_id>imported_skill_update_rules.rule_id:NO ACTION/NO ACTION/NONE',
-  ],
-  imported_skill_update_candidates: [
-    'skill_id>imported_skills.skill_id:NO ACTION/NO ACTION/NONE',
-    'from_snapshot_id>imported_skill_snapshots.snapshot_id:NO ACTION/NO ACTION/NONE',
-    'to_snapshot_id>imported_skill_snapshots.snapshot_id:NO ACTION/NO ACTION/NONE',
-    'base_revision_id>imported_skill_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'adopted_revision_id>imported_skill_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'rule_id>imported_skill_update_rules.rule_id:NO ACTION/NO ACTION/NONE',
-  ],
-  imported_skill_current_selections: [
-    'skill_id>imported_skills.skill_id:NO ACTION/NO ACTION/NONE',
-    'revision_id>imported_skill_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
-
-/**
- * Revision 83 adds the three relations to an earlier store, whatever revision it stood at; the revision-81 relations they refer to
- * are created first by `initializeImportedSkillSchema`. A store already at 83 or later is never given them anew: one that lacks
- * them is refused by the exact schema check, as every revision's missing relations are.
- */
-export function initializeImportedSkillUpdateSchema(db: DatabaseSync, version: number): void {
-  if (version >= IMPORTED_SKILL_UPDATE_SCHEMA_VERSION ||
-    Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL).some((name) => db.prepare('SELECT 1 FROM sqlite_schema WHERE name = ?').get(name) !== undefined)) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(IMPORTED_SKILL_UPDATE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(IMPORTED_SKILL_UPDATE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}

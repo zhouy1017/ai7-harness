@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { baselineAnalysisPlan, isRemoteExecutionRoute } from './task-plan.js';
 import { customAnalysisPlan } from './analysis/custom-analysis-kind.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
@@ -39,7 +40,6 @@ import {
   customAnalysisTextRefusal,
 } from './analysis/custom-analysis-contract.js';
 import type { CustomAnalysisVersionInput } from './analysis/custom-analysis-kind.js';
-import { CUSTOM_ANALYSIS_SCHEMA_VERSION } from './task-authorization.js';
 import type { AnalysisKindDefinition } from './analysis/kind-definition.js';
 import { customAnalysisKindDefinition } from './analysis/custom-analysis-kind.js';
 import { BaselineAnalysisStore, type ProgressReader, runIsActive } from './analysis/baseline-analysis-store.js';
@@ -96,39 +96,12 @@ export const CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL = {
 
 /** Every relation is a ledger; a stopped version takes no further state, whoever writes it. */
 export const CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL: Readonly<Record<string, string>> = {
-  ...Object.fromEntries(
-    Object.keys(CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL).flatMap((table) => ['update', 'delete'].map((op) => [
-      `${table}_no_${op}`, `CREATE TRIGGER ${table}_no_${op} BEFORE ${op.toUpperCase()} ON ${table}
-    BEGIN SELECT RAISE(ABORT, 'CUSTOM_ANALYSIS_DIMENSION_IMMUTABLE'); END`,
-    ])),
-  ),
+  ...appendOnly(Object.fromEntries(Object.keys(CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL).map((table) => [table, 'CUSTOM_ANALYSIS_DIMENSION_IMMUTABLE']))),
   custom_analysis_dimension_states_after_stopped: `CREATE TRIGGER custom_analysis_dimension_states_after_stopped
     BEFORE INSERT ON custom_analysis_dimension_states
     WHEN EXISTS (SELECT 1 FROM custom_analysis_dimension_states s WHERE s.version_id = NEW.version_id AND s.state = 'stopped')
     BEGIN SELECT RAISE(ABORT, 'CUSTOM_ANALYSIS_DIMENSION_STOPPED'); END`,
 };
-
-/** The foreign keys of the three relations, in the exact-schema validator's own spelling. */
-export const CUSTOM_ANALYSIS_DIMENSION_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  custom_analysis_dimension_versions: ['dimension_id>custom_analysis_dimensions.dimension_id:NO ACTION/NO ACTION/NONE'],
-  custom_analysis_dimension_states: ['version_id>custom_analysis_dimension_versions.version_id:NO ACTION/NO ACTION/NONE'],
-};
-
-/** Revision 82's relations, created once before the version is stamped: an older store gains them empty and nothing moves. */
-export function initializeCustomAnalysisDimensionSchema(db: DatabaseSync, version: number): void {
-  if (version >= CUSTOM_ANALYSIS_SCHEMA_VERSION || Object.keys(CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL).some((name) => db.prepare('SELECT 1 FROM sqlite_schema WHERE name = ?').get(name) !== undefined)) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Custom analysis dimension schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 export class CustomAnalysisDimensionError extends Error {
   constructor(readonly code: string, message: string) {

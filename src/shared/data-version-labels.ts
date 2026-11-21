@@ -11,6 +11,11 @@ export function newerDataVersionMessage(dataVersion: number, schemaRevision: num
   return `这份数据来自更新的 AI7（数据版本 ${dataVersion} / 数据库修订 ${schemaRevision}），请使用更新的 AI7 打开。`;
 }
 
+/** Data an earlier AI7 wrote, refused before anything touches it (#1634). */
+export function olderDataVersionMessage(dataVersion: number): string {
+  return `这份数据来自较早的 AI7（数据版本 ${dataVersion}），这一版 AI7 还不能打开它：AI7 没有打开这份数据，也没有改动它。请使用原来的 AI7 打开。`;
+}
+
 /** Accept only the exact, bounded storage refusals owned here, on both sides of startup IPC. */
 export function dataVersionStartupRefusal(code: unknown, message: unknown): { code: string; message: string } | null {
   if (typeof code !== 'string' || typeof message !== 'string') return null;
@@ -19,6 +24,10 @@ export function dataVersionStartupRefusal(code: unknown, message: unknown): { co
     (code === 'UPGRADE_BACKUP_FAILED' && message === UPGRADE_BACKUP_FAILED) ||
     (code === 'UPGRADE_BACKUP_EXISTS' && message === UPGRADE_BACKUP_EXISTS) ||
     (code === 'UPGRADE_BACKUP_UNSUPPORTED' && message === UPGRADE_BACKUP_UNSUPPORTED)) return { code, message };
+  if (code === 'DATA_VERSION_OLDER') {
+    const older = /^这份数据来自较早的 AI7（数据版本 ([1-9]\d{0,15})），这一版 AI7 还不能打开它：AI7 没有打开这份数据，也没有改动它。请使用原来的 AI7 打开。$/u.exec(message);
+    return older !== null && Number.isSafeInteger(Number(older[1])) ? { code, message } : null;
+  }
   if (code !== 'DATA_VERSION_NEWER') return null;
   const numbers = /^这份数据来自更新的 AI7（数据版本 ([1-9]\d{0,15}) \/ 数据库修订 ([1-9]\d{0,15})），请使用更新的 AI7 打开。$/u.exec(message);
   if (numbers === null || !numbers.slice(1).every((value) => Number.isSafeInteger(Number(value)))) return null;

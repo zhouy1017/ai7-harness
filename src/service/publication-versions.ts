@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -94,40 +95,11 @@ export const PUBLICATION_VERSION_SCHEMA_SQL = {
 } as const;
 
 /** Every Publication Version relation is a ledger: a row is appended once and never rewritten or removed. */
-export const PUBLICATION_VERSION_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(PUBLICATION_VERSION_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'PUBLICATION_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'PUBLICATION_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the three relations, in the exact-schema validator's own spelling. */
-export const PUBLICATION_VERSION_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  publication_versions: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
-    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
-    'milestone_id>milestone_versions.milestone_id:NO ACTION/NO ACTION/NONE',
-    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-  public_release_permissions: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'publication_version_id>publication_versions.publication_version_id:NO ACTION/NO ACTION/NONE',
-    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-  publication_events: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'publication_version_id>publication_versions.publication_version_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const PUBLICATION_VERSION_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  publication_versions: 'PUBLICATION_LEDGER_IMMUTABLE',
+  public_release_permissions: 'PUBLICATION_LEDGER_IMMUTABLE',
+  publication_events: 'PUBLICATION_LEDGER_IMMUTABLE',
+});
 
 export class PublicationVersionError extends Error {
   constructor(readonly code: string, message: string) {
@@ -138,29 +110,6 @@ export class PublicationVersionError extends Error {
 
 export function requirePublication(condition: unknown, code: string, message: string): asserts condition {
   if (!condition) throw new PublicationVersionError(code, message);
-}
-
-/**
- * The three relations and their ledger triggers, created once and never rebuilt: a store that predates
- * them gains three empty relations and nothing existing moves. Like revisions 21 to 24 this runs before
- * the version is stamped in `task-authorization.ts` and is shape-detected, so a store that already has
- * them does no work here.
- */
-export function initializePublicationVersionSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'publication_versions'").get();
-  if (existing !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(PUBLICATION_VERSION_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(PUBLICATION_VERSION_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Publication version schema rollback failed.');
-    }
-    throw error;
-  }
-  requirePublication(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
 // ---- the store ------------------------------------------------------------------------------------

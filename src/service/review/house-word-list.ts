@@ -1,3 +1,4 @@
+import { appendOnly } from '../append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -24,16 +25,9 @@ export const HOUSE_WORD_LIST_SCHEMA_SQL = { house_word_list_versions: `CREATE TA
   CHECK((ordinal = 1 AND previous_version_id IS NULL AND previous_sha256 IS NULL) OR
     (ordinal > 1 AND previous_version_id IS NOT NULL AND previous_sha256 IS NOT NULL))
 ) STRICT` } as const;
-export const HOUSE_WORD_LIST_TRIGGER_SQL = {
-  house_word_list_versions_no_update: `CREATE TRIGGER house_word_list_versions_no_update BEFORE UPDATE ON house_word_list_versions
-    BEGIN SELECT RAISE(ABORT, 'HOUSE_WORD_LIST_IMMUTABLE'); END`,
-  house_word_list_versions_no_delete: `CREATE TRIGGER house_word_list_versions_no_delete BEFORE DELETE ON house_word_list_versions
-    BEGIN SELECT RAISE(ABORT, 'HOUSE_WORD_LIST_IMMUTABLE'); END`,
-} as const;
-export const HOUSE_WORD_LIST_FOREIGN_KEYS = {
-  house_word_list_versions: ['previous_version_id>house_word_list_versions.version_id:NO ACTION/NO ACTION/NONE',
-    'previous_sha256>house_word_list_versions.sha256:NO ACTION/NO ACTION/NONE'],
-} as const;
+export const HOUSE_WORD_LIST_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  house_word_list_versions: 'HOUSE_WORD_LIST_IMMUTABLE',
+});
 type Row = Record<string, SQLOutputValue>;
 function requireRecord(value: unknown): asserts value { houseRequire(value, 'HOUSE_RECORD_INVALID', '词表历史、结构或摘要损坏；未更改任何词条。'); }
 function sqlIdentity(sql: string): string { return sql.replace(/\s+/gu, ' ').trim(); }
@@ -111,15 +105,6 @@ export function validateHouseWordListStore(db: DatabaseSync): HouseWordListDocum
     previous = document;
   }
   return previous;
-}
-/** Disposable-owner tests and, after its release, the normal store initializer use this same DDL. */
-export function initializeHouseWordListSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'house_word_list_versions'").get() !== undefined;
-  if (existing) { validateHouseWordListStore(db); return; }
-  transaction(db, () => {
-    db.exec(HOUSE_WORD_LIST_SCHEMA_SQL.house_word_list_versions);
-    for (const sql of Object.values(HOUSE_WORD_LIST_TRIGGER_SQL)) db.exec(sql);
-  });
 }
 export class HouseWordLists {
   constructor(private readonly db: DatabaseSync) {}

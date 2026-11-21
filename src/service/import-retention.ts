@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { createHash } from 'node:crypto';
 import {
   closeSync,
@@ -1347,19 +1348,6 @@ export function validateWordChoice(value: unknown): WordTrackedChoiceInput {
 
 type SqlRow = Record<string, SQLOutputValue>;
 
-/** `import_fidelity_categories` exactly as revisions 10 to 26 carried it: eight positions, three statuses. */
-export const IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL = `CREATE TABLE import_fidelity_categories (
-    fidelity_review_id TEXT NOT NULL REFERENCES import_fidelity_reviews(fidelity_review_id),
-    category_key TEXT NOT NULL,
-    display_label TEXT NOT NULL,
-    item_count INTEGER NOT NULL CHECK(item_count >= 0),
-    status TEXT NOT NULL CHECK(status IN ('preserved', 'degraded', 'unsupported')),
-    detail TEXT NOT NULL,
-    position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 8),
-    PRIMARY KEY(fidelity_review_id, category_key),
-    UNIQUE(fidelity_review_id, position)
-  ) STRICT`;
-
 /**
  * The widened relation of revision 27: a review parsed under `ai7-docx-fflate-saxes/2` has ten classes
  * and may say `retained`; one recorded under `/1` keeps its eight rows as they were.
@@ -1424,32 +1412,10 @@ export const IMPORT_RETENTION_SCHEMA_SQL = {
 } as const;
 
 /** The choice and the mapping are records of a committed import: appended once, never rewritten. */
-export const IMPORT_RETENTION_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  (['import_fidelity_choices', 'manuscript_block_sources'] as const).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'IMPORT_RETENTION_RECORD_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'IMPORT_RETENTION_RECORD_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the four relations, in the exact-schema validator's own spelling. */
-export const IMPORT_RETENTION_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  import_fidelity_choices: ['fidelity_review_id>import_fidelity_reviews.fidelity_review_id:NO ACTION/NO ACTION/NONE'],
-  staged_import_block_sources: ['draft_id>staged_import_snapshots.draft_id:NO ACTION/CASCADE/NONE'],
-  staged_import_text_box_paragraphs: ['draft_id>staged_import_snapshots.draft_id:NO ACTION/CASCADE/NONE'],
-  manuscript_block_sources: [
-    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
-    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const IMPORT_RETENTION_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  import_fidelity_choices: 'IMPORT_RETENTION_RECORD_IMMUTABLE',
+  manuscript_block_sources: 'IMPORT_RETENTION_RECORD_IMMUTABLE',
+});
 
 /** Issue #1132's closed Word layer; the historical revision-27 relations keep their exact SQL. */
 export const WORD_IMPORT_RETENTION_SCHEMA_SQL = {
@@ -1530,14 +1496,14 @@ export const WORD_IMPORT_RETENTION_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const WORD_IMPORT_RETENTION_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(WORD_IMPORT_RETENTION_SCHEMA_SQL).filter((table) => table !== 'staged_word_revision_intakes').flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update BEFORE UPDATE ON ${table}
-    BEGIN SELECT RAISE(ABORT, 'WORD_IMPORT_RECORD_IMMUTABLE'); END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete BEFORE DELETE ON ${table}
-    BEGIN SELECT RAISE(ABORT, 'WORD_IMPORT_RECORD_IMMUTABLE'); END`],
-  ]),
-);
+export const WORD_IMPORT_RETENTION_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  word_revision_sources: 'WORD_IMPORT_RECORD_IMMUTABLE',
+  word_revision_imports: 'WORD_IMPORT_RECORD_IMMUTABLE',
+  word_manuscript_source_segments: 'WORD_IMPORT_RECORD_IMMUTABLE',
+  word_tracked_edit_samples: 'WORD_IMPORT_RECORD_IMMUTABLE',
+  word_tracked_edit_sample_imports: 'WORD_IMPORT_RECORD_IMMUTABLE',
+  word_import_mark_sources: 'WORD_IMPORT_RECORD_IMMUTABLE',
+});
 
 export const WORD_IMPORT_RETENTION_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   staged_word_revision_intakes: ['draft_id>staged_import_snapshots.draft_id:NO ACTION/CASCADE/NONE'],
@@ -1619,29 +1585,6 @@ export function validateWordImportRetentionClosure(db: DatabaseSync): void {
   requireRetention(invalid === undefined, 'WORD_SOURCE_INVALID', 'Word 修订来源、导入、片段或样本存在不完整或跨图书的引用。');
 }
 
-/** Separate from revision 27: existing retention tables never cause the new layer to be skipped. */
-export function initializeWordImportRetentionSchema(db: DatabaseSync): void {
-  const existing = Object.keys(WORD_IMPORT_RETENTION_SCHEMA_SQL).filter((name) =>
-    db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(name) !== undefined);
-  if (existing.length > 0) {
-    validateWordImportRetentionSchema(db);
-    return;
-  }
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(WORD_IMPORT_RETENTION_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(WORD_IMPORT_RETENTION_TRIGGER_SQL)) db.exec(sql);
-    validateWordImportRetentionSchema(db);
-    requireRetention(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', 'Word 修订导入层引用校验失败。');
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Word import retention schema rollback failed.');
-    }
-    throw error;
-  }
-}
-
 export class ImportRetentionError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
@@ -1666,87 +1609,6 @@ function text(value: SQLOutputValue | undefined): string {
 /** A relation's text as the exact-schema validator compares it: no identifier quoting, no whitespace, no case. */
 function canonicalTableSql(sql: string): string {
   return sql.replace(/["`[\]]/gu, '').replace(/\s+/gu, '').toLowerCase();
-}
-
-/**
- * Which of its two texts `import_fidelity_categories` holds: revision 26's, or revision 27's widened
- * one. No other text was ever created, so any other is refused.
- */
-export function importFidelityCategoriesShape(db: DatabaseSync): 'revision-26' | 'current' {
-  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'import_fidelity_categories'").get() as SqlRow | undefined;
-  const sql = row === undefined ? '' : canonicalTableSql(text(row.sql));
-  if (sql === canonicalTableSql(IMPORT_FIDELITY_CATEGORIES_SQL)) return 'current';
-  requireRetention(sql === canonicalTableSql(IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL), 'SCHEMA_MIGRATION_FAILED', '导入保真分类表结构不兼容。');
-  return 'revision-26';
-}
-
-/**
- * Revision 26 → 27 for `import_fidelity_categories`: rebuilt from its widened text with every row
- * copied byte for byte, rowid included, in rowid order, and every index or trigger on it re-armed from
- * its own text (revision 26 created none; the indexes behind its keys come back with the table). It runs
- * in the caller's transaction with foreign keys off; the caller checks every reference before it commits.
- */
-export function widenImportFidelityCategories(db: DatabaseSync): void {
-  requireRetention(
-    db.isTransaction && integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys) === 0,
-    'SCHEMA_MIGRATION_FAILED',
-    '导入保真分类表只能在停用引用校验的事务中重建。',
-  );
-  const columnsOf = (): string => (db.prepare("SELECT name FROM pragma_table_info('import_fidelity_categories') ORDER BY cid").all() as SqlRow[])
-    .map((row) => text(row.name)).join(', ');
-  const rows = (): number => integer((db.prepare('SELECT count(*) total FROM import_fidelity_categories').get() as SqlRow).total);
-  const columns = columnsOf();
-  const before = rows();
-  const attached = (db.prepare(
-    "SELECT sql FROM sqlite_schema WHERE tbl_name = 'import_fidelity_categories' AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name",
-  ).all() as SqlRow[]).map((row) => text(row.sql));
-  db.exec('CREATE TEMP TABLE migrate_import_fidelity_categories AS SELECT rowid AS migrate_rowid, * FROM import_fidelity_categories');
-  db.exec('DROP TABLE import_fidelity_categories');
-  db.exec(IMPORT_FIDELITY_CATEGORIES_SQL);
-  requireRetention(columnsOf() === columns, 'SCHEMA_MIGRATION_FAILED', '导入保真分类表迁移前后的列不一致。');
-  db.exec(`INSERT INTO import_fidelity_categories(rowid, ${columns})
-    SELECT migrate_rowid, ${columns} FROM temp.migrate_import_fidelity_categories ORDER BY migrate_rowid`);
-  db.exec('DROP TABLE temp.migrate_import_fidelity_categories');
-  for (const sql of attached) db.exec(sql);
-  requireRetention(rows() === before, 'SCHEMA_MIGRATION_FAILED', '导入保真分类表迁移未保留全部记录。');
-}
-
-/**
- * Revision 27, once per store and in one transaction: `import_fidelity_categories` is rebuilt while it
- * holds revision 26's exact text, with foreign keys off around the transaction; then the four relations
- * are created, and every reference is checked before anything commits. Shape-detected: once
- * `import_fidelity_choices` exists this has been done.
- */
-export function initializeImportRetentionSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'import_fidelity_choices'").get();
-  if (existing !== undefined) return;
-  const widen = importFidelityCategoriesShape(db) === 'revision-26';
-  const foreignKeys = (): number => integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
-  const restoreForeignKeys = widen && foreignKeys() === 1;
-  if (widen) {
-    db.exec('PRAGMA foreign_keys = OFF');
-    requireRetention(foreignKeys() === 0, 'SCHEMA_MIGRATION_FAILED', '无法暂时停用引用校验以迁移数据库。');
-  }
-  try {
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      if (widen) widenImportFidelityCategories(db);
-      for (const sql of Object.values(IMPORT_RETENTION_SCHEMA_SQL)) db.exec(sql);
-      for (const sql of Object.values(IMPORT_RETENTION_TRIGGER_SQL)) db.exec(sql);
-      requireRetention(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-      db.exec('COMMIT');
-    } catch (error) {
-      try { db.exec('ROLLBACK'); } catch (rollbackError) {
-        throw new AggregateError([error, rollbackError], 'Import retention schema rollback failed.');
-      }
-      throw error;
-    }
-  } finally {
-    if (restoreForeignKeys) {
-      db.exec('PRAGMA foreign_keys = ON');
-      requireRetention(foreignKeys() === 1, 'SCHEMA_MIGRATION_FAILED', '无法恢复引用校验。');
-    }
-  }
 }
 
 /** One paragraph of a staged text box, as `staged_import_text_box_paragraphs` holds it. */

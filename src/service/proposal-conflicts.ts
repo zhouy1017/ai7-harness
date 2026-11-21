@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -111,32 +112,11 @@ export const PROPOSAL_CONFLICT_SCHEMA_SQL = {
 } as const;
 
 /** Every conflict relation is a ledger: a row is appended once and never rewritten or removed. */
-export const PROPOSAL_CONFLICT_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(PROPOSAL_CONFLICT_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'PROPOSAL_CONFLICT_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'PROPOSAL_CONFLICT_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the three relations, in the exact-schema validator's own spelling. */
-export const PROPOSAL_CONFLICT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  proposal_conflict_drafts: ['mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE'],
-  proposal_conflict_deferrals: ['mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE'],
-  proposal_conflict_outcomes: [
-    'decision_id>proposal_item_decisions.decision_id:NO ACTION/NO ACTION/NONE',
-    'draft_id>proposal_conflict_drafts.draft_id:NO ACTION/NO ACTION/NONE',
-    'mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE',
-    'new_mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const PROPOSAL_CONFLICT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  proposal_conflict_drafts: 'PROPOSAL_CONFLICT_LEDGER_IMMUTABLE',
+  proposal_conflict_deferrals: 'PROPOSAL_CONFLICT_LEDGER_IMMUTABLE',
+  proposal_conflict_outcomes: 'PROPOSAL_CONFLICT_LEDGER_IMMUTABLE',
+});
 
 export class ProposalConflictError extends Error {
   constructor(readonly code: string, message: string) {
@@ -147,29 +127,6 @@ export class ProposalConflictError extends Error {
 
 function requireConflict(condition: unknown, code: string, message: string): asserts condition {
   if (!condition) throw new ProposalConflictError(code, message);
-}
-
-/**
- * The three relations and their ledger triggers, created once and never rebuilt: a store that predates
- * them gains three empty relations and nothing existing moves. Like revisions 21 to 25 this runs before
- * the version is stamped in `task-authorization.ts` and is shape-detected, so a store that already has
- * them does no work here.
- */
-export function initializeProposalConflictSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'proposal_conflict_drafts'").get();
-  if (existing !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(PROPOSAL_CONFLICT_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(PROPOSAL_CONFLICT_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Proposal conflict schema rollback failed.');
-    }
-    throw error;
-  }
-  requireConflict(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
 const relationSeen = new WeakSet<DatabaseSync>();

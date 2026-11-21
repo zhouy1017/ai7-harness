@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { EvaluationProfileProjection, SaveEvaluationProfileInput } from '../shared/protocol.js';
@@ -25,33 +26,10 @@ export const EVALUATION_PROFILE_SCHEMA_SQL = {
   PRIMARY KEY(task_intent_id, prompt_contract_sha256)
 ) STRICT`,
 } as const;
-export const EVALUATION_PROFILE_TRIGGER_SQL = Object.fromEntries(Object.keys(EVALUATION_PROFILE_SCHEMA_SQL).flatMap((table) =>
-  ['update', 'delete'].map((operation) => [`${table}_no_${operation}`, `CREATE TRIGGER ${table}_no_${operation}
-    BEFORE ${operation.toUpperCase()} ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'EVALUATION_PROFILE_LEDGER_IMMUTABLE');
-    END`])));
-export const EVALUATION_PROFILE_FOREIGN_KEYS = {
-  evaluation_profile_versions: ['previous_version_id>evaluation_profile_versions.version_id:NO ACTION/NO ACTION/NONE'],
-  initial_evaluation_tasks: ['task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE'],
-};
-export function initializeEvaluationProfileSchema(db: DatabaseSync): void {
-  // The pair is created in one transaction, so a store holding only one of them is a state this code never wrote. Leave
-  // that partial state for the exact-schema check to refuse, rather than attempting the missing relation and surfacing
-  // SQLite's raw "already exists" (Issue #798, P3-3).
-  const present = Object.keys(EVALUATION_PROFILE_SCHEMA_SQL).filter((name) =>
-    db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(name) !== undefined);
-  if (present.length > 0) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(EVALUATION_PROFILE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(EVALUATION_PROFILE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollback) { throw new AggregateError([error, rollback], 'Evaluation profile schema rollback failed.'); }
-    throw error;
-  }
-}
+export const EVALUATION_PROFILE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  evaluation_profile_versions: 'EVALUATION_PROFILE_LEDGER_IMMUTABLE',
+  initial_evaluation_tasks: 'EVALUATION_PROFILE_LEDGER_IMMUTABLE',
+});
 
 const COUNTS = [1, 2, 4, 5, 10];
 export const EVALUATION_PROFILE_COUNT_REASON = '评分项数需要能把 100 分平均分成整数：1、2、4、5 或 10 项。';

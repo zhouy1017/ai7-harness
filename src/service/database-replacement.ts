@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
 import { lstat, mkdir, open, opendir, readdir, realpath, rename, rm, type FileHandle } from 'node:fs/promises';
@@ -79,20 +80,9 @@ export const DATABASE_REPLACEMENT_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const DATABASE_REPLACEMENT_TRIGGER_SQL: Readonly<Record<string, string>> = {
-  database_replacements_no_update: `CREATE TRIGGER database_replacements_no_update
-    BEFORE UPDATE ON database_replacements
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_REPLACEMENT_LEDGER_IMMUTABLE');
-    END`,
-  database_replacements_no_delete: `CREATE TRIGGER database_replacements_no_delete
-    BEFORE DELETE ON database_replacements
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_REPLACEMENT_LEDGER_IMMUTABLE');
-    END`,
-};
-
-export const DATABASE_REPLACEMENT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {};
+export const DATABASE_REPLACEMENT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  database_replacements: 'DATABASE_REPLACEMENT_LEDGER_IMMUTABLE',
+});
 
 export class DatabaseReplacementError extends Error {
   constructor(readonly code: string, message: string) {
@@ -122,29 +112,12 @@ type SqlRow = Record<string, SQLOutputValue>;
 /** How many of a merge's titles its record names; the rest are counted. */
 const MAX_MERGED_TITLES_LISTED = 10;
 
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'database_replacements'";
 const INTENT_SCHEMA = 'ai7.database-replacement.intent/1' as const;
 const RECORD_SCHEMA = 'ai7.database-replacement/1' as const;
 const INVALID = '替换本机数据的记录已损坏。';
 const INTERRUPTED = '上次替换本机数据的过程无法继续；AI7 没有再移动任何数据。';
 /** The Agent Data Root's own places a replacement leaves where they are. */
 export const REPLACEMENT_KEPT_ROOTS: ReadonlySet<string> = new Set(['shell', EXPORT_STAGING_DIRECTORY]);
-
-/** Revision 57's relation, created once: a store that predates it gains an empty ledger and nothing existing moves. */
-export function initializeDatabaseReplacementSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(DATABASE_REPLACEMENT_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(DATABASE_REPLACEMENT_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Database replacement schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 /** The fixed staging place beside the Agent Data Root where a replacement waits to be applied. */
 export function replacementStagingFor(dataRoot: string): string {

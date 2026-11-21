@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { BackgroundAnalysisStartingPoint, DefaultExecutionRuleBinding, MaterialPlanInputsProjection } from '../shared/protocol.js';
@@ -107,62 +108,12 @@ export const BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL: Readonly<Record<string
   ]),
 );
 
-function migrateBackgroundProcessingEnrollments(db: DatabaseSync): void {
-  const shape = db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'background_analysis_enrollments' AND type = 'table'").get()?.sql;
-  if (shape === undefined || (db.prepare('PRAGMA table_info(background_analysis_enrollments)').all()).some((row) => row.name === 'kind')) return;
-  requireEnrollment(Number(db.prepare('PRAGMA user_version').get()?.user_version) < 89, 'SCHEMA_INVALID', '当前版本缺少后台处理登记种类列。');
-  const normalize = (sql: string): string => sql.replace(/\s+/gu, ' ').trim();
-  for (const [table, sql] of Object.entries(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL)) {
-    requireEnrollment(normalize(String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)?.sql)) === normalize(sql), 'SCHEMA_INVALID', '后台处理登记前驱结构不兼容。');
-    for (const row of db.prepare(`SELECT canonical_json, sha256 FROM ${table}`).all()) {
-      requireEnrollment(typeof row.canonical_json === 'string' && sha256Hex(row.canonical_json) === row.sha256, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记记录摘要不一致。');
-    }
-  }
-  const foreignKeys = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
-  db.exec('PRAGMA foreign_keys = OFF');
-  try {
-    db.exec('BEGIN IMMEDIATE');
-    for (const table of Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL)) {
-      const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)).join(', ');
-      db.exec(`CREATE TEMP TABLE idle_${table} AS SELECT rowid AS prior_rowid, * FROM ${table}`);
-      db.exec(`DROP TABLE ${table}`);
-      db.exec(BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL[table]!);
-      db.exec(`INSERT INTO ${table}(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM temp.idle_${table} ORDER BY prior_rowid`);
-      db.exec(`DROP TABLE temp.idle_${table}`);
-      db.exec(BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL[`${table}_no_update`]!);
-      db.exec(BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL[`${table}_no_delete`]!);
-    }
-    requireEnrollment(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '后台处理登记迁移后引用校验失败。');
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
-  finally { if (foreignKeys) db.exec('PRAGMA foreign_keys = ON'); }
-}
-
 /** Every enrollment relation is a ledger: a row is appended once and never rewritten or removed. */
-export const BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'BACKGROUND_ANALYSIS_ENROLLMENT_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'BACKGROUND_ANALYSIS_ENROLLMENT_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the three relations, in the exact-schema validator's own spelling. */
-export const BACKGROUND_ANALYSIS_ENROLLMENT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  background_analysis_enrollments: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE'],
-  background_analysis_enrollment_versions: ['enrollment_id>background_analysis_enrollments.enrollment_id:NO ACTION/NO ACTION/NONE'],
-  background_analysis_enrollment_states: [
-    'enrollment_id>background_analysis_enrollments.enrollment_id:NO ACTION/NO ACTION/NONE',
-    'enrollment_version_id>background_analysis_enrollment_versions.enrollment_version_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  background_analysis_enrollments: 'BACKGROUND_ANALYSIS_ENROLLMENT_IMMUTABLE',
+  background_analysis_enrollment_versions: 'BACKGROUND_ANALYSIS_ENROLLMENT_IMMUTABLE',
+  background_analysis_enrollment_states: 'BACKGROUND_ANALYSIS_ENROLLMENT_IMMUTABLE',
+});
 
 export class BackgroundAnalysisEnrollmentError extends Error {
   constructor(readonly code: string, message: string) {
@@ -173,28 +124,6 @@ export class BackgroundAnalysisEnrollmentError extends Error {
 
 export function requireEnrollment(condition: unknown, code: string, message: string): asserts condition {
   if (!condition) throw new BackgroundAnalysisEnrollmentError(code, message);
-}
-
-/**
- * Revision 66's three relations and their ledger triggers, created once and never rebuilt: a store that predates them gains
- * three empty relations and nothing existing moves. Shape-detected like revision 31's rule ledger, and run before the version is
- * stamped in `task-authorization.ts`, which widens the Run Authorizations' origin in the same revision.
- */
-export function initializeBackgroundAnalysisEnrollmentSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'background_analysis_enrollments'").get();
-  if (existing !== undefined) return migrateBackgroundProcessingEnrollments(db);
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Background analysis enrollment schema rollback failed.');
-    }
-    throw error;
-  }
-  requireEnrollment(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
 // ---- the ledger ------------------------------------------------------------------------------------------

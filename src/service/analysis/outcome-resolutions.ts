@@ -1,3 +1,4 @@
+import { appendOnly } from '../append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { AnalysisError, canonicalRecord, isRecord, parseCanonicalJson, requireAnalysis, sha256Hex } from './canonical.js';
@@ -29,27 +30,10 @@ export const OUTCOME_RESOLUTION_SCHEMA_SQL = {
 } as const;
 
 /** A resolution is appended once and never rewritten or removed, like every ledger row. */
-export const OUTCOME_RESOLUTION_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(OUTCOME_RESOLUTION_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'TASK_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'TASK_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
+export const OUTCOME_RESOLUTION_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  analysis_outcome_resolutions: 'TASK_LEDGER_IMMUTABLE',
+});
 
-/** The foreign key of the relation, in the exact-schema validator's own spelling. */
-export const OUTCOME_RESOLUTION_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  analysis_outcome_resolutions: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE'],
-};
-
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_outcome_resolutions'";
 const RESOLUTION_SCHEMA = 'ai7.analysis.outcome-resolution/1';
 /** The one determination the editor can make here: the request's result stays unknown, and its range or step stays a gap. */
 export const OUTCOME_RESOLUTION_DETERMINATION = 'kept-as-gap' as const;
@@ -57,22 +41,6 @@ export const OUTCOME_RESOLUTION_DETERMINATION = 'kept-as-gap' as const;
 export const OUTCOME_RESOLUTION_EVIDENCE = 'manual' as const;
 /** The most outcomes one resolution names — a Book's whole list, bounded as every list a read returns is. */
 export const OUTCOME_RESOLUTION_LIMIT = 500;
-
-/** Revision 68's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
-export function initializeOutcomeResolutionSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(OUTCOME_RESOLUTION_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(OUTCOME_RESOLUTION_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Outcome resolution schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 type SqlRow = Record<string, SQLOutputValue>;
 
