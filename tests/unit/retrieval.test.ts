@@ -20,8 +20,6 @@ import { localRetrievalRule } from '../support/policy-rules.js';
 const source = (id: string, text: string): RetrievalSource => ({ sourceKind: 'manuscript', sourceId: id, digest: 'a'.repeat(64),
   read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: `block-${id}`, text }] }) });
 const localTools = localRetrievalRule();
-const embeddings = (values: number[][]) => ({ identity: 'synthetic', dimensions: values[0]!.length, readiness: () => ({ state: 'ready' as const }),
-  embed: async () => values.map((value) => Float32Array.from(value)) });
 
 describe('Run-local pinned retrieval', () => {
   it('chunks deterministically by code units with stable bounded overlap', async () => {
@@ -44,38 +42,9 @@ describe('Run-local pinned retrieval', () => {
     expect(candidates.every((candidate) => candidate.preview.isWellFormed() && candidate.preview.length <= 200 &&
       index.exactFetch(candidate.candidateId).text.isWellFormed() && candidate.anchor.end - candidate.anchor.start <= 1_200)).toBe(true);
   });
-  it('combines local vector rank and lexical rank with reciprocal rank fusion', async () => {
-    const index = new RetrievalIndex([source('one', 'alpha'), source('two', 'beta')], embeddings([[1, 0], [0, 1], [1, 0]]));
-    const results = await index.retrieve('alpha');
-    expect(results).toHaveLength(2);
-    expect(results[0]!.score).toBe(1 / 61);
+  it('fuses rankings by reciprocal rank, equal ranks scoring equally', () => {
     expect(reciprocalRankFusion([['a', 'b'], ['b', 'a']]).get('a')).toBe(reciprocalRankFusion([['a', 'b'], ['b', 'a']]).get('b'));
-  });
-  it('ranks by local vector similarity when wording has no lexical match', async () => {
-    const index = new RetrievalIndex([source('one', 'alpha'), source('two', 'beta')], embeddings([[1, 0], [0, 1], [1, 0]]));
-    expect((await index.retrieve('gamma')).map((candidate) => candidate.sourceId)).toEqual(['two']);
-  });
-  it('ranks by BM25 alone, embedding nothing, while the provider needs its model or its digest does not match', async () => {
-    const sources = [source('one', 'alpha alpha beta'), source('two', 'beta gamma'), source('three', 'delta')];
-    const lexical = await new RetrievalIndex(sources).retrieve('alpha beta');
-    expect(lexical.map((candidate) => candidate.sourceId)).toEqual(['one', 'two']);
-    for (const readiness of [{ state: 'needs-model', expectedDigest: null }, { state: 'digest-mismatch', expectedDigest: 'a'.repeat(64), actualDigest: 'b'.repeat(64) }] as const) {
-      let calls = 0;
-      const provider = { identity: 'synthetic', dimensions: 2, readiness: () => readiness, embed: async () => { calls += 1; return []; } };
-      const materialVectors = async () => { calls += 1; return []; };
-      expect(await new RetrievalIndex(sources, provider, materialVectors).retrieve('alpha beta')).toEqual(lexical);
-      expect(calls).toBe(0);
-    }
-  });
-  it('consumes only pinned material-vector hits and ignores a different build or unpinned source', async () => {
-    const material: RetrievalSource = { sourceKind: 'material', sourceId: 'one', digest: 'a'.repeat(64),
-      read: () => ({ digest: 'a'.repeat(64), segments: [{ segmentOrdinal: 1, text: 'alpha' }] }) };
-    let digest = 'a'.repeat(64);
-    const query = async () => [{ materialId: 'foreign', indexDigest: digest, ordinal: 1, score: 1 }, { materialId: 'one', indexDigest: digest, ordinal: 1, score: 0.9 }];
-    const index = new RetrievalIndex([material], embeddings([[1]]), query);
-    expect((await index.retrieve('gamma')).map((candidate) => candidate.sourceId)).toEqual(['one']);
-    digest = 'b'.repeat(64);
-    expect((await index.retrieve('gamma')).length).toBe(0);
+    expect(reciprocalRankFusion([['a']]).get('a')).toBe(1 / 61);
   });
   it('refuses withdrawn and moved pins, never substituting fresh text', async () => {
     let digest = 'a'.repeat(64); let withdrawn = false;
@@ -94,23 +63,18 @@ describe('Run-local pinned retrieval', () => {
     index.dispose();
     expect(() => index.exactFetch(candidate!.candidateId)).toThrowError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
   });
-  it('never indexes an unpinned source and rechecks withdrawal after asynchronous ranking', async () => {
-    let withdrawn = false;
+  it('never indexes an unpinned source and rechecks withdrawal between ranking and answer', async () => {
+    let reads = 0;
+    // The first read ranks; the source is withdrawn before the second, which retrieve makes before it answers.
     const index = new RetrievalIndex([{ ...source('authorized', 'alpha'), read: () => {
-      if (withdrawn) throw new RetrievalError('MATERIAL_REFERENCE_UNAVAILABLE');
+      reads += 1;
+      if (reads > 1) throw new RetrievalError('MATERIAL_REFERENCE_UNAVAILABLE');
       return source('authorized', 'alpha').read();
-    } }], { ...embeddings([[1], [1]]), embed: async () => { withdrawn = true; return [Float32Array.from([1]), Float32Array.from([1])]; } });
+    } }]);
     expect(await index.retrieve('alpha')).toEqual([]);
+    expect(reads).toBe(2);
     expect(() => index.exactFetch('foreign')).toThrowError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
-  });
-  it('does not revive a disposed Run when an in-flight embedding completes', async () => {
-    let finish!: () => void;
-    const index = new RetrievalIndex([source('one', 'alpha')], { ...embeddings([[1], [1]]), embed: () => new Promise((resolve) => {
-      finish = () => resolve([Float32Array.from([1]), Float32Array.from([1])]);
-    }) });
-    const pending = index.retrieve('alpha');
-    index.dispose(); finish();
-    await expect(pending).rejects.toMatchObject({ code: 'RETRIEVAL_SOURCE_NOT_AUTHORIZED' });
+    index.dispose();
     await expect(index.retrieve('alpha')).rejects.toMatchObject({ code: 'RETRIEVAL_SOURCE_NOT_AUTHORIZED' });
   });
   it('certifies an anchored quotation only after Exact Fetch, preserving ordinary fixture bytes', async () => {
@@ -271,23 +235,23 @@ describe('local lexical retrieval over Han text (#1623)', () => {
     const naming = async (index: RetrievalIndex) => (await index.retrieve('长姑')).filter((candidate) => /长妈妈|阿长/u.test(book.texts.get(candidate.anchor.blockId!)!)).length;
     // Without the records only the shared 长 reaches a few of them; with them all eight candidates name her.
     expect(await naming(new RetrievalIndex([book]))).toBe(3);
-    expect(await naming(new RetrievalIndex([book], null, null, records))).toBe(8);
+    expect(await naming(new RetrievalIndex([book], records))).toBe(8);
     // A frequent name does not hide the other: 阿长 also reaches passages that say only 长妈妈, and 长妈妈 those that say only 阿长,
     // which the verbatim rule alone fills with the queried spelling (#1623 review A).
     const onlyOther = async (index: RetrievalIndex, query: string, other: string) => (await index.retrieve(query))
       .filter((candidate) => { const passage = book.texts.get(candidate.anchor.blockId!)!; return passage.includes(other) && !passage.includes(query); }).length;
     expect([await onlyOther(new RetrievalIndex([book]), '阿长', '长妈妈'), await onlyOther(new RetrievalIndex([book]), '长妈妈', '阿长')]).toEqual([0, 0]);
-    expect(await onlyOther(new RetrievalIndex([book], null, null, records), '阿长', '长妈妈')).toBe(ONLY_CHANG_MAMA);
-    expect(await onlyOther(new RetrievalIndex([book], null, null, records), '长妈妈', '阿长')).toBe(ONLY_A_CHANG);
+    expect(await onlyOther(new RetrievalIndex([book], records), '阿长', '长妈妈')).toBe(ONLY_CHANG_MAMA);
+    expect(await onlyOther(new RetrievalIndex([book], records), '长妈妈', '阿长')).toBe(ONLY_A_CHANG);
     // No name matches, only a one-character name, or a name that straddles a word boundary (先生的 holds 生的 across 先生|的):
     // the same ranking as without pinned records.
-    for (const query of ['天气', '甲', '先生的']) expect(await new RetrievalIndex([book], null, null, records).retrieve(query), query).toEqual(await new RetrievalIndex([book]).retrieve(query));
+    for (const query of ['天气', '甲', '先生的']) expect(await new RetrievalIndex([book], records).retrieve(query), query).toEqual(await new RetrievalIndex([book]).retrieve(query));
     // The straddling name, where only its sibling could reach a passage: substring matching would find 熟的 here.
-    expect(await new RetrievalIndex(words('熟的', '天气'), null, null, records).retrieve('先生的书')).toEqual([]);
+    expect(await new RetrievalIndex(words('熟的', '天气'), records).retrieve('先生的书')).toEqual([]);
     // At most eight other names: of nine siblings in the pinned order, the first (夏荷) and eighth (中原) are found, the ninth (上林) not.
     const names = ['春雨', '夏荷', '秋月', '冬雪', '东风', '西山', '南湖', '北海', '中原', '上林'];
     const many = { baseline: null, guidelines: [], terms: [{ kind: 'term', name: names[0], aliases: names.slice(1) }] };
-    const found = (await new RetrievalIndex(words(names[1]!, names[8]!, names[9]!), null, null, many).retrieve(names[0]!)).map((candidate) => candidate.sourceId);
+    const found = (await new RetrievalIndex(words(names[1]!, names[8]!, names[9]!), many).retrieve(names[0]!)).map((candidate) => candidate.sourceId);
     expect([...found].sort()).toEqual(['w0', 'w1']);
   }, 60_000);
   it('fuses further phrasings deterministically, and one query ranks as before', async () => {
@@ -303,16 +267,18 @@ describe('local lexical retrieval over Han text (#1623)', () => {
     expect(fused.map((candidate) => candidate.anchor.blockId)).toEqual(FUSED_ORDER);
     expect(index.searchManuscript('首印', 'tokenized').map((block) => block.blockId)).toEqual(TOKENIZED_ORDER);
   }, 60_000);
-  it('fuses phrasings with the local vectors and still rechecks withdrawal after the asynchronous embed', async () => {
-    let withdrawn = false; let withdrawOnEmbed = false;
+  it('fuses phrasings lexically and still rechecks withdrawal between ranking and answer', async () => {
+    let reads = 0; let withdrawAt = Infinity;
     const index = new RetrievalIndex([{ ...source('authorized', 'alpha'), read: () => {
-      if (withdrawn) throw new RetrievalError('MATERIAL_REFERENCE_UNAVAILABLE');
+      reads += 1;
+      if (reads >= withdrawAt) throw new RetrievalError('MATERIAL_REFERENCE_UNAVAILABLE');
       return source('authorized', 'alpha').read();
-    } }], { ...embeddings([[1], [1]]), embed: async (texts: readonly string[]) => { withdrawn = withdrawOnEmbed; return texts.map(() => Float32Array.from([1])); } });
+    } }]);
+    // Only 'alpha' matches: its passage is first of one of the two phrasings' rankings.
     const [candidate] = await index.retrieve('alpha', 8, undefined, ['beta']);
-    expect(candidate!.score).toBe(1 / 61 + 1 / 61 + 1 / 61);
+    expect(candidate!.score).toBe(1 / 61);
     expect(index.exactFetch(candidate!.candidateId).text).toBe('alpha');
-    withdrawOnEmbed = true;
+    withdrawAt = reads + 2;
     expect(await index.retrieve('alpha', 8, undefined, ['beta'])).toEqual([]);
   });
 });

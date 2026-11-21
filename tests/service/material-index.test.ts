@@ -24,8 +24,8 @@ import { readFileSync } from 'node:fs';
 // Service-integration suite (L2) for ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009,
 // ATTN-009) over the real store on a temporary Agent Data Root. The collected book is exact `sample1` — an admitted Public
 // SampleBook — and every other file is the suite's own synthetic words, never a manuscript. The Owner's option 乙
-// (2026-10-09) builds four layers — original, metadata, extracted text, sentence-anchored segments — and states similarity
-// vectors, recognition and machine 来源译文 as not provided. A Task reads the index read-only, only within its plan boundary.
+// (2026-10-09) builds four layers — original, metadata, extracted text, sentence-anchored segments — and states recognition
+// and machine 来源译文 as not provided; 相似段落检索 ranks the segments by words with nothing built (R5-F2c). A Task reads the index read-only, only within its plan boundary.
 
 /** An archive as every writer in the product writes one: at the fixed archive time (#611). */
 const archive = (files: Zippable): Uint8Array => zipSync(files, { mtime: fixedArchiveTime() });
@@ -120,17 +120,15 @@ describe('资料索引 over the real store', () => {
         const candidates = await index.retrieve('alpha');
         expect(index.exactFetch(candidates[0]!.candidateId).text.length > 0).toBe(true);
         expect(watching.changed()).toBe(false);
-        // Nothing persisted: no index, embedding or projection file is written anywhere under the data root.
+        // Nothing persisted: no index or projection file is written anywhere under the data root.
         expect(dataRootFiles()).toEqual(files);
         await expect(store.searchReferableMaterials({ bookId, query: 'alpha', k: 9 })).rejects.toMatchObject({ code: 'RETRIEVAL_ARGUMENTS_INVALID' });
-        // Hybrid ranking (#892 seam): without the item's vectors only the lexical rank counts; once the editor builds them, the
-        // pinned build's own vectors rank the same paragraph too and reciprocal-rank fusion lifts it above a single rank.
-        expect(Math.max(...(await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 })).candidates.map((candidate) => candidate.score))).toBeLessThanOrEqual(1 / 61);
-        store.buildMaterialVectors(item.materialId);
-        await store.settleMaterialLayers();
-        const hybrid = await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 });
-        expect(hybrid.candidates[0]!.score).toBeGreaterThan(1 / 61);
-        expect(hybrid.candidates.every((candidate) => candidate.sourceId === item.materialId && candidate.revisionOrIndexDigest === pin.indexDigest)).toBe(true);
+        // By the lexical ranking alone (R5-F2c): exactly the candidates and scores of a bare index over the same pinned build, the
+        // paragraph holding the words verbatim first.
+        const lexical = await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 });
+        expect(lexical.candidates).toEqual(await new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => store.readMaterialIndexForTask(scope, id, from))).retrieve('alpha delta', 8, ['material']));
+        expect(lexical.candidates[0]!.preview).toBe('alpha delta');
+        expect(lexical.candidates.every((candidate) => candidate.sourceId === item.materialId && candidate.revisionOrIndexDigest === pin.indexDigest)).toBe(true);
         setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
         expect((await index.retrieve('alpha')).length).toBe(0);
         expect(() => index.exactFetch(candidates[0]!.candidateId)).toThrowError('MATERIAL_REFERENCE_UNAVAILABLE');
@@ -145,8 +143,8 @@ describe('资料索引 over the real store', () => {
       // A store that does not serve builds nothing by itself: the item waits, every layer but the original pending, the
       // deferred ones not provided from the start.
       expect(added.index).toEqual({
-        state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, vectors: null, translation: null,
-        layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending', vectors: 'pending' },
+        state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, translation: null,
+        layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending' },
       });
       expect(await refusal(() => store.inspectLibraryMaterialSegments({ materialId: added.materialId, from: 1 }))).toBe('MATERIAL_INDEX_NOT_READY');
 
@@ -155,8 +153,8 @@ describe('资料索引 over the real store', () => {
       const built = store.inspectLibraryMaterial(added.materialId).index;
       expect(built.state).toBe('complete');
       expect(built.reason).toBeNull();
-      // Its similarity vectors wait for the editor to ask (Issue #892): never built on open.
-      expect(built.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'not-built' });
+      // Six layers: 相似段落检索 needs none of its own (R5-F2c).
+      expect(built.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete' });
       expect(built.metadata!.language).toBe('zh');
       expect(built.metadata!.paragraphs).toBeGreaterThan(MAX_MATERIAL_SEGMENTS_PAGE);
       expect(built.metadata!.sentences).toBeGreaterThanOrEqual(built.metadata!.paragraphs);
@@ -259,8 +257,8 @@ describe('资料索引 over the real store', () => {
       // A scan needs recognition, which is not provided (Issue #892); a file with no text has none. Each is a build that says
       // so, and the original and metadata stand. A web page is read since Issue #428's formats.
       expect(store.inspectLibraryMaterial(pdf.materialId).index).toMatchObject({
-        state: 'unsupported', reason: 'needs-recognition', vectors: null, translation: null,
-        layers: { original: 'complete', metadata: 'complete', text: 'unsupported', recognition: 'deferred', translation: 'unsupported', segments: 'unsupported', vectors: 'unsupported' },
+        state: 'unsupported', reason: 'needs-recognition', translation: null,
+        layers: { original: 'complete', metadata: 'complete', text: 'unsupported', recognition: 'deferred', translation: 'unsupported', segments: 'unsupported' },
       });
       expect(store.inspectLibraryMaterial(page.materialId).index).toMatchObject({
         state: 'complete', reason: null, layers: { text: 'complete', recognition: 'not-needed', segments: 'complete' },
@@ -326,7 +324,7 @@ describe('资料索引 over the real store', () => {
         const index = store.inspectLibraryMaterial(item.materialId).index;
         expect([index.state, index.reason, index.metadata?.documentTitle, index.metadata?.language, index.metadata?.headings, index.metadata?.paragraphs])
           .toEqual(['complete', null, title, 'zh', 1, sentences.length]);
-        expect(index.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'not-built' });
+        expect(index.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete' });
         const segments = segmentsOf(item.materialId);
         expect(segments.map((segment) => segment.sentences.map(([start, end]) => segment.text.slice(start, end)))).toEqual(sentences);
         expect(segments.map((segment) => segment.kind)).toEqual(['heading', ...sentences.slice(1).map(() => 'paragraph')]);

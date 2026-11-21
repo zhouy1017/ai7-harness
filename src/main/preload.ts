@@ -408,8 +408,6 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['inspectLibraryMaterialSegments']['output']>(IPC_CHANNELS.inspectLibraryMaterialSegments, input),
   searchReferableMaterials: (input: ServiceOperationMap['searchReferableMaterials']['input']) =>
     invoke<ServiceOperationMap['searchReferableMaterials']['output']>(IPC_CHANNELS.searchReferableMaterials, input),
-  buildMaterialVectors: (input: ServiceOperationMap['buildMaterialVectors']['input']) =>
-    invoke<ServiceOperationMap['buildMaterialVectors']['output']>(IPC_CHANNELS.buildMaterialVectors, input),
   queryMaterialVectors: (input: ServiceOperationMap['queryMaterialVectors']['input']) =>
     invoke<ServiceOperationMap['queryMaterialVectors']['output']>(IPC_CHANNELS.queryMaterialVectors, input),
   requestMaterialTranslation: (input: ServiceOperationMap['requestMaterialTranslation']['input']) =>

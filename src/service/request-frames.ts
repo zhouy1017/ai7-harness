@@ -1091,14 +1091,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.materialId) || !isSafeInteger(input.from, 1)) throw new ProtocolError(tentativeId);
       break;
     }
-    // 构建相似索引 and 生成来源译文 (Issue #892): one item.
-    case 'buildMaterialVectors':
+    // 生成来源译文 (Issue #892): one item.
     case 'requestMaterialTranslation': {
       const input = requireInput(value.input, ['materialId'], tentativeId);
       if (!validUuid(input.materialId)) throw new ProtocolError(tentativeId);
       break;
     }
-    // 相似段落检索 (Issue #892): one item, the editor's text within its bound, and how many candidates.
+    // 相似段落检索 (Issue #892): one item, the editor's text within the lexical ranker's bound, and how many candidates (R5-F2c).
     case 'queryMaterialVectors': {
       const input = requireInput(value.input, ['materialId', 'text', 'k'], tentativeId);
       if (!validUuid(input.materialId) || !isBoundedString(input.text, MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS) ||

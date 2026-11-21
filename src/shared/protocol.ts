@@ -665,7 +665,6 @@ export const IPC_CHANNELS = {
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
   inspectLibraryMaterialSegments: 'ai7:j15:inspect-library-material-segments',
-  buildMaterialVectors: 'ai7:j15:build-material-vectors',
   queryMaterialVectors: 'ai7:j15:query-material-vectors',
   requestMaterialTranslation: 'ai7:j15:request-material-translation',
   searchReferableMaterials: 'ai7:search-referable-materials',
@@ -4400,12 +4399,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: { materialId: string; from: number };
     output: MaterialSegmentsPageProjection;
   };
-  /** 构建相似索引 (Issue #892): the current build's similarity vectors made on this machine, on request; the item as it now reads. */
-  buildMaterialVectors: {
-    input: { materialId: string };
-    output: LibraryMaterialProjection;
-  };
-  /** 相似段落检索 (Issue #892): an item's paragraphs nearest the editor's text, by its built vectors; read-only. */
+  /** 相似段落检索 (Issue #892): an item's paragraphs that best match the editor's words, ranked by words since R5-F2c; read-only. */
   queryMaterialVectors: {
     input: { materialId: string; text: string; k: number };
     output: MaterialVectorSearchProjection;
@@ -5176,8 +5170,6 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): Promise<LibraryDecisionReasonPage>;
   /** 查看分段: one page of the item's segments, read-only. */
   inspectLibraryMaterialSegments(input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']): Promise<MaterialSegmentsPageProjection>;
-  /** 构建相似索引: made on this machine; nothing is sent. */
-  buildMaterialVectors(input: ServiceOperationMap['buildMaterialVectors']['input']): Promise<LibraryMaterialProjection>;
   /** 相似段落检索 in 查看索引: read-only. */
   queryMaterialVectors(input: ServiceOperationMap['queryMaterialVectors']['input']): Promise<MaterialVectorSearchProjection>;
   /** 生成来源译文: refused unless the selected policy's rule names it. */

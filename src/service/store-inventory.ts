@@ -25,6 +25,8 @@ import { openPackageStore } from './database-exports.js';
  *   store holds the four pre-installed tables at version 1 — tables 4, versions 4, entries 68,507 (8,105 + 3,558 + 382 +
  *   56,462), source files 0. Those three `tables` counts and `entities.library` are compared as "old 0, new exactly these",
  *   never by equality.
+ * - the similarity vectors (R5-F2c; ADR 0107 §4 point 5): a revision-116 store's vector rows are not carried — revision 117
+ *   has no vector table, so they are dropped, not copied, and the inventory counts them on neither side.
  * Every other part of `entities` carries none of these, so it is compared by plain equality.
  */
 
@@ -179,7 +181,6 @@ export const INVENTORY_TABLES = [
   'material_index_builds',
   'material_index_segments',
   'material_index_translations',
-  'material_index_vectors',
   'material_translation_attempts',
   'milestone_signoff_records',
   'milestone_versions',
