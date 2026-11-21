@@ -104,6 +104,20 @@ describe('the 字表与词表 library (R5-L1)', () => {
     } finally { db.close(); }
   });
 
+  it('never changes a stored table, version or entry when an install runs again, for all keys or for one', () => {
+    const db = library();
+    try {
+      const snapshot = (): unknown => ['standard_tables', 'standard_table_versions', 'standard_table_entries']
+        .map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY 1, 2`).all().map((row) => ({ ...row })));
+      const before = JSON.stringify(snapshot());
+      db.exec('BEGIN IMMEDIATE');
+      expect(installPreinstalledStandardTables(db)).toEqual([]);
+      for (const key of PREINSTALLED_TABLE_KEYS) expect(installPreinstalledStandardTables(db, [key])).toEqual([]);
+      db.exec('COMMIT');
+      expect(JSON.stringify(snapshot())).toBe(before);
+    } finally { db.close(); }
+  });
+
   it('installs one table by key, installs nothing twice, and refuses to run outside a transaction', () => {
     const db = library(['gf-1001-2001']);
     try {

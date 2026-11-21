@@ -6,6 +6,7 @@ import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type { EditorialWorkspaceProfileProjection, ProposalReviewReturnPosition } from '../shared/protocol.js';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
+import { foreignKeyViolations } from './store-records.js';
 
 /**
  * Proposal Review Return Position (Issue #902, V2-UX-PROP-010): review progress is a profile preference, never a
@@ -326,7 +327,7 @@ export function validateEditorialWorkspaceProfileNativeSchema(db: DatabaseSync):
     'NATIVE_ARTIFACT_SCHEMA_INVALID',
     '原生构件安装或图书启用关系无效。',
   );
-  requireProfile(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'NATIVE_ARTIFACT_SCHEMA_INVALID', '原生构件引用校验失败。');
+  requireProfile(foreignKeyViolations(db, ['native_artifact_installations', 'native_artifact_book_enablements']) === 0, 'NATIVE_ARTIFACT_SCHEMA_INVALID', '原生构件引用校验失败。');
 }
 
 export function validateEditorialWorkspaceProfileSchema(db: DatabaseSync): void {
@@ -443,7 +444,7 @@ export function validateEditorialWorkspaceProfileSchema(db: DatabaseSync): void 
     '原生构件图书启用缺少权限侧车 pin。',
   );
   requireProfile(
-    db.prepare('PRAGMA foreign_key_check').all().length === 0,
+    foreignKeyViolations(db, ['editorial_workspace_profile_sidecar_revisions', 'editorial_workspace_profile_book_pins']) === 0,
     'NATIVE_ARTIFACT_SCHEMA_INVALID',
     '权限侧车引用校验失败。',
   );

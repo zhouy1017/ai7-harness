@@ -182,7 +182,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 
 `src/service/review/deterministic/standard-data.json` includes 2013 character membership (`kTGH`) and simplified-form references (`kSimplifiedVariant`) derived from [Unicode 17.0.0 Unihan](https://www.unicode.org/Public/17.0.0/ucd/Unihan.zip), under Unicode License v3. The public Chinese standard-table facts and conditions come from the admitted 2013 character table and GF 1001-2001 transcription; these are editorial references, not a full-standard compliance claim. No source PDFs, images or admission records are shipped.
 
-`src/service/standard-tables/seed/cycb-2.ts` lists the words of 《现代汉语常用词表（第2版）》 (李行健、苏新春 主编，教育部语言文字信息管理司 组编，商务印书馆 2021) with their frequency ranks, taken from the public text transcription at https://github.com/zispace/hanzi-words-cycb (commit `712fb0f0c420f6ceca0778ca46eb3cc3cbc5a9d8`, file 现代汉语常用词表（第2版）.tsv). Only the words and ranks are kept. 该仓库未声明许可；the list is shipped at the Owner's direction and used only as a reference to flag unusual spellings for the editor to check.
+`src/service/standard-tables/seed/cycb-2.ts` lists the words of 《现代汉语常用词表（第2版）》 (李行健、苏新春 主编，教育部语言文字信息管理司 组编，商务印书馆 2021) with their frequency ranks, taken from the public text transcription at https://github.com/zispace/hanzi-words-cycb (commit `712fb0f0c420f6ceca0778ca46eb3cc3cbc5a9d8`, file 现代汉语常用词表（第2版）.tsv). The source file's SHA-256 is `53e3a67f90fcb29c0f5fa4a25f747aaadf84ca4cbe52d123b1a77dba22814d71`. Only the words and ranks are kept. 该仓库未声明许可；the list is shipped at the Owner's direction and used only as a reference to flag unusual spellings for the editor to check.
 
 ```text
 UNICODE LICENSE V3

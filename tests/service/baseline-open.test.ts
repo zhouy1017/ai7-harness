@@ -4,7 +4,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { unzipSync } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BASELINE_SCHEMA_REVISION } from '../../src/service/baseline-schema.js';
 import { DATA_VERSION, dataVersionMarkerPath, readDataVersionMarker, storeRevisionOnDisk } from '../../src/service/data-version.js';
 import { EditorialStore } from '../../src/service/store.js';
@@ -160,5 +160,31 @@ describe('opening the storage baseline', () => {
       expect(() => db.prepare('UPDATE import_drafts SET draft_version = draft_version + 1 WHERE draft_id = ?').run(staged!.draftId))
         .toThrow(baseMessage('abandonment_cleanup_block_draft_update'));
     } finally { db.close(); }
+  });
+
+  it('walks the references of the whole store once on an ordinary open, and refuses an orphan row of each owner', async () => {
+    await newStore();
+    const wholePasses = async (): Promise<number> => {
+      const prepared = vi.spyOn(DatabaseSync.prototype, 'prepare');
+      try {
+        (await EditorialStore.open(roots.dataRoot, roots.codeRoot)).close();
+        return prepared.mock.calls.filter(([sql]) => /^\s*PRAGMA\s+foreign_key_check\s*$/iu.test(String(sql))).length;
+      } finally { prepared.mockRestore(); }
+    };
+    expect(await wholePasses()).toBe(1); // validateBoundedStore's; the other owners name their own relations
+
+    const orphans: ReadonlyArray<readonly [string, string, readonly string[]]> = [
+      ['the manuscript core', 'INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id) VALUES (?, ?, ?)', [randomUUID(), randomUUID(), randomUUID()]],
+      ['task authorization', "INSERT INTO task_manuscript_pins VALUES (?, '{}', ?, '2026-11-21T00:00:00.000Z')", [randomUUID(), createHash('sha256').update('{}').digest('hex')]],
+      ['the analysis ledger', "INSERT INTO analysis_plan_records VALUES (?, 1, 'manuscript-pin', '{}', ?, '2026-11-21T00:00:00.000Z')", [randomUUID(), createHash('sha256').update('{}').digest('hex')]],
+      ['the 权限侧车', "INSERT INTO native_artifact_book_enablements VALUES (?, ?, '2026-11-21T00:00:00.000Z')", [randomUUID(), randomUUID()]],
+    ];
+    for (const [index, [, sql, values]] of orphans.entries()) {
+      const root = join(dirname(roots.dataRoot), `orphan-${index}`);
+      await newStore(root); // a clean store opens; the same store with one orphan row does not
+      const raw = new DatabaseSync(storePath(root));
+      try { raw.exec('PRAGMA foreign_keys = OFF'); raw.prepare(sql).run(...values); } finally { raw.close(); }
+      await expect(EditorialStore.open(root, roots.codeRoot)).rejects.toThrow();
+    }
   });
 });
