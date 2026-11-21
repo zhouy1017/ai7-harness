@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -176,6 +176,47 @@ describe('the Journey record that stands in for the browser', () => {
       await symlink(outside, join(linked, BROWSER_RECORD_DIRECTORY), 'junction');
       await expect(createSourceOpener(linked, true)).rejects.toThrow();
       await expect(createSourceOpener(undefined, true)).rejects.toThrow();
+    } finally { await rm(parent, { recursive: true, force: true }); }
+  });
+
+  // Round 1 re-check: the record FILE itself, not only its directory, must not lead out of the data root.
+  async function recordRoots() {
+    const parent = await realpath(await mkdtemp(join(tmpdir(), 'ai7-browser-record-file-')));
+    const dataRoot = join(parent, 'data');
+    await mkdir(join(dataRoot, BROWSER_RECORD_DIRECTORY), { recursive: true });
+    const outside = join(parent, 'outside-run.txt');
+    await writeFile(outside, 'outside\n');
+    return { parent, dataRoot, outside, leaf: join(dataRoot, BROWSER_RECORD_DIRECTORY, BROWSER_RECORD_FILE) };
+  }
+
+  it('appends a relaunch after the earlier lines of the same regular file', async () => {
+    const { parent, dataRoot, leaf } = await recordRoots();
+    try {
+      await (await createSourceOpener(dataRoot, true))('https://example.org/first');
+      await (await createSourceOpener(dataRoot, true))('https://example.org/second');
+      await expect(readFile(leaf, 'utf8')).resolves.toBe('https://example.org/first\nhttps://example.org/second\n');
+    } finally { await rm(parent, { recursive: true, force: true }); }
+  });
+
+  it('refuses a hard link at the record file that points outside the data root, and writes nothing there', async () => {
+    const { parent, dataRoot, outside, leaf } = await recordRoots();
+    try {
+      await link(outside, leaf);
+      await expect(createSourceOpener(dataRoot, true)).rejects.toThrow('AI7_DESKTOP_STARTUP_INVALID');
+      await expect(readFile(outside, 'utf8')).resolves.toBe('outside\n');
+    } finally { await rm(parent, { recursive: true, force: true }); }
+  });
+
+  it('refuses a symbolic link at the record file that points outside the data root, and writes nothing there', async (context) => {
+    const { parent, dataRoot, outside, leaf } = await recordRoots();
+    try {
+      try { await symlink(outside, leaf, 'file'); } catch (error) {
+        // A file symbolic link needs a privilege this Windows account may not hold; the hard-link case above still runs.
+        if ((error as NodeJS.ErrnoException).code === 'EPERM') return context.skip('creating a file symbolic link needs SeCreateSymbolicLinkPrivilege here');
+        throw error;
+      }
+      await expect(createSourceOpener(dataRoot, true)).rejects.toThrow('AI7_DESKTOP_STARTUP_INVALID');
+      await expect(readFile(outside, 'utf8')).resolves.toBe('outside\n');
     } finally { await rm(parent, { recursive: true, force: true }); }
   });
 });

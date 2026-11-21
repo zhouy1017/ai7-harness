@@ -1,5 +1,5 @@
 import { ipcMain, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
-import { appendFile } from 'node:fs/promises';
+import { lstat, open, writeFile, type FileHandle } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { IPC_CHANNELS, type ResolvedBookWorkbenchRoute, type SourceIdentityInput, type SourceOpenedProjection } from '../shared/protocol.js';
@@ -39,13 +39,38 @@ export const BROWSER_RECORD_FILE = 'addresses.txt';
  * The system browser — or, under J-04's bare `--j04-browser-record on` (admitted only under the E2E harness), a record file
  * the main process places inside the launch's own data root, never a path a caller names: each address handed over is
  * appended on its own line instead of any browser opening. The directory is created or checked as a real directory of the
- * data root, so a link out of it refuses the launch.
+ * data root, so a link out of it refuses the launch; the file is settled once, before any window opens — see openRecordFile.
  */
 export async function createSourceOpener(dataRoot: string | undefined, record: boolean): Promise<SourceOpener> {
   if (!record) return (address) => shell.openExternal(address);
   requireDesktop(dataRoot !== undefined, 'AI7_DESKTOP_STARTUP_INVALID');
-  const recordPath = resolve(await ensureCanonicalDataDirectory(dataRoot, BROWSER_RECORD_DIRECTORY), BROWSER_RECORD_FILE);
-  return (address) => appendFile(recordPath, `${address}\n`, 'utf8');
+  const handle = await openRecordFile(resolve(await ensureCanonicalDataDirectory(dataRoot, BROWSER_RECORD_DIRECTORY), BROWSER_RECORD_FILE));
+  return async (address) => { await handle.appendFile(`${address}\n`, 'utf8'); };
+}
+
+/**
+ * The record file, settled once for the life of the process: created when absent; otherwise a regular file — no symbolic link
+ * or other reparse point — with exactly one link, so it cannot lead out of the data root. It is opened once and the open handle
+ * must be the very file inspected; every address is appended through that handle, never by reopening the name. A relaunch on
+ * the same data root appends after the earlier lines.
+ */
+async function openRecordFile(path: string): Promise<FileHandle> {
+  const inspect = () => lstat(path, { bigint: true });
+  let inspected = await inspect().catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error; });
+  if (inspected === null) {
+    await writeFile(path, '', { flag: 'wx' });
+    inspected = await inspect();
+  }
+  requireDesktop(inspected.isFile() && !inspected.isSymbolicLink() && inspected.nlink === 1n, 'AI7_DESKTOP_STARTUP_INVALID');
+  const handle = await open(path, 'a');
+  try {
+    const opened = await handle.stat({ bigint: true });
+    requireDesktop(opened.isFile() && opened.dev === inspected.dev && opened.ino === inspected.ino && opened.nlink === 1n, 'AI7_DESKTOP_STARTUP_INVALID');
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+  return handle;
 }
 
 function sourceIdentity(input: unknown): SourceIdentityInput {
