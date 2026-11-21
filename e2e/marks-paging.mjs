@@ -16,12 +16,6 @@ const READ_WINDOW = `(async () => {
   return {shown:first.marks.length,total:first.marksPage?.total??first.marks.length,marks:marks.map((mark)=>({markId:mark.markId,kind:mark.kind,status:mark.status,anchorState:mark.anchorState,blockId:mark.blockId,categoryKey:mark.categoryKey,from:mark.fromGrapheme,to:mark.toGrapheme,source:mark.sourceKind}))};
 })()`;
 
-async function key(renderer, name, code, windowsVirtualKeyCode, modifiers = 0) {
-  const text = name.length === 1 && modifiers === 0 ? { text: name } : {};
-  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code, windowsVirtualKeyCode, modifiers, ...text });
-  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: name, code, windowsVirtualKeyCode, modifiers });
-}
-
 /** The row's words and where it stands: inside the pane, which is inside the window, with its control under the pointer. */
 const SENTENCE = `(() => {
   const row=document.querySelector('[data-marks-paging]'), pane=${PANE}, button=row?.querySelector('[data-marks-more]');
@@ -75,19 +69,22 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   await pointerClick(renderer, waitFor, '[data-nav-book-section="manuscript"]', 'marks-paging-return');
   await opened();
   await waitFor(renderer, `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(sentence)}`, 'marks-paging-sentence-again');
-  // The caret at the end of the text: a real click in the last block of the window, then Ctrl+End.
+  // The caret in the paragraph of the last mark, by a real click: the step then starts from the card the click selects (or the caret
+  // it leaves), in the middle of the window, so reading its place does not carry the text past the window's end.
   const LAST = `Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).at(-1)`;
-  await pointerClick(renderer, waitFor, '[data-testid="manuscript-editor"] > [data-block-id]:last-child', 'marks-paging-caret-click');
-  await key(renderer, 'End', 'End', 35, 2);
-  await waitFor(renderer, `(() => { const selection=getSelection(), last=${LAST}; if (!selection || !selection.isCollapsed || !last || !last.contains(selection.focusNode)) return false; const range=document.createRange(); range.setStart(selection.focusNode,selection.focusOffset); range.setEnd(last,last.childNodes.length); return range.toString()===''; })()`, 'marks-paging-caret-at-end');
+  const lastMark = facts.marks.filter((mark) => mark.status === 'open' && mark.kind === 'change-suggestion').at(-1);
+  const BLOCK = `[data-testid="manuscript-editor"] > [data-block-id="${lastMark.blockId}"]`;
+  await pointerClick(renderer, waitFor, BLOCK, 'marks-paging-caret-click');
+  await waitFor(renderer, `(() => { const selection=getSelection(), block=document.querySelector(${JSON.stringify(BLOCK)}); return selection?.isCollapsed===true && block!==null && block.contains(selection.focusNode); })()`, 'marks-paging-caret-in-paragraph');
   // The expectation, from the service's own read of the same step: where it lands and where that stands among the window's marks.
   // The step starts from the selected card when the caret stands on a mark (at the end of the last paragraph it may), else from the caret.
   await renderer.evaluate(`new Promise((done)=>requestAnimationFrame(()=>requestAnimationFrame(done)))`);
   const expected = await renderer.evaluate(`(async () => {
-    const window_=await (${READ_WINDOW}), last=${LAST};
+    const window_=await (${READ_WINDOW});
     const category=window_.marks.filter((mark)=>mark.status==='open' && mark.kind==='change-suggestion').at(-1)?.categoryKey??null;
     const selected=window_.marks.find((mark)=>mark.markId===document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard);
-    const from=selected===undefined?{blockId:last.dataset.blockId,grapheme:1000000,markId:null}:{blockId:selected.blockId,grapheme:selected.from,markId:selected.markId};
+    const selection=getSelection(), block=document.querySelector(${JSON.stringify(BLOCK)}), range=document.createRange(); range.setStart(block,0); range.setEnd(selection.focusNode,selection.focusOffset);
+    const from=selected===undefined?{blockId:block.dataset.blockId,grapheme:Array.from(range.toString()).length,markId:null}:{blockId:selected.blockId,grapheme:selected.from,markId:selected.markId};
     const found=await window.ai7.findPendingMark({manuscriptId:globalThis.__marksPaging.manuscriptId,branchId:globalThis.__marksPaging.branchId,from,direction:'previous',categories:category===null?[]:[category],models:[]});
     const ordinal=found.mark===null?-1:window_.marks.findIndex((mark)=>mark.markId===found.mark.markId);
     return {category,markId:found.mark?.markId??null,ordinal,total:window_.total,fromSelected:selected!==undefined};
