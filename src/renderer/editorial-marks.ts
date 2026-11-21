@@ -801,7 +801,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     read: (input) => api.getManuscriptWindowAt(input),
     changed: () => refreshComments(),
     alive: () => !destroyed,
-    focusAfter: (markId) => { if (markId === undefined) filterButton.focus(); else void revealRevision(markId); },
+    focusAfter: () => filterButton.focus(),
     errorMessage: (error, fallback) => options.errorMessage(error, fallback),
     setStatus: (message, tone) => options.setStatus(message, tone),
   });
@@ -817,6 +817,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   options.comments?.host.parentElement?.append(leaders);
   let commentsFrame: number | undefined;
   let preservePanePositions = false;
+  let commentsFocus: Element | null = null;
   let commentsFrameScroll = 0;
   let pressedComment: string | undefined;
   let pressedTextMark: EditorialMarkAnchorProjection | undefined;
@@ -1166,7 +1167,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         if (focused && document.activeElement !== focused) {
           const target = reply?.contains(focused) ? focused : action ? entry.node.querySelector<HTMLElement>(`[data-mark-action="${CSS.escape(action)}"]`)
             : focused.tagName === 'SUMMARY' ? entry.node.querySelector<HTMLElement>('.editorial-mark-more summary') : entry.node;
-          target?.focus({ preventScroll: true });
+          const enabled = target?.tagName !== 'BUTTON' || !(target as HTMLButtonElement).disabled;
+          (enabled ? target ?? entry.node : entry.node).focus({ preventScroll: true });
           if (selection && focused instanceof HTMLTextAreaElement) focused.setSelectionRange(...selection);
         }
       }
@@ -1198,6 +1200,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const paneTop = commentsScroll.scrollTop || 0;
     const selectedNode = activeComment === undefined ? undefined : commentNodes.get(activeComment)?.node;
     const holdingControl = selectedNode !== undefined && selectedNode.getBoundingClientRect().height > commentsScroll.clientHeight && document.activeElement !== selectedNode && selectedNode.contains(document.activeElement);
+    const focusMoved = document.activeElement !== commentsFocus;
+    commentsFocus = document.activeElement;
     const holdingFrame = preservePanePositions || holdingControl || (activeComment === undefined && paneTop > 0);
     const placed = holdingFrame ? (() => {
       const existing = items.filter(item => Number.isFinite(Number.parseFloat(item.node.style.top)))
@@ -1244,7 +1248,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (active) {
       // Expansion can change the height after the stack measured it. Correct only cards
       // that fit their final visible box; taller cards retain the stack's head alignment.
-      if (!preservePanePositions) {
+      if (!preservePanePositions && (!holdingControl || focusMoved)) {
         const pane = commentsScroll.getBoundingClientRect();
         const box = (holdingControl ? document.activeElement! : active.node).getBoundingClientRect();
         if (box.height <= commentsScroll.clientHeight) {

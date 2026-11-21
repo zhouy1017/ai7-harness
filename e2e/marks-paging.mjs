@@ -166,7 +166,7 @@ export async function loadEveryMark(renderer, waitFor) {
   for (let page = 0; page < 8 && await renderer.evaluate(`${row}!==null && ${row}.hidden===false`); page += 1) {
     const before = await renderer.evaluate(`${row}.querySelector('span')?.textContent`);
     await pointerClick(renderer, waitFor, '[data-marks-paging] [data-marks-more]', 'marks-paging-load-every-mark');
-    await waitFor(renderer, `${row}.hidden===true || (${row}.querySelector('span')?.textContent!==${JSON.stringify(before)} && ${row}.querySelector('[data-marks-more]').disabled===false)`, 'marks-paging-every-mark-page', 60_000);
+    await waitFor(renderer, `${row}.hidden===true || (${row}.querySelector('span')?.textContent!==${JSON.stringify(before)} && ${row}.querySelector('[data-marks-more]').getAttribute('aria-disabled')==='false')`, 'marks-paging-every-mark-page', 60_000);
   }
 }
 
@@ -195,13 +195,19 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   check(placed !== null && placed.text === sentence && placed.label === '显示更多' && placed.inPane && placed.rowInWindow && placed.buttonInWindow && placed.buttonOnTop, 'marks-paging-sentence-place', placed);
   // 显示更多 by a real click: the rest is loaded, the sentence is gone, and every open mark of the window is drawn in the text.
   // Each press reads one page of 400; the Book may hold applied marks of an earlier form in the same window, so there can be several.
+  const morePlaceBefore=await renderer.evaluate(PLACE);
   for (let shown = 400; shown < facts.total; shown += 400) {
     await pointerClick(renderer, waitFor, '[data-marks-paging] [data-marks-more]', 'marks-paging-more');
+    const busyStyle=await renderer.evaluate(`(() => {const button=document.querySelector('[data-marks-more]');return {busy:button.getAttribute('aria-disabled')==='true',opacity:getComputedStyle(button).opacity};})()`);
+    check(busyStyle.opacity===(busyStyle.busy?'0.5':'1'),'marks-paging-more-busy-style',busyStyle);
     const now = Math.min(facts.total, shown + 400);
-    await waitFor(renderer, now >= facts.total ? `document.querySelector('[data-marks-paging]')?.hidden===true` : `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(`已显示 ${now} / ${facts.total} 条。`)} && document.querySelector('[data-marks-more]').disabled===false`, 'marks-paging-page-loaded', 60_000);
-    await waitFor(renderer, `document.querySelector('[data-marks-paging]').hidden ? document.activeElement?.matches('[data-comment-card]')===true : document.activeElement===document.querySelector('[data-marks-more]')`, 'marks-paging-more-focus');
-    check(await renderer.evaluate(`document.querySelector('[data-marks-paging]').hidden ? document.activeElement?.matches('[data-comment-card]')===true : document.activeElement===document.querySelector('[data-marks-more]')`),'marks-paging-more-focus');
+    await waitFor(renderer, now >= facts.total ? `document.querySelector('[data-marks-paging]')?.hidden===true` : `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(`已显示 ${now} / ${facts.total} 条。`)} && document.querySelector('[data-marks-more]').getAttribute('aria-disabled')==='false'`, 'marks-paging-page-loaded', 60_000);
+    await waitFor(renderer, `document.querySelector('[data-marks-paging]').hidden ? document.activeElement===document.querySelector('[data-mark-filter-toggle]') : document.activeElement===document.querySelector('[data-marks-more]')`, 'marks-paging-more-focus');
+    check(await renderer.evaluate(`document.querySelector('[data-marks-paging]').hidden ? document.activeElement===document.querySelector('[data-mark-filter-toggle]') : document.activeElement===document.querySelector('[data-marks-more]')`),'marks-paging-more-focus');
   }
+  await waitFor(renderer,`new Promise(resolve=>{const before=JSON.stringify(${PLACE});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${PLACE}))));})`,'marks-paging-more-place-rest');
+  const morePlaceAfter=await renderer.evaluate(PLACE);
+  check(morePlaceAfter.selected===morePlaceBefore.selected && morePlaceAfter.first===morePlaceBefore.first && morePlaceAfter.firstTop===morePlaceBefore.firstTop && morePlaceAfter.scrollTop===morePlaceBefore.scrollTop,'marks-paging-more-keeps-place',{before:morePlaceBefore,after:morePlaceAfter});
   // The marks the pane did not have before the press: those past the first page (an earlier stage's mark may stand undrawn on page 1).
   const open = facts.marks.slice(400).filter((mark) => mark.status === 'open' && mark.anchorState === 'exact' && mark.kind !== 'personal-highlight');
   const drawn = await renderer.evaluate(`(() => { const ids=${JSON.stringify(open.map((mark) => mark.markId))};
@@ -286,6 +292,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     }
     return false;
   })()`), 'marks-paging-accepted-beyond-first-page');
+  await waitFor(renderer, `(() => { const node=document.querySelector(${JSON.stringify(card)}); return node?.dataset.revalidating==='false' && node.querySelector('[data-mark-action="accept-and-apply"]')===null && node.querySelector('[data-mark-application]')!==null; })()`, 'marks-paging-rendered-accepted', 60_000);
   // The decision does not throw the loaded pages away: the same pages are still held and its card stays where the editor left it.
   const kept = `${rowNow}===${JSON.stringify(rowWant)} && document.querySelector(${JSON.stringify(card)})!==null && document.querySelector('.editor-window [data-mark-id="${expected.markId}"]')!==null`;
   try {
@@ -294,17 +301,17 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     check(false, 'marks-paging-decision-keeps-pages', await renderer.evaluate(`({row:${rowNow},rowWant:${JSON.stringify(rowWant)},card:document.querySelector(${JSON.stringify(card)})!==null,words:document.querySelector('.editor-window [data-mark-id="${expected.markId}"]')!==null,anyWords:document.querySelector('[data-mark-id="${expected.markId}"]')!==null,first:document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId,drawn:document.querySelectorAll('.editor-window [data-mark-id]').length,status:document.querySelector('#persistence-status')?.textContent??null})`));
   }
   // At the window's last pending mark (`around` is null) there is no card to go on to: the card stays selected and the focus is where an
-  // ordinary window leaves it (the re-drawn card does not hold it; the unit parity case for the last mark pins that).
+  // ordinary window leaves it: the card holds focus when its decided action is removed (both command and re-read unit cases pin it).
   // The editor's place is kept: the same paragraph at the top of the text and the scroll where it was (to a few lines, as the applied
   // words reflow), and the next pending card is selected and focused (a pointer decision stays on the page), as in a window that
   // holds every mark; both stand inside the window.
   try {
-    await waitFor(renderer, `(() => { const place=${PLACE}; return place.selected===${JSON.stringify(wantSelected)} && (${JSON.stringify(around)}===null || place.active===${JSON.stringify(wantSelected)}); })()`, 'marks-paging-decision-keeps-place', 60_000);
+    await waitFor(renderer, `(() => { const place=${PLACE}; return place.selected===${JSON.stringify(wantSelected)} && place.active===${JSON.stringify(wantSelected)}; })()`, 'marks-paging-decision-keeps-place', 60_000);
   } catch { /* said below with what stood */ }
   await waitFor(renderer, `new Promise((resolve)=>{const box=()=>JSON.stringify(${PLACE});const first=box();requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(box()===first)));})`, 'marks-paging-decision-place-rest');
   const placeAfter = await renderer.evaluate(PLACE);
   console.log('COMMENTS_DECISION_PLACE/'+JSON.stringify({placeBefore,placeAfter,next:around}));
-  check(placeAfter.first === placeBefore.first && Math.abs(placeAfter.scrollTop - placeBefore.scrollTop) <= Math.round((await renderer.evaluate('innerHeight')) / 4) && placeAfter.selected === wantSelected && (around === null || placeAfter.active === wantSelected) && placeAfter.selectedInWindow && placeAfter.activeInWindow,
+  check(placeAfter.first === placeBefore.first && Math.abs(placeAfter.scrollTop - placeBefore.scrollTop) <= Math.round((await renderer.evaluate('innerHeight')) / 4) && placeAfter.selected === wantSelected && placeAfter.active === wantSelected && placeAfter.selectedInWindow && placeAfter.activeInWindow,
     'marks-paging-decision-keeps-place', { placeBefore, placeAfter, next: around });
   if (around!==null) await assertCardActionReachable(renderer,check,waitFor,`[data-comment-card="${around}"]`,'marks-paging-decision-next',{returnToCard:true});
   await pointerClick(renderer, waitFor, '[data-mark-filter-toggle]', 'marks-paging-reset-open');

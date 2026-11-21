@@ -211,11 +211,12 @@ export async function seedCommentsPane(renderer, check, waitFor, size = {width:1
   // A window that holds more marks than one answer carries (#1604) shows the seeds only once the pages are read.
   await loadEveryMark(renderer, waitFor);
   try { await waitFor(renderer, `(() => { const scroll=document.querySelector('.editor-window'),v=scroll.getBoundingClientRect(),first=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]'),last=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]'); if(first&&last&&(first.getBoundingClientRect().top<v.top||last.getBoundingClientRect().bottom>v.bottom)){scroll.scrollTop+=first.getBoundingClientRect().top-v.top-100;return false;} return __comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===false) && document.querySelector('.manuscript-comments-canvas').dataset.loading==='false'; })()`, 'comments-five-visible'); } catch {
-    const geometry=await renderer.evaluate(`(() => { const scroll=document.querySelector('.editor-window'),pane=document.querySelector('.manuscript-comments-scroll'),canvas=document.querySelector('.manuscript-comments-canvas'),v=scroll.getBoundingClientRect(); return {viewportTop:v.top,viewportBottom:v.bottom,textScroll:scroll.scrollTop,paneScroll:pane.scrollTop,loading:canvas.dataset.loading,reads:canvas.dataset.cardReads,seeds:__comments.ids.map(id=>{const a=document.querySelector('.editor-window [data-mark-id="'+id+'"]'),c=document.querySelector('[data-comment-card="'+id+'"]'),r=a?.getBoundingClientRect();return {anchor:!!a,top:r?.top,bottom:r?.bottom,card:!!c,hidden:c?.hidden,read:c?.dataset.revalidating};})}; })()`);
+    const geometry=await renderer.evaluate(`(() => { const scroll=document.querySelector('.editor-window'),pane=document.querySelector('.manuscript-comments-scroll'),canvas=document.querySelector('.manuscript-comments-canvas'),v=scroll.getBoundingClientRect(); return {viewportTop:v.top,viewportBottom:v.bottom,textScroll:scroll.scrollTop,paneScroll:pane.scrollTop,paneBox:(()=>{const r=pane.getBoundingClientRect();return [r.left,r.top,r.right,r.bottom]})(),selected:document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard??null,active:{tag:document.activeElement?.tagName,card:document.activeElement?.closest('[data-comment-card]')?.dataset.commentCard??null,action:document.activeElement?.dataset?.markAction??null},loading:canvas.dataset.loading,reads:canvas.dataset.cardReads,seeds:__comments.ids.map(id=>{const a=document.querySelector('.editor-window [data-mark-id="'+id+'"]'),c=document.querySelector('[data-comment-card="'+id+'"]'),r=a?.getBoundingClientRect();return {anchor:!!a,top:r?.top,bottom:r?.bottom,card:!!c,hidden:c?.hidden,read:c?.dataset.revalidating,box:c?(()=>{const r=c.getBoundingClientRect();return [r.left,r.top,r.right,r.bottom]})():null};})}; })()`);
+    console.log('COMMENTS_SEED_FAILURE/'+JSON.stringify(geometry));
     check(false,'comments-five-visible',geometry);
   }
   // #1429: use the existing complete comments journey to exercise category/search linkage.
-  const category=await renderer.evaluate(`(() => {
+  const category=await renderer.evaluate(`(async () => {
     const pane=document.querySelector('.manuscript-comments-pane');
     const cards=__comments.ids.map(id=>pane.querySelector('[data-mark-card="'+id+'"]'));
     const inline=__comments.ids.map(id=>document.querySelector('.editor-window [data-mark-id="'+id+'"]'));
@@ -225,8 +226,22 @@ export async function seedCommentsPane(renderer, check, waitFor, size = {width:1
     pane.querySelector('[data-mark-filter-toggle]').click();
     pane.querySelector('[data-mark-category-filter="editor"]').click();
     const input=pane.querySelector('[data-mark-search-input]'); input.value='公开合成批注 2'; input.dispatchEvent(new Event('input',{bubbles:true}));
-    globalThis.__commentsSearch=input; const heading=document.querySelector('.manuscript-comments-heading').getBoundingClientRect().height,filters=document.querySelector('.editorial-mark-filters').getBoundingClientRect().height; return {cardsReady,inlineReady,headerReady:heading+filters<=84,heading,filters};
+    globalThis.__commentsSearch=input;
+    const measure=()=>{
+      const heading=document.querySelector('.manuscript-comments-heading'),filters=document.querySelector('.editorial-mark-filters');
+      return {heading:heading.getBoundingClientRect().height,filters:filters.getBoundingClientRect().height,headerText:heading.textContent,
+        rows:Array.from(filters.children).map(node=>({className:node.className,hidden:node.hidden,display:getComputedStyle(node).display,height:node.getBoundingClientRect().height,text:node.matches('.marks-paging,.editorial-mark-filter-summary,.editorial-mark-disclosure')?node.textContent:null})),
+        popover:pane.querySelector('.editorial-mark-filter-popover').matches(':popover-open'),viewport:[innerWidth,innerHeight]};
+    };
+    let measured=measure(),stable=false;
+    for(let turn=0;turn<30&&!stable;turn++){
+      const before=JSON.stringify(measured);
+      await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+      measured=measure();stable=before===JSON.stringify(measured);
+    }
+    return {cardsReady,inlineReady,...measured,stable,headerReady:stable&&measured.heading+measured.filters<=84};
   })()`);
+  console.log('COMMENTS_HEADER/'+JSON.stringify(category));
   check(category.cardsReady,'comments-category-badges-and-search-cards',category);
   check(category.inlineReady,'comments-category-badges-and-search-words',category);
   check(category.cardsReady&&category.inlineReady&&category.headerReady,'comments-category-badges-and-search',category);

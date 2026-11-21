@@ -549,7 +549,7 @@ describe('comments command parity and refresh continuity', () => {
     pane.scrollTop = 37; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
     expect(pane.scrollTop).toBe(37);
   });
-  it('keeps 显示更多 focus through a read, ignores a second press, and focuses the last page successor (#1661)', async () => {
+  it('keeps 显示更多 focus through a read, ignores a second press, and returns focus to the header (#1661)', async () => {
     const next = { ...suggestion, markId: 'next' }, last = { ...suggestion, markId: 'last' };
     const ui = mount(suggestion); await paint();
     ui.get.mockImplementation(async input => input.markId === 'next' ? next : input.markId === 'last' ? last : suggestion);
@@ -566,7 +566,66 @@ describe('comments command parity and refresh continuity', () => {
     expect(document.activeElement).toBe(button);
     ui.pageAt.mockResolvedValueOnce({ ...windowOf(), marks: [anchor(last)], marksTruncated: false, marksPage: { shown: 1, total: 3, nextOrdinal: null, digest: 'd' } });
     button.click(); await paint();
-    expect(document.activeElement).toBe(ui.pane.querySelector('[data-comment-card="last"]'));
+    expect(document.activeElement).toBe(ui.pane.querySelector('[data-mark-filter-toggle]'));
+  });
+  it.each(['command', 'reload'])('keeps focus on the last decided card when its action disappears (%s, #1661)', async path => {
+    const remove = MiniElement.prototype.remove;
+    vi.spyOn(MiniElement.prototype, 'remove').mockImplementation(function (this: MiniElement) {
+      const owned = this.contains(miniDocument.activeElement); remove.call(this);
+      if (owned) miniDocument.activeElement = miniDocument.body;
+    });
+    vi.spyOn(MiniElement.prototype, 'focus').mockImplementation(function (this: MiniElement) {
+      if (this.disabled || miniDocument.activeElement === this) return;
+      miniDocument.activeElement = this; this.dispatchEvent({ type: 'focusin', bubbles: true });
+    });
+    const ui = mount(suggestion); ui.setPage({ position: { startCharacter: 0, endCharacter: 10, totalCharacters: 10 } } as never); await paint(); await ui.open(); await paint();
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    const button = node.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!; button.focus();
+    const application = { effectId: 'effect', kind: 'apply' as const, interaction: 'accept-and-apply' as const,
+      approvalId: 'approval', dispatchId: 'dispatch', receiptId: 'receipt', changeCount: 1, payloadDigest: 'a'.repeat(64), receiptDigest: 'b'.repeat(64),
+      before: { revisionId: 'revision', journalSequence: 0, workingDigest: 'c'.repeat(64) }, after: { revisionId: 'revision', journalSequence: 1, workingDigest: 'd'.repeat(64) },
+      committedAt: card.createdAt, reversesEffectId: null, reversedByEffectId: null };
+    const applied = { ...suggestion, status: 'applied' as const, suggestion: { ...suggestion.suggestion!, application } };
+    ui.get.mockResolvedValue(applied);
+    if (path === 'command') {
+      const marks = [anchor(applied)];
+      ui.apply.mockResolvedValueOnce({ markId: applied.markId, card: applied, marks, marksTruncated: false, window: { ...windowOf(), marks }, application: {} } as never);
+      button.click();
+    } else ui.setPage({ journalSequence: 1, marks: [anchor(applied)] });
+    await paint();
+    expect(node.querySelector('[data-mark-action="accept-and-apply"]') === null).toBe(true);
+    expect(node.dataset['selected']).toBe('true');
+    expect(document.activeElement === node).toBe(true);
+  });
+  it('keeps the selected card and text place after the last 显示更多 press (#1661 R1)', async () => {
+    const far = { ...suggestion, markId: 'far', blockId: 'far-block' };
+    const ui = mount(suggestion); await paint(); await ui.open(); await paint();
+    const paragraph = document.createElement('p'); paragraph.dataset['blockId'] = 'far-block'; ui.host.append(paragraph);
+    Object.assign(paragraph, { getBoundingClientRect: () => ({ top: 3000, bottom: 3020, height: 20 }), scrollIntoView: vi.fn(() => { ui.scroll.scrollTop = 2000; }) });
+    ui.get.mockImplementation(async input => input.markId === 'far' ? far : suggestion);
+    ui.setPage({ marksPage: { shown: 1, total: 2, nextOrdinal: 1, digest: 'd' }, marksTruncated: true }); await paint();
+    ui.pageAt.mockResolvedValueOnce({ ...windowOf(), marks: [anchor(far)], marksPage: { shown: 1, total: 2, nextOrdinal: null, digest: 'd' }, marksTruncated: false });
+    ui.scroll.scrollTop = 37;
+    const first = ui.host.querySelector('[data-block-id]');
+    const button = ui.pane.querySelector<HTMLButtonElement>('[data-marks-more]')!; button.focus(); button.click(); await paint();
+    expect(ui.pane.querySelector('[data-comment-card="comment"]')?.getAttribute('data-selected')).toBe('true');
+    expect(ui.scroll.scrollTop).toBe(37);
+    expect(ui.host.querySelector('[data-block-id]') === first).toBe(true);
+    expect(paragraph.scrollIntoView).not.toHaveBeenCalled();
+    expect(document.activeElement === ui.pane.querySelector('[data-mark-filter-toggle]')).toBe(true);
+  });
+  it('keeps a hand scroll to the tall-card head after focus reveal (#1661 N1)', async () => {
+    const ui = mount(suggestion); await paint(); await ui.open(); await paint();
+    const { pane, node } = measuredPane(ui, 'comment', () => 400);
+    const button = node.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!;
+    button.getBoundingClientRect = () => { const top = node.getBoundingClientRect().top + 350; return { top, bottom: top + 28, height: 28 } as DOMRect; };
+    ui.refresh(); await paint(); expect(pane.scrollTop).toBe(8);
+    button.focus(); (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true });
+    pane.scrollTop = 86; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    pane.scrollTop = 8; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    ui.refresh(); await paint();
+    expect(pane.scrollTop).toBe(8);
+    expect(document.activeElement === button).toBe(true);
   });
   it('keeps the chosen pane card through hover, then clears it when filtered out (#1451)', async () => {
     const ui = mount(card, [{ ...card, markId: 'other' }]); await paint();
@@ -1120,7 +1179,7 @@ describe('comments command parity and refresh continuity', () => {
       press(stuck); await paint();
       expect(cardIds(stuck)).toEqual(['m0', 'm1', 'm2']); expect(rowOf(stuck).hidden).toBe(false);
       expect(rowOf(stuck).querySelector('[role="alert"]')?.hasAttribute('hidden')).toBe(false);
-      expect(stuck.pane.querySelector<HTMLButtonElement>('[data-marks-more]')!.disabled).toBe(false);
+      expect(stuck.pane.querySelector<HTMLButtonElement>('[data-marks-more]')!.getAttribute('aria-disabled')).toBe('false');
     });
 
     // 下一条 / 上一条待处理 with no filter in a window that holds marks the pane has not loaded (#1604): the service names the mark.
