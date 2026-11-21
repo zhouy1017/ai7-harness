@@ -35,7 +35,7 @@ export function effectiveSearchSourceLine(projection: ModelServiceSettingsProjec
     : projection.launchPolicy.providerProcessing.settingsSearchTools?.websearch.backends.find((backend) => mainRoute.route.startsWith(`${backend.id.slice('search-'.length)}-`));
   if (native !== undefined) return `当前生效来源：随模型渠道 · ${mainRoute!.binding.providerLabel} 自带搜索${native.id === 'search-openai' || native.id === 'search-anthropic' ? '（未实测）' : ''}`;
   const selected = ready.find((backend) => backend.backendId === projection.searchBackends.selectedBackendId) ?? ready[0];
-  return selected === undefined ? '当前生效来源：暂不可用 · 当前模型渠道不自带联网搜索，请在 设置 › 联网检索 保存一个后端密钥。'
+  return selected === undefined ? `当前生效来源：暂不可用 · 当前模型渠道不自带联网搜索，${technicalWords('请在 设置 › 联网检索 保存一个后端密钥。', '请在下面的检索服务里，为其中一个保存密钥。')}`
     : projection.searchBackends.alwaysUseSelectedBackend ? `当前生效来源：编辑指定 · ${selected.name}`
     : `当前生效来源：兜底 · ${selected.name}`;
 }
@@ -117,7 +117,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
   const override = element('input'); override.type = 'checkbox'; override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false;
   override.dataset['action'] = 'always-use-selected-search-backend';
-  const label = element('label', 'field-note'); label.append(override, element('span', undefined, '总是使用联网检索里选定的后端'));
+  const label = element('label', 'field-note'); label.append(override, element('span', undefined, technicalWords('总是使用联网检索里选定的后端', '总是使用选定的检索服务')));
   override.addEventListener('change', async () => {
     override.disabled = true;
     try { render(await api.selectSearchBackend({ backendId: selectedBackendId, alwaysUseSelectedBackend: override.checked })); setStatus('联网检索来源偏好已保存。', 'success'); }

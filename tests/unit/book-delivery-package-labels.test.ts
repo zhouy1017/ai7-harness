@@ -244,3 +244,38 @@ describe('准备图书交付包 with the routine purpose', () => {
     expect(prepareBookDeliveryPackage).not.toHaveBeenCalled();
   });
 });
+
+// Stage-2 rework (Issue #1550): the preview draws 限制 only over lines, as it does 不包含.
+describe('the preview of 图书交付包 and its 限制 heading', () => {
+  const BOOK = '11111111-1111-4111-8111-111111111111';
+  let uninstall: () => void;
+  beforeEach(() => { uninstall = installMiniDom(); setTechnicalLayerVisible(false); });
+  afterEach(() => uninstall());
+
+  async function headings(limitations: string[]): Promise<{ headings: string[]; lines: string[] }> {
+    const root = miniDocument.createElement('section');
+    miniDocument.body.append(root);
+    const reading = {
+      bookId: BOOK, statement: '', conditions: [], ready: true, unmet: [], versions: [], versionsTruncated: false, changedSinceLatest: false, documents: [],
+      content: { digest: 'c'.repeat(64), included: [], includedTruncated: false, excluded: [], limitations, limitationsTruncated: false },
+    } as BookDeliveryPackageProjection;
+    const surface = mountBookDeliveryPackage({ root: root as unknown as HTMLElement, bookId: BOOK, api: { inspectBookDeliveryPackage: vi.fn(async () => reading), prepareBookDeliveryPackage: vi.fn() } as never,
+      technicalDetails: () => miniDocument.createElement('details') as unknown as HTMLElement,
+      setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback, route: vi.fn() });
+    surface.refresh();
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    const preview = root.querySelector('.package-preview') as MiniElement;
+    return {
+      headings: (preview.querySelectorAll('h5') as MiniElement[]).map((heading) => heading.textContent),
+      lines: (preview.querySelectorAll('ul.package-limitations li') as MiniElement[]).map((line) => line.textContent),
+    };
+  }
+
+  it('draws no 限制 heading for a new package with nothing to limit it', async () => {
+    expect(await headings([])).toEqual({ headings: ['包含'], lines: [] });
+  });
+
+  it('shows a package prepared before this version with its limitation lines under the heading', async () => {
+    expect(await headings(['稿件：自发稿版本后有修改，本包按发稿版本。'])).toEqual({ headings: ['包含', '限制'], lines: ['稿件：自发稿版本后有修改，本包按发稿版本。'] });
+  });
+});

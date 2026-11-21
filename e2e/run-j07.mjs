@@ -520,6 +520,8 @@ const PAGE_HELPERS = `(() => {
     pkg: () => document.querySelector('[data-screen="book-deliverables"] .deliverables-package-slot > section.deliverables-package'),
     condition: (id) => window.__j07.pkg()?.querySelector('ol.package-condition-list > li[data-condition-id="' + id + '"]') ?? null,
     packageVersions: () => Array.from(window.__j07.pkg()?.querySelectorAll('ol.package-version-list > li') ?? []),
+    // A heading of the preview with another heading or nothing after it (Issue #1550 rework): the preview's headings that stand over nothing.
+    emptyPreviewHeadings: () => Array.from(window.__j07.pkg()?.querySelectorAll('.package-preview > h5') ?? []).filter((heading) => heading.nextElementSibling === null || /^H[1-6]$/.test(heading.nextElementSibling.tagName)).map((heading) => heading.textContent),
     packageReason: () => document.getElementById(window.__j07.pkg()?.querySelector('[data-package-action="prepare"]')?.getAttribute('aria-describedby') ?? '')?.textContent ?? null,
     // Its export (Issue #416, S67b): the card below a version, and each file's key, format, words and outcome.
     packageExport: () => window.__j07.pkg()?.querySelector('ol.package-version-list > li > section.package-export') ?? null,
@@ -1326,7 +1328,10 @@ async function main() {
       return bundle.querySelector(':scope > h3')?.textContent === '图书交付包' && bundle.parentElement?.parentElement?.lastElementChild === bundle.parentElement &&
         window.__j07.condition('publication')?.dataset.conditionMet === 'false' && window.__j07.condition('work-records')?.dataset.conditionMet === 'true' &&
         prepare instanceof HTMLButtonElement && prepare.disabled &&
-        window.__j07.packageReason() === '还不能准备：发稿版本未满足。' && window.__j07.packageVersions().length === 0;
+        window.__j07.packageReason() === '还不能准备：发稿版本未满足。' && window.__j07.packageVersions().length === 0 &&
+        // A package with nothing to limit it has no 限制 heading, and no heading of the preview stands over nothing.
+        bundle.querySelector('.package-preview') !== null && !Array.from(bundle.querySelectorAll('.package-preview > h5')).some((heading) => heading.textContent === '限制') &&
+        window.__j07.emptyPreviewHeadings().length === 0;
     })()`, 'package-unavailable-before-a-milestone');
     const nothing = await renderer.evaluate(READ_PUBLICATION);
     requireJourney(nothing?.bookId === bookId && nothing.milestones.length === 0 && nothing.designations.length === 0 &&
@@ -2258,6 +2263,7 @@ async function main() {
         // No 不包含 list at all (Issue #1639): neither the four types nor the fixed exclusions are itemised.
         bundle.querySelector('ul.package-excluded') === null && !(bundle.textContent ?? '').includes('不包含') &&
         JSON.stringify(limitations) === ${JSON.stringify(JSON.stringify(['稿件：自发稿版本后有修改，本包按发稿版本。']))} &&
+        window.__j07.emptyPreviewHeadings().length === 0 && Array.from(bundle.querySelectorAll('.package-preview > h5')).some((heading) => heading.textContent === '限制') &&
         !bundle.querySelector('[data-package-action="prepare"]').disabled && window.__j07.packageReason() === '' &&
         bundle.querySelector('[data-package-field="purpose"]')?.value === '';
     })()`, 'package-preview-lists-what-it-holds');
