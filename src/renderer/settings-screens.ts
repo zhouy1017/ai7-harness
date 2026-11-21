@@ -218,9 +218,24 @@ function settingsPages(): Partial<Record<SettingsRoute, () => void>> {
   };
 }
 
-/** A settings page with the navigation beside it; any other page is itself. */
+/** The screen last laid out; every screen passes through `settingsLayout`, so this is the one the editor is leaving. */
+let laidOut: string | undefined;
+
+/**
+ * A settings page with the navigation beside it; any other page is itself. The window's document is the one scroll container
+ * every page shares, so a page keeps whatever offset the screen before it had left (模型服务 opened from the middle of 帮助 began
+ * at its second step). A settings page that follows another screen therefore opens at the top, whether it is reached from a
+ * 帮助 step, the settings navigation or a command; a repaint of the page on show (a saved key, a refreshed list) keeps the
+ * editor's place. 返回 re-opens the page it came from through this same path, so it opens at the top as well.
+ */
 function settingsLayout(state: string, content: HTMLElement): HTMLElement {
+  const leaving = laidOut;
+  laidOut = state;
   if (!SETTINGS_HUB_GROUPS.some((group) => group.rows.some((row) => row.route === state))) return content;
+  if (leaving !== state) {
+    const page = document.scrollingElement;
+    if (page) page.scrollTop = 0;
+  }
   const layout = element('div', 'settings-layout');
   layout.append(settingsNavigation(state), content);
   return layout;

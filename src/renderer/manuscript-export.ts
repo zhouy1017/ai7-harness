@@ -10,7 +10,7 @@ import {
   type RendererApi,
 } from '../shared/protocol.js';
 import {
-  EXPORT_ACTION_LABELS, EXPORT_DEGRADED_NOTE, EXPORT_FIDELITY_HEADING,
+  EXPORT_ACTION_LABELS, EXPORT_DEGRADED_NOTE, EXPORT_FIDELITY_HEADING, EXPORT_MENU_LABEL,
   EXPORT_OPTION_LABELS, EXPORT_OPTION_ORDER, EXPORT_STATUS_LINES,
   exportAbsentLine, exportCardHeading, exportCountText, exportPillText, exportPositionsLine,
   exportReceiptMeta, exportSavedRevisionLine, exportShownRows, type ExportAction,
@@ -213,7 +213,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     menu(targetOrRead, label) {
       const target = (): ManuscriptExportTargetInput => typeof targetOrRead === 'function' ? targetOrRead() : targetOrRead;
       const menu = el('details', 'export-menu'); menu.dataset['exportMenu'] = target().kind;
-      const summary = el('summary', undefined, '导出 ▾'); menu.append(summary);
+      const summary = el('summary', undefined, EXPORT_MENU_LABEL); menu.append(summary);
       const body = el('div', 'export-menu-body'); menu.append(body);
       for (const [value, name] of [['docx', 'DOCX'], ['pdf', 'PDF'], ['markdown', 'Markdown']] as const) {
         const button = el('button', 'quiet', `导出 ${name}`); button.type = 'button'; button.dataset['exportAction'] = 'open';

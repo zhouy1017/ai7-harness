@@ -28,6 +28,9 @@ export const EXPORT_ACTION_LABELS = {
 } as const;
 export type ExportAction = keyof typeof EXPORT_ACTION_LABELS;
 
+/** The menu 交付物 offers to write the manuscript to a file; 帮助's 第一次审稿 names it by these words. */
+export const EXPORT_MENU_LABEL = '导出 ▾';
+
 /** What the card names before its first review: the version kind, and a milestone's or a report's own label. */
 export type ExportPendingLabel =
   | { kind: 'current' }
