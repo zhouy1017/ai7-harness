@@ -35,8 +35,13 @@ const SENTENCE = `(() => {
 export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   at(wide ? 'marks-paging-wide' : 'marks-paging-gate');
   const opened = async () => {
-    if (await renderer.evaluate(`document.querySelector('[data-edge-entry="comments"]')?.getAttribute('aria-expanded')!=='true'`)) await pointerClick(renderer, waitFor, '[data-edge-entry="comments"]', 'marks-paging-open-pane');
-    await waitFor(renderer, `${PANE}?.hidden===false && document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')!==null`, 'marks-paging-pane-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]')!==null && document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')!==null && document.querySelector('[data-edge-entry="comments"]')!==null`, 'marks-paging-editor-ready', 60_000);
+    if (await renderer.evaluate(`document.querySelector('[data-edge-entry="comments"]').getAttribute('aria-expanded')!=='true'`)) await pointerClick(renderer, waitFor, '[data-edge-entry="comments"]', 'marks-paging-open-pane');
+    try {
+      await waitFor(renderer, `${PANE}?.hidden===false && document.querySelector('[data-edge-entry="comments"]').getAttribute('aria-expanded')==='true'`, 'marks-paging-pane-open');
+    } catch {
+      check(false, 'marks-paging-pane-open', await renderer.evaluate(`({expanded:document.querySelector('[data-edge-entry="comments"]')?.getAttribute('aria-expanded'),hidden:${PANE}?.hidden??null,right:document.documentElement.dataset.rightColumn??null,sidebar:document.documentElement.dataset.sidebar??null,viewport:[innerWidth,innerHeight]})`));
+    }
   };
   await opened();
   // The text on screen carries more marks than one answer: the first 400, and the sentence says so.
