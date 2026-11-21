@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFileSync, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BASELINE_SCHEMA_REVISION } from '../../src/service/baseline-schema.js';
 import { DATA_VERSION, dataVersionMarkerPath, readDataVersionMarker, storeRevisionOnDisk } from '../../src/service/data-version.js';
 import { EditorialStore } from '../../src/service/store.js';
-import { olderDataVersionMessage } from '../../src/shared/data-version-labels.js';
+import { FOREIGN_DATABASE, olderDataVersionMessage } from '../../src/shared/data-version-labels.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { importSample1Book } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -38,6 +38,22 @@ function filesOf(root: string): Record<string, string> {
   };
   if (existsSync(root)) walk(root);
   return out;
+}
+
+const SEED_TABLES = ['search_backend_connections', 'procedure_definitions', 'procedure_definition_versions', 'production_document_categories'];
+const INSTANT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/gu;
+
+/**
+ * Every seed row in rowid order. An instant reads `<instant>`, and a digest of another column of its row (whose bytes carry the
+ * instant) reads `<sha256 of that column>`; every other byte is compared.
+ */
+function seedRows(db: DatabaseSync): Record<string, Array<Record<string, unknown>>> {
+  return Object.fromEntries(SEED_TABLES.map((table) => [table, (db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Array<Record<string, unknown>>)
+    .map((row) => Object.fromEntries(Object.entries(row).map(([column, value]) => {
+      const source = typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value) ? Object.entries(row).find(([, other]) =>
+        typeof other === 'string' && createHash('sha256').update(other).digest('hex') === value)?.[0] : undefined;
+      return [column, source !== undefined ? `<sha256 of ${source}>` : typeof value === 'string' ? value.replace(INSTANT, '<instant>') : value];
+    })))]));
 }
 
 async function newStore(root = roots.dataRoot): Promise<void> {
@@ -73,9 +89,12 @@ describe('opening the storage baseline', () => {
       expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(BASELINE_SCHEMA_REVISION);
       expect(DATA_VERSION).toBe(2);
       expect(db.prepare('SELECT data_version, schema_revision FROM store_versions').all()).toEqual([{ data_version: 2, schema_revision: 117 }]);
-      const count = (table: string): number => Number(db.prepare(`SELECT count(*) total FROM ${table}`).get()!.total);
-      expect([count('search_backend_connections'), count('procedure_definitions'), count('procedure_definition_versions'),
-        count('production_document_categories')]).toEqual([5, 18, 29, 5]);
+      // The seed, value for value, as a store of revision 116 held it when new (instants and the digests that carry them masked).
+      const seed = seedRows(db);
+      if (process.env.AI7_REGENERATE_BASELINE_SEED === '1') writeFileSync('tests/fixtures/database/revision-117-seed.json', `${JSON.stringify(seed, null, 1)}
+`);
+      expect(seed).toEqual(JSON.parse(readFileSync('tests/fixtures/database/revision-117-seed.json', 'utf8')));
+      expect(Object.values(seed).map((rows) => rows.length)).toEqual([5, 18, 29, 5]);
     } finally { db.close(); }
     expect(await readDataVersionMarker(roots.dataRoot)).toMatchObject({ dataVersion: 2, schemaRevision: 117 });
   });
@@ -160,5 +179,72 @@ describe('opening the storage baseline', () => {
       expect(() => db.prepare('UPDATE import_drafts SET draft_version = draft_version + 1 WHERE draft_id = ?').run(staged!.draftId))
         .toThrow(baseMessage('abandonment_cleanup_block_draft_update'));
     } finally { db.close(); }
+  });
+});
+
+/** The store files of `root` copied into `into` as a crash would leave them, while `writer` still holds them open. */
+function snapshotStore(root: string, into: string, files = ['ai7.sqlite', 'ai7.sqlite-wal', 'ai7.sqlite-shm']): void {
+  for (const file of files) {
+    if (existsSync(join(root, 'store', file))) copyFileSync(join(root, 'store', file), join(into, 'store', file));
+  }
+}
+
+describe('a database AI7 did not make (#1634 review B1)', () => {
+  it.each(['in the file', 'in an uncheckpointed write-ahead log'] as const)('refuses a revision-0 database that holds a table %s, every file unchanged', async (where) => {
+    const writer = join(roots.inputRoot, 'foreign');
+    await mkdir(join(writer, 'store'), { recursive: true });
+    await mkdir(join(roots.dataRoot, 'store'), { recursive: true });
+    const db = new DatabaseSync(storePath(writer));
+    try {
+      if (where === 'in an uncheckpointed write-ahead log') db.exec('PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;');
+      db.exec('CREATE TABLE old_data (value TEXT)');
+      if (where === 'in an uncheckpointed write-ahead log') snapshotStore(writer, roots.dataRoot);
+    } finally { db.close(); }
+    if (where === 'in the file') snapshotStore(writer, roots.dataRoot);
+    const before = filesOf(roots.dataRoot);
+    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toMatchObject({
+      code: 'DATA_STORE_FOREIGN', message: FOREIGN_DATABASE,
+    });
+    expect(filesOf(roots.dataRoot)).toEqual(before);
+  });
+
+  it('builds the baseline in a 0-byte store file', async () => {
+    await mkdir(join(roots.dataRoot, 'store'), { recursive: true });
+    await writeFile(storePath(roots.dataRoot), new Uint8Array());
+    await newStore();
+    expect(storeRevisionOnDisk(storePath(roots.dataRoot))).toBe(BASELINE_SCHEMA_REVISION);
+  });
+});
+
+describe('the file reader agrees with SQLite (#1634 review F4)', () => {
+  // Each state is a crash-like copy of a live writer's files; SQLite then reads a second copy, so the reader's copy stays as written.
+  const states: ReadonlyArray<readonly [string, (db: DatabaseSync) => void]> = [
+    ['a closed baseline store', () => undefined],
+    ['a revision stamped in the log', (db) => db.exec('PRAGMA user_version = 116')],
+    ['a log already checkpointed but kept', (db) => { db.exec('PRAGMA user_version = 116'); db.exec('PRAGMA wal_checkpoint(PASSIVE)'); }],
+    ['two stamps, the later committed last', (db) => { db.exec('PRAGMA user_version = 5'); db.exec('PRAGMA user_version = 116'); }],
+    ['an open transaction spilled into the log', (db) => {
+      db.exec('PRAGMA cache_size = 1; CREATE TABLE spill (value TEXT); BEGIN; PRAGMA user_version = 3');
+      const insert = db.prepare('INSERT INTO spill VALUES (?)');
+      for (let index = 0; index < 400; index += 1) insert.run('溢出'.repeat(200));
+    }],
+  ];
+  it.each(states)('reads %s as SQLite does', async (_label, write) => {
+    await newStore();
+    const writer = new DatabaseSync(storePath(roots.dataRoot));
+    const copies = [join(roots.inputRoot, 'reader'), join(roots.inputRoot, 'sqlite')];
+    try {
+      writer.exec('PRAGMA wal_autocheckpoint = 0');
+      write(writer);
+      // The main file and its log; SQLite rebuilds the shared-memory index, which a live writer holds locked.
+      for (const copy of copies) { await mkdir(join(copy, 'store'), { recursive: true }); snapshotStore(roots.dataRoot, copy, ['ai7.sqlite', 'ai7.sqlite-wal']); }
+    } finally {
+      if (writer.isTransaction) writer.exec('ROLLBACK');
+      writer.close();
+    }
+    const sqlite = new DatabaseSync(storePath(copies[1]!), { readOnly: true });
+    try {
+      expect(storeRevisionOnDisk(storePath(copies[0]!))).toBe(Number(sqlite.prepare('PRAGMA user_version').get()!.user_version));
+    } finally { sqlite.close(); }
   });
 });

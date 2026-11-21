@@ -307,6 +307,18 @@ describe('provider-free local ReviewRun', () => {
     expect(refusal).toBeInstanceOf(StoreError); expect(refusal).toMatchObject({ code: 'LOCAL_PLAN_INVALID', message: '本地检查计划或输入无效；请重新准备。' });
   });
 
+  it('refuses at the next open a local-stage artifact chain tampered behind its triggers', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '本地工件链样书');
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); replaceFirst(book, '他停住了…又望向门口。'); const prepared = prepare(book, policy); authorize(book, prepared);
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(prepared.run.reviewRunId); await driver.dispose(); store.markCleanShutdown(); store.close();
+    const db = database(); const record = readLocalStageArtifacts(db, prepared.run.reviewRunId).at(-1)!.record;
+    expect(() => db.exec('UPDATE review_local_stage_artifacts SET sequence = sequence')).toThrow();
+    const tampered = canonicalRecord({ ...record, previousDigest: '0'.repeat(64) }); db.exec('DROP TRIGGER review_local_stage_artifacts_no_update');
+    db.prepare('UPDATE review_local_stage_artifacts SET canonical_json = ?, sha256 = ? WHERE review_run_id = ? AND sequence = 3').run(tampered.json, tampered.digest, prepared.run.reviewRunId);
+    db.exec("CREATE TRIGGER review_local_stage_artifacts_no_update BEFORE UPDATE ON review_local_stage_artifacts BEGIN SELECT RAISE(ABORT, 'REVIEW_LOCAL_STAGE_IMMUTABLE'); END"); db.close();
+    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow(expect.objectContaining({ code: expect.stringMatching(/LOCAL_STAGE|RECORD_INVALID/u) }));
+  });
+
   it('rolls back marks and findings at a materialization crash and continues from completion without checking again', async () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '本地物化回滚样书');
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); replaceFirst(book, '他停住了…又望向门口。'); const prepared = prepare(book, policy); authorize(book, prepared);

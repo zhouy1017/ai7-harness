@@ -12,6 +12,8 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_EXPORT_SCHEMA_VERSION, LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { DATABASE_EXPORT_TRIGGER_SQL } from '../../src/service/database-exports.js';
 
 const payloadWalk = vi.hoisted(() => ({ root: null as string | null, pause: null as (() => Promise<void>) | null }));
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -287,6 +289,87 @@ describe('导出数据库 over the real store', () => {
       store.markCleanShutdown();
     } finally {
       store.close();
+    }
+  }, 180_000);
+  it('keeps its records as ledgers read back against their digests', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const destination = join(roots.inputRoot, 'ledger.ai7db');
+    try {
+      const preparation = await store.prepareDatabaseExport(destination, true);
+      await store.approveDatabaseExport(preparation.preparationId, true);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const inspected = async (): Promise<unknown> => {
+      const reader = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      try {
+        const answer = (() => {
+          try {
+            return reader.inspectDatabaseExports();
+          } catch (error) {
+            return error;
+          }
+        })();
+        reader.markCleanShutdown();
+        return answer;
+      } finally {
+        reader.close();
+      }
+    };
+    // A preparation whose row and record were rewritten together, its digest left as it was, no longer reads.
+    const original = (() => {
+      const database = new DatabaseSync(databasePath);
+      try {
+        const row = database.prepare('SELECT file_name, canonical_json FROM database_export_preparations').get() as { file_name: string; canonical_json: string };
+        database.exec('DROP TRIGGER database_export_preparations_no_update');
+        const record = parseCanonicalJson(row.canonical_json) as Record<string, unknown>;
+        database.prepare('UPDATE database_export_preparations SET file_name = ?, canonical_json = ?')
+          .run('rewritten.ai7db', canonicalRecord({ ...record, fileName: 'rewritten.ai7db' }).json);
+        database.exec(DATABASE_EXPORT_TRIGGER_SQL.database_export_preparations_no_update!);
+        return row;
+      } finally {
+        database.close();
+      }
+    })();
+    expect(code(await inspected())).toBe('DATABASE_EXPORT_RECORD_INVALID');
+    const restore = new DatabaseSync(databasePath);
+    try {
+      restore.exec('DROP TRIGGER database_export_preparations_no_update');
+      restore.prepare('UPDATE database_export_preparations SET file_name = ?, canonical_json = ?').run(original.file_name, original.canonical_json);
+      restore.exec(DATABASE_EXPORT_TRIGGER_SQL.database_export_preparations_no_update!);
+    } finally {
+      restore.close();
+    }
+    expect((await inspected() as { total: number }).total).toBe(1);
+    const tamper = new DatabaseSync(databasePath);
+    try {
+      for (const table of ['database_export_preparations', 'database_export_approvals', 'database_export_receipts']) {
+        expect(() => tamper.exec(`UPDATE ${table} SET canonical_json = canonical_json`)).toThrowError(/DATABASE_EXPORT_LEDGER_IMMUTABLE/u);
+        expect(() => tamper.exec(`DELETE FROM ${table}`)).toThrowError(/DATABASE_EXPORT_LEDGER_IMMUTABLE/u);
+      }
+      // A receipt rewritten by hand, digest and all, no longer reads.
+      tamper.exec('DROP TRIGGER database_export_receipts_no_update');
+      const row = tamper.prepare('SELECT canonical_json FROM database_export_receipts').get() as { canonical_json: string };
+      const rewritten = canonicalRecord({ ...(parseCanonicalJson(row.canonical_json) as Record<string, unknown>), finalPath: join(roots.inputRoot, 'elsewhere.ai7db') });
+      tamper.prepare('UPDATE database_export_receipts SET canonical_json = ?, sha256 = ?').run(rewritten.json, rewritten.digest);
+      tamper.exec(DATABASE_EXPORT_TRIGGER_SQL.database_export_receipts_no_update!);
+    } finally {
+      tamper.close();
+    }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(code((() => {
+        try {
+          return reopened.inspectDatabaseExports();
+        } catch (error) {
+          return error;
+        }
+      })())).toBe('DATABASE_EXPORT_RECORD_INVALID');
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
     }
   }, 180_000);
 

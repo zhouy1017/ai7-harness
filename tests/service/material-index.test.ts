@@ -18,6 +18,8 @@ import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
 import { RetrievalIndex } from '../../src/service/retrieval/index.js';
 import { materialRetrievalSources } from '../../src/service/retrieval/source-readers.js';
+import { existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 
 // Service-integration suite (L2) for ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009,
 // ATTN-009) over the real store on a temporary Agent Data Root. The collected book is exact `sample1` — an admitted Public
@@ -513,4 +515,47 @@ describe('资料索引 over the real store', () => {
     }
   }, 120_000);
 
+
+  it('builds at the next start what a closing service stopped, and removes stray working copies', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let materialId: string;
+    try {
+      materialId = (await put(store, file('早到.txt', CHINESE), '早到')).materialId;
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    const work = join(roots.dataRoot, MATERIAL_INDEX_WORK_DIRECTORY);
+    mkdirSync(work, { recursive: true });
+    writeFileSync(join(work, `.work-${randomUUID()}.docx`), 'left behind');
+    writeFileSync(join(work, 'keep-me.txt'), 'not a working copy');
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(readdirSync(work)).toEqual(['keep-me.txt']);
+      expect(store.inspectLibraryMaterial(materialId).index.state).toBe('queued');
+      // Stopped as the service closes: the build under way records nothing.
+      store.startMaterialIndexing();
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const database = new DatabaseSync(storePath(), { readOnly: true });
+      try {
+        expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
+        expect((database.prepare('SELECT count(*) count FROM material_index_builds').get() as { count: number }).count).toBeLessThanOrEqual(1);
+      } finally {
+        database.close();
+      }
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      expect(store.inspectLibraryMaterial(materialId).index.state).toBe('complete');
+      expect(existsSync(work) ? readdirSync(work) : []).toEqual(['keep-me.txt']);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    expect(readFileSync(join(work, 'keep-me.txt'), 'utf8')).toBe('not a working copy');
+  }, 120_000);
 });
