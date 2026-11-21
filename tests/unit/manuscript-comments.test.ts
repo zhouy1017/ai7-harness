@@ -924,8 +924,11 @@ describe('comments command parity and refresh continuity', () => {
       ui.pageAt.mockResolvedValueOnce(pageOf([2, 3, 4], 3, null)); press(ui); await paint();
       const handled = { ...cards[0]!, status: 'resolved' as const };
       ui.update.mockResolvedValueOnce({ markId: 'm0', card: handled, marks: [anchor(handled), anchor(cards[1]), anchor(cards[2])], marksTruncated: true, marksPage: { shown: 3, total: 5, nextOrdinal: 3, digest: 'd2' } } as never);
-      ui.pageAt.mockResolvedValueOnce(pageOf([3, 4], 2, null, 'd2'));
+      // While the pages are read back the sentence does not come back for a moment: the pane's header would move under the editor's hand.
+      const rowDuring: boolean[] = [];
+      ui.pageAt.mockImplementationOnce(async () => { rowDuring.push(rowOf(ui).hidden === true); return pageOf([3, 4], 2, null, 'd2'); });
       ui.pane.querySelector<HTMLButtonElement>('[data-comment-card="m0"] [data-mark-action="resolve"]')!.click(); await paint();
+      expect(rowDuring).toEqual([true]);
       expect(ui.pageAt.mock.calls[1]?.[0]).toMatchObject({ marks: { afterOrdinal: 3, digest: 'd2' } });
       expect(cardIds(ui)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4']); expect(rowOf(ui).hidden).toBe(true);
     });

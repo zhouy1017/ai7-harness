@@ -58,6 +58,8 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
   let loaded: { readonly key: string; count: number } | null = null;
   let reading: Promise<boolean> | null = null;
   let abandoned = false;
+  /** Pages being read back after a reload: the row stays as it was, so the pane's header does not move under the editor's hand. */
+  let restoring = false;
   let failure: string | null = null;
 
   /**
@@ -130,7 +132,8 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
     const page = window.marksPage;
     if (loaded !== null && loaded.key === key && page !== undefined && page.nextOrdinal !== null && window.marks.length < loaded.count) {
       const want = loaded.count;
-      void run(() => pages(want)).then(() => { if (host.alive()) host.changed(); });
+      restoring = true;
+      void run(() => pages(want)).then(() => { restoring = false; if (host.alive()) { paint(); host.changed(); } });
       return;
     }
     loaded = { key, count: window.marks.length };
@@ -156,6 +159,7 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
     const window = host.window();
     const page = window.marksPage;
     const hadFocus = row.contains(document.activeElement);
+    if (restoring) return;
     if (page === undefined || page.nextOrdinal === null) {
       row.hidden = true;
       failed.hidden = true;
