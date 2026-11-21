@@ -1177,6 +1177,31 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-model-settings-hub');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'ordinary-model-settings-ready');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="use-model-for-both-roles"]') && document.querySelector('[data-action="select-fast-role-model"]') && !document.querySelector('[data-custom-model-id]') && document.querySelector('[data-model-summary]') && document.querySelectorAll('[data-search-backend]').length===5`, 'ordinary-model-single-view');
+    // Stage-2 rework (#1547): on the first opening, with no key saved, the one highlighted sentence names only what the editor can do now.
+    // Step 2's key field is the next thing: it is inside the window and its scroller's visible box, and the point at its centre is the field itself, with no scripted scroll before.
+    requireJourney(await primary.evaluate(`(async () => {
+      const settings = await window.ai7.getModelServiceSettings();
+      const pro = settings.modelRoles.find((role) => role.roleId === 'foreground-pro');
+      const flow = document.querySelector('[data-model-service-flow]');
+      const channel = settings.channels.find((entry) => entry.channelId === flow.dataset.flowChannel);
+      const keySaved = settings.routeChoice.routes.find((route) => route.route === channel.route)?.connection?.credentialOperationState === 'ready';
+      const sentence = document.querySelector('[data-model-summary]');
+      const field = document.querySelector('.model-credential-form input[type="password"]');
+      if (pro.binding !== null || keySaved || !(field instanceof HTMLInputElement)) return false;
+      const box = field.getBoundingClientRect(), hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      const header = document.querySelector('#context-header').getBoundingClientRect(), sidebar = document.querySelector('#app-sidebar').getBoundingClientRect();
+      let inScroller = true;
+      for (let parent = field.parentElement; parent !== null; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (/auto|scroll/.test(style.overflowY) && parent.scrollHeight > parent.clientHeight) { const visible = parent.getBoundingClientRect(); inScroller = inScroller && box.top >= visible.top && box.bottom <= visible.bottom; }
+      }
+      return sentence.textContent === '尚未选择模型。请先在上面的「2. 填写密钥并获取模型」里保存这个渠道的密钥，再选择模型并点击「使用这个模型」。' &&
+        document.querySelector('[data-flow-step="credential"] h4').textContent.startsWith('2. 填写密钥并获取模型') &&
+        !field.disabled && box.width > 0 && box.height > 0 && box.top >= header.bottom && box.bottom <= innerHeight && box.left >= sidebar.right && box.right <= innerWidth && inScroller &&
+        (hit === field || field.contains(hit)) &&
+        document.querySelector('[data-action="save-channel-credential"]').textContent === '保存并获取模型' &&
+        document.querySelector('[data-action="use-model-for-both-roles"]').disabled === true;
+    })()`) === true, 'ordinary-first-run-sentence-names-the-next-step');
     await assertOrdinaryModelReachability(primary);
     // #1370: both configuration sections are directly mounted in ordinary mode. CI has no search keys;
     // credential save/test success is covered by the ordinary-production renderer/service tests, never a live provider.
@@ -1186,6 +1211,14 @@ async function main() {
         search.textContent.includes('当前生效来源：') && !search.querySelector('h3[data-developer-only]');
     })()`, 'ordinary-search-proxy-visible');
     await assertRenderer(primary, `!/https?:[/][/]|配置摘要|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-technical-identifiers');
+    // Stage-2 rework (#1547): ordinary mode says 检索服务 on the engine's own text, never 后端, and never points the editor at the page it is on.
+    await assertRenderer(primary, `(() => {
+      const search=document.querySelector('[data-search-backends="true"]'); const text=search.textContent;
+      const always=search.querySelector('[data-action="always-use-selected-search-backend"]')?.parentElement?.textContent;
+      const source=text.slice(text.indexOf('当前生效来源：'));
+      return !text.includes('后端') && !text.includes('设置 › 联网检索') && always==='总是使用选定的检索服务' &&
+        (!source.startsWith('当前生效来源：暂不可用') || source.includes('请在下面的检索服务里，为其中一个保存密钥。'));
+    })()`, 'ordinary-search-says-search-service');
     // The 未实测 disclosure names hit rates; detailed measurement labels and numeric values remain technical-only.
     await assertRenderer(primary, `!/评测参考|p50|中文命中率|国际命中率|命中率[ ：:]*[0-9]/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-detailed-measurements');
     await assertRenderer(primary, `document.querySelectorAll('[data-search-backends="true"] [data-action="probe-search-candidate"]').length===3`, 'ordinary-search-candidate-connection-controls');

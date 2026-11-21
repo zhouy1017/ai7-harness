@@ -181,13 +181,21 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
   return step;
 }
 
+/** What to do first when no model is chosen yet: only a control the editor can use now is named, in the order the page's own steps unlock. */
+function noModelSentence(projection: ModelServiceSettingsProjection, channel: ModelServiceChannelProjection): string {
+  if (channel.route === null || !projection.routeChoice.routes.some((option) => option.route === channel.route)) return '尚未选择模型。这个渠道在当前版本里还不能使用，请先在上面的「1. 渠道」里选择其他渠道。';
+  if (!credentialReady(projection, channel.route)) return '尚未选择模型。请先在上面的「2. 填写密钥并获取模型」里保存这个渠道的密钥，再选择模型并点击「使用这个模型」。';
+  if (channel.models.filter(bothEligible).length === 0) return '尚未选择模型。模型列表还没有取到，请先点击上面的「刷新模型列表」，取到后选择模型并点击「使用这个模型」。';
+  return '尚未选择模型，请在上方选择模型并点击「使用这个模型」。';
+}
+
 /** The standing ordinary explanation belongs between the main action and the optional choice. */
-export function modelServiceSummary(projection: ModelServiceSettingsProjection): HTMLElement {
+export function modelServiceSummary(projection: ModelServiceSettingsProjection, channel: ModelServiceChannelProjection): HTMLElement {
   const main = projection.modelRoles.find(role => role.roleId === 'foreground-pro');
   const flash = projection.modelRoles.find(role => role.roleId === 'foreground-flash');
   const name = (role: typeof main): string => role?.binding == null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}`;
   let text: string;
-  if (main?.binding == null) text = '尚未选择模型，请在上方选择模型并点击「使用这个模型」。';
+  if (main?.binding == null) text = noModelSentence(projection, channel);
   else if (main.status !== 'available') {
     const reason = main.statusDetail?.split('。')[0];
     text = `${name(main)} · ${main.statusLabel}：${reason ?? (main.status === 'setup-required' ? '请保存这个渠道的密钥，或选择其他模型' : main.status === 'needs-attention' ? '请重新保存这个渠道的密钥，或选择其他模型' : '系统的安全存储暂不可用，请先恢复本机安全存储后重试')}。`;
@@ -391,6 +399,9 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
       }
       if (group.children.length > 0) choices.push(group);
     }
+    // After a recommended group the rest needs a heading of its own, as developer mode has; a channel that names none keeps a plain list.
+    const otherGroup = el('optgroup'); otherGroup.label = '其他模型';
+    const otherOptions: HTMLOptionElement[] = [];
     for (const { model, row, favourite } of sorted) {
       row.hidden = !matches(model);
       paintFavourite(favourite, model.modelId);
@@ -403,9 +414,11 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
       }
       else if (!recommended.has(model.modelId) && (matches(model) || model.modelId === checked?.modelId)) {
         const option = el('option', undefined, `${starred.includes(model.modelId) ? '★ ' : ''}${modelLabelWords(model)}${!matches(model) ? ' · 已选（不匹配筛选）' : ''}`);
-        option.value = model.modelId; choices.push(option);
+        option.value = model.modelId; otherOptions.push(option);
       }
     }
+    if (recommended.size > 0) { otherGroup.append(...otherOptions); if (otherOptions.length > 0) choices.push(otherGroup); }
+    else choices.push(...otherOptions);
     if (!technicalLayerVisible) { modelSelect.replaceChildren(...choices); modelSelect.value = checked?.modelId ?? ''; }
     paintFavourite(selectedFavourite, checked?.modelId);
     matchCount.textContent = `匹配 ${offered.filter(matches).length} / ${offered.length} 个模型${checked === null ? '' : `；已选：${modelLabelWords(checked)}`}`;
@@ -478,7 +491,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   optional.append(clear);
   if (technicalLayerVisible) actions.append(test, roleButtons[0]!);
   // A manual model ID is the developer layer's (Issue #1431 item 97); ordinary settings choose from the searchable catalogue.
-  step.append(filterLabel, group, matchCount, ...(technicalLayerVisible ? [customLabel] : []), effortLabels[0]!, effortNote, actions, modelServiceSummary(projection), optional);
+  step.append(filterLabel, group, matchCount, ...(technicalLayerVisible ? [customLabel] : []), effortLabels[0]!, effortNote, actions, modelServiceSummary(projection, channel), optional);
   const testStep = el('div', 'model-service-flow-test');
   if (!technicalLayerVisible) testStep.append(el('h4', undefined, '4. 测试连接'), test);
   testStep.append(feedback, el('p', 'field-note', technicalLayerVisible ? MODEL_CONNECTION_TEST_NOTE : '只发送一条测试消息，不含图书文字。'));

@@ -768,7 +768,7 @@ it('groups configured recommendations before the remaining models and offers def
   setTechnicalLayerVisible(false);
   const projection = settings(['anthropic-claude']);
   const { node } = flow(projection);
-  expect(node.querySelectorAll('optgroup').map(group => (group as unknown as { label: string }).label)).toEqual(['推荐 · 主要模型', '推荐 · 较轻模型']);
+  expect(node.querySelectorAll('optgroup').map(group => (group as unknown as { label: string }).label).slice(0, 2)).toEqual(['推荐 · 主要模型', '推荐 · 较轻模型']);
   const effort = node.querySelector('select[aria-label="思考强度"]')!;
   expect(effort.querySelectorAll('option').map(option => option.textContent)).toEqual(expect.arrayContaining(['服务默认', '其他…']));
   effort.value = '__other'; effort.dispatchEvent({ type: 'change' });
@@ -933,3 +933,60 @@ it('keeps the selected lighter model connection-test result beside its controls'
   const { node } = flow(projection);
   expect(node.querySelector('[data-flash-connection-test]')!.textContent).toBe('较轻模型连接成功，可以使用。');
 });
+
+// Stage-2 rework (#1547): the sentence under 「使用这个模型」 names only what the editor can do now.
+describe('the sentence while no model is chosen (ordinary mode)', () => {
+  const noModel = (ready: ReadonlyArray<ModelServiceRouteId>, edit: (projection: ModelServiceSettingsProjection) => ModelServiceSettingsProjection = (projection) => projection) =>
+    flow(edit(settings(ready, null)), api(), { channel: 'anthropic-claude' }).node;
+  const sentence = (node: MiniElement) => node.querySelector('[data-model-summary]')!.textContent;
+  beforeEach(() => setTechnicalLayerVisible(false));
+
+  it('says to save the key in step 2 first while the channel on screen has none', () => {
+    const node = noModel([]);
+    expect(sentence(node)).toBe('尚未选择模型。请先在上面的「2. 填写密钥并获取模型」里保存这个渠道的密钥，再选择模型并点击「使用这个模型」。');
+    expect(node.querySelector('.model-credential-form input')!.disabled).toBe(false);
+    expect(node.querySelector('select[aria-label="AI7 使用的模型"]')!.disabled).toBe(true);
+    expect(button(node, 'use-model-for-both-roles').disabled).toBe(true);
+  });
+  it('reads as before once the key is saved and models are listed', () => {
+    const node = noModel(['anthropic-claude']);
+    expect(sentence(node)).toBe('尚未选择模型，请在上方选择模型并点击「使用这个模型」。');
+    expect(node.querySelector('select[aria-label="AI7 使用的模型"]')!.disabled).toBe(false);
+    expect(button(node, 'use-model-for-both-roles').disabled).toBe(false);
+  });
+  it('points at 刷新模型列表 when the key is saved but no model is listed yet', () => {
+    const node = noModel(['anthropic-claude'], (projection) => ({ ...projection, channels: projection.channels.map((channel) => channel.channelId === 'anthropic-claude' ? { ...channel, models: [] } : channel) }));
+    expect(sentence(node)).toBe('尚未选择模型。模型列表还没有取到，请先点击上面的「刷新模型列表」，取到后选择模型并点击「使用这个模型」。');
+    expect(button(node, 'retry-model-list').disabled).toBe(false);
+  });
+  it('sends the editor to 渠道 when the channel on screen is not connected in this version', () => {
+    const node = noModel([], (projection) => ({ ...projection, routeChoice: { ...projection.routeChoice, routes: projection.routeChoice.routes.filter((option) => option.route !== 'anthropic-claude') } }));
+    expect(sentence(node)).toBe('尚未选择模型。这个渠道在当前版本里还不能使用，请先在上面的「1. 渠道」里选择其他渠道。');
+  });
+});
+
+// Stage-2 rework (#1547): the models no recommendation names follow a heading of their own, as in developer mode.
+describe('the ordinary model list headings', () => {
+  const model = (modelId: string) => ({ modelId, modelLabel: modelId, family: 'synthetic', main: 'eligible', fast: 'eligible', capabilities: { text: 'supported', stream: 'supported', functionTools: 'supported' } });
+  const groups = (recommended: { pro: string[]; flash: string[] } | undefined) => {
+    setTechnicalLayerVisible(false);
+    const projection = settings(['anthropic-claude']);
+    const channels = projection.channels.map((channel) => {
+      if (channel.channelId !== 'anthropic-claude') return channel;
+      const { recommended: _own, ...plain } = channel;
+      return { ...plain, models: ['a', 'b', 'c', 'd'].map(model), ...(recommended === undefined ? {} : { recommended }) } as typeof channel;
+    });
+    const node = flow({ ...projection, channels }, api(), { channel: 'anthropic-claude' }).node;
+    return node.querySelectorAll('optgroup').map((group) => ({ label: (group as unknown as { label: string }).label, models: group.children.map((option) => option.value) }));
+  };
+
+  it('puts the remaining models under 其他模型 after the recommended groups', () => {
+    expect(groups({ pro: ['a'], flash: ['b'] })).toEqual([
+      { label: '推荐 · 主要模型', models: ['a'] }, { label: '推荐 · 较轻模型', models: ['b'] }, { label: '其他模型', models: ['c', 'd'] }]);
+  });
+  it('draws no 其他模型 when every model is recommended, and no group at all when none is', () => {
+    expect(groups({ pro: ['a', 'b'], flash: ['c', 'd'] }).map((group) => group.label)).toEqual(['推荐 · 主要模型', '推荐 · 较轻模型']);
+    expect(groups(undefined)).toEqual([]);
+  });
+});
+
