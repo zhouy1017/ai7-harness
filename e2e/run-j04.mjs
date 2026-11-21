@@ -1822,7 +1822,7 @@ async function main() {
     const historicalDataRoot = resolve(runRoot, 'historical-policy-reader');
     await cp(currentDataRoot, historicalDataRoot, { recursive: true, filter: (source) => source !== currentShellRoot });
     const historicalHelper = resolve(runRoot, 'historical-policy-fixture.mjs');
-    await build({ entryPoints: [resolve(ROOT, 'tests/support/analysis-ledger-revisions.ts')], bundle: true,
+    await build({ entryPoints: [resolve(ROOT, 'tests/support/pre94-policy-encoding.ts')], bundle: true,
       platform: 'node', format: 'esm', outfile: historicalHelper, logLevel: 'silent' });
     const { constructPre94PolicyEncoding } = await import(pathToFileURL(historicalHelper).href);
     const historicalDatabase = new DatabaseSync(resolve(historicalDataRoot, 'store', 'ai7.sqlite'));
