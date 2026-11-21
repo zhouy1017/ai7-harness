@@ -344,7 +344,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
           .toBe('PRODUCTION_DOCUMENT_TYPE_INVALID:这个文档类型不在本社的类型配置中。');
       }
       const bundle = book.store.inspectBookDeliveryPackage(book.bookId);
-      expect(bundle.conditions.map((condition) => condition.key)).toEqual(['publication', 'document', 'document', 'document', 'document', 'document', 'work-records']);
+      expect(bundle.conditions.map((condition) => condition.key)).toEqual(['publication', 'work-records']);
       expect(bundle.content.included.filter((item) => item.kind === 'readers-report'))
         .toEqual([{ kind: 'readers-report', label: '审稿意见 · 给作者的修改意见 · 版本 1', detail: '发稿版本设定后才起草，按准备时的最新一版' }]);
       // Nor does 范例 admit it while the Book has no 发稿版本 in force.

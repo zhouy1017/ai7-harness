@@ -14,6 +14,7 @@ import { ManuscriptExportStore } from '../../src/service/manuscript-export.js';
 import { compileWordTrackedDocx, parseDocx } from '../../src/service/docx.js';
 import * as exportFiles from '../../src/service/manuscript-export.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { insertLegacyPackageVersion } from '../support/legacy-package-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type BookDeliveryPackageExportProjection } from '../../src/shared/protocol.js';
@@ -116,6 +117,10 @@ async function preparePackageOf(store: EditorialStore, book: { bookId: string; m
   const title = store.listBooks(null).items.find((item) => item.bookId === book.bookId)!.title;
   return { ...book, title, packageVersionId: prepared.package.versions[0]!.packageVersionId };
 }
+
+/** The next version of a package in the shape packages had before Issue #1639 (see the helper): its manifest keeps its 不包含 list. */
+const legacyShapedVersion = (packageVersionId: string): string =>
+  insertLegacyPackageVersion(join(roots.dataRoot, 'store', 'ai7.sqlite'), packageVersionId).packageVersionId;
 
 /** A 批注 on the manuscript's longest paragraph, as the editor makes one: the milestone's file then carries it. */
 function annotate(store: EditorialStore, book: { manuscriptId: string; branchId: string }): void {
@@ -630,10 +635,10 @@ describe('图书交付包 · 导出 (S67b)', () => {
       expect(store.inspectDeliverables(bookId).exports).toEqual([]);
     }, 240_000);
 
-    it('writes the frozen manifest with its delivery records and exclusions', async () => {
+    it('writes the frozen manifest with its delivery records and no 不包含 list for a package made now (Issue #1639)', async () => {
       const first = await prepare(folder);
       await store.approveBookDeliveryPackageExport({ bookId, exportId: first.exportId }, true);
-      // The 交付包清单 is the version's own words: what it holds, each document's Delivery Records, what it leaves out.
+      // The 交付包清单 is the version's own words: what it holds and each document's Delivery Records.
       const manifest = await readFile(join(folder, '交付包清单.md'), 'utf8');
       expect(manifest.split('\n')).toEqual([
         `# ${title} · 图书交付包 v1`,
@@ -653,21 +658,51 @@ describe('图书交付包 · 导出 (S67b)', () => {
         '',
         expect.stringMatching(/^- 第 1 次交付 · 宣传部 · 版本 1 · \d{4}-\d{2}-\d{2}T.*（备注：首发稿）$/u),
         '',
-        '## 不包含',
-        '',
-        '- 备注：稿件与文档上的备注只供编辑自己参考',
-        '- 资料库原件',
-        '- 中间修订版：稿件只含发稿版本，文档只含交付过的版本',
-        '- 本书不做：宣传文章、评论文章、发布会材料、营销要点',
-        '- 评估记录：本书没有定稿评估记录',
-        '- 审稿意见：本书没有审稿意见',
-        '',
         '## 说明',
         '',
         '- 图书交付包把已完成的工作放在一起：它不是发稿，也不是交付；准备它不改变任何记录，也不生成文件。',
         '',
       ]);
       for (const forbidden of PUBLICATION_FORBIDDEN_WORDS) expect(manifest).not.toContain(forbidden);
+    }, 240_000);
+
+    it('keeps the 交付包清单 of a package made before Issue #1639 byte for byte, with its delivery sentence and its 不包含 list', async () => {
+      const legacy = insertLegacyPackageVersion(join(roots.dataRoot, 'store', 'ai7.sqlite'), packageVersionId);
+      const delivery = await (async () => {
+        const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+        try { return database.prepare('SELECT ordinal, recipient_label, version, note, recorded_at FROM production_document_deliveries WHERE book_id = ?').get(bookId) as Record<string, string | number>; }
+        finally { database.close(); }
+      })();
+      const legacyReview = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId: legacy.packageVersionId, options: ALL }, true);
+      const prepared = await store.prepareBookDeliveryPackageExport({ bookId, packageVersionId: legacy.packageVersionId, options: ALL,
+        memberKeys: ['manifest'], reviewDigest: legacyReview.reviewDigest, folder }, true);
+      await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
+      // The whole file, as the code before this Issue wrote it for this record: the expectation is written out here from the record's
+      // own values and was run against the base commit's manifest writer, so it cannot move with the code under test.
+      const expected = [
+        `# ${title} · 图书交付包 v2`, '',
+        '- 用途：交出版社存档', `- 准备于：${legacy.preparedAt}`, `- 内容摘要：${legacy.contentDigest}`, '',
+        '## 包含', '',
+        '- 稿件 · 发稿版本「一审稿」 · r1（发稿范围：纸质版首印）',
+        '- 新闻稿 · 版本 1', '',
+        '## 交付记录', '', '### 新闻稿', '',
+        `- 第 ${String(delivery['ordinal'])} 次交付 · ${String(delivery['recipient_label'])} · 版本 ${String(delivery['version'])} · ${String(delivery['recorded_at'])}（备注：${String(delivery['note'])}）`, '',
+        '## 不包含', '',
+        '- 备注：稿件与文档上的备注只供编辑自己参考',
+        '- 资料库原件',
+        '- 中间修订版：稿件只含发稿版本，文档只含交付过的版本',
+        '- 本书不做：宣传文章、评论文章、发布会材料、营销要点',
+        '- 评估记录：本书没有定稿评估记录',
+        '- 审稿意见：本书没有审稿意见', '',
+        '## 说明', '',
+        '- 新闻稿：交付后有修改，本包按交付时的版本 1。',
+        '- 图书交付包把已完成的工作放在一起：它不是发稿，也不是交付；准备它不改变任何记录，也不生成文件。', '',
+      ].join('\n');
+      const written = await readFile(join(folder, '交付包清单.md'));
+      expect(written.toString('utf8')).toBe(expected);
+      expect(createHash('sha256').update(written).digest('hex')).toBe(createHash('sha256').update(expected, 'utf8').digest('hex'));
+      // The record verifies and lists beside the package made now.
+      expect(store.inspectBookDeliveryPackage(bookId).versions.map((version) => version.label)).toEqual(['v2', 'v1']);
     }, 240_000);
 
     it('refuses the whole set when a rival file appears after preparation', async () => {
@@ -778,7 +813,9 @@ describe('图书交付包 · 导出 (S67b)', () => {
   it('writes the 交付包清单 from the frozen version alone, whatever changes after it', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      const { bookId, packageVersionId } = await preparedPackage(store);
+      const prepared1 = await preparedPackage(store);
+      const { bookId } = prepared1;
+      const packageVersionId = legacyShapedVersion(prepared1.packageVersionId);
       const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL }, true);
       // 恢复 of a type moves the package's content past v1; v1's files and their review stay exactly as they were.
       store.decideProductionDocumentType({ bookId, typeId: 'marketing-points', notForThisBook: false });
@@ -1001,7 +1038,9 @@ describe('图书交付包 · 导出 (S67b)', () => {
     const words = BOOK_DELIVERY_PACKAGE_WORDS as { libraryOriginals: string };
     const original = words.libraryOriginals;
     try {
-      const { bookId, packageVersionId } = await preparedPackage(store);
+      const prepared1 = await preparedPackage(store);
+      const { bookId } = prepared1;
+      const packageVersionId = legacyShapedVersion(prepared1.packageVersionId);
       const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL }, true);
       const exportTo = async (name: string) => {
         const folder = join(roots.inputRoot, name);

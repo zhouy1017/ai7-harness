@@ -2180,7 +2180,7 @@ async function main() {
     at('package-evaluation');
     // 评估 定稿 (Issue #429, S81a; BUNDLE-001): the Book's first Evaluation Record is scored and finalized through 评估's own
     // operations — five scores, both risks 低 with a statement, 修改后再议 — so the package has a 定稿 评估记录 to name. The Book
-    // has no 审稿意见, which the package lists under 不包含 with the reason; the drafting itself is J-11's.
+    // has no 审稿意见; the drafting itself is J-11's.
     const evaluationStart = await renderer.evaluate(`window.ai7.startEvaluation({ fromInitial: false }).then((page) => ({ recordId: page.record.recordId, entries: page.record.entries, content: page.record.content }))`);
     requireJourney(typeof evaluationStart?.recordId === 'string' && evaluationStart.content?.items?.length === 5 && evaluationStart.content.risks?.length === 2, 'package-evaluation-started', evaluationStart);
     const evaluationContent = {
@@ -2208,8 +2208,7 @@ async function main() {
       return bundle.querySelector('.package-statement')?.textContent === ${JSON.stringify(PACKAGE_STATEMENT)} &&
         JSON.stringify(rows) === ${JSON.stringify(JSON.stringify([
           `publication:true:发稿版本「${FIRST.label}」 · r1`,
-          'document:news-release:true:第 2 次交付 · 版本 3',
-          ...OTHER_TYPES.map((typeId) => `document:${typeId}:false:尚未创建`),
+          'document:news-release:true:版本 3',
           'work-records:true:暂无审阅记录',
         ]))} &&
         window.__j07.condition('publication').querySelector('.package-condition-notice')?.textContent === '自发稿版本后有修改：可以另设发稿版本，也可以按当前发稿版本打包。' &&
@@ -2219,11 +2218,8 @@ async function main() {
         !/%|百分/.test(bundle.textContent ?? '');
     })()`, 'package-conditions-name-what-is-missing');
     // A purpose the editor writes still has its limit: past 80 characters 准备 is held with the reason, and clearing the field
-    // gives the routine purpose back; the four documents not yet created never hold it.
+    // gives the routine purpose back; the four documents not yet created never hold it, and have no row (Issue #1639).
     await assertRenderer(renderer, `(() => { const input=window.__j07.pkg().querySelector('[data-package-field=purpose]'); const prepare=()=>window.__j07.pkg().querySelector('[data-package-action=prepare]'); input.value='长'.repeat(81); input.dispatchEvent(new Event('input',{bubbles:true})); const held=prepare().disabled && window.__j07.packageReason()==='交付包用途过长。'; input.value=''; input.dispatchEvent(new Event('input',{bubbles:true})); return held && !prepare().disabled && window.__j07.packageReason()===''; })()`, 'package-optional-documents-do-not-block');
-    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-condition-id="document:promotion-article"] [data-package-route="document"]', 'package-route-document');
-    // A type with no document yet: the technical card's own next action is 本书不做 (new documents are made on 稿件, Issue #1403).
-    await waitFor(renderer, `document.activeElement === window.__j07.cardAction('promotion-article', 'notForThisBook')`, 'package-route-focuses-the-card');
 
     at('package-not-for-this-book');
     // The four other types 本书不做 on their own cards: every condition holds, 准备 is available on the routine purpose, and the
@@ -2239,10 +2235,8 @@ async function main() {
       const lines = (selector) => Array.from(bundle.querySelectorAll(selector)).map((item) => item.dataset.itemKind + ':' + item.querySelector('.package-item-label')?.firstChild?.textContent);
       const limitations = Array.from(bundle.querySelectorAll('ul.package-limitations > li')).map((item) => item.textContent);
       return JSON.stringify(lines('ul.package-included > li')) === ${JSON.stringify(JSON.stringify([`publication:发稿版本「${FIRST.label}」 · r1`, 'document:新闻稿 · 版本 3', 'evaluation-record:评估记录 · 第 1 版定稿']))} &&
-        JSON.stringify(lines('ul.package-excluded > li')) === ${JSON.stringify(JSON.stringify([
-          ...['宣传文章', '评论文章', '发布会材料', '营销要点'].map((label) => `not-for-this-book:${label}`), 'readers-report:审稿意见', 'exclusion:备注', 'exclusion:资料库原件', 'exclusion:中间修订版',
-        ]))} &&
-        bundle.querySelector('ul.package-excluded > li[data-item-kind="readers-report"] .package-item-detail')?.textContent === '本书没有审稿意见' &&
+        // No 不包含 list at all (Issue #1639): neither the four types nor the fixed exclusions are itemised.
+        bundle.querySelector('ul.package-excluded') === null && !(bundle.textContent ?? '').includes('不包含') &&
         JSON.stringify(limitations) === ${JSON.stringify(JSON.stringify(['稿件：自发稿版本后有修改，本包按发稿版本。']))} &&
         !bundle.querySelector('[data-package-action="prepare"]').disabled && window.__j07.packageReason() === '' &&
         bundle.querySelector('[data-package-field="purpose"]')?.value === '';
@@ -2406,12 +2400,10 @@ async function main() {
       `- 稿件 · ${manifestInputs.included[0].label}（${manifestInputs.included[0].detail}）`, `- ${manifestInputs.included[1].label}`,
       `- ${manifestInputs.included[2].label}（定稿于 ${manifestInputs.included[2].detail.split(' · 定稿于 ')[1]}）`, '',
       '## 交付记录', '', '### 新闻稿', '',
-      ...manifestInputs.deliveries.map((delivery) =>
+      // The record names the 新闻稿's saved 版本 3 (the newest, held by default): its Delivery Records are that version's.
+      ...manifestInputs.deliveries.filter((delivery) => delivery.versionLabel === '版本 3').map((delivery) =>
         `- 第 ${delivery.ordinal} 次交付 · ${delivery.recipient.label} · ${delivery.versionLabel} · ${delivery.recordedAt}${delivery.note === null ? '' : `（备注：${delivery.note}）`}`),
       '',
-      '## 不包含', '',
-      '- 备注：稿件与文档上的备注只供编辑自己参考', '- 资料库原件', '- 中间修订版：稿件只含发稿版本，文档只含交付过的版本', '- 本书不做：宣传文章、评论文章、发布会材料、营销要点',
-      '- 审稿意见：本书没有审稿意见', '',
       '## 说明', '',
       ...manifestInputs.limitations.map((line) => `- ${line}`), `- ${manifestInputs.statement}`, '',
     ].join('\n');
@@ -3184,8 +3176,17 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('[data-screen="book-deliverables"] section.deliverables-documents') === null && document.querySelector('[data-deliverables-action="open-derivatives"]')?.textContent === '前往衍生稿件' && document.querySelector('.maintenance-cases, [data-maintenance-action]') === null && document.querySelector('.package-condition-list li[data-condition-key="document"]') === null`, 'multi-package-ordinary');
     const renamedId = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.find(doc=>doc.title==='另一篇宣传文章')?.documentId ?? null)`);
     requireJourney(UUID_PATTERN.test(renamedId ?? ''), 'multi-package-renamed-id', renamedId);
-    await assertRenderer(renderer, `(() => { const box = document.querySelector('.package-document-choices > li[data-document-id=${JSON.stringify(renamedId)}] input[type="checkbox"]'); if (!(box instanceof HTMLInputElement) || box.checked || box.disabled) return false; box.click(); return true; })()`, 'multi-package-tick');
-    await waitFor(renderer, `Array.from(document.querySelectorAll('.deliverables-package ul.package-included > li'), (item) => item.textContent).includes('宣传文章 · 《另一篇宣传文章》 · 版本 1')`, 'multi-package-included');
+    // Every derivative with a saved version is ticked by default (Issue #1639): the control's real state says so before anything is
+    // pressed, the package lists the document as held, and the editor's own presses untick and tick it again.
+    const renamedBox = `.package-document-choices > li[data-document-id=${JSON.stringify(renamedId)}] input[type="checkbox"]`;
+    const renamedHeld = `Array.from(document.querySelectorAll('.deliverables-package ul.package-included > li'), (item) => item.textContent).includes('宣传文章 · 《另一篇宣传文章》 · 版本 1')`;
+    const renamedState = (checked) => `(() => { const box = document.querySelector(${JSON.stringify(renamedBox)}); return box instanceof HTMLInputElement && !box.disabled && box.checked === ${checked} && ${renamedHeld} === ${checked}; })()`;
+    await waitFor(renderer, renamedState(true), 'multi-package-default-ticked');
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.package-document-choices > li input[type="checkbox"]'), (box) => box.checked).every((checked) => checked === true)`, 'multi-package-every-document-ticked');
+    await pointerClick(renderer, waitFor, renamedBox, 'multi-package-untick');
+    await waitFor(renderer, renamedState(false), 'multi-package-unticked');
+    await pointerClick(renderer, waitFor, renamedBox, 'multi-package-retick');
+    await waitFor(renderer, renamedState(true), 'multi-package-included');
     const deliveriesAfter = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).reduce((total, doc)=>total+doc.deliveries.length, 0))`);
     requireJourney(deliveriesAfter === 0, 'multi-package-no-delivery', deliveriesAfter);
 
