@@ -293,16 +293,10 @@ export const LEGACY_LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Obje
       sourceKinds: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['manuscript', 'material', 'retained-source'] } } }, required: ['query'], additionalProperties: false } }),
 ]);
 export const LOCAL_TOOL_SCHEMA_DIGEST = sha256Hex(canonicalJson(LEGACY_LOCAL_TOOL_SCHEMAS));
-/** The rule-declared tool set's (composition v2) `retrieve`: the legacy one plus further phrasings fused locally (#1623, ADR 0107 §4 point 3). */
-const RULE_RETRIEVE_SCHEMA = { name: 'retrieve' as const, description: LEGACY_LOCAL_TOOL_SCHEMAS[1]!.description,
-  parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 },
-    queries: { type: 'array', maxItems: RETRIEVAL_LEXICAL.maxQueries, items: { type: 'string', minLength: 1, maxLength: 1000 },
-      description: `同一检索意图的其他说法，最多 ${RETRIEVAL_LEXICAL.maxQueries} 条；与 query 一并检索后合并排序。` },
-    k: { type: 'integer', minimum: 1, maximum: 8 },
-    sourceKinds: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['manuscript', 'material', 'retained-source'] } } }, required: ['query'], additionalProperties: false } };
+// A frozen plan pins these bytes (its composition digest, re-derived when an archived review opens): no declaration changes here until
+// tool schemas are versioned per plan. `retrieve`'s further phrasings (#1623) are therefore read by the handler but declared nowhere.
 export const LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.freeze([
-  LEGACY_LOCAL_TOOL_SCHEMAS[0]!,
-  RULE_RETRIEVE_SCHEMA,
+  ...LEGACY_LOCAL_TOOL_SCHEMAS,
   { name: 'read_blocks', description: '读取固定稿件中指定内容块及其相邻段落；只在本次授权范围内读取。',
     parameters: { type: 'object', properties: { blockId: { type: 'string' }, radius: { type: 'integer', minimum: 0, maximum: 3 } }, required: ['blockId', 'radius'], additionalProperties: false } },
   { name: 'baseline_facts', description: '按名称或文字查询本次计划固定的本书基线实体、设定与事件；每类最多返回 8 条并注明其余条数；未固定来源或没有匹配时返回空结果。',
@@ -311,7 +305,7 @@ export const LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.free
     parameters: { type: 'object', properties: { clauseId: { type: 'string', maxLength: 200 } }, additionalProperties: false } },
   { name: 'term_table', description: '读取本次计划固定的本书人名、地名和术语表，可按文字查询；每类最多返回 8 条并注明其余条数；未固定来源或没有匹配时返回空结果。',
     parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 200 } }, additionalProperties: false } },
-  { name: 'search_manuscript', description: '在本次授权固定稿件中检索段落：exact 只返回含查询原文的段落；tokenized 按相关程度返回段落，含查询原文的在前。',
+  { name: 'search_manuscript', description: '在本次授权固定稿件中精确或分词检索；只返回匹配段落。',
     parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 }, mode: { type: 'string', enum: ['exact', 'tokenized'] } }, required: ['query', 'mode'], additionalProperties: false } },
   // The scoped Global Agent's two further tools (#1171); a rule naming neither never registers them.
   { name: 'read_procedure', description: '读取本次对话明确列入范围的工序（工序与规则）的确切版本；未列入范围的工序或版本不返回。',

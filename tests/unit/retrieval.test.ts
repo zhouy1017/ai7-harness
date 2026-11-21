@@ -319,11 +319,9 @@ describe('registered local tools without egress', () => {
     const cut = (canonicalToolArguments('retrieve', { query: 'alpha', queries: ['x'.repeat(999) + '𠮷'] }) as unknown as { queries: string[] }).queries[0]!;
     expect([cut.length, cut.isWellFormed()]).toEqual([999, true]);
     expect(canonicalToolArguments('retrieve', { queries: ['beta'] })).toBeNull();
-    // Only the rule-declared set (composition v2) offers them; composition v1 keeps its legacy bytes.
+    // No declaration offers them: a frozen plan pins the declared tools' bytes, so they wait for per-plan tool schemas (ADR 0107 §4).
     const declaredRule = { ...localRetrievalRule(), declarations: [{ name: 'retrieve', readOnly: true as const, concurrencySafe: true as const }], parallelCallsAllowed: false };
-    const declared = ruleNamedToolSchemas(false, declaredRule).find((schema) => schema.name === 'retrieve')!;
-    expect(declared.parameters).toMatchObject({ required: ['query'], properties: { queries: { type: 'array', maxItems: 4, items: { type: 'string' } } } });
-    expect(typeof (declared.parameters as { properties: { queries: { description: unknown } } }).properties.queries.description).toBe('string');
+    expect(JSON.stringify(ruleNamedToolSchemas(false, declaredRule))).not.toContain('queries');
     expect(JSON.stringify(LEGACY_LOCAL_TOOL_SCHEMAS)).not.toContain('queries');
     expect(toolSetEqualsPlatformSchemas(LEGACY_LOCAL_TOOL_SCHEMAS, ruleNamedToolSchemas(false, true))).toBe(true);
     const facts = binding();
