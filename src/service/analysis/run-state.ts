@@ -162,6 +162,22 @@ const RECONCILED_INTERRUPTED_STAGE_REASON = 'AI7 上次关闭时运行中断，�
 export const RECONCILED_QUEUED_DETAIL =
   'AI7 上次关闭时这项任务还在等待运行名额，没有开始，也没有发送任何内容；重新启动后它不会自己开始。需要时请重新准备并开始。' as const;
 
+/** Read historical reconciliation rows too: startup need not write a new reason to tell the truth. */
+export function runStopReasonOf(db: DatabaseSync, runRecordId: string, state: BaselineAnalysisRunState, value: unknown): ResumableStopReason | undefined {
+  if (!isRecord(value)) return undefined;
+  if (state === 'resumable') return value.stopReason === 'proxy-unreachable' || value.stopReason === 'model-service-unreachable' || value.stopReason === 'outcome-unknown' || value.stopReason === 'shutdown'
+    ? value.stopReason : undefined;
+  if (value.reconciled !== true) return undefined;
+  if (state === 'blocked-before-dispatch' && value.detail === RECONCILED_QUEUED_DETAIL) return 'shutdown';
+  if (state !== 'paused') return undefined;
+  if (value.detail === RECONCILED_YIELDED_DETAIL) return 'shutdown';
+  if (value.detail !== RECONCILED_PAUSED_DETAIL) return undefined;
+  const previous = db.prepare('SELECT state, canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1 OFFSET 1').get(runRecordId);
+  if (previous?.state !== 'pausing' || typeof previous.canonical_json !== 'string') return undefined;
+  const record = parseCanonicalJson(previous.canonical_json);
+  return isRecord(record) && record.idleYield === true ? 'shutdown' : undefined;
+}
+
 /** The schema of one unit's continuation checkpoint (Issue #422, S76b). */
 export const UNIT_CHECKPOINT_SCHEMA = 'ai7.analysis.unit-checkpoint/1' as const;
 

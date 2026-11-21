@@ -4407,7 +4407,7 @@ export class EditorialStore {
           bookId === null ? null : { bookId, cancelled: false })).tasks;
         for (const control of controls) {
           const run = control.run;
-          if (run === null || !runIsActive(run.state) || run.state === 'awaiting-connectivity') continue;
+          if (run === null || (!runIsActive(run.state) && !(run.state === 'blocked-before-dispatch' && run.stopReason === 'shutdown')) || run.state === 'awaiting-connectivity') continue;
           readings.push({ kind, bookId: control.bookId, bookTitle: control.bookTitle, taskIntentId: control.taskIntentId,
             runRecordId: run.runRecordId, state: run.state, stateAt: run.stateAt, control });
         }
