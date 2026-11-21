@@ -35,11 +35,12 @@ import {
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+import { sample1Seed, type Sample1Seed } from '../support/sample1-seed.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
 let requestGovernor: ModelRequestGovernor;
-beforeEach(() => { requestGovernor = new ModelRequestGovernor(); store = undefined!; owner = undefined!; roots = undefined!; });
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); store = undefined!; owner = undefined!; roots = undefined!; placedBook = null; });
 afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Issue #901 (wave 8, slice 8a): 事实核查 at its three Evidence Assurance Levels through the real store, Review Run, frozen plan,
@@ -48,6 +49,11 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 // at run time from the unit message it received, and the relations the scenario names. Every page is synthetic public text
 // written here; no manuscript text appears in this file, and none is printed or compared.
 armPerTicketHostAdmission();
+
+// Every case's first Book is a copy of one imported sample1 store, placed in its data root before the case opens its own store (#1621);
+// a second Book of a case (and the import itself, proven by the cases that import) goes through `importSample1Book`.
+const seeded = sample1Seed({ title: 'sample1 事实核查' });
+let placedBook: Sample1Seed['book'] | null = null;
 
 const TINYFISH = SEARCH_BACKENDS.find((entry) => entry.id === 'search-tinyfish')!;
 const MUSEUM = 'https://museum.example.org/zun';
@@ -120,6 +126,9 @@ async function setup(initial: Scenario): Promise<void> {
   connected = false;
   roots = await createServiceTestRoots('ai7-factual-verification-');
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+  const seed = await seeded();
+  seed.place(roots.dataRoot);
+  placedBook = seed.book;
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   const ordinary = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((entry) => entry.route === 'opencode-go')!;
   const connection = initial.claimStages ? store.saveModelServiceConnection('合成普通连接', null, 'ready', 'opencode-go') : null;
@@ -234,6 +243,8 @@ afterEach(async () => {
   await owner?.dispose();
   store?.close();
   await roots?.dispose();
+  // The seeded first Book is taken by the case's first newBook; one left over would be a Book the case never had before the seed.
+  expect(placedBook).toBeNull();
 });
 
 type Book = Awaited<ReturnType<typeof importSample1Book>>;
@@ -247,8 +258,12 @@ function enrollFactualRecheck(bookId: string) {
 }
 
 async function newBook(name: string): Promise<Book> {
-  const book = await importSample1Book(store, roots.codeRoot, name);
-  await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+  let book = placedBook;
+  placedBook = null;
+  if (book === null) {
+    book = await importSample1Book(store, roots.codeRoot, name);
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+  }
   // The connection is the store's, recorded once however many Books a case imports.
   if (!connected) recordMissingCredentialConnection(store, '合成连接');
   connected = true;

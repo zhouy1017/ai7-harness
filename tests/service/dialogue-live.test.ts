@@ -595,6 +595,24 @@ describe('就这段提问… on the live route (provider-free)', () => {
     } finally { await dialogues.dispose(); store.close(); }
   });
 
+  it('answers 稿件对话 on the Pro model when only a Pro model is chosen (#1620)', async () => {
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '只选 Pro 的对话');
+    const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0].route;
+    const connection = store.saveModelServiceConnection('只选 Pro', null, 'ready', route);
+    store.selectMainRoleModel(route, 'pro-only-dialogue-model');
+    const main = store.getConfiguredModelRoleBinding('main-editorial')!;
+    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toEqual(main);
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', main, main);
+    const calls: StubCall[] = [];
+    const dialogues = liveOwner(store, productionDialogueRoute({ scope: 'ordinary-production', nativeFetch: stubTransport(calls, () => ANSWER) },
+      () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-pro-only' }));
+    try {
+      await ask(store, dialogues, book.bookId, selectionOf(store, book));
+      expect(calls.map((call) => [call.url, JSON.parse(call.body).model])).toEqual([[main.endpoint, 'pro-only-dialogue-model']]);
+    } finally { await dialogues.dispose(); }
+  });
+
   it('production dialogue sends repeated input twice without opening a development cache, then uses the newly selected route', async () => {
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '正式使用对话');

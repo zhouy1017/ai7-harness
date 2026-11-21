@@ -147,7 +147,7 @@ describe('the words of the 审阅 destination', () => {
       'scope-redo': '修改计划并重新授权',
       'scope-cancel': '取消任务',
       'influence-redo': '重新执行（不含该影响）',
-      'influence-lineage': '查看学习来源链…',
+      'influence-lineage': '查看来源与用途…',
       'scope-cancel-confirm': '确认取消任务',
       'scope-cancel-keep': '不取消',
       capture: '将以上工序保存为可复用工序',

@@ -3307,6 +3307,87 @@ async function main() {
     await clickSelector(renderer, '.learning-reinclude [data-learning-audit-action="reinclude-cancel"]', 'learning-audit-reflow-cancel');
     await readAudit(renderer, (page) => page.reinclude === null && page.lineage?.decisions.length === 5, 'learning-audit-reflow-closed');
 
+    // ---- 学习回溯 in ordinary mode (Issue #1549): the tab is there, a row nobody decided is decided in place, one in use is stopped ----
+    at('learning-audit-ordinary');
+    const auditMode = async (developer, name) => {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `${name}-settings-ready`);
+      await click(renderer, '帮助', `${name}-help`);
+      await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `${name}-switch-ready`);
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `${name}-switch`);
+      await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='${developer}'`, `${name}-applied`);
+    };
+    await auditMode(false, 'learning-audit-ordinary');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-audit-ordinary-quality');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), (node) => node.textContent).join('|') === '审阅偏好|反馈记录|学习回溯'`, 'learning-audit-ordinary-tabs');
+    // Real pointer and key input, as the editor gives it: the tab, each dropdown and its option, the row's choice, the explorer and the way back.
+    const auditSelect = async (selector, value, name) => {
+      const index = await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(selector)}).options).findIndex((option) => option.value === ${JSON.stringify(value)})`);
+      requireJourney(index >= 0, `${name}-option-exists`, { selector, value });
+      await pointerClick(renderer, waitFor, `${selector} + .ui-select-trigger`, `${name}-open`);
+      // The options open inside the window and are what the pointer meets there.
+      await assertRenderer(renderer, `(() => {
+        const popover = document.querySelector(${JSON.stringify(`${selector} ~ .ui-select-popover`)});
+        const option = popover?.querySelector('.ui-select-option[data-index="${index}"]');
+        if (!(popover instanceof HTMLElement) || popover.hidden || !(option instanceof HTMLElement)) return false;
+        const box = popover.getBoundingClientRect();
+        return box.width > 0 && box.height > 0 && box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight;
+      })()`, `${name}-popover-inside`);
+      await pointerClick(renderer, waitFor, `${selector} ~ .ui-select-popover .ui-select-option[data-index="${index}"]`, `${name}-option`);
+    };
+    await pointerClick(renderer, waitFor, '#quality-tab-audit', 'learning-audit-ordinary-tab');
+    await readAudit(renderer, (page) => page.view === 'list', 'learning-audit-ordinary-list');
+    // Filters are dropdowns of the shared style, the search and date controls styled as the other pages' are, and all of it inside the window.
+    await auditSelect('#learning-audit-filter-standing', '', 'learning-audit-ordinary-standing-cleared');
+    await readAudit(renderer, (page) => page.view === 'list' && page.rows.length > 0, 'learning-audit-ordinary-standing-read');
+    await auditSelect('#learning-audit-filter-kind', '', 'learning-audit-ordinary-kind-cleared');
+    await readAudit(renderer, (page) => page.view === 'list' && page.rows.length > 0, 'learning-audit-ordinary-kind-read');
+    await pointerClick(renderer, waitFor, '#learning-audit-query', 'learning-audit-ordinary-query-focus');
+    await renderer.evaluate(`document.querySelector('#learning-audit-query').select()`);
+    await renderer.send('Input.insertText', { text: '分页原因5' });
+    await pressEnter(renderer);
+    const ordinaryRow = await readAudit(renderer, (page) => page.rows.length === 1, 'learning-audit-ordinary-row');
+    const ordinaryKey = ordinaryRow.rows[0][0];
+    requireJourney(ordinaryRow.note !== null && !ordinaryRow.note.includes('授予') && ordinaryRow.rows[0][1] === 'pending' && ordinaryRow.rows[0][2] === '还没决定' && ordinaryRow.rows[0][4] === false, 'learning-audit-ordinary-row-words', ordinaryRow);
+    const ordinaryControls = await renderer.evaluate(`(() => {
+      const root = document.querySelector('[data-screen="quality-learning"] .learning-audit');
+      const buttons = Array.from(root.querySelectorAll('li.learning-audit-material .learning-audit-decide button'));
+      buttons[0]?.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const filters = Array.from(root.querySelectorAll('.learning-audit-filter .ui-select-trigger'));
+      const query = root.querySelector('#learning-audit-query');
+      const fits = (node) => { const box = node.getBoundingClientRect(); return box.width > 0 && box.left >= 0 && box.right <= innerWidth; };
+      // Each choice is inside the window and is what a pointer meets at its centre.
+      const meets = (node) => { const box = node.getBoundingClientRect(); return box.top >= 0 && box.bottom <= innerHeight && node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)); };
+      return { labels: buttons.map((node) => node.textContent), reachable: buttons.every((node) => fits(node) && meets(node)), buttons: buttons.length,
+        buttonChoices: root.querySelectorAll('.filter-choices').length, filters: filters.length, filtersFit: filters.every(fits), queryFits: fits(query), fromFits: fits(root.querySelector('#learning-audit-filter-from')),
+        queryRadius: getComputedStyle(query).borderTopLeftRadius, selectRadius: filters[0] ? getComputedStyle(filters[0]).borderTopLeftRadius : null, width: innerWidth, height: innerHeight };
+    })()`);
+    requireJourney(JSON.stringify(ordinaryControls.labels) === JSON.stringify(['用于学习', '不用']) && ordinaryControls.reachable && ordinaryControls.buttonChoices === 0 && ordinaryControls.filters === 4 &&
+      ordinaryControls.filtersFit && ordinaryControls.queryFits && ordinaryControls.fromFits && ordinaryControls.queryRadius === '8px' && ordinaryControls.selectRadius === '8px', 'learning-audit-ordinary-filters-style', ordinaryControls);
+    await pointerClick(renderer, waitFor, `${auditRow(ordinaryKey)} [data-learning-audit-action="decide-book"]`, 'learning-audit-ordinary-decide');
+    const decidedRow = await readAudit(renderer, (page) => page.rows.length === 1 && page.rows[0][1] === 'book', 'learning-audit-ordinary-decided');
+    requireJourney(decidedRow.rows[0][2] === '用于学习 · 仅本书' && decidedRow.rows[0][4] === true, 'learning-audit-ordinary-decided-words', decidedRow);
+    const decidedService = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(ordinaryKey)} }).then((read) => [read.standing, read.decisions.map((entry) => entry.choice).join('>')])`);
+    requireJourney(JSON.stringify(decidedService) === JSON.stringify(['book', 'book']), 'learning-audit-ordinary-decided-service', decidedService);
+    // The one in use is read as two parts and stopped from its explorer; nothing technical is drawn.
+    await pointerClick(renderer, waitFor, `${auditRow(ordinaryKey)} [data-learning-audit-action="open"]`, 'learning-audit-ordinary-open');
+    await readAudit(renderer, (page) => page.lineage?.key === ordinaryKey, 'learning-audit-ordinary-lineage');
+    await assertRenderer(renderer, `(() => {
+      const lineage = document.querySelector('.learning-lineage');
+      const parts = Array.from(lineage.querySelectorAll('[data-lineage-part]'), (node) => node.dataset.lineagePart);
+      return JSON.stringify(parts) === JSON.stringify(['from', 'used']) && getComputedStyle(lineage.querySelector('.learning-lineage-parts')).display === 'grid' &&
+        lineage.querySelector('.learning-audit-details') === null && lineage.querySelector('.learning-lineage-step[data-lineage-step]') === null &&
+        !/审计详情|\\bv[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}T|[0-9a-f]{32}/u.test(lineage.textContent);
+    })()`, 'learning-audit-ordinary-lineage-words');
+    await pointerClick(renderer, waitFor, '.learning-lineage [data-learning-audit-action="stop"]', 'learning-audit-ordinary-stop');
+    await waitFor(renderer, `${notice} === '已停止今后使用 1 条学习材料。'`, 'learning-audit-ordinary-stop-status');
+    await readAudit(renderer, (page) => page.lineage?.key === ordinaryKey && page.lineage.standing === 'excluded', 'learning-audit-ordinary-stopped');
+    await assertRenderer(renderer, `document.querySelector('.learning-remediation-preview') === null`, 'learning-audit-ordinary-no-preview');
+    await pointerClick(renderer, waitFor, '.learning-lineage [data-learning-audit-action="back"]', 'learning-audit-ordinary-back');
+    const stoppedRow = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 1 && page.rows[0][1] === 'excluded', 'learning-audit-ordinary-stopped-row');
+    requireJourney(stoppedRow.rows[0][2] === '不用于学习', 'learning-audit-ordinary-stopped-words', stoppedRow);
+    await auditMode(true, 'learning-audit-ordinary-restore');
+
     // ---- 从第 M 版重新评估 past a damaged latest version (Issue #726), and the house calibration offset (Issue #429, EVAL-011a) ----
     at('evaluation-damaged-route');
     // 评估旅程丙's latest version, 第 15 版 begun from AI7's 初评, is damaged on disk while the product is closed — one entry's digest

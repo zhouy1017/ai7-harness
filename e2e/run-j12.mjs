@@ -544,6 +544,13 @@ async function assertFirstRunGeometry(renderer, reviewExpected) {
   })()`) === true, 'first-run-card-geometry');
 }
 
+/** F1 as a real key press: 帮助 opens from any screen (#1548). */
+async function pressF1(renderer) {
+  const key = { key: 'F1', code: 'F1', windowsVirtualKeyCode: 112, nativeVirtualKeyCode: 112 };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+}
+
 async function firstRunClick(renderer, selector, label = null) {
   const point = await renderer.evaluate(`(async () => { const node=${label === null ? `document.querySelector(${JSON.stringify(selector)})` : `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(node=>node.textContent===${JSON.stringify(label)})`}; if(!node)return null; node.scrollIntoView({block:'center'}); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); const b=node.getBoundingClientRect(); return {x:b.left+b.width/2,y:b.top+b.height/2}; })()`);
   requireJourney(point !== null, 'first-run-pointer-target');
@@ -967,6 +974,31 @@ async function main() {
     await waitFor(onboardingPage, `document.querySelector('[data-import-target-choices]')`, 'first-run-import-step-opened');
     await firstRunClick(onboardingPage, 'button', '取消导入');
     await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, 'first-run-import-step-returned');
+    // #1548: the card's 帮助 opens 帮助 on 第一次审稿 with its heading focused and in view at both Gate window sizes; with no Book open
+    // the steps that act inside one say so; the model and import steps lead to their own pages.
+    at('first-run-help');
+    for (const [width,height] of [[1280,800],[1008,681]]) {
+      await onboardingPage.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+      await waitFor(onboardingPage, `innerWidth===${width} && innerHeight===${height}`, `first-run-help-size-${width}`);
+      await firstRunClick(onboardingPage, '[data-onboarding-help]');
+      await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, `first-run-help-opened-${width}`);
+      await assertRenderer(onboardingPage, `document.activeElement===document.querySelector('[data-help-section="first-review"] h4')`, `first-run-help-heading-focused-${width}`);
+      // scrollIntoView lands on a rounded offset: a fraction of a pixel either side still counts as in view.
+      await assertRenderer(onboardingPage, `(() => { const box=document.querySelector('[data-help-section="first-review"] h4').getBoundingClientRect(); return box.top>=-1 && box.bottom<=innerHeight+1; })()`, `first-run-help-heading-in-view-${width}`);
+      await assertRenderer(onboardingPage, `(() => { const steps=Array.from(document.querySelectorAll('[data-help-step]')); return steps.length===5 && steps.every((step)=>{ const b=step.getBoundingClientRect(); return b.left>=0 && b.right<=innerWidth; }); })()`, `first-run-help-steps-inside-${width}`);
+      await assertRenderer(onboardingPage, `document.querySelectorAll('[data-help-step-go]').length===2 && document.querySelectorAll('[data-help-step-needs-book]').length===3`, `first-run-help-no-book-steps-${width}`);
+      await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+      await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, `first-run-help-returned-${width}`);
+    }
+    await onboardingPage.send('Emulation.clearDeviceMetricsOverride');
+    await firstRunClick(onboardingPage, '[data-onboarding-help]');
+    await firstRunClick(onboardingPage, '[data-help-step-go="model"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"]')`, 'first-run-help-model-step');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, 'first-run-help-model-returned');
+    await firstRunClick(onboardingPage, '[data-onboarding-help]');
+    await firstRunClick(onboardingPage, '[data-help-step-go="import"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'first-run-help-import-step');
     at('first-run-data-location-settings');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-settings]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'first-run-settings-ready');
@@ -1008,6 +1040,38 @@ async function main() {
     await onboardingPage.send('Emulation.clearDeviceMetricsOverride');
     await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
     await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-book-review-reopened-manuscript');
+    // #1548: F1 on the manuscript opens 帮助; with the Book open every step has its button and each lands on its destination.
+    at('first-review-help-book');
+    const helpFromManuscript = async (name) => {
+      await pressF1(onboardingPage);
+      await waitFor(onboardingPage, `document.querySelector('[data-screen="help"] [data-help-section="first-review"]')`, name);
+    };
+    // A real pointer press inside the manuscript puts the caret there; only then is F1 pressed.
+    await firstRunClick(onboardingPage, '[data-testid="manuscript-editor"]');
+    await assertRenderer(onboardingPage, `document.querySelector('[data-testid="manuscript-editor"]')?.contains(document.activeElement)===true`, 'first-review-help-focus-manuscript');
+    await helpFromManuscript('first-review-help-f1');
+    await assertRenderer(onboardingPage, `document.querySelectorAll('[data-help-step-go]').length===5 && !document.querySelector('[data-help-step-needs-book]')`, 'first-review-help-book-steps');
+    await firstRunClick(onboardingPage, '[data-help-step-go="review"]');
+    await waitFor(onboardingPage, `document.querySelector('dialog.review-sheet')?.open===true`, 'first-review-help-review');
+    await firstRunClick(onboardingPage, '[data-review-action="close-sheet"]');
+    await helpFromManuscript('first-review-help-f1-again');
+    await firstRunClick(onboardingPage, '[data-help-step-go="process"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="book-findings"]')`, 'first-review-help-process');
+    await helpFromManuscript('first-review-help-f1-findings');
+    await firstRunClick(onboardingPage, '[data-help-step-go="export"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="book-deliverables"]')`, 'first-review-help-export');
+    await helpFromManuscript('first-review-help-f1-deliverables');
+    await firstRunClick(onboardingPage, '[data-help-step-go="import"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] button[data-book-id="${sampleBook.bookId}"]')`, 'first-review-help-import');
+    await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-review-help-reopened-manuscript');
+    await helpFromManuscript('first-review-help-f1-model');
+    await firstRunClick(onboardingPage, '[data-help-step-go="model"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"]')`, 'first-review-help-model');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="landing"] button[data-book-id="${sampleBook.bookId}"]')`, 'first-review-help-model-library');
+    await firstRunClick(onboardingPage, `button[data-book-id="${sampleBook.bookId}"]`);
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="editor"]')`, 'first-review-help-returned-manuscript');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-book-section="overview"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="book-overview"]')`, 'first-book-review-returned-overview');
     at('guided-strip');
@@ -1105,7 +1169,7 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
     await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===5 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、审阅偏好、范例、资料库、本社词表'`, 'ordinary-knowledge-five-categories');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
-    await waitFor(primary, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), node=>node.textContent).join('|')==='审阅偏好|反馈记录' && document.querySelector('#quality-tab-preferences')?.getAttribute('aria-selected')==='true'`, 'ordinary-quality-two-views');
+    await waitFor(primary, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), node=>node.textContent).join('|')==='审阅偏好|反馈记录|学习回溯' && document.querySelector('#quality-tab-preferences')?.getAttribute('aria-selected')==='true'`, 'ordinary-quality-three-views');
     await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='审阅偏好已打开' && document.querySelector('[data-learning-enabled]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-quality-loaded');
     await assertRenderer(primary, `!document.querySelector('#persistence-status')?.textContent.includes('该页在开发者模式下显示') && !document.body.textContent.includes('该页在开发者模式下显示')`, 'ordinary-quality-no-shelved-notice');
     // #1521: AI 助手 is in the sidebar, so the page's footer button to it is gone in ordinary mode.
@@ -1189,6 +1253,62 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
+    // #1553: ordinary mode keeps the conversation, its history and one fold of what a question may consult. The pills, the
+    // governance form, the directives, the sending preview and the habits summary are developer-only; 学习回溯 is offered because
+    // its page opens in ordinary mode (#1549). This stage stops the one preference it creates, so the fold's honest state is
+    // "nothing to include"; the live choice is proved on J-16's accepted preference above.
+    // The fold exists at mount; its list is written when the projection arrives, so wait for that sentence before asserting.
+    await waitFor(primary, `document.querySelector('[data-global-agent-fold="references"]')?.textContent.includes('还没有可加入提问的审阅偏好。')===true`, 'ordinary-agent-fold-ready');
+    const ordinaryAgentSurface = `(() => {
+      const root=document.querySelector('[data-global-agent="destination"]');
+      const fold=root?.querySelector('[data-global-agent-fold="references"]');
+      return root instanceof HTMLElement && fold instanceof HTMLDetailsElement && fold.open === false &&
+        fold.querySelector(':scope > summary')?.textContent === '参考哪些书和偏好 · 已选 0 本书、0 条偏好' &&
+        fold.textContent.includes('还没有可加入提问的审阅偏好。') &&
+        fold.querySelectorAll('.global-agent-sources input[type="checkbox"]').length === 0 &&
+        root.querySelectorAll('.global-agent-pill').length === 0 &&
+        root.querySelector('[data-global-agent-governance]') === null &&
+        root.querySelector('[data-global-agent-question-form] button[type="submit"]')?.textContent === '发送问题' &&
+        !Array.from(root.querySelectorAll('button'), (node) => node.textContent).some((text) => text === '查看将发送的内容' || text === '生成审阅习惯总结') &&
+        Array.from(root.querySelectorAll('button'), (node) => node.textContent).includes('学习回溯 · 停止今后使用') &&
+        !/治理|监督/u.test(root.textContent);
+    })()`;
+    await assertRenderer(primary, ordinaryAgentSurface, 'ordinary-agent-one-fold');
+    // A real pointer opens and closes the fold at both window sizes; its empty state is what the editor reads, not a dead row.
+    for (const [width, height] of [[1280, 800], [1008, 681]]) {
+      await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await waitFor(primary, `innerWidth===${width} && innerHeight===${height}`, 'ordinary-agent-fold-viewport');
+      for (const open of [true, false]) {
+        const point = await primary.evaluate(`(async () => {
+          const summary=document.querySelector('[data-global-agent-fold="references"] > summary');
+          if(!(summary instanceof HTMLElement))return null;
+          summary.scrollIntoView({block:'center',behavior:'instant'});
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          const box=summary.getBoundingClientRect();
+          const x=box.left+box.width/2, y=box.top+box.height/2;
+          return {x,y,visible:box.top>=document.querySelector('#context-header').getBoundingClientRect().bottom && box.bottom<=innerHeight &&
+            box.left>=0 && box.right<=innerWidth && document.elementFromPoint(x,y)?.closest('summary')===summary};
+        })()`);
+        requireJourney(point?.visible === true, 'ordinary-agent-fold-summary-visible');
+        await primary.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+        await primary.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+        await waitFor(primary, `document.querySelector('[data-global-agent-fold="references"]')?.open === ${open}`, 'ordinary-agent-fold-toggle');
+        if (open) {
+          await assertRenderer(primary, `(() => {
+            const fold=document.querySelector('[data-global-agent-fold="references"]');
+            const note=Array.from(fold?.querySelectorAll('p')??[]).find((node)=>node.textContent==='还没有可加入提问的审阅偏好。');
+            const box=note?.getBoundingClientRect();
+            return fold instanceof HTMLDetailsElement && note instanceof HTMLElement && box.width>0 && box.height>0 && box.top>=0 && box.bottom<=innerHeight &&
+              fold.querySelectorAll('.global-agent-sources input[type="checkbox"]').length === 0;
+          })()`, 'ordinary-agent-fold-empty-readable');
+        }
+      }
+    }
+    await primary.send('Emulation.clearDeviceMetricsOverride');
+    await primary.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo({top:0,left:0,behavior:'instant'}); })()`);
+    // #1549: the 学习回溯 button this page offers in ordinary mode opens that page, by a real pointer.
+    await pointerClick(primary, waitFor, '[data-global-agent-action="audit"]', 'ordinary-agent-audit-button');
+    await waitFor(primary, `document.querySelector('#quality-tab-audit')?.getAttribute('aria-selected')==='true' && document.querySelector('[data-screen="quality-learning"] .learning-audit[data-learning-audit-view="list"]') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'ordinary-agent-audit-opens');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-restore-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'technical-mode-restore-settings-ready');
     await click(primary, '帮助', 'technical-mode-restore-help');
@@ -1201,6 +1321,17 @@ async function main() {
 
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
+    // #1553: the developer layer keeps the three pills, the governance form, the directives, the sending preview and the
+    // 学习回溯 button, which is offered exactly because that page can be opened here.
+    await assertRenderer(primary, `(() => {
+      const root=document.querySelector('[data-global-agent="destination"]');
+      const buttons=Array.from(root?.querySelectorAll('button')??[], (node) => node.textContent);
+      return root instanceof HTMLElement && root.querySelector('[data-global-agent-fold]') === null &&
+        JSON.stringify(Array.from(root.querySelectorAll('.global-agent-pill'), (pill) => pill.dataset.globalAgentPill)) === JSON.stringify(['scope','governance','directives']) &&
+        root.querySelector('[data-global-agent-governance]') instanceof HTMLFormElement &&
+        root.querySelector('.global-agent-directives') instanceof HTMLElement &&
+        buttons.includes('查看将发送的内容') && buttons.includes('生成审阅习惯总结') && buttons.includes('学习回溯 · 停止今后使用');
+    })()`, 'developer-agent-pills-and-pages');
     await requireJourney(await primary.evaluate(`(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === ${directivesAfterPreference} && document.querySelector('#context-title')?.textContent === 'AI 助手'; })()`), 'global-agent-entry-no-work');
     await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='AI 助手' && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型')`, 'agent-header-title-and-processing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
@@ -2158,12 +2289,25 @@ async function main() {
         !refreshed.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.models.some(model=>model.modelId==='deepseek-flash'))return false;
       let settings=await window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'j12-custom-main'});
       const binding=(id)=>settings.roles.find(role=>role.roleId===id)?.binding;
-      if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='deepseek-flash')return false;
+      // #1620: the first key chose no Flash model, so the Flash roles follow the Pro model the editor just chose.
+      if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='j12-custom-main')return false;
       settings=await window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'j12-custom-fast'});
       if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='j12-custom-fast')return false;
       settings=await window.ai7.selectBothRoleModels({route:'deepseek-open-platform',modelId:'deepseek-flash'});
       return binding('main-editorial')?.modelId==='deepseek-flash'&&binding('fast-interaction')?.modelId==='deepseek-flash';
     })()`), 'independent-role-models-without-test');
+    // #1620: the Pro / Flash requests beside the 0.7.3 ones; the four roles say where their model comes from, and Flash follows Pro once cleared.
+    requireJourney(await primary.evaluate(`(async () => {
+      let settings=await window.ai7.selectFlashModel({route:'deepseek-open-platform',modelId:'j12-tier-flash'});
+      const role=(id)=>settings.modelRoles.find(item=>item.roleId===id);
+      if(settings.modelRoles.map(item=>item.roleId).join(',')!=='foreground-pro,foreground-flash,underlying-pro,underlying-flash')return false;
+      if(role('underlying-flash')?.binding?.modelId!=='j12-tier-flash'||role('underlying-flash').source!=='flash-tier'||role('foreground-pro').binding?.modelId!=='deepseek-flash')return false;
+      settings=await window.ai7.clearFlashModel();
+      if(role('foreground-flash')?.source!=='follows-foreground-pro'||role('foreground-flash').sourceLabel!=='跟随前台 Pro'||role('foreground-flash').binding?.modelId!=='deepseek-flash')return false;
+      await window.ai7.selectProModel({route:'deepseek-open-platform',modelId:'deepseek-flash'});
+      settings=await window.ai7.selectFlashModel({route:'deepseek-open-platform',modelId:'deepseek-flash'});
+      return role('foreground-flash')?.source==='flash-tier'&&settings.roles.find(item=>item.roleId==='fast-interaction')?.binding?.modelId==='deepseek-flash';
+    })()`) === true, 'tier-model-requests');
     await assertRenderer(primary, `(() => { const refresh=document.querySelector('[data-action="retry-model-list"]'); if(!(refresh instanceof HTMLButtonElement)||refresh.disabled||refresh.textContent!=='刷新模型列表')return false; refresh.click(); return true; })()`, 'model-refresh-click');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent==='模型服务不可达，请检查网络或网络代理设置' && document.querySelector('.model-service-technical:is(:not([open]), [hidden]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')`, 'model-refresh-discovery-failure-visible');
     await assertRenderer(primary, `document.querySelector('[data-action="test-flow-connection"]')?.disabled===false && document.querySelector('.model-service-flow-feedback')?.textContent.includes('尚未测试')`, 'inline-model-connection-test-surface');

@@ -666,6 +666,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['regenerateProposalConflictUnit']['output']>(IPC_CHANNELS.regenerateProposalConflictUnit, input),
   getManuscriptRail: (input: ServiceOperationMap['getManuscriptRail']['input']) =>
     invoke<ServiceOperationMap['getManuscriptRail']['output']>(IPC_CHANNELS.getManuscriptRail, input),
+  findPendingMark: (input: ServiceOperationMap['findPendingMark']['input']) =>
+    invoke<ServiceOperationMap['findPendingMark']['output']>(IPC_CHANNELS.findPendingMark, input),
   runEditorClipboardCommand: (input: { command: EditorClipboardCommand }) =>
     invoke<{ state: 'done' }>(IPC_CHANNELS.runEditorClipboardCommand, input),
   recordManuscriptEntryPosition: (input: ServiceOperationMap['recordManuscriptEntryPosition']['input']) =>
@@ -869,6 +871,9 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   selectBothRoleModels: (input: Parameters<RendererApi['selectBothRoleModels']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectBothRoleModels']>>>(IPC_CHANNELS.selectBothRoleModels, input),
   refreshModelServiceModels: (input: Parameters<RendererApi['refreshModelServiceModels']>[0]) => invoke<Awaited<ReturnType<RendererApi['refreshModelServiceModels']>>>(IPC_CHANNELS.refreshModelServiceModels, input),
   selectFastRoleModel: (input: Parameters<RendererApi['selectFastRoleModel']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectFastRoleModel']>>>(IPC_CHANNELS.selectFastRoleModel, input),
+  selectProModel: (input: Parameters<RendererApi['selectProModel']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectProModel']>>>(IPC_CHANNELS.selectProModel, input),
+  selectFlashModel: (input: Parameters<RendererApi['selectFlashModel']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectFlashModel']>>>(IPC_CHANNELS.selectFlashModel, input),
+  clearFlashModel: () => invoke<Awaited<ReturnType<RendererApi['clearFlashModel']>>>(IPC_CHANNELS.clearFlashModel, {}),
   testModelServiceConnection: (input: Parameters<RendererApi['testModelServiceConnection']>[0]) => invoke<Awaited<ReturnType<RendererApi['testModelServiceConnection']>>>(IPC_CHANNELS.testModelServiceConnection, input),
   getModelServiceSettings: () =>
     invoke<Awaited<ReturnType<RendererApi['getModelServiceSettings']>>>(IPC_CHANNELS.getModelServiceSettings),

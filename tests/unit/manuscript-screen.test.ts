@@ -10,6 +10,8 @@ import type { mountBoundedEditor } from '../../src/renderer/editor.js';
 import { readReturnPlace } from '../../src/renderer/reading-return.js';
 import { mountTaskDrawer, type MountTaskDrawerOptions } from '../../src/renderer/task-drawer.js';
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
+import { ICON_IDS } from '../../src/renderer/components/icon-sprite.js';
+import { SHELL_AGENT_WORKSPACE_ROW, SHELL_BOOK_GROUPS, SHELL_DESTINATIONS, SHELL_MORE_BOOKS_ICON, SHELL_SETTINGS } from '../../src/renderer/shell-labels.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import type { ManuscriptRailProjection, ManuscriptWindowProjection, RendererApi } from '../../src/shared/protocol.js';
 
@@ -781,6 +783,23 @@ describe('the one right-hand column (#1542)', () => {
     expect(setItem).not.toHaveBeenCalled();
     app.screen.querySelector<HTMLButtonElement>('[aria-label="关闭批注栏"]')!.click();
     expect(setItem).toHaveBeenCalledWith('ai7.comments-pane.book-one', 'false');
+    app.showing!.destroy();
+  });
+
+  it('gives each right-edge entry its own symbol, none borrowed from a sidebar destination (#1554)', () => {
+    const app = columnShell();
+    app.open(windowOf('book-one'));
+    const ids = [...app.screen.querySelectorAll<HTMLElement>('[data-edge-entry]')]
+      .map((entry) => entry.querySelector<HTMLElement>('.icon')?.dataset['icon'] ?? '');
+    expect(ids).toEqual(['i-nav', 'i-paragraph-analysis', 'i-task', 'i-comment']);
+    for (const id of ids) expect(ICON_IDS).toContain(id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const sidebar = [
+      ...SHELL_DESTINATIONS.map((entry) => entry.icon),
+      ...SHELL_BOOK_GROUPS.flatMap((group) => group.sections.map((section) => section.icon)),
+      SHELL_AGENT_WORKSPACE_ROW.icon, SHELL_SETTINGS.icon, SHELL_MORE_BOOKS_ICON,
+    ];
+    for (const id of ids) expect(sidebar).not.toContain(id);
     app.showing!.destroy();
   });
 

@@ -133,8 +133,9 @@ export function getManuscriptWindowAt(
   manuscriptId: string,
   branchId: string,
   target: ManuscriptWindowTarget,
+  marks?: { afterOrdinal: number; digest: string },
 ): ManuscriptWindowProjection {
-  return host.boundedCall(() => host.bounded.getWindow(manuscriptId, branchId, target));
+  return host.boundedCall(() => host.bounded.getWindow(manuscriptId, branchId, target, marks));
 }
 
 /** Where the editor last was, resolved against the working state now, or `null` if never recorded. */
