@@ -102,3 +102,16 @@ it('is over when the editor moves to a window with a larger held prefix, and rea
   release();
   expect(await held).toBe(false); expect(reads).toEqual([400]); expect(sets).toHaveLength(0);
 });
+
+it('stays over when the editor leaves the window and comes back to one that already holds the target before the answer arrives', async () => {
+  const { host, sets, reads, put, current, release, elsewhere } = gated(10, 2);
+  const paging = createMarksPaging(host);
+  const original = current();
+  const held = paging.hold('m4');
+  await Promise.resolve();
+  // Away (another window loads), then back: the original window again, loaded further, with the target already in it.
+  put(elsewhere([])); paging.observe();
+  put({ ...original, marks: [0, 1, 2, 3, 4].map(mark), marksPage: { shown: 5, total: 10, nextOrdinal: 5, digest: 'd' } }); paging.observe();
+  release();
+  expect(await held).toBe(false); expect(reads).toEqual([2]); expect(sets).toHaveLength(0);
+});

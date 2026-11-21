@@ -1101,6 +1101,21 @@ describe('comments command parity and refresh continuity', () => {
       expect(ui.status).not.toHaveBeenCalledWith('没能读取其他位置的待处理批注；没有移动。', 'error');
     });
 
+    it('does not select the mark either when the editor left the window and came back to one that already holds it before the answer arrived', async () => {
+      const ui = await dense();
+      const page = deferred<unknown>();
+      ui.pageAt.mockImplementation(() => page.promise);
+      ui.find.mockResolvedValueOnce({ mark: { markId: 'm4', blockId: 'block', fromGrapheme: 4 } });
+      ui.pane.querySelector<HTMLButtonElement>('[data-mark-category-filter="editor"]')!.click(); await paint();
+      ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click(); await paint();
+      expect(ui.pageAt).toHaveBeenCalledTimes(1);
+      ui.setPage({ blocks: [{ ...windowOf().blocks[0]!, blockId: 'elsewhere', position: 9 }], marks: [] }); await paint();
+      ui.setPage({ blocks: windowOf().blocks, marks: [0, 1, 2, 3, 4].map((index) => anchor(cards[index]!)), marksPage: { shown: 5, total: 5, nextOrdinal: null, digest: 'd1' } }); await paint();
+      page.resolve(pageOf([3, 4], 2, null)); await paint(); await paint();
+      expect(selectedCard(ui.pane)).toBeUndefined(); expect(ui.pageAt).toHaveBeenCalledTimes(1);
+      expect(ui.status).not.toHaveBeenCalledWith('没能读取其他位置的待处理批注；没有移动。', 'error');
+    });
+
     it('goes straight to a filtered match beyond the pages it holds, reading pages until the mark is held and its card works (#1604)', async () => {
       const ui = await dense();
       ui.find.mockResolvedValueOnce({ mark: { markId: 'm4', blockId: 'block', fromGrapheme: 4 } });

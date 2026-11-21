@@ -49,10 +49,14 @@ export async function railJump(renderer, waitFor, check, fraction, name) {
     const x=r.left+r.width/2, wanted=r.top+Math.min(r.height-2, Math.max(2, r.height*${fraction}));
     for (let step=0; step<=40; step+=1) for (const y of [wanted+step, wanted-step]) { if (y<r.top+1 || y>r.bottom-1) continue; const hit=document.elementFromPoint(x,y); if (hit && track.contains(hit) && !hit.closest('.rail-marker')) return {x,y}; }
     return null; })()`;
-  await waitFor(renderer, `${point}!==null`, `${name}-track-in-window`);
+  // The same wait as `pointerClick`: the chosen point and its hit test are the same on two consecutive frames before the pointer moves
+  // there, and are checked again once it has, before it presses.
+  await waitFor(renderer, `new Promise((resolve)=>requestAnimationFrame(()=>{const before=${point};requestAnimationFrame(()=>{const after=${point};resolve(before!==null&&after!==null&&before.x===after.x&&before.y===after.y);});}))`, `${name}-track-point-stable`);
   const at = await renderer.evaluate(point);
   check(at !== null, `${name}-track-point`);
   await renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...at, button: 'none', buttons: 0 });
+  const held = await renderer.evaluate(`new Promise((resolve)=>requestAnimationFrame(()=>{const track=document.querySelector(${JSON.stringify(TRACK)}),hit=document.elementFromPoint(${at.x},${at.y}),now=${point};resolve(!!track&&!!hit&&track.contains(hit)&&!hit.closest('.rail-marker')&&now!==null&&now.x===${at.x}&&now.y===${at.y});}))`);
+  check(held === true, `${name}-track-point-held`);
   await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at, button: 'left', buttons: 1, clickCount: 1 });
   await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at, button: 'left', buttons: 0, clickCount: 1 });
   if (fraction === 0) {
