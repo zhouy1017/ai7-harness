@@ -241,6 +241,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     replaceScreen('model-service', content);
     mounted = content;
     restoreInteraction(content);
+    if (entry && document.scrollingElement) document.scrollingElement.scrollTop = 0;
     if (searchHadFocus) focusSearchSettings();
     let reading = false, draftEdited = false;
     content.addEventListener('input', (event) => { const target = event.target as HTMLElement; if (target.closest('.model-credential-form, .model-service-proxy-form, .model-service-effort') || target instanceof HTMLInputElement && target.type === 'password') draftEdited = true; });

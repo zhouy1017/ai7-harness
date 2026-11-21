@@ -66,7 +66,7 @@ function completeSettings(): ModelServiceSettingsProjection {
   } as unknown as ModelServiceSettingsProjection;
 }
 
-function mountSettings(calls: ReturnType<typeof api>, resetScroll = false) {
+function mountSettings(calls: ReturnType<typeof api>) {
   let poll: (() => void) | undefined;
   vi.stubGlobal('window', { ai7: calls, setInterval: (tick: () => void) => { poll = tick; return 0; }, clearInterval: () => undefined });
   const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] => {
@@ -75,7 +75,7 @@ function mountSettings(calls: ReturnType<typeof api>, resetScroll = false) {
   const root = element('main'); document.body.append(root);
   const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(),
     button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
-    rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (_state, content) => { root.replaceChildren(content); if (resetScroll) root.scrollTop = 0; } });
+    rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (_state, content) => root.replaceChildren(content) });
   return { screen, node: root as unknown as MiniElement, poll: () => poll!() };
 }
 
@@ -772,7 +772,8 @@ it('groups configured recommendations before the remaining models and offers def
 
 
 it('lets an explicit settings entry reset the previous page scroll instead of restoring it', async () => {
-  const { screen, node } = mountSettings(api(completeSettings()), true);
+  const { screen, node } = mountSettings(api(completeSettings()));
+  Object.defineProperty(document, 'scrollingElement', { configurable: true, value: node });
   try {
     await screen.renderModelServiceSettings();
     node.scrollTop = 240;
