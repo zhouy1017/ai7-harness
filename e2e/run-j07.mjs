@@ -3340,16 +3340,34 @@ async function main() {
     await openManagement('management-menus');
     const menusRow = `${managementPage} [data-derivative-document=${JSON.stringify(managementBlankId)}]`;
     const menusPill = `document.querySelector(${JSON.stringify(`${menusRow} .status-pill`)})?.textContent`;
+    /**
+     * A row menu opened by its button holds its panel inside the content area: right of the sidebar's real right edge, inside the
+     * window's right and bottom edges, and clear of the button that opened it. The panel is read once its opening animation has
+     * ended (and its placement is applied), never after a fixed sleep; every bound is the window's or the sidebar's own.
+     */
+    const assertRowMenuInside = async (menu, name) => {
+      const summarySelector = `${menusRow} [data-derivative-row-menu="${menu}"]`;
+      const panelSelector = `${menusRow} [data-derivative-row-menu-body="${menu}"]`;
+      await waitFor(renderer, `(() => { const summary=document.querySelector(${JSON.stringify(summarySelector)}); const panel=document.querySelector(${JSON.stringify(panelSelector)}); return summary?.parentElement?.open===true && panel instanceof HTMLElement && getComputedStyle(panel).position==='fixed' && panel.getAnimations().length===0; })()`, `${name}-settled`, 30_000);
+      await assertRenderer(renderer, `(() => { const summary=document.querySelector(${JSON.stringify(summarySelector)}); const panel=document.querySelector(${JSON.stringify(panelSelector)}); const sidebar=document.querySelector('#app-sidebar'); if(!(summary instanceof HTMLElement && panel instanceof HTMLElement && sidebar instanceof HTMLElement)) return false; const box=panel.getBoundingClientRect(), button=summary.getBoundingClientRect(), edge=sidebar.getBoundingClientRect().right; const clear=box.bottom<=button.top || box.top>=button.bottom || box.right<=button.left || box.left>=button.right; return box.width>0 && box.height>0 && edge>0 && box.left>=edge && box.right<=innerWidth && box.top>=0 && box.bottom<=innerHeight && clear; })()`, `${name}-inside`);
+    };
+    // The window's own size first: the page is standing here before any size is emulated.
+    for (const menu of ['export', 'more']) {
+      await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="${menu}"]`, `management-${menu}-own`);
+      await assertRowMenuInside(menu, `management-${menu}-own`);
+      await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="${menu}"]`, `management-${menu}-own-close`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="${menu}"]`)})?.parentElement?.open === false`, `management-${menu}-own-closed`, 30_000);
+    }
     try {
       for (const [width, height] of [[1280, 800], [1008, 681]]) {
         await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
         await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="export"]`, `management-export-${width}`);
-        await waitFor(renderer, `(() => { const panel=document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu-body="export"]`)}); const summary=document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="export"]`)}); if(!(panel instanceof HTMLElement)||summary?.parentElement?.open!==true) return false; const box=panel.getBoundingClientRect(); return box.width>0 && box.height>0 && box.left>=0 && box.top>=0 && box.right<=innerWidth && box.bottom<=innerHeight; })()`, `management-export-panel-${width}`, 30_000);
+        await assertRowMenuInside('export', `management-export-${width}`);
         await assertRenderer(renderer, `Array.from(document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu-body="export"]`)}).querySelectorAll('button'), (button)=>button.textContent).join('|')==='导出 DOCX|导出 MD'`, `management-export-entries-${width}`);
         await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="export"]`, `management-export-close-${width}`);
         await waitFor(renderer, `document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="export"]`)})?.parentElement?.open === false`, `management-export-closed-${width}`, 30_000);
         await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="more"]`, `management-more-${width}`);
-        await waitFor(renderer, `document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="more"]`)})?.parentElement?.open === true`, `management-more-open-${width}`, 30_000);
+        await assertRowMenuInside('more', `management-more-${width}`);
         await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-action="finalize"]`, `management-finalize-${width}`);
         await waitFor(renderer, `${menusPill} === '已定稿'`, `management-finalized-${width}`, 60_000);
         await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="more"]`, `management-more-again-${width}`);
@@ -3375,6 +3393,8 @@ async function main() {
     await assertRenderer(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); return strip instanceof HTMLElement && strip.textContent.includes('宣传文章') && strip.textContent.includes(${JSON.stringify(`${promotionCount} 篇衍生稿件`)}); })()`, 'management-category-strip');
     await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="yes"]`, 'management-category-refuse');
     await waitFor(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); const problem=strip?.querySelector('.derivatives-confirm-problem'); return strip instanceof HTMLElement && problem instanceof HTMLElement && (problem.textContent ?? '').trim().length > 0 && strip.textContent.includes('宣传文章'); })()`, 'management-category-refusal', 60_000);
+    // The refusal is said once, in the strip the editor is looking at: the bottom bar does not repeat it.
+    await assertRenderer(renderer, `(() => { const problem=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm-problem`)})?.textContent?.trim() ?? ''; const bar=document.querySelector('#persistence-status'); return problem.length > 0 && bar instanceof HTMLElement && !(bar.textContent ?? '').includes(problem); })()`, 'management-category-refusal-once');
     await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.some(type=>type.typeId==='promotion-article' && type.documents.length === ${promotionCount}))`, 'management-category-kept');
     await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="no"]`, 'management-category-cancel');
     await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}) === null && document.activeElement?.textContent === '删除类别'`, 'management-category-cancelled');

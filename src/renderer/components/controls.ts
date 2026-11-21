@@ -393,7 +393,9 @@ export function mountMenuControls(root: HTMLElement): () => void {
       // Measure where the panel will stand: fixed, with the whole window to grow into, not inside its (maybe narrow) anchor.
       panel.style.left = `${8 - origin.left}px`;
       const width = Math.min(panel.offsetWidth, view.innerWidth - 16);
-      panel.style.left = `${Math.max(8, Math.min(rect.right - width, view.innerWidth - width - 8)) - origin.left}px`;
+      // A menu that sits left of the window's far edge may opt to open from its button's left edge, so it never reaches back over the sidebar.
+      const anchor = menu.dataset['menuAnchor'] === 'start' ? rect.left : rect.right - width;
+      panel.style.left = `${Math.max(8, Math.min(anchor, view.innerWidth - width - 8)) - origin.left}px`;
       const below = view.innerHeight - rect.bottom - 12;
       const upwards = below < Math.min(panel.scrollHeight, 200) && rect.top > below;
       panel.style.maxHeight = `${Math.max(48, (upwards ? rect.top : below) - 8)}px`;
