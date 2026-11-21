@@ -699,10 +699,14 @@ it('offers ready channels, favourites first, and resets the task choice without 
   const changed = vi.fn();
   const projection = settings(['opencode-go', 'openai-platform']);
   const chooser = createDispatchChooser({ role: 'main-editorial', changed });
-  const favourite = projection.channels.find(channel => channel.channelId === 'opencode-go')!.models.at(-1)!;
+  const goModels = projection.channels.find(channel => channel.channelId === 'opencode-go')!.models;
+  // A Go model declared on its /responses route is never offered (#1582): no runtime record serves that route.
+  const favourite = goModels.filter(model => model.main !== 'route-not-served').at(-1)!;
+  const unserved = goModels.find(model => model.main === 'route-not-served')!;
   const defaults = JSON.stringify(projection.roles);
-  chooser.render(projection, { 'opencode-go': [favourite.modelId] });
+  chooser.render(projection, { 'opencode-go': [favourite.modelId, unserved.modelId] });
   const root = chooser.element as unknown as MiniElement;
+  expect(root.querySelectorAll('option').some(option => option.textContent.includes(unserved.modelLabel))).toBe(false);
   expect(root.querySelectorAll('optgroup').map(group => (group as unknown as { label: string }).label)).toEqual(['OpenCode Go', 'OpenAI 官方']);
   expect(root.querySelectorAll('optgroup')[0]!.children[0]!.textContent).toBe(`★ ${favourite.modelLabel}`);
   const inheritedLabel = root.querySelector('summary')!.textContent;

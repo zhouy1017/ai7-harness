@@ -546,6 +546,27 @@ export const CONFIGURED_RUNTIME_MODEL_LABELS: Readonly<Record<string, string>> =
   'opencode-zen-responses/gpt-5.6-luna': 'GPT 5.6 Luna（OpenCode Zen）',
 };
 
+/** The recommended Pro and Flash models of each channel (ADR 0107 §1; Issue #1620), by provider: listed first, never bound by themselves. */
+export const CONFIGURED_RECOMMENDED_MODELS: Readonly<Record<string, { readonly pro: readonly string[]; readonly flash: readonly string[] }>> = {
+  'anthropic-claude': { pro: ['claude-opus-5', 'claude-fable-5-1'], flash: ['claude-haiku-4-5'] },
+  'deepseek-open-platform': { pro: ['deepseek-v4-pro'], flash: ['deepseek-flash'] },
+  'google-gemini': { pro: ['gemini-3.1-pro-preview', 'gemini-2.5-pro'], flash: ['gemini-3.8-flash'] },
+  'openai-platform': { pro: ['gpt-5.6-sol', 'gpt-6-astra'], flash: ['gpt-5.6-luna'] },
+  'opencode-go': { pro: ['deepseek-v4-pro', 'kimi-k3', 'glm-5.3'], flash: ['deepseek-v4.1-flash', 'glm-5.3-flash'] },
+  'opencode-zen': {
+    pro: ['claude-opus-5-5', 'gpt-6.1-sol', 'qwen3.8-max'],
+    flash: ['deepseek-v4.1-flash', 'glm-5.3-flash', 'claude-haiku-5-5'],
+  },
+};
+
+/** The models a channel declares on a further route only (Issue #1582), by route: never sent on the first route of the channel. */
+export const CONFIGURED_ALTERNATE_ROUTE_MODELS: Readonly<Record<string, readonly string[]>> = {
+  'opencode-go-messages': ['qwen3.7-plus', 'qwen3.6-plus', 'minimax-m3', 'minimax-m2.7', 'minimax-m2.5'],
+  'opencode-go-responses': ['grok-4.6', 'gpt-5.6-luna'],
+  'opencode-zen-messages': ['claude-fable-5-1', 'claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-opus-4-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-5-5', 'claude-haiku-4-5', 'qwen3.8-flash', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-plus', 'qwen3.5-plus'],
+  'opencode-zen-responses': ['gpt-6-astra', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2', 'gpt-5.2-codex', 'gpt-5.1', 'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5', 'gpt-5-codex', 'gpt-5-nano', 'grok-4.7', 'grok-4.6', 'grok-4.5', 'grok-build-0.1', 'muse-spark-1.3', 'muse-spark-1.2'],
+};
+
 /** One credential slot per configured provider (ADR 0073 §4): the members of `CredentialSlotId`, and the Credential Broker's closed set. */
 export const CONFIGURED_CREDENTIAL_SLOTS = [
   'alibaba-model-studio',

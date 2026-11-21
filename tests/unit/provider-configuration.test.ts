@@ -138,6 +138,15 @@ describe('provider documents and the generator (ADR 0073 §2)', () => {
     }
   });
 
+  it('generates each recommendation from its document and none for a document that names none (Issue #1620)', () => {
+    const input = freshInput();
+    delete documentOf(input, 'google-gemini').recommendedModels;
+    const shared = Object.entries(generator.renderProviderConfiguration(generator.resolveProviderConfiguration(input))).find(([path]) => path.endsWith('provider-configuration.generated.ts'))![1];
+    const recommended = shared.slice(shared.indexOf('export const CONFIGURED_RECOMMENDED_MODELS'), shared.indexOf('export const CONFIGURED_ALTERNATE_ROUTE_MODELS'));
+    expect(recommended).not.toContain('google-gemini');
+    expect(recommended).toContain("'opencode-go': { pro: ['deepseek-v4-pro', 'kimi-k3', 'glm-5.3'], flash: ['deepseek-v4.1-flash', 'glm-5.3-flash'] }");
+  });
+
   it('lands the supported set of ADR 0080 §5 as one document per provider, Doubao recorded as a task', () => {
     const providers = freshInput().documents.map((entry) => entry.data.providerId).sort();
     expect(providers).toEqual([
@@ -320,6 +329,11 @@ describe('provider documents and the generator (ADR 0073 §2)', () => {
         (copy.credential as any).developmentCredentialReference = randomUUID();
         input.documents.push({ file: 'ai7-local-deterministic.json', data: copy });
       }],
+      // Issue #1620: a recommendation is a model the document lists on a route the runtime table serves, never one #1582 refuses.
+      ['recommended-unserved', (input) => { documentOf(input, 'opencode-go').recommendedModels = { pro: ['gpt-5.6-luna'], flash: [] }; }],
+      ['recommended-unserved', (input) => { documentOf(input, 'opencode-go').recommendedModels = { pro: [], flash: ['claude-haiku-4-5'] }; }],
+      ['schema', (input) => { documentOf(input, 'opencode-go').recommendedModels = { pro: ['kimi-k3'] }; }],
+      ['alternate-route-ambiguous', (input) => { const models = route(documentOf(input, 'opencode-go'), 2).models; route(documentOf(input, 'opencode-go'), 1).models.push(structuredClone(models[0])); }],
     ];
     for (const [rule, mutate] of cases) {
       const message = refusalAfter(mutate);

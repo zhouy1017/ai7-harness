@@ -637,5 +637,9 @@
     "Endpoint drift #1267 is repaired under Wave23 #1279/#1283: the three implemented Zen routes use /inference/openai/v1 or /inference/anthropic/v1, and discovery uses /inference/v1/models. Selected policy v33 already admits these hosts, protocol families and credential slots; its bytes and all predecessor identities remain unchanged.",
     "Free-tier chat models require OpenCode and may return HTTP403 from third-party clients; account availability is determined by discovery or an explicit connection test. Jev/SystemOne is not an implemented text protocol.",
     "No live Zen connection was performed for this repair. Documentary protocol compatibility does not establish account availability, response quality, cost or live model validation."
-  ]
+  ],
+  "recommendedModels": {
+    "pro": ["claude-opus-5-5", "gpt-6.1-sol", "qwen3.8-max"],
+    "flash": ["deepseek-v4.1-flash", "glm-5.3-flash", "claude-haiku-5-5"]
+  }
 }
