@@ -103,7 +103,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   await pointerClick(renderer, waitFor, '[data-pending-step="previous"]', 'marks-paging-previous');
   // What the page did in the seconds after the press, kept for the failure message.
   const trace = await renderer.evaluate(`(async () => { const rows=[]; for (let turn=0; turn<30; turn++) { rows.push([turn*100, document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId?.slice(-6), document.querySelectorAll('.editor-window [data-mark-id]').length, document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard?.slice(0,6)??null, document.querySelector('#persistence-status')?.textContent??null, document.querySelector('[data-marks-paging] span')?.textContent??null]); await new Promise((done)=>setTimeout(done,100)); } return rows.filter((row,index)=>index===0||JSON.stringify(row.slice(1))!==JSON.stringify(rows[index-1].slice(1))); })()`);
-  // The card of that mark is selected, focused and inside the pane; its words are drawn inside the text's window; the pane holds
+  // The card of that mark is selected, focused, starts inside the pane (a tall card scrolls in it) and stands inside the window; its words are drawn inside the text's window; the pane holds
   // the pages up to that mark (all of them, and no sentence, when it stands on the last page).
   const held = Math.min(expected.total, Math.ceil((expected.ordinal + 1) / 400) * 400);
   const rowNow = `(() => { const row=document.querySelector('[data-marks-paging]'); return row===null || row.hidden ? 'none' : row.querySelector('span')?.textContent; })()`;
@@ -119,7 +119,8 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     const node=document.querySelector(${JSON.stringify(card)}), scroll=document.querySelector('.manuscript-comments-scroll'), words=document.querySelector('.editor-window [data-mark-id="${expected.markId}"]'), editor=document.querySelector('.editor-window');
     const inside=(a,b)=>a!==null && b!==null && a.width>0 && a.height>0 && a.left>=b.left-1 && a.right<=b.right+1 && a.top>=b.top-1 && a.bottom<=b.bottom+1;
     const rect=(element)=>element?.getBoundingClientRect()??null, view={left:0,top:0,right:innerWidth,bottom:innerHeight};
-    return {card:inside(rect(node),rect(scroll)) && inside(rect(node),view), words:inside(rect(words),rect(editor)) && inside(rect(words),view), row:${rowNow}, cardBox:rect(node)&&[rect(node).left,rect(node).top,rect(node).right,rect(node).bottom], viewport:[innerWidth,innerHeight]};
+    const cardBox=rect(node), paneBox=rect(scroll), startsInPane=cardBox!==null && paneBox!==null && cardBox.left>=paneBox.left-1 && cardBox.right<=paneBox.right+1 && cardBox.top>=paneBox.top-1 && cardBox.top<paneBox.bottom;
+    return {card:startsInPane && inside(cardBox,view), words:inside(rect(words),rect(editor)) && inside(rect(words),view), row:${rowNow}, cardBox:rect(node)&&[rect(node).left,rect(node).top,rect(node).right,rect(node).bottom], viewport:[innerWidth,innerHeight]};
   })()`);
   check(arrived.card && arrived.words && arrived.row === rowWant, 'marks-paging-arrived-beyond-first-page', { ...arrived, rowWant });
   // It can be accepted: 接受并应用 on its card, by a real click (a pointer decision stays on the page); the service records the Apply.
