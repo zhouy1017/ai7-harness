@@ -934,9 +934,12 @@ async function main() {
     // #1623: local retrieval's Han word boundaries, in the product's executable run as the service runs (ADR 0107 §4 point 1).
     at('retrieval-segmenter-packaged-runtime');
     {
-      const { PACKAGED_RUNTIME_BOUNDARIES, hanWordBoundaries, segmenterPinTexts } = await import('./segmenter-pin.mjs');
+      const { CORPUS_BOUNDARY_SHA256, PACKAGED_RUNTIME_BOUNDARIES, boundaryDigest, hanWordBoundaries, segmenterCorpusTexts, segmenterPinTexts } = await import('./segmenter-pin.mjs');
       const packaged = await segmentInProductRuntime(executable, segmenterPinTexts(ROOT), hanWordBoundaries);
       requireJourney(JSON.stringify(packaged) === JSON.stringify(PACKAGED_RUNTIME_BOUNDARIES), 'retrieval-segmenter-packaged-runtime', packaged);
+      // Every paragraph of every admitted SampleBook: the packaged runtime must give the test runtime's digest.
+      const corpus = boundaryDigest(await segmentInProductRuntime(executable, segmenterCorpusTexts(ROOT), hanWordBoundaries));
+      requireJourney(corpus === CORPUS_BOUNDARY_SHA256, 'retrieval-segmenter-packaged-corpus', corpus);
     }
 
     // ---- the first launch, bound to the J-04 model adapter and J-16's unit hold -----------------------------

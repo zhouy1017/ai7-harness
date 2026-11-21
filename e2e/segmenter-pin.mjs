@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { unzipSync } from 'fflate';
@@ -31,7 +32,21 @@ export const PACKAGED_RUNTIME_BOUNDARIES = Object.freeze([
   ...SEGMENTER_DICTIONARY_DIFFERENCES.map((word) => Object.freeze([word.length])),
 ]);
 
-const ENTITIES ={ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+/** Every admitted Public SampleBook, whose every paragraph the corpus digest covers. */
+export const SEGMENTER_CORPUS_BOOKS = Object.freeze(['sample1.docx', 'luxun-nahan.docx', 'luxun-zhaohua-xishi.docx', 'liue-laocan-youji.docx', 'wujingzi-rulin-waishi.docx']);
+/**
+ * SHA-256 of every paragraph's Han word boundaries over `SEGMENTER_CORPUS_BOOKS` (no text is stored). None of the seven words occurs
+ * in any of these books, so both runtimes must give this one digest.
+ */
+export const CORPUS_BOUNDARY_SHA256 = 'a1e55a143d764d3e54f974b92d939919e41138e9d6433d97e75e65bf47d754a6';
+export function segmenterCorpusTexts(root) {
+  return SEGMENTER_CORPUS_BOOKS.flatMap((book) => docxParagraphs(resolve(root, 'SampleBooks', book)));
+}
+export function boundaryDigest(boundaries) {
+  return createHash('sha256').update(JSON.stringify(boundaries)).digest('hex');
+}
+
+const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 /** The non-empty paragraphs of a DOCX body, as its text runs read them. */
 export function docxParagraphs(path) {
   const xml = new TextDecoder().decode(unzipSync(readFileSync(path), { filter: (file) => file.name === 'word/document.xml' })['word/document.xml']);

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { RETRIEVAL_LEXICAL, RetrievalIndex, RetrievalError, chunkRanges, retrievalTokens, reciprocalRankFusion, type RetrievalSource } from '../../src/service/retrieval/index.js';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 // @ts-expect-error Plain ESM pin shared with J-16 has no declarations.
-import { PACKAGED_RUNTIME_BOUNDARIES, SEGMENTER_DICTIONARY_DIFFERENCES, TEST_RUNTIME_BOUNDARIES, hanWordBoundaries, segmenterPinTexts } from '../../e2e/segmenter-pin.mjs';
+import { CORPUS_BOUNDARY_SHA256, PACKAGED_RUNTIME_BOUNDARIES, SEGMENTER_DICTIONARY_DIFFERENCES, TEST_RUNTIME_BOUNDARIES, boundaryDigest, hanWordBoundaries, segmenterCorpusTexts, segmenterPinTexts } from '../../e2e/segmenter-pin.mjs';
 import { prepareRetrievalResult, markRetrievalResult, notExactFetched, dialogueRetrievalCitations } from '../../src/service/retrieval/result-validator.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 import { PlatformToolSession } from '../../src/service/provider/platform-tool-session.js';
@@ -183,7 +183,12 @@ describe('local lexical retrieval over Han text (#1623)', () => {
     expect(hanWordBoundaries(segmenterPinTexts(ROOT))).toEqual(TEST_RUNTIME_BOUNDARIES);
     expect(SEGMENTER_DICTIONARY_DIFFERENCES).toHaveLength(7);
     expect(PACKAGED_RUNTIME_BOUNDARIES.slice(3)).toEqual(SEGMENTER_DICTIONARY_DIFFERENCES.map((word: string) => [word.length]));
-  });
+    // Every paragraph of every admitted SampleBook: none holds one of the seven words, so this digest is both runtimes'.
+    const corpus: string[] = segmenterCorpusTexts(ROOT);
+    expect(corpus.length).toBe(2933);
+    expect(SEGMENTER_DICTIONARY_DIFFERENCES.filter((word: string) => corpus.some((text) => text.normalize('NFKC').includes(word)))).toEqual([]);
+    expect(boundaryDigest(hanWordBoundaries(corpus))).toBe(CORPUS_BOUNDARY_SHA256);
+  }, 60_000);
   it('weights each tier as named: three words, one bigram and two single characters, by hand', async () => {
     // 'alpha beta修订': w:alpha, w:beta, w:修订, b:修订, u:修, u:订 (6 features); 'gamma delta': 2. Every matched term has df 1 of 2.
     const [hit, ...rest] = await new RetrievalIndex(words('alpha beta修订', 'gamma delta')).retrieve('alpha beta修订');
