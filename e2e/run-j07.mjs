@@ -689,7 +689,7 @@ const READ_PUBLICATION = `window.ai7.inspectDeliverables().then((deliverables) =
   prompt: deliverables.publication.actualsPrompt === null ? null : deliverables.publication.actualsPrompt.label + ' · ' + deliverables.publication.actualsPrompt.stateLabel,
 }))`;
 
-async function importAndOpen(renderer, title, distinct = false, start = 'landing') {
+async function importAndOpen(renderer, title, distinct = false, start = 'landing', stayOnOverview = false) {
   requireJourney(start === 'landing' || start === 'target', 'import-entry-stage');
   if (start === 'landing') {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'import-landing');
@@ -704,6 +704,7 @@ async function importAndOpen(renderer, title, distinct = false, start = 'landing
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'import-committed', 180_000);
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'import-acknowledged', 180_000);
+  if (stayOnOverview) return;
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'import-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'import-editor');
 }
@@ -1238,6 +1239,26 @@ async function main() {
     await nativeWordExport('suggestions', 'word-suggestions-export');
     await nativeWordExport('accepted-baseline', 'word-accepted-export');
 
+    at('deliverables-save-in-place');
+    const inlineRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'inline-deliverables-data'), checkout);
+    const inline = await launch({ root: inlineRoot, picker: manuscript });
+    await importAndOpen(inline, EXCERPT.title, false, 'landing', true);
+    await pointerClick(inline, waitFor, SIDEBAR.section('deliverables'), 'inline-deliverables-entry');
+    await waitFor(inline, `document.querySelector('[data-publication-action="designate"]')?.textContent === '存为里程碑并设为发稿版本…'`, 'inline-save-ready');
+    await assertRenderer(inline, `(() => { const lines = Array.from(document.querySelectorAll('.deliverables-definition')); return lines.length === 3 && lines.every(line => { const r=line.getBoundingClientRect(); return r.width>0 && r.top>=0 && r.bottom<=innerHeight && r.left>=0 && r.right<=innerWidth; }); })()`, 'inline-definitions-in-window');
+    await assertRenderer(inline, `(() => { const button=document.querySelector('[data-publication-action="designate"]'); const r=button?.getBoundingClientRect(); return r && r.width>0 && r.height>0 && r.top>=0 && r.left>=0 && r.bottom<=innerHeight && r.right<=innerWidth; })()`, 'inline-save-in-first-screenful');
+    await inline.evaluate(`document.querySelector('[data-publication-action="designate"]').addEventListener('click', (event) => { const style=getComputedStyle(event.currentTarget); window.__j07InlineBusy=event.currentTarget.getAttribute('aria-disabled')==='true' && style.opacity==='0.5' && style.cursor==='default'; }, { once: true })`);
+    await pointerClick(inline, waitFor, '[data-publication-action="designate"]', 'inline-save-milestone');
+    await assertRenderer(inline, `window.__j07InlineBusy === true`, 'inline-saving-disabled-style');
+    await waitFor(inline, `document.querySelector('form.publication-designate input[type="radio"]')?.checked === true`, 'inline-saved-form');
+    await assertRenderer(inline, `document.querySelector('[data-publication-field="scope"]')?.value === '全书定稿' && document.querySelector('[data-publication-field="basis"]')?.value === '编辑审定通过' && !document.querySelector('[data-testid="manuscript-editor"]')`, 'inline-defaults');
+    await assertRenderer(inline, `(() => { const confirm=document.querySelector('[data-publication-action="confirm"]'); const r=confirm?.getBoundingClientRect(); return confirm===document.activeElement && r && r.width>0 && r.height>0 && r.top>=0 && r.left>=0 && r.bottom<=innerHeight && r.right<=innerWidth; })()`, 'inline-confirm-focused-in-window');
+    await pressEnter(inline);
+    await waitFor(inline, `document.querySelector('.publication-versions > li') !== null && document.querySelector('form.publication-designate') === null`, 'inline-designated');
+    await assertRenderer(inline, `(async () => { const value=await window.ai7.inspectDeliverables(); const milestones=value.publication.milestones; const designations=value.publication.designations; return milestones.length===1 && milestones[0].label.startsWith('阶段留档 · ') && designations.length===1 && designations[0].current && designations[0].milestoneId===milestones[0].milestoneId; })()`, 'inline-single-saved-designation');
+    await waitFor(inline, `document.querySelector('[data-package-ready="true"] [data-package-action="prepare"]')?.disabled === false`, 'inline-package-preparable');
+    await close();
+
     at('import-and-open');
     let renderer = await launch({ picker: manuscript, save: exportPath });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'product-ready');
@@ -1274,7 +1295,7 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('deliverables-before-milestone');
-    // Before any milestone 设为发稿版本 is there, unavailable, with its reason in words beside it (PUB-002).
+    // Before any milestone the in-place save action is ready (Issue #1550).
     await openDeliverables(renderer, 'before-milestone');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
     await runJ14DarkPass({ renderer, journey: 'J-07', at, representative: '#screen[data-screen="book-deliverables"] > .page-content', returnTo: SIDEBAR.section('deliverables') });
@@ -1283,13 +1304,12 @@ async function main() {
       const page = document.querySelector('[data-screen="book-deliverables"] > .book-deliverables');
       const block = window.__j07.block();
       const designate = window.__j07.action('designate');
-      const reason = document.getElementById(designate?.getAttribute('aria-describedby') ?? '');
       const actions = Array.from(page?.querySelectorAll(':scope > .workbench-actions button') ?? []).map((item) => item.textContent);
       return page?.dataset.bookId === ${JSON.stringify(bookId)} && !page.querySelector(':scope > .section-label') &&
         page.querySelector(':scope > h2')?.textContent === '工作 · 交付物' && !page.querySelector('.workbench-actions') &&
         actions.length === 0 && block.querySelector(':scope > h3')?.firstChild?.textContent === '发稿 · 稿件' &&
         block.dataset.publicationState === 'no-milestone' && window.__j07.items().length === 0 && block.querySelector('.milestone-list-empty') !== null &&
-        designate instanceof HTMLButtonElement && designate.disabled && designate.getAttribute('aria-label') === '设为发稿版本…' && reason?.textContent === '先保存里程碑版本' &&
+        designate instanceof HTMLButtonElement && !designate.disabled && designate.textContent === '存为里程碑并设为发稿版本…' &&
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
         block.querySelector('.publication-change-notice') === null &&
         window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 衍生稿件' &&
@@ -1297,7 +1317,7 @@ async function main() {
         Array.from(window.__j07.documents().querySelectorAll('li.production-document-card')).every((card) =>
           card.dataset.documentState === 'none' && card.querySelector('[data-document-action="create"], [data-document-action="blank"], [data-document-action="import"]') === null &&
           card.querySelector('[data-document-action="notForThisBook"]') instanceof HTMLButtonElement);
-    })()`, 'designate-unavailable-before-a-milestone');
+    })()`, 'save-and-designate-available-before-a-milestone');
     // Issue #416 (S67a): 图书交付包 comes last and waits for everything, naming what is missing.
     await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'false'`, 'package-before-milestone');
     await assertRenderer(renderer, `(() => {
@@ -2180,7 +2200,7 @@ async function main() {
     at('package-evaluation');
     // 评估 定稿 (Issue #429, S81a; BUNDLE-001): the Book's first Evaluation Record is scored and finalized through 评估's own
     // operations — five scores, both risks 低 with a statement, 修改后再议 — so the package has a 定稿 评估记录 to name. The Book
-    // has no 审稿意见, which the package lists under 不包含 with the reason; the drafting itself is J-11's.
+    // has no 审稿意见; the drafting itself is J-11's.
     const evaluationStart = await renderer.evaluate(`window.ai7.startEvaluation({ fromInitial: false }).then((page) => ({ recordId: page.record.recordId, entries: page.record.entries, content: page.record.content }))`);
     requireJourney(typeof evaluationStart?.recordId === 'string' && evaluationStart.content?.items?.length === 5 && evaluationStart.content.risks?.length === 2, 'package-evaluation-started', evaluationStart);
     const evaluationContent = {
@@ -2208,8 +2228,7 @@ async function main() {
       return bundle.querySelector('.package-statement')?.textContent === ${JSON.stringify(PACKAGE_STATEMENT)} &&
         JSON.stringify(rows) === ${JSON.stringify(JSON.stringify([
           `publication:true:发稿版本「${FIRST.label}」 · r1`,
-          'document:news-release:true:第 2 次交付 · 版本 3',
-          ...OTHER_TYPES.map((typeId) => `document:${typeId}:false:尚未创建`),
+          'document:news-release:true:版本 3',
           'work-records:true:暂无审阅记录',
         ]))} &&
         window.__j07.condition('publication').querySelector('.package-condition-notice')?.textContent === '自发稿版本后有修改：可以另设发稿版本，也可以按当前发稿版本打包。' &&
@@ -2219,11 +2238,8 @@ async function main() {
         !/%|百分/.test(bundle.textContent ?? '');
     })()`, 'package-conditions-name-what-is-missing');
     // A purpose the editor writes still has its limit: past 80 characters 准备 is held with the reason, and clearing the field
-    // gives the routine purpose back; the four documents not yet created never hold it.
+    // gives the routine purpose back; the four documents not yet created never hold it, and have no row (Issue #1639).
     await assertRenderer(renderer, `(() => { const input=window.__j07.pkg().querySelector('[data-package-field=purpose]'); const prepare=()=>window.__j07.pkg().querySelector('[data-package-action=prepare]'); input.value='长'.repeat(81); input.dispatchEvent(new Event('input',{bubbles:true})); const held=prepare().disabled && window.__j07.packageReason()==='交付包用途过长。'; input.value=''; input.dispatchEvent(new Event('input',{bubbles:true})); return held && !prepare().disabled && window.__j07.packageReason()===''; })()`, 'package-optional-documents-do-not-block');
-    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-condition-id="document:promotion-article"] [data-package-route="document"]', 'package-route-document');
-    // A type with no document yet: the technical card's own next action is 本书不做 (new documents are made on 稿件, Issue #1403).
-    await waitFor(renderer, `document.activeElement === window.__j07.cardAction('promotion-article', 'notForThisBook')`, 'package-route-focuses-the-card');
 
     at('package-not-for-this-book');
     // The four other types 本书不做 on their own cards: every condition holds, 准备 is available on the routine purpose, and the
@@ -2239,10 +2255,8 @@ async function main() {
       const lines = (selector) => Array.from(bundle.querySelectorAll(selector)).map((item) => item.dataset.itemKind + ':' + item.querySelector('.package-item-label')?.firstChild?.textContent);
       const limitations = Array.from(bundle.querySelectorAll('ul.package-limitations > li')).map((item) => item.textContent);
       return JSON.stringify(lines('ul.package-included > li')) === ${JSON.stringify(JSON.stringify([`publication:发稿版本「${FIRST.label}」 · r1`, 'document:新闻稿 · 版本 3', 'evaluation-record:评估记录 · 第 1 版定稿']))} &&
-        JSON.stringify(lines('ul.package-excluded > li')) === ${JSON.stringify(JSON.stringify([
-          ...['宣传文章', '评论文章', '发布会材料', '营销要点'].map((label) => `not-for-this-book:${label}`), 'readers-report:审稿意见', 'exclusion:备注', 'exclusion:资料库原件', 'exclusion:中间修订版',
-        ]))} &&
-        bundle.querySelector('ul.package-excluded > li[data-item-kind="readers-report"] .package-item-detail')?.textContent === '本书没有审稿意见' &&
+        // No 不包含 list at all (Issue #1639): neither the four types nor the fixed exclusions are itemised.
+        bundle.querySelector('ul.package-excluded') === null && !(bundle.textContent ?? '').includes('不包含') &&
         JSON.stringify(limitations) === ${JSON.stringify(JSON.stringify(['稿件：自发稿版本后有修改，本包按发稿版本。']))} &&
         !bundle.querySelector('[data-package-action="prepare"]').disabled && window.__j07.packageReason() === '' &&
         bundle.querySelector('[data-package-field="purpose"]')?.value === '';
@@ -2406,12 +2420,10 @@ async function main() {
       `- 稿件 · ${manifestInputs.included[0].label}（${manifestInputs.included[0].detail}）`, `- ${manifestInputs.included[1].label}`,
       `- ${manifestInputs.included[2].label}（定稿于 ${manifestInputs.included[2].detail.split(' · 定稿于 ')[1]}）`, '',
       '## 交付记录', '', '### 新闻稿', '',
-      ...manifestInputs.deliveries.map((delivery) =>
+      // The record names the 新闻稿's saved 版本 3 (the newest, held by default): its Delivery Records are that version's.
+      ...manifestInputs.deliveries.filter((delivery) => delivery.versionLabel === '版本 3').map((delivery) =>
         `- 第 ${delivery.ordinal} 次交付 · ${delivery.recipient.label} · ${delivery.versionLabel} · ${delivery.recordedAt}${delivery.note === null ? '' : `（备注：${delivery.note}）`}`),
       '',
-      '## 不包含', '',
-      '- 备注：稿件与文档上的备注只供编辑自己参考', '- 资料库原件', '- 中间修订版：稿件只含发稿版本，文档只含交付过的版本', '- 本书不做：宣传文章、评论文章、发布会材料、营销要点',
-      '- 审稿意见：本书没有审稿意见', '',
       '## 说明', '',
       ...manifestInputs.limitations.map((line) => `- ${line}`), `- ${manifestInputs.statement}`, '',
     ].join('\n');
@@ -3184,8 +3196,17 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('[data-screen="book-deliverables"] section.deliverables-documents') === null && document.querySelector('[data-deliverables-action="open-derivatives"]')?.textContent === '前往衍生稿件' && document.querySelector('.maintenance-cases, [data-maintenance-action]') === null && document.querySelector('.package-condition-list li[data-condition-key="document"]') === null`, 'multi-package-ordinary');
     const renamedId = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.find(doc=>doc.title==='另一篇宣传文章')?.documentId ?? null)`);
     requireJourney(UUID_PATTERN.test(renamedId ?? ''), 'multi-package-renamed-id', renamedId);
-    await assertRenderer(renderer, `(() => { const box = document.querySelector('.package-document-choices > li[data-document-id=${JSON.stringify(renamedId)}] input[type="checkbox"]'); if (!(box instanceof HTMLInputElement) || box.checked || box.disabled) return false; box.click(); return true; })()`, 'multi-package-tick');
-    await waitFor(renderer, `Array.from(document.querySelectorAll('.deliverables-package ul.package-included > li'), (item) => item.textContent).includes('宣传文章 · 《另一篇宣传文章》 · 版本 1')`, 'multi-package-included');
+    // Every derivative with a saved version is ticked by default (Issue #1639): the control's real state says so before anything is
+    // pressed, the package lists the document as held, and the editor's own presses untick and tick it again.
+    const renamedBox = `.package-document-choices > li[data-document-id=${JSON.stringify(renamedId)}] input[type="checkbox"]`;
+    const renamedHeld = `Array.from(document.querySelectorAll('.deliverables-package ul.package-included > li'), (item) => item.textContent).includes('宣传文章 · 《另一篇宣传文章》 · 版本 1')`;
+    const renamedState = (checked) => `(() => { const box = document.querySelector(${JSON.stringify(renamedBox)}); return box instanceof HTMLInputElement && !box.disabled && box.checked === ${checked} && ${renamedHeld} === ${checked}; })()`;
+    await waitFor(renderer, renamedState(true), 'multi-package-default-ticked');
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.package-document-choices > li input[type="checkbox"]'), (box) => box.checked).every((checked) => checked === true)`, 'multi-package-every-document-ticked');
+    await pointerClick(renderer, waitFor, renamedBox, 'multi-package-untick');
+    await waitFor(renderer, renamedState(false), 'multi-package-unticked');
+    await pointerClick(renderer, waitFor, renamedBox, 'multi-package-retick');
+    await waitFor(renderer, renamedState(true), 'multi-package-included');
     const deliveriesAfter = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).reduce((total, doc)=>total+doc.deliveries.length, 0))`);
     requireJourney(deliveriesAfter === 0, 'multi-package-no-delivery', deliveriesAfter);
 
@@ -3340,16 +3361,34 @@ async function main() {
     await openManagement('management-menus');
     const menusRow = `${managementPage} [data-derivative-document=${JSON.stringify(managementBlankId)}]`;
     const menusPill = `document.querySelector(${JSON.stringify(`${menusRow} .status-pill`)})?.textContent`;
+    /**
+     * A row menu opened by its button holds its panel inside the content area: right of the sidebar's real right edge, inside the
+     * window's right and bottom edges, and clear of the button that opened it. The panel is read once its opening animation has
+     * ended (and its placement is applied), never after a fixed sleep; every bound is the window's or the sidebar's own.
+     */
+    const assertRowMenuInside = async (menu, name) => {
+      const summarySelector = `${menusRow} [data-derivative-row-menu="${menu}"]`;
+      const panelSelector = `${menusRow} [data-derivative-row-menu-body="${menu}"]`;
+      await waitFor(renderer, `(() => { const summary=document.querySelector(${JSON.stringify(summarySelector)}); const panel=document.querySelector(${JSON.stringify(panelSelector)}); return summary?.parentElement?.open===true && panel instanceof HTMLElement && getComputedStyle(panel).position==='fixed' && panel.getAnimations().length===0; })()`, `${name}-settled`, 30_000);
+      await assertRenderer(renderer, `(() => { const summary=document.querySelector(${JSON.stringify(summarySelector)}); const panel=document.querySelector(${JSON.stringify(panelSelector)}); const sidebar=document.querySelector('#app-sidebar'); if(!(summary instanceof HTMLElement && panel instanceof HTMLElement && sidebar instanceof HTMLElement)) return false; const box=panel.getBoundingClientRect(), button=summary.getBoundingClientRect(), edge=sidebar.getBoundingClientRect().right; const clear=box.bottom<=button.top || box.top>=button.bottom || box.right<=button.left || box.left>=button.right; return box.width>0 && box.height>0 && edge>0 && box.left>=edge && box.right<=innerWidth && box.top>=0 && box.bottom<=innerHeight && clear; })()`, `${name}-inside`);
+    };
+    // The window's own size first: the page is standing here before any size is emulated.
+    for (const menu of ['export', 'more']) {
+      await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="${menu}"]`, `management-${menu}-own`);
+      await assertRowMenuInside(menu, `management-${menu}-own`);
+      await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="${menu}"]`, `management-${menu}-own-close`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="${menu}"]`)})?.parentElement?.open === false`, `management-${menu}-own-closed`, 30_000);
+    }
     try {
       for (const [width, height] of [[1280, 800], [1008, 681]]) {
         await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
         await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="export"]`, `management-export-${width}`);
-        await waitFor(renderer, `(() => { const panel=document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu-body="export"]`)}); const summary=document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="export"]`)}); if(!(panel instanceof HTMLElement)||summary?.parentElement?.open!==true) return false; const box=panel.getBoundingClientRect(); return box.width>0 && box.height>0 && box.left>=0 && box.top>=0 && box.right<=innerWidth && box.bottom<=innerHeight; })()`, `management-export-panel-${width}`, 30_000);
+        await assertRowMenuInside('export', `management-export-${width}`);
         await assertRenderer(renderer, `Array.from(document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu-body="export"]`)}).querySelectorAll('button'), (button)=>button.textContent).join('|')==='导出 DOCX|导出 MD'`, `management-export-entries-${width}`);
         await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="export"]`, `management-export-close-${width}`);
         await waitFor(renderer, `document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="export"]`)})?.parentElement?.open === false`, `management-export-closed-${width}`, 30_000);
         await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="more"]`, `management-more-${width}`);
-        await waitFor(renderer, `document.querySelector(${JSON.stringify(`${menusRow} [data-derivative-row-menu="more"]`)})?.parentElement?.open === true`, `management-more-open-${width}`, 30_000);
+        await assertRowMenuInside('more', `management-more-${width}`);
         await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-action="finalize"]`, `management-finalize-${width}`);
         await waitFor(renderer, `${menusPill} === '已定稿'`, `management-finalized-${width}`, 60_000);
         await pointerClick(renderer, waitFor, `${menusRow} [data-derivative-row-menu="more"]`, `management-more-again-${width}`);
@@ -3375,6 +3414,8 @@ async function main() {
     await assertRenderer(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); return strip instanceof HTMLElement && strip.textContent.includes('宣传文章') && strip.textContent.includes(${JSON.stringify(`${promotionCount} 篇衍生稿件`)}); })()`, 'management-category-strip');
     await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="yes"]`, 'management-category-refuse');
     await waitFor(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); const problem=strip?.querySelector('.derivatives-confirm-problem'); return strip instanceof HTMLElement && problem instanceof HTMLElement && (problem.textContent ?? '').trim().length > 0 && strip.textContent.includes('宣传文章'); })()`, 'management-category-refusal', 60_000);
+    // The refusal is said once, in the strip the editor is looking at: the bottom bar does not repeat it.
+    await assertRenderer(renderer, `(() => { const problem=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm-problem`)})?.textContent?.trim() ?? ''; const bar=document.querySelector('#persistence-status'); return problem.length > 0 && bar instanceof HTMLElement && !(bar.textContent ?? '').includes(problem); })()`, 'management-category-refusal-once');
     await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.some(type=>type.typeId==='promotion-article' && type.documents.length === ${promotionCount}))`, 'management-category-kept');
     await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="no"]`, 'management-category-cancel');
     await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}) === null && document.activeElement?.textContent === '删除类别'`, 'management-category-cancelled');

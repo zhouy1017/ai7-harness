@@ -332,7 +332,7 @@ it('offers 取消定稿 in the row\'s more menu once the document is finalized (
 });
 
 it('asks about a category in an app strip that names it and its documents, and shows the service\'s refusal (#1551)', async () => {
-  const { root, methods, surface } = setup(); await flush(); click(root, '管理衍生稿件类别');
+  const { root, methods, setStatus, surface } = setup(); await flush(); click(root, '管理衍生稿件类别');
   const strip = (): HTMLElement | null => root.querySelector<HTMLElement>('.derivatives-confirm');
   click(root.querySelector<HTMLElement>('[data-derivative-type="news-release"]')!, '删除类别');
   expect(strip()!.textContent).toContain('新闻稿');
@@ -341,6 +341,8 @@ it('asks about a category in an app strip that names it and its documents, and s
   expect(methods.deleteProductionDocumentType).toHaveBeenCalledWith({ typeId: 'news-release' });
   // The service's own refusal stands in the strip; the renderer copied none of its rule.
   expect(strip()!.textContent).toContain('这个类别下还有衍生稿件，请先改到别的类别。');
+  // Said once, where the editor is looking: the status bar does not repeat it.
+  expect(setStatus).not.toHaveBeenCalledWith(expect.stringContaining('这个类别下还有衍生稿件'), 'error');
   // Asking and cancelling repaint only the strip: a category name being typed stays as it is.
   const typed = root.querySelector<HTMLInputElement>('[aria-label="新类别名称"]')!; typed.value = '还没保存的名称';
   click(root.querySelector<HTMLElement>('[data-derivative-type="custom"]')!, '删除类别');

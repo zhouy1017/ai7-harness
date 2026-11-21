@@ -6149,15 +6149,6 @@ export class EditorialStore {
     return factualVerificationOperations.internalBookManuscript(this.#factualVerificationOperationsHost, bookId);
   }
 
-  /**
-   * The Versioned Verification Results of one Review Run's completed or eligible retained 事实核查 output (FREV-001), recorded once it has put its
-   * findings on the manuscript: each finding with the relations and Correction Variants the Run's model stated for its
-   * assertions, which the ledger checks against what the Run captured. Repeating it records nothing more.
-   */
-  #materializeFactualVerification(reviewRunId: string): void {
-    return factualVerificationOperations.internalMaterializeFactualVerification(this.#factualVerificationOperationsHost, reviewRunId);
-  }
-
   /** Record the results of a Review Run's 事实核查 category if it has formed them and they are not yet recorded. */
   materializeFactualVerification(reviewRunId: string): void {
     return factualVerificationOperations.materializeFactualVerification(this.#factualVerificationOperationsHost, reviewRunId);
@@ -6175,6 +6166,11 @@ export class EditorialStore {
   /** The Evidence Workspace of one result (EVID-001 to EVID-013): a read; it creates no mutation of any kind (EVID-012). */
   inspectEvidenceWorkspace(input: InspectEvidenceWorkspaceInput): EvidenceWorkspaceProjection {
     return factualVerificationOperations.inspectEvidenceWorkspace(this.#factualVerificationOperationsHost, input);
+  }
+
+  /** 在浏览器中打开 (Issue #1641): the address recorded for one source of this Book; a read. */
+  inspectSourceAddress(input: ServiceOperationMap['inspectSourceAddress']['input']): ServiceOperationMap['inspectSourceAddress']['output'] {
+    return factualVerificationOperations.inspectSourceAddress(this.#factualVerificationOperationsHost, input);
   }
 
   /**

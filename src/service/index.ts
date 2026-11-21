@@ -883,6 +883,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectFactualVerification(request.input) };
     case 'inspectEvidenceWorkspace':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvidenceWorkspace(request.input) };
+    case 'inspectSourceAddress':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSourceAddress(request.input) };
     case 'recordVerificationReviewDecision':
       return { id: request.id, ok: true, op: request.op, result: store.recordVerificationReviewDecision(request.input) };
     case 'prepareCorrectionProposal':

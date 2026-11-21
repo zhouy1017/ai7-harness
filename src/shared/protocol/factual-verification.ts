@@ -545,6 +545,30 @@ export interface InspectEvidenceWorkspaceInput {
   sourcesAfter: number | null;
 }
 
+/**
+ * 在浏览器中打开 (Issue #1641): a source named by its identity, never by an address — a source card of one factual
+ * verification result, or one retained row of 来源与证据. The service answers what it recorded for it, refusing another Book's.
+ */
+export type SourceIdentityInput =
+  | { bookId: string; resultId: string; cardId: string }
+  | { bookId: string; evidenceId: string };
+
+/** The recorded address of one source and its kind; an in-Book source has none. */
+export type SourceAddressProjection =
+  | { sourceKind: 'web'; address: string }
+  | { sourceKind: 'in-book'; address: null };
+
+/** The service read behind 在浏览器中打开: nothing else of the source is answered. */
+export interface InspectSourceAddressOperation {
+  input: SourceIdentityInput;
+  output: SourceAddressProjection;
+}
+
+/** What 在浏览器中打开 answers once the system browser has the address: its host as recorded (ASCII form). */
+export interface SourceOpenedProjection {
+  host: string;
+}
+
 export interface RecordVerificationReviewDecisionInput {
   excludedSourceRefs?: readonly string[];
   bookId: string;
@@ -839,4 +863,51 @@ export interface FactualReviewProjection extends Omit<
   updateControls: ReviewCategoryUpdateControlsProjection | null;
   history: null | FactualReviewHistoryProjection;
   inspectedRevision: null | { revision: FactualReviewResultSetRevisionProjection; current: boolean; readOnly: true };
+}
+
+/** The claim-scoped 事实核查 stages and 复核 an admitted Provider Processing rule names (protocol.ts AdmittedProviderRule). */
+export interface AdmittedFactualVerificationStage {
+  readonly contractId: 'ai7.factual-claim-verification/1';
+  readonly stageId: 'web-verification';
+  readonly maximumInitialSessionsPerEligibleClaim: number;
+  readonly maximumModelRequestsPerSession: number;
+  readonly maximumPlatformToolRoundsPerSession: number;
+  readonly maximumSearchSubmissionsPerClaim: number;
+  readonly maximumMetadataUtf8Bytes: number;
+  readonly tools: readonly string[];
+  readonly automaticTransportRetryAllowed: false;
+  readonly contractRetryAllowed: false;
+  readonly counterResetOnResumeAllowed: false;
+}
+
+export interface AdmittedFactualClaimStages {
+  readonly taskKind: 'factual-review';
+  readonly taskMode: 'whole-manuscript';
+  readonly evidenceAssuranceLevels: readonly EvidenceAssuranceLevel[];
+  readonly procedureId: string;
+  readonly procedureVersion: number;
+  readonly claimArtifactSchema: 'ai7.factual-claim-ledger/1';
+  readonly claimExtraction: {
+    readonly contractId: 'ai7.factual-claim-extraction/1';
+    readonly stageId: 'claim-extraction';
+    readonly maximumInitialSessionsPerCoverageUnit: number;
+    readonly maximumModelRequestsPerSession: number;
+    readonly maximumAssertionsPerCoverageUnit: number;
+    readonly tools: readonly string[];
+    readonly automaticTransportRetryAllowed: false;
+    readonly contractRetryAllowed: false;
+  };
+  readonly claimVerification: AdmittedFactualVerificationStage;
+}
+
+export interface AdmittedFactualRecheck {
+  readonly maximumClaims: number;
+  readonly maximumAutomaticRunsPerOnceKey: number;
+  readonly requestedLevels: readonly EvidenceAssuranceLevel[];
+  readonly onlyContractId: 'ai7.factual-claim-verification/1';
+  readonly onlyStageId: 'web-verification';
+  readonly verificationContract: AdmittedFactualVerificationStage;
+  readonly onceKeyPersistedBeforeDispatch: true;
+  readonly latestStillCurrentEditorDecisionRequired: true;
+  readonly sameBookActiveMatchingEnrollmentRequired: true;
 }

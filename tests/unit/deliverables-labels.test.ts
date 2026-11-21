@@ -158,7 +158,7 @@ describe('the words of 交付物', () => {
     expect(DELIVERABLES_DESTINATION_ACTIONS).toEqual(['打开稿件', '工作概览']);
     expect(MILESTONE_LIST_HEADING).toBe('里程碑版本');
     expect(PUBLICATION_HISTORY_HEADING).toBe('设为发稿版本的记录');
-    expect(PUBLICATION_ACTION_LABELS).toEqual({ designate: '设为发稿版本…', confirm: '设为发稿版本', cancel: '取消', open: '打开交付物' });
+    expect(PUBLICATION_ACTION_LABELS).toEqual({ designate: '设为发稿版本…', saveAndDesignate: '存为里程碑并设为发稿版本…', confirm: '设为发稿版本', refresh: '重新读取交付物', cancel: '取消', open: '打开交付物' });
     expect(PUBLICATION_FORM_HEADING).toBe('设为发稿版本');
     expect(PUBLICATION_MILESTONE_LEGEND).toBe('选择里程碑版本');
     expect([PUBLICATION_SCOPE_LABEL, PUBLICATION_BASIS_LABEL]).toEqual(['发稿范围', '依据']);
@@ -311,10 +311,9 @@ describe('the milestone form', () => {
   });
 });
 
-describe('the 交付物 lede (Issue #1410 item 22)', () => {
-  it('says the newest milestone and the routine scope and basis are already chosen, and asks for nothing to be written', () => {
-    expect(DELIVERABLES_LEDE).toBe('默认选中最新的里程碑版本，发稿范围和依据已按常规填好，可按需改写后设为发稿版本；之后稿件再有修改，这里会提示。');
-    expect(DELIVERABLES_LEDE).not.toMatch(/写明|明确选定/u);
+describe('the three 交付物 definitions (Issue #1550)', () => {
+  it('explains milestones, publication and all package contents in three lines', () => {
+    expect(DELIVERABLES_LEDE).toBe('里程碑版本：你认可的稿件版本。\n发稿版本：交给后续生产使用的里程碑版本。\n图书交付包：汇集发稿版本、勾选的衍生稿件和已完成的审阅报告、评估记录及审稿意见。');
   });
 });
 

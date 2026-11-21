@@ -58,7 +58,7 @@ it('a menu panel wider than its narrow anchor stays inside the window near the r
   // Inside its 83 px anchor the nowrap content measures 83 px; once fixed with room to grow it is 340 px.
   const panel = { style, scrollHeight: 120, get offsetWidth() { return values['position'] === 'fixed' && values['left'] !== undefined ? 340 : 83; } };
   const summary = { getBoundingClientRect: () => ({ left: 907, right: 990, top: 8, bottom: 40 }) };
-  const menu = { open: true, querySelector: () => summary };
+  const menu = { open: true, dataset: {}, querySelector: () => summary };
   const position = runInNewContext(transpileModule(`${body}; position;`, {}).outputText, {
     menus: () => [menu], panelOf: () => panel, fixedOrigin: () => ({ left: 0, top: 0 }), view: { innerWidth: 1008, innerHeight: 681 },
   });
@@ -66,6 +66,13 @@ it('a menu panel wider than its narrow anchor stays inside the window near the r
   const left = Number.parseFloat(values['left'] ?? 'NaN');
   expect(left).toBeGreaterThanOrEqual(8);
   expect(left + 340).toBeLessThanOrEqual(1008 - 8);
+  // A menu that opts in opens from its button's left edge, so it never reaches back over what is left of the button (the sidebar).
+  const start = runInNewContext(transpileModule(`${body}; position;`, {}).outputText, {
+    menus: () => [{ ...menu, dataset: { menuAnchor: 'start' }, querySelector: () => ({ getBoundingClientRect: () => ({ left: 300, right: 383, top: 8, bottom: 40 }) }) }],
+    panelOf: () => panel, fixedOrigin: () => ({ left: 0, top: 0 }), view: { innerWidth: 1008, innerHeight: 681 },
+  });
+  start();
+  expect(Number.parseFloat(values['left'] ?? 'NaN')).toBe(300);
 });
 
 it('Space chooses the active option in an open select and preserves spaces in its filter', () => {

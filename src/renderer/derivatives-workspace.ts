@@ -301,7 +301,6 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
     } catch (error) {
       if (stopped) return;
       deleteProblem = options.errorMessage(error, '删除类别未完成，请重试。');
-      options.setStatus(deleteProblem, 'error');
     } finally {
       busy = false;
       if (!stopped) paint();
@@ -450,6 +449,8 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
   /** A row's secondary actions in the shared disclosure menu, so Escape, an outside click and focus behave as elsewhere. */
   function rowMenu(summaryText: string, name: string, items: HTMLButtonElement[]): HTMLDetailsElement {
     const menu = el('details', undefined, 'derivative-menu');
+    // The row's buttons stand at the page's left, so the panel opens from the button's left edge, inside the content area.
+    menu.dataset['menuAnchor'] = 'start';
     const summary = el('summary', summaryText, 'btn secondary');
     summary.dataset['derivativeRowMenu'] = name;
     const body = menuPanel(...items);

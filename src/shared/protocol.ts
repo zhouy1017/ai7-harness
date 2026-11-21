@@ -185,6 +185,11 @@ import type {
   ServiceWireOutput,
 } from './protocol/analysis.js';
 import type {
+  AdmittedFactualClaimStages,
+  AdmittedFactualRecheck,
+  InspectSourceAddressOperation,
+  SourceIdentityInput,
+  SourceOpenedProjection,
   CorrectionProposalDraftProjection,
   CorrectionProposalSavedProjection,
   EvidenceAssuranceLevel,
@@ -630,6 +635,7 @@ export const IPC_CHANNELS = {
   saveEvidenceAsMaterial: 'ai7:j04:save-evidence-as-material',
   inspectFactualVerification: 'ai7:j04:inspect-factual-verification',
   inspectEvidenceWorkspace: 'ai7:j04:inspect-evidence-workspace',
+  openSourceInBrowser: 'ai7:j04:open-source-in-browser',
   recordVerificationReviewDecision: 'ai7:j04:record-verification-review-decision',
   prepareCorrectionProposal: 'ai7:j04:prepare-correction-proposal',
   saveCorrectionProposal: 'ai7:j04:save-correction-proposal',
@@ -1925,52 +1931,6 @@ export type OutboundDataCategoryId =
  * admits, the Model Role it binds, that role's exact route, endpoint, model and credential slot, and the outbound data categories
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
-export interface AdmittedFactualVerificationStage {
-  readonly contractId: 'ai7.factual-claim-verification/1';
-  readonly stageId: 'web-verification';
-  readonly maximumInitialSessionsPerEligibleClaim: number;
-  readonly maximumModelRequestsPerSession: number;
-  readonly maximumPlatformToolRoundsPerSession: number;
-  readonly maximumSearchSubmissionsPerClaim: number;
-  readonly maximumMetadataUtf8Bytes: number;
-  readonly tools: readonly string[];
-  readonly automaticTransportRetryAllowed: false;
-  readonly contractRetryAllowed: false;
-  readonly counterResetOnResumeAllowed: false;
-}
-
-export interface AdmittedFactualClaimStages {
-  readonly taskKind: 'factual-review';
-  readonly taskMode: 'whole-manuscript';
-  readonly evidenceAssuranceLevels: readonly EvidenceAssuranceLevel[];
-  readonly procedureId: string;
-  readonly procedureVersion: number;
-  readonly claimArtifactSchema: 'ai7.factual-claim-ledger/1';
-  readonly claimExtraction: {
-    readonly contractId: 'ai7.factual-claim-extraction/1';
-    readonly stageId: 'claim-extraction';
-    readonly maximumInitialSessionsPerCoverageUnit: number;
-    readonly maximumModelRequestsPerSession: number;
-    readonly maximumAssertionsPerCoverageUnit: number;
-    readonly tools: readonly string[];
-    readonly automaticTransportRetryAllowed: false;
-    readonly contractRetryAllowed: false;
-  };
-  readonly claimVerification: AdmittedFactualVerificationStage;
-}
-
-export interface AdmittedFactualRecheck {
-  readonly maximumClaims: number;
-  readonly maximumAutomaticRunsPerOnceKey: number;
-  readonly requestedLevels: readonly EvidenceAssuranceLevel[];
-  readonly onlyContractId: 'ai7.factual-claim-verification/1';
-  readonly onlyStageId: 'web-verification';
-  readonly verificationContract: AdmittedFactualVerificationStage;
-  readonly onceKeyPersistedBeforeDispatch: true;
-  readonly latestStillCurrentEditorDecisionRequired: true;
-  readonly sameBookActiveMatchingEnrollmentRequired: true;
-}
-
 export interface AdmittedProviderRule {
   readonly claimScopedFactualStages?: AdmittedFactualClaimStages;
   readonly factualRecheck?: AdmittedFactualRecheck;
@@ -4414,6 +4374,8 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: InspectEvidenceWorkspaceInput;
     output: EvidenceWorkspaceProjection;
   };
+  /** 在浏览器中打开 (Issue #1641): the recorded address of one source named by its identity; read-only. */
+  inspectSourceAddress: InspectSourceAddressOperation;
   /** 记录核查审阅决定 (Issue #901; FREV-006): one immutable Review Decision bound to one result version. */
   recordVerificationReviewDecision: {
     input: RecordVerificationReviewDecisionInput;
@@ -5206,6 +5168,8 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   saveEvidenceAsMaterial(input: { bookId: string; evidenceId: string; title?: string | null }): Promise<ServiceOperationMap['saveEvidenceAsMaterial']['output']>;
   inspectFactualVerification(input: InspectFactualVerificationInput): Promise<FactualVerificationLensProjection>;
   inspectEvidenceWorkspace(input: InspectEvidenceWorkspaceInput): Promise<EvidenceWorkspaceProjection>;
+  /** 在浏览器中打开 (Issue #1641): the system browser gets the address the service recorded for this source, if the rule admits it. */
+  openSourceInBrowser(input: SourceIdentityInput): Promise<SourceOpenedProjection>;
   recordVerificationReviewDecision(input: RecordVerificationReviewDecisionInput): Promise<VerificationReviewDecisionRecordedProjection>;
   prepareCorrectionProposal(input: PrepareCorrectionProposalInput): Promise<CorrectionProposalDraftProjection>;
   saveCorrectionProposal(input: SaveCorrectionProposalInput): Promise<CorrectionProposalSavedProjection>;
