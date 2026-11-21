@@ -13,7 +13,7 @@ const READ_WINDOW = `(async () => {
   let page=await window.ai7.getManuscriptWindowAt(at); const first=page, marks=[...page.marks];
   while (page.marksPage?.nextOrdinal!=null) { page=await window.ai7.getManuscriptWindowAt({...at,marks:{afterOrdinal:page.marksPage.nextOrdinal,digest:page.marksPage.digest}}); marks.push(...page.marks); }
   globalThis.__marksPaging={...binding,start};
-  return {shown:first.marks.length,total:first.marksPage?.total??first.marks.length,marks:marks.map((mark)=>({markId:mark.markId,kind:mark.kind,status:mark.status,anchorState:mark.anchorState,blockId:mark.blockId,categoryKey:mark.categoryKey}))};
+  return {shown:first.marks.length,total:first.marksPage?.total??first.marks.length,marks:marks.map((mark)=>({markId:mark.markId,kind:mark.kind,status:mark.status,anchorState:mark.anchorState,blockId:mark.blockId,categoryKey:mark.categoryKey,from:mark.fromGrapheme,to:mark.toGrapheme,source:mark.sourceKind}))};
 })()`;
 
 async function key(renderer, name, code, windowsVirtualKeyCode, modifiers = 0) {
@@ -55,8 +55,10 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     const now = Math.min(facts.total, shown + 400);
     await waitFor(renderer, now >= facts.total ? `document.querySelector('[data-marks-paging]')?.hidden===true` : `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(`已显示 ${now} / ${facts.total} 条。`)} && document.querySelector('[data-marks-more]').disabled===false`, 'marks-paging-page-loaded', 60_000);
   }
-  const drawn = await renderer.evaluate(`(() => { const ids=${JSON.stringify(facts.marks.filter((mark) => mark.status === 'open' && mark.anchorState === 'exact' && mark.kind !== 'personal-highlight').map((mark) => mark.markId))};
-    const missing=ids.filter((id)=>document.querySelector('.editor-window [data-mark-id="'+id+'"]')===null); return {ids:ids.length,missing:missing.length,first:missing.slice(0,3)}; })()`);
+  const open = facts.marks.filter((mark) => mark.status === 'open' && mark.anchorState === 'exact' && mark.kind !== 'personal-highlight');
+  const drawn = await renderer.evaluate(`(() => { const ids=${JSON.stringify(open.map((mark) => mark.markId))};
+    const missing=ids.filter((id)=>document.querySelector('.editor-window [data-mark-id="'+id+'"]')===null); return {ids:ids.length,missing:missing.length,first:missing.slice(0,3),blocks:Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).map((node)=>node.dataset.blockId),anywhere:missing.slice(0,3).map((id)=>document.querySelector('[data-mark-id="'+id+'"]')!==null)}; })()`);
+  drawn.missingMarks = open.filter((mark) => drawn.first.includes(mark.markId)).map((mark, index) => ({ ...mark, markId: undefined, ordinal: facts.marks.findIndex((entry) => entry.markId === drawn.first[index]) }));
   check(drawn.ids > 400 && drawn.missing === 0, 'marks-paging-all-drawn', drawn);
 
   // The way back loads the first page again. 上一条待处理 from the end of the text, under the category the marks share, goes
