@@ -2370,6 +2370,15 @@ async function main() {
     await assertRenderer(primary, `(() => { const refresh=document.querySelector('[data-action="retry-model-list"]'); if(!(refresh instanceof HTMLButtonElement)||refresh.disabled||refresh.textContent!=='刷新模型列表')return false; refresh.click(); return true; })()`, 'model-refresh-click');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent==='模型服务不可达，请检查网络或网络代理设置' && document.querySelector('.model-service-technical:is(:not([open]), [hidden]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')`, 'model-refresh-discovery-failure-visible');
     await assertRenderer(primary, `document.querySelector('[data-action="test-flow-connection"]')?.disabled===false && document.querySelector('.model-service-flow-feedback')?.textContent.includes('尚未测试')`, 'inline-model-connection-test-surface');
+    // The provider-free catalogue has only its offline default until the editor adds a custom choice.
+    // Seed a distinct choice through the existing developer field, so ordinary-mode selection has two real entries.
+    await pointerClick(primary, waitFor, '[data-custom-flash-model-id]', 'model-choice-seed-field');
+    await primary.send('Input.dispatchKeyEvent', {type:'keyDown',key:'a',code:'KeyA',modifiers:2,windowsVirtualKeyCode:65});
+    await primary.send('Input.dispatchKeyEvent', {type:'keyUp',key:'a',code:'KeyA',modifiers:2,windowsVirtualKeyCode:65});
+    await primary.send('Input.insertText', {text:'j12-choice-alternative'});
+    await primary.evaluate(`document.querySelector('.model-service-settings').dataset.choiceSeedOld='true'`);
+    await pointerClick(primary, waitFor, '[data-action="select-fast-role-model"]', 'model-choice-seed-save');
+    await waitFor(primary, `(async()=>{const settings=await window.ai7.getModelServiceSettings();return settings.modelRoles.find(role=>role.roleId==='foreground-flash').binding.modelId==='j12-choice-alternative'&&document.querySelector('.model-service-settings:not([data-choice-seed-old]) select[data-flash-model]')?.value==='j12-choice-alternative';})()`, 'model-choice-seed-saved');
     // #1372: ordinary-mode configuration uses the same role, refresh, filter and persisted favourite operations.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-catalogue-settings');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'ordinary-catalogue-settings-ready');
@@ -2437,7 +2446,14 @@ async function main() {
       const index = await primary.evaluate(`Array.from(document.querySelector(${JSON.stringify(selector)}).options).findIndex(option=>option.value===${JSON.stringify(id)})`);
       requireJourney(index>=0, 'model-choice-offered');
       await pointerClick(primary, waitFor, selector + ' + .ui-select-trigger', 'model-choice-open');
-      if (!lighter) await assertRenderer(primary, `Array.from(document.querySelectorAll('.ui-select-popover:not([hidden]) [role="group"][aria-label="推荐 · 主要模型"] .field-note')).some(node=>{const b=node.getBoundingClientRect();return node.textContent==='推荐 · 主要模型'&&b.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&b.bottom<=innerHeight;})`, 'model-choice-recommendation-visible');
+      if (!lighter) requireJourney((await primary.evaluate(`(() => {
+        const expected=Array.from(document.querySelector('select[aria-label="AI7 使用的模型"]').querySelectorAll('optgroup')).map(group=>group.label);
+        const groups=Array.from(document.querySelectorAll('.ui-select-popover:not([hidden]) [role="group"]'));
+        return expected.length>0&&JSON.stringify(groups.map(group=>group.getAttribute('aria-label')))===JSON.stringify(expected)&&groups.every(group=>{
+          const heading=group.querySelector('.field-note'),box=heading.getBoundingClientRect();
+          return heading.textContent===group.getAttribute('aria-label')&&box.width>0&&box.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&box.bottom<=innerHeight;
+        });
+      })()`)) === true, 'model-choice-recommendation-visible');
       // Small catalogues have no search field. Arrow keys navigate the actual popup in either form.
       for (const key of ['ArrowDown', 'ArrowUp']) {
         await primary.send('Input.dispatchKeyEvent', {type:'keyDown',key});
@@ -2445,6 +2461,7 @@ async function main() {
       }
       await pointerClick(primary, waitFor, `.ui-select-popover:not([hidden]) [role="option"][data-index="${index}"]`, 'model-choice-option');
     };
+    if (localDebugEnabled()) recordDebugDetail('J-12', `model-choice-catalogue ${JSON.stringify(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.channels.find(channel=>channel.route==='deepseek-open-platform').models.map(model=>({modelId:model.modelId,main:model.main,fast:model.fast})))`))}`);
     const alternative = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.channels.find(channel=>channel.route==='deepseek-open-platform').models.find(model=>model.main==='eligible'&&model.fast==='eligible'&&model.modelId!=='deepseek-flash')?.modelId ?? null)`);
     requireJourney(typeof alternative==='string', 'model-choice-alternative-offered');
     const flashBefore = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.modelRoles.find(role=>role.roleId==='foreground-flash').source))`);
