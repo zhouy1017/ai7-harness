@@ -1,6 +1,7 @@
 import { DEFAULT_MILESTONE_PURPOSE, defaultMilestoneLabel } from './milestone-defaults.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import {
+  MILESTONE_PURPOSE_LABELS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
   MAX_PUBLICATION_SCOPE_CHARACTERS,
   type DeliverablesProjection,
@@ -127,7 +128,7 @@ type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProduct
   'approveBookDeliveryPackageExport' | 'cancelBookDeliveryPackageExport' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
   'inspectMaintenanceCase' | 'listMaintenanceCases' | 'recordMaintenanceCase' | 'appendMaintenanceCaseRevision' | 'saveMaintenanceErrata' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
-  'decideProductionDocumentType' | 'recordProductionDocumentDelivery' | 'getManuscriptWindow' | 'saveMilestone'>;
+  'decideProductionDocumentType' | 'recordProductionDocumentDelivery' | 'saveMilestone'>;
 
 export interface MountDeliverablesOptions {
   /** The destination's panel: the surface appends its heading and its host, and the caller its persistent actions after them. */
@@ -233,6 +234,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   let documentsGeneration = 0;
   let working = false;
   let form: DesignateForm | null = null;
+  let savedForDesignation: string | null = null;
   let block: HTMLElement | undefined;
   let deliveryForm: DeliveryForm | null = null;
   let documentsBlock: HTMLElement | undefined;
@@ -331,14 +333,16 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const ticket = ++generation;
     void api.inspectDeliverables().then(
       (next) => {
-        if (destroyed || ticket !== generation || !host.isConnected || next.bookId !== bookId) return;
+        if (destroyed || working || ticket !== generation || !host.isConnected || next.bookId !== bookId) return;
         projection = next;
-        render('keep');
+        if (savedForDesignation !== null) {
+          openSavedDesignation();
+        } else render('keep');
       },
       (error) => {
         if (destroyed || ticket !== generation || !host.isConnected) return;
         if (projection === null) renderUnavailable(error);
-        else options.setStatus(options.errorMessage(error, DELIVERABLES_STATUS_LINES.refreshFailed), 'error');
+        else if (savedForDesignation === null) options.setStatus(options.errorMessage(error, DELIVERABLES_STATUS_LINES.refreshFailed), 'error');
       },
     );
   }
@@ -460,7 +464,9 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       firstChoice()?.focus();
     } else if (focus === 'confirm') {
       const confirm = section.querySelector<HTMLButtonElement>('[data-publication-action="confirm"]');
-      (confirm !== null && !confirm.disabled ? confirm : firstChoice())?.focus();
+      const target = confirm !== null && !confirm.disabled ? confirm : firstChoice();
+      target?.focus();
+      target?.scrollIntoView({ block: 'center' });
     } else if (restore !== null) {
       const match = Array.from(section.querySelectorAll<HTMLElement>('button, input, textarea, summary'))
         .find((candidate) => focusKeyOf(candidate) === restore.key);
@@ -572,7 +578,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   function renderDesignate(next: DeliverablesProjection): HTMLElement {
     const area = el('div', 'publication-designate-area');
     const row = el('div', 'button-row publication-designate-row');
-    const saveFirst = next.manuscript !== null && next.publication.milestones.length === 0;
+    const saveFirst = next.manuscript !== null && next.publication.milestones.length === 0 && savedForDesignation === null;
     const open = el('button', saveFirst ? 'primary' : 'secondary', saveFirst ? PUBLICATION_ACTION_LABELS.saveAndDesignate : PUBLICATION_ACTION_LABELS.designate);
     open.type = 'button';
     open.dataset['publicationAction'] = 'designate';
@@ -589,7 +595,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       return area;
     }
     open.disabled = working;
-    open.setAttribute('aria-expanded', form === null ? 'false' : 'true');
+    if (!saveFirst) open.setAttribute('aria-expanded', form === null ? 'false' : 'true');
     open.addEventListener('click', () => { if (saveFirst) void saveAndDesignate(); else openForm(); });
     if (form !== null) {
       const node = renderForm(next, form);
@@ -756,34 +762,58 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     render('form');
   }
 
+  /** Select only the milestone this action saved, including after a failed re-read recovers. */
+  function openSavedDesignation(): void {
+    if (savedForDesignation === null || !projection?.publication.milestones.some((item) => item.milestoneId === savedForDesignation)) return;
+    form = { milestoneId: savedForDesignation, scope: PUBLICATION_SCOPE_DEFAULT, basis: PUBLICATION_BASIS_DEFAULT, problem: null };
+    savedForDesignation = null;
+    render('confirm');
+  }
+
   /** Save with the manuscript save menu's defaults, then select that exact milestone in place. */
   async function saveAndDesignate(): Promise<void> {
-    if (destroyed || working || projection?.manuscript == null) return;
+    if (destroyed || working || savedForDesignation !== null || projection?.manuscript == null) return;
     const { manuscriptId, branchId } = projection.manuscript;
     working = true;
     generation += 1;
-    render('keep');
+    // Keep the pressed control in place and focusable while the save is busy.
+    block?.setAttribute('aria-busy', 'true');
+    for (const control of block?.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>('button, input, textarea') ?? []) {
+      if (control.dataset['publicationAction'] === 'designate') control.setAttribute('aria-disabled', 'true');
+      else control.disabled = true;
+    }
+    options.setStatus(DELIVERABLES_STATUS_LINES.savingMilestone, 'busy');
+    let saved;
     try {
-      await api.getManuscriptWindow({ manuscriptId, branchId, cursor: null });
+      saved = await api.saveMilestone({ manuscriptId, branchId,
+        label: defaultMilestoneLabel(MILESTONE_PURPOSE_LABELS[DEFAULT_MILESTONE_PURPOSE], new Date()), purposeKind: DEFAULT_MILESTONE_PURPOSE, purpose: null, note: '' });
+    } catch (error) {
+      working = false;
       if (destroyed) return;
-      const saved = await api.saveMilestone({ manuscriptId, branchId,
-        label: defaultMilestoneLabel('阶段留档', new Date()), purposeKind: DEFAULT_MILESTONE_PURPOSE, purpose: null, note: '' });
-      if (destroyed) return;
+      generation += 1;
+      render('designate');
+      options.setStatus(options.errorMessage(error, DELIVERABLES_STATUS_LINES.milestoneFailed), 'error');
+      refresh();
+      return;
+    }
+    if (destroyed) return;
+    savedForDesignation = saved.milestoneId;
+    generation += 1; // A read started during saving must not overwrite the saved result.
+    try {
       const next = await api.inspectDeliverables();
       if (destroyed) return;
       if (next.bookId !== bookId) throw new Error(DELIVERABLES_UNAVAILABLE);
       projection = next;
-      form = { milestoneId: saved.milestoneId, scope: PUBLICATION_SCOPE_DEFAULT, basis: PUBLICATION_BASIS_DEFAULT, problem: null };
       working = false;
-      render('form');
-      bundle.refresh();
-      options.setStatus(saved.completionLabel, 'success');
-    } catch (error) {
+      openSavedDesignation();
+    } catch {
       working = false;
       if (destroyed) return;
-      render('designate');
-      options.setStatus(options.errorMessage(error, '里程碑未保存。'), 'error');
+      render('keep');
+      refresh();
     }
+    bundle.refresh();
+    options.setStatus(DELIVERABLES_STATUS_LINES.milestoneSaved, 'success');
   }
 
   /** What 设为发稿版本 records for the form as it stands: an empty field is its default. */

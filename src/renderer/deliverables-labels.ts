@@ -27,7 +27,7 @@ export const DELIVERABLES_SECTION_LABEL = '工作 · 交付物';
 /** The editor toolbar's entry in IA-006's 工作 group, after 审阅, and the heading of 工作概览's one line. */
 export const DELIVERABLES_ENTRY_LABEL = '交付物';
 /** Issue #1550: the three deliverables and how they relate, one plain line each. */
-export const DELIVERABLES_LEDE = '里程碑版本：你认可的稿件版本。\n发稿版本：交给后续生产使用的里程碑版本。\n图书交付包：发稿版本与勾选的衍生稿件一起导出的包。';
+export const DELIVERABLES_LEDE = '里程碑版本：你认可的稿件版本。\n发稿版本：交给后续生产使用的里程碑版本。\n图书交付包：汇集发稿版本、勾选的衍生稿件和已完成的审阅报告、评估记录及审稿意见。';
 /** The one block S65 reaches: the manuscript's 发稿 (editor-surfaces §9's first row). */
 export const DELIVERABLES_PUBLICATION_HEADING = '发稿 · 稿件';
 export const DELIVERABLES_UNAVAILABLE = '无法读取这本书的交付物。';
@@ -44,7 +44,7 @@ export const PUBLICATION_CURRENT_MARK = '当前发稿版本';
 /** The label of every `data-publication-action` the destination carries, and of 工作概览's `data-deliverables-action`. */
 export const PUBLICATION_ACTION_LABELS = {
   designate: '设为发稿版本…',
-  saveAndDesignate: '存为里程碑并设为发稿版本',
+  saveAndDesignate: '存为里程碑并设为发稿版本…',
   confirm: '设为发稿版本',
   cancel: '取消',
   open: '打开交付物',
@@ -273,6 +273,9 @@ export const DELIVERABLES_STATUS_LINES = {
   opening: '正在打开交付物…',
   openFailed: '无法打开交付物。',
   refreshFailed: '无法刷新交付物。',
+  savingMilestone: '正在保存里程碑版本…',
+  milestoneFailed: '里程碑未保存。',
+  milestoneSaved: '里程碑已保存，请在下方确认设为发稿版本。',
   designating: '正在设为发稿版本…',
   designateFailed: '未能设为发稿版本。',
 } as const;

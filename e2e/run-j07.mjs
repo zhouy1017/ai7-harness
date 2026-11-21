@@ -1244,13 +1244,18 @@ async function main() {
     const inline = await launch({ root: inlineRoot, picker: manuscript });
     await importAndOpen(inline, EXCERPT.title, false, 'landing', true);
     await pointerClick(inline, waitFor, SIDEBAR.section('deliverables'), 'inline-deliverables-entry');
-    await waitFor(inline, `document.querySelector('[data-publication-action="designate"]')?.textContent === '存为里程碑并设为发稿版本'`, 'inline-save-ready');
+    await waitFor(inline, `document.querySelector('[data-publication-action="designate"]')?.textContent === '存为里程碑并设为发稿版本…'`, 'inline-save-ready');
     await assertRenderer(inline, `(() => { const lines = Array.from(document.querySelectorAll('.deliverables-definition')); return lines.length === 3 && lines.every(line => { const r=line.getBoundingClientRect(); return r.width>0 && r.top>=0 && r.bottom<=innerHeight && r.left>=0 && r.right<=innerWidth; }); })()`, 'inline-definitions-in-window');
+    await assertRenderer(inline, `(() => { const button=document.querySelector('[data-publication-action="designate"]'); const r=button?.getBoundingClientRect(); return r && r.width>0 && r.height>0 && r.top>=0 && r.left>=0 && r.bottom<=innerHeight && r.right<=innerWidth; })()`, 'inline-save-in-first-screenful');
     await pointerClick(inline, waitFor, '[data-publication-action="designate"]', 'inline-save-milestone');
     await waitFor(inline, `document.querySelector('form.publication-designate input[type="radio"]')?.checked === true`, 'inline-saved-form');
     await assertRenderer(inline, `document.querySelector('[data-publication-field="scope"]')?.value === '全书定稿' && document.querySelector('[data-publication-field="basis"]')?.value === '编辑审定通过' && !document.querySelector('[data-testid="manuscript-editor"]')`, 'inline-defaults');
-    await pointerClick(inline, waitFor, '[data-publication-action="confirm"]', 'inline-designate');
+    await assertRenderer(inline, `(() => { const confirm=document.querySelector('[data-publication-action="confirm"]'); const r=confirm?.getBoundingClientRect(); return confirm===document.activeElement && r && r.width>0 && r.height>0 && r.top>=0 && r.left>=0 && r.bottom<=innerHeight && r.right<=innerWidth; })()`, 'inline-confirm-focused-in-window');
+    await inline.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await inline.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await waitFor(inline, `document.querySelector('.publication-versions > li') !== null && document.querySelector('form.publication-designate') === null`, 'inline-designated');
+    await assertRenderer(inline, `(async () => { const value=await window.ai7.inspectDeliverables(); const milestones=value.publication.milestones; const designations=value.publication.designations; return milestones.length===1 && milestones[0].label.startsWith('阶段留档 · ') && designations.length===1 && designations[0].current && designations[0].milestoneId===milestones[0].milestoneId; })()`, 'inline-single-saved-designation');
+    await waitFor(inline, `document.querySelector('[data-package-ready="true"] [data-package-action="prepare"]')?.disabled === false`, 'inline-package-preparable');
     await close();
 
     at('import-and-open');
@@ -1298,13 +1303,12 @@ async function main() {
       const page = document.querySelector('[data-screen="book-deliverables"] > .book-deliverables');
       const block = window.__j07.block();
       const designate = window.__j07.action('designate');
-      const reason = document.getElementById(designate?.getAttribute('aria-describedby') ?? '');
       const actions = Array.from(page?.querySelectorAll(':scope > .workbench-actions button') ?? []).map((item) => item.textContent);
       return page?.dataset.bookId === ${JSON.stringify(bookId)} && !page.querySelector(':scope > .section-label') &&
         page.querySelector(':scope > h2')?.textContent === '工作 · 交付物' && !page.querySelector('.workbench-actions') &&
         actions.length === 0 && block.querySelector(':scope > h3')?.firstChild?.textContent === '发稿 · 稿件' &&
         block.dataset.publicationState === 'no-milestone' && window.__j07.items().length === 0 && block.querySelector('.milestone-list-empty') !== null &&
-        designate instanceof HTMLButtonElement && !designate.disabled && designate.textContent === '存为里程碑并设为发稿版本' &&
+        designate instanceof HTMLButtonElement && !designate.disabled && designate.textContent === '存为里程碑并设为发稿版本…' &&
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
         block.querySelector('.publication-change-notice') === null &&
         window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 衍生稿件' &&
