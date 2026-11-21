@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { RetrievalIndex, RetrievalError, chunkRanges, retrievalTokens, reciprocalRankFusion, type RetrievalSource } from '../../src/service/retrieval/index.js';
+import { RETRIEVAL_LEXICAL, RetrievalIndex, RetrievalError, chunkRanges, retrievalTokens, reciprocalRankFusion, type RetrievalSource } from '../../src/service/retrieval/index.js';
+import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
+// @ts-expect-error Plain ESM pin shared with J-16 has no declarations.
+import { PACKAGED_RUNTIME_BOUNDARIES, SEGMENTER_DICTIONARY_DIFFERENCES, TEST_RUNTIME_BOUNDARIES, hanWordBoundaries, segmenterPinTexts } from '../../e2e/segmenter-pin.mjs';
 import { prepareRetrievalResult, markRetrievalResult, notExactFetched, dialogueRetrievalCitations } from '../../src/service/retrieval/result-validator.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 import { PlatformToolSession } from '../../src/service/provider/platform-tool-session.js';
@@ -27,8 +32,8 @@ describe('Run-local pinned retrieval', () => {
     expect((await index.retrieve('lexical')).map((entry) => entry.candidateId)).toEqual(first.map((entry) => entry.candidateId));
     expect(first.every((entry) => entry.preview.length <= 200 && entry.anchor.end - entry.anchor.start <= 1200 && entry.anchor.blockId === 'block-one')).toBe(true);
   });
-  it('uses CJK bigrams and Latin tokens for deterministic BM25', async () => {
-    expect(retrievalTokens('中文检索 ALPHA 42')).toEqual(['中文', '文检', '检索', 'alpha', '42']);
+  it('uses Han words, bigrams and single characters, and Latin and number tokens, for deterministic BM25 (#1623)', async () => {
+    expect(retrievalTokens('中文检索 ALPHA 42')).toEqual(['w:中文', 'w:检索', 'b:中文', 'b:文检', 'b:检索', 'u:中', 'u:文', 'u:检', 'u:索', 'w:alpha', 'w:42']);
     const index = new RetrievalIndex([source('one', '中文检索 alpha'), source('two', 'unrelated beta')]);
     expect((await index.retrieve('中文 alpha')).map((entry) => entry.sourceId)).toEqual(['one']);
     expect(() => index.exactFetch('unissued')).toThrowError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
@@ -150,6 +155,111 @@ describe('Run-local pinned retrieval', () => {
   });
 });
 
+// #1623 (ADR 0107 §4 points 1–3): the local lexical upgrade. Public SampleBooks are read through the product's own import.
+const ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const SAMPLE_BOOKS = join(ROOT, 'SampleBooks');
+async function sampleBook(id: string, file: string): Promise<RetrievalSource & { readonly texts: ReadonlyMap<string, string> }> {
+  const blocks: ParsedDocxBlock[] = [];
+  await parseDocx(join(SAMPLE_BOOKS, file), file, (block) => blocks.push(block));
+  // Stable identities, so that a pinned order never rests on the identities one import mints.
+  const segments = blocks.map((block) => ({ blockId: `${id}-${block.position}`, text: block.text }));
+  return { sourceKind: 'manuscript', sourceId: id, digest: 'a'.repeat(64), read: () => ({ digest: 'a'.repeat(64), segments }),
+    texts: new Map(segments.map((segment) => [segment.blockId, segment.text])) };
+}
+/** Pinned orders over 呐喊 for 首印 (with 初印 and 印数), by block position: computed on Node 24.18.1 at #1623. */
+const FUSED_ORDER = ['nahan-26', 'nahan-312', 'nahan-152', 'nahan-596', 'nahan-807', 'nahan-842', 'nahan-834', 'nahan-956'];
+const TOKENIZED_ORDER = ['nahan-26', 'nahan-312', 'nahan-807', 'nahan-288', 'nahan-152', 'nahan-596', 'nahan-303', 'nahan-68'];
+const words = (...items: string[]): RetrievalSource[] => items.map((text, index) => source(`w${index}`, text));
+
+describe('local lexical retrieval over Han text (#1623)', () => {
+  it('normalizes with NFKC, keeps a supplementary-plane character and leaves function words out of the single characters', () => {
+    expect(retrievalTokens('ＡＢＣ１２')).toEqual(['w:abc12']);
+    expect(retrievalTokens('\uF900')).toEqual(['u:\u8C48']);
+    expect(retrievalTokens('𠮷')).toEqual(['u:𠮷']);
+    expect(retrievalTokens('的书')).toEqual(['b:的书', 'u:书']);
+    expect(RETRIEVAL_LEXICAL).toMatchObject({ wordWeight: 1, bigramWeight: 0.6, morphemeWeight: 0.25, maxQueries: 4, aliasMinLength: 2, aliasExpansionLimit: 8 });
+  });
+  it('pins the test runtime\'s word boundaries, including the seven words only the packaged runtime keeps whole', () => {
+    expect(hanWordBoundaries(segmenterPinTexts(ROOT))).toEqual(TEST_RUNTIME_BOUNDARIES);
+    expect(SEGMENTER_DICTIONARY_DIFFERENCES).toHaveLength(7);
+    expect(PACKAGED_RUNTIME_BOUNDARIES.slice(3)).toEqual(SEGMENTER_DICTIONARY_DIFFERENCES.map((word: string) => [word.length]));
+  });
+  it('ranks words that share a morpheme, literal matches first, and finds nothing for a query that shares no character', async () => {
+    const index = new RetrievalIndex(words('修订', '修改', '改动', '违约', '毁约', '首印', '初印', '印数', '天气'));
+    const texts = async (query: string) => (await index.retrieve(query)).map((candidate) => index.exactFetch(candidate.candidateId).text);
+    const changed = await texts('修改');
+    expect([changed[0], [...changed.slice(1)].sort()]).toEqual(['修改', ['修订', '改动'].sort()]);
+    expect(await texts('违约')).toEqual(['违约', '毁约']);
+    const printed = await texts('首印');
+    expect([printed[0], [...printed.slice(1)].sort()]).toEqual(['首印', ['初印', '印数'].sort()]);
+    expect(await texts('晴朗')).toEqual([]);
+  });
+  it('finds the SampleBook passage that shares a morpheme with each of the Issue\'s words, and a supplementary-plane character', async () => {
+    const books = [await sampleBook('nahan', 'luxun-nahan.docx'), await sampleBook('zhaohua', 'luxun-zhaohua-xishi.docx')];
+    const index = new RetrievalIndex(books);
+    const text = (candidate: { anchor: { blockId?: string; start: number; end: number } }) =>
+      books.map((book) => book.texts.get(candidate.anchor.blockId!)).find((entry) => entry !== undefined)!.slice(candidate.anchor.start, candidate.anchor.end);
+    // None of these words occurs in either book, so the literal ranker found nothing; every passage now found shares a character with it.
+    for (const query of ['修订', '修改', '改动', '违约', '毁约', '首印', '初印', '印数']) {
+      expect(books.some((book) => [...book.texts.values()].some((passage) => passage.includes(query))), query).toBe(false);
+      const found = (await index.retrieve(query)).map(text);
+      expect(found.length, query).toBe(8);
+      expect(found.every((passage) => [...query].some((char) => passage.includes(char))), query).toBe(true);
+    }
+    // And a word of the book that shares the morpheme ranks among the first: 付印, 翻印, 石印 or 刻印 for 首印.
+    expect((await index.retrieve('首印')).slice(0, 3).map(text).some((passage) => /付印|翻印|石印|刻印/u.test(passage))).toBe(true);
+    const rare = String.fromCodePoint(0x2CB3B);
+    const found = await index.retrieve(rare);
+    expect(found.length).toBeGreaterThan(0);
+    expect(text(found[0]!)).toContain(rare);
+  }, 60_000);
+  it('ranks tokenized manuscript search by BM25 instead of requiring every token, ties in manuscript order', () => {
+    const index = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'book', digest: 'a'.repeat(64),
+      read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: '改过' }, { blockId: 'two', text: '修改了两处，又修改一处' }, { blockId: 'three', text: '天气' }, { blockId: 'four', text: '改过' }] }) }]);
+    expect(index.searchManuscript('修改', 'tokenized').map((block) => block.blockId)).toEqual(['two', 'one', 'four']);
+    expect(index.searchManuscript('晴朗', 'tokenized')).toEqual([]);
+    expect(index.searchManuscript('修改', 'exact').map((block) => block.blockId)).toEqual(['two']);
+  });
+  it('expands a query by the other names of the pinned entity it names, and only then', async () => {
+    const book = await sampleBook('zhaohua', 'luxun-zhaohua-xishi.docx');
+    const records = { baseline: { revisionId: 'fixed', digest: 'b'.repeat(64), entities: [{ kind: 'person', name: '长妈妈', aliases: ['阿长'] }], events: [], settingClaims: [] },
+      guidelines: [], terms: [{ kind: 'term', name: '甲', aliases: ['乙'] }] };
+    const otherNameOnly = async (index: RetrievalIndex) => (await index.retrieve('阿长')).filter((candidate) => {
+      const passage = book.texts.get(candidate.anchor.blockId!)!;
+      return passage.includes('长妈妈') && !passage.includes('阿长');
+    }).length;
+    expect(await otherNameOnly(new RetrievalIndex([book]))).toBe(0);
+    expect(await otherNameOnly(new RetrievalIndex([book], null, null, records))).toBeGreaterThan(0);
+    // No name matches, or only a one-character name: the same ranking as without pinned records.
+    for (const query of ['天气', '甲']) expect(await new RetrievalIndex([book], null, null, records).retrieve(query)).toEqual(await new RetrievalIndex([book]).retrieve(query));
+  }, 60_000);
+  it('fuses further phrasings deterministically, and one query ranks as before', async () => {
+    const book = await sampleBook('nahan', 'luxun-nahan.docx');
+    const index = new RetrievalIndex([book]);
+    const single = await index.retrieve('首印');
+    expect(await index.retrieve('首印', 8, undefined, [])).toEqual(single);
+    expect(await index.retrieve('首印', 8, undefined, ['首印'])).toEqual(single);
+    const fused = await index.retrieve('首印', 8, undefined, ['初印', '印数']);
+    expect(await index.retrieve('首印', 8, undefined, ['印数', '初印'])).toEqual(fused);
+    expect(await new RetrievalIndex([book]).retrieve('首印', 8, undefined, ['初印', '印数'])).toEqual(fused);
+    // The pinned order on a fixed corpus: a change of ranking, of a weight or of the runtime's segmentation shows here.
+    expect(fused.map((candidate) => candidate.anchor.blockId)).toEqual(FUSED_ORDER);
+    expect(index.searchManuscript('首印', 'tokenized').map((block) => block.blockId)).toEqual(TOKENIZED_ORDER);
+  }, 60_000);
+  it('fuses phrasings with the local vectors and still rechecks withdrawal after the asynchronous embed', async () => {
+    let withdrawn = false; let withdrawOnEmbed = false;
+    const index = new RetrievalIndex([{ ...source('authorized', 'alpha'), read: () => {
+      if (withdrawn) throw new RetrievalError('MATERIAL_REFERENCE_UNAVAILABLE');
+      return source('authorized', 'alpha').read();
+    } }], { ...embeddings([[1], [1]]), embed: async (texts: readonly string[]) => { withdrawn = withdrawOnEmbed; return texts.map(() => Float32Array.from([1])); } });
+    const [candidate] = await index.retrieve('alpha', 8, undefined, ['beta']);
+    expect(candidate!.score).toBe(1 / 61 + 1 / 61 + 1 / 61);
+    expect(index.exactFetch(candidate!.candidateId).text).toBe('alpha');
+    withdrawOnEmbed = true;
+    expect(await index.retrieve('alpha', 8, undefined, ['beta'])).toEqual([]);
+  });
+});
+
 describe('registered local tools without egress', () => {
   const binding = (): EgressBindingFacts => ({ bindingDigest: 'b'.repeat(64), route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL,
     systemPrompt: 'synthetic', outboundDataCategory: 'public-or-synthetic', admittedUserMessages: new Set(['synthetic']), localTools,
@@ -158,6 +268,17 @@ describe('registered local tools without egress', () => {
     expect(canonicalToolArguments('retrieve', { query: ' alpha ', k: 8 })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8 });
     expect(canonicalToolArguments('retrieve', { query: 'alpha', k: 9 })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8 });
     expect(canonicalToolArguments('retrieve', { query: 'alpha', sourceKinds: ['other'] })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8 });
+    // #1623: further phrasings are taken loosely — junk, empty, repeated and the query itself are dropped, then the first four kept.
+    expect(canonicalToolArguments('retrieve', { query: 'alpha', queries: ['e', 'd', 'c', 'b', 'a'] })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8, queries: ['b', 'c', 'd', 'e'] });
+    expect(canonicalToolArguments('retrieve', { query: 'alpha', queries: [7, '', '  ', 'alpha', ' beta ', 'beta', null, { x: 1 }] })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8, queries: ['beta'] });
+    expect(canonicalToolArguments('retrieve', { query: 'alpha', queries: 'beta' })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8 });
+    expect(canonicalToolArguments('retrieve', { queries: ['beta'] })).toBeNull();
+    // Only the rule-declared set (composition v2) offers them; composition v1 keeps its legacy bytes.
+    const declaredRule = { ...localRetrievalRule(), declarations: [{ name: 'retrieve' as const, readOnly: true, concurrencySafe: true }], parallelCallsAllowed: false };
+    const declared = ruleNamedToolSchemas(false, declaredRule).find((schema) => schema.name === 'retrieve')!;
+    expect(declared.parameters).toMatchObject({ required: ['query'], properties: { queries: { type: 'array', maxItems: 4, items: { type: 'string' } } } });
+    expect(typeof (declared.parameters as { properties: { queries: { description: unknown } } }).properties.queries.description).toBe('string');
+    expect(JSON.stringify(LEGACY_LOCAL_TOOL_SCHEMAS)).not.toContain('queries');
     expect(toolSetEqualsPlatformSchemas(LEGACY_LOCAL_TOOL_SCHEMAS, ruleNamedToolSchemas(false, true))).toBe(true);
     const facts = binding();
     const payload = { provider: facts.route, model: facts.model, system: facts.systemPrompt, tools: LEGACY_LOCAL_TOOL_SCHEMAS,
@@ -188,6 +309,26 @@ describe('registered local tools without egress', () => {
     session.startUnit();
     expect(session.egressScope.localBreakerState?.()).toBe('intact');
     expect(session.unitEnd(failed as unknown as Parameters<PlatformToolSession['unitEnd']>[0])).toBeNull();
+  });
+});
+
+describe('a retrieve call with further phrasings (#1623)', () => {
+  it('answers five phrasings from the first four and a junk-laden call from what remains, as one call', async () => {
+    const facts: EgressBindingFacts = { bindingDigest: 'b'.repeat(64), route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL,
+      systemPrompt: 'synthetic', outboundDataCategory: 'public-or-synthetic', admittedUserMessages: new Set(['synthetic']), localTools,
+      policy: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 } };
+    const corpus = () => words('修订', '修改', '改动', '违约', '毁约', '首印', '初印', '印数', '天气');
+    const session = new PlatformToolSession({ binding: facts, scope: { currentBindingDigest: () => facts.bindingDigest, acceptedOutputDigests: new Set() },
+      retrieval: new RetrievalIndex(corpus()), purpose: 'synthetic',
+      fetch: async () => { throw new Error('socket seam reached'); }, admitHost: () => { throw new Error('host seam reached'); } });
+    const signal = new AbortController().signal;
+    const call = async (callId: string, args: unknown) => JSON.parse((await session.execute({ callId, tool: 'retrieve', arguments: args, signal,
+      dispatch: { token: Symbol(), active: () => !signal.aborted } })).text) as unknown;
+    const expected = await new RetrievalIndex(corpus()).retrieve('修订', 8, undefined, ['首印', '违约', '天气', '初印']);
+    expect(await call('1', { query: '修订', queries: ['首印', '违约', '天气', '初印', '毁约'] })).toEqual(expected);
+    expect(await call('2', { query: '修订', queries: [1, '', '修订', '违约', '违约'] })).toEqual(await new RetrievalIndex(corpus()).retrieve('修订', 8, undefined, ['违约']));
+    expect(session.usage).toMatchObject({ retrievalCalls: 2 });
+    expect(session.usage.refusedRetrievalCalls ?? 0).toBe(0);
   });
 });
 
