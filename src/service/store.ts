@@ -1654,7 +1654,7 @@ export class EditorialStore {
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
       facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: LATEST_SCHEMA_VERSION }),
-      // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
+      // A package's data opens as a store of its own, with no launch control: at this baseline or refused, checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
           induceUnprovableReconciliation: false,

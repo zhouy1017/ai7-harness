@@ -79,15 +79,15 @@ import { requireBounded } from './manuscript/bounded-kernel.js';
  *
  * Revision 23 (Issue #408) widened `editorial_marks` for the one pin that is empty: a 修改建议 whose
  * Apply deleted its words is pinned on no text, at the zero-width range where they were, and is exact
- * there until an edit spans that point. A new store is created with the widened text; a store that
- * revision 22 created is rebuilt to it (`widenEditorialMarks`), and revision 22's text is kept only to
- * recognise and validate such a store (`EDITORIAL_MARK_REVISION_22_SQL`).
+ * there until an edit spans that point. The storage baseline (#1634) creates the widened text; the
+ * rebuild of a store revision 22 created, and revision 22's text, went with the migration chain: the
+ * upgrade tool (ADR 0105 §4) is what reads such a store now.
  *
  * Revision 28 (Issue #411) widened `proposal_change_items` for the third change kind a file's author can
  * propose: `insert`, an item with no current text that writes its proposal at a point. Its mark stands on
- * the empty range there, exactly like an applied deletion's. A store that revision 22 to 27 created is
- * rebuilt to the widened text (`widenProposalChangeItems`), and revision 27's text is kept only to
- * recognise and validate such a store (`PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL`).
+ * the empty range there, exactly like an applied deletion's. The baseline creates the widened text; the
+ * rebuild of a store revision 22 to 27 created, and revision 27's text, went with the migration chain
+ * (#1634).
  */
 export const EDITORIAL_MARK_SCHEMA_SQL = {
   editorial_marks: `CREATE TABLE editorial_marks (

@@ -1,4 +1,3 @@
-import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from '../task-authorization.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { UUID_PATTERN, canonicalRecord, parseCanonicalJson, requireAnalysis } from './canonical.js';
 import type {
@@ -23,7 +22,6 @@ export function recordUnitCheckpoint(host: RunCheckpointOperationsHost, input: {
     observation: UnitCheckpoint['observation'];
     requests?: readonly string[];
   }): void {
-  if (input.requests !== undefined) requireAnalysis(Number(host.db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, 'ANALYSIS_RECORD_INVALID', '请求检查点写入需要已验证的读者修订。');
   const recordedAt = new Date().toISOString();
   const record = canonicalRecord({
     schema: UNIT_CHECKPOINT_SCHEMA,
