@@ -1705,6 +1705,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'controller-loopback-sentinel',
     'controller-imports',
     'exact-sample1',
+    'retrieval-segmenter-packaged-runtime',
     'renderer-api-boundary',
     'book-import',
     'book-prerequisites',

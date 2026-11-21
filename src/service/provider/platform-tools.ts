@@ -1,5 +1,6 @@
 import { hasKeys, canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { isPublicHostName } from '../../shared/network-denial.js';
+import { RETRIEVAL_LEXICAL } from '../retrieval/index.js';
 import { GLOBAL_AGENT_SCOPED_TOOL_NAMES, LOCAL_TOOL_DECLARATION_NAMES, type LocalToolsRule } from './local-tools.js';
 
 /**
@@ -292,6 +293,8 @@ export const LEGACY_LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Obje
       sourceKinds: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['manuscript', 'material', 'retained-source'] } } }, required: ['query'], additionalProperties: false } }),
 ]);
 export const LOCAL_TOOL_SCHEMA_DIGEST = sha256Hex(canonicalJson(LEGACY_LOCAL_TOOL_SCHEMAS));
+// A frozen plan pins these bytes (its composition digest, re-derived when an archived review opens): no declaration changes here until
+// tool schemas are versioned per plan. `retrieve`'s further phrasings (#1623) are therefore read by the handler but declared nowhere.
 export const LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.freeze([
   ...LEGACY_LOCAL_TOOL_SCHEMAS,
   { name: 'read_blocks', description: '读取固定稿件中指定内容块及其相邻段落；只在本次授权范围内读取。',
@@ -355,7 +358,7 @@ export function toolSetEqualsPlatformSchemas(tools: ReadonlyArray<unknown>, sche
 export type PlatformToolArguments =
   | { readonly tool: 'websearch'; readonly query: string }
   | { readonly tool: 'webfetch'; readonly url: string }
-  | { readonly tool: 'retrieve'; readonly query: string; readonly k: number; readonly sourceKinds?: ReadonlyArray<'manuscript' | 'material' | 'retained-source'> }
+  | { readonly tool: 'retrieve'; readonly query: string; readonly k: number; readonly sourceKinds?: ReadonlyArray<'manuscript' | 'material' | 'retained-source'>; readonly queries?: ReadonlyArray<string> }
   | { readonly tool: 'exact_fetch'; readonly candidateId: string }
   | { readonly tool: 'read_blocks'; readonly blockId: string; readonly radius: number }
   | { readonly tool: 'baseline_facts'; readonly query: string }
@@ -445,7 +448,19 @@ export function canonicalToolArguments(name: string, input: unknown): PlatformTo
     const kinds = args.sourceKinds;
     if (kinds !== undefined && (!Array.isArray(kinds) || kinds.length < 1 || kinds.length > 3 || new Set(kinds).size !== kinds.length ||
         !kinds.every((kind) => ['manuscript', 'material', 'retained-source'].includes(String(kind))))) return null;
-    return { tool: 'retrieve', query, k, ...(kinds === undefined ? {} : { sourceKinds: [...kinds].sort() as Array<'manuscript' | 'material' | 'retained-source'> }) };
+    // Loose by design: a lone string is one phrasing; a junk, empty or ill-formed entry is dropped, an over-long one cut first (never
+    // inside a surrogate pair); one phrasing per form the ranker reads (NFKC, lower case), none the query's own; the first four kept.
+    const forms = new Map<string, string>([[query.normalize('NFKC').toLowerCase(), query]]);
+    for (const entry of typeof args.queries === 'string' ? [args.queries] : Array.isArray(args.queries) ? args.queries : []) {
+      if (typeof entry !== 'string' || forms.size > RETRIEVAL_LEXICAL.maxQueries) continue;
+      let phrasing = entry.normalize('NFC').trim().slice(0, 1000);
+      if (/[\uD800-\uDBFF]$/.test(phrasing)) phrasing = phrasing.slice(0, -1);
+      const form = phrasing.normalize('NFKC').toLowerCase();
+      if (phrasing.length > 0 && phrasing.isWellFormed() && !forms.has(form)) forms.set(form, phrasing);
+    }
+    const queries = [...forms.values()].slice(1).sort();
+    return { tool: 'retrieve', query, k, ...(kinds === undefined ? {} : { sourceKinds: [...kinds].sort() as Array<'manuscript' | 'material' | 'retained-source'> }),
+      ...(queries.length === 0 ? {} : { queries }) };
   }
   if (name === 'websearch') {
     if (!hasKeys(args, ['query']) || typeof args['query'] !== 'string') return null;

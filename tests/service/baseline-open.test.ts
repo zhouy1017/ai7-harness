@@ -244,18 +244,37 @@ describe('a database AI7 did not make (#1634 review B1)', () => {
 
 describe('the file reader agrees with SQLite (#1634 review F4)', () => {
   // Each state is a crash-like copy of a live writer's files; SQLite then reads a second copy, so the reader's copy stays as written.
-  const states: ReadonlyArray<readonly [string, (db: DatabaseSync) => void]> = [
-    ['a closed baseline store', () => undefined],
-    ['a revision stamped in the log', (db) => db.exec('PRAGMA user_version = 116')],
-    ['a log already checkpointed but kept', (db) => { db.exec('PRAGMA user_version = 116'); db.exec('PRAGMA wal_checkpoint(PASSIVE)'); }],
-    ['two stamps, the later committed last', (db) => { db.exec('PRAGMA user_version = 5'); db.exec('PRAGMA user_version = 116'); }],
+  const fill = (db: DatabaseSync): void => {
+    db.exec('CREATE TABLE IF NOT EXISTS spill (value TEXT)');
+    const insert = db.prepare('INSERT INTO spill VALUES (?)');
+    for (let index = 0; index < 60; index += 1) insert.run('溢出'.repeat(200));
+  };
+  // The log without its last frame: a commit torn after the frames before it were written.
+  const cutLastFrame = (copy: string): void => {
+    const log = readFileSync(`${storePath(copy)}-wal`);
+    writeFileSync(`${storePath(copy)}-wal`, log.subarray(0, log.length - (24 + log.readUInt32BE(8))));
+  };
+  const states: Array<[string, (db: DatabaseSync) => void, ((copy: string) => void) | null, number | null]> = [
+    ['a closed baseline store', () => undefined, null, null],
+    ['a revision stamped in the log', (db) => db.exec('PRAGMA user_version = 116'), null, null],
+    ['a log already checkpointed but kept', (db) => { db.exec('PRAGMA user_version = 116'); db.exec('PRAGMA wal_checkpoint(PASSIVE)'); }, null, null],
+    ['two stamps, the later committed last', (db) => { db.exec('PRAGMA user_version = 5'); db.exec('PRAGMA user_version = 116'); }, null, null],
     ['an open transaction spilled into the log', (db) => {
       db.exec('PRAGMA cache_size = 1; CREATE TABLE spill (value TEXT); BEGIN; PRAGMA user_version = 3');
       const insert = db.prepare('INSERT INTO spill VALUES (?)');
       for (let index = 0; index < 400; index += 1) insert.run('溢出'.repeat(200));
-    }],
+    }, null, null],
+    // Review N2: the log restarts after a checkpoint; frames of the earlier log, under older salts, stay after the new ones.
+    ['a restarted log over the frames of an earlier one', (db) => {
+      db.exec('PRAGMA user_version = 115'); fill(db); db.exec('PRAGMA user_version = 116');
+      db.exec('PRAGMA wal_checkpoint(PASSIVE)'); db.exec('PRAGMA user_version = 117');
+    }, null, 117],
+    // Review N2: a later transaction wrote its page 1 but not its commit frame.
+    ['a commit torn after its page-1 frame', (db) => {
+      db.exec('PRAGMA user_version = 116'); db.exec('BEGIN; PRAGMA user_version = 30'); fill(db); db.exec('COMMIT');
+    }, cutLastFrame, 116],
   ];
-  it.each(states)('reads %s as SQLite does', async (_label, write) => {
+  it.each(states)('reads %s as SQLite does', async (_label, write, alter, expected) => {
     await newStore();
     const writer = new DatabaseSync(storePath(roots.dataRoot));
     const copies = [join(roots.inputRoot, 'reader'), join(roots.inputRoot, 'sqlite')];
@@ -268,9 +287,12 @@ describe('the file reader agrees with SQLite (#1634 review F4)', () => {
       if (writer.isTransaction) writer.exec('ROLLBACK');
       writer.close();
     }
+    if (alter !== null) for (const copy of copies) alter(copy);
     const sqlite = new DatabaseSync(storePath(copies[1]!), { readOnly: true });
     try {
-      expect(storeRevisionOnDisk(storePath(copies[0]!))).toBe(Number(sqlite.prepare('PRAGMA user_version').get()!.user_version));
+      const revision = Number(sqlite.prepare('PRAGMA user_version').get()!.user_version);
+      expect(storeRevisionOnDisk(storePath(copies[0]!))).toBe(revision);
+      if (expected !== null) expect(revision).toBe(expected);
     } finally { sqlite.close(); }
   });
 });

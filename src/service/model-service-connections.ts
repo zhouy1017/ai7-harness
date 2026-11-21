@@ -1,10 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
+import type { ModelRoleId } from '../shared/protocol/model-roles.js';
 
-/**
- * `model_service_connections`, the Model Service routes' connection rows (Issues #712, #811, #1044, #1225): every text the relation
- * has had, and the rebuilds between them. Each rebuild copies every row byte for byte, rowid included, so a protected credential
- * behind a Credential Reference keeps answering; nothing references this relation.
- */
+/** Connection identity and remembered per-channel defaults; active role choices live in model_role_choices (#1650). */
 export const MODEL_SERVICE_ROW_COLUMNS = 'connection_id, role_id, connection_name, provider_id, model_id, adapter_revision, configuration_revision, ' +
   'approved_fallback_chain, credential_slot, credential_reference, credential_operation_state, created_at, updated_at, credential_updated_at';
 
@@ -28,7 +25,7 @@ const MODEL_SERVICE_ROW_BINDINGS_103 = `(connection_id = 'main-editorial-deepsee
 /** Channel and credential slot constraints stay exact; model IDs are editor/provider configuration (#1281). */
 const MODEL_SERVICE_CHANNEL_BINDINGS = MODEL_SERVICE_ROW_BINDINGS_103.replace(/\s+AND model_id (?:IN \([^)]*\)|= '[^']*')/gu, '');
 
-/** Revision 114: independent role defaults; existing rows retain their predecessor effective effort, otherwise no explicit effort. */
+/** Revision 117: channel defaults remain available to per-Task choices and the legacy connection projection. */
 export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_connections (
   connection_id TEXT PRIMARY KEY CHECK(connection_id IN ('main-editorial-deepseek-v4-pro', 'main-editorial-opencode-go', 'openai-platform', 'opencode-zen', 'anthropic-claude', 'google-gemini')),
   role_id TEXT NOT NULL CHECK(role_id = 'main-editorial'),
@@ -48,9 +45,6 @@ export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_c
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   credential_updated_at TEXT NOT NULL,
-  -- At most one selected row; unselected rows coexist as NULL (#811 brief revision 8).
-  selected INTEGER UNIQUE CHECK(selected = 1),
-  fast_selected INTEGER UNIQUE CHECK(fast_selected = 1),
   connection_test TEXT CHECK(connection_test IS NULL OR json_valid(connection_test)),
   CHECK((connection_id = 'main-editorial-deepseek-v4-pro' AND provider_id = 'deepseek-open-platform' AND credential_slot = 'deepseek-api-key') OR
     (connection_id = 'main-editorial-opencode-go' AND provider_id = 'opencode-go' AND credential_slot = 'opencode-go') OR
@@ -59,6 +53,58 @@ export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_c
     (connection_id = 'anthropic-claude' AND provider_id = 'anthropic-claude' AND credential_slot = 'anthropic-claude') OR
     (connection_id = 'google-gemini' AND provider_id = 'google-gemini' AND credential_slot = 'google-gemini'))
 ) STRICT`;
+
+/** R5-F1a: only explicit choices are stored; an absent role follows ADR 0107's cascade. */
+export const MODEL_ROLE_CHOICE_SCHEMA_SQL = {
+  model_role_choices: `CREATE TABLE model_role_choices (
+  role_id TEXT PRIMARY KEY CHECK(role_id IN ('foreground-pro', 'foreground-flash', 'underlying-pro', 'underlying-flash')),
+  connection_id TEXT NOT NULL REFERENCES model_service_connections(connection_id) ON DELETE CASCADE,
+  model_id TEXT NOT NULL CHECK(length(model_id) BETWEEN 1 AND 128),
+  reasoning_effort TEXT CHECK(reasoning_effort IS NULL OR length(reasoning_effort) BETWEEN 1 AND 40)
+) STRICT`,
+};
+
+export interface ModelRoleChoiceInput {
+  readonly connectionId: string;
+  readonly modelId: string;
+  readonly reasoningEffort?: string;
+}
+export interface ModelRoleChoice extends ModelRoleChoiceInput { readonly roleId: ModelRoleId }
+
+/** Internal storage seam for R5-F1; the caller owns the transaction, not a new wire operation. */
+export function writeModelRoleChoice(db: DatabaseSync, roleId: ModelRoleId, choice: ModelRoleChoiceInput | null): void {
+  if (choice === null) { db.prepare('DELETE FROM model_role_choices WHERE role_id = ?').run(roleId); return; }
+  db.prepare(`INSERT INTO model_role_choices(role_id, connection_id, model_id, reasoning_effort) VALUES (?, ?, ?, ?)
+    ON CONFLICT(role_id) DO UPDATE SET connection_id = excluded.connection_id, model_id = excluded.model_id, reasoning_effort = excluded.reasoning_effort`)
+    .run(roleId, choice.connectionId, choice.modelId, choice.reasoningEffort ?? null);
+}
+
+export function readModelRoleChoices(db: DatabaseSync): ModelRoleChoice[] {
+  return db.prepare('SELECT role_id, connection_id, model_id, reasoning_effort FROM model_role_choices').all().map(row => ({
+    roleId: row.role_id as ModelRoleId, connectionId: String(row.connection_id), modelId: String(row.model_id),
+    ...(row.reasoning_effort === null ? {} : { reasoningEffort: String(row.reasoning_effort) }),
+  }));
+}
+
+/** R5-6 passes the old connection groups while copying; this function neither opens nor converts a store. */
+export interface Revision116ModelRoleRow {
+  readonly connection_id: string;
+  readonly model_id: string;
+  readonly reasoning_effort: string | null;
+  readonly fast_model_id: string;
+  readonly fast_reasoning_effort: string | null;
+  readonly selected: number | null;
+  readonly fast_selected: number | null;
+}
+
+export function mapRevision116ModelRoleChoices(rows: readonly Revision116ModelRoleRow[]): ModelRoleChoice[] {
+  return rows.flatMap(row => [
+    ...(row.selected !== 1 ? [] : [{ roleId: 'foreground-pro' as const, connectionId: row.connection_id, modelId: row.model_id,
+      ...(row.reasoning_effort === null ? {} : { reasoningEffort: row.reasoning_effort }) }]),
+    ...(row.fast_selected !== 1 ? [] : [{ roleId: 'foreground-flash' as const, connectionId: row.connection_id, modelId: row.fast_model_id || row.model_id,
+      ...(row.fast_reasoning_effort === null ? {} : { reasoningEffort: row.fast_reasoning_effort }) }]),
+  ]);
+}
 
 /** Whether any row, under whichever text the relation holds, falls outside every exact revision-103 binding. */
 export function modelServiceRowsOutsideBindings(db: DatabaseSync): boolean {

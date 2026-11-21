@@ -3,8 +3,8 @@ import type { ModelServiceBindingProjection, ModelServiceConnectionId } from './
 
 /**
  * The four Model Roles of ADR 0107 §1 — 前台 / 底层 × Pro / Flash. Pro and Flash name a capability tier, never a vendor's model.
- * Until R5-F1 stores a binding per role, the two Pro roles take the editor's Pro model and the two Flash roles take the Flash
- * model when one is chosen and usable, otherwise the Pro model (Issue #1620).
+ * Each role may hold its own choice; absent choices follow the foreground roles (Issue #1650). Legacy tier requests still
+ * choose the model both Flash roles use (Issue #1620); independent role requests belong to R5-F1.
  */
 export const MODEL_ROLE_IDS = ['foreground-pro', 'foreground-flash', 'underlying-pro', 'underlying-flash'] as const;
 export type ModelRoleId = (typeof MODEL_ROLE_IDS)[number];

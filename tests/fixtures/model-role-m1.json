@@ -1,0 +1,3724 @@
+{
+  "pro": {
+    "rows": [
+      {
+        "connection_id": "anthropic-claude",
+        "model_id": "claude-opus-5",
+        "reasoning_effort": "high",
+        "fast_model_id": "claude-opus-5",
+        "fast_reasoning_effort": null,
+        "selected": 1,
+        "fast_selected": null
+      },
+      {
+        "connection_id": "main-editorial-opencode-go",
+        "model_id": "deepseek-v4.1-flash",
+        "reasoning_effort": null,
+        "fast_model_id": "deepseek-v4.1-flash",
+        "fast_reasoning_effort": null,
+        "selected": null,
+        "fast_selected": null
+      }
+    ],
+    "modelRoles": [
+      {
+        "roleId": "foreground-pro",
+        "roleLabel": "前台 Pro",
+        "purposeLabel": "主审校与深度创作",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "foreground-flash",
+        "roleLabel": "前台 Flash",
+        "purposeLabel": "即时对话与局部微调",
+        "tier": "flash",
+        "source": "follows-foreground-pro",
+        "sourceLabel": "跟随前台 Pro",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-pro",
+        "roleLabel": "底层 Pro",
+        "purposeLabel": "自主学习与深度归纳",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-flash",
+        "roleLabel": "底层 Flash",
+        "purposeLabel": "底层转换与检索整理",
+        "tier": "flash",
+        "source": "follows-foreground-pro",
+        "sourceLabel": "跟随前台 Pro",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      }
+    ],
+    "connections": [
+      {
+        "connectionId": "main-editorial-opencode-go",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Go",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "fastBinding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001651",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": false,
+        "fastSelected": false,
+        "connectionTest": null
+      },
+      {
+        "connectionId": "anthropic-claude",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Claude",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "fastBinding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001650",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": true,
+        "fastSelected": false,
+        "connectionTest": null
+      }
+    ],
+    "cards": [
+      {
+        "roleId": "fast-interaction",
+        "roleLabel": "快速交互角色",
+        "purposeLabel": "快速交互与低风险候选生成",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "跟随前台 Pro",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "main-editorial",
+        "roleLabel": "主编辑角色",
+        "purposeLabel": "中文长篇写作、编辑建议与复杂指令处理",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "连接名称与凭据已由操作系统安全凭据库保护。",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "difficult-escalation",
+        "roleLabel": "疑难升级角色",
+        "purposeLabel": "疑难或高后果工作升级",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      },
+      {
+        "roleId": "frontier",
+        "roleLabel": "前沿模型角色",
+        "purposeLabel": "挑战性或明确授权的高后果工作",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      }
+    ],
+    "settingsModelRoles": "[{\"roleId\":\"foreground-pro\",\"roleLabel\":\"前台 Pro\",\"purposeLabel\":\"主审校与深度创作\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"foreground-flash\",\"roleLabel\":\"前台 Flash\",\"purposeLabel\":\"即时对话与局部微调\",\"tier\":\"flash\",\"source\":\"follows-foreground-pro\",\"sourceLabel\":\"跟随前台 Pro\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-pro\",\"roleLabel\":\"底层 Pro\",\"purposeLabel\":\"自主学习与深度归纳\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-flash\",\"roleLabel\":\"底层 Flash\",\"purposeLabel\":\"底层转换与检索整理\",\"tier\":\"flash\",\"source\":\"follows-foreground-pro\",\"sourceLabel\":\"跟随前台 Pro\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null}]",
+    "bindings": {
+      "foreground-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "foreground-flash": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "underlying-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "underlying-flash": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "main-editorial": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "fast-interaction": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      }
+    }
+  },
+  "same-channel": {
+    "rows": [
+      {
+        "connection_id": "anthropic-claude",
+        "model_id": "claude-opus-5",
+        "reasoning_effort": "high",
+        "fast_model_id": "claude-haiku-4-5",
+        "fast_reasoning_effort": "low",
+        "selected": 1,
+        "fast_selected": 1
+      },
+      {
+        "connection_id": "main-editorial-opencode-go",
+        "model_id": "deepseek-v4.1-flash",
+        "reasoning_effort": null,
+        "fast_model_id": "deepseek-v4.1-flash",
+        "fast_reasoning_effort": null,
+        "selected": null,
+        "fast_selected": null
+      }
+    ],
+    "modelRoles": [
+      {
+        "roleId": "foreground-pro",
+        "roleLabel": "前台 Pro",
+        "purposeLabel": "主审校与深度创作",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "foreground-flash",
+        "roleLabel": "前台 Flash",
+        "purposeLabel": "即时对话与局部微调",
+        "tier": "flash",
+        "source": "flash-tier",
+        "sourceLabel": "使用所选 Flash 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-haiku-4-5",
+          "modelLabel": "Claude Haiku 4.5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "low"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-pro",
+        "roleLabel": "底层 Pro",
+        "purposeLabel": "自主学习与深度归纳",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-flash",
+        "roleLabel": "底层 Flash",
+        "purposeLabel": "底层转换与检索整理",
+        "tier": "flash",
+        "source": "flash-tier",
+        "sourceLabel": "使用所选 Flash 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-haiku-4-5",
+          "modelLabel": "Claude Haiku 4.5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "low"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      }
+    ],
+    "connections": [
+      {
+        "connectionId": "main-editorial-opencode-go",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Go",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "fastBinding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001651",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": false,
+        "fastSelected": false,
+        "connectionTest": null
+      },
+      {
+        "connectionId": "anthropic-claude",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Claude",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "fastBinding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-haiku-4-5",
+          "modelLabel": "Claude Haiku 4.5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "low"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001650",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": true,
+        "fastSelected": true,
+        "connectionTest": null
+      }
+    ],
+    "cards": [
+      {
+        "roleId": "fast-interaction",
+        "roleLabel": "快速交互角色",
+        "purposeLabel": "快速交互与低风险候选生成",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "独立保存快速交互模型；主编辑角色的切换不会改变此选择。",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-haiku-4-5",
+          "modelLabel": "Claude Haiku 4.5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "low"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-haiku-4-5",
+            "modelLabel": "Claude Haiku 4.5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "low"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": true,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "main-editorial",
+        "roleLabel": "主编辑角色",
+        "purposeLabel": "中文长篇写作、编辑建议与复杂指令处理",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "连接名称与凭据已由操作系统安全凭据库保护。",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-haiku-4-5",
+            "modelLabel": "Claude Haiku 4.5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "low"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": true,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "difficult-escalation",
+        "roleLabel": "疑难升级角色",
+        "purposeLabel": "疑难或高后果工作升级",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      },
+      {
+        "roleId": "frontier",
+        "roleLabel": "前沿模型角色",
+        "purposeLabel": "挑战性或明确授权的高后果工作",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      }
+    ],
+    "settingsModelRoles": "[{\"roleId\":\"foreground-pro\",\"roleLabel\":\"前台 Pro\",\"purposeLabel\":\"主审校与深度创作\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"foreground-flash\",\"roleLabel\":\"前台 Flash\",\"purposeLabel\":\"即时对话与局部微调\",\"tier\":\"flash\",\"source\":\"flash-tier\",\"sourceLabel\":\"使用所选 Flash 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-haiku-4-5\",\"modelLabel\":\"Claude Haiku 4.5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"low\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-pro\",\"roleLabel\":\"底层 Pro\",\"purposeLabel\":\"自主学习与深度归纳\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-flash\",\"roleLabel\":\"底层 Flash\",\"purposeLabel\":\"底层转换与检索整理\",\"tier\":\"flash\",\"source\":\"flash-tier\",\"sourceLabel\":\"使用所选 Flash 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-haiku-4-5\",\"modelLabel\":\"Claude Haiku 4.5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"low\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null}]",
+    "bindings": {
+      "foreground-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "foreground-flash": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-haiku-4-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "low"
+        },
+        "digest": "f2309a772f6ce45f79af9dc7f719f04bf7d5a8478f5e1a75aca8086fbfaeebea"
+      },
+      "underlying-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "underlying-flash": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-haiku-4-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "low"
+        },
+        "digest": "f2309a772f6ce45f79af9dc7f719f04bf7d5a8478f5e1a75aca8086fbfaeebea"
+      },
+      "main-editorial": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "fast-interaction": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-haiku-4-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "low"
+        },
+        "digest": "f2309a772f6ce45f79af9dc7f719f04bf7d5a8478f5e1a75aca8086fbfaeebea"
+      }
+    }
+  },
+  "two-channels": {
+    "rows": [
+      {
+        "connection_id": "anthropic-claude",
+        "model_id": "claude-opus-5",
+        "reasoning_effort": "high",
+        "fast_model_id": "claude-opus-5",
+        "fast_reasoning_effort": null,
+        "selected": 1,
+        "fast_selected": null
+      },
+      {
+        "connection_id": "main-editorial-opencode-go",
+        "model_id": "deepseek-v4.1-flash",
+        "reasoning_effort": null,
+        "fast_model_id": "glm-5.3-flash",
+        "fast_reasoning_effort": "low",
+        "selected": null,
+        "fast_selected": 1
+      }
+    ],
+    "modelRoles": [
+      {
+        "roleId": "foreground-pro",
+        "roleLabel": "前台 Pro",
+        "purposeLabel": "主审校与深度创作",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "foreground-flash",
+        "roleLabel": "前台 Flash",
+        "purposeLabel": "即时对话与局部微调",
+        "tier": "flash",
+        "source": "flash-tier",
+        "sourceLabel": "使用所选 Flash 模型",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-pro",
+        "roleLabel": "底层 Pro",
+        "purposeLabel": "自主学习与深度归纳",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-flash",
+        "roleLabel": "底层 Flash",
+        "purposeLabel": "底层转换与检索整理",
+        "tier": "flash",
+        "source": "flash-tier",
+        "sourceLabel": "使用所选 Flash 模型",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      }
+    ],
+    "connections": [
+      {
+        "connectionId": "main-editorial-opencode-go",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Go",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "fastBinding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001651",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": false,
+        "fastSelected": true,
+        "connectionTest": null
+      },
+      {
+        "connectionId": "anthropic-claude",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Claude",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "fastBinding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001650",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": true,
+        "fastSelected": false,
+        "connectionTest": null
+      }
+    ],
+    "cards": [
+      {
+        "roleId": "fast-interaction",
+        "roleLabel": "快速交互角色",
+        "purposeLabel": "快速交互与低风险候选生成",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "独立保存快速交互模型；主编辑角色的切换不会改变此选择。",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "connection": {
+          "connectionId": "main-editorial-opencode-go",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Go",
+          "binding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "deepseek-v4.1-flash",
+            "modelLabel": "DeepSeek V4.1 Flash",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go"
+          },
+          "fastBinding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "glm-5.3-flash",
+            "modelLabel": "glm-5.3-flash",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go",
+            "reasoningEffort": "low"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": false,
+          "fastSelected": true,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "main-editorial",
+        "roleLabel": "主编辑角色",
+        "purposeLabel": "中文长篇写作、编辑建议与复杂指令处理",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "连接名称与凭据已由操作系统安全凭据库保护。",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "difficult-escalation",
+        "roleLabel": "疑难升级角色",
+        "purposeLabel": "疑难或高后果工作升级",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      },
+      {
+        "roleId": "frontier",
+        "roleLabel": "前沿模型角色",
+        "purposeLabel": "挑战性或明确授权的高后果工作",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      }
+    ],
+    "settingsModelRoles": "[{\"roleId\":\"foreground-pro\",\"roleLabel\":\"前台 Pro\",\"purposeLabel\":\"主审校与深度创作\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"foreground-flash\",\"roleLabel\":\"前台 Flash\",\"purposeLabel\":\"即时对话与局部微调\",\"tier\":\"flash\",\"source\":\"flash-tier\",\"sourceLabel\":\"使用所选 Flash 模型\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"glm-5.3-flash\",\"modelLabel\":\"glm-5.3-flash\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\",\"reasoningEffort\":\"low\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-pro\",\"roleLabel\":\"底层 Pro\",\"purposeLabel\":\"自主学习与深度归纳\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-flash\",\"roleLabel\":\"底层 Flash\",\"purposeLabel\":\"底层转换与检索整理\",\"tier\":\"flash\",\"source\":\"flash-tier\",\"sourceLabel\":\"使用所选 Flash 模型\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"glm-5.3-flash\",\"modelLabel\":\"glm-5.3-flash\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\",\"reasoningEffort\":\"low\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null}]",
+    "bindings": {
+      "foreground-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "foreground-flash": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "glm-5.3-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+          "reasoningEffort": "low"
+        },
+        "digest": "28f187a843d89ac574a10aa2dff8784343af33975dfe2741753d3702c6173d0c"
+      },
+      "underlying-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "underlying-flash": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "glm-5.3-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+          "reasoningEffort": "low"
+        },
+        "digest": "28f187a843d89ac574a10aa2dff8784343af33975dfe2741753d3702c6173d0c"
+      },
+      "main-editorial": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "fast-interaction": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "glm-5.3-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+          "reasoningEffort": "low"
+        },
+        "digest": "28f187a843d89ac574a10aa2dff8784343af33975dfe2741753d3702c6173d0c"
+      }
+    }
+  },
+  "cleared": {
+    "rows": [
+      {
+        "connection_id": "anthropic-claude",
+        "model_id": "claude-opus-5",
+        "reasoning_effort": "high",
+        "fast_model_id": "claude-opus-5",
+        "fast_reasoning_effort": null,
+        "selected": 1,
+        "fast_selected": null
+      },
+      {
+        "connection_id": "main-editorial-opencode-go",
+        "model_id": "deepseek-v4.1-flash",
+        "reasoning_effort": null,
+        "fast_model_id": "glm-5.3-flash",
+        "fast_reasoning_effort": "low",
+        "selected": null,
+        "fast_selected": null
+      }
+    ],
+    "modelRoles": [
+      {
+        "roleId": "foreground-pro",
+        "roleLabel": "前台 Pro",
+        "purposeLabel": "主审校与深度创作",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "foreground-flash",
+        "roleLabel": "前台 Flash",
+        "purposeLabel": "即时对话与局部微调",
+        "tier": "flash",
+        "source": "follows-foreground-pro",
+        "sourceLabel": "跟随前台 Pro",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-pro",
+        "roleLabel": "底层 Pro",
+        "purposeLabel": "自主学习与深度归纳",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-flash",
+        "roleLabel": "底层 Flash",
+        "purposeLabel": "底层转换与检索整理",
+        "tier": "flash",
+        "source": "follows-foreground-pro",
+        "sourceLabel": "跟随前台 Pro",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      }
+    ],
+    "connections": [
+      {
+        "connectionId": "main-editorial-opencode-go",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Go",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "fastBinding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001651",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": false,
+        "fastSelected": false,
+        "connectionTest": null
+      },
+      {
+        "connectionId": "anthropic-claude",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Claude",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "fastBinding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001650",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": true,
+        "fastSelected": false,
+        "connectionTest": null
+      }
+    ],
+    "cards": [
+      {
+        "roleId": "fast-interaction",
+        "roleLabel": "快速交互角色",
+        "purposeLabel": "快速交互与低风险候选生成",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "跟随前台 Pro",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "main-editorial",
+        "roleLabel": "主编辑角色",
+        "purposeLabel": "中文长篇写作、编辑建议与复杂指令处理",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "连接名称与凭据已由操作系统安全凭据库保护。",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "difficult-escalation",
+        "roleLabel": "疑难升级角色",
+        "purposeLabel": "疑难或高后果工作升级",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      },
+      {
+        "roleId": "frontier",
+        "roleLabel": "前沿模型角色",
+        "purposeLabel": "挑战性或明确授权的高后果工作",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      }
+    ],
+    "settingsModelRoles": "[{\"roleId\":\"foreground-pro\",\"roleLabel\":\"前台 Pro\",\"purposeLabel\":\"主审校与深度创作\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"foreground-flash\",\"roleLabel\":\"前台 Flash\",\"purposeLabel\":\"即时对话与局部微调\",\"tier\":\"flash\",\"source\":\"follows-foreground-pro\",\"sourceLabel\":\"跟随前台 Pro\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-pro\",\"roleLabel\":\"底层 Pro\",\"purposeLabel\":\"自主学习与深度归纳\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-flash\",\"roleLabel\":\"底层 Flash\",\"purposeLabel\":\"底层转换与检索整理\",\"tier\":\"flash\",\"source\":\"follows-foreground-pro\",\"sourceLabel\":\"跟随前台 Pro\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null}]",
+    "bindings": {
+      "foreground-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "foreground-flash": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "underlying-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "underlying-flash": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "main-editorial": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "fast-interaction": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      }
+    }
+  },
+  "missing-flash": {
+    "rows": [
+      {
+        "connection_id": "anthropic-claude",
+        "model_id": "claude-opus-5",
+        "reasoning_effort": "high",
+        "fast_model_id": "claude-opus-5",
+        "fast_reasoning_effort": null,
+        "selected": 1,
+        "fast_selected": null
+      },
+      {
+        "connection_id": "main-editorial-opencode-go",
+        "model_id": "deepseek-v4.1-flash",
+        "reasoning_effort": null,
+        "fast_model_id": "glm-5.3-flash",
+        "fast_reasoning_effort": "low",
+        "selected": null,
+        "fast_selected": 1
+      }
+    ],
+    "modelRoles": [
+      {
+        "roleId": "foreground-pro",
+        "roleLabel": "前台 Pro",
+        "purposeLabel": "主审校与深度创作",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "foreground-flash",
+        "roleLabel": "前台 Flash",
+        "purposeLabel": "即时对话与局部微调",
+        "tier": "flash",
+        "source": "flash-unavailable-follows-foreground-pro",
+        "sourceLabel": "已选的 Flash 模型暂时不可用，现在跟随前台 Pro",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-pro",
+        "roleLabel": "底层 Pro",
+        "purposeLabel": "自主学习与深度归纳",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-flash",
+        "roleLabel": "底层 Flash",
+        "purposeLabel": "底层转换与检索整理",
+        "tier": "flash",
+        "source": "flash-unavailable-follows-foreground-pro",
+        "sourceLabel": "已选的 Flash 模型暂时不可用，现在跟随前台 Pro",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      }
+    ],
+    "connections": [
+      {
+        "connectionId": "main-editorial-opencode-go",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Go",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "fastBinding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001651",
+        "credentialOperationState": "missing",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.001Z",
+        "selected": false,
+        "fastSelected": true,
+        "connectionTest": null
+      },
+      {
+        "connectionId": "anthropic-claude",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Claude",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "fastBinding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001650",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": true,
+        "fastSelected": false,
+        "connectionTest": null
+      }
+    ],
+    "cards": [
+      {
+        "roleId": "fast-interaction",
+        "roleLabel": "快速交互角色",
+        "purposeLabel": "快速交互与低风险候选生成",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "已选的 Flash 模型暂时不可用，现在跟随前台 Pro",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "main-editorial",
+        "roleLabel": "主编辑角色",
+        "purposeLabel": "中文长篇写作、编辑建议与复杂指令处理",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "连接名称与凭据已由操作系统安全凭据库保护。",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "difficult-escalation",
+        "roleLabel": "疑难升级角色",
+        "purposeLabel": "疑难或高后果工作升级",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      },
+      {
+        "roleId": "frontier",
+        "roleLabel": "前沿模型角色",
+        "purposeLabel": "挑战性或明确授权的高后果工作",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      }
+    ],
+    "settingsModelRoles": "[{\"roleId\":\"foreground-pro\",\"roleLabel\":\"前台 Pro\",\"purposeLabel\":\"主审校与深度创作\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"foreground-flash\",\"roleLabel\":\"前台 Flash\",\"purposeLabel\":\"即时对话与局部微调\",\"tier\":\"flash\",\"source\":\"flash-unavailable-follows-foreground-pro\",\"sourceLabel\":\"已选的 Flash 模型暂时不可用，现在跟随前台 Pro\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-pro\",\"roleLabel\":\"底层 Pro\",\"purposeLabel\":\"自主学习与深度归纳\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-flash\",\"roleLabel\":\"底层 Flash\",\"purposeLabel\":\"底层转换与检索整理\",\"tier\":\"flash\",\"source\":\"flash-unavailable-follows-foreground-pro\",\"sourceLabel\":\"已选的 Flash 模型暂时不可用，现在跟随前台 Pro\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null}]",
+    "bindings": {
+      "foreground-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "foreground-flash": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "underlying-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "underlying-flash": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "main-editorial": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "fast-interaction": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      }
+    }
+  },
+  "refused-flash": {
+    "rows": [
+      {
+        "connection_id": "anthropic-claude",
+        "model_id": "claude-opus-5",
+        "reasoning_effort": "high",
+        "fast_model_id": "claude-opus-5",
+        "fast_reasoning_effort": null,
+        "selected": 1,
+        "fast_selected": null
+      },
+      {
+        "connection_id": "main-editorial-opencode-go",
+        "model_id": "deepseek-v4.1-flash",
+        "reasoning_effort": null,
+        "fast_model_id": "gpt-5.6-luna",
+        "fast_reasoning_effort": "low",
+        "selected": null,
+        "fast_selected": 1
+      }
+    ],
+    "modelRoles": [
+      {
+        "roleId": "foreground-pro",
+        "roleLabel": "前台 Pro",
+        "purposeLabel": "主审校与深度创作",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "foreground-flash",
+        "roleLabel": "前台 Flash",
+        "purposeLabel": "即时对话与局部微调",
+        "tier": "flash",
+        "source": "flash-not-served-follows-foreground-pro",
+        "sourceLabel": "这个渠道暂时还不能使用已选的 Flash 模型，现在跟随前台 Pro",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-pro",
+        "roleLabel": "底层 Pro",
+        "purposeLabel": "自主学习与深度归纳",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-flash",
+        "roleLabel": "底层 Flash",
+        "purposeLabel": "底层转换与检索整理",
+        "tier": "flash",
+        "source": "flash-not-served-follows-foreground-pro",
+        "sourceLabel": "这个渠道暂时还不能使用已选的 Flash 模型，现在跟随前台 Pro",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      }
+    ],
+    "connections": [
+      {
+        "connectionId": "main-editorial-opencode-go",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Go",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "fastBinding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "gpt-5.6-luna",
+          "modelLabel": "gpt-5.6-luna",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001651",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": false,
+        "fastSelected": true,
+        "connectionTest": null
+      },
+      {
+        "connectionId": "anthropic-claude",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Claude",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "fastBinding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001650",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": true,
+        "fastSelected": false,
+        "connectionTest": null
+      }
+    ],
+    "cards": [
+      {
+        "roleId": "fast-interaction",
+        "roleLabel": "快速交互角色",
+        "purposeLabel": "快速交互与低风险候选生成",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "这个渠道暂时还不能使用已选的 Flash 模型，现在跟随前台 Pro",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "main-editorial",
+        "roleLabel": "主编辑角色",
+        "purposeLabel": "中文长篇写作、编辑建议与复杂指令处理",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "连接名称与凭据已由操作系统安全凭据库保护。",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "difficult-escalation",
+        "roleLabel": "疑难升级角色",
+        "purposeLabel": "疑难或高后果工作升级",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      },
+      {
+        "roleId": "frontier",
+        "roleLabel": "前沿模型角色",
+        "purposeLabel": "挑战性或明确授权的高后果工作",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      }
+    ],
+    "settingsModelRoles": "[{\"roleId\":\"foreground-pro\",\"roleLabel\":\"前台 Pro\",\"purposeLabel\":\"主审校与深度创作\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"foreground-flash\",\"roleLabel\":\"前台 Flash\",\"purposeLabel\":\"即时对话与局部微调\",\"tier\":\"flash\",\"source\":\"flash-not-served-follows-foreground-pro\",\"sourceLabel\":\"这个渠道暂时还不能使用已选的 Flash 模型，现在跟随前台 Pro\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-pro\",\"roleLabel\":\"底层 Pro\",\"purposeLabel\":\"自主学习与深度归纳\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-flash\",\"roleLabel\":\"底层 Flash\",\"purposeLabel\":\"底层转换与检索整理\",\"tier\":\"flash\",\"source\":\"flash-not-served-follows-foreground-pro\",\"sourceLabel\":\"这个渠道暂时还不能使用已选的 Flash 模型，现在跟随前台 Pro\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null}]",
+    "bindings": {
+      "foreground-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "foreground-flash": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "underlying-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "underlying-flash": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "main-editorial": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "fast-interaction": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      }
+    }
+  },
+  "refused-pro": {
+    "rows": [
+      {
+        "connection_id": "anthropic-claude",
+        "model_id": "claude-opus-5",
+        "reasoning_effort": "high",
+        "fast_model_id": "claude-opus-5",
+        "fast_reasoning_effort": null,
+        "selected": null,
+        "fast_selected": null
+      },
+      {
+        "connection_id": "main-editorial-opencode-go",
+        "model_id": "gpt-5.6-luna",
+        "reasoning_effort": null,
+        "fast_model_id": "deepseek-v4.1-flash",
+        "fast_reasoning_effort": null,
+        "selected": 1,
+        "fast_selected": null
+      }
+    ],
+    "modelRoles": [
+      {
+        "roleId": "foreground-pro",
+        "roleLabel": "前台 Pro",
+        "purposeLabel": "主审校与深度创作",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "gpt-5.6-luna",
+          "modelLabel": "gpt-5.6-luna",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "status": "needs-attention",
+        "statusLabel": "需处理",
+        "statusDetail": "这个渠道暂时还不能使用这个模型，请换一个模型。这次没有发送任何内容。"
+      },
+      {
+        "roleId": "foreground-flash",
+        "roleLabel": "前台 Flash",
+        "purposeLabel": "即时对话与局部微调",
+        "tier": "flash",
+        "source": "follows-foreground-pro",
+        "sourceLabel": "跟随前台 Pro",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "gpt-5.6-luna",
+          "modelLabel": "gpt-5.6-luna",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "status": "needs-attention",
+        "statusLabel": "需处理",
+        "statusDetail": "这个渠道暂时还不能使用这个模型，请换一个模型。这次没有发送任何内容。"
+      },
+      {
+        "roleId": "underlying-pro",
+        "roleLabel": "底层 Pro",
+        "purposeLabel": "自主学习与深度归纳",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "gpt-5.6-luna",
+          "modelLabel": "gpt-5.6-luna",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "status": "needs-attention",
+        "statusLabel": "需处理",
+        "statusDetail": "这个渠道暂时还不能使用这个模型，请换一个模型。这次没有发送任何内容。"
+      },
+      {
+        "roleId": "underlying-flash",
+        "roleLabel": "底层 Flash",
+        "purposeLabel": "底层转换与检索整理",
+        "tier": "flash",
+        "source": "follows-foreground-pro",
+        "sourceLabel": "跟随前台 Pro",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "gpt-5.6-luna",
+          "modelLabel": "gpt-5.6-luna",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "status": "needs-attention",
+        "statusLabel": "需处理",
+        "statusDetail": "这个渠道暂时还不能使用这个模型，请换一个模型。这次没有发送任何内容。"
+      }
+    ],
+    "connections": [
+      {
+        "connectionId": "main-editorial-opencode-go",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Go",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "gpt-5.6-luna",
+          "modelLabel": "gpt-5.6-luna",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "fastBinding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001651",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": true,
+        "fastSelected": false,
+        "connectionTest": null
+      },
+      {
+        "connectionId": "anthropic-claude",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Claude",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "fastBinding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001650",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": false,
+        "fastSelected": false,
+        "connectionTest": null
+      }
+    ],
+    "cards": [
+      {
+        "roleId": "fast-interaction",
+        "roleLabel": "快速交互角色",
+        "purposeLabel": "快速交互与低风险候选生成",
+        "status": "needs-attention",
+        "statusLabel": "需处理",
+        "statusDetail": "这个渠道暂时还不能使用这个模型，请换一个模型。这次没有发送任何内容。",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "gpt-5.6-luna",
+          "modelLabel": "gpt-5.6-luna",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "connection": {
+          "connectionId": "main-editorial-opencode-go",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Go",
+          "binding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "gpt-5.6-luna",
+            "modelLabel": "gpt-5.6-luna",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go"
+          },
+          "fastBinding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "deepseek-v4.1-flash",
+            "modelLabel": "DeepSeek V4.1 Flash",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "main-editorial",
+        "roleLabel": "主编辑角色",
+        "purposeLabel": "中文长篇写作、编辑建议与复杂指令处理",
+        "status": "needs-attention",
+        "statusLabel": "需处理",
+        "statusDetail": "这个渠道暂时还不能使用这个模型，请换一个模型。这次没有发送任何内容。",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "gpt-5.6-luna",
+          "modelLabel": "gpt-5.6-luna",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "connection": {
+          "connectionId": "main-editorial-opencode-go",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Go",
+          "binding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "gpt-5.6-luna",
+            "modelLabel": "gpt-5.6-luna",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go"
+          },
+          "fastBinding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "deepseek-v4.1-flash",
+            "modelLabel": "DeepSeek V4.1 Flash",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "difficult-escalation",
+        "roleLabel": "疑难升级角色",
+        "purposeLabel": "疑难或高后果工作升级",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      },
+      {
+        "roleId": "frontier",
+        "roleLabel": "前沿模型角色",
+        "purposeLabel": "挑战性或明确授权的高后果工作",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      }
+    ],
+    "settingsModelRoles": "[{\"roleId\":\"foreground-pro\",\"roleLabel\":\"前台 Pro\",\"purposeLabel\":\"主审校与深度创作\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"gpt-5.6-luna\",\"modelLabel\":\"gpt-5.6-luna\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\"},\"status\":\"needs-attention\",\"statusLabel\":\"需处理\",\"statusDetail\":\"这个渠道暂时还不能使用这个模型，请换一个模型。这次没有发送任何内容。\"},{\"roleId\":\"foreground-flash\",\"roleLabel\":\"前台 Flash\",\"purposeLabel\":\"即时对话与局部微调\",\"tier\":\"flash\",\"source\":\"follows-foreground-pro\",\"sourceLabel\":\"跟随前台 Pro\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"gpt-5.6-luna\",\"modelLabel\":\"gpt-5.6-luna\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\"},\"status\":\"needs-attention\",\"statusLabel\":\"需处理\",\"statusDetail\":\"这个渠道暂时还不能使用这个模型，请换一个模型。这次没有发送任何内容。\"},{\"roleId\":\"underlying-pro\",\"roleLabel\":\"底层 Pro\",\"purposeLabel\":\"自主学习与深度归纳\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"gpt-5.6-luna\",\"modelLabel\":\"gpt-5.6-luna\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\"},\"status\":\"needs-attention\",\"statusLabel\":\"需处理\",\"statusDetail\":\"这个渠道暂时还不能使用这个模型，请换一个模型。这次没有发送任何内容。\"},{\"roleId\":\"underlying-flash\",\"roleLabel\":\"底层 Flash\",\"purposeLabel\":\"底层转换与检索整理\",\"tier\":\"flash\",\"source\":\"follows-foreground-pro\",\"sourceLabel\":\"跟随前台 Pro\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"gpt-5.6-luna\",\"modelLabel\":\"gpt-5.6-luna\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\"},\"status\":\"needs-attention\",\"statusLabel\":\"需处理\",\"statusDetail\":\"这个渠道暂时还不能使用这个模型，请换一个模型。这次没有发送任何内容。\"}]",
+    "bindings": {
+      "foreground-pro": {
+        "binding": null,
+        "digest": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+      },
+      "foreground-flash": {
+        "binding": null,
+        "digest": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+      },
+      "underlying-pro": {
+        "binding": null,
+        "digest": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+      },
+      "underlying-flash": {
+        "binding": null,
+        "digest": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+      },
+      "main-editorial": {
+        "binding": null,
+        "digest": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+      },
+      "fast-interaction": {
+        "binding": null,
+        "digest": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+      }
+    }
+  },
+  "go-fallback": {
+    "rows": [
+      {
+        "connection_id": "anthropic-claude",
+        "model_id": "claude-opus-5",
+        "reasoning_effort": "high",
+        "fast_model_id": "claude-opus-5",
+        "fast_reasoning_effort": null,
+        "selected": null,
+        "fast_selected": null
+      },
+      {
+        "connection_id": "main-editorial-opencode-go",
+        "model_id": "deepseek-v4.1-flash",
+        "reasoning_effort": null,
+        "fast_model_id": "deepseek-v4.1-flash",
+        "fast_reasoning_effort": null,
+        "selected": null,
+        "fast_selected": null
+      }
+    ],
+    "modelRoles": [
+      {
+        "roleId": "foreground-pro",
+        "roleLabel": "前台 Pro",
+        "purposeLabel": "主审校与深度创作",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "foreground-flash",
+        "roleLabel": "前台 Flash",
+        "purposeLabel": "即时对话与局部微调",
+        "tier": "flash",
+        "source": "follows-foreground-pro",
+        "sourceLabel": "跟随前台 Pro",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-pro",
+        "roleLabel": "底层 Pro",
+        "purposeLabel": "自主学习与深度归纳",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-flash",
+        "roleLabel": "底层 Flash",
+        "purposeLabel": "底层转换与检索整理",
+        "tier": "flash",
+        "source": "follows-foreground-pro",
+        "sourceLabel": "跟随前台 Pro",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      }
+    ],
+    "connections": [
+      {
+        "connectionId": "main-editorial-opencode-go",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Go",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "fastBinding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001651",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": false,
+        "fastSelected": false,
+        "connectionTest": null
+      },
+      {
+        "connectionId": "anthropic-claude",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Claude",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "fastBinding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001650",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": false,
+        "fastSelected": false,
+        "connectionTest": null
+      }
+    ],
+    "cards": [
+      {
+        "roleId": "fast-interaction",
+        "roleLabel": "快速交互角色",
+        "purposeLabel": "快速交互与低风险候选生成",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "跟随前台 Pro",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "connection": {
+          "connectionId": "main-editorial-opencode-go",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Go",
+          "binding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "deepseek-v4.1-flash",
+            "modelLabel": "DeepSeek V4.1 Flash",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go"
+          },
+          "fastBinding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "deepseek-v4.1-flash",
+            "modelLabel": "DeepSeek V4.1 Flash",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": false,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "main-editorial",
+        "roleLabel": "主编辑角色",
+        "purposeLabel": "中文长篇写作、编辑建议与复杂指令处理",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "连接名称与凭据已由操作系统安全凭据库保护。",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "connection": {
+          "connectionId": "main-editorial-opencode-go",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Go",
+          "binding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "deepseek-v4.1-flash",
+            "modelLabel": "DeepSeek V4.1 Flash",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go"
+          },
+          "fastBinding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "deepseek-v4.1-flash",
+            "modelLabel": "DeepSeek V4.1 Flash",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": false,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "difficult-escalation",
+        "roleLabel": "疑难升级角色",
+        "purposeLabel": "疑难或高后果工作升级",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      },
+      {
+        "roleId": "frontier",
+        "roleLabel": "前沿模型角色",
+        "purposeLabel": "挑战性或明确授权的高后果工作",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      }
+    ],
+    "settingsModelRoles": "[{\"roleId\":\"foreground-pro\",\"roleLabel\":\"前台 Pro\",\"purposeLabel\":\"主审校与深度创作\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"deepseek-v4.1-flash\",\"modelLabel\":\"DeepSeek V4.1 Flash\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"foreground-flash\",\"roleLabel\":\"前台 Flash\",\"purposeLabel\":\"即时对话与局部微调\",\"tier\":\"flash\",\"source\":\"follows-foreground-pro\",\"sourceLabel\":\"跟随前台 Pro\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"deepseek-v4.1-flash\",\"modelLabel\":\"DeepSeek V4.1 Flash\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-pro\",\"roleLabel\":\"底层 Pro\",\"purposeLabel\":\"自主学习与深度归纳\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"deepseek-v4.1-flash\",\"modelLabel\":\"DeepSeek V4.1 Flash\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-flash\",\"roleLabel\":\"底层 Flash\",\"purposeLabel\":\"底层转换与检索整理\",\"tier\":\"flash\",\"source\":\"follows-foreground-pro\",\"sourceLabel\":\"跟随前台 Pro\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"deepseek-v4.1-flash\",\"modelLabel\":\"DeepSeek V4.1 Flash\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null}]",
+    "bindings": {
+      "foreground-pro": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions"
+        },
+        "digest": "9d7a4919d847d381cb9d30401fb1593272e222d976c600d97dbab24fc73849e3"
+      },
+      "foreground-flash": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions"
+        },
+        "digest": "9d7a4919d847d381cb9d30401fb1593272e222d976c600d97dbab24fc73849e3"
+      },
+      "underlying-pro": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions"
+        },
+        "digest": "9d7a4919d847d381cb9d30401fb1593272e222d976c600d97dbab24fc73849e3"
+      },
+      "underlying-flash": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions"
+        },
+        "digest": "9d7a4919d847d381cb9d30401fb1593272e222d976c600d97dbab24fc73849e3"
+      },
+      "main-editorial": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions"
+        },
+        "digest": "9d7a4919d847d381cb9d30401fb1593272e222d976c600d97dbab24fc73849e3"
+      },
+      "fast-interaction": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions"
+        },
+        "digest": "9d7a4919d847d381cb9d30401fb1593272e222d976c600d97dbab24fc73849e3"
+      }
+    }
+  },
+  "task-flash": {
+    "rows": [
+      {
+        "connection_id": "anthropic-claude",
+        "model_id": "claude-opus-5",
+        "reasoning_effort": "high",
+        "fast_model_id": "claude-opus-5",
+        "fast_reasoning_effort": null,
+        "selected": 1,
+        "fast_selected": null
+      },
+      {
+        "connection_id": "main-editorial-opencode-go",
+        "model_id": "deepseek-v4.1-flash",
+        "reasoning_effort": null,
+        "fast_model_id": "glm-5.3-flash",
+        "fast_reasoning_effort": "low",
+        "selected": null,
+        "fast_selected": 1
+      }
+    ],
+    "modelRoles": [
+      {
+        "roleId": "foreground-pro",
+        "roleLabel": "前台 Pro",
+        "purposeLabel": "主审校与深度创作",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "foreground-flash",
+        "roleLabel": "前台 Flash",
+        "purposeLabel": "即时对话与局部微调",
+        "tier": "flash",
+        "source": "flash-tier",
+        "sourceLabel": "使用所选 Flash 模型",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-pro",
+        "roleLabel": "底层 Pro",
+        "purposeLabel": "自主学习与深度归纳",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-flash",
+        "roleLabel": "底层 Flash",
+        "purposeLabel": "底层转换与检索整理",
+        "tier": "flash",
+        "source": "flash-tier",
+        "sourceLabel": "使用所选 Flash 模型",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      }
+    ],
+    "connections": [
+      {
+        "connectionId": "main-editorial-opencode-go",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Go",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "fastBinding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001651",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": false,
+        "fastSelected": true,
+        "connectionTest": null
+      },
+      {
+        "connectionId": "anthropic-claude",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Claude",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "fastBinding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001650",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": true,
+        "fastSelected": false,
+        "connectionTest": null
+      }
+    ],
+    "cards": [
+      {
+        "roleId": "fast-interaction",
+        "roleLabel": "快速交互角色",
+        "purposeLabel": "快速交互与低风险候选生成",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "独立保存快速交互模型；主编辑角色的切换不会改变此选择。",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "connection": {
+          "connectionId": "main-editorial-opencode-go",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Go",
+          "binding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "deepseek-v4.1-flash",
+            "modelLabel": "DeepSeek V4.1 Flash",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go"
+          },
+          "fastBinding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "glm-5.3-flash",
+            "modelLabel": "glm-5.3-flash",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go",
+            "reasoningEffort": "low"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": false,
+          "fastSelected": true,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "main-editorial",
+        "roleLabel": "主编辑角色",
+        "purposeLabel": "中文长篇写作、编辑建议与复杂指令处理",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "连接名称与凭据已由操作系统安全凭据库保护。",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "difficult-escalation",
+        "roleLabel": "疑难升级角色",
+        "purposeLabel": "疑难或高后果工作升级",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      },
+      {
+        "roleId": "frontier",
+        "roleLabel": "前沿模型角色",
+        "purposeLabel": "挑战性或明确授权的高后果工作",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      }
+    ],
+    "settingsModelRoles": "[{\"roleId\":\"foreground-pro\",\"roleLabel\":\"前台 Pro\",\"purposeLabel\":\"主审校与深度创作\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"foreground-flash\",\"roleLabel\":\"前台 Flash\",\"purposeLabel\":\"即时对话与局部微调\",\"tier\":\"flash\",\"source\":\"flash-tier\",\"sourceLabel\":\"使用所选 Flash 模型\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"glm-5.3-flash\",\"modelLabel\":\"glm-5.3-flash\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\",\"reasoningEffort\":\"low\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-pro\",\"roleLabel\":\"底层 Pro\",\"purposeLabel\":\"自主学习与深度归纳\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-flash\",\"roleLabel\":\"底层 Flash\",\"purposeLabel\":\"底层转换与检索整理\",\"tier\":\"flash\",\"source\":\"flash-tier\",\"sourceLabel\":\"使用所选 Flash 模型\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"glm-5.3-flash\",\"modelLabel\":\"glm-5.3-flash\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\",\"reasoningEffort\":\"low\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null}]",
+    "bindings": {
+      "foreground-pro": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions"
+        },
+        "digest": "9d7a4919d847d381cb9d30401fb1593272e222d976c600d97dbab24fc73849e3"
+      },
+      "foreground-flash": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "glm-5.3-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+          "reasoningEffort": "low"
+        },
+        "digest": "28f187a843d89ac574a10aa2dff8784343af33975dfe2741753d3702c6173d0c"
+      },
+      "underlying-pro": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions"
+        },
+        "digest": "9d7a4919d847d381cb9d30401fb1593272e222d976c600d97dbab24fc73849e3"
+      },
+      "underlying-flash": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "glm-5.3-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+          "reasoningEffort": "low"
+        },
+        "digest": "28f187a843d89ac574a10aa2dff8784343af33975dfe2741753d3702c6173d0c"
+      },
+      "main-editorial": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions"
+        },
+        "digest": "9d7a4919d847d381cb9d30401fb1593272e222d976c600d97dbab24fc73849e3"
+      },
+      "fast-interaction": {
+        "binding": {
+          "route": "opencode-go",
+          "model": "glm-5.3-flash",
+          "credentialSlot": "opencode-go",
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+          "reasoningEffort": "low"
+        },
+        "digest": "28f187a843d89ac574a10aa2dff8784343af33975dfe2741753d3702c6173d0c"
+      }
+    }
+  },
+  "task-other": {
+    "rows": [
+      {
+        "connection_id": "anthropic-claude",
+        "model_id": "claude-opus-5",
+        "reasoning_effort": "high",
+        "fast_model_id": "claude-opus-5",
+        "fast_reasoning_effort": null,
+        "selected": 1,
+        "fast_selected": null
+      },
+      {
+        "connection_id": "main-editorial-opencode-go",
+        "model_id": "deepseek-v4.1-flash",
+        "reasoning_effort": null,
+        "fast_model_id": "glm-5.3-flash",
+        "fast_reasoning_effort": "low",
+        "selected": null,
+        "fast_selected": 1
+      }
+    ],
+    "modelRoles": [
+      {
+        "roleId": "foreground-pro",
+        "roleLabel": "前台 Pro",
+        "purposeLabel": "主审校与深度创作",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "foreground-flash",
+        "roleLabel": "前台 Flash",
+        "purposeLabel": "即时对话与局部微调",
+        "tier": "flash",
+        "source": "flash-tier",
+        "sourceLabel": "使用所选 Flash 模型",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-pro",
+        "roleLabel": "底层 Pro",
+        "purposeLabel": "自主学习与深度归纳",
+        "tier": "pro",
+        "source": "pro-tier",
+        "sourceLabel": "使用所选 Pro 模型",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      },
+      {
+        "roleId": "underlying-flash",
+        "roleLabel": "底层 Flash",
+        "purposeLabel": "底层转换与检索整理",
+        "tier": "flash",
+        "source": "flash-tier",
+        "sourceLabel": "使用所选 Flash 模型",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": null
+      }
+    ],
+    "connections": [
+      {
+        "connectionId": "main-editorial-opencode-go",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Go",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "deepseek-v4.1-flash",
+          "modelLabel": "DeepSeek V4.1 Flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go"
+        },
+        "fastBinding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001651",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": false,
+        "fastSelected": true,
+        "connectionTest": null
+      },
+      {
+        "connectionId": "anthropic-claude",
+        "roleId": "main-editorial",
+        "connectionName": "Synthetic Claude",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "fastBinding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude"
+        },
+        "credentialReference": "00000000-0000-4000-8000-000000001650",
+        "credentialOperationState": "ready",
+        "createdAt": "2026-11-21T00:00:00.000Z",
+        "updatedAt": "2026-11-21T00:00:00.000Z",
+        "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+        "selected": true,
+        "fastSelected": false,
+        "connectionTest": null
+      }
+    ],
+    "cards": [
+      {
+        "roleId": "fast-interaction",
+        "roleLabel": "快速交互角色",
+        "purposeLabel": "快速交互与低风险候选生成",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "独立保存快速交互模型；主编辑角色的切换不会改变此选择。",
+        "binding": {
+          "providerId": "opencode-go",
+          "providerLabel": "OpenCode Go",
+          "modelId": "glm-5.3-flash",
+          "modelLabel": "glm-5.3-flash",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "opencode-go",
+          "reasoningEffort": "low"
+        },
+        "connection": {
+          "connectionId": "main-editorial-opencode-go",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Go",
+          "binding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "deepseek-v4.1-flash",
+            "modelLabel": "DeepSeek V4.1 Flash",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go"
+          },
+          "fastBinding": {
+            "providerId": "opencode-go",
+            "providerLabel": "OpenCode Go",
+            "modelId": "glm-5.3-flash",
+            "modelLabel": "glm-5.3-flash",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "opencode-go",
+            "reasoningEffort": "low"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001651",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": false,
+          "fastSelected": true,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "main-editorial",
+        "roleLabel": "主编辑角色",
+        "purposeLabel": "中文长篇写作、编辑建议与复杂指令处理",
+        "status": "available",
+        "statusLabel": "可用",
+        "statusDetail": "连接名称与凭据已由操作系统安全凭据库保护。",
+        "binding": {
+          "providerId": "anthropic-claude",
+          "providerLabel": "Claude 官方",
+          "modelId": "claude-opus-5",
+          "modelLabel": "Claude Opus 5",
+          "adapterRevision": 1,
+          "configurationRevision": 1,
+          "approvedFallbackChain": [],
+          "credentialSlot": "anthropic-claude",
+          "reasoningEffort": "high"
+        },
+        "connection": {
+          "connectionId": "anthropic-claude",
+          "roleId": "main-editorial",
+          "connectionName": "Synthetic Claude",
+          "binding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude",
+            "reasoningEffort": "high"
+          },
+          "fastBinding": {
+            "providerId": "anthropic-claude",
+            "providerLabel": "Claude 官方",
+            "modelId": "claude-opus-5",
+            "modelLabel": "Claude Opus 5",
+            "adapterRevision": 1,
+            "configurationRevision": 1,
+            "approvedFallbackChain": [],
+            "credentialSlot": "anthropic-claude"
+          },
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "credentialOperationState": "ready",
+          "createdAt": "2026-11-21T00:00:00.000Z",
+          "updatedAt": "2026-11-21T00:00:00.000Z",
+          "credentialUpdatedAt": "2026-11-21T00:00:00.000Z",
+          "selected": true,
+          "fastSelected": false,
+          "connectionTest": null
+        }
+      },
+      {
+        "roleId": "difficult-escalation",
+        "roleLabel": "疑难升级角色",
+        "purposeLabel": "疑难或高后果工作升级",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      },
+      {
+        "roleId": "frontier",
+        "roleLabel": "前沿模型角色",
+        "purposeLabel": "挑战性或明确授权的高后果工作",
+        "status": "setup-required",
+        "statusLabel": "需设置",
+        "statusDetail": "当前版本未配置此角色的模型服务绑定。",
+        "binding": null,
+        "connection": null
+      }
+    ],
+    "settingsModelRoles": "[{\"roleId\":\"foreground-pro\",\"roleLabel\":\"前台 Pro\",\"purposeLabel\":\"主审校与深度创作\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"foreground-flash\",\"roleLabel\":\"前台 Flash\",\"purposeLabel\":\"即时对话与局部微调\",\"tier\":\"flash\",\"source\":\"flash-tier\",\"sourceLabel\":\"使用所选 Flash 模型\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"glm-5.3-flash\",\"modelLabel\":\"glm-5.3-flash\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\",\"reasoningEffort\":\"low\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-pro\",\"roleLabel\":\"底层 Pro\",\"purposeLabel\":\"自主学习与深度归纳\",\"tier\":\"pro\",\"source\":\"pro-tier\",\"sourceLabel\":\"使用所选 Pro 模型\",\"binding\":{\"providerId\":\"anthropic-claude\",\"providerLabel\":\"Claude 官方\",\"modelId\":\"claude-opus-5\",\"modelLabel\":\"Claude Opus 5\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"anthropic-claude\",\"reasoningEffort\":\"high\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null},{\"roleId\":\"underlying-flash\",\"roleLabel\":\"底层 Flash\",\"purposeLabel\":\"底层转换与检索整理\",\"tier\":\"flash\",\"source\":\"flash-tier\",\"sourceLabel\":\"使用所选 Flash 模型\",\"binding\":{\"providerId\":\"opencode-go\",\"providerLabel\":\"OpenCode Go\",\"modelId\":\"glm-5.3-flash\",\"modelLabel\":\"glm-5.3-flash\",\"adapterRevision\":1,\"configurationRevision\":1,\"approvedFallbackChain\":[],\"credentialSlot\":\"opencode-go\",\"reasoningEffort\":\"low\"},\"status\":\"available\",\"statusLabel\":\"可用\",\"statusDetail\":null}]",
+    "bindings": {
+      "foreground-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "foreground-flash": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "underlying-pro": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "underlying-flash": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "main-editorial": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      },
+      "fast-interaction": {
+        "binding": {
+          "route": "anthropic-claude",
+          "model": "claude-opus-5",
+          "credentialSlot": "anthropic-claude",
+          "credentialReference": "00000000-0000-4000-8000-000000001650",
+          "endpoint": "https://api.anthropic.com/v1/messages",
+          "reasoningEffort": "high"
+        },
+        "digest": "c618138fa4810cb3cfc11484230bbca713d0fd526054d5e9233a531729914eec"
+      }
+    }
+  }
+}

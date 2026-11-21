@@ -17,10 +17,11 @@ import { openPackageStore } from './database-exports.js';
  * Known differences R5-6 must expect between the old store and the upgraded one (not implemented here):
  * - `tables.manuscript_revisions`: one 「升级时的稿件」 revision more per manuscript (ADR 0105 §5), so old + `manuscripts` rows;
  * - `tables.working_offset_nodes`: dropped by the position conversion (ADR 0105 §6), so 0 after the upgrade;
+ * - `tables.model_role_choices`: 0 before; 0, 1 or 2 after, from mapping the two selected connection groups (R5-F1a);
  * - `tables.store_versions`: one more row, the Data Version 2 record;
  * - the other position-keyed tables are converted (ADR 0105 §6); R5-6 states any further difference when it lands;
  * - the 字表与词表 library (R5-L1; ADR 0106 §9): a store at revision 116 has none of `standard_tables`,
- *   `standard_table_versions` and `standard_table_entries` (counted as 0, and `entities.library` is 0 throughout); the upgraded
+ *   `standard_table_versions` and `standard_table_entries` (counted as 0, and every count of `entities.library` is 0); the upgraded
  *   store holds the four pre-installed tables at version 1 — tables 4, versions 4, entries 68,507 (8,105 + 3,558 + 382 +
  *   56,462), source files 0. Those three `tables` counts and `entities.library` are compared as "old 0, new exactly these",
  *   never by equality.
@@ -183,6 +184,7 @@ export const INVENTORY_TABLES = [
   'milestone_signoff_records',
   'milestone_versions',
   'model_service_connections',
+  'model_role_choices', // R5-F1a
   'native_artifact_book_enablements',
   'native_artifact_installations',
   'plan_envelopes',

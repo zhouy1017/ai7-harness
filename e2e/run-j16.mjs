@@ -1,6 +1,7 @@
 import { rightColumnGeometry } from './comments-pane.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
+import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -132,6 +133,26 @@ async function awaitFixedOperation(operation, timeoutMs, timeoutError) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/** Runs `segment` over `texts` in the product's executable as Node (`ELECTRON_RUN_AS_NODE`), the way the service runs, and returns its answer. */
+async function segmentInProductRuntime(executable, texts, segment) {
+  const script = `const segment = ${segment.toString()}; let input = ''; process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => { input += chunk; }); process.stdin.on('end', () => { process.stdout.write(JSON.stringify(segment(JSON.parse(input)))); });`;
+  const child = spawn(executable, ['-e', script], { cwd: ROOT, env: { ...productEnvironment(executable), ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+  let output = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { output += chunk; });
+  const exited = new Promise((resolveExit, rejectExit) => { child.once('error', rejectExit); child.once('close', (code) => resolveExit(code)); });
+  child.stdin.end(JSON.stringify(texts), 'utf8');
+  try {
+    const code = await awaitFixedOperation(exited, 30_000, journeyCheckFailure('J-16', 'retrieval-segmenter-timeout'));
+    requireJourney(code === 0, 'retrieval-segmenter-exit', code);
+  } catch (error) {
+    child.kill('SIGKILL');
+    throw error;
+  }
+  return JSON.parse(output);
 }
 
 // ---- the controller's own sentinel and the renderer's pipe ------------------------------------------------
@@ -909,6 +930,17 @@ async function main() {
     at('exact-sample1');
     const sample = await lstat(SAMPLE1_PATH);
     requireJourney(sample.isFile() && !sample.isSymbolicLink() && sample.size === SAMPLE1_BYTES && (await digestFile(SAMPLE1_PATH)) === SAMPLE1_SHA256, 'sample1-identity');
+
+    // #1623: local retrieval's Han word boundaries, in the product's executable run as the service runs (ADR 0107 §4 point 1).
+    at('retrieval-segmenter-packaged-runtime');
+    {
+      const { CORPUS_BOUNDARY_SHA256, PACKAGED_RUNTIME_BOUNDARIES, boundaryDigest, hanWordBoundaries, segmenterCorpusTexts, segmenterPinTexts } = await import('./segmenter-pin.mjs');
+      const packaged = await segmentInProductRuntime(executable, segmenterPinTexts(ROOT), hanWordBoundaries);
+      requireJourney(JSON.stringify(packaged) === JSON.stringify(PACKAGED_RUNTIME_BOUNDARIES), 'retrieval-segmenter-packaged-runtime', packaged);
+      // Every paragraph of every admitted SampleBook: the packaged runtime must give the test runtime's digest.
+      const corpus = boundaryDigest(await segmentInProductRuntime(executable, segmenterCorpusTexts(ROOT), hanWordBoundaries));
+      requireJourney(corpus === CORPUS_BOUNDARY_SHA256, 'retrieval-segmenter-packaged-corpus', corpus);
+    }
 
     // ---- the first launch, bound to the J-04 model adapter and J-16's unit hold -----------------------------
     at('renderer-api-boundary');

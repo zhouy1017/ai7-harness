@@ -31,6 +31,12 @@ const INTENDED_DELTA: ReadonlyArray<{ readonly object: string; readonly change: 
   { object: 'index:sqlite_autoindex_standard_table_versions_1', change: 'added', slice: 'R5-L1' },
   { object: 'index:sqlite_autoindex_standard_table_versions_2', change: 'added', slice: 'R5-L1' },
   { object: 'index:sqlite_autoindex_standard_table_versions_3', change: 'added', slice: 'R5-L1' },
+  // R5-F1a
+  { object: 'table:model_service_connections', change: 'changed', slice: 'R5-F1a' },
+  { object: 'index:sqlite_autoindex_model_service_connections_3', change: 'removed', slice: 'R5-F1a' },
+  { object: 'index:sqlite_autoindex_model_service_connections_4', change: 'removed', slice: 'R5-F1a' },
+  { object: 'table:model_role_choices', change: 'added', slice: 'R5-F1a' },
+  { object: 'index:sqlite_autoindex_model_role_choices_1', change: 'added', slice: 'R5-F1a' },
 ];
 
 const reference = JSON.parse(readFileSync('tests/fixtures/database/revision-116-schema.json', 'utf8')) as { userVersion: number; rows: DumpRow[] };
