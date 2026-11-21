@@ -58,7 +58,7 @@ describe('the model-service channel catalogue', () => {
       return store!.saveModelServiceConnection(first.connectionName, first.credentialReference, 'ready', route);
     });
     expect(saved.map((connection) => [connection.connectionId, connection.binding.credentialSlot, connection.selected, connection.fastSelected ?? null]))
-      .toEqual([['opencode-zen', 'opencode-zen', true, true], ['anthropic-claude', 'anthropic-claude', false, false], ['google-gemini', 'google-gemini', false, false]]);
+      .toEqual([['opencode-zen', 'opencode-zen', true, false], ['anthropic-claude', 'anthropic-claude', false, false], ['google-gemini', 'google-gemini', false, false]]);
     expect(saved.every((connection) => /^[0-9a-f-]{36}$/u.test(connection.credentialReference))).toBe(true);
     store.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

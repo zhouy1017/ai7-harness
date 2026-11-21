@@ -16,6 +16,7 @@ import type { JournalEditInput } from './protocol/manuscript-structure.js';
 import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js';
 import type { AiEditLocksProjection, InspectAiEditLocksInput, InspectScopedAiEditInput, ScopedAiEditProjection, SetAiEditLocksInput, StartScopedAiEditInput } from './protocol/scoped-edit.js';
 import type { GlobalAttentionProjection } from './protocol/global-attention.js';
+import type { BothRoleModelSelectionInput, FastModelSelectionInput, ModelConnectionTestStatus, ModelCredentialOperationState, ModelRoleCardProjection, ModelRoleResolutionProjection, ModelRoleStatus, ModelRoleStatusLabel, ModelServiceConnectionProjection, ModelTierSelectionInput } from './protocol/model-roles.js';
 import type {
   ModelServiceBindingProjection,
   ModelServiceChannelProjection,
@@ -334,6 +335,7 @@ export * from './protocol/custom-analysis-redo.js';
 export type * from './protocol/selection-span.js';
 export type * from './protocol/global-attention.js';
 export * from './protocol/model-service.js';
+export * from './protocol/model-roles.js';
 export * from './protocol/search-backends.js';
 export { validStructureChoice } from './protocol/import-structure.js';
 export * from './protocol/global-agent.js';
@@ -865,6 +867,7 @@ export const IPC_CHANNELS = {
   selectFastRoleModel: 'ai7:model-service:select-fast-model',
   selectMainRoleModel: 'ai7:model-service:select-main-model',
   selectBothRoleModels: 'ai7:model-service:select-both-models',
+  selectProModel: 'ai7:model-service:select-pro-model', selectFlashModel: 'ai7:model-service:select-flash-model', clearFlashModel: 'ai7:model-service:clear-flash-model',
   refreshModelServiceModels: 'ai7:model-service:refresh-models',
   testModelServiceConnection: 'ai7:model-service:test-connection',
   selectSearchBackend: 'ai7:j12:select-search-backend',
@@ -1484,72 +1487,6 @@ export interface ProductDataLocationProjection {
 export interface ProductDataLocationRevealProjection {
   state: 'requested';
   nativeRevealSuppressedForE2e: boolean;
-}
-
-export type ModelRoleId =
-  | 'fast-interaction'
-  | 'main-editorial'
-  | 'difficult-escalation'
-  | 'frontier';
-
-export type ModelRoleStatus = 'available' | 'setup-required' | 'needs-attention' | 'unavailable';
-
-export type ModelRoleStatusLabel = '可用' | '需设置' | '需处理' | '不可用';
-
-export type ModelCredentialOperationState = 'ready' | 'missing' | 'needs-attention';
-
-export interface ModelServiceConnectionProjection {
-  connectionId: ModelServiceConnectionId;
-  roleId: 'main-editorial';
-  connectionName: string;
-  binding: ModelServiceBindingProjection;
-  fastBinding?: ModelServiceBindingProjection;
-  credentialReference: string;
-  credentialOperationState: ModelCredentialOperationState;
-  createdAt: string;
-  updatedAt: string;
-  credentialUpdatedAt: string;
-  /** Whether the editor chose this route for the Tasks they start from now on (Issue #811). */
-  selected: boolean;
-  /** Independent Fast choice; Main's legacy selected column keeps its meaning. */
-  fastSelected?: boolean;
-  connectionTest?: ModelConnectionTestStatus | null;
-}
-
-/** Exact-binding public text-probe result; only its bounded reply and provenance are retained. */
-export interface ModelConnectionTestStatus {
-  responseText?: string;
-  modelId: string;
-  credentialUpdatedAt: string;
-  testedAt: string;
-  outcome: 'passed' | 'failed' | 'outcome-unknown' | 'cancelled';
-  code: string | null;
-  verified: 'buffered-text-only';
-  provenance?: ModelTextAttemptProvenance;
-}
-
-export interface ModelTextAttemptProvenance {
-  readonly role: 'Fast Interaction Role';
-  readonly route: string;
-  readonly model: string;
-  readonly endpoint: string;
-  readonly credentialSlot: string;
-  readonly credentialReference: string;
-  readonly policyVersion: string;
-  readonly bindingDigest: string;
-  readonly credentialUpdatedAt?: string;
-  readonly usage: { readonly inputTokens: number; readonly outputTokens: number; readonly cacheReadTokens?: number; readonly reasoningTokens?: number } | null;
-  readonly failureCode: string | null;
-}
-
-export interface FastModelSelectionInput extends Pick<RuntimeExecutionConfig, 'reasoningEffort'> {
-  route: ModelServiceRouteId;
-  modelId: string;
-}
-
-/** Atomic two-role selection carries independent defaults. */
-export interface BothRoleModelSelectionInput extends FastModelSelectionInput {
-  fastReasoningEffort?: RuntimeExecutionConfig['reasoningEffort'];
 }
 
 /**
@@ -2326,6 +2263,8 @@ export interface ModelServiceStoredStateProjection {
   /** Every route's connection (Issue #811), Go first; at most one is `selected`. */
   connections: readonly ModelServiceConnectionProjection[];
   launchPolicy: LaunchPolicyProjection; channels: readonly ModelServiceChannelProjection[];
+  /** The four roles of ADR 0107 §1 with their effective model and its source (Issue #1620). */
+  modelRoles: readonly ModelRoleResolutionProjection[];
 }
 
 /** One route the Main Editorial Role may be configured to, as 设置 › 模型服务 offers it (Issue #811). */
@@ -2359,17 +2298,6 @@ export const MODEL_SERVICE_SETUP_REQUIRED_REASON =
 /** What 设置 › 模型服务 says about choosing the route (Issue #811). */
 export const MODEL_SERVICE_ROUTE_EFFECT_LABEL = '切换路线只影响之后开始的任务；已在进行的任务保持原有绑定。没有自动备用路线。' as const;
 
-export interface ModelRoleCardProjection {
-  roleId: ModelRoleId;
-  roleLabel: '快速交互角色' | '主编辑角色' | '疑难升级角色' | '前沿模型角色';
-  purposeLabel: string;
-  status: ModelRoleStatus;
-  statusLabel: ModelRoleStatusLabel;
-  statusDetail: string;
-  binding: ModelServiceBindingProjection | null;
-  connection: ModelServiceConnectionProjection | null;
-}
-
 export type ModelServiceProxySetting = { mode: 'direct' } | { mode: 'proxy'; protocol: 'http' | 'https'; hostPort: string };
 export interface ProxyProbeResult {
   status: 'available' | 'https-rejected' | 'connection-refused' | 'authentication-required' | 'unreachable';
@@ -2384,6 +2312,8 @@ export interface ModelServiceSettingsProjection {
   proxy: ModelServiceProxySetting;
   lastProxyProbe?: ProxyProbeResult | null;
   roles: readonly ModelRoleCardProjection[];
+  /** The four roles of ADR 0107 §1 in its order, with their effective model, 思考强度 and source (Issue #1620). */
+  modelRoles: readonly ModelRoleResolutionProjection[];
   /** The two routes and the providers not yet supported (Issue #811). */
   routeChoice: {
     routes: readonly ModelServiceRouteOptionProjection[];
@@ -5065,6 +4995,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   selectFastRoleModel: { input: FastModelSelectionInput; output: void };
   selectMainRoleModel: { input: FastModelSelectionInput; output: void };
   selectBothRoleModels: { input: BothRoleModelSelectionInput; output: void };
+  selectProModel: { input: ModelTierSelectionInput; output: void }; selectFlashModel: { input: ModelTierSelectionInput; output: void }; clearFlashModel: { input: Record<string, never>; output: void };
   refreshModelServiceModels: { input: { route: ModelServiceRouteId }; output: ModelDiscoveryResult };
   testModelServiceConnection: { input: FastModelSelectionInput; output: ModelConnectionTestStatus };
   getModelServiceStoredState: {
@@ -5633,6 +5564,9 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   selectFastRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   selectMainRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   selectBothRoleModels(input: BothRoleModelSelectionInput): Promise<ModelServiceSettingsProjection>;
+  selectProModel(input: ModelTierSelectionInput): Promise<ModelServiceSettingsProjection>;
+  selectFlashModel(input: ModelTierSelectionInput): Promise<ModelServiceSettingsProjection>;
+  clearFlashModel(): Promise<ModelServiceSettingsProjection>;
   refreshModelServiceModels(input: { route: ModelServiceRouteId }): Promise<ModelServiceSettingsProjection>;
   testModelServiceConnection(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   getModelServiceSettings(): Promise<ModelServiceSettingsProjection>;

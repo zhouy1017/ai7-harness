@@ -88,6 +88,24 @@ describe('the connection test on the admitted channels', () => {
       expect(() => target.selectModelServiceRoute(route)).not.toThrow();
     });
 
+  // #1582: a Zen model declared on its Messages or Responses route only is sent there with that route's encoder, never as Chat Completions.
+  it.each([['claude-opus-5', 'anthropic-messages', 'https://opencode.ai/inference/anthropic/v1/messages'],
+    ['gpt-6-sol', 'openai-responses', 'https://opencode.ai/inference/openai/v1/responses']] as const)(
+    'sends OpenCode Zen %s on its declared %s route (#1582)', async (modelId, family, endpoint) => {
+      const target = await saved('opencode-zen');
+      const nativeFetch = fixtureTransport(family, 'text', 'AI7_OK');
+      const status = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
+        { route: 'opencode-zen', modelId }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
+      expect(status).toMatchObject({ modelId, outcome: 'passed', provenance: { model: modelId, endpoint } });
+      expect(nativeFetch).toHaveBeenCalledTimes(1);
+      const [url, init] = nativeFetch.mock.calls[0]! as [string, RequestInit];
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      expect(String(url)).toBe(endpoint);
+      expect(body.model).toBe(modelId);
+      if (family === 'anthropic-messages') expect([Array.isArray(body.messages), typeof body.max_tokens, 'input' in body]).toEqual([true, 'number', false]);
+      else expect([Array.isArray(body.input) || typeof body.input === 'string', typeof body.max_output_tokens, 'messages' in body]).toEqual([true, 'number', false]);
+    });
+
   it('tests a dynamic Gemini model ID through its channel adapter', async () => {
     const target = await saved('google-gemini');
     const nativeFetch = fixtureTransport('google-generate-content', 'text', 'AI7_OK');

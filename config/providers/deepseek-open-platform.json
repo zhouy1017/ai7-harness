@@ -97,5 +97,9 @@
   ],
   "openQuestions": [
     "Historical model-specific read-side evidence remains unchanged. Runtime protocol support and effort control have provider-free family coverage; model/effort availability is decided by the configured service (#1453, ADR 0102/0103)."
-  ]
+  ],
+  "recommendedModels": {
+    "pro": ["deepseek-v4-pro"],
+    "flash": ["deepseek-flash"]
+  }
 }

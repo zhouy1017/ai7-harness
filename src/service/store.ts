@@ -31,7 +31,7 @@ import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInpu
 import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } from '../shared/protocol/series.js';
 import { effectiveModelReasoningEffort, modelProfileFor } from './provider/model-profile.js';
 import { composeTaskOverview, estimateTaskStarts } from './task-overview.js';
-import { customAnalysisModeGoal } from '../shared/protocol.js';
+import { customAnalysisModeGoal, modelServiceRouteRefusal, type LegacyModelRoleId, type ModelRoleId, type ModelRoleResolutionProjection } from '../shared/protocol.js';
 import * as modelSearchSettings from './model-search-settings.js';
 import * as materialIndexOperations from './material-index-operations.js';
 import * as globalAgentOperations from './global-agent-operations.js';
@@ -1810,7 +1810,6 @@ export class EditorialStore {
       get getModelServiceRouteConnection() { return store.getModelServiceRouteConnection.bind(store); },
       get getSearchBackendConnections() { return store.getSearchBackendConnections.bind(store); },
       get modelServiceBinding() { return store.modelServiceBinding.bind(store); },
-      get selectRoleModel() { return store.selectRoleModel.bind(store); },
     };
   }
 
@@ -3092,17 +3091,18 @@ export class EditorialStore {
   #launchChoice(role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig, remembered = false): import('./task-launch-snapshots.js').LaunchChoice {
     let notice: string | undefined;
     if (remembered && Object.keys(override).length > 0) {
-      const connection = this.getModelServiceConnections().find(connection => override.modelConnectionId === undefined
-        ? role === 'main-editorial' ? connection.selected : connection.fastSelected : connection.connectionId === override.modelConnectionId);
+      const connection = modelSearchSettings.resolveModelRole(this.#modelSearchSettingsHost, role, { ...(override.modelConnectionId === undefined ? {} : { modelConnectionId: override.modelConnectionId }) }).connection;
+      // A remembered model the channel can no longer send (#1582) falls back like one no longer listed.
       if (connection?.credentialOperationState !== 'ready' || (override.modelId !== undefined &&
-          !this.getModelServiceModels(connection.binding.providerId).some(model => model.modelId === override.modelId))) {
+          (!this.getModelServiceModels(connection.binding.providerId).some(model => model.modelId === override.modelId) ||
+            modelServiceRouteRefusal(connection.binding.providerId, override.modelId, role === 'main-editorial' ? 'main' : 'fast') !== null))) {
         override = {};
         notice = '上次选择的模型已不可用，本次已使用角色默认模型。';
       }
     }
-    const binding = this.getConfiguredModelRoleBinding(role, override);
+    const { binding, refusal } = modelSearchSettings.resolveModelRole(this.#modelSearchSettingsHost, role, override);
     requireStore(this.#baselineAnalysis.launch.operationalScope !== 'ordinary-production' || binding !== null,
-      'MODEL_SERVICE_SETUP_REQUIRED', '请先在设置中连接可用模型。');
+      refusal === null ? 'MODEL_SERVICE_SETUP_REQUIRED' : 'MODEL_ROUTE_NOT_SERVED', refusal ?? '请先在设置中连接可用模型。');
     const connection = binding === null ? undefined : this.getModelServiceConnections().find(connection => connection.credentialReference === binding.credentialReference);
     return { binding, ...(notice === undefined ? {} : { notice }), executionConfig: { ...(connection === undefined ? {} : { modelConnectionId: connection.connectionId }),
       ...(binding === null ? {} : { modelId: binding.model, reasoningEffort: binding.reasoningEffort ?? 'off' }) } };
@@ -8555,21 +8555,17 @@ export class EditorialStore {
     return modelSearchSettings.selectModelServiceRoute(this.#modelSearchSettingsHost, route);
   }
 
-  /** Exact persisted role selection. A missing chosen key never falls back to another channel. */
-  getConfiguredModelRoleBinding(role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig = {}): ConfiguredProviderBinding | null {
+  /** A role's binding under the cascade of Issue #1620; legacy ids read as aliases. A missing key never falls back to another channel. */
+  getConfiguredModelRoleBinding(role: ModelRoleId | LegacyModelRoleId, override: RuntimeExecutionConfig = {}): ConfiguredProviderBinding | null {
     return modelSearchSettings.getConfiguredModelRoleBinding(this.#modelSearchSettingsHost, role, override);
   }
-
-  selectFastRoleModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
-    return modelSearchSettings.selectFastRoleModel(this.#modelSearchSettingsHost, route, modelId, reasoningEffort);
-  }
-
-  selectMainRoleModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
-    return modelSearchSettings.selectMainRoleModel(this.#modelSearchSettingsHost, route, modelId, reasoningEffort);
-  }
-
+  /** The four roles with their effective model and its source (Issue #1620). */
+  getModelRoles(): ModelRoleResolutionProjection[] { return modelSearchSettings.getModelRoles(this.#modelSearchSettingsHost); }
+  clearFlashModel(): void { modelSearchSettings.clearFlashModel(this.#modelSearchSettingsHost); }
+  selectFastRoleModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void { this.selectRoleModel(route, modelId, 'fast', reasoningEffort); }
+  selectMainRoleModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void { this.selectRoleModel(route, modelId, 'main', reasoningEffort); }
   selectBothRoleModels(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string, fastReasoningEffort?: string): void {
-    return modelSearchSettings.selectBothRoleModels(this.#modelSearchSettingsHost, route, modelId, reasoningEffort, fastReasoningEffort);
+    this.selectRoleModel(route, modelId, 'both', reasoningEffort, fastReasoningEffort);
   }
 
   private selectRoleModel(route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string): void {
