@@ -86,7 +86,7 @@ function candidateCard(candidate: SearchBackendCandidateProjection, options: Sea
   card.append(element('h4', undefined, `${candidate.name} · 未实测`));
   const price = `单价 ${candidate.price} · 不可选择`;
   const disclosure = candidate.disclosure.map((line) => (technicalLayerVisible ? line : line.replace(/（\/[^）]+）/gu, '')).replace(/。$/u, '')).join('；');
-  card.append(element('p', 'field-note', disclosure === '' ? price : `${price}；${disclosure}。`));
+  card.append(element('p', 'field-note', !technicalLayerVisible || disclosure === '' ? price : `${price}；${disclosure}。`));
   if (technicalLayerVisible) card.append(element('p', 'field-note search-candidate-technical', `接口 ${candidate.endpoint} · 协议 ${candidate.protocol} · 配置摘要 ${candidate.configurationDigest}`));
   const output = element('div');
   output.dataset['searchCandidateProbe'] = candidate.candidateId;
@@ -113,7 +113,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   section.dataset['searchBackends'] = 'true';
   const heading = element('h3', undefined, '联网检索');
   heading.tabIndex = -1;
-  section.append(heading, element('p', 'field-note', `${effectiveSearchSourceLine(projection).replace(/。$/u, '')}；新任务优先用主编辑模型自带搜索，否则用已配置的检索服务；已开始的任务继续使用原来源；${SEARCH_FALLBACK_NOTE}`));
+  section.append(heading, element('p', 'field-note', `${effectiveSearchSourceLine(projection)} ${technicalLayerVisible ? `新任务优先用主编辑模型自带搜索，否则用已配置的检索服务；已开始的任务继续使用原来源；${SEARCH_FALLBACK_NOTE}` : '可设一个备用来源，出错时自动切换。'}`));
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
   const override = element('input'); override.type = 'checkbox'; override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false;
   override.dataset['action'] = 'always-use-selected-search-backend';

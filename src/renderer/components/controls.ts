@@ -158,14 +158,20 @@ export function enhanceSelect(select: HTMLSelectElement): EnhancedSelect | null 
   const renderOptions = (): void => {
     const options = Array.from(select.options);
     const query = filter.value.trim().toLocaleLowerCase();
-    const nextSignature = JSON.stringify([query, ...options.map((option) => [option.text, option.value, option.selected, optionDisabled(option), option.hidden, option.parentElement?.hidden])]);
+    const nextSignature = JSON.stringify([query, ...options.map((option) => [option.text, option.value, option.selected, optionDisabled(option), option.hidden, option.parentElement?.hidden, option.parentElement?.getAttribute('label')])]);
     if (nextSignature === signature) return;
     signature = nextSignature;
     const scrollTop = list.scrollTop;
     visible = []; rows = [];
     list.replaceChildren();
+    let previousGroup: Element | null = null;
     options.forEach((option, index) => {
       if (option.hidden || option.parentElement?.hidden || !option.text.toLocaleLowerCase().includes(query)) return;
+      const group = option.parentElement;
+      if (group?.tagName === 'OPTGROUP' && group !== previousGroup) {
+        const heading = doc.createElement('div'); heading.className = 'field-note'; heading.textContent = group.getAttribute('label'); list.append(heading);
+      }
+      previousGroup = group;
       const row = doc.createElement('div');
       row.className = 'ui-select-option';
       row.id = `${list.id}-${index}`;

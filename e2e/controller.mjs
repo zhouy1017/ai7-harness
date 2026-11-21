@@ -873,6 +873,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'screen-return-origins',
     'diagnostics-bundle-export',
     'model-service-first-save',
+    'model-one-model-setup',
     'model-effort-defaults-wide',
     'model-effort-defaults-gate',
     'dispatch-model-wide',

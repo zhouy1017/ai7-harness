@@ -144,7 +144,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     );
     content.append(
       element('h2', undefined, '模型服务'),
-      element('p', 'lede', technicalLayerVisible ? '选择渠道，保存密钥并获取模型，再分别指定主编辑与快速交互模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
+      element('p', 'lede', technicalLayerVisible ? '选择渠道，保存密钥并获取模型，再选择使用的模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
     );
     content.append(modelServiceFlow(projection, { api: rendererApi, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
       effortDraft: (channel, role) => effortDrafts.get(`${channel}/${role}`),
@@ -163,13 +163,23 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
         return favourites;
       } }));
     const currentRoles = element('section', 'model-service-current-roles');
-    currentRoles.setAttribute('aria-label', '当前角色模型');
-    for (const role of projection.roles.filter((role) => role.roleId === 'main-editorial' || role.roleId === 'fast-interaction')) {
-      const effort = role.binding?.reasoningEffort;
-      const mark = effort === undefined || effort === 'off' ? ' · 服务默认' : `@${effort}`;
-      const line = element('p', undefined, `${role.roleLabel}：${role.binding === null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}${mark}`} · ${role.statusLabel}`);
-      line.dataset['modelRole'] = role.roleId; line.dataset['modelRoleStatus'] = role.status;
-      currentRoles.append(line);
+    currentRoles.setAttribute('aria-label', '当前使用的模型');
+    const main = projection.modelRoles.find(role => role.roleId === 'foreground-pro');
+    const flash = projection.modelRoles.find(role => role.roleId === 'foreground-flash');
+    const name = (role: typeof main): string => role?.binding == null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}`;
+    const summary = element('p', undefined, `AI7 当前使用：${name(main)}；${flash?.source === 'follows-foreground-pro' ? '对话、润色和 AI 助手也使用同一个模型。' : `对话、润色和 AI 助手使用：${name(flash)}。`}`);
+    summary.dataset['modelSummary'] = 'true'; currentRoles.append(summary);
+    const shownReasons = new Set<string>();
+    for (const role of projection.modelRoles) {
+      const reason = role.statusDetail?.split('。')[0];
+      if (technicalLayerVisible) {
+        const effort = role.binding?.reasoningEffort;
+        const line = element('p', undefined, `${role.roleLabel}：${name(role)} · 思考强度：${effort === undefined || effort === 'off' ? '服务默认' : effort} · ${role.sourceLabel} · ${role.statusLabel}${reason ? ` · ${reason}。请选择其他模型。` : ''}`);
+        line.dataset['modelRole'] = role.roleId === 'foreground-pro' ? 'main-editorial' : role.roleId === 'foreground-flash' ? 'fast-interaction' : role.roleId; line.dataset['modelRoleStatus'] = role.status;
+        currentRoles.append(line);
+      } else if (reason && !shownReasons.has(reason)) {
+        currentRoles.append(element('p', 'attention-note', `${role.statusLabel}：${reason}。请选择其他模型。`)); shownReasons.add(reason);
+      }
     }
     content.append(currentRoles);
     const unsupported = element('section', 'review-section model-unsupported-providers');

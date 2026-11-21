@@ -16,7 +16,7 @@ import { modelServiceRuntimeBinding } from '../shared/protocol/model-service.js'
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 
 /** Model settings chooses independent role bindings from the account catalogue or a custom model ID. */
-export type ModelServiceFlowApi = Pick<RendererApi, 'saveModelServiceCredential' | 'removeModelServiceCredential' | 'selectMainRoleModel' | 'selectFastRoleModel' | 'selectBothRoleModels' | 'refreshModelServiceModels' | 'testModelServiceConnection'>;
+export type ModelServiceFlowApi = Pick<RendererApi, 'saveModelServiceCredential' | 'removeModelServiceCredential' | 'selectProModel' | 'selectFlashModel' | 'clearFlashModel' | 'refreshModelServiceModels' | 'testModelServiceConnection'>;
 
 export interface ModelServiceFlowOptions {
   readonly api: ModelServiceFlowApi;
@@ -44,7 +44,7 @@ export interface ModelServiceChoice {
   readonly modelLabel: string;
 }
 
-export const USE_FOR_BOTH_ROLES_LABEL = '用于主编辑与快速交互';
+export const USE_FOR_BOTH_ROLES_LABEL = '使用这个模型';
 export const OPEN_MODEL_SERVICE_LABEL = '打开模型服务设置';
 
 const DISPOSITION_WORDS: Readonly<Record<Exclude<ModelServiceModelDisposition, 'eligible'>, string>> = {
@@ -198,10 +198,11 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
 function modelStep(projection: ModelServiceSettingsProjection, channel: ModelServiceChannelProjection, options: ModelServiceFlowOptions): HTMLElement {
   const step = el('div', 'model-service-flow-step');
   step.dataset['flowStep'] = 'model';
-  step.append(el('h4', undefined, technicalLayerVisible ? '3. 选择主编辑与快速交互模型' : '3. AI7 使用的模型'));
+  step.append(el('h4', undefined, '3. AI7 使用的模型'));
   const ready = credentialReady(projection, channel.route);
   const offered = channel.models.filter(bothEligible);
-  const current = currentModelServiceChoice(projection);
+  const pro = projection.modelRoles.find(role => role.roleId === 'foreground-pro');
+  const current = pro?.binding == null ? null : { route: pro.binding.providerId, modelId: pro.binding.modelId };
   const preferred = options.modelId || (current?.route === channel.route ? current.modelId : null);
   const group = el('fieldset', 'model-service-flow-models');
   let favourites = options.favourites ?? {};
@@ -212,7 +213,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   filter.value = options.filter ?? '';
   filter.addEventListener('input', () => { options.chooseFilter?.(filter.value); repaintCatalogue(); });
   filterLabel.append(filter);
-  const legend = el('legend', undefined, '选择模型，再指定使用角色');
+  const legend = el('legend', undefined, '选择要使用的模型');
   if (offered.length === 0) legend.append(` · ${ready ? '正在获取模型列表' : '保存密钥后获取模型'}`);
   group.append(legend);
   let checked: ModelServiceChannelModelProjection | null = null;
@@ -231,31 +232,42 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   custom.type = 'text'; custom.maxLength = 128; custom.dataset['customModelId'] = 'true';
   custom.disabled = !ready;
   customLabel.append(custom);
-  const effortChoices = el('datalist'); effortChoices.id = `model-efforts-${channel.channelId}`;
   const effortInputs = new Map<'main' | 'fast', HTMLInputElement>();
+  const effortSelects = new Map<'main' | 'fast', HTMLSelectElement>();
   const effortLabels = (['main', 'fast'] as const).map((role) => {
     const label = role === 'main' ? '主编辑思考强度' : '快速交互思考强度';
-    const wrapper = el('label', 'model-service-effort', label);
+    const wrapper = el('label', 'model-service-effort', role === 'main' ? '思考强度' : '较轻模型的思考强度');
+    const select = el('select'); select.setAttribute('aria-label', label); select.disabled = !ready;
     const input = el('input'); input.type = 'text'; input.maxLength = 40;
-    input.setAttribute('aria-label', label); input.placeholder = '服务默认'; input.disabled = !ready;
-    input.dataset['reasoningEffort'] = role; input.setAttribute('list', effortChoices.id);
-    const roleId = role === 'main' ? 'main-editorial' : 'fast-interaction';
-    const saved = projection.roles.find((entry) => entry.roleId === roleId)?.binding?.reasoningEffort;
+    input.setAttribute('aria-label', `${label}其他`); input.disabled = !ready;
+    input.dataset['reasoningEffort'] = role;
+    const saved = projection.modelRoles.find(entry => entry.roleId === (role === 'main' ? 'foreground-pro' : 'foreground-flash'))?.binding?.reasoningEffort;
     input.value = options.effortDraft?.(channel.channelId, role) ?? (saved === 'off' ? '' : saved ?? '');
-    effortInputs.set(role, input); wrapper.append(input);
+    select.addEventListener('change', () => {
+      input.hidden = select.value !== '__other';
+      if (!input.hidden) input.focus();
+      else { input.value = select.value; input.dispatchEvent(new Event('input')); }
+    });
+    effortInputs.set(role, input); effortSelects.set(role, select); wrapper.append(select, input);
     return wrapper;
   });
   const chosenEffort = (role: 'main' | 'fast' = 'main'): string => effortInputs.get(role)!.value.trim() || 'off';
-  const effortNote = el('p', 'field-note', '留空使用服务默认。建议值来自服务文档；手填其他值由模型服务验证，可能不被接受。只影响之后开始的任务。');
+  const effortNote = el('p', 'field-note', '只影响之后开始的任务。');
   const roleButtons: HTMLButtonElement[] = [];
   const paint = (): void => {
     test.disabled = testFast.disabled = testing || !ready || checked === null;
-    const sameEffort = projection.roles.filter((role) => role.roleId === 'main-editorial' || role.roleId === 'fast-interaction')
-      .every((role) => (role.binding?.reasoningEffort ?? 'off') === chosenEffort(role.roleId === 'main-editorial' ? 'main' : 'fast'));
+    const sameEffort = (pro?.binding?.reasoningEffort ?? 'off') === chosenEffort();
     use.disabled = !ready || checked === null || (current?.route === channel.route && current.modelId === checked.modelId && sameEffort);
     const runtime = channel.route === null || checked === null ? undefined : modelServiceRuntimeBinding(channel.route, checked.modelId, 'main');
     const levels = runtime === undefined ? [] : CONFIGURED_MODEL_REASONING[`${runtime.route}/${runtime.model}`]?.efforts ?? CONFIGURED_ROUTE_REASONING[runtime.route]?.efforts ?? [];
-    effortChoices.replaceChildren(...levels.map((level) => { const option = el('option'); option.value = level; return option; }));
+    for (const [role, select] of effortSelects) {
+      const value = effortInputs.get(role)!.value;
+      select.replaceChildren(...[['', '服务默认'], ...levels.map(level => [level, level]), ['__other', '其他…']].map(([value, label]) => {
+        const option = el('option', undefined, label); option.value = value!; return option;
+      }));
+      select.value = value === '' || levels.includes(value) ? value : '__other';
+      effortInputs.get(role)!.hidden = select.value !== '__other';
+    }
     for (const button of roleButtons) button.disabled = !ready || checked === null;
     const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
     const own = tested !== null && tested.modelId === checked?.modelId ? tested : null;
@@ -331,13 +343,32 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     const matches = (model: ModelServiceChannelModelProjection): boolean =>
       `${model.modelId} ${model.modelLabel} ${modelLabelWords(model)}`.toLocaleLowerCase().includes(query);
     const starred = favourites[channel.channelId] ?? [];
-    const sorted = [...entries].sort((a, b) => Number(starred.includes(b.model.modelId)) - Number(starred.includes(a.model.modelId)));
-    const choices: HTMLOptionElement[] = [];
+    const category = (id: string): number => channel.recommended?.pro.includes(id) ? 0 : channel.recommended?.flash.includes(id) ? 1 : 2;
+    const sorted = [...entries].sort((a, b) => category(a.model.modelId) - category(b.model.modelId) || Number(starred.includes(b.model.modelId)) - Number(starred.includes(a.model.modelId)));
+    if (technicalLayerVisible) rows.replaceChildren();
+    let previousCategory = -1;
+    const choices: (HTMLOptionElement | HTMLOptGroupElement)[] = [];
+    const recommended = new Set<string>();
+    if (!technicalLayerVisible) for (const [tier, label] of [['pro', '推荐 · 主要模型'], ['flash', '推荐 · 较轻模型']] as const) {
+      const group = el('optgroup'); group.label = label;
+      for (const id of channel.recommended?.[tier] ?? []) {
+        const model = offered.find(model => model.modelId === id);
+        if (!model || (!matches(model) && id !== checked?.modelId)) continue;
+        const option = el('option', undefined, modelLabelWords(model)); option.value = id; group.append(option); recommended.add(id);
+      }
+      if (group.children.length > 0) choices.push(group);
+    }
     for (const { model, row, favourite } of sorted) {
       row.hidden = !matches(model);
       paintFavourite(favourite, model.modelId);
-      if (technicalLayerVisible) rows.append(row);
-      else if (matches(model) || model.modelId === checked?.modelId) {
+      if (technicalLayerVisible) {
+        const group = category(model.modelId);
+        if (matches(model) && group !== previousCategory) {
+          rows.append(el('h5', undefined, group === 0 ? '推荐 · 主要模型' : group === 1 ? '推荐 · 较轻模型' : '其他模型')); previousCategory = group;
+        }
+        rows.append(row);
+      }
+      else if (!recommended.has(model.modelId) && (matches(model) || model.modelId === checked?.modelId)) {
         const option = el('option', undefined, `${starred.includes(model.modelId) ? '★ ' : ''}${modelLabelWords(model)}${!matches(model) ? ' · 已选（不匹配筛选）' : ''}`);
         option.value = model.modelId; choices.push(option);
       }
@@ -359,8 +390,8 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     custom.value = options.modelId; chooseCustom();
   }
   for (const [role, label, select] of [
-    ['main', '用于主编辑角色', options.api.selectMainRoleModel],
-    ['fast', '用于快速交互角色', options.api.selectFastRoleModel],
+    ['main', '用于主要任务', options.api.selectProModel],
+    ['fast', '用于较轻的任务', options.api.selectFlashModel],
   ] as const) {
     const button = el('button', 'secondary', label); button.type = 'button'; button.dataset['action'] = `select-${role}-role-model`;
     button.addEventListener('click', () => void (async () => {
@@ -389,22 +420,33 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   use.addEventListener('click', () => void (async () => {
     if (checked === null || channel.route === null) return;
     use.disabled = true;
-    options.setStatus(technicalLayerVisible ? '正在保存主编辑与快速交互的模型…' : '正在保存模型…', 'busy');
+    options.setStatus('正在保存模型…', 'busy');
     try {
-      const next = await useForBothRoles(options.api, { route: channel.route, modelId: checked.modelId, reasoningEffort: chosenEffort(), fastReasoningEffort: chosenEffort('fast') });
-      options.setEffortDraft?.(channel.channelId, 'main', undefined); options.setEffortDraft?.(channel.channelId, 'fast', undefined);
+      const next = await options.api.selectProModel({ route: channel.route, modelId: checked.modelId, reasoningEffort: chosenEffort() });
+      options.setEffortDraft?.(channel.channelId, 'main', undefined);
       options.render(next);
-      options.setStatus(`之后开始的任务使用 ${channel.channelLabel} / ${modelLabelWords(checked)}；已在进行的任务不受影响`, 'success');
+      options.setStatus(`之后开始的主要任务使用 ${channel.channelLabel} / ${modelLabelWords(checked)}；已在进行的任务不受影响`, 'success');
     } catch (error) { use.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
   })());
   paint();
   if (checked !== null) options.chooseModel?.(checked.modelId);
   const actions = el('div', 'button-row');
-  actions.append(...(technicalLayerVisible ? [test, testFast] : []), ...roleButtons, use);
+  actions.append(use);
+  const optional = el('section', 'model-service-optional');
+  optional.append(el('h4', undefined, '可选：为较轻的任务另选一个模型'), el('p', 'field-note', '对话、润色和 AI 助手可以使用较轻的模型。在上面的列表中选择后，点击下方按钮。'), effortLabels[1]!, roleButtons[1]!);
+  const clear = el('button', 'quiet', '不单独选择'); clear.type = 'button'; clear.dataset['action'] = 'clear-flash-model';
+  clear.disabled = projection.modelRoles.find(role => role.roleId === 'foreground-flash')?.source === 'follows-foreground-pro';
+  clear.addEventListener('click', () => void (async () => {
+    clear.disabled = true;
+    try { options.render(await options.api.clearFlashModel()); options.setStatus('较轻的任务使用同一个模型。', 'success'); }
+    catch (error) { clear.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
+  })());
+  optional.append(clear);
+  if (technicalLayerVisible) actions.append(test, testFast, roleButtons[0]!);
   // A manual model ID is the developer layer's (Issue #1431 item 97); ordinary settings choose from the searchable catalogue.
-  step.append(filterLabel, group, matchCount, ...(technicalLayerVisible ? [customLabel] : []), ...effortLabels, effortChoices, effortNote, actions);
+  step.append(filterLabel, group, matchCount, ...(technicalLayerVisible ? [customLabel] : []), effortLabels[0]!, effortNote, actions, optional);
   const testStep = el('div', 'model-service-flow-test');
-  if (!technicalLayerVisible) testStep.append(el('h4', undefined, '4. 测试连接'), test, testFast);
+  if (!technicalLayerVisible) testStep.append(el('h4', undefined, '4. 测试连接'), test);
   testStep.append(feedback, el('p', 'field-note', technicalLayerVisible ? MODEL_CONNECTION_TEST_NOTE : '只发送一条测试消息，不含图书文字。'));
   step.append(testStep);
   const others = channel.models.filter((model) => !bothEligible(model));
@@ -429,7 +471,7 @@ export function modelServiceFlow(projection: ModelServiceSettingsProjection, opt
   section.dataset['modelServiceFlow'] = 'true';
   section.dataset['modelServiceMode'] = technicalLayerVisible ? 'developer' : 'ordinary';
   section.setAttribute('aria-label', '选择模型');
-  if (technicalLayerVisible) section.append(el('h3', undefined, '选择模型'), el('p', 'field-note', `主编辑角色与快速交互角色可分别选择模型；${MODEL_SERVICE_ROUTE_EFFECT_LABEL}`));
+  if (technicalLayerVisible) section.append(el('h3', undefined, '选择模型'), el('p', 'field-note', `选择主模型和可选的较轻模型；${MODEL_SERVICE_ROUTE_EFFECT_LABEL}`));
   const channels = el('fieldset', 'model-service-flow-channels');
   channels.append(el('legend', undefined, '1. 渠道'));
   const steps = el('div');
