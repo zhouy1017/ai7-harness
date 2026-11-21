@@ -20,6 +20,7 @@ async function setup(refuse = false, press = true) {
       designate: { available: false, unavailableReason: '先保存里程碑版本' }, statement: '仅表示此版本可用于上述发稿范围；AI7 不会发布或发送', actualsPrompt: null }, exports: [] };
   const calls: string[] = [];
   const api = {
+    designatePublicationVersion: vi.fn(),
     inspectDeliverables: vi.fn(async () => { calls.push('inspect'); return structuredClone(projection); }),
     getManuscriptWindow: vi.fn(async () => { calls.push('window'); }),
     saveMilestone: vi.fn(async (input) => {
@@ -42,6 +43,7 @@ it('saves with menu defaults and opens the selected designation at its confirm',
   const { root, api, calls, setStatus } = await setup();
   expect(calls).toEqual(['save', 'inspect']);
   expect(api.getManuscriptWindow).not.toHaveBeenCalled();
+  expect(api.designatePublicationVersion).not.toHaveBeenCalled();
   expect(setStatus).toHaveBeenLastCalledWith('里程碑已保存，请在下方确认设为发稿版本。', 'success');
   expect(refreshPackage).toHaveBeenCalledTimes(2);
   expect(miniDocument.activeElement).toBe(root.querySelector('[data-publication-action="confirm"]'));
@@ -111,4 +113,49 @@ it('ignores an old reading begun during saving even when it answers after the sa
   answer(before); await settle();
   expect(root.querySelector('form.publication-designate')).not.toBeNull();
   expect(root.querySelector('[data-publication-action="designate"]')?.textContent).toBe('设为发稿版本…');
+});
+
+it('holds a saved milestone through two failed reads and offers a reread instead of another save', async () => {
+  const { root, api, setStatus } = await setup(false, false);
+  api.inspectDeliverables.mockRejectedValueOnce(new Error('read failed')).mockRejectedValueOnce(new Error('read failed'));
+  const pressed = root.querySelector('[data-publication-action="designate"]')!;
+  pressed.click(); await settle();
+  expect(root.querySelector('[data-publication-action="designate"]')?.textContent).toBe('设为发稿版本…');
+  root.querySelector('[data-publication-action="designate"]')!.click(); pressed.click(); await settle();
+  expect(api.saveMilestone).toHaveBeenCalledTimes(1);
+  expect(setStatus).toHaveBeenLastCalledWith('里程碑已保存，但交付物未能重新读取。请点「重新读取交付物」后再确认发稿版本。', 'error');
+  root.querySelector('[data-publication-action="refresh"]')!.click(); await settle();
+  expect(root.querySelector('input')?.checked).toBe(true);
+});
+it('keeps the focused busy control when a reading answers during saving', async () => {
+  const { root, api, surface } = await setup(false, false);
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  const save = api.saveMilestone.getMockImplementation()!;
+  api.saveMilestone.mockImplementation(async input => { await pending; return save(input); });
+  const pressed = root.querySelector('[data-publication-action="designate"]')!;
+  pressed.focus(); pressed.click(); surface.start(); await settle();
+  expect(root.querySelector('[data-publication-action="designate"]')).toBe(pressed);
+  expect(miniDocument.activeElement).toBe(pressed);
+  expect(pressed.disabled).toBe(false);
+  finish(); await settle();
+});
+it('keeps a refusal sentence when the follow-up read fails too', async () => {
+  const { root, api, setStatus } = await setup(true, false);
+  api.inspectDeliverables.mockRejectedValueOnce(new Error('read failed'));
+  root.querySelector('[data-publication-action="designate"]')!.click(); await settle();
+  expect(setStatus).toHaveBeenLastCalledWith('暂时无法保存，请重试。', 'error');
+});
+it('clears busy controls when a successful reread does not contain the saved milestone', async () => {
+  const { root, api } = await setup(false, false);
+  const before = await api.inspectDeliverables();
+  api.inspectDeliverables.mockResolvedValueOnce(before);
+  root.querySelector('[data-publication-action="designate"]')!.click(); await settle();
+  expect(root.querySelector('.deliverables-publication')?.getAttribute('aria-busy')).toBeNull();
+  expect(root.querySelector('[data-publication-action="refresh"]')).not.toBeNull();
+});
+it('prevents a held Enter from activating the newly focused confirm', async () => {
+  const { root, api } = await setup();
+  expect(root.querySelector('[data-publication-action="confirm"]')!.dispatchEvent({ type: 'keydown', key: 'Enter', ...{ repeat: true } })).toBe(false);
+  expect(api.designatePublicationVersion).not.toHaveBeenCalled();
 });

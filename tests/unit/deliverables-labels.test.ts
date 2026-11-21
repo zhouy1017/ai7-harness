@@ -158,7 +158,7 @@ describe('the words of 交付物', () => {
     expect(DELIVERABLES_DESTINATION_ACTIONS).toEqual(['打开稿件', '工作概览']);
     expect(MILESTONE_LIST_HEADING).toBe('里程碑版本');
     expect(PUBLICATION_HISTORY_HEADING).toBe('设为发稿版本的记录');
-    expect(PUBLICATION_ACTION_LABELS).toEqual({ designate: '设为发稿版本…', saveAndDesignate: '存为里程碑并设为发稿版本…', confirm: '设为发稿版本', cancel: '取消', open: '打开交付物' });
+    expect(PUBLICATION_ACTION_LABELS).toEqual({ designate: '设为发稿版本…', saveAndDesignate: '存为里程碑并设为发稿版本…', confirm: '设为发稿版本', refresh: '重新读取交付物', cancel: '取消', open: '打开交付物' });
     expect(PUBLICATION_FORM_HEADING).toBe('设为发稿版本');
     expect(PUBLICATION_MILESTONE_LEGEND).toBe('选择里程碑版本');
     expect([PUBLICATION_SCOPE_LABEL, PUBLICATION_BASIS_LABEL]).toEqual(['发稿范围', '依据']);

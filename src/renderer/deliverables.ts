@@ -328,7 +328,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
    * Read 交付物 again and paint it. Every read has a ticket: an answer that comes back after a newer read
    * or a designation began, after the destination was left, or for another Book never paints.
    */
-  function refresh(): void {
+  function refresh(preserveStatus = false): void {
     if (destroyed) return;
     const ticket = ++generation;
     void api.inspectDeliverables().then(
@@ -340,9 +340,12 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         } else render('keep');
       },
       (error) => {
-        if (destroyed || ticket !== generation || !host.isConnected) return;
-        if (projection === null) renderUnavailable(error);
-        else if (savedForDesignation === null) options.setStatus(options.errorMessage(error, DELIVERABLES_STATUS_LINES.refreshFailed), 'error');
+        if (destroyed || working || ticket !== generation || !host.isConnected) return;
+        if (savedForDesignation !== null) {
+          render('keep');
+          options.setStatus(DELIVERABLES_STATUS_LINES.savedReadFailed, 'error');
+        } else if (projection === null) renderUnavailable(error);
+        else if (!preserveStatus) options.setStatus(options.errorMessage(error, DELIVERABLES_STATUS_LINES.refreshFailed), 'error');
       },
     );
   }
@@ -486,7 +489,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const heading = el('h4', undefined, `${MILESTONE_LIST_HEADING}${next.publication.milestonesTruncated ? ` · ${milestonesTruncatedLine(milestones.length)}` : ''}`);
     section.append(heading);
     if (milestones.length === 0) {
-      heading.append(' · ', el('span', 'milestone-list-empty', MILESTONE_LIST_EMPTY));
+      heading.append(' · ', el('span', 'milestone-list-empty', savedForDesignation === null ? MILESTONE_LIST_EMPTY : DELIVERABLES_STATUS_LINES.savedReadFailed));
       return section;
     }
     const list = el('ol', 'milestone-list');
@@ -585,6 +588,15 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     row.append(open);
     area.append(row);
     const availability = next.publication.designate;
+    if (savedForDesignation !== null) {
+      open.disabled = true;
+      const retry = el('button', 'secondary', PUBLICATION_ACTION_LABELS.refresh);
+      retry.type = 'button';
+      retry.dataset['publicationAction'] = 'refresh';
+      retry.addEventListener('click', () => refresh());
+      row.append(retry);
+      return area;
+    }
     if (!availability.available && !saveFirst) {
       open.disabled = true;
       const why = el('span', 'publication-unavailable-reason', availability.unavailableReason ?? '');
@@ -707,6 +719,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     reasonLabel.append(reasonPrefix, reason);
     confirm.append(reasonLabel);
     confirm.addEventListener('click', () => void confirmDesignation(state));
+    confirm.addEventListener('keydown', (event) => { if (event.key === 'Enter' && event.repeat) event.preventDefault(); });
     const cancel = el('button', 'quiet', PUBLICATION_ACTION_LABELS.cancel);
     cancel.type = 'button';
     cancel.dataset['publicationAction'] = 'cancel';
@@ -764,10 +777,15 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
 
   /** Select only the milestone this action saved, including after a failed re-read recovers. */
   function openSavedDesignation(): void {
-    if (savedForDesignation === null || !projection?.publication.milestones.some((item) => item.milestoneId === savedForDesignation)) return;
+    if (savedForDesignation === null || !projection?.publication.milestones.some((item) => item.milestoneId === savedForDesignation)) {
+      render('keep');
+      options.setStatus(DELIVERABLES_STATUS_LINES.savedReadFailed, 'error');
+      return;
+    }
     form = { milestoneId: savedForDesignation, scope: PUBLICATION_SCOPE_DEFAULT, basis: PUBLICATION_BASIS_DEFAULT, problem: null };
     savedForDesignation = null;
     render('confirm');
+    options.setStatus(DELIVERABLES_STATUS_LINES.milestoneSaved, 'success');
   }
 
   /** Save with the manuscript save menu's defaults, then select that exact milestone in place. */
@@ -793,7 +811,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       generation += 1;
       render('designate');
       options.setStatus(options.errorMessage(error, DELIVERABLES_STATUS_LINES.milestoneFailed), 'error');
-      refresh();
+      refresh(true);
       return;
     }
     if (destroyed) return;
@@ -810,10 +828,10 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       working = false;
       if (destroyed) return;
       render('keep');
+      options.setStatus(DELIVERABLES_STATUS_LINES.savedReadFailed, 'error');
       refresh();
     }
     bundle.refresh();
-    options.setStatus(DELIVERABLES_STATUS_LINES.milestoneSaved, 'success');
   }
 
   /** What 设为发稿版本 records for the form as it stands: an empty field is its default. */

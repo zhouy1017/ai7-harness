@@ -46,6 +46,7 @@ export const PUBLICATION_ACTION_LABELS = {
   designate: '设为发稿版本…',
   saveAndDesignate: '存为里程碑并设为发稿版本…',
   confirm: '设为发稿版本',
+  refresh: '重新读取交付物',
   cancel: '取消',
   open: '打开交付物',
 } as const;
@@ -276,6 +277,7 @@ export const DELIVERABLES_STATUS_LINES = {
   savingMilestone: '正在保存里程碑版本…',
   milestoneFailed: '里程碑未保存。',
   milestoneSaved: '里程碑已保存，请在下方确认设为发稿版本。',
+  savedReadFailed: '里程碑已保存，但交付物未能重新读取。请点「重新读取交付物」后再确认发稿版本。',
   designating: '正在设为发稿版本…',
   designateFailed: '未能设为发稿版本。',
 } as const;
