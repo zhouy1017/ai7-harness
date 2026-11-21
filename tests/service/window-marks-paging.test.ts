@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import type { ProducedEditorialMarkInput } from '../../src/service/editorial-marks.js';
@@ -192,6 +194,26 @@ it('steps exactly as the rail lists and as the 批注栏\'s own filter judges ea
   const everyModel = [...new Set([...cards.values()].map((card) => editorialMarkFilterModel(card.source)).filter((model) => model !== null))] as string[];
   expect(everyModel).toContain('AI7');
   expect(walk(book, 'next', { categories: [], models: everyModel }, start).every((markId) => cards.get(markId)!.source.kind === 'ai7')).toBe(true);
+});
+
+it('tells two marks that freeze no model name apart by the models their Tasks recorded (#1604)', async () => {
+  const { book, blockId, ids } = await denseParagraph(1, 100, () => ({ label: '错别字与规范', binding: LOCAL }));
+  const text = Array.from(windowAt(book, blockId).blocks.find((block) => block.blockId === blockId)!.text);
+  const tasks = [randomUUID(), randomUUID()], models = ['recorded-model-a', 'recorded-model-b'];
+  // Each Task's provider resolution names the model it ran on; neither mark froze one.
+  const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { enableForeignKeyConstraints: false });
+  tasks.forEach((task, index) => database.prepare('INSERT INTO analysis_plan_records(task_intent_id, plan_version, component, canonical_json, sha256, created_at) VALUES (?, 1, ?, ?, ?, ?)')
+    .run(task, 'provider-resolution-plan', JSON.stringify({ executionRoute: { kind: 'test-route', model: models[index] } }), 'a'.repeat(64), '2000-01-01T00:00:00.000Z'));
+  database.close();
+  const recorded = store.createProducedEditorialMarks(tasks.map((taskId, index) => ({ manuscriptId: book.manuscriptId, branchId: book.branchId, blockId,
+    fromGrapheme: 10 + index * 10, toGrapheme: 11 + index * 10, pinnedText: text[10 + index * 10]!, kind: 'annotation' as const, body: '公开合成批注', proposedText: null,
+    rationale: null, atomicGroupId: null, source: { kind: 'ai7' as const, origin: 'task' as const, label: '自定义类别', taskId }, basis: [] })), (markIds) => markIds.map((markId) => markId!));
+  const start = { blockId: windowAt(book, blockId).blocks[0]!.blockId, grapheme: -1, markId: null };
+  expect(walk(book, 'next', { categories: [], models: [models[0]!] }, start)).toEqual([recorded[0]]);
+  expect(walk(book, 'next', { categories: [], models: [models[1]!] }, start)).toEqual([recorded[1]]);
+  expect(walk(book, 'next', { categories: [], models: models }, start)).toEqual(recorded);
+  expect(walk(book, 'previous', { categories: [], models: [models[0]!] }, { blockId, grapheme: 1_000_000, markId: null })).toEqual([recorded[0]]);
+  expect(walk(book, 'next', { categories: [], models: ['AI7 本地检查'] }, start)).toEqual(ids);
 });
 
 it('refuses a malformed marks page or pending step at the request frame', () => {

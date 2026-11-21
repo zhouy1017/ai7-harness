@@ -1235,6 +1235,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'local-check-exact-sample1',
     'review-keyboard-wide',
     'review-keyboard-gate',
+    'marks-paging-wide',
+    'marks-paging-gate',
     'review-batch-undo-wide',
     'review-batch-undo-gate',
     'dispatch-review-wide',

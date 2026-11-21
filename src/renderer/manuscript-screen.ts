@@ -2466,7 +2466,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     });
     if (step === 'set-marks') {
       // The text is the text on screen: only the marks are new, so nothing open over the text is touched (review P2-7).
-      editor.setMarks(next.marks, next.marksTruncated);
+      editor.setMarks(next.marks, next.marksTruncated, next.marksPage);
       editorialMarks?.refreshComments();
       manuscriptRail?.refresh();
       const refreshed = [...(editorHost.dataset['marksRefreshed'] ?? '').split(',').filter((entry) => entry.length > 0), 'review-settled'].slice(-12);
@@ -2739,7 +2739,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
           const read = await api.getManuscriptWindowAt({
             manuscriptId: shown.manuscriptId, branchId: shown.branchId, target: { kind: 'window-start', blockId: shown.blocks[0]!.blockId },
           });
-          return read.blocks[0]?.blockId === shown.blocks[0]?.blockId ? { journalSequence: read.journalSequence, marks: read.marks, truncated: read.marksTruncated } : null;
+          return read.blocks[0]?.blockId === shown.blocks[0]?.blockId ? { journalSequence: read.journalSequence, marks: read.marks, truncated: read.marksTruncated, page: read.marksPage } : null;
         },
       },
       // 就这段发起任务… (Issue #423, S77b): the Book's manuscript only; the prepared Task's plan opens in the side slot.
