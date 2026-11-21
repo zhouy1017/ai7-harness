@@ -1,45 +1,16 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { unzipSync, zipSync } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseDocx, parseNativeDocxIntake, compileWordTrackedDocx, compileWordTrackedDocxBytes, WORD_DOCX_PARSER_IDENTITY,
   type ParsedDocx, type ParsedDocxBlock, type NativeDocxIntakeParse } from '../../src/service/docx.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
-import {
-  IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL,
-  IMPORT_RETENTION_TRIGGER_SQL,
-  importFidelityCategoriesShape,
-  initializeWordImportRetentionSchema,
-  validateWordImportRetentionSchema,
-  WORD_IMPORT_RETENTION_SCHEMA_SQL,
-  readWordParentSourcePin,
-  readWordImportChoiceRecord,
-  wordParentSourcePinRecord,
-  requireWordParentSourcePin,
-  requireWordRevisionSource,
-  retainWordRevisionSource,
-  wordTrackedSamples,
-  wordTrackedSampleRecord,
-  WORD_EXTRACTOR_IDENTITY,
-  stageWordRevisionIntake,
-  requireWordStagedIntake,
-  createWordSampleDetailContext,
-  wordSampleDetailContextCurrent,
-  resolveWordSampleDetailSource,
-  wordSampleDetailStream,
-  pageWordSampleDetail,
-  bindWordReadingToRevision,
-  retainWordManuscriptSourceSegments,
-  requireWordManuscriptSourceSegments,
-  retainWordRevisionImport,
-  type WordImportChoiceRecord,
-} from '../../src/service/import-retention.js';
+import { IMPORT_RETENTION_TRIGGER_SQL, validateWordImportRetentionSchema, WORD_IMPORT_RETENTION_SCHEMA_SQL, readWordParentSourcePin, readWordImportChoiceRecord, wordParentSourcePinRecord, requireWordParentSourcePin, requireWordRevisionSource, retainWordRevisionSource, wordTrackedSamples, wordTrackedSampleRecord, WORD_EXTRACTOR_IDENTITY, stageWordRevisionIntake, requireWordStagedIntake, createWordSampleDetailContext, wordSampleDetailContextCurrent, resolveWordSampleDetailSource, wordSampleDetailStream, pageWordSampleDetail, bindWordReadingToRevision, retainWordManuscriptSourceSegments, requireWordManuscriptSourceSegments, retainWordRevisionImport, type WordImportChoiceRecord } from '../../src/service/import-retention.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
-import { DATA_VERSION_TRIGGER_SQL, DataVersionLedger, dataVersionMarkerPath, readDataVersionMarkerText,
-  refuseNewerDataVersion } from '../../src/service/data-version.js';
+import { dataVersionMarkerPath } from '../../src/service/data-version.js';
 import { EditorialLearningLedger } from '../../src/service/learning/ledger.js';
 import { wordTrackedEditCandidate, learningMaterialDigest, wordLocalImportAdmissions } from '../../src/service/learning-eligibility.js';
 import { readWordManuscriptExportSource, planWordManuscriptExport } from '../../src/service/manuscript-export.js';
@@ -48,8 +19,7 @@ import { createWordImportedMarks, validateWordImportedMarkSources } from '../../
 import { EditorialMarkStore } from '../../src/service/editorial-marks.js';
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } from '../../src/shared/protocol.js';
 import { EditorialStore, SOURCE_VERSION_PARSER_CHANGED_MESSAGE } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, MODEL_REQUEST_ADMISSION_SCHEMA_VERSION,
-  PROPOSAL_CONFLICT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../../src/shared/protocol.js';
 import {
   ADMITTED_BASELINE_DOCX,
@@ -57,17 +27,9 @@ import {
   composeRevisedDocx,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
-import { IMPORT_RETENTION_RELATIONS_DROP_ORDER, WORD_IMPORT_RETENTION_RELATIONS_DROP_ORDER, SAMPLE1_V1_REPORT, stageHistoricalTrackedDocxFixture } from '../support/import-retention.js';
-import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
-import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
-import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
+import { WORD_IMPORT_RETENTION_RELATIONS_DROP_ORDER, SAMPLE1_V1_REPORT, stageHistoricalTrackedDocxFixture } from '../support/import-retention.js';
 import { SAMPLE1_BLOCKS, importSample1Book, requireExactSample1, sample1Path } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
-import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
-import { MIGRATION_EMPTY_RELATIONS, PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
-import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for import retention (Issue #410, plan slice S61; ADR 0086) over the real
 // `EditorialStore` on a temporary Agent Data Root. Every manuscript is exact `sample1` or composed from it —
@@ -104,28 +66,6 @@ function dropEmptyWordRetentionLayer(db: DatabaseSync): void {
     expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()?.total).toBe(0);
     db.exec(`DROP TABLE ${table}`);
   }
-}
-
-/** Reader 92 differs here only in the absent Word layer and the exact version metadata, never in source/retention bytes. */
-function constructReader92Predecessor(db: DatabaseSync): void {
-  dropEmptyWordRetentionLayer(db);
-  const { latest, count } = new DataVersionLedger(db).standing();
-  if (count !== 1 || latest?.schemaRevision !== LATEST_SCHEMA_VERSION || latest.upgrade !== null) {
-    throw new Error('expected one unupgraded current version record');
-  }
-  const { upgrade, ...value } = latest;
-  const old = canonicalRecord({ schema: 'ai7.store-version/1', ...value, supersedes: null, schemaRevision: MODEL_REQUEST_ADMISSION_SCHEMA_VERSION });
-  db.exec('DROP TRIGGER store_versions_no_update');
-  db.prepare('UPDATE store_versions SET schema_revision = ?, canonical_json = ?, sha256 = ? WHERE record_id = ?')
-    .run(MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, old.json, old.digest, latest.recordId);
-  db.exec(DATA_VERSION_TRIGGER_SQL.store_versions_no_update!);
-  execPre74Fixture(db, `PRAGMA user_version = ${MODEL_REQUEST_ADMISSION_SCHEMA_VERSION}`);
-  expect(new DataVersionLedger(db).standing().latest?.schemaRevision).toBe(MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
-  const markerPath = dataVersionMarkerPath(roots.dataRoot);
-  const marker = readDataVersionMarkerText(readFileSync(markerPath, 'utf8'));
-  const oldMarker = { ...marker, schemaRevision: MODEL_REQUEST_ADMISSION_SCHEMA_VERSION };
-  refuseNewerDataVersion(oldMarker, { dataVersion: 1, schemaRevision: MODEL_REQUEST_ADMISSION_SCHEMA_VERSION });
-  writeFileSync(markerPath, JSON.stringify(oldMarker));
 }
 
 function retainedSourceRows(db: DatabaseSync) {
@@ -223,7 +163,7 @@ describe('closed Word retention definitions (#1132)', () => {
       store.markCleanShutdown();
     } finally { store.close(); }
     withDatabase(false, (db) => {
-      initializeWordImportRetentionSchema(db);
+      validateWordImportRetentionSchema(db);
       db.exec('BEGIN IMMEDIATE');
       try {
         const unsupported = inputs[0]!;
@@ -252,7 +192,7 @@ describe('closed Word retention definitions (#1132)', () => {
       const pin = readWordParentSourcePin(db, bookId, sourceVersionId);
       expect(pin.parserIdentity).toBe('ai7-docx-fflate-saxes/3');
       expect(pin.sourceDigest).toBe(compiled.sourceDigest);
-      initializeWordImportRetentionSchema(db);
+      validateWordImportRetentionSchema(db);
       expect(() => retainWordRevisionSource(db, pin, compiled.graph)).toThrow('一并提交');
       db.exec('BEGIN IMMEDIATE');
       try {
@@ -285,7 +225,7 @@ describe('closed Word retention definitions (#1132)', () => {
     beforeEach(async () => {
       const parent = await retainedWordParentFixture();
       db = new DatabaseSync(databasePath());
-      initializeWordImportRetentionSchema(db);
+      validateWordImportRetentionSchema(db);
       db.exec('BEGIN IMMEDIATE');
       const choice = wordChoiceFixture(db, parent.bookId, parent.compiled);
       const branchId = String(db.prepare('SELECT branch_id FROM branch_working_state WHERE base_revision_id = ?')
@@ -479,7 +419,7 @@ describe('closed Word retention definitions (#1132)', () => {
     const { compiled, bookId } = await retainedWordParentFixture(2_001);
     expect(compiled.templates).toHaveLength(2_001);
     withDatabase(false, (db) => {
-      initializeWordImportRetentionSchema(db);
+      validateWordImportRetentionSchema(db);
       db.exec('BEGIN IMMEDIATE');
       try {
         const { choice, ledger, samples, recordedAt, commitId } = wordChoiceFixture(db, bookId, compiled);
@@ -502,61 +442,17 @@ describe('closed Word retention definitions (#1132)', () => {
     });
   }, 180_000);
 
-  it('adds the complete empty layer once while preserving existing source and retention records', async () => {
-    await withStore(async (store) => { await importSample1Book(store, roots.codeRoot, 'Word 层保留校验'); });
-    withDatabase(false, (db) => {
-      const tables = ['source_versions', 'source_provenance', 'manuscript_block_sources', 'import_fidelity_categories', 'import_fidelity_choices'];
-      const prior = tables.map((table) => db.prepare(`SELECT rowid, * FROM ${table} ORDER BY rowid`).all());
-      const version = db.prepare('PRAGMA user_version').get();
-      dropEmptyWordRetentionLayer(db);
-      initializeWordImportRetentionSchema(db);
-      initializeWordImportRetentionSchema(db);
-      validateWordImportRetentionSchema(db);
-      expect(tables.map((table) => db.prepare(`SELECT rowid, * FROM ${table} ORDER BY rowid`).all())).toEqual(prior);
-      expect(db.prepare('PRAGMA user_version').get()).toEqual(version);
-      expect(Object.keys(WORD_IMPORT_RETENTION_SCHEMA_SQL).map((table) => db.prepare(`SELECT count(*) total FROM ${table}`).get()?.total))
-        .toEqual(Array(7).fill(0));
-      expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    });
-  }, 120_000);
-
-  it('refuses a partial layer without healing it or stamping a revision', async () => {
-    await withStore(async () => {});
-    withDatabase(false, (db) => {
-      dropEmptyWordRetentionLayer(db);
-      db.exec('CREATE TABLE word_revision_sources (source_version_id TEXT PRIMARY KEY) STRICT');
-      const schema = db.prepare('SELECT name, sql FROM sqlite_schema ORDER BY name').all();
-      const version = db.prepare('PRAGMA user_version').get();
-      expect(() => initializeWordImportRetentionSchema(db)).toThrow('Word');
-      expect(db.prepare('SELECT name, sql FROM sqlite_schema ORDER BY name').all()).toEqual(schema);
-      expect(db.prepare('PRAGMA user_version').get()).toEqual(version);
-    });
-  });
-
-  it('rolls back all seven definitions when a trigger collision interrupts initialization', async () => {
-    await withStore(async () => {});
-    withDatabase(false, (db) => {
-      dropEmptyWordRetentionLayer(db);
-      db.exec('CREATE TRIGGER word_revision_sources_no_update BEFORE UPDATE ON books BEGIN SELECT 1; END');
-      const schema = db.prepare('SELECT name, sql FROM sqlite_schema ORDER BY name').all();
-      const version = db.prepare('PRAGMA user_version').get();
-      expect(() => initializeWordImportRetentionSchema(db)).toThrow();
-      expect(db.prepare('SELECT name, sql FROM sqlite_schema ORDER BY name').all()).toEqual(schema);
-      expect(db.prepare('PRAGMA user_version').get()).toEqual(version);
-      expect(db.isTransaction).toBe(false);
-    });
-  });
 });
 
 describe('Word empty-layer migration through EditorialStore.open', () => {
-  it.each([MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION])('refuses an orphan Word source before any open mutation at reader %s', async (reader) => {
+  it.each([LATEST_SCHEMA_VERSION])('refuses an orphan Word source before any open mutation at reader %s', async (reader) => {
     const { compiled, bookId } = await retainedWordParentFixture();
     const before = withDatabase(false, (db) => {
       const sourceVersionId = String(db.prepare('SELECT source_version_id FROM source_versions WHERE book_id = ?').get(bookId)!.source_version_id);
       db.exec('BEGIN IMMEDIATE');
       try { retainWordRevisionSource(db, readWordParentSourcePin(db, bookId, sourceVersionId), compiled.graph); db.exec('COMMIT'); }
       catch (error) { db.exec('ROLLBACK'); throw error; }
-      execPre74Fixture(db, `PRAGMA user_version = ${reader}`);
+      db.exec(`PRAGMA user_version = ${reader}`);
       return { sources: retainedSourceRows(db), word: db.prepare('SELECT * FROM word_revision_sources').all(),
         versions: db.prepare('SELECT * FROM store_versions ORDER BY ordinal').all() };
     });
@@ -572,59 +468,13 @@ describe('Word empty-layer migration through EditorialStore.open', () => {
     expect(readFileSync(dataVersionMarkerPath(roots.dataRoot), 'utf8')).toBe(marker);
   });
 
-  it.each([false, true])('migrates a reader-92 source store without backfill through two reopens (interrupted before stamp: %s)', async (interrupt) => {
-    await withStore(async (store) => { await importSample1Book(store, roots.codeRoot, 'Word 迁移保留'); });
-    const before = withDatabase(false, (db) => {
-      const rows = retainedSourceRows(db);
-      constructReader92Predecessor(db);
-      expect(retainedSourceRows(db)).toEqual(rows);
-      return rows;
-    });
-    const object = withDatabase(false, (db) => db.prepare('SELECT relative_key, object_digest FROM content_objects ORDER BY object_digest LIMIT 1').get()!);
-    const objectPath = join(roots.dataRoot, 'objects', ...String(object.relative_key).split('/'));
-    const objectDigest = (): string => createHash('sha256').update(readFileSync(objectPath)).digest('hex');
-    expect(objectDigest()).toBe(object.object_digest);
-    if (interrupt) {
-      const execute = DatabaseSync.prototype.exec;
-      let interrupted = false;
-      const stamp = vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function (this: DatabaseSync, sql: string): void {
-        if (!interrupted && sql.trim() === `PRAGMA user_version = 95`) {
-          interrupted = true;
-          throw new Error('WORD_MIGRATION_BEFORE_STAMP');
-        }
-        execute.call(this, sql);
-      });
-      try { await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow('WORD_MIGRATION_BEFORE_STAMP'); }
-      finally { stamp.mockRestore(); }
-      expect(interrupted).toBe(true);
-      withDatabase(false, (db) => {
-        expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
-        validateWordImportRetentionSchema(db);
-        expect(retainedSourceRows(db)).toEqual(before);
-      });
-      expect(readDataVersionMarkerText(readFileSync(dataVersionMarkerPath(roots.dataRoot), 'utf8')).schemaRevision)
-        .toBe(MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
-    }
-    for (let reopen = 0; reopen < 2; reopen += 1) {
-      await withStore(async (store) => { expect(store.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION); });
-      withDatabase(false, (db) => {
-        validateWordImportRetentionSchema(db);
-        expect(retainedSourceRows(db)).toEqual(before);
-        expect(WORD_IMPORT_RETENTION_RELATIONS_DROP_ORDER.map((table) => db.prepare(`SELECT count(*) total FROM ${table}`).get()!.total))
-          .toEqual(Array(7).fill(0));
-        expect(db.prepare('SELECT count(*) total FROM learning_signals').get()!.total).toBe(0);
-      });
-      expect(objectDigest()).toBe(object.object_digest);
-    }
-  }, 120_000);
 });
 
 /**
- * Plant revision 26 exactly as a build before ADR 0086 left it, over a store holding one imported sample1 Book: its
- * review is the eight-row one the frozen builder rebuilds under parser identity /1, degraded and accepted as it had to
- * be, and `import_fidelity_categories` holds revision 26's text. Returns the planted rows.
+ * Plant the record a build before ADR 0086 left, over a store holding one imported sample1 Book: its review is the eight-row
+ * one the frozen builder rebuilds under parser identity /1, degraded and accepted as it had to be. Returns the planted rows.
  */
-function plantRevision26(): Row[] {
+function plantEarlierParserReview(): Row[] {
   return withDatabase(false, (database) => {
     database.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE;');
     const review = database.prepare('SELECT fidelity_review_id, source_version_id FROM manuscript_import_records').get() as Row;
@@ -632,9 +482,6 @@ function plantRevision26(): Row[] {
     database.prepare("UPDATE source_versions SET parser_identity = 'ai7-docx-fflate-saxes/1' WHERE source_version_id = ?").run(String(review.source_version_id));
     database.prepare("UPDATE source_provenance SET parser_identity = 'ai7-docx-fflate-saxes/1' WHERE source_version_id = ?").run(String(review.source_version_id));
     database.prepare('DELETE FROM import_fidelity_categories WHERE fidelity_review_id = ?').run(reviewId);
-    for (const relation of [...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE ${relation}`);
-    database.exec('DROP TABLE import_fidelity_categories');
-    database.exec(IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL);
     const insert = database.prepare(
       `INSERT INTO import_fidelity_categories(fidelity_review_id, category_key, display_label, item_count, status, detail, position)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -649,9 +496,7 @@ function plantRevision26(): Row[] {
         '"schema":"ai7.import-degradation-decision/1","scope":"this-import-only","state":"accepted-complete-set"}',
         new Date().toISOString());
     database.prepare('UPDATE manuscript_import_records SET degradation_decision_id = ?').run(decisionId);
-    execPre74Fixture(database, `PRAGMA user_version = ${PROPOSAL_CONFLICT_SCHEMA_VERSION}; COMMIT; PRAGMA foreign_keys = ON;`);
-    downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
-    expect(importFidelityCategoriesShape(database)).toBe('revision-26');
+    database.exec(`COMMIT; PRAGMA foreign_keys = ON;`);
     return database.prepare('SELECT rowid, * FROM import_fidelity_categories ORDER BY rowid').all() as Row[];
   });
 }
@@ -975,45 +820,14 @@ describe('the startup validation J-01 proves (Issue #584)', () => {
   }, 180_000);
 });
 
-describe('schema revision 27 over the real store', () => {
-  it('migrates a revision-26 store holding a legacy eight-row review, with every fidelity row byte for byte', async () => {
-    await requireExactSample1(roots.codeRoot);
-    let bookId: string;
-    await withStore(async (store) => {
-      bookId = (await importSample1Book(store, roots.codeRoot, '修订版 27 迁移')).bookId;
-    });
-
-    // Plant revision 26 exactly as a build before ADR 0086 left it: the review is the eight-row one the
-    // frozen builder rebuilds under parser identity /1, degraded and accepted as it had to be, and
-    // `import_fidelity_categories` holds revision 26's text.
-    const before = plantRevision26();
-    expect(before).toHaveLength(8);
-
-    await withStore(async (migrated) => {
-      expect(migrated.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION);
-      // The legacy review reads back under the identity it was recorded with: eight rows, degraded, accepted.
-      const record = migrated.getBookOverview(bookId).records.find((item) => item.kind === 'import-record');
-      expect(record?.kind === 'import-record' && record.fidelityCategories).toEqual(SAMPLE1_V1_REPORT);
-      expect(record?.kind === 'import-record' && record.degradationDecision?.acceptedItems.map((item) => item.categoryKey))
-        .toEqual(['inline-styles', 'sections']);
-    });
-    withDatabase(true, (database) => {
-      expect(importFidelityCategoriesShape(database)).toBe('current');
-      expect(database.prepare('SELECT rowid, * FROM import_fidelity_categories ORDER BY rowid').all()).toEqual(before);
-      for (const relation of [...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) {
-        expect(database.prepare(`SELECT count(*) total FROM ${relation}`).get()).toEqual({ total: 0 });
-      }
-      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    });
-  }, 180_000);
-
+describe('a Book an earlier parser read, over the real store', () => {
   it('names the parser change when a Book an earlier parser read takes its unchanged file again, at the choice (Issue #532)', async () => {
     await requireExactSample1(roots.codeRoot);
     let bookId: string;
     await withStore(async (store) => {
       bookId = (await importSample1Book(store, roots.codeRoot, '旧读取方式')).bookId;
     });
-    plantRevision26();
+    plantEarlierParserReview();
     const sourceVersionId = withDatabase(true, (database) =>
       String((database.prepare('SELECT source_version_id FROM source_versions').get() as Row).source_version_id));
     await withStore(async (migrated) => {
@@ -1068,7 +882,7 @@ describe('schema revision 27 over the real store', () => {
     await withStore(async (store) => {
       await importSample1Book(store, roots.codeRoot, '旧读取方式');
     });
-    plantRevision26();
+    plantEarlierParserReview();
     const [sourceVersionId, sourceDigest] = withDatabase(true, (database) => {
       const row = database.prepare('SELECT source_version_id, source_digest FROM source_versions').get() as Row;
       return [String(row.source_version_id), String(row.source_digest)];

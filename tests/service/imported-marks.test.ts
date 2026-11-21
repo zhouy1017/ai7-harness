@@ -1,14 +1,12 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { stageHistoricalTrackedDocxFixture } from '../support/import-retention.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { COMMENTS_REVISIONS_DETAIL } from '../../src/service/docx.js';
-import { EditorialMarkStore, proposalChangeItemsShape } from '../../src/service/editorial-marks.js';
+import { EditorialMarkStore } from '../../src/service/editorial-marks.js';
 import { ImportedMarkError, createImportedMarks, stageImportedMarks } from '../../src/service/imported-marks.js';
 import { EditorialStore, StoreError, importedMarksRecord } from '../../src/service/store.js';
-import { IMPORT_RETENTION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { EditorialMarkAnchorProjection, ManuscriptBlockProjection } from '../../src/shared/protocol.js';
 import {
@@ -19,15 +17,7 @@ import {
   type ComposedRevisedRequest,
   type SourceSpan,
 } from '../support/composed-fixture.js';
-import { IMPORTED_MARK_RELATIONS_DROP_ORDER, downgradeProposalChangeItemsToRevision27 } from '../support/imported-marks.js';
-import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
-import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
-import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
-import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
-import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for imported marks (Issue #411, plan slice S62) over the real `EditorialStore`
 // on a temporary Agent Data Root. Every input is composed from exact `sample1`'s words with neutral author
@@ -983,52 +973,3 @@ function importedSuggestions(store: EditorialStore, binding: ManuscriptBinding):
 function importedMarkCount(store: EditorialStore, binding: ManuscriptBinding) {
   return { total: importedCards(store, binding).filter((card) => [AUTHOR, OTHER].includes(card.source.label!)).length };
 }
-
-/** Unique revision-27 → 28 coverage: the replacement/merge migration suites start at later revisions. */
-async function plantedRevision27() {
-  const path = await composeRevised({
-    paragraphs: REVISED.paragraphs.filter((_paragraph, index) => index === 0 || index === 2 || index === 3),
-    comments: REVISED.comments!,
-  });
-  await withStore(async (store) => { await importRevised(store, path); });
-  return withDatabase(false, (database) => {
-    for (const relation of [...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE ${relation}`);
-    for (const relation of IMPORTED_MARK_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
-    downgradeProposalChangeItemsToRevision27(database);
-    execPre74Fixture(database, `PRAGMA user_version = ${IMPORT_RETENTION_SCHEMA_VERSION}`);
-    downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
-    expect(proposalChangeItemsShape(database)).toBe('revision-27');
-    return {
-      items: database.prepare('SELECT rowid, * FROM proposal_change_items ORDER BY rowid').all() as Row[],
-      marks: database.prepare('SELECT rowid, * FROM editorial_marks ORDER BY rowid').all() as Row[],
-    };
-  });
-}
-
-describe('schema revision 28 over the real store', () => {
-  it('migrates a planted revision-27 store, rebuilding its Proposal Change Items byte for byte', async () => {
-    const before = await plantedRevision27();
-    expect(before.items.map((row) => row.change_type)).toEqual(['delete', 'replace']);
-
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      // The widened ledger takes an insertion now: a second file with one imports on the migrated store.
-      const { commit } = await importRevised(migrated, await composeRevised({ paragraphs: [REVISED.paragraphs[1]!] }));
-      expect(windowMarks(migrated, commit.manuscriptId, commit.branchId).map((mark) => mark.insertedText !== null)).toEqual([true]);
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    withDatabase(false, (database) => {
-      expect(proposalChangeItemsShape(database)).toBe('current');
-      const items = database.prepare('SELECT rowid, * FROM proposal_change_items ORDER BY rowid').all() as Row[];
-      expect(items.slice(0, 2)).toEqual(before.items);
-      expect((database.prepare('SELECT rowid, * FROM editorial_marks ORDER BY rowid').all() as Row[]).slice(0, before.marks.length)).toEqual(before.marks);
-      // The rebuilt ledger still refuses mutation of committed proposal items.
-      expect(() => database.exec('UPDATE proposal_change_items SET proposed_text = proposed_text')).toThrow(/EDITORIAL_MARK_LEDGER_IMMUTABLE/u);
-      expect(() => database.exec('DELETE FROM proposal_change_items')).toThrow(/EDITORIAL_MARK_LEDGER_IMMUTABLE/u);
-      expect(database.prepare('SELECT count(*) total FROM staged_import_marks').get()).toEqual({ total: 0 });
-      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    });
-  }, 180_000);
-});

@@ -1,12 +1,8 @@
-import { MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_ROW_COLUMNS } from '../../src/service/model-service-connections.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../src/shared/provider-configuration.generated.js';
-import { DatabaseSync } from 'node:sqlite';
-import { join } from 'node:path';
 import { MODEL_SERVICE_CHANNELS, modelServiceChannelOf, type ModelServiceConnectionProjection } from '../../src/shared/protocol.js';
-import { asRevision102 } from '../support/structural-revisions.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 
 // Issue #1215: the one Settings flow reads its channels from the generated declarations and the runtime model table, and the
@@ -81,44 +77,6 @@ describe('the model-service channel catalogue', () => {
     // Credential rotation clears diagnostic status and preserves the channel choice.
     connection = store.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', 'openai-platform');
     expect([connection.selected, store.getConfiguredModelRoleBinding('main-editorial')?.route]).toEqual([true, 'openai-platform']);
-  });
-
-  it('opens a genuine revision-102 store at 103 with every connection row copied (#1225)', async () => {
-    const roots = await createServiceTestRoots('ai7-model-channels-');
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    for (const route of ['opencode-go', 'openai-platform'] as const) store.saveModelServiceConnection(`Synthetic ${route}`, null, 'ready', route);
-    const before = store.getModelServiceConnections();
-    store.markCleanShutdown(); store.close(); store = undefined;
-    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    try { asRevision102(db); } finally { db.close(); }
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    expect(store.getModelServiceConnections()).toEqual(before);
-    const anthropic = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
-    expect(anthropic.binding).toMatchObject({ providerId: 'anthropic-claude', modelId: 'claude-opus-5', credentialSlot: 'anthropic-claude' });
-  });
-  it('migrates the model-restricted schema, preserving references and selections, and keeps a dynamic ID through restart', async () => {
-    const roots = await createServiceTestRoots('ai7-channel-migration-');
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const connection = store.saveModelServiceConnection('Synthetic OpenAI', null, 'ready', 'openai-platform');
-    store.selectModelServiceRoute('openai-platform');
-    const before = store.getModelServiceConnections();
-    store.markCleanShutdown(); store.close(); store = undefined;
-    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    try {
-      db.exec('BEGIN IMMEDIATE');
-      db.exec('CREATE TEMP TABLE old_channel_rows AS SELECT rowid AS original_rowid, * FROM model_service_connections');
-      db.exec('DROP TABLE model_service_connections'); db.exec(MODEL_SERVICE_CONNECTION_REVISION_103_SQL);
-      db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test)
-        SELECT original_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test FROM old_channel_rows`);
-      db.exec('DROP TABLE old_channel_rows; PRAGMA user_version = 104'); db.exec('COMMIT');
-    } finally { db.close(); }
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    expect(store.getModelServiceConnections()).toEqual(before);
-    store.selectFastRoleModel('openai-platform', 'account/new-model');
-    store.markCleanShutdown(); store.close(); store = undefined;
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toMatchObject({ model: 'account/new-model', route: 'openai-platform', credentialReference: connection.credentialReference });
-    expect(store.getConfiguredModelRoleBinding('main-editorial')?.model).toBe('gpt-5.6-luna');
   });
 
 });

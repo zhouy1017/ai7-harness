@@ -1,4 +1,3 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { BaselineAnalysisExecutionOwner, ModelRequestGovernor, type ModelRequestPermit, type ModelRequestProducer } from '../../src/service/analysis/execution.js';
 import { join } from 'node:path';
@@ -12,8 +11,6 @@ import { readLocalStageArtifacts } from '../../src/service/review/review-runs.js
 import { graphemeCount } from '../../src/service/analysis/factual-review-contract.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import * as checker from '../../src/service/review/deterministic/checker.js';
-import { PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
-import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import * as adapter from '../../src/service/provider/deepseek-adapter.js';
 import * as broker from '../../src/service/provider/credential-broker.js';
 import * as harness from '../../src/service/harness/primary-agent-harness.js';
@@ -308,25 +305,6 @@ describe('provider-free local ReviewRun', () => {
     let refusal: unknown;
     try { store.createReviewRunPreparationWork(book.bookId, ['local-text-check'], WHOLE, policy, null, [], null, null, null, outside); } catch (error) { refusal = error; }
     expect(refusal).toBeInstanceOf(StoreError); expect(refusal).toMatchObject({ code: 'LOCAL_PLAN_INVALID', message: '本地检查计划或输入无效；请重新准备。' });
-  });
-
-  it('migrates genuine schema89 additively, tolerates a committed pre-stamp table and rejects corrupted artifact chains', async () => {
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '本地迁移样书');
-    store.markCleanShutdown(); store.close(); let db = database(); const prior = db.prepare('SELECT * FROM books').all();
-    db.exec('DROP TABLE review_local_stage_artifacts; DROP TRIGGER procedure_definition_versions_no_delete; DROP TRIGGER procedure_definitions_no_delete;');
-    execPre74Fixture(db, "DELETE FROM procedure_definition_versions WHERE procedure_id = 'ai7-procedure/local-text-check'; DELETE FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/local-text-check'; PRAGMA user_version = 89");
-    db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definition_versions_no_delete']!); db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definitions_no_delete']!); db.close();
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); store.markCleanShutdown(); store.close(); db = database();
-    expect(db.prepare('SELECT * FROM books').all()).toEqual(prior); expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
-    execPre74Fixture(db, 'PRAGMA user_version = 89'); db.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); replaceFirst(book, '他停住了…又望向门口。'); const prepared = prepare(book, policy); authorize(book, prepared);
-    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(prepared.run.reviewRunId); await driver.dispose(); store.markCleanShutdown(); store.close();
-    db = database(); const record = readLocalStageArtifacts(db, prepared.run.reviewRunId).at(-1)!.record;
-    expect(() => db.exec('UPDATE review_local_stage_artifacts SET sequence = sequence')).toThrow();
-    const tampered = canonicalRecord({ ...record, previousDigest: '0'.repeat(64) }); db.exec('DROP TRIGGER review_local_stage_artifacts_no_update');
-    db.prepare('UPDATE review_local_stage_artifacts SET canonical_json = ?, sha256 = ? WHERE review_run_id = ? AND sequence = 3').run(tampered.json, tampered.digest, prepared.run.reviewRunId);
-    db.exec("CREATE TRIGGER review_local_stage_artifacts_no_update BEFORE UPDATE ON review_local_stage_artifacts BEGIN SELECT RAISE(ABORT, 'REVIEW_LOCAL_STAGE_IMMUTABLE'); END"); db.close();
-    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
   });
 
   it('rolls back marks and findings at a materialization crash and continues from completion without checking again', async () => {

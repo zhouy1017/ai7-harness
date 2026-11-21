@@ -1,14 +1,10 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
-import { LATEST_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { RESEARCH_EVIDENCE_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
 import type { RetainedEvidence, RetainedUnit } from '../../src/service/analysis/factual-review-evidence.js';
-import { dropFactualVerificationRelations, FACTUAL_VERIFICATION_SCHEMA_NAMES, dropMaterialIndexLayerRelations, dropResearchEvidenceRelations, restoreProposalReviewPredecessor, pre77SchemaRows, restoreTaskIntentDraftPredecessor, pre80SchemaRows } from '../support/pre74-schema.js';
-import { MATERIAL_INDEX_LAYER_SCHEMA_SQL, MATERIAL_INDEX_LAYER_TRIGGER_SQL } from '../../src/service/material-index.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book } from '../support/sample1-baseline.js';
 import { ResearchEvidenceLedger } from '../../src/service/research-evidence.js';
@@ -32,13 +28,6 @@ function evidence(text: string, capturedAt: string): RetainedEvidence {
 function unit(entries: RetainedEvidence[]): RetainedUnit {
   return { state: 'completed', searchCalls: 1, retentionFetches: entries.length, failedRetrievals: 0,
     findings: [{ findingId: FINDING, blockId: `blk_${'f'.repeat(24)}`, quote: '合成引文', category: '史实', sources: entries.length }], evidence: entries };
-}
-
-function schemaRows(path: string): Array<{ type: string; name: string; sql: string | null }> {
-  const db = new DatabaseSync(path);
-  try {
-    return (db.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all() as Array<{ type: string; name: string; sql: string | null }>);
-  } finally { db.close(); }
 }
 
 describe('the research evidence ledger, schema 75', () => {
@@ -67,50 +56,6 @@ describe('the research evidence ledger, schema 75', () => {
         } while (after !== null);
         expect(seen).toBe(40);
       } finally { db.close(); }
-    } finally { store?.close(); await roots.dispose(); }
-  });
-
-  it('migrates an exact revision-74 store by adding its four relations, moving nothing else, and refuses a 75 without them', async () => {
-    const roots = await createServiceTestRoots('ai7-research-evidence-migration-');
-    let store: EditorialStore | undefined;
-    try {
-      expect(RESEARCH_EVIDENCE_SCHEMA_VERSION).toBe(75);
-      // Revisions 76 (#892), 77 (#902), and 78 (#901) follow it; the exact revision-74 store traverses each.
-      // Synchronized delta with #66 and #89: revisions 81 and 83 add imported Skill sibling relations.
-      // #1044 adds independent model selection and translation-attempt metadata at revision 84.
-
-      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-      await importSample1Book(store, roots.codeRoot, '迁移回归');
-      store.close(); store = undefined;
-      const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-      const terminal = schemaRows(path);
-      // The predecessor is planted as revision 74 left it: none of revision 75's relations or triggers, nor revision 76's.
-      const plant = new DatabaseSync(path);
-      // Synchronized delta with Issue #423 (slice 7a): a predecessor of revision 80 has no drafts and the narrower Task Intents.
-      restoreTaskIntentDraftPredecessor(plant);
-      dropFactualVerificationRelations(plant);
-      restoreProposalReviewPredecessor(plant);
-      dropMaterialIndexLayerRelations(plant);
-      dropResearchEvidenceRelations(plant);
-      execPre74Fixture(plant, 'PRAGMA user_version = 95');
-    plant.exec(`PRAGMA user_version = ${SEARCH_BACKEND_SCHEMA_VERSION}`);
-      plant.close();
-      const predecessor = schemaRows(path);
-      const added = [...FACTUAL_VERIFICATION_SCHEMA_NAMES, ...Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL), ...Object.keys(RESEARCH_EVIDENCE_TRIGGER_SQL),
-        ...Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL), ...Object.keys(MATERIAL_INDEX_LAYER_TRIGGER_SQL)];
-      expect(predecessor.filter((row) => added.includes(row.name))).toEqual([]);
-      expect(predecessor).toEqual(pre77SchemaRows(pre80SchemaRows(terminal).filter((row) => !added.includes(row.name))));
-
-      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-      store.close(); store = undefined;
-      expect(schemaRows(path)).toEqual(terminal);
-      const migrated = new DatabaseSync(path);
-      expect(migrated.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
-      for (const name of Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL)) expect(migrated.prepare(`SELECT count(*) AS n FROM ${name}`).get()!.n).toBe(0);
-      // A store stamped 75 that lost them is refused, never rebuilt.
-      dropResearchEvidenceRelations(migrated);
-      migrated.close();
-      await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
     } finally { store?.close(); await roots.dispose(); }
   });
 

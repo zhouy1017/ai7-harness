@@ -1,16 +1,10 @@
-import { ANALYSIS_LEDGER_SCHEMA_SQL, IDLE_RUN_AUTHORIZATIONS_SQL } from '../../src/service/task-authorization.js';
 import { join, resolve } from 'node:path';
 import { cp } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
-import {
-  IMPORTED_SKILL_SCHEMA_SQL, IMPORTED_SKILL_TRIGGER_SQL, IMPORTED_SKILL_UPDATE_RULE_CONFIRMATION, IMPORTED_SKILL_UPDATE_SCHEMA_SQL, IMPORTED_SKILL_UPDATE_TRIGGER_SQL,
-} from '../../src/service/imported-skill-schema.js';
-import { IMPORTED_SKILL_UPDATE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { execPre74Fixture, IMPORTED_SKILL_UPDATE_RELATIONS, pre82SchemaRows } from '../support/pre74-schema.js';
+import { IMPORTED_SKILL_UPDATE_RULE_CONFIRMATION } from '../../src/service/imported-skill-schema.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 let roots: ServiceTestRoots | undefined;
@@ -245,61 +239,3 @@ describe('import and update stay distinct at the shared acquisition seam', () =>
   });
 });
 
-describe('revision 83 over earlier stores', () => {
-  it.each([81, 82])('adds its three relations empty to a revision-%i store and reads a Skill kept before as on its latest revision', async (predecessor) => {
-    let store = await open();
-    const first = await importPlain(store);
-    store.markCleanShutdown(); store.close();
-    const planted = new DatabaseSync(databasePath());
-    let before: unknown[];
-    try {
-      // The shared predecessor fixture undoes revision 83 (and 81, 80 … for an earlier stamp); at 81 only revision 83 is missing.
-      execPre74Fixture(planted, `PRAGMA user_version = ${predecessor}`);
-      before = planted.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all();
-      for (const table of IMPORTED_SKILL_UPDATE_RELATIONS) expect(planted.prepare('SELECT 1 FROM sqlite_schema WHERE name = ?').get(table)).toBeUndefined();
-      expect(planted.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name LIKE 'imported_skill%'").get()?.n)
-        .toBe(Object.keys(IMPORTED_SKILL_SCHEMA_SQL).length + Object.keys(IMPORTED_SKILL_TRIGGER_SQL).length);
-    } finally { planted.close(); }
-    store = await open();
-    try {
-      const after = new DatabaseSync(databasePath(), { readOnly: true });
-      try {
-        expect(Number(after.prepare('PRAGMA user_version').get()?.user_version)).toBe(LATEST_SCHEMA_VERSION);
-        expect(IMPORTED_SKILL_UPDATE_SCHEMA_VERSION).toBe(83);
-        const added = new Set(['review_run_synthesis', ...Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL), ...Object.keys(IMPORTED_SKILL_UPDATE_TRIGGER_SQL)]);
-        const rows = after.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all() as Array<{ type: string; name: string; sql: string }>;
-        // At 81 the predecessor also traverses 7f's admitted Result Set rebuild; at 82 every pre-existing schema row is exact.
-        expect((predecessor < 82 ? pre82SchemaRows(rows) : rows.map((row) => row.name === 'analysis_task_intents'
-          ? { ...row, sql: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents } : row.name === 'analysis_run_authorizations'
-            ? { ...row, sql: IDLE_RUN_AUTHORIZATIONS_SQL } : row)).filter((row) => !added.has(String(row.name)))).toEqual(before!);
-        for (const table of IMPORTED_SKILL_UPDATE_RELATIONS) {
-          expect(after.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n).toBe(0);
-          expect(MERGE_TABLE_POLICY[table as keyof typeof MERGE_TABLE_POLICY]).toBe('house');
-        }
-      } finally { after.close(); }
-      // The Skill kept at 81 has no selection; it is on its latest revision, and a new one is kept beside it.
-      const page = store.inspectImportedSkills(first.revisionId, null);
-      expect(page.skills.map((skill) => skill.revisionId)).toEqual([first.revisionId]);
-      expect(page.history).toEqual([expect.objectContaining({ revisionId: first.revisionId, current: true, selectedReason: null })]);
-      const candidate = (await (await check(store, first.skillId, 'plain-v2-text')).kept()).candidate!;
-      const adopted = store.adoptImportedSkillUpdate({ candidateId: candidate.candidateId, reviewDigest: candidate.reviewDigest, acceptItems: [], upstreamPaths: [] });
-      expect(store.inspectImportedSkills(adopted.adoptedRevisionId, null).history.map((entry) => [entry.ordinal, entry.current])).toEqual([[2, true], [1, false]]);
-    } finally { store.markCleanShutdown(); store.close(); }
-  });
-
-  it('refuses a revision-83 store without its update relations rather than giving them anew', async () => {
-    const store = await open();
-    store.markCleanShutdown(); store.close();
-    const planted = new DatabaseSync(databasePath());
-    try {
-      expect(Number(planted.prepare('PRAGMA user_version').get()?.user_version)).toBe(116);
-      for (const trigger of Object.keys(IMPORTED_SKILL_UPDATE_TRIGGER_SQL)) planted.exec(`DROP TRIGGER ${trigger}`);
-      for (const table of Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL).reverse()) planted.exec(`DROP TABLE ${table}`);
-    } finally { planted.close(); }
-    await expect(EditorialStore.open(roots!.dataRoot, roots!.codeRoot)).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
-    const after = new DatabaseSync(databasePath(), { readOnly: true });
-    try {
-      expect(after.prepare("SELECT name FROM sqlite_schema WHERE name LIKE 'imported_skill_update%' OR name LIKE 'imported_skill_current%'").all()).toEqual([]);
-    } finally { after.close(); }
-  });
-});

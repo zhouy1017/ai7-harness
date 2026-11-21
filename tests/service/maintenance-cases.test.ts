@@ -1,11 +1,9 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MAINTENANCE_CASE_SCHEMA_SQL } from '../../src/service/maintenance-cases.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { LATEST_SCHEMA_VERSION, PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   MAINTENANCE_CONCLUDED,
   MAINTENANCE_FORBIDDEN_COMPLETIONS,
@@ -16,7 +14,6 @@ import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type MaintenanceCaseResultProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for ⑥ 维护事项 (Issue #426, plan slice S68a; V2-UX-MAINT-001 to 011, ADR 0040) over the
 // real `EditorialStore` on a temporary Agent Data Root. The manuscript is composed from the one admitted SampleBook; the
@@ -303,72 +300,6 @@ describe('⑥ 维护事项 (S68a)', () => {
       store.close();
     }
   }, 180_000);
-
-  it('adds the 维护事项 relations to a revision-42 store empty', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      await importBook(store);
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const planted = new DatabaseSync(path);
-    try {
-      planted.exec('PRAGMA foreign_keys = OFF');
-      execPre74Fixture(planted, `BEGIN IMMEDIATE;
-        DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books;
-        DROP TABLE database_merges;
-        DROP TABLE database_replacements;
-        DROP TABLE scheduled_backup_removals;
-        DROP TABLE scheduled_backups;
-        DROP TABLE backup_preferences;
-        DROP TABLE database_export_receipts;
-        DROP TABLE database_export_approvals;
-        DROP TABLE database_export_preparations;
-        DROP TABLE store_versions;
-        DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions;
-        DROP TABLE series_knowledge_revisions;
-        DROP TABLE series_knowledge_candidates;
-        DROP TABLE series_knowledge_items;
-        DROP TABLE series_membership_changes;
-        DROP TABLE series;
-        DROP TABLE evaluation_preferences;
-        DROP TABLE publication_actuals;
-        DROP TABLE learning_eligibility_decisions;
-        DROP TABLE proposal_decision_feedback;
-        DROP TABLE analysis_feedback_signals;
-        DROP TABLE evaluation_record_entries;
-        DROP TABLE evaluation_records;
-        DROP TABLE library_material_decisions;
-        DROP TABLE library_materials;
-        DROP TABLE review_guideline_versions;
-        DROP TABLE book_people_versions;
-        DROP TABLE maintenance_case_revisions;
-        DROP TABLE maintenance_errata_versions;
-        DROP TABLE maintenance_cases;
-        PRAGMA user_version = ${PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION};
-        COMMIT;`);
-      downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
-      planted.exec('PRAGMA foreign_keys = ON');
-    } finally {
-      planted.close();
-    }
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    const after = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      for (const table of LEDGER) expect((after.prepare(`SELECT count(*) count FROM ${table}`).get() as { count: number }).count).toBe(0);
-      expect((after.prepare("SELECT count(*) count FROM sqlite_schema WHERE type = 'trigger' AND name LIKE 'maintenance_%'").get() as { count: number }).count).toBe(6);
-    } finally {
-      after.close();
-    }
-  }, 120_000);
 
   it('opens every case of a 发稿版本, however many came after it', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

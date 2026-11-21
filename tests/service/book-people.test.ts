@@ -1,14 +1,11 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BOOK_PEOPLE_ROLE_LISTS, BOOK_PEOPLE_TRIGGER_SQL, BUILTIN_BOOK_PEOPLE_ROLES } from '../../src/service/book-people.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { LATEST_SCHEMA_VERSION, MAINTENANCE_CASE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 作者 · 责编 · 相关人 (Issue #431, plan slice S83; V2-UX-BOOK-006) over the real
 // `EditorialStore` on a temporary Agent Data Root. The manuscripts are composed from the one admitted SampleBook under
@@ -187,68 +184,6 @@ describe('作者 · 责编 · 相关人 (S83)', () => {
       reopened.close();
     }
   }, 180_000);
-
-  it('adds the people relation to a revision-43 store empty', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let bookId: string;
-    try {
-      bookId = await importBook(store, FIRST);
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const planted = new DatabaseSync(path);
-    try {
-      execPre74Fixture(planted, `BEGIN IMMEDIATE;
-        DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books;
-        DROP TABLE database_merges;
-        DROP TABLE database_replacements;
-        DROP TABLE scheduled_backup_removals;
-        DROP TABLE scheduled_backups;
-        DROP TABLE backup_preferences;
-        DROP TABLE database_export_receipts;
-        DROP TABLE database_export_approvals;
-        DROP TABLE database_export_preparations;
-        DROP TABLE store_versions;
-        DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions;
-        DROP TABLE series_knowledge_revisions;
-        DROP TABLE series_knowledge_candidates;
-        DROP TABLE series_knowledge_items;
-        DROP TABLE series_membership_changes;
-        DROP TABLE series;
-        DROP TABLE evaluation_preferences;
-        DROP TABLE publication_actuals;
-        DROP TABLE learning_eligibility_decisions;
-        DROP TABLE proposal_decision_feedback;
-        DROP TABLE analysis_feedback_signals;
-        DROP TABLE evaluation_record_entries;
-        DROP TABLE evaluation_records;
-        DROP TABLE library_material_decisions;
-        DROP TABLE library_materials;
-        DROP TABLE review_guideline_versions;
-        DROP TABLE book_people_versions;
-        PRAGMA user_version = ${MAINTENANCE_CASE_SCHEMA_VERSION};
-        COMMIT;`);
-      downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
-    } finally {
-      planted.close();
-    }
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      expect(migrated.getBookOverview(bookId!).people.version).toBe(0);
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    const after = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect((after.prepare('SELECT count(*) count FROM book_people_versions').get() as { count: number }).count).toBe(0);
-    } finally {
-      after.close();
-    }
-  }, 120_000);
 
   it('reads every version under the role list it was saved with, whatever list a later release ships', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

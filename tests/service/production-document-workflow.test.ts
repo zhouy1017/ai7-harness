@@ -1,4 +1,3 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -7,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL } from '../../src/service/production-document-workflow.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
   type ProductionDocumentPhaseAction,
@@ -16,7 +14,6 @@ import {
 } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, type SourceSpan } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for a Production Document's Deliverable Workflow (Issue #415, plan slice S66c;
 // V2-UX-WORK-001 to 009, WORK-011) over the real `EditorialStore` on a temporary Agent Data Root. The manuscript and the draft
@@ -247,83 +244,4 @@ describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)',
     }
   }, 180_000);
 
-  it('gives every document of a revision-39 store its workflow, begun when the document was made, and moves nothing', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let bookId: string;
-    let before: string;
-    let createdAt: string;
-    try {
-      bookId = await importBook(store, await compose('迁移流程组稿', [1, 2]));
-      createdAt = (await newsRelease(store, bookId)).createdAt;
-      before = JSON.stringify(store.inspectProductionDocuments(bookId));
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const planted = new DatabaseSync(path);
-    try {
-      planted.exec('PRAGMA foreign_keys = OFF');
-      execPre74Fixture(planted, `BEGIN IMMEDIATE;
-        DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books;
-        DROP TABLE database_merges;
-        DROP TABLE database_replacements;
-        DROP TABLE scheduled_backup_removals;
-        DROP TABLE scheduled_backups;
-        DROP TABLE backup_preferences;
-        DROP TABLE database_export_receipts;
-        DROP TABLE database_export_approvals;
-        DROP TABLE database_export_preparations;
-        DROP TABLE store_versions;
-        DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions;
-        DROP TABLE series_knowledge_revisions;
-        DROP TABLE series_knowledge_candidates;
-        DROP TABLE series_knowledge_items;
-        DROP TABLE series_membership_changes;
-        DROP TABLE series;
-        DROP TABLE evaluation_preferences;
-        DROP TABLE publication_actuals;
-        DROP TABLE learning_eligibility_decisions;
-        DROP TABLE proposal_decision_feedback;
-        DROP TABLE analysis_feedback_signals;
-        DROP TABLE evaluation_record_entries;
-        DROP TABLE evaluation_records;
-        DROP TABLE library_material_decisions;
-        DROP TABLE library_materials;
-        DROP TABLE review_guideline_versions;
-        DROP TABLE book_people_versions;
-        DROP TABLE maintenance_case_revisions;
-        DROP TABLE maintenance_errata_versions;
-        DROP TABLE maintenance_cases;
-        DROP TABLE production_document_origin_readings;
-        DROP TABLE book_delivery_package_export_files;
-        DROP TABLE book_delivery_package_exports;
-        DROP TABLE production_document_phase_transitions;
-        DROP TABLE production_document_workflow_instances;
-        PRAGMA user_version = ${BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION};
-        COMMIT;`);
-      downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
-      planted.exec('PRAGMA foreign_keys = ON');
-    } finally {
-      planted.close();
-    }
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      // The document reads exactly as it did: the same profile, activated when it was made, no phase moved. Only what its
-      // material held reads as unknown, since a store that old never counted it (Issue #547).
-      expect(JSON.stringify(migrated.inspectProductionDocuments(bookId!))).toBe(before!.replaceAll('"marksNotCarried":0', '"marksNotCarried":null'));
-      expect(workflowOf(migrated, bookId!).profile.activatedAt).toBe(createdAt!);
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    const after = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect((after.prepare('SELECT count(*) count FROM production_document_workflow_instances').get() as { count: number }).count).toBe(1);
-      expect((after.prepare('SELECT count(*) count FROM production_document_phase_transitions').get() as { count: number }).count).toBe(0);
-    } finally {
-      after.close();
-    }
-  }, 120_000);
 });

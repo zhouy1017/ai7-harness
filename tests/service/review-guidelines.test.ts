@@ -1,5 +1,4 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -7,7 +6,6 @@ import { DatabaseSync, type SQLInputValue, type StatementResultingChanges } from
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
-import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import {
   EDITORIAL_WORKSPACE_PROFILE_DIGEST,
@@ -20,9 +18,7 @@ import {
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
-import { REVIEW_GUIDELINE_TRIGGER_SQL } from '../../src/service/review-guidelines.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BOOK_PEOPLE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import {
   MAX_GUIDELINE_OLDER_BOOKS_SHOWN,
@@ -36,7 +32,6 @@ import {
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -402,92 +397,6 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(await refusal(() => store.previewReviewGuidelineVersion('ai7-builtin/unknown', file('x.txt', '1. 条。')))).toBe('REVIEW_GUIDELINE_UNKNOWN:没有这份审阅规范文件。');
     } finally {
       await close(session);
-    }
-  }, 300_000);
-
-  it('adds revision 45 to a revision-44 store with nothing else moved, and refuses a version rewritten by hand', async () => {
-    const first = await openStore();
-    try {
-      const preview = await first.store.previewReviewGuidelineVersion(TYPOS_DOCUMENT, file('house.txt', HOUSE_CLAUSES));
-      first.store.importReviewGuidelineVersion(preview.previewId);
-    } finally {
-      await close(first);
-    }
-    // A revision-44 store never held the relation: planted by dropping it, it gains it again empty.
-    const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    try {
-      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; DROP TABLE library_material_decisions; DROP TABLE library_materials; DROP TABLE review_guideline_versions; PRAGMA user_version = ${BOOK_PEOPLE_SCHEMA_VERSION};`);
-      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
-    } finally {
-      plant.close();
-    }
-    const migrated = await openStore();
-    try {
-      expect(typosDocument(migrated.store.inspectReviewGuidelines()).currentOrdinal).toBe(1);
-      const preview = await migrated.store.previewReviewGuidelineVersion(TYPOS_DOCUMENT, file('house-again.txt', HOUSE_CLAUSES));
-      migrated.store.importReviewGuidelineVersion(preview.previewId);
-    } finally {
-      await close(migrated);
-    }
-    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(() => database.exec("UPDATE review_guideline_versions SET recorded_at = recorded_at")).toThrowError(/REVIEW_GUIDELINE_LEDGER_IMMUTABLE/u);
-      expect(() => database.exec('DELETE FROM review_guideline_versions')).toThrowError(/REVIEW_GUIDELINE_LEDGER_IMMUTABLE/u);
-      // A later build that rewords a built-in clause moves the digest of AI7's version 1; the house's version still reads,
-      // chained to the root its import recorded. Planted by re-rooting the stored version, its own digest recomputed.
-      database.exec('DROP TRIGGER review_guideline_versions_no_update');
-      const stored = database.prepare('SELECT version_id, canonical_json FROM review_guideline_versions').get() as { version_id: string; canonical_json: string };
-      const rerooted = canonicalRecord({ ...(JSON.parse(stored.canonical_json) as Record<string, unknown>), previousSha256: 'e'.repeat(64) });
-      database.prepare('UPDATE review_guideline_versions SET previous_sha256 = ?, canonical_json = ?, sha256 = ? WHERE version_id = ?')
-        .run('e'.repeat(64), rerooted.json, rerooted.digest, stored.version_id);
-      database.exec(REVIEW_GUIDELINE_TRIGGER_SQL.review_guideline_versions_no_update!);
-      // A version of a document AI7 fixes, as a build before that rule could have stored one: named nowhere, applied never.
-      const versionId = randomUUID();
-      const recordedAt = new Date().toISOString();
-      const planted = canonicalRecord({
-        schema: 'ai7.review-guideline-version/1', versionId, documentId: 'ai7-builtin/factual-review', ordinal: 2, title: '事实核查契约', issuer: '本社',
-        clauses: [{ clauseId: 'factual-review/1', text: '本社核查。' }], source: { displayName: 'fact.txt', format: 'text', sha256: 'd'.repeat(64), bytes: 16 },
-        previousSha256: 'e'.repeat(64), recordedAt,
-      });
-      database.prepare('INSERT INTO review_guideline_versions(version_id, document_id, ordinal, previous_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(versionId, 'ai7-builtin/factual-review', 2, 'e'.repeat(64), recordedAt, planted.json, planted.digest);
-    } finally {
-      database.close();
-    }
-    const rebuilt = await openStore();
-    try {
-      const page = rebuilt.store.inspectReviewGuidelines();
-      expect(typosDocument(page)).toMatchObject({ currentOrdinal: 2, issuer: '本社' });
-      const factual = page.documents.find((document) => document.documentId === 'ai7-builtin/factual-review')!;
-      expect([factual.currentOrdinal, factual.issuer, factual.versions.length]).toEqual([1, 'AI7 内置默认', 1]);
-      const creation = rebuilt.store.prepareBookCreation('空图书', null);
-      const emptyBookId = rebuilt.store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
-      const basis = (categoryId: string) => rebuilt.store.inspectReviewWorkspace(emptyBookId, null).categories.find((category) => category.categoryId === categoryId)!.basis;
-      expect(basis('factual-review').guidelineDocuments).toContainEqual(expect.objectContaining({ issuer: 'AI7 内置默认', title: '事实核查契约', version: '1' }));
-      expect(basis(TYPOS).guidelineDocuments).toContainEqual(expect.objectContaining({ issuer: '本社', title: '文字规范条款', version: '2' }));
-    } finally {
-      await close(rebuilt);
-    }
-    // Rewritten by hand behind the triggers' back: the chain no longer reads, and the page says so rather than guess.
-    const rewrite = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    try {
-      rewrite.exec('DROP TRIGGER review_guideline_versions_no_update');
-      rewrite.exec(`UPDATE review_guideline_versions SET canonical_json = replace(canonical_json, '本社新增', '改过')`);
-      rewrite.exec(REVIEW_GUIDELINE_TRIGGER_SQL.review_guideline_versions_no_update!);
-    } finally {
-      rewrite.close();
-    }
-    const tampered = await openStore();
-    try {
-      expect(await refusal(() => tampered.store.inspectReviewGuidelines())).toMatch(/^REVIEW_GUIDELINE_RECORD_INVALID:/u);
-      // 审阅 says the same, never a failed request: its categories read the configuration the chain gives.
-      const creation = tampered.store.prepareBookCreation('空图书', null);
-      const bookId = tampered.store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
-      expect(await refusal(() => tampered.store.inspectReviewWorkspace(bookId, null))).toMatch(/^REVIEW_GUIDELINE_RECORD_INVALID:/u);
-    } finally {
-      await tampered.owner.dispose();
-      tampered.store.close();
     }
   }, 300_000);
 

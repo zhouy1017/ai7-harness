@@ -1,5 +1,4 @@
 import { launchLocalForSnapshot, inspectLaunchSnapshots } from '../support/task-launch.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -7,28 +6,12 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
-import {
-  DATABASE_EXPORT_TRIGGER_SQL,
-  copyStore,
-  databasePackageSources,
-  openPackageStore,
-  verifyCopiedPayloads,
-  writeDatabasePackage,
-  type DatabaseExportError,
-  type DatabasePackageBounds,
-  type DatabasePackageMember,
-} from '../../src/service/database-exports.js';
+import { parseCanonicalJson } from '../../src/service/analysis/canonical.js';
+import { copyStore, databasePackageSources, openPackageStore, verifyCopiedPayloads, writeDatabasePackage, type DatabaseExportError, type DatabasePackageBounds, type DatabasePackageMember } from '../../src/service/database-exports.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import {
-  ANALYSIS_LEDGER_REVISION_58_SQL,
-  DATABASE_EXPORT_SCHEMA_VERSION,
-  LATEST_SCHEMA_VERSION,
-  STORE_VERSION_SCHEMA_VERSION,
-} from '../../src/service/task-authorization.js';
+import { DATABASE_EXPORT_SCHEMA_VERSION, LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 const payloadWalk = vi.hoisted(() => ({ root: null as string | null, pause: null as (() => Promise<void>) | null }));
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -304,120 +287,6 @@ describe('导出数据库 over the real store', () => {
       store.markCleanShutdown();
     } finally {
       store.close();
-    }
-  }, 180_000);
-
-  it('keeps its records as ledgers read back against their digests, and adds revision 55 to a revision-54 store', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const destination = join(roots.inputRoot, 'ledger.ai7db');
-    try {
-      const preparation = await store.prepareDatabaseExport(destination, true);
-      await store.approveDatabaseExport(preparation.preparationId, true);
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const inspected = async (): Promise<unknown> => {
-      const reader = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-      try {
-        const answer = (() => {
-          try {
-            return reader.inspectDatabaseExports();
-          } catch (error) {
-            return error;
-          }
-        })();
-        reader.markCleanShutdown();
-        return answer;
-      } finally {
-        reader.close();
-      }
-    };
-    // A preparation whose row and record were rewritten together, its digest left as it was, no longer reads.
-    const original = (() => {
-      const database = new DatabaseSync(databasePath);
-      try {
-        const row = database.prepare('SELECT file_name, canonical_json FROM database_export_preparations').get() as { file_name: string; canonical_json: string };
-        database.exec('DROP TRIGGER database_export_preparations_no_update');
-        const record = parseCanonicalJson(row.canonical_json) as Record<string, unknown>;
-        database.prepare('UPDATE database_export_preparations SET file_name = ?, canonical_json = ?')
-          .run('rewritten.ai7db', canonicalRecord({ ...record, fileName: 'rewritten.ai7db' }).json);
-        database.exec(DATABASE_EXPORT_TRIGGER_SQL.database_export_preparations_no_update!);
-        return row;
-      } finally {
-        database.close();
-      }
-    })();
-    expect(code(await inspected())).toBe('DATABASE_EXPORT_RECORD_INVALID');
-    const restore = new DatabaseSync(databasePath);
-    try {
-      restore.exec('DROP TRIGGER database_export_preparations_no_update');
-      restore.prepare('UPDATE database_export_preparations SET file_name = ?, canonical_json = ?').run(original.file_name, original.canonical_json);
-      restore.exec(DATABASE_EXPORT_TRIGGER_SQL.database_export_preparations_no_update!);
-    } finally {
-      restore.close();
-    }
-    expect((await inspected() as { total: number }).total).toBe(1);
-    const tamper = new DatabaseSync(databasePath);
-    try {
-      for (const table of ['database_export_preparations', 'database_export_approvals', 'database_export_receipts']) {
-        expect(() => tamper.exec(`UPDATE ${table} SET canonical_json = canonical_json`)).toThrowError(/DATABASE_EXPORT_LEDGER_IMMUTABLE/u);
-        expect(() => tamper.exec(`DELETE FROM ${table}`)).toThrowError(/DATABASE_EXPORT_LEDGER_IMMUTABLE/u);
-      }
-      // A receipt rewritten by hand, digest and all, no longer reads.
-      tamper.exec('DROP TRIGGER database_export_receipts_no_update');
-      const row = tamper.prepare('SELECT canonical_json FROM database_export_receipts').get() as { canonical_json: string };
-      const rewritten = canonicalRecord({ ...(parseCanonicalJson(row.canonical_json) as Record<string, unknown>), finalPath: join(roots.inputRoot, 'elsewhere.ai7db') });
-      tamper.prepare('UPDATE database_export_receipts SET canonical_json = ?, sha256 = ?').run(rewritten.json, rewritten.digest);
-      tamper.exec(DATABASE_EXPORT_TRIGGER_SQL.database_export_receipts_no_update!);
-    } finally {
-      tamper.close();
-    }
-    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      expect(code((() => {
-        try {
-          return reopened.inspectDatabaseExports();
-        } catch (error) {
-          return error;
-        }
-      })())).toBe('DATABASE_EXPORT_RECORD_INVALID');
-      reopened.markCleanShutdown();
-    } finally {
-      reopened.close();
-    }
-
-    // A store as revision 54 left it gains the three empty ledgers and nothing else moves.
-    {
-      const other = await createServiceTestRoots('ai7-service-database-export-migration-');
-      try {
-        const first = await EditorialStore.open(other.dataRoot, other.codeRoot);
-        first.markCleanShutdown();
-        first.close();
-        const plant = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'));
-        try {
-          execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; PRAGMA user_version = ${STORE_VERSION_SCHEMA_VERSION};`);
-          downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
-        } finally {
-          plant.close();
-        }
-        const migrated = await EditorialStore.open(other.dataRoot, other.codeRoot);
-        try {
-          expect(migrated.inspectDatabaseExports()).toEqual({ exports: [], total: 0, activity: null });
-          migrated.markCleanShutdown();
-        } finally {
-          migrated.close();
-        }
-        const check = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-        try {
-          expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-        } finally {
-          check.close();
-        }
-      } finally {
-        await other.dispose();
-      }
     }
   }, 180_000);
 

@@ -1,28 +1,16 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
-import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import type { Connectivity, TaskPlanConnectivity } from '../../src/service/connectivity.js';
-import {
-  DEFAULT_EXECUTION_RULES_STATEMENT,
-  DefaultExecutionRuleLedger,
-  QUICK_START_DEVELOPER_LIVE,
-  QUICK_START_OFFLINE,
-  QUICK_START_RANGE_REASON,
-  QUICK_START_RULE_CHANGED,
-  SET_RULE_FIRST_BASELINE,
-  quickStartNoRuleReason,
-} from '../../src/service/default-execution-rules.js';
+import { DefaultExecutionRuleLedger, QUICK_START_DEVELOPER_LIVE, QUICK_START_OFFLINE, QUICK_START_RANGE_REASON, QUICK_START_RULE_CHANGED, SET_RULE_FIRST_BASELINE, quickStartNoRuleReason } from '../../src/service/default-execution-rules.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CONNECTIVITY_WAIT_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -30,18 +18,9 @@ import {
   type BaselineAnalysisUpdateMode,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
-import {
-  DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER,
-  analysisRunAuthorizationsShape,
-  plantRevision30Relations,
-} from '../support/default-execution-rules.js';
+import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
-import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
-import { MIGRATION_EMPTY_RELATIONS, PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
-import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
-import { constructPre94PolicyEncoding, downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -139,96 +118,7 @@ function ownerOf(store: EditorialStore): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
-/** Every relation's exact text and a digest of its rows, so a migration can say exactly what it moved. */
-function relationTruth(database: DatabaseSync): Map<string, { sql: string; content: string }> {
-  const relations = database.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'table' ORDER BY name").all() as { name: string; sql: string | null }[];
-  return new Map(relations.map((relation) => {
-    const rows = database.prepare(`SELECT * FROM "${relation.name}"`).all() as Row[];
-    const hash = createHash('sha256');
-    for (const row of rows) {
-      for (const column of Object.keys(row).sort()) {
-        const value = row[column]!;
-        hash.update(JSON.stringify([column, value instanceof Uint8Array ? [...value] : typeof value === 'bigint' ? value.toString() : value]));
-      }
-    }
-    return [relation.name, { sql: String(relation.sql), content: `${rows.length}:${hash.digest('hex')}` }];
-  }));
-}
-
 describe('schema revision 31 over the real store', () => {
-  it('widens a planted revision-30 store\'s authorization origin with every row as it was, and adds the empty rule ledger', async () => {
-    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      const imported = await importSample1Book(first, roots.codeRoot, 'L2 sample1 规则迁移');
-      await pinEditorialWorkspaceProfileRevision2(first, imported.bookId);
-      recordMissingCredentialConnection(first, 'L2 主编辑连接');
-      const prepared = prepare(first, imported.bookId);
-      first.authorizeBaselineAnalysis(imported.bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-      first.markCleanShutdown();
-    } finally {
-      first.close();
-    }
-    const before = withDatabase(false, (database) => {
-      constructPre94PolicyEncoding(database);
-      plantRevision30Relations(database);
-      execPre74Fixture(database, `PRAGMA user_version = ${CONNECTIVITY_WAIT_SCHEMA_VERSION}`);
-      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
-      expect(analysisRunAuthorizationsShape(database)).toBe('revision-30');
-      return {
-        authorizations: database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all() as Row[],
-        truth: relationTruth(database),
-      };
-    });
-    expect(before.authorizations.map((row) => row.origin)).toEqual(['standard-direct']);
-
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      expect(migrated.inspectDefaultExecutionRules()).toEqual({ rules: [], statement: DEFAULT_EXECUTION_RULES_STATEMENT });
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(analysisRunAuthorizationsShape(database)).toBe('current');
-      expect(database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(before.authorizations.map((row) => ({ ...row, start_when: 'now' })));
-      const after = relationTruth(database);
-      expect([...after.keys()]).toEqual([...before.truth.keys(), 'review_run_synthesis', ...RESEARCH_EVIDENCE_RELATIONS, ...MATERIAL_INDEX_LAYER_RELATIONS, ...PROPOSAL_REVIEW_RELATIONS, ...FACTUAL_VERIFICATION_RELATIONS, ...HOUSE_REVIEW_PREFERENCE_RELATIONS, ...TASK_INTENT_DRAFT_RELATIONS, ...IMPORTED_SKILL_RELATIONS, ...CUSTOM_ANALYSIS_RELATIONS, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
-      for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(after.get(relation)?.content).toMatch(/^0:/);
-      for (const relation of [...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(after.get(relation)?.content).toMatch(/^0:/);
-      // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_task_intents', 'proposal_item_decisions']);
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['analysis_run_authorizations', 'service_lifetimes']);
-      expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_run_authorizations' ORDER BY name").all())
-        .toEqual([{ name: 'analysis_run_authorizations_no_delete' }, { name: 'analysis_run_authorizations_no_update' }]);
-      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    });
-  }, 300_000);
-
-  it('refuses a store whose authorizations match neither shape, rather than rebuilding it', async () => {
-    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      first.markCleanShutdown();
-    } finally {
-      first.close();
-    }
-    withDatabase(false, (database) => {
-      plantRevision30Relations(database);
-      // A hand-altered relation: a column no revision ever wrote.
-      execPre74Fixture(database, `PRAGMA foreign_keys = OFF;
-        BEGIN IMMEDIATE;
-        DROP TRIGGER analysis_run_authorizations_no_update;
-        DROP TRIGGER analysis_run_authorizations_no_delete;
-        ALTER TABLE analysis_run_authorizations ADD COLUMN note TEXT;
-        PRAGMA user_version = ${CONNECTIVITY_WAIT_SCHEMA_VERSION};
-        COMMIT;
-        PRAGMA foreign_keys = ON;`);
-      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
-      expect(analysisRunAuthorizationsShape(database)).toBe('other');
-    });
-    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
-  }, 300_000);
-
   it('keeps every rule row as it was written: the ledger refuses an update or a delete', async () => {
     const store = await openWithRoute();
     const owner = ownerOf(store);

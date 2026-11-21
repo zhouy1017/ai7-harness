@@ -1,4 +1,3 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { unzipSync } from 'fflate';
 import { existsSync, writeFileSync } from 'node:fs';
@@ -15,11 +14,9 @@ import { compileWordTrackedDocx, parseDocx } from '../../src/service/docx.js';
 import * as exportFiles from '../../src/service/manuscript-export.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type BookDeliveryPackageExportProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, type SourceSpan } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for the export of a 图书交付包 version (Issue #416, plan slice S67b; V2-UX-BUNDLE-004,
 // DPKG-011, DPKG-013, DPKG-014, EXP-010 to EXP-022) over the real `EditorialStore` on a temporary Agent Data Root. The
@@ -164,55 +161,6 @@ function plantInvalidEvaluationPin(bookId: string): string {
     database.close();
   }
   return plantedId!;
-}
-
-// No owning migration suite starts before revision 56; retain this revision-40 path.
-function downgradeToRevision40(): void {
-  const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-  const planted = new DatabaseSync(path);
-  try {
-    planted.exec('PRAGMA foreign_keys = OFF');
-    execPre74Fixture(planted, `BEGIN IMMEDIATE;
-      DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books;
-      DROP TABLE database_merges;
-      DROP TABLE database_replacements;
-      DROP TABLE scheduled_backup_removals;
-      DROP TABLE scheduled_backups;
-      DROP TABLE backup_preferences;
-      DROP TABLE database_export_receipts;
-      DROP TABLE database_export_approvals;
-      DROP TABLE database_export_preparations;
-      DROP TABLE store_versions;
-      DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions;
-      DROP TABLE series_knowledge_revisions;
-      DROP TABLE series_knowledge_candidates;
-      DROP TABLE series_knowledge_items;
-      DROP TABLE series_membership_changes;
-      DROP TABLE series;
-      DROP TABLE evaluation_preferences;
-      DROP TABLE publication_actuals;
-      DROP TABLE learning_eligibility_decisions;
-      DROP TABLE proposal_decision_feedback;
-      DROP TABLE analysis_feedback_signals;
-      DROP TABLE evaluation_record_entries;
-      DROP TABLE evaluation_records;
-      DROP TABLE library_material_decisions;
-      DROP TABLE library_materials;
-      DROP TABLE review_guideline_versions;
-      DROP TABLE book_people_versions;
-      DROP TABLE maintenance_case_revisions;
-      DROP TABLE maintenance_errata_versions;
-      DROP TABLE maintenance_cases;
-      DROP TABLE production_document_origin_readings;
-      DROP TABLE book_delivery_package_export_files;
-      DROP TABLE book_delivery_package_exports;
-      PRAGMA user_version = ${PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION};
-      COMMIT;`);
-    downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
-    planted.exec('PRAGMA foreign_keys = ON');
-  } finally {
-    planted.close();
-  }
 }
 
 function prepareEvaluatedPackage(store: EditorialStore, bookId: string, purpose: string): string {
@@ -898,28 +846,6 @@ describe('图书交付包 · 导出 (S67b)', () => {
       expect(store.inspectBookDeliveryPackage(bookId).versions[0]!.exports).toEqual([]);
     } finally { release(); await jobs.dispose(); store.close(); }
   }, 180_000);
-
-  it('exports a package after migrating the unique revision-40 predecessor', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      await importBook(store, await compose('迁移导出组稿', [1, 2]));
-      store.markCleanShutdown();
-    } finally { store.close(); }
-    downgradeToRevision40();
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      const { bookId, packageVersionId } = await preparedPackage(migrated);
-      expect(migrated.inspectBookDeliveryPackage(bookId).versions[0]!.exports).toEqual([]);
-      const review = await migrated.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL }, true);
-      const folder = join(roots.inputRoot, '迁移后导出'); await mkdir(folder);
-      const prepared = await migrated.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL,
-        memberKeys: review.files.map((file) => file.key), reviewDigest: review.reviewDigest, folder }, true);
-      const result = await migrated.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
-      expect(result.export.state).toBe('exported');
-      expect(await readdir(folder)).toHaveLength(3);
-      migrated.markCleanShutdown();
-    } finally { migrated.close(); }
-  }, 120_000);
 
   it('says what each file keeps and loses, and writes the marks only as the editor leaves 含批注 and 含修改建议', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

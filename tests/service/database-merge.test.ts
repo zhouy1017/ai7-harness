@@ -1,12 +1,6 @@
 import { launchLocalForSnapshot, inspectLaunchSnapshots } from '../support/task-launch.js';
 import { setLibraryDecision } from '../support/library-materials.js';
-import { asDraftRevision105 } from '../support/draft-revisions.js';
-import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
-import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
-import { asRevision98 } from '../support/procedure-revisions.js';
-import { asRevision99, asRevision100, asRevision101, asRevision102 } from '../support/structural-revisions.js';
 import { randomUUID } from 'node:crypto';
 import { copyFileSync, cpSync, existsSync, mkdirSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -26,7 +20,6 @@ import {
   planMerge,
   saveStoreFiles,
 } from '../../src/service/database-merge.js';
-import { writeDatabasePackage } from '../../src/service/database-exports.js';
 import { EDITORIAL_WORKSPACE_PROFILE_DIGEST } from '../../src/service/editorial-workspace-profile.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { preMergeBackupFileName, replacementStagingFor, writeMergeReceipt, type ReplacementIntent } from '../../src/service/database-replacement.js';
@@ -39,8 +32,6 @@ import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { J03_TASK_GOAL } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { WRITING_REQUEST } from '../support/writing-task.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -787,24 +778,6 @@ describe('Book learning controls across database merge (#1115)', () => {
 });
 
 describe('只导入其中的图书 over the store', () => {
-  it('keeps a revision-105 draft when its Book is migrated and merged', async () => {
-    let source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const bookId = emptyBook(source, '旧版本草稿合并');
-    const draft = source.saveTaskIntentDraft({ bookId, draftId: null, expectedOrdinal: null, origin: 'composer-book', goal: '审阅本书', target: { kind: 'book' }, outcomeClass: 'review' });
-    source.markCleanShutdown(); source.close();
-    const db = new DatabaseSync(storeOf(roots.dataRoot));
-    try { asDraftRevision105(db); } finally { db.close(); }
-    source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let path: string;
-    try { path = await exportedFrom(source, 'revision105-merge.ai7db'); } finally { source.close(); }
-    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    try { const preview = await target.inspectDatabaseImport(path); await target.prepareDatabaseMerge(preview.previewId, T); }
-    finally { target.close(); }
-    target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    try { expect(target.inspectTaskIntentDrafts({ bookId, draftId: draft.draftId }).drafts[0]!.version).toEqual(draft.version); }
-    finally { target.close(); }
-  });
-
   it('selected policy profile merge preserves exact frozen Book metadata without importing House authority', async () => {
     const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-factual-authored');
     const control = { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
@@ -1192,180 +1165,6 @@ describe('what a merge refuses, puts back and brings forward', () => {
     } finally { target.close(); }
   }, 180_000);
 
-  it('migrates a genuine revision-97 package on selected-Book merge (#1170)', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const creation = source.prepareBookCreation('版本97待合并图书', null);
-    source.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }); source.close();
-    const db = new DatabaseSync(storeOf(roots.dataRoot));
-    const path = join(roots.inputRoot, 'revision97.ai7db');
-    try {
-      db.exec('DROP TABLE procedure_run_choices; DROP TABLE procedure_version_stops; DROP TABLE procedure_version_origins; DROP TABLE procedure_plan_pins;');
-      db.exec(PROCEDURE_DEFINITION_SCHEMA_SQL.procedure_plan_pins);
-      for (const action of ['update', 'delete']) db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL[`procedure_plan_pins_no_${action}`]!);
-      execPre74Fixture(db, 'PRAGMA user_version = 97');
-      await writeDatabasePackage(db, roots.dataRoot, path, () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 97,
-        createdAt: T.toISOString(), origin: 'database-export', contents: { books: 1, sourceVersions: 0, libraryMaterials: 0, series: 0 } }));
-    } finally { db.close(); }
-    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    try {
-      const preview = await target.inspectDatabaseImport(path);
-      expect(preview).toMatchObject({ schemaRevision: 97, compatibility: 'compatible' });
-      await target.prepareDatabaseMerge(preview.previewId, T);
-      target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
-      expect(titles(target)).toEqual(['版本97待合并图书']);
-      expect(target.procedureLibrary({ action: 'inspect' }).procedures).toHaveLength(17);
-      target.markCleanShutdown();
-    } finally { target.close(); }
-  });
-
-  it('migrates a genuine revision-98 package on selected-Book merge without its missing 全文审校 row (#1173)', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const creation = source.prepareBookCreation('版本98待合并图书', null);
-    source.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }); source.close();
-    const db = new DatabaseSync(storeOf(roots.dataRoot));
-    const path = join(roots.inputRoot, 'revision98.ai7db');
-    try {
-      asRevision98(db);
-      expect(db.prepare("SELECT count(*) total FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/full-review'").get()).toEqual({ total: 0 });
-      await writeDatabasePackage(db, roots.dataRoot, path, () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 98,
-        createdAt: T.toISOString(), origin: 'database-export', contents: { books: 1, sourceVersions: 0, libraryMaterials: 0, series: 0 } }));
-    } finally { db.close(); }
-    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    try {
-      const preview = await target.inspectDatabaseImport(path);
-      expect(preview).toMatchObject({ schemaRevision: 98, compatibility: 'compatible' });
-      await target.prepareDatabaseMerge(preview.previewId, T);
-      target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
-      expect(titles(target)).toEqual(['版本98待合并图书']);
-      expect(target.procedureLibrary({ action: 'inspect' }).procedures.map((entry) => entry.procedureId).at(-1)).toBe('ai7-procedure/full-review');
-      target.markCleanShutdown();
-    } finally { target.close(); }
-  });
-
-  it('migrates a genuine revision-99 package with command history on selected-Book merge, where 撤销 and Enter work (#1175)', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let book: { bookId: string; manuscriptId: string; branchId: string };
-    try {
-      book = await importBook(source, await compose('版本99待合并图书', [21, 22, 23]));
-      const view = source.getManuscriptWindow(book.manuscriptId, book.branchId, null);
-      source.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: view.revisionId,
-        blockId: view.blocks[1]!.blockId, windowStartBlockId: view.blocks[0]!.blockId, baseBlockDigest: view.blocks[1]!.digest,
-        expectedJournalSequence: view.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '〔合并前〕' });
-      source.markCleanShutdown();
-    } finally { source.close(); }
-    const db = new DatabaseSync(storeOf(roots.dataRoot));
-    const path = join(roots.inputRoot, 'revision99.ai7db');
-    try {
-      asRevision99(db);
-      await writeDatabasePackage(db, roots.dataRoot, path, () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 99,
-        createdAt: T.toISOString(), origin: 'database-export', contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 } }));
-    } finally { db.close(); }
-    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    try {
-      const preview = await target.inspectDatabaseImport(path);
-      expect(preview).toMatchObject({ schemaRevision: 99, compatibility: 'compatible' });
-      await target.prepareDatabaseMerge(preview.previewId, T);
-      target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
-      const merged = target.getManuscriptWindow(book!.manuscriptId, book!.branchId, null);
-      expect(merged.blocks[1]!.text.startsWith('〔合并前〕')).toBe(true);
-      target.undoManuscript(book!.manuscriptId, book!.branchId, merged.workingDigest);
-      const undone = target.getManuscriptWindow(book!.manuscriptId, book!.branchId, null);
-      expect(undone.blocks[1]!.text.startsWith('〔合并前〕')).toBe(false);
-      const split = target.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book!.manuscriptId, branchId: book!.branchId,
-        baseRevisionId: undone.revisionId, blockId: undone.blocks[1]!.blockId, windowStartBlockId: undone.blocks[0]!.blockId,
-        baseBlockDigest: undone.blocks[1]!.digest, expectedJournalSequence: undone.journalSequence, fromGrapheme: 4, toGrapheme: 4, insertText: '',
-        structure: { kind: 'split', newBlockId: `blk_${'0123456789ab'.repeat(2)}` } });
-      expect(split.window.blocks).toHaveLength(merged.blocks.length + 1);
-      target.markCleanShutdown();
-    } finally { target.close(); }
-  });
-
-  it('migrates a genuine revision-102 package on selected-Book merge, keeping its manuscript exact (#1225)', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let book: { bookId: string; manuscriptId: string; branchId: string };
-    let before: unknown;
-    try {
-      book = await importBook(source, await compose('版本102待合并图书', [24, 25, 26]));
-      before = source.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks;
-      source.markCleanShutdown();
-    } finally { source.close(); }
-    const db = new DatabaseSync(storeOf(roots.dataRoot));
-    const path = join(roots.inputRoot, 'revision102.ai7db');
-    try {
-      asRevision102(db);
-      await writeDatabasePackage(db, roots.dataRoot, path, () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 102,
-        createdAt: T.toISOString(), origin: 'database-export', contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 } }));
-    } finally { db.close(); }
-    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    try {
-      const preview = await target.inspectDatabaseImport(path);
-      expect(preview).toMatchObject({ schemaRevision: 102, compatibility: 'compatible' });
-      await target.prepareDatabaseMerge(preview.previewId, T);
-      target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
-      expect(target.getManuscriptWindow(book!.manuscriptId, book!.branchId, null).blocks).toEqual(before);
-      target.markCleanShutdown();
-    } finally { target.close(); }
-  });
-
-  it('migrates a genuine revision-101 package on selected-Book merge, keeping its manuscript exact (#1205)', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let book: { bookId: string; manuscriptId: string; branchId: string };
-    let before: unknown;
-    try {
-      book = await importBook(source, await compose('版本101待合并图书', [24, 25, 26]));
-      before = source.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks;
-      source.markCleanShutdown();
-    } finally { source.close(); }
-    const db = new DatabaseSync(storeOf(roots.dataRoot));
-    const path = join(roots.inputRoot, 'revision101.ai7db');
-    try {
-      asRevision101(db);
-      await writeDatabasePackage(db, roots.dataRoot, path, () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 101,
-        createdAt: T.toISOString(), origin: 'database-export', contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 } }));
-    } finally { db.close(); }
-    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    try {
-      const preview = await target.inspectDatabaseImport(path);
-      expect(preview).toMatchObject({ schemaRevision: 101, compatibility: 'compatible' });
-      await target.prepareDatabaseMerge(preview.previewId, T);
-      target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
-      expect(target.getManuscriptWindow(book!.manuscriptId, book!.branchId, null).blocks).toEqual(before);
-      target.markCleanShutdown();
-    } finally { target.close(); }
-  });
-
-  it('migrates a genuine revision-100 package on selected-Book merge, where 撤销 still works (#1204)', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let book: { bookId: string; manuscriptId: string; branchId: string };
-    try {
-      book = await importBook(source, await compose('版本100待合并图书', [24, 25, 26]));
-      const view = source.getManuscriptWindow(book.manuscriptId, book.branchId, null);
-      source.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: view.revisionId,
-        blockId: view.blocks[0]!.blockId, windowStartBlockId: view.blocks[0]!.blockId, baseBlockDigest: view.blocks[0]!.digest,
-        expectedJournalSequence: view.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '〔合并前〕' });
-      source.markCleanShutdown();
-    } finally { source.close(); }
-    const db = new DatabaseSync(storeOf(roots.dataRoot));
-    const path = join(roots.inputRoot, 'revision100.ai7db');
-    try {
-      asRevision100(db);
-      await writeDatabasePackage(db, roots.dataRoot, path, () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 100,
-        createdAt: T.toISOString(), origin: 'database-export', contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 } }));
-    } finally { db.close(); }
-    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    try {
-      const preview = await target.inspectDatabaseImport(path);
-      expect(preview).toMatchObject({ schemaRevision: 100, compatibility: 'compatible' });
-      await target.prepareDatabaseMerge(preview.previewId, T);
-      target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
-      const merged = target.getManuscriptWindow(book!.manuscriptId, book!.branchId, null);
-      expect(merged.blocks[0]!.text.startsWith('〔合并前〕')).toBe(true);
-      target.undoManuscript(book!.manuscriptId, book!.branchId, merged.workingDigest);
-      expect(target.getManuscriptWindow(book!.manuscriptId, book!.branchId, null).blocks[0]!.text.startsWith('〔合并前〕')).toBe(false);
-      target.markCleanShutdown();
-    } finally { target.close(); }
-  });
-
   it('keeps an imported Run exact without installing the source house procedure library (#1170)', async () => {
     const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let bookId: string, procedure: { procedureId: string; version: number; digest: string }, promptDigest: string, path: string;
@@ -1394,53 +1193,6 @@ describe('what a merge refuses, puts back and brings forward', () => {
       target.markCleanShutdown();
     } finally { target.close(); }
   });
-
-  it('brings a package made at an older revision to this one before it merges', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      await importBook(source, await compose(TITLE, [1, 2]));
-    } finally {
-      source.close();
-    }
-    // The package as an AI7 at revision 57 exactly would have made it: its store without any relation revisions 58 to 65 added —
-    // the writing Tasks and drafts (65), the evaluation rewrite records (64), the Captured Procedures (63), the 审稿意见 records (62), the Series Retrieval Exclusions (61), the dialogue ledger (60), the
-    // 初评 drafts (59) and the merges (58) — and its kind-coupled relations as revision 58 left them (Issue #674).
-    const older = join(roots.inputRoot, 'older.sqlite');
-    copyFileSync(storeOf(roots.dataRoot), older);
-    const packagePath = join(roots.inputRoot, 'AI7 旧版数据库.ai7db');
-    const db = new DatabaseSync(older);
-    try {
-      execPre74Fixture(db, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks;
-        DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins;
-        DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures;
-        DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions;
-        DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings;
-        DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges;
-        PRAGMA user_version = 57;`);
-      downgradeKindCoupledRelations(db, ANALYSIS_LEDGER_REVISION_58_SQL);
-      await writeDatabasePackage(db, roots.dataRoot, packagePath, () => ({
-        dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 57, createdAt: T.toISOString(), origin: 'database-export',
-        contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 },
-      }));
-    } finally {
-      db.close();
-    }
-    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    try {
-      const preview = await target.inspectDatabaseImport(packagePath);
-      expect([preview.schemaRevision, preview.compatibility, preview.books.map((entry) => entry.status)]).toEqual([57, 'compatible', ['new']]);
-      await target.prepareDatabaseMerge(preview.previewId, T);
-    } finally {
-      target.close();
-    }
-    target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    try {
-      expect(titles(target)).toEqual([TITLE]);
-      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'applied', mergedTitles: [TITLE] });
-    } finally {
-      target.close();
-    }
-  }, 180_000);
 
   it('refuses to preview a file whose store does not read, as damaged, and stages nothing', async () => {
     const store = 'not a database';
@@ -1974,22 +1726,6 @@ describe('what a merge refuses, puts back and brings forward', () => {
   }, 240_000);
 });
 
-
-it('validates a historical reader91 source through the existing selected-Book merge callback (#1131)', async () => {
-  const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  const bookId = emptyBook(source, '合成历史来源'); await source.close();
-  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite')); execPre74Fixture(db, 'PRAGMA user_version = 91');
-  const packagePath = join(roots.inputRoot, 'reader91.ai7db');
-  try { await writeDatabasePackage(db, roots.dataRoot, packagePath, () => ({ dataVersion: 1, schemaRevision: 91,
-    softwareVersion: '0.1.0', createdAt: T.toISOString(), origin: 'database-export' })); } finally { db.close(); }
-  let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-  const preview = await target.inspectDatabaseImport(packagePath); await target.prepareDatabaseMerge(preview.previewId, T);
-  await target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
-  try {
-    expect(target.listBooks(null).items.map((book) => book.bookId)).toContain(bookId);
-    expect(target.inspectDataVersion()).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION });
-  } finally { await target.close(); }
-});
 
 
 it('merges a custom derivative category and its document management state with its Book (#1427)', async () => {

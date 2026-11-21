@@ -1,6 +1,5 @@
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cp, unlink, writeFile } from 'node:fs/promises';
+import { cp, unlink } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
 import {
@@ -228,22 +227,6 @@ describe('durable request reader compatibility', () => {
     const after = new DatabaseSync(path); try { expect(requestRows(after)).toEqual(before); } finally { after.close(); }
   });
 
-  it.each([90, 91].flatMap((revision) => requestFields.flatMap(([table, field]) => [null, { malformed: true }].map((value) => ({ revision, table, field, location: `${table}.${field}`, value })))))
-    ('refuses property presence under predecessor $revision at $location ($value), without restamping', async ({ revision, table, field, value }) => {
-      const crash = await admittedCrash(table === 'analysis_unit_checkpoints' ? 'unit' : table === 'analysis_clarification_requests' ? 'clarification' : 'held');
-      const path = join(crash.snapshot, 'store', 'ai7.sqlite'); const db = new DatabaseSync(path);
-      constructPre94PolicyEncoding(db);
-      for (const [target, property] of requestFields) rewriteRequestRows(db, target, (record) => { delete record[property]; });
-      expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()!.total).toBeGreaterThan(0);
-      rewriteRequestRows(db, table, (record, index) => { if (index === 0) record[field] = value; });
-      db.exec(`PRAGMA user_version = ${revision}`); const before = requestRows(db); db.close();
-      const marker = (await readDataVersionMarker(crash.snapshot))!;
-      await writeFile(dataVersionMarkerPath(crash.snapshot), JSON.stringify({ ...marker, schemaRevision: revision }));
-      await expect(EditorialStore.open(crash.snapshot, crash.roots.codeRoot)).rejects.toMatchObject({ code: 'ANALYSIS_RECORD_INVALID' });
-      const after = new DatabaseSync(path); try { expect(requestRows(after)).toEqual(before); } finally { after.close(); }
-      expect((await readDataVersionMarker(crash.snapshot))!.schemaRevision).toBe(revision);
-    });
-
   it.each(['digest', 'chain', 'sequence', 'binding', 'foreign-run', 'foreign-unit', 'input', 'logical-request', 'ordinal', 'unknown-event', 'extra-key', 'orphan-array', 'orphan-refusal', 'duplicate-array', 'foreign-array', 'no-send-correlation'] as const)
     ('refuses rehashed current-format $0 corruption before any reconciliation or canonical mutation', async (damage) => {
       const crash = await admittedCrash('unit'); const path = join(crash.snapshot, 'store', 'ai7.sqlite'); const db = new DatabaseSync(path);
@@ -339,17 +322,6 @@ describe('durable request reader compatibility', () => {
     const before = requestRows(db); db.close();
     await expect(EditorialStore.open(crash.snapshot, crash.roots.codeRoot)).rejects.toMatchObject({ code: 'ANALYSIS_RECORD_INVALID' });
     const after = new DatabaseSync(path); try { expect(requestRows(after)).toEqual(before); } finally { after.close(); }
-  });
-
-  it('refuses a governed append under a predecessor stamp before writing any positive no-send evidence', async () => {
-    const crash = await admittedCrash(); const path = join(crash.roots.dataRoot, 'store', 'ai7.sqlite'); const db = new DatabaseSync(path);
-    const original = crash.opened[0]!; const ledger = original.executionLedgerForRun(crash.runRecordId);
-    const request = [...ledger.requestAdmissionOf(crash.runRecordId)!.open.values()][0]!;
-    db.exec('PRAGMA user_version = 91'); const before = requestRows(db);
-    try {
-      expect(() => ledger.recordModelRequestNotSent(crash.runRecordId, request.requestId)).toThrow('读者修订');
-      expect(requestRows(db)).toEqual(before);
-    } finally { db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`); db.close(); }
   });
 
   it.each([null, true, ['ordinary-production-editorial-review']])('refuses a coercible nonstring rule pin %j instead of treating it as a string', async (rule) => {

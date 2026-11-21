@@ -29,10 +29,9 @@ async function unpack(): Promise<void> {
   }
 }
 
-// The admitted sample1 fixture supplies real source objects, review results and marks. Upgrade it
-// only in test setup; inventoryStore itself must never open EditorialStore or migrate anything.
+// A baseline store holding imported sample1, then the D7 relations seeded beside it; inventoryStore itself never opens
+// EditorialStore. The admitted 0.7.1 package (revision 115) is read as it lies, never opened (#1634).
 async function seed(): Promise<void> {
-  await unpack();
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   try { await importSample1(store); } finally { store.close(); }
   const db = new DatabaseSync(path);
@@ -166,7 +165,7 @@ describe('read-only business inventory', () => {
     expect([after.mtimeMs, after.size]).toEqual([before.mtimeMs, before.size]);
   });
 
-  it('counts a real revision-116 store deterministically and equals its online backup', async () => {
+  it('counts a real revision-117 store deterministically and equals its online backup', async () => {
     await seed();
     const before = await stat(path);
     const output = inventoryStore(path);
@@ -201,7 +200,6 @@ describe('read-only business inventory', () => {
   });
 
   it('counts the rows of an un-checkpointed WAL and leaves the main file and the -wal bytes unchanged', async () => {
-    await unpack();
     // A live product store: WAL mode, auto-checkpoint off. A crash-like snapshot is its main file and its -wal, without -shm.
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const wal = join(roots.inputRoot, 'wal');

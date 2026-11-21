@@ -1,29 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { initializeAiEditLockSchema } from '../../../src/service/ai-edit-locks.js';
+import { AI_EDIT_LOCK_SCHEMA_SQL } from '../../../src/service/ai-edit-locks.js';
 import { AnalysisError } from '../../../src/service/analysis/canonical.js';
-import { BoundedManuscriptStore, BoundedStoreError, BoundedStoreFatalError, initializeManuscriptEntryPositionSchema } from '../../../src/service/bounded-manuscript.js';
-import { DecisionFeedbackError, initializeDecisionFeedbackSchema } from '../../../src/service/decision-feedback.js';
+import { BoundedManuscriptStore, BoundedStoreError, BoundedStoreFatalError } from '../../../src/service/bounded-manuscript.js';
+import { DECISION_FEEDBACK_SCHEMA_SQL, DecisionFeedbackError } from '../../../src/service/decision-feedback.js';
 import { DOCX_PARSER_IDENTITY, parseDocx, type ParsedDocxBlock } from '../../../src/service/docx.js';
 import * as editorialMarkOperations from '../../../src/service/editorial-mark-operations.js';
-import { EditorialMarkError, EditorialMarkStore, initializeEditorialMarkSchema, initializeProposalReviewSchema } from '../../../src/service/editorial-marks.js';
+import { EDITORIAL_MARK_SCHEMA_SQL, EditorialMarkError, EditorialMarkStore, PROPOSAL_REVIEW_SCHEMA_SQL } from '../../../src/service/editorial-marks.js';
 import { writeImportedManuscriptRows } from '../../../src/service/import-intake-operations.js';
-import { IMPORT_FIDELITY_CATEGORIES_SQL, initializeImportRetentionSchema } from '../../../src/service/import-retention.js';
-import { initializeInlineEditorRevisionSchema } from '../../../src/service/inline-editor-revisions.js';
-import { initializeEditorialLearningSchema } from '../../../src/service/learning/ledger.js';
-import { initializeLearningEligibilitySchema } from '../../../src/service/learning-eligibility.js';
-import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from '../../../src/service/manuscript-apply.js';
-import {
-  COMMON_SCHEMA_SQL, FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL, FULL_TARGET_SCHEMA_SQL, MANUSCRIPT_REIMPORT_INDEX_SQL, RECOVERY_SCHEMA_SQL,
-  TARGET_INDEX_SQL, TARGET_VIRTUAL_TABLE_SQL, V6_TARGET_SCHEMA_SQL,
-} from '../../../src/service/manuscript/bounded-schema-sql.js';
-import { NOTE_BLOCK_SCHEMA_SQL, NOTE_BLOCK_TRIGGER_SQL, widenedBlockKindTables } from '../../../src/service/manuscript/note-schema.js';
+import { IMPORT_RETENTION_SCHEMA_SQL } from '../../../src/service/import-retention.js';
+import { INLINE_EDITOR_REVISION_SCHEMA_SQL } from '../../../src/service/inline-editor-revisions.js';
+import { EDITORIAL_LEARNING_SCHEMA_SQL } from '../../../src/service/learning/ledger.js';
+import { LEARNING_ELIGIBILITY_SCHEMA_SQL } from '../../../src/service/learning-eligibility.js';
+import { MANUSCRIPT_EFFECT_SCHEMA_SQL, ManuscriptApplyStore } from '../../../src/service/manuscript-apply.js';
 import * as manuscriptOperations from '../../../src/service/manuscript/operations.js';
-import { STRUCTURAL_EDIT_SCHEMA_SQL } from '../../../src/service/manuscript/structural-schema.js';
-import { MANUSCRIPTS_REVISION_37_SQL, PRODUCTION_DOCUMENT_INDEX_SQL } from '../../../src/service/production-document-ledger.js';
-import { initializeReimportGroupSchema } from '../../../src/service/reimport-group-ledger.js';
-import { initializeImportStructureSchema } from '../../../src/service/manuscript/structure-schema.js';
-import { initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore } from '../../../src/service/proposal-conflicts.js';
+import { REIMPORT_GROUP_SCHEMA_SQL } from '../../../src/service/reimport-group-ledger.js';
+import { IMPORT_STRUCTURE_SCHEMA_SQL } from '../../../src/service/manuscript/structure-schema.js';
+import { PROPOSAL_CONFLICT_SCHEMA_SQL, ProposalConflictError, ProposalConflictStore } from '../../../src/service/proposal-conflicts.js';
+import { createBaselineRelations } from '../baseline-relations.js';
 import { canonicalJson, sha256, StoreError, StoreFatalError } from '../../../src/service/store-records.js';
 import { admittedSourcePath, ADMITTED_BASELINE_DOCX } from '../composed-fixture.js';
 import { DOCX_SOURCE_STUBS } from './docx-stubs.js';
@@ -58,56 +52,18 @@ const READER_STUBS = {
 ) STRICT`,
 } as const;
 
-const widened = widenedBlockKindTables(FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL);
-const one = (sql: string | ReadonlyArray<string>): string => typeof sql === 'string' ? sql : sql[sql.length - 1]!;
-
 /**
- * The manuscript's own relations at their terminal production text (block kinds widened by revision 101, as the store's
- * schema check expects them), in dependency order. Every one is compared whole with an opened store by the parity case.
+ * The manuscript's own relations at their baseline text, with their indexes and triggers. Every one is compared whole with an
+ * opened store by the parity case.
  */
-const MANUSCRIPT_DEFINITIONS: ReadonlyArray<string> = [
-  MANUSCRIPTS_REVISION_37_SQL,
-  PRODUCTION_DOCUMENT_INDEX_SQL.manuscripts_one_primary_per_book,
-  one(COMMON_SCHEMA_SQL.manuscript_branches),
-  one(COMMON_SCHEMA_SQL.manuscript_blocks),
-  V6_TARGET_SCHEMA_SQL.manuscript_revisions,
-  one(widened.manuscript_block_versions!),
-  MANUSCRIPT_REIMPORT_INDEX_SQL.revision_reimport_identity,
-  one(widened.working_blocks!),
-  TARGET_INDEX_SQL.working_blocks_window,
-  FULL_TARGET_SCHEMA_SQL.branch_working_state,
-  FULL_TARGET_SCHEMA_SQL.edit_journal_entries,
-  TARGET_INDEX_SQL.journal_branch_order,
-  V6_TARGET_SCHEMA_SQL.manuscript_outline,
-  TARGET_INDEX_SQL.manuscript_outline_order,
-  V6_TARGET_SCHEMA_SQL.working_offset_nodes,
-  TARGET_VIRTUAL_TABLE_SQL,
-  V6_TARGET_SCHEMA_SQL.manuscript_search_sessions,
-  V6_TARGET_SCHEMA_SQL.manuscript_search_results,
-  V6_TARGET_SCHEMA_SQL.manuscript_replacement_previews,
-  V6_TARGET_SCHEMA_SQL.manuscript_replacement_matches,
-  TARGET_INDEX_SQL.replacement_matches_block,
-  V6_TARGET_SCHEMA_SQL.milestone_versions,
-  V6_TARGET_SCHEMA_SQL.milestone_signoff_records,
-  RECOVERY_SCHEMA_SQL.service_lifetimes,
-  RECOVERY_SCHEMA_SQL.service_lifetime_branch_writes,
-  TARGET_INDEX_SQL.lifetime_outcome_order,
-  RECOVERY_SCHEMA_SQL.recovery_snapshots,
-  TARGET_INDEX_SQL.recovery_snapshot_branch,
-  RECOVERY_SCHEMA_SQL.recovery_attention,
-  TARGET_INDEX_SQL.recovery_attention_startup,
-  RECOVERY_SCHEMA_SQL.recovery_restore_stages,
-  one(widened.recovery_restore_stage_blocks!),
-  RECOVERY_SCHEMA_SQL.recovery_decisions,
-  RECOVERY_SCHEMA_SQL.recovery_restorations,
-  RECOVERY_SCHEMA_SQL.manuscript_recovery_review_status,
-  // Revision 100's command relations (structural-schema.ts) at their terminal text; its initializer rebuilds prior ones.
-  STRUCTURAL_EDIT_SCHEMA_SQL.manuscript_command_groups,
-  STRUCTURAL_EDIT_SCHEMA_SQL.manuscript_command_edits,
-  TARGET_INDEX_SQL.command_history_state,
-  STRUCTURAL_EDIT_SCHEMA_SQL.manuscript_block_lineage,
-  NOTE_BLOCK_SCHEMA_SQL.manuscript_note_sources,
-  ...Object.values(NOTE_BLOCK_TRIGGER_SQL),
+const MANUSCRIPT_RELATIONS: ReadonlyArray<string> = [
+  'manuscripts', 'manuscript_branches', 'manuscript_blocks', 'manuscript_revisions', 'manuscript_block_versions', 'working_blocks',
+  'branch_working_state', 'edit_journal_entries', 'manuscript_outline', 'working_offset_nodes', 'working_block_search',
+  'manuscript_search_sessions', 'manuscript_search_results', 'manuscript_replacement_previews', 'manuscript_replacement_matches',
+  'milestone_versions', 'milestone_signoff_records', 'service_lifetimes', 'service_lifetime_branch_writes', 'recovery_snapshots',
+  'recovery_attention', 'recovery_restore_stages', 'recovery_restore_stage_blocks', 'recovery_decisions', 'recovery_restorations',
+  'manuscript_recovery_review_status', 'manuscript_command_groups', 'manuscript_command_edits', 'manuscript_block_lineage',
+  'manuscript_note_sources',
 ];
 
 /** The tables of the helper that are labelled stubs; every other table is a production definition. */
@@ -121,26 +77,14 @@ export function manuscriptMarksDatabase(): DatabaseSync {
     db.exec('PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = ON; PRAGMA trusted_schema = OFF; PRAGMA temp_store = MEMORY;');
     for (const table of SOURCE_STUB_TABLES) db.exec(DOCX_SOURCE_STUBS[table]);
     for (const sql of Object.values(READER_STUBS)) db.exec(sql);
-    for (const sql of MANUSCRIPT_DEFINITIONS) db.exec(sql);
-    db.exec(IMPORT_FIDELITY_CATEGORIES_SQL);
-    initializeImportRetentionSchema(db);
-    initializeManuscriptEntryPositionSchema(db);
-    initializeEditorialMarkSchema(db);
-    initializeProposalReviewSchema(db);
-    initializeManuscriptEffectSchema(db);
-    initializeProposalConflictSchema(db);
-    initializeDecisionFeedbackSchema(db);
-    initializeAiEditLockSchema(db);
-    initializeInlineEditorRevisionSchema(db);
-    // A Proposal Decision is captured as learning material inside the Apply transaction: the learning ledger's own
-    // production initializer (learning/ledger.ts), compared whole with an opened store by the parity case.
-    initializeEditorialLearningSchema(db);
-    initializeLearningEligibilitySchema(db);
-    // The relations whose presence the readers test (a mark set aside by a reimport, a comparison's group sets, the
-    // imported structure's lineage): their owners' production initializers, so every reader takes the branch an opened
-    // store takes, on a Book that was never reimported.
-    initializeReimportGroupSchema(db);
-    initializeImportStructureSchema(db);
+    createBaselineRelations(db, ...MANUSCRIPT_RELATIONS, 'import_fidelity_categories', IMPORT_RETENTION_SCHEMA_SQL,
+      'manuscript_entry_positions', EDITORIAL_MARK_SCHEMA_SQL, PROPOSAL_REVIEW_SCHEMA_SQL, MANUSCRIPT_EFFECT_SCHEMA_SQL,
+      PROPOSAL_CONFLICT_SCHEMA_SQL, DECISION_FEEDBACK_SCHEMA_SQL, AI_EDIT_LOCK_SCHEMA_SQL, INLINE_EDITOR_REVISION_SCHEMA_SQL,
+      // A Proposal Decision is captured as learning material inside the Apply transaction.
+      EDITORIAL_LEARNING_SCHEMA_SQL, LEARNING_ELIGIBILITY_SCHEMA_SQL,
+      // The relations whose presence the readers test (a mark set aside by a reimport, a comparison's group sets, the imported
+      // structure's lineage), so every reader takes the branch an opened store takes, on a Book that was never reimported.
+      REIMPORT_GROUP_SCHEMA_SQL, IMPORT_STRUCTURE_SCHEMA_SQL);
     return db;
   } catch (error) { db.close(); throw error; }
 }

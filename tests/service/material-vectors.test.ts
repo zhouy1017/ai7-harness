@@ -1,5 +1,4 @@
 import { setLibraryDecision } from '../support/library-materials.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -18,14 +17,11 @@ import {
 } from '../../src/service/fast-role/material-translation-contract.js';
 import { STUB_EMBEDDING_IDENTITY } from '../../src/service/knowledge/embedding-stub.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { MATERIAL_INDEX_LAYER_SCHEMA_SQL, MATERIAL_INDEX_LAYER_TRIGGER_SQL } from '../../src/service/material-index.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { PROVIDER_LEDGER_FILE, isItemLine, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
 import { EditorialStore, StoreError, type BackgroundAnalysisRuntime } from '../../src/service/store.js';
-import { LATEST_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { LibraryMaterialKind, LibraryMaterialProjection } from '../../src/shared/protocol.js';
 import { malformedPdf, sampleTextPdf, syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
-import { dropFactualVerificationRelations, FACTUAL_VERIFICATION_SCHEMA_NAMES, dropMaterialIndexLayerRelations, restoreProposalReviewPredecessor, pre77SchemaRows, restoreTaskIntentDraftPredecessor, pre80SchemaRows } from '../support/pre74-schema.js';
 import { withoutRuleFor } from '../support/policy-rules.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -617,53 +613,3 @@ describe('来源译文 over the real store', () => {
   }, 120_000);
 });
 
-describe('revision 76', () => {
-  it('migrates an exact revision-75 store by adding its two relations, moving nothing else, and refuses a 76 without them', async () => {
-    expect(MATERIAL_INDEX_LAYER_SCHEMA_VERSION).toBe(76);
-
-    const schemaRows = (): Array<{ name: string; sql: string }> => {
-      const database = new DatabaseSync(storePath(), { readOnly: true });
-      try {
-        return database.prepare("SELECT name, sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY name").all() as Array<{ name: string; sql: string }>;
-      } finally {
-        database.close();
-      }
-    };
-    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const added = await put(store, file('ferry.txt', ENGLISH), 'Ferry notes');
-    store.startMaterialIndexing();
-    await store.settleMaterialIndexing();
-    store.markCleanShutdown();
-    store.close();
-    const terminal = schemaRows();
-    const plant = new DatabaseSync(storePath());
-    const earlierLayers = ['material_index_builds', 'material_index_segments'].map((table) =>
-      plant.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
-    // Synchronized delta with Issue #423 (slice 7a): a predecessor of revision 80 has no drafts and the narrower Task Intents.
-    restoreTaskIntentDraftPredecessor(plant);
-    dropFactualVerificationRelations(plant);
-    restoreProposalReviewPredecessor(plant);
-    dropMaterialIndexLayerRelations(plant);
-    execPre74Fixture(plant, 'PRAGMA user_version = 95');
-    plant.exec(`PRAGMA user_version = ${RESEARCH_EVIDENCE_SCHEMA_VERSION}`);
-    plant.close();
-    const names = [...FACTUAL_VERIFICATION_SCHEMA_NAMES, ...Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL), ...Object.keys(MATERIAL_INDEX_LAYER_TRIGGER_SQL)];
-    expect(schemaRows()).toEqual(pre77SchemaRows(pre80SchemaRows(terminal).filter((row) => !names.includes(row.name))));
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      // The build made before the revision stands; its vectors are built on it.
-      expect(store.inspectLibraryMaterial(added.materialId).index.vectors?.state).toBe('not-built');
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-    expect(schemaRows()).toEqual(terminal);
-    const migrated = new DatabaseSync(storePath());
-    expect(['material_index_builds', 'material_index_segments'].map((table) =>
-      migrated.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(earlierLayers);
-    expect((migrated.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-    dropMaterialIndexLayerRelations(migrated);
-    migrated.close();
-    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
-  }, 120_000);
-});

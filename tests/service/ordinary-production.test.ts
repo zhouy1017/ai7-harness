@@ -1,8 +1,6 @@
 import * as egressGate from '../../src/service/provider/egress-gate.js';
 import { recordedMarkModel, markModelLabels } from '../../src/service/editorial-mark-source.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { MODEL_SERVICE_CONNECTION_REVISION_72_SQL } from '../../src/service/bounded-manuscript.js';
 import { FastRoleExecutionOwner, productionFastRoleRoutes, testModelServiceConnection } from '../../src/service/fast-role/fast-role-execution.js';
 import { materialTranslator, MATERIAL_TRANSLATION_RESULT_SCHEMA } from '../../src/service/fast-role/material-translation-contract.js';
 import { randomUUID } from 'node:crypto';
@@ -1657,32 +1655,6 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     expect(store.getModelServiceRouteConnection('openai-platform')?.connectionTest).toBeNull();
     expect(store.getConfiguredModelRoleBinding('fast-interaction')?.route).toBe('openai-platform');
     expect(() => store.selectFastRoleModel('openai-platform', 'gpt-5.6-luna')).not.toThrow();
-  });
-
-  it('migrates revision83 without changing Main/reference/history and freezes the prior Fast choice independently', async () => {
-    const { store } = await openProductionStore();
-    const connection = store.saveModelServiceConnection('Legacy Main', null, 'ready', 'deepseek-open-platform');
-    store.selectModelServiceRoute('deepseek-open-platform'); store.close();
-    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    const columns = 'connection_id, role_id, connection_name, provider_id, model_id, adapter_revision, configuration_revision, approved_fallback_chain, credential_slot, credential_reference, credential_operation_state, created_at, updated_at, credential_updated_at, selected';
-    const before = database.prepare(`SELECT ${columns} FROM model_service_connections`).all();
-    database.exec(`CREATE TEMP TABLE legacy_model_selection AS SELECT ${columns} FROM model_service_connections; DROP TABLE model_service_connections;`);
-    database.exec(MODEL_SERVICE_CONNECTION_REVISION_72_SQL);
-    execPre74Fixture(database, `INSERT INTO model_service_connections SELECT * FROM legacy_model_selection; DROP TABLE legacy_model_selection;
-      DROP TABLE material_translation_attempts; PRAGMA user_version = 83;`);
-    database.close();
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(migrated);
-    const after = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-    try {
-      expect(after.prepare(`SELECT ${columns} FROM model_service_connections`).all()).toEqual(before);
-      expect(after.prepare('SELECT count(*) AS count FROM material_translation_attempts').get()!.count).toBe(0);
-    }
-    finally { after.close(); }
-    const saved = migrated.getModelServiceRouteConnection('deepseek-open-platform')!;
-    expect(saved).toMatchObject({ credentialReference: connection.credentialReference, selected: true, fastSelected: true, connectionTest: null });
-    migrated.saveModelServiceConnection('New Main', null, 'ready', 'opencode-go'); migrated.selectModelServiceRoute('opencode-go');
-    expect(migrated.getConfiguredModelRoleBinding('main-editorial')?.route).toBe('opencode-go');
-    expect(migrated.getConfiguredModelRoleBinding('fast-interaction')?.route).toBe('deepseek-open-platform');
   });
 
   it.each([1, 2])('refuses a replaced and retested credential during secret read %s without retargeting the attempt', async (replaceAt) => {

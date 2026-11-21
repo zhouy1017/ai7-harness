@@ -170,8 +170,8 @@ describe('the service-authored sentences of the eight modules', () => {
   it('fail by name on a new sentence, and on an entry whose text has gone', () => {
     const added = placement((file) => file === 'task-plan.ts' ? `${read(file)}\nexport const PROBE = '这项任务现在不能续行。';\n` : read(file));
     expect(added.misplaced).toEqual([expect.stringMatching(/^task-plan\.ts \(now line \d+\) 「这项任务现在不能续行。」 in none$/u)]);
-    const gone = placement((file) => file === 'background-analysis-enrollments.ts' ? read(file).replace('后台处理登记前驱结构不兼容。', '前驱结构不兼容。') : read(file));
-    expect(gone.stale).toEqual(['KNOWN_RAW background-analysis-enrollments.ts 「后台处理登记前驱结构不兼容。」']);
+    const gone = placement((file) => file === 'background-analysis-enrollments.ts' ? read(file).replace('后台处理登记的预算上限无效。', '预算上限无效。') : read(file));
+    expect(gone.stale).toEqual(['KNOWN_RAW background-analysis-enrollments.ts 「后台处理登记的预算上限无效。」']);
   });
 
   it('every family has samples the service made, and each reads in the table\'s words and differs from the service\'s', () => {

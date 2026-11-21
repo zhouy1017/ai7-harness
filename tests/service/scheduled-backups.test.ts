@@ -1,4 +1,4 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
@@ -8,18 +8,10 @@ import { strFromU8, unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
-import {
-  SCHEDULED_BACKUP_TRIGGER_SQL,
-  ScheduledBackups,
-  backupFailureReason,
-  backupFileName,
-  backupLocationFor,
-  initializeScheduledBackupSchema,
-} from '../../src/service/scheduled-backups.js';
+import { ScheduledBackups, backupFailureReason, backupFileName, backupLocationFor, SCHEDULED_BACKUP_SCHEMA_SQL } from '../../src/service/scheduled-backups.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DATABASE_EXPORT_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { LATEST_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 const payloadWalk = vi.hoisted(() => ({ root: null as string | null, pause: null as (() => Promise<void>) | null }));
 const packedBackup = vi.hoisted(() => ({ pause: null as ((signal: AbortSignal | undefined) => Promise<void>) | null }));
@@ -325,146 +317,6 @@ describe('定期自动备份 over the real store', () => {
     }
   }, 180_000);
 
-  it('keeps its records as ledgers read back against their digests, and adds revision 56 to a revision-55 store', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      await store.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }, T);
-      expect(await store.runScheduledBackupIfDue(T)).toBe(true);
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const tamper = new DatabaseSync(databasePath);
-    try {
-      for (const table of ['backup_preferences', 'scheduled_backups']) {
-        expect(() => tamper.exec(`UPDATE ${table} SET canonical_json = canonical_json`)).toThrowError(/SCHEDULED_BACKUP_LEDGER_IMMUTABLE/u);
-        expect(() => tamper.exec(`DELETE FROM ${table}`)).toThrowError(/SCHEDULED_BACKUP_LEDGER_IMMUTABLE/u);
-      }
-      // A switch change rewritten in its row and record, its digest left as it was, no longer reads.
-      tamper.exec('DROP TRIGGER backup_preferences_no_update');
-      const preference = tamper.prepare('SELECT canonical_json FROM backup_preferences').get() as { canonical_json: string };
-      tamper.prepare('UPDATE backup_preferences SET enabled = 0, canonical_json = ?')
-        .run(canonicalRecord({ ...(parseCanonicalJson(preference.canonical_json) as Record<string, unknown>), enabled: false }).json);
-      tamper.exec(SCHEDULED_BACKUP_TRIGGER_SQL.backup_preferences_no_update!);
-    } finally {
-      tamper.close();
-    }
-    const refusedPreference = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      expect(code((() => {
-        try {
-          return refusedPreference.inspectScheduledBackups(T);
-        } catch (error) {
-          return error;
-        }
-      })())).toBe('SCHEDULED_BACKUP_RECORD_INVALID');
-      refusedPreference.markCleanShutdown();
-    } finally {
-      refusedPreference.close();
-    }
-    const restore = new DatabaseSync(databasePath);
-    try {
-      restore.exec('DROP TRIGGER backup_preferences_no_update');
-      const preference = restore.prepare('SELECT canonical_json FROM backup_preferences').get() as { canonical_json: string };
-      restore.prepare('UPDATE backup_preferences SET enabled = 1, canonical_json = ?')
-        .run(canonicalRecord({ ...(parseCanonicalJson(preference.canonical_json) as Record<string, unknown>), enabled: true }).json);
-      restore.exec(SCHEDULED_BACKUP_TRIGGER_SQL.backup_preferences_no_update!);
-    } finally {
-      restore.close();
-    }
-    // A switch change rewritten whole — row, record and digest agreeing — so that only its place in the chain is wrong.
-    const chain = new DatabaseSync(databasePath);
-    let original: { ordinal: number; supersedes: string | null; canonical_json: string; sha256: string };
-    try {
-      chain.exec('DROP TRIGGER backup_preferences_no_update');
-      const row = chain.prepare('SELECT preference_id, ordinal, supersedes_preference_id supersedes, canonical_json, sha256 FROM backup_preferences').get() as
-        { preference_id: string; ordinal: number; supersedes: string | null; canonical_json: string; sha256: string };
-      original = row;
-      const moved = canonicalRecord({ ...(parseCanonicalJson(row.canonical_json) as Record<string, unknown>), ordinal: 2, supersedes: row.preference_id });
-      chain.prepare('UPDATE backup_preferences SET ordinal = 2, supersedes_preference_id = preference_id, canonical_json = ?, sha256 = ?').run(moved.json, moved.digest);
-      chain.exec(SCHEDULED_BACKUP_TRIGGER_SQL.backup_preferences_no_update!);
-    } finally {
-      chain.close();
-    }
-    const refusedChain = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      expect(code((() => {
-        try {
-          return refusedChain.inspectScheduledBackups(T);
-        } catch (error) {
-          return error;
-        }
-      })())).toBe('SCHEDULED_BACKUP_RECORD_INVALID');
-      refusedChain.markCleanShutdown();
-    } finally {
-      refusedChain.close();
-    }
-    const unchain = new DatabaseSync(databasePath);
-    try {
-      unchain.exec('DROP TRIGGER backup_preferences_no_update');
-      unchain.prepare('UPDATE backup_preferences SET ordinal = ?, supersedes_preference_id = ?, canonical_json = ?, sha256 = ?')
-        .run(original!.ordinal, original!.supersedes, original!.canonical_json, original!.sha256);
-      unchain.exec(SCHEDULED_BACKUP_TRIGGER_SQL.backup_preferences_no_update!);
-    } finally {
-      unchain.close();
-    }
-    const tamperBackup = new DatabaseSync(databasePath);
-    try {
-      // A backup's record rewritten by hand, digest and all, no longer reads.
-      tamperBackup.exec('DROP TRIGGER scheduled_backups_no_update');
-      const row = tamperBackup.prepare('SELECT canonical_json FROM scheduled_backups').get() as { canonical_json: string };
-      const rewritten = canonicalRecord({ ...(parseCanonicalJson(row.canonical_json) as Record<string, unknown>), byteLength: 1 });
-      tamperBackup.prepare('UPDATE scheduled_backups SET canonical_json = ?, sha256 = ?').run(rewritten.json, rewritten.digest);
-      tamperBackup.exec(SCHEDULED_BACKUP_TRIGGER_SQL.scheduled_backups_no_update!);
-    } finally {
-      tamperBackup.close();
-    }
-    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      expect(code((() => {
-        try {
-          return reopened.inspectScheduledBackups(T);
-        } catch (error) {
-          return error;
-        }
-      })())).toBe('SCHEDULED_BACKUP_RECORD_INVALID');
-      reopened.markCleanShutdown();
-    } finally {
-      reopened.close();
-    }
-
-    // A store as revision 55 left it gains the three empty ledgers, and the switch starts off.
-    const other = await createServiceTestRoots('ai7-service-scheduled-backup-migration-');
-    try {
-      const first = await EditorialStore.open(other.dataRoot, other.codeRoot);
-      first.markCleanShutdown();
-      first.close();
-      const plant = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'));
-      try {
-        execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; PRAGMA user_version = ${DATABASE_EXPORT_SCHEMA_VERSION};`);
-        downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
-      } finally {
-        plant.close();
-      }
-      const migrated = await EditorialStore.open(other.dataRoot, other.codeRoot);
-      try {
-        expect([migrated.inspectScheduledBackups(T).enabled, migrated.inspectScheduledBackups(T).total]).toEqual([false, 0]);
-        migrated.markCleanShutdown();
-      } finally {
-        migrated.close();
-      }
-      const check = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-      try {
-        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      } finally {
-        check.close();
-      }
-    } finally {
-      await other.dispose();
-    }
-  }, 180_000);
-
   it('removes only a file it made, each removal before any write, and clears what a cut-off check left (Issue #434 review)', async () => {
     const location = `${roots.dataRoot}-backups`;
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -657,7 +509,7 @@ describe('定期自动备份 over the real store', () => {
     const location = backupLocationFor(dataRoot);
     const db = new DatabaseSync(':memory:');
     try {
-      initializeScheduledBackupSchema(db);
+      createBaselineRelations(db, SCHEDULED_BACKUP_SCHEMA_SQL);
       const backups = new ScheduledBackups(db, dataRoot, {
         facts: () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 1 }),
       });

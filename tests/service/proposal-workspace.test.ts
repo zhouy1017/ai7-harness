@@ -1,18 +1,14 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { dropFactualVerificationRelations, restoreTaskIntentDraftPredecessor } from '../support/pre74-schema.js';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import { MAX_FRAME_BYTES, applyReceiptState, legacyApplyOutcome, type ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import { applyOnce } from '../../src/renderer/manuscript-apply.js';
 import { readProposalWorkspace } from '../../src/renderer/proposal-workspace.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { EDITORIAL_MARK_TRIGGER_SQL, PROPOSAL_ITEM_DECISIONS_PRE77_SQL, PROPOSAL_REVIEW_SCHEMA_SQL } from '../../src/service/editorial-marks.js';
 import { readApplyOutcomeAttention } from '../../src/service/global-attention.js';
 
 // Service-integration suite (L2) for AI7 Apply on Change Suggestions (Issue #408). The manuscript is
@@ -228,39 +224,6 @@ describe('Proposal decision workspace', () => {
     } finally { store.close(); }
   });
 
-  it('migrates a real pre-77 CHECK with every existing value and rowid unchanged', async () => {
-    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    try {
-      const book = await importBook(store);
-      const block = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[0]!;
-      const markId = suggest(store, book, block.blockId, 0, 2).markId;
-      store.recordChangeSuggestionDecision({ ...binding(store, book), markId, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: '合成原因' });
-      store.markCleanShutdown(); store.close();
-      const db = new DatabaseSync(path); db.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE');
-      // Restore the exact predecessor tables before claiming its version.
-      restoreTaskIntentDraftPredecessor(db); // Synchronized delta with Issue #423 (slice 7a): a predecessor of revision 80 has no drafts and the narrower Task Intents.
-      dropFactualVerificationRelations(db); // Synchronized delta: revision 78's relations cannot stand in a pre-77 fixture.
-      for (const table of Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE ${table}`);
-      const columns = db.prepare("SELECT name FROM pragma_table_info('proposal_item_decisions') ORDER BY cid").all().map((row) => String(row.name)).join(', ');
-      db.exec('CREATE TEMP TABLE saved_decisions AS SELECT rowid AS old_rowid, * FROM proposal_item_decisions; DROP TABLE proposal_item_decisions');
-      db.exec(PROPOSAL_ITEM_DECISIONS_PRE77_SQL);
-      db.exec(`INSERT INTO proposal_item_decisions(rowid, ${columns}) SELECT old_rowid, ${columns} FROM saved_decisions ORDER BY old_rowid; DROP TABLE saved_decisions`);
-      for (const [name, sql] of Object.entries(EDITORIAL_MARK_TRIGGER_SQL)) if (name.startsWith('proposal_item_decisions_')) db.exec(sql);
-      const before = db.prepare('SELECT rowid, * FROM proposal_item_decisions ORDER BY rowid').all();
-      execPre74Fixture(db, 'PRAGMA user_version = 76; COMMIT'); db.close();
-      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-      const read = new DatabaseSync(path);
-      expect(read.prepare('SELECT rowid, * FROM proposal_item_decisions ORDER BY rowid').all()).toEqual(before);
-      expect(read.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-      expect(read.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(() => read.exec("UPDATE proposal_item_decisions SET actor = 'editor'")).toThrow(/IMMUTABLE/u);
-      const input = { ...book, resultId: null }; const workspace = store.inspectProposalWorkspace(input);
-      const drafted = store.saveProposalDecisionDraft({ ...input, markIds: [markId], disposition: 'deferred', atomicGroupId: null, expectedScopeDigest: workspace.scopeDigest });
-      expect(store.recordProposalDecision({ ...input, expectedScopeDigest: drafted.scopeDigest, clientDecisionId: randomUUID() }).decision!.items[0]!.disposition).toBe('deferred');
-      read.close();
-    } finally { store.close(); }
-  });
   it('offers the workspace only above 20, keeps drafts reversible, records and supersedes pinned partial decisions', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

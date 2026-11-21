@@ -11,6 +11,10 @@ import { ensureBackupLocation } from './scheduled-backups.js';
 import { UPGRADE_BACKUP_EXISTS, UPGRADE_BACKUP_FAILED, UPGRADE_BACKUP_UNSUPPORTED } from '../shared/data-version-labels.js';
 
 /**
+ * Not called since the storage baseline (#1634; ADR 0105 §4): an open no longer migrates, so nothing is backed up as a store
+ * opens. Its next caller is the in-app upgrade tool (R5-6), whose back-up step writes today's pre-upgrade package into today's
+ * backup location; if R5-6 does not use this module, R5-6 deletes it. What follows describes it as the open used it.
+ *
  * 升级前备份 (Issue #433, plan slice S85b; V2-UX-DSTO-016; ADR 0079 §1.1, §1.3, §1.4). A software update that must move the data
  * to a later Data Version backs it up first: before anything migrates the store, the data as it is — the store and every file
  * beside it — is written as the database package of S86a into the backup location, named `AI7 升级前备份 <date time>.ai7db`

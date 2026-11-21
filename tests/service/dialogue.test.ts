@@ -1,5 +1,4 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { mergeBooks } from '../../src/service/database-merge.js';
@@ -13,11 +12,6 @@ import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.j
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_LEDGER_REVISION_59_SQL, LATEST_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { READERS_REPORT_SCHEMA_SQL } from '../../src/service/readers-reports.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
-import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
-import { EVALUATION_REWRITE_SCHEMA_SQL } from '../../src/service/evaluation-rewrites.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { DialogueProjection, DialogueSelectionInput } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -637,62 +631,6 @@ describe('就这段提问… over the real store and harness', () => {
     }
   });
 
-  it('adds revision 60 to a revision-59 store, and keeps its relations append-only and verified', async () => {
-    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    store.close();
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    let database = new DatabaseSync(path);
-    try {
-      database.exec('PRAGMA foreign_keys = OFF');
-      // A revision-59 store held neither the evaluation rewrite records (revision 64), the Captured Procedures (revision 63) nor
-      // 审稿意见's relations and the reader's report kind in its kind-coupled CHECKs (revision 62).
-      for (const table of Object.keys(EVALUATION_REWRITE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
-      for (const table of Object.keys(CAPTURED_PROCEDURE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
-      for (const table of Object.keys(READERS_REPORT_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
-      for (const table of Object.keys(DIALOGUE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
-      execPre74Fixture(database, `PRAGMA user_version = ${INITIAL_EVALUATION_SCHEMA_VERSION}`);
-      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_59_SQL);
-    } finally {
-      database.close();
-    }
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const stepped = steppedHold();
-    const dialogues = owner(store, stepped.hold);
-    let dialogueId = '';
-    let bookId = '';
-    try {
-      const book = await importSample1Book(store, roots.codeRoot, '迁移');
-      bookId = book.bookId;
-      const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
-      dialogueId = turn.dialogueId;
-      stepped.allow(99);
-      dialogues.begin(turn);
-      await waitFor(() => store.inspectDialogue(book.bookId, dialogueId, 0, () => null), (value) => value.attempts[0]!.state === 'completed', 'completed');
-    } finally {
-      await dialogues.dispose();
-      store.close();
-    }
-    database = new DatabaseSync(path);
-    try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(() => database.prepare('UPDATE dialogue_tasks SET asked_at = asked_at').run()).toThrowError(/DIALOGUE_LEDGER_IMMUTABLE/u);
-      expect(() => database.prepare('DELETE FROM dialogue_attempt_outcomes').run()).toThrowError(/DIALOGUE_LEDGER_IMMUTABLE/u);
-      // A row altered by hand does not read.
-      database.exec('DROP TRIGGER dialogue_harness_spans_no_update');
-      database.prepare('UPDATE dialogue_harness_spans SET start_seq = start_seq + 1').run();
-      database.exec(DIALOGUE_TRIGGER_FOR_TEST);
-    } finally {
-      database.close();
-    }
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot).catch((error: unknown) => {
-      throw error;
-    });
-    try {
-      expect(refusal(() => store.inspectDialogue(bookId, dialogueId, 0, () => null))).toBe('DIALOGUE_RECORD_INVALID');
-    } finally {
-      store.close();
-    }
-  });
 });
 
 describe('就这段提问… at its edges (PR #658 review)', () => {
@@ -812,9 +750,3 @@ describe('就这段提问… at its edges (PR #658 review)', () => {
     }
   }, 120_000);
 });
-
-const DIALOGUE_TRIGGER_FOR_TEST = `CREATE TRIGGER dialogue_harness_spans_no_update
-    BEFORE UPDATE ON dialogue_harness_spans
-    BEGIN
-      SELECT RAISE(ABORT, 'DIALOGUE_LEDGER_IMMUTABLE');
-    END`;

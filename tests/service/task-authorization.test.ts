@@ -5,19 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import {
-  ANALYSIS_LEDGER_SCHEMA_SQL,
-  CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION,
-  TASK_AUTHORIZATION_SCHEMA_SQL,
-  TaskAuthorizationError,
-  canonicalRecord,
-  executionPlanValue,
-  planEnvelopeSummary,
-  planEnvelopeValue,
-  planStopCondition,
-  providerResolutionPlanValue,
-  validateTaskAuthorizationSchema,
-} from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_SCHEMA_SQL, CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, TASK_AUTHORIZATION_SCHEMA_SQL, TaskAuthorizationError, canonicalRecord, executionPlanValue, planEnvelopeSummary, planEnvelopeValue, planStopCondition, providerResolutionPlanValue } from '../../src/service/task-authorization.js';
 import {
   J03_TASK_GOAL,
   type LaunchPolicyProjection,
