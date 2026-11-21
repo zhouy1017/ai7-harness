@@ -36,6 +36,23 @@ describe('one-step drawer launch frames (#1455)', () => {
     ['launchInitialEvaluation', {}], ['launchReadersReport', { template: 'author' }],
     ['launchEvaluationRewrite', { recordId: bookId }],
   ] as const;
+  it('decodes review relaunch through the existing review launch operation (#1656)', () => {
+    const frame = { id: randomUUID(), op: 'launchReviewRun', input: { bookId, categoryIds: ['typos-and-usage'],
+      scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, clientCommandId: randomUUID(),
+      relaunchOf: { kind: 'review-run', ref: bookId, runRecordId: bookId, revision: `0:0:0:${'a'.repeat(64)}`, cancelsFirst: false } } };
+    expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...frame.input, relaunchOf: { ...frame.input.relaunchOf, revision: 'invalid' } } })))).toThrow(ProtocolError);
+  });
+  it.each(commands)('decodes %s relaunch source and redo metadata additively (#1656)', (op, task) => {
+    const kind = op === 'launchWritingTask' ? 'writing' : op === 'launchInitialEvaluation' ? 'initial-evaluation'
+      : op === 'launchReadersReport' ? 'readers-report' : op === 'launchEvaluationRewrite' ? 'evaluation-rewrite' : 'baseline-analysis';
+    const relaunchOf = { kind, ref: bookId, runRecordId: bookId, revision: 'a'.repeat(64), cancelsFirst: false };
+    const frame = { id: randomUUID(), op, input: { bookId, ...task, clientCommandId: randomUUID(), redoOf: bookId, relaunchOf } };
+    expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    for (const invalid of [{ ...relaunchOf, extra: true }, { ...relaunchOf, revision: 'broken' }, { ...relaunchOf, runRecordId: 'broken' }, { ...relaunchOf, cancelsFirst: 'yes' }]) {
+      expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...frame.input, relaunchOf: invalid } })))).toThrow(ProtocolError);
+    }
+  });
   it.each(commands)('decodes %s with a closed choice and command identity', (op, task) => {
     const input = { bookId, ...task, clientCommandId: randomUUID(), executionConfig: { modelConnectionId: 'instance-reference', modelId: 'account/model', reasoningEffort: 'high' }, rememberedChoice: true };
     const frame = { id: randomUUID(), op, input };

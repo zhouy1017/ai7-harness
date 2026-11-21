@@ -599,6 +599,74 @@ function expectVanishedSelectionRefused(target: LaunchBook): void {
 }
 
 if (ONE_STEP_KINDS[subject].length > 0) describe.each(ONE_STEP_KINDS[subject])('%s one-step launch', (kind) => {
+  it.each([false, true])('relaunches a failed task and replays once, remembered=%s (#1656)', async remembered => {
+    const target = await book(kind, true); ordinary();
+    const first = command(kind, target, { reasoningEffort: 'high' })();
+    const taskKind = kind === 'custom-analysis' ? 'baseline-analysis' : kind;
+    const read = () => store.inspectTaskPlan({ bookId: target.bookId, kind: taskKind, ref: first.taskIntentId });
+    expect(read().relaunch).toBeNull();
+    first.ledger.recordRunState(first.runRecordId, 'failed', { detail: '合成运行失败' });
+    const plan = read(); expect(plan.redo).toBeNull(); expect(plan.relaunch).not.toBeNull();
+    const recipe = plan.relaunch!;
+    const invalidCarry = { operation: recipe.operation, input: { ...recipe.input, redoOf: first.runRecordId, clientCommandId: randomUUID() } };
+    expect(() => commitLaunch(target, invalidCarry as import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch'])).toThrowError(expect.objectContaining({ code: 'ANALYSIS_REDO_STALE' }));
+    expect(recipe.cancelsFirst).toBeNull(); expect(recipe.input).not.toHaveProperty('redoOf');
+    expect(recipe.input).not.toHaveProperty('clientCommandId'); expect(recipe.input).not.toHaveProperty('executionConfig');
+    const { relaunchOf: _source, bookId: _book, ...editorial } = recipe.input;
+    const expected = store.repeatTaskRequest(target.bookId, { kind: taskKind, ref: first.taskIntentId });
+    if (expected.kind === 'writing') expect(editorial).toEqual(expected.request);
+    if (expected.kind === 'readers-report') expect(editorial).toMatchObject({ template: expected.template, materialIds: expected.materialIds });
+    const launch = { operation: recipe.operation, input: { ...recipe.input, clientCommandId: randomUUID(), rememberedChoice: remembered,
+      executionConfig: remembered ? { modelConnectionId: randomUUID(), modelId: 'removed-relaunch-model' } : { modelId: 'custom-relaunch-model', reasoningEffort: 'low' } } };
+    if (launch.operation === 'launchReviewRun') throw new Error('unexpected review');
+    const run = commitLaunch(target, launch as import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch']);
+    expect(run.taskIntentId).not.toBe(first.taskIntentId);
+    const before = first.ledger.loadExecutionPlan(first.runRecordId), after = run.ledger.loadExecutionPlan(run.runRecordId);
+    expect(after.promptContractDigest).toBe(before.promptContractDigest);
+    expect(after.manifest.units.map(unit => unit.digest)).toEqual(before.manifest.units.map(unit => unit.digest));
+    expect(run.ledger.frozenPlan(run.taskIntentId, after.planEnvelopeDigest).components['provider-resolution-plan']).toMatchObject({ executionRoute: remembered
+      ? { model: store.getConfiguredModelRoleBinding('main-editorial')!.model } : { model: 'custom-relaunch-model', reasoningEffort: 'low' } });
+    if (remembered) expect(run.launchNotice).toBe('上次选择的模型已不可用，本次已使用角色默认模型。');
+    expect(commitLaunch(target, launch as import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch']).runRecordId).toBe(run.runRecordId);
+    expect(() => commitLaunch(target, { ...launch, input: { ...launch.input, clientCommandId: randomUUID() } } as import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch']))
+      .toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE', message: '这项任务已经变化，请重新打开任务后再开始。' }));
+    expect(capture!.requests).toHaveLength(0);
+  });
+
+  it.each(['interrupted', 'blocked-before-dispatch', 'restart-queued', 'cancelled-after-start', 'outcome-unknown'] as const)('offers the right relaunch for %s without sending the old task (#1656)', async state => {
+    const target = await book(kind, true); ordinary();
+    const first = command(kind, target, {}, randomUUID(), false, state === 'cancelled-after-start'
+      ? { removedSteps: [], disallowedAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 64000 } } : undefined)();
+    const taskKind = kind === 'custom-analysis' ? 'baseline-analysis' : kind;
+    if (state === 'cancelled-after-start') first.ledger.recordRunState(first.runRecordId, 'executing', { detail: '合成已开始' });
+    first.ledger.recordRunState(first.runRecordId, state === 'restart-queued' ? 'blocked-before-dispatch' : state === 'cancelled-after-start' ? 'cancelled' : state === 'outcome-unknown' ? 'resumable' : state,
+      state === 'restart-queued' ? { reconciled: true, detail: 'AI7 上次关闭时这项任务还在等待运行名额，没有开始，也没有发送任何内容；重新启动后它不会自己开始。需要时请重新准备并开始。' } : { detail: '合成停止', ...(state === 'outcome-unknown' ? { stopReason: 'outcome-unknown' } : {}) });
+    const plan = store.inspectTaskPlan({ bookId: target.bookId, kind: taskKind, ref: first.taskIntentId });
+    if (state === 'outcome-unknown') { expect(plan.relaunch).toBeNull(); return; }
+    const recipe = plan.relaunch!; expect(recipe).not.toBeNull();
+    const launch = { operation: recipe.operation, input: { ...recipe.input, clientCommandId: randomUUID(), executionConfig: { reasoningEffort: 'low' } } } as import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch'];
+    if (recipe.cancelsFirst !== null) {
+      expect(() => commitLaunch(target, { ...launch, input: { ...launch.input, relaunchOf: { ...recipe.input.relaunchOf!, cancelsFirst: false } } } as import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch']))
+        .toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      expect(() => commitLaunch(target, launch)).toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      if (recipe.cancelsFirst.operation === 'cancelWaitingBaselineAnalysis') store.cancelWaitingBaselineAnalysis(target.bookId, first.taskIntentId);
+      else if (recipe.cancelsFirst.operation === 'cancelWaitingTask') store.cancelWaitingTask(recipe.cancelsFirst.input);
+      else controlLaunched(kind, target, first, 'cancel');
+      expect(first.ledger.currentRunState(first.runRecordId)).toBe('cancelled');
+    }
+    const preview = state === 'cancelled-after-start' ? store.previewTaskLaunch({ bookId: target.bookId, launch }, policy) : null;
+    const next = commitLaunch(target, launch);
+    expect(next.taskIntentId).not.toBe(first.taskIntentId);
+    if (state === 'cancelled-after-start') expect(recipe.input).toHaveProperty('redoOf', first.runRecordId);
+    if (kind === 'baseline-analysis') expect(store.inspectAnalysisTask(target.bookId, next.taskIntentId).taskIntent?.redoOf?.runRecordId ?? null).toBe(state === 'cancelled-after-start' ? first.runRecordId : null);
+    if (preview !== null) {
+      expect(preview.usage).toBe(store.inspectTaskPlan({ bookId: target.bookId, kind: taskKind, ref: next.taskIntentId }).service.usage);
+      expect(next.ledger.loadExecutionPlan(next.runRecordId).editorEdits.disallowedAdaptations).toEqual(['safe-retry']);
+      expect(next.ledger.loadExecutionPlan(next.runRecordId).runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 64000 });
+    }
+    expect(capture!.requests).toHaveLength(0);
+  });
+
   it('refuses the preview while a same-kind task is active instead of describing an unavailable launch', async () => {
     const target=await book(kind, true);ordinary();
     command(kind,target,{reasoningEffort:'high'},randomUUID(),false,undefined,'when-online')();

@@ -1,6 +1,6 @@
 import { EVIDENCE_ASSURANCE_LEVELS } from '../shared/protocol/factual-verification.js';
 import { validLocalOptions } from './review/deterministic/plan.js';
-import { validReasoningEffort, validRuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
+import { validReasoningEffort, validRuntimeExecutionConfig, validTaskRelaunchSource } from '../shared/runtime-execution-config.js';
 import { canonicalPlanEdits } from './analysis/plan-edits.js';
 import { validStructureChoice } from '../shared/protocol/import-structure.js';
 import { CUSTOM_ANALYSIS_PREPARATION_PURPOSES, type CustomAnalysisPreparationPurpose } from '../shared/protocol/custom-analysis-redo.js';
@@ -471,7 +471,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'launchReadersReport':
     case 'launchEvaluationRewrite': {
       if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
-      const { clientCommandId, executionConfig, rememberedChoice, planEdits, startWhen, ...task } = value.input;
+      const { clientCommandId, executionConfig, rememberedChoice, planEdits, startWhen, relaunchOf, redoOf, ...task } = value.input;
+      if (relaunchOf !== undefined && !validTaskRelaunchSource(relaunchOf) || redoOf !== undefined && redoOf !== null && !validUuid(redoOf)) throw new ProtocolError(tentativeId);
       if (startWhen !== undefined && startWhen !== 'now' && startWhen !== 'idle' && startWhen !== 'when-online') throw new ProtocolError(tentativeId);
       if (planEdits !== undefined && (!isRecord(planEdits) ||
           !Object.keys(planEdits).every(key => ['removedSteps', 'disallowedAdaptations', 'askFirstAdaptations', 'runBudgetCeiling', 'evidenceAssuranceLevel'].includes(key)) || canonicalPlanEdits({
@@ -483,7 +484,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           (rememberedChoice !== undefined && typeof rememberedChoice !== 'boolean')) throw new ProtocolError(tentativeId);
       // The task's existing input validator owns its editorial contract; launch metadata is validated above.
       decodeRequest(Buffer.from(JSON.stringify({ id: tentativeId, op: op.replace(/^launch/u, 'prepare'),
-        input: op === 'launchBaselineAnalysis' ? { ...task, reconfirm: false } : task })));
+        input: op === 'launchBaselineAnalysis' ? { ...task, reconfirm: false, ...(redoOf === undefined ? {} : { redoOf }) } : task })));
       break;
     }
     case 'ready':
@@ -1855,7 +1856,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'launchReviewRun':
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig', 'rememberedChoice', 'evidenceAssuranceLevel', 'startWhen'] : [])], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig', 'rememberedChoice', 'evidenceAssuranceLevel', 'startWhen', 'relaunchOf'] : [])], tentativeId);
+      if (input.relaunchOf !== undefined && !validTaskRelaunchSource(input.relaunchOf)) throw new ProtocolError(tentativeId);
       if (input.rememberedChoice !== undefined && typeof input.rememberedChoice !== 'boolean') throw new ProtocolError(tentativeId);
       if (input.decisionId !== undefined && (!validUuid(input.decisionId) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'factual-review')) throw new ProtocolError(tentativeId);
       if (value.op === 'launchReviewRun' && (!validUuid(input.clientCommandId) || (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)))) throw new ProtocolError(tentativeId);

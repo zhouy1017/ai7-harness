@@ -1,4 +1,4 @@
-import { repeatTaskRequest, redoTaskRequest, type TaskRelaunchHost } from './task-relaunch.js';
+import { repeatTaskRequest, redoTaskRequest, withTaskRelaunch, requireTaskRelaunchSource, type TaskRelaunchHost } from './task-relaunch.js';
 import * as importEditingOperations from './import-editing-operations.js';
 import { inspectManuscriptExportReceipt as inspectExportReceipt } from './manuscript-export.js';
 import * as importRetentionOperations from './import-retention.js';
@@ -2813,6 +2813,7 @@ export class EditorialStore {
       prepareTaskMaterials: this.#prepareTaskMaterials.bind(this),
       resultBinding: this.#resultBinding.bind(this),
       launchChoice: this.#launchChoice.bind(this),
+      requireRelaunchSource: (bookId, source) => requireTaskRelaunchSource(this.#taskRelaunchHost(), bookId, source, 'review-run'),
       executionLedgerForRun: (runRecordId) => this.executionLedgerForRun(runRecordId),
       materializeFactualVerification: (reviewRunId) => this.materializeFactualVerification(reviewRunId),
       inspectTaskPlanWithConnection: (input, credentialReadiness, connectivity, progress) => this.inspectTaskPlanWithConnection(input, credentialReadiness, connectivity, progress),
@@ -3125,6 +3126,7 @@ export class EditorialStore {
     create: (context: import('./task-plan-creation.js').TaskLaunchContext, policy: LaunchPolicyProjection) => ReturnType<BaselineAnalysisStore['launchTask']>,
     startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     if (preview !== undefined) {
+      requireTaskRelaunchSource(this.#taskRelaunchHost(), input.bookId, input.relaunchOf, kind === 'custom-analysis' ? 'baseline-analysis' : kind);
       const choice = this.#launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice);
       const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
         ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
@@ -3137,6 +3139,7 @@ export class EditorialStore {
     try {
       const launched = launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind, input: request },
         () => this.#launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice), (choice, snapshotId) => {
+          requireTaskRelaunchSource(this.#taskRelaunchHost(), input.bookId, input.relaunchOf, kind === 'custom-analysis' ? 'baseline-analysis' : kind);
           const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
             ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
           execution = this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch;
@@ -3173,12 +3176,12 @@ export class EditorialStore {
 
   launchWritingTask(input: import('../shared/protocol.js').ServiceOperationMap['launchWritingTask']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('writing', input, policy, (context, launchPolicy) => writingTaskOperations.launchWritingTask(
-      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, null, null, context), startWhen, preview);
+      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, input.redoOf ?? null, null, context), startWhen, preview);
   }
 
   launchInitialEvaluation(input: import('../shared/protocol.js').ServiceOperationMap['launchInitialEvaluation']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('initial-evaluation', input, policy, (context, launchPolicy) => initialEvaluationOperations.launchInitialEvaluationTask(
-      this.#launchInitialHost(context.execution), input.bookId, launchPolicy, input.materialIds ?? [], null, input.seriesId ?? null, context), startWhen, preview);
+      this.#launchInitialHost(context.execution), input.bookId, launchPolicy, input.materialIds ?? [], input.redoOf ?? null, input.seriesId ?? null, context), startWhen, preview);
   }
 
   launchReadersReport(input: import('../shared/protocol.js').ServiceOperationMap['launchReadersReport']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
@@ -3187,7 +3190,7 @@ export class EditorialStore {
       return readersReportOperations.launchReadersReportTask({ ...this.#readersReportHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind),
         requireEvaluationMaterialScope: (has, kind) => initialEvaluationOperations.internalRequireEvaluationMaterialScope(evaluation, has, kind) },
-        input.bookId, input.template, launchPolicy, input.materialIds ?? [], null, context);
+        input.bookId, input.template, launchPolicy, input.materialIds ?? [], input.redoOf ?? null, context);
     }, startWhen, preview);
   }
 
@@ -3196,7 +3199,7 @@ export class EditorialStore {
       const evaluation = this.#launchInitialHost(context.execution);
       return evaluationRewriteOperations.launchEvaluationRewriteTask({ ...this.#evaluationRewriteHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind) },
-        input.bookId, input.recordId, launchPolicy, null, context);
+        input.bookId, input.recordId, launchPolicy, input.redoOf ?? null, context);
     }, startWhen, preview);
   }
 
@@ -3417,7 +3420,7 @@ export class EditorialStore {
       plan = { ...plan, goal: { ...plan.goal, draft: { draftId: promoted.draftId, sentence: promoted.latest.goal } } };
       if (promoted.latest.target === 'ranges') plan = draftRangesPlan(plan, promoted.latest.ranges);
     }
-    return { ...found, plan: { ...plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) } };
+    return { ...found, plan: withTaskRelaunch(this.#taskRelaunchHost(), { ...plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) }) };
   }
 
   #taskPlanOfKind(
@@ -3805,7 +3808,7 @@ export class EditorialStore {
       writingTask: ref => this.#writingCall(() => this.#writingTasks.task(ref)),
       latestReaders: bookId => readersReportOperations.latestReadersReport(this.#readersReportHost, bookId),
       latestRewrite: bookId => evaluationRewriteOperations.latestEvaluationRewrite(this.#evaluationRewriteHost, bookId),
-      latestWriting: bookId => this.#latestWriting(bookId) };
+      latestWriting: bookId => this.#latestWriting(bookId), taskPlan: input => this.inspectTaskPlan(input), reviewFacts: (bookId, ref) => this.#reviewCall(() => this.#reviewRuns.planFacts(bookId, ref)) };
   }
 
   repeatTaskRequest(bookId: string, source: NonNullable<import('../shared/protocol.js').StartQuickTasksInput['tasks'][number]['repeat']>) {
