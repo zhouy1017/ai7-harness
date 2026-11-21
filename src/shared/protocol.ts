@@ -161,7 +161,8 @@ import type {
 import type {
   ChangeEditorialLearningInput,
   CreateEditorialMemoryInput,
-  DeactivateEditorialMemoryInput,
+  ReviewPreferenceLifecycleOperations,
+  ReviewPreferenceLifecycleRendererApi,
   EditorialLearningProjection,
   InspectEditorialLearningInput,
   LearningReasonAskInput,
@@ -709,6 +710,8 @@ export const IPC_CHANNELS = {
   createEditorialMemory: 'ai7:learning:create-editorial-memory',
   acceptEditorialMemory: 'ai7:learning:accept-editorial-memory',
   deactivateEditorialMemory: 'ai7:learning:deactivate-editorial-memory',
+  reenableReviewPreference: 'ai7:learning:reenable-review-preference',
+  deleteReviewPreference: 'ai7:learning:delete-review-preference',
   inspectHouseReviewPreference: 'ai7:j11:inspect-house-review-preference',
   rebuildHouseReviewPreference: 'ai7:j11:rebuild-house-review-preference',
   inspectEditQualitySignals: 'ai7:j11:inspect-edit-quality-signals',
@@ -3905,7 +3908,7 @@ export interface UsageProjection {
 /** The result of 导出为 CSV…: a file of numbers and ids, written where the editor chose. */
 export type UsageCsvExportResult = { outcome: 'cancelled' } | { outcome: 'written'; rows: number };
 
-export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations {
+export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations, ReviewPreferenceLifecycleOperations {
   getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
   selectSearchBackend: { input: SearchBackendSelectionInput; output: SearchBackendSettingsProjection };
   probeSearchBackend: { input: { backendId: string; candidateId?: SearchCandidateId }; output: SearchBackendProbeProjection };
@@ -4679,8 +4682,6 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   recordLearningReasonAsk: { input: LearningReasonAskInput & { frequency: import('./preferences.js').LearningAskFrequency }; output: LearningReasonAskProjection | null };
   changeEditorialLearning: { input: ChangeEditorialLearningInput; output: EditorialLearningProjection };
   createEditorialMemory: { input: CreateEditorialMemoryInput; output: EditorialLearningProjection };
-  acceptEditorialMemory: { input: import('./protocol/learning.js').AcceptEditorialMemoryInput; output: EditorialLearningProjection };
-  deactivateEditorialMemory: { input: DeactivateEditorialMemoryInput; output: EditorialLearningProjection };
   inspectHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
   rebuildHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
   inspectEditQualitySignals: { input: { bookId: string | null; preferenceAfter?: PreferenceAdoptionCursor | null }; output: EditQualitySignalsProjection };
@@ -5034,7 +5035,7 @@ export type PickerReselectResult =
   | { status: 'cancelled' }
   | { status: 'reselected'; continuation: ContinueImportProjection };
 
-export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
+export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi, ReviewPreferenceLifecycleRendererApi {
   selectSearchBackend(input: SearchBackendSelectionInput): Promise<ModelServiceSettingsProjection>;
   probeSearchBackend(input: { backendId: string; candidateId?: SearchCandidateId }): Promise<SearchBackendProbeProjection>;
   saveSearchBackendCredential(input: { backendId: string; secret: string } | { backendId: string; reuseModelCredential: true }): Promise<ModelServiceSettingsProjection>;
@@ -5313,8 +5314,6 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   recordLearningReasonAsk(input: LearningReasonAskInput): Promise<LearningReasonAskProjection | null>;
   changeEditorialLearning(input: ChangeEditorialLearningInput): Promise<EditorialLearningProjection>;
   createEditorialMemory(input: CreateEditorialMemoryInput): Promise<EditorialLearningProjection>;
-  acceptEditorialMemory(input: import('./protocol/learning.js').AcceptEditorialMemoryInput): Promise<EditorialLearningProjection>;
-  deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): Promise<EditorialLearningProjection>;
   inspectHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
   rebuildHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
   inspectEditQualitySignals(input: { bookId: string | null; preferenceAfter?: PreferenceAdoptionCursor | null }): Promise<EditQualitySignalsProjection>;

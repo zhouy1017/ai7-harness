@@ -905,6 +905,10 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.acceptEditorialMemory(request.input) };
     case 'deactivateEditorialMemory':
       return { id: request.id, ok: true, op: request.op, result: store.deactivateEditorialMemory(request.input) };
+    case 'reenableReviewPreference':
+      return { id: request.id, ok: true, op: request.op, result: store.reviewPreferenceLifecycle(request.input, 'reactivate') };
+    case 'deleteReviewPreference':
+      return { id: request.id, ok: true, op: request.op, result: store.reviewPreferenceLifecycle(request.input, 'retire') };
     case 'inspectHouseReviewPreference':
       return { id: request.id, ok: true, op: request.op, result: store.inspectHouseReviewPreference() };
     case 'rebuildHouseReviewPreference':

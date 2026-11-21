@@ -145,7 +145,8 @@ export interface LegacyEditorialMemoryVersion {
   positiveExamples: ReadonlyArray<LearningSourceReference>;
   negativeExamples: ReadonlyArray<LearningSourceReference>;
   confidence: number;
-  activation: 'active' | 'inactive';
+  /** `retired` (Issue #1655) is terminal: 删除 of a stopped entry. */
+  activation: 'active' | 'inactive' | 'retired';
   signalIds: ReadonlyArray<string>;
   supervisionDirectiveRefs: ReadonlyArray<string>;
   actor: 'editor';
@@ -187,10 +188,11 @@ export interface EditorialMemoryVersion {
   operationalScope: TrustedOperationalScope;
   applicability: EditorialMemoryApplicability;
   editorialDimension: string; title: string; confidence: number;
-  state: 'proposed' | 'active' | 'inactive' | 'frozen';
+  state: 'proposed' | 'active' | 'inactive' | 'frozen' | 'retired';
   actor: 'editor' | 'AI7'; actionId: string;
   curation?: { taskIntentId: string; runRecordId: string; bundleDigest: string };
-  action: 'create' | 'accept' | 'merge' | 'correct' | 'deactivate' | 'freeze';
+  /** `reactivate` restores a stopped entry; `retire` (state `retired`, terminal) deletes one (Issue #1655). */
+  action: 'create' | 'accept' | 'merge' | 'correct' | 'deactivate' | 'freeze' | 'reactivate' | 'retire';
   signalIds: ReadonlyArray<string>;
   positiveExamples: ReadonlyArray<LearningSourceReference>;
   negativeExamples: ReadonlyArray<LearningSourceReference>;
@@ -211,7 +213,7 @@ export interface EditorialLearningProjection {
   signals: ReadonlyArray<LearningSignal & { currentEligibility: LearningSignalStanding; bookTitle: string;
     memoryCandidate?: { editorialDimension: string; operationalScope: TrustedOperationalScope } | null }>;
   items: ReadonlyArray<{ current: GlobalEditorialMemoryVersion; usable: boolean; history: ReadonlyArray<GlobalEditorialMemoryVersion>;
-    sources?: ReadonlyArray<EditorialMemorySourceSnapshot>; nextSourceOffset?: number | null; nextHistoryOffset?: number | null }>;
+    row: ReviewPreferenceRow; sources?: ReadonlyArray<EditorialMemorySourceSnapshot>; nextSourceOffset?: number | null; nextHistoryOffset?: number | null }>;
   nextSignalOffset: number | null;
   nextItemOffset: number | null;
   nextExclusionOffset: number | null;
@@ -252,6 +254,34 @@ export type CreateEditorialMemoryInput = LegacyCreateEditorialMemoryInput | {
 };
 export interface AcceptEditorialMemoryInput { itemId: string; expectedVersionId: string; actionId: string }
 export interface DeactivateEditorialMemoryInput { itemId: string; expectedVersionId: string; actionId?: string }
+
+/**
+ * What 审阅偏好 draws for one row, memory and preference alike (Issue #1655). Retired rows are absent. `pin` is the entry's own
+ * revision, sent as `expectedRevisionId`; `reenable` is set only for a `disabled` row; `pausedInUse` is an enabled memory whose
+ * material stopped (today's `usable: false`), never a preference line.
+ */
+export interface ReviewPreferenceRow {
+  readonly group: 'pending' | 'enabled' | 'disabled';
+  readonly changedAt: string;
+  readonly origin: 'editor' | 'ai';
+  readonly reenable: { readonly standing: 'allowed' | 'merged' | 'material-stopped'; readonly sentence: string } | null;
+  readonly pin: string;
+  readonly pausedInUse: boolean;
+}
+/** 重新启用 / 删除 of one stopped 审阅偏好 row, by the row's `pin`; the same `actionId` acts once. */
+export interface ReviewPreferenceLifecycleInput { itemId: string; expectedRevisionId: string; actionId: string }
+export interface ReviewPreferenceLifecycleOperations {
+  acceptEditorialMemory: { input: AcceptEditorialMemoryInput; output: EditorialLearningProjection };
+  deactivateEditorialMemory: { input: DeactivateEditorialMemoryInput; output: EditorialLearningProjection };
+  reenableReviewPreference: { input: ReviewPreferenceLifecycleInput; output: EditorialLearningProjection };
+  deleteReviewPreference: { input: ReviewPreferenceLifecycleInput; output: EditorialLearningProjection };
+}
+export interface ReviewPreferenceLifecycleRendererApi {
+  acceptEditorialMemory(input: AcceptEditorialMemoryInput): Promise<EditorialLearningProjection>;
+  deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): Promise<EditorialLearningProjection>;
+  reenableReviewPreference(input: ReviewPreferenceLifecycleInput): Promise<EditorialLearningProjection>;
+  deleteReviewPreference(input: ReviewPreferenceLifecycleInput): Promise<EditorialLearningProjection>;
+}
 
 export interface LearningReasonAskProjection {
   askId: string;

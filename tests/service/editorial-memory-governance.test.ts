@@ -214,7 +214,7 @@ it('refreshes ordinary preference pins after memory acceptance before stopping f
   try {
     await view.click(`[data-memory-item="${candidate.itemId}"]`, '接受记忆');
     expect(() => subject.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: preference.itemId, revisionId: preference.revisionId }],
-      scope: { kind: 'house' }, categoryId: preference.categoryId, text: '', effect: 'guide' })).toThrow('版本已经变化');
+      scope: { kind: 'house' }, categoryId: preference.categoryId, text: '', effect: 'guide' })).toThrow('刚在别处改过');
     await view.click(`[data-review-preference="${preference.itemId}"]`, '停用');
     expect(subject.inspectGlobalAgent().items.find((item) => item.itemId === preference.itemId)?.state).toBe('inactive');
     expect(view.root.textContent).not.toContain('无法更新学习记录');
@@ -289,7 +289,7 @@ it('publishes two same-category memories with true automatic/explicit ancestry, 
   expect(current(a.itemId).versionId).not.toBe(a.versionId);
   expect(subject.globalAgentSourcesCurrent([pin])).toBe(false);
   const directive = corrected.directives.at(-1)!;
-  subject.recordLearningSupervision({ actionId: directive.actionId!, operation: directive.operation, targets: directive.targets,
+  subject.recordLearningSupervision({ actionId: directive.actionId!, operation: 'correct', targets: directive.targets,
     scope: directive.scope, categoryId: directive.categoryId, text: directive.text, effect: directive.effect });
   expect(subject.inspectGlobalAgent().directives.at(-1)!.directiveId).toBe(directive.directiveId);
   expect(() => govern([a], 'correct', '失效版本不能修正。')).toThrow();
@@ -602,4 +602,305 @@ it.each(['material', 'book'] as const)('reserves a legacy correction whose sourc
   const restored = subject.inspectHouseReviewPreference().current!;
   expect(restored.lines.filter((line) => line.categoryId === 'typos-and-usage').map((line) => line.text).sort()).toEqual(['合'.repeat(120), '乙'.repeat(80)].sort());
   expect(restored.lines.find((line) => line.owner?.itemId === fitting.itemId)).toBeDefined();
+});
+
+// ---- 审阅偏好: 重新启用 and 删除 (Issue #1655) ------------------------------------------------------------------------------
+/** What one request wrote: rows of each append-only relation it may touch. */
+function rowCounts(): Record<string, number> {
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    return Object.fromEntries(['global_editorial_memory_items', 'global_editorial_memory_item_versions', 'learning_supervision_directives',
+      'house_review_preference_versions'].map((table) => [table, Number(db.prepare(`SELECT count(*) n FROM ${table}`).get()!.n)]));
+  } finally { db.close(); }
+}
+/** The open-time validation over the store as it stands. */
+function validateOnOpen(): void {
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try { new EditorialLearningLedger(db).validate(); new SupervisionDirectives(db).validate(); new HouseReviewPreferenceLedger(db).validate(); } finally { db.close(); }
+}
+function refused(operation: () => unknown, code: string): void {
+  let error: unknown;
+  try { operation(); } catch (caught) { error = caught; }
+  expect(error, code).toMatchObject({ code });
+}
+function lifecycle(subject: EditorialStore) {
+  const send = (action: 'reactivate' | 'retire') => (itemId: string, pin: string, actionId: string = randomUUID()) =>
+    subject.reviewPreferenceLifecycle({ itemId, expectedRevisionId: pin, actionId }, action);
+  const memoryRow = (itemId: string) => subject.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0, detailItemId: itemId }).items[0]?.row;
+  const preferenceRow = (itemId: string) => subject.inspectGlobalAgent().items.find((item) => item.itemId === itemId);
+  return { reenable: send('reactivate'), remove: send('retire'), memoryRow, preferenceRow };
+}
+
+it('re-enables a stopped memory entry by appending one version per action id, then deletes it from every list (#1655)', async () => {
+  const { subject, book, signals, make, create, accept, govern, current } = await sourceDecisions();
+  const { reenable, remove, memoryRow } = lifecycle(subject);
+  const a = accept(make(create([signals[0]!.signalId], '合成可重新启用的记忆。')));
+  const b = accept(make(create([signals[2]!.signalId], '合成另一条记忆。')));
+  const material = () => subject.inspectLearningMaterial(book.bookId, signals[0]!.source.materialKey);
+  const standing = material().state;
+  const stop = (itemId: string) => subject.deactivateEditorialMemory({ itemId, expectedVersionId: current(itemId).versionId, actionId: randomUUID() });
+  stop(a.itemId);
+  const stopped = memoryRow(a.itemId)!;
+  expect(stopped).toEqual({ group: 'disabled', changedAt: current(a.itemId).recordedAt, origin: 'editor',
+    reenable: { standing: 'allowed', sentence: '可以重新启用，恢复到停用前的样子。' }, pin: current(a.itemId).versionId, pausedInUse: false });
+  // A directive about another entry recorded in between does not make the page's pin stale.
+  govern([b], 'correct', '合成另一条记忆的更正。');
+  refused(() => remove(a.itemId, stopped.pin.replace(/^./u, (c) => c === '0' ? '1' : '0')), 'REVIEW_PREFERENCE_CHANGED');
+  const before = rowCounts();
+  const actionId = randomUUID();
+  const answer = reenable(a.itemId, stopped.pin, actionId);
+  expect(rowCounts()).toEqual({ ...before, global_editorial_memory_item_versions: before.global_editorial_memory_item_versions! + 1,
+    house_review_preference_versions: before.house_review_preference_versions! + 1 });
+  expect(current(a.itemId)).toMatchObject({ action: 'reactivate', state: 'active', actor: 'editor', supervisionDirectiveRefs: [] });
+  expect(answer.items.find((entry) => entry.current.itemId === a.itemId)).toMatchObject({ usable: true, row: { group: 'enabled', reenable: null, pausedInUse: false } });
+  expect(subject.inspectHouseReviewPreference().current!.lines.some((line) => line.owner?.itemId === a.itemId)).toBe(true);
+  // The same request again acts once and answers the same; another action id is told it already happened.
+  const after = rowCounts();
+  expect(reenable(a.itemId, stopped.pin, actionId).items).toEqual(subject.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).items);
+  expect(rowCounts()).toEqual(after);
+  refused(() => reenable(a.itemId, stopped.pin), 'REVIEW_PREFERENCE_ALREADY_REENABLED');
+  refused(() => remove(a.itemId, current(a.itemId).versionId), 'REVIEW_PREFERENCE_CHANGED');
+  validateOnOpen();
+  // 停用 → 重新启用 → 停用 → 重新启用 → 删除 on one entry, the store reopened between two requests, validated on every read.
+  stop(a.itemId); validateOnOpen();
+  const second = memoryRow(a.itemId)!.pin;
+  refused(() => reenable(a.itemId, stopped.pin), 'REVIEW_PREFERENCE_CHANGED');
+  const launch = subject.baselineAnalysisLedger.launch;
+  subject.markCleanShutdown(); subject.close(); store = undefined;
+  store = await EditorialStore.open(roots!.dataRoot, roots!.codeRoot);
+  const reopened = store;
+  reopened.baselineAnalysisLedger.bindLaunch(launch);
+  reopened.reviewPreferenceLifecycle({ itemId: a.itemId, expectedRevisionId: second, actionId: randomUUID() }, 'reactivate'); validateOnOpen();
+  reopened.deactivateEditorialMemory({ itemId: a.itemId, expectedVersionId: reopened.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0, detailItemId: a.itemId }).items[0]!.current.versionId, actionId: randomUUID() });
+  const last = reopened.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0, detailItemId: a.itemId }).items[0]!.row.pin;
+  const deleteId = randomUUID();
+  const deleted = reopened.reviewPreferenceLifecycle({ itemId: a.itemId, expectedRevisionId: last, actionId: deleteId }, 'retire');
+  validateOnOpen();
+  expect(reopened.reviewPreferenceLifecycle({ itemId: a.itemId, expectedRevisionId: last, actionId: deleteId }, 'retire').items).toEqual(deleted.items);
+  // Absent from every list, count, source candidate and the published preference; the material's standing is unchanged.
+  expect(deleted.items.some((entry) => entry.current.itemId === a.itemId)).toBe(false);
+  expect(reopened.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0, detailItemId: a.itemId }).items).toEqual([]);
+  const global = reopened.inspectGlobalAgent();
+  expect([...global.items, ...global.sourceCandidates!].some((entry) => entry.itemId === a.itemId)).toBe(false);
+  expect(reopened.inspectHouseReviewPreference().current!.lines.some((line) => line.owner?.itemId === a.itemId)).toBe(false);
+  expect(reopened.inspectLearningLineage(book.bookId, signals[0]!.source.materialKey).downstream).toMatchObject({ memoryCandidates: 0, activeMemories: 0 });
+  expect(reopened.inspectLearningMaterial(book.bookId, signals[0]!.source.materialKey).state).toBe(standing);
+  // Every later request naming it is refused as deleted.
+  refused(() => reopened.reviewPreferenceLifecycle({ itemId: a.itemId, expectedRevisionId: last, actionId: randomUUID() }, 'reactivate'), 'REVIEW_PREFERENCE_DELETED');
+  refused(() => reopened.reviewPreferenceLifecycle({ itemId: a.itemId, expectedRevisionId: last, actionId: randomUUID() }, 'retire'), 'REVIEW_PREFERENCE_DELETED');
+  refused(() => reopened.deactivateEditorialMemory({ itemId: a.itemId, expectedVersionId: last, actionId: randomUUID() }), 'REVIEW_PREFERENCE_DELETED');
+  refused(() => reopened.acceptEditorialMemory({ itemId: a.itemId, expectedVersionId: last, actionId: randomUUID() }), 'REVIEW_PREFERENCE_DELETED');
+  refused(() => reopened.recordLearningSupervision({ actionId: randomUUID(), operation: 'correct', targets: [{ itemId: a.itemId, revisionId: last }],
+    scope: { kind: 'house' }, categoryId: 'typos-and-usage', text: '合成不能更正已删除的。', effect: 'guide' }), 'REVIEW_PREFERENCE_DELETED');
+});
+
+it('restores a candidate, a frozen entry and a corrected one to their own state, and refuses merged or material-stopped ones (#1655)', async () => {
+  const { subject, book, signals, make, create, accept, govern, current } = await sourceDecisions();
+  const { reenable, remove, memoryRow } = lifecycle(subject);
+  // 排除 a candidate → 重新启用 → a candidate again, and accepting still works.
+  const candidate = make(create([signals[0]!.signalId], '合成候选记忆。'));
+  subject.deactivateEditorialMemory({ itemId: candidate.itemId, expectedVersionId: candidate.versionId, actionId: randomUUID() });
+  reenable(candidate.itemId, memoryRow(candidate.itemId)!.pin);
+  expect(current(candidate.itemId).state).toBe('proposed');
+  expect(memoryRow(candidate.itemId)).toMatchObject({ group: 'pending', reenable: null });
+  expect(accept(current(candidate.itemId)).state).toBe('active');
+  // Frozen by an AI 助手 freeze → back to its state before the freeze, while the scope's curation hold still holds.
+  const frozen = accept(make(create([signals[2]!.signalId], '合成冻结的记忆。')));
+  govern([frozen], 'supervise', '冻结这条合成记忆。', 'freeze');
+  expect(memoryRow(frozen.itemId)).toMatchObject({ group: 'disabled', reenable: { standing: 'allowed' } });
+  reenable(frozen.itemId, memoryRow(frozen.itemId)!.pin);
+  expect(current(frozen.itemId).state).toBe('active');
+  expect(subject.prepareLearningCuration(book.bookId, signals.map((signal) => signal.signalId)).coverage
+    .every((entry) => entry.state === 'held' && entry.reason !== null)).toBe(true);
+  expect(subject.prepareLearningCuration(book.bookId, [signals[0]!.signalId]).coverage).toEqual([{ signalId: signals[0]!.signalId, state: 'held', reason: 'supervision-frozen' }]);
+  // Merged into another entry: re-enabling is refused, deleting it is allowed.
+  const left = accept(make(create([signals[0]!.signalId], '合成合并甲。')));
+  const right = accept(make(create([signals[2]!.signalId], '合成合并乙。')));
+  govern([left, right], 'merge', '合成合并后的记忆。');
+  expect(memoryRow(left.itemId)).toMatchObject({ group: 'disabled', reenable: { standing: 'merged', sentence: '已并入另一条，不能单独重新启用。' } });
+  refused(() => reenable(left.itemId, memoryRow(left.itemId)!.pin), 'REVIEW_PREFERENCE_MERGED');
+  remove(left.itemId, memoryRow(left.itemId)!.pin);
+  expect(memoryRow(left.itemId)).toBeUndefined();
+  // Corrected through the AI 助手 while stopped: a candidate, not a disabled row.
+  const corrected = accept(make(create([signals[3]!.signalId], '合成停用后更正。')));
+  subject.deactivateEditorialMemory({ itemId: corrected.itemId, expectedVersionId: corrected.versionId, actionId: randomUUID() });
+  const stalePin = memoryRow(corrected.itemId)!.pin;
+  govern([current(corrected.itemId)], 'correct', '合成更正后的说法。');
+  expect(memoryRow(corrected.itemId)).toMatchObject({ group: 'pending' });
+  refused(() => reenable(corrected.itemId, stalePin), 'REVIEW_PREFERENCE_CHANGED');
+  // A material stopped in 学习回溯: the row says so and re-enabling is refused.
+  const sourced = accept(make(create([signals[3]!.signalId], '合成材料停止后的记忆。')));
+  subject.deactivateEditorialMemory({ itemId: sourced.itemId, expectedVersionId: sourced.versionId, actionId: randomUUID() });
+  subject.changeEditorialLearning({ kind: 'material', signalId: signals[3]!.signalId });
+  expect(memoryRow(sourced.itemId)).toMatchObject({ reenable: { standing: 'material-stopped', sentence: '依据的学习材料已停止今后使用，不能重新启用。' } });
+  const counts = rowCounts();
+  refused(() => reenable(sourced.itemId, memoryRow(sourced.itemId)!.pin), 'REVIEW_PREFERENCE_MATERIAL_STOPPED');
+  expect(rowCounts()).toEqual(counts);
+  validateOnOpen();
+});
+
+it('re-enables a legacy /1 entry by appending activation active and deletes it with a terminal /1 value (#1655)', async () => {
+  const { subject, signals } = await sourceDecisions();
+  const { reenable, remove, memoryRow } = lifecycle(subject);
+  subject.createEditorialMemory({ clientMemoryId: randomUUID(), signalId: signals[1]!.signalId, title: '合成旧式记忆。', editorialDimension: 'typos-and-usage', confidence: 0.5 });
+  const legacy = subject.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).items.find((entry) => entry.current.schema !== 'ai7.global-editorial-memory/2')!;
+  expect(legacy.row).toMatchObject({ group: 'enabled', origin: 'editor', pin: legacy.current.versionId });
+  subject.deactivateEditorialMemory({ itemId: legacy.current.itemId, expectedVersionId: legacy.current.versionId });
+  const stopped = memoryRow(legacy.current.itemId)!;
+  const actionId = randomUUID();
+  reenable(legacy.current.itemId, stopped.pin, actionId);
+  const counts = rowCounts();
+  reenable(legacy.current.itemId, stopped.pin, actionId);
+  expect(rowCounts()).toEqual(counts);
+  expect(memoryRow(legacy.current.itemId)).toMatchObject({ group: 'enabled' });
+  subject.deactivateEditorialMemory({ itemId: legacy.current.itemId, expectedVersionId: memoryRow(legacy.current.itemId)!.pin });
+  remove(legacy.current.itemId, memoryRow(legacy.current.itemId)!.pin);
+  expect(memoryRow(legacy.current.itemId)).toBeUndefined();
+  refused(() => subject.deactivateEditorialMemory({ itemId: legacy.current.itemId, expectedVersionId: stopped.pin }), 'REVIEW_PREFERENCE_DELETED');
+  validateOnOpen();
+});
+
+it('brings a stopped derived line back derived with today\'s words, an editor\'s line with its own words under the limit, and deletes for good (#1655)', async () => {
+  const { subject, book, explicit } = await sourceDecisions();
+  const { reenable, remove, preferenceRow } = lifecycle(subject);
+  subject.rebuildHouseReviewPreference();
+  const derived = subject.inspectGlobalAgent().items.find((item) => item.kind === 'preference' && item.bookId === null && item.categoryId === 'typos-and-usage')!;
+  expect(derived.row).toMatchObject({ group: 'enabled', origin: 'ai', pausedInUse: false, reenable: null });
+  // 停用 sends the listed revision; the row pin is the line's own revision afterwards.
+  subject.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: derived.itemId, revisionId: derived.revisionId }],
+    scope: { kind: 'category', categoryId: 'typos-and-usage' }, categoryId: 'typos-and-usage', text: '', effect: 'guide' });
+  const stopped = preferenceRow(derived.itemId)!;
+  expect(stopped).toMatchObject({ state: 'inactive', row: { group: 'disabled', origin: 'ai', reenable: { standing: 'allowed' } } });
+  expect(stopped.revisionId.startsWith(`${stopped.row!.pin}@`)).toBe(true);
+  // New decided feedback rebuilds the group with other words while it is stopped.
+  if (explicit.kind === 'word-tracked-edit' || explicit.kind === 'manual-edit-journal') throw new Error('Expected decision signal');
+  const window = subject.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+  subject.recordProposalDecisionFeedback({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+    markId: explicit.source.markId!, decisionId: explicit.source.decisionId, expectedFeedback: explicit.source.reasonRevision,
+    action: 'revise', reason: '合成修订后的判断。', reasonSource: 'free-text' });
+  const material = subject.inspectLearningMaterial(book.bookId, explicit.source.materialKey);
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: material.decisions, choice: 'house', note: null });
+  subject.rebuildHouseReviewPreference();
+  const rebuilt = subject.inspectHouseReviewPreference().current!.governance!.baseLines.find((line) => line.bookId === null && line.categoryId === 'typos-and-usage')!;
+  expect(rebuilt.text).not.toBe(derived.text);
+  // A directive about another line in between does not make the page's pin stale.
+  const editor = subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'style-and-format',
+    text: '合成编辑自己的规则。', effect: 'guide' }).items.find((item) => item.text === '合成编辑自己的规则。')!;
+  const counts = rowCounts();
+  const actionId = randomUUID();
+  reenable(derived.itemId, preferenceRow(derived.itemId)!.row!.pin, actionId);
+  expect(rowCounts()).toEqual({ ...counts, learning_supervision_directives: counts.learning_supervision_directives! + 1,
+    house_review_preference_versions: counts.house_review_preference_versions! + 1 });
+  const back = preferenceRow(derived.itemId)!;
+  expect(back).toMatchObject({ state: 'active', text: rebuilt.text, row: { group: 'enabled', origin: 'ai' } });
+  expect(subject.inspectHouseReviewPreference().current!.lines.some((line) => line.text === rebuilt.text)).toBe(true);
+  expect(subject.inspectGlobalAgent().directives.at(-1)).toMatchObject({ operation: 'reactivate', text: '', effect: 'guide', actionId,
+    targets: [{ itemId: derived.itemId, revisionId: stopped.row!.pin }], scope: { kind: 'category', categoryId: 'typos-and-usage' } });
+  reenable(derived.itemId, stopped.row!.pin, actionId);
+  expect(rowCounts().learning_supervision_directives).toBe(counts.learning_supervision_directives! + 1);
+  refused(() => reenable(derived.itemId, stopped.row!.pin), 'REVIEW_PREFERENCE_ALREADY_REENABLED');
+  refused(() => remove(derived.itemId, back.row!.pin), 'REVIEW_PREFERENCE_CHANGED');
+  // An editor's line comes back with its words, held to the house limit as adding it is.
+  const stopLine = (itemId: string) => { const item = preferenceRow(itemId)!; subject.recordLearningSupervision({ operation: 'deactivate',
+    targets: [{ itemId, revisionId: item.revisionId }], scope: { kind: 'house' }, categoryId: item.categoryId, text: '', effect: 'guide' }); };
+  stopLine(editor.itemId);
+  reserveLibrarySpace(subject);
+  expect(preferenceRow(editor.itemId)!.row).toMatchObject({ group: 'disabled', origin: 'editor' });
+  // Fill the house to five characters short of 6,000: the stopped line's ten would not fit.
+  const used = subject.inspectGlobalAgent().items.filter((item) => item.kind === 'preference' && item.state === 'active').reduce((sum, item) => sum + [...item.text].length, 0);
+  subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'style-and-format', text: '合'.repeat(6_000 - used - 5), effect: 'guide' });
+  const full = rowCounts();
+  refused(() => reenable(editor.itemId, preferenceRow(editor.itemId)!.row!.pin), 'GLOBAL_AGENT_MEMORY_LIMIT');
+  expect(rowCounts()).toEqual(full);
+  // Deleting is accepted only for a stopped line; afterwards it is gone and stays gone across rebuilds.
+  refused(() => remove(derived.itemId, preferenceRow(derived.itemId)!.row!.pin), 'REVIEW_PREFERENCE_CHANGED');
+  stopLine(derived.itemId);
+  remove(derived.itemId, preferenceRow(derived.itemId)!.row!.pin);
+  expect(preferenceRow(derived.itemId)).toBeUndefined();
+  subject.rebuildHouseReviewPreference();
+  expect(preferenceRow(derived.itemId)).toBeUndefined();
+  expect(subject.inspectHouseReviewPreference().current!.lines.some((line) => line.text === rebuilt.text)).toBe(false);
+  refused(() => subject.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: derived.itemId, revisionId: back.revisionId }],
+    scope: { kind: 'category', categoryId: 'typos-and-usage' }, categoryId: 'typos-and-usage', text: '', effect: 'guide' }), 'REVIEW_PREFERENCE_DELETED');
+  refused(() => reenable(derived.itemId, back.row!.pin), 'REVIEW_PREFERENCE_DELETED');
+  validateOnOpen();
+});
+
+it('refuses a merged or vanished preference line and keeps a corrected one\'s words (#1655)', async () => {
+  const { subject, book, explicit } = await sourceDecisions();
+  const { reenable, remove, preferenceRow } = lifecycle(subject);
+  subject.rebuildHouseReviewPreference();
+  const derived = () => subject.inspectGlobalAgent().items.find((item) => item.kind === 'preference' && item.categoryId === 'typos-and-usage')!;
+  const create = (text: string) => subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'style-and-format',
+    text, effect: 'guide' }).items.find((item) => item.text === text)!;
+  // A corrected derived line comes back with its corrected words.
+  const line = derived();
+  subject.recordLearningSupervision({ operation: 'correct', targets: [{ itemId: line.itemId, revisionId: line.revisionId }], scope: { kind: 'house' },
+    categoryId: 'typos-and-usage', text: '合成更正后的偏好。', effect: 'guide' });
+  const corrected = derived();
+  subject.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: corrected.itemId, revisionId: corrected.revisionId }],
+    scope: { kind: 'house' }, categoryId: 'typos-and-usage', text: '', effect: 'guide' });
+  reenable(corrected.itemId, preferenceRow(corrected.itemId)!.row!.pin);
+  expect(preferenceRow(corrected.itemId)).toMatchObject({ state: 'active', text: '合成更正后的偏好。', row: { origin: 'ai' } });
+  // Merged into another line: refused as merged, deletable.
+  const first = create('合成规则甲。'); const second = create('合成规则乙。');
+  subject.recordLearningSupervision({ operation: 'merge', targets: [first, second].map((item) => ({ itemId: item.itemId, revisionId: preferenceRow(item.itemId)!.revisionId })),
+    scope: { kind: 'house' }, categoryId: 'style-and-format', text: '合成合并后的规则。', effect: 'guide' });
+  expect(preferenceRow(first.itemId)!.row).toMatchObject({ group: 'disabled', reenable: { standing: 'merged' } });
+  refused(() => reenable(first.itemId, preferenceRow(first.itemId)!.row!.pin), 'REVIEW_PREFERENCE_MERGED');
+  remove(first.itemId, preferenceRow(first.itemId)!.row!.pin);
+  expect(preferenceRow(first.itemId)).toBeUndefined();
+  expect(preferenceRow(subject.inspectGlobalAgent().items.find((item) => item.text === '合成合并后的规则。')!.itemId)!.state).toBe('active');
+  // A group whose derived line vanished while stopped lists no row, and re-enabling it is refused as changed.
+  const vanishing = derived();
+  subject.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: vanishing.itemId, revisionId: vanishing.revisionId }],
+    scope: { kind: 'house' }, categoryId: 'typos-and-usage', text: '', effect: 'guide' });
+  const pin = preferenceRow(vanishing.itemId)!.row!.pin;
+  const material = subject.inspectLearningMaterial(book.bookId, explicit.source.materialKey);
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: material.decisions, choice: 'excluded', note: null });
+  expect(preferenceRow(vanishing.itemId)).toBeUndefined();
+  refused(() => reenable(vanishing.itemId, pin), 'REVIEW_PREFERENCE_CHANGED');
+  validateOnOpen();
+});
+
+it('keeps the AI 助手 pins of a store without the new records byte for byte (#1655)', async () => {
+  const { subject, signals, make, create, accept } = await sourceDecisions();
+  subject.rebuildHouseReviewPreference();
+  accept(make(create([signals[0]!.signalId], '合成助手可读的记忆。')));
+  subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'style-and-format', text: '合成助手规则。', effect: 'guide' });
+  const global = subject.inspectGlobalAgent();
+  const head = global.directives.at(-1)!.directiveId;
+  // The listed and sent revisions keep their recorded form; the row pin is the line's own revision beside it.
+  for (const item of global.items.filter((entry) => entry.kind === 'preference')) {
+    expect(item.revisionId).toBe(`${item.row!.pin}@${head}`);
+    expect(Object.keys(item).sort()).toEqual(['bookId', 'categoryId', 'itemId', 'kind', 'lineage', 'revisionId', 'row', 'state', 'text']);
+  }
+  for (const candidate of global.sourceCandidates!) expect(Object.keys(candidate).sort()).toEqual(['itemId', 'kind', 'revisionId', 'text', 'title']);
+  expect(subject.globalAgentSourcesCurrent(global.sourceCandidates!.map(({ itemId, revisionId }) => ({ itemId, revisionId })))).toBe(true);
+});
+
+it('lists a pending material AI7 already uses by default under 本社, not as undecided, with its row unchanged (#1655)', async () => {
+  const { subject, book, signals, explicit } = await sourceDecisions();
+  // One more pending material without an automatic admission: an editor's own mark, outside any review.
+  const window = subject.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+  const block = window.blocks.findLast((candidate) => candidate.kind === 'paragraph' && [...candidate.text].length >= 20)!;
+  const binding = { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId };
+  const markId = subject.createEditorialMark({ ...binding, clientMarkId: randomUUID(), baseRevisionId: window.revisionId, expectedJournalSequence: window.journalSequence,
+    blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 1, selectedText: [...block.text][0]!, kind: 'change-suggestion',
+    highlightColor: null, body: '', proposedText: '合成编辑建议', rationale: '合成检查' }).markId;
+  subject.recordChangeSuggestionDecision({ ...binding, markId, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: '合成编辑自己的判断。' });
+  const rows = (standing: 'pending' | 'house') => {
+    const page = subject.inspectLearningAudit({ bookId: book.bookId, standing });
+    return { count: page.books[0]?.materialCount ?? 0, rows: page.books.flatMap((entry) => entry.materials)
+      .map((material) => [material.materialKey, material.standing, material.automaticAdmission?.choice ?? null]).sort() };
+  };
+  const automatic = signals.filter((signal) => signal.signalId !== explicit.signalId).map((signal) => signal.source.materialKey);
+  const pending = rows('pending');
+  expect(pending.count).toBe(1);
+  expect(pending.rows).toHaveLength(1);
+  expect(pending.rows[0]!.slice(1)).toEqual(['pending', null]);
+  expect([explicit.source.materialKey, ...automatic]).not.toContain(pending.rows[0]![0]);
+  const house = rows('house');
+  expect(house.count).toBe(1 + automatic.length);
+  expect(house.rows).toEqual([[explicit.source.materialKey, 'house', null], ...automatic.map((key) => [key, 'pending', 'house'])].sort());
 });

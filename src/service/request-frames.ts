@@ -1648,6 +1648,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.itemId) || !validUuid(input.expectedVersionId) || input.actionId !== undefined && !validUuid(input.actionId)) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'reenableReviewPreference':
+    case 'deleteReviewPreference': {
+      const input = requireInput(value.input, ['itemId', 'expectedRevisionId', 'actionId'], tentativeId);
+      if (!isBoundedString(input.itemId, 180) || !isBoundedString(input.expectedRevisionId, 180) || !validUuid(input.actionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'inspectHouseReviewPreference':
     case 'rebuildHouseReviewPreference': {
       requireInput(value.input, [], tentativeId);
