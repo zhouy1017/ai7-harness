@@ -1,6 +1,6 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
-import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { insertLegacyPackageVersion, LEGACY_PACKAGE_EXCLUSIONS } from '../support/legacy-package-version.js';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -261,51 +261,61 @@ describe('图书交付包 (S67a)', () => {
     }
   });
 
-  it('reads a package made before Issue #1639 as it was stored: it verifies, its sentences and digest are untouched, and a new package carries none of them', async () => {
+  it('reads a package made before Issue #1639 exactly as it was stored: its delivery sentence, exclusions and digests are returned untouched, and it still verifies', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let bookId: string;
-    let legacy: { packageVersionId: string; contentDigest: string; sha256: string };
+    let first: string;
     try {
       const book = await importBook(store, await compose('旧交付包组稿', [1, 2, 3]));
       bookId = book.bookId;
       const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '定稿', 'stage-archive', null, '');
       store.designatePublicationVersion({ bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
       const news = (await store.createProductionDocument({ bookId, typeId: 'news-release', title: '首发通稿' })).document!;
-      const first = store.prepareBookDeliveryPackage({ bookId, purpose: '交出版社存档', expectedContentDigest: store.inspectBookDeliveryPackage(bookId).content.digest });
-      // A package made now: the derivative is held with no sentence about delivery and no 不会做 list.
-      const firstId = first.package.versions[0]!.packageVersionId;
+      await store.recordProductionDocumentDelivery({ bookId, documentId: news.documentId, version: { kind: 'saved', revisionId: news.versions[0]!.revisionId },
+        recipient: { kind: 'publicity', custom: null }, note: null });
+      const prepared = store.prepareBookDeliveryPackage({ bookId, purpose: '交出版社存档', expectedContentDigest: store.inspectBookDeliveryPackage(bookId).content.digest });
+      first = prepared.package.versions[0]!.packageVersionId;
       store.markCleanShutdown();
+    } finally {
       store.close();
-      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-      try {
-        const row = database.prepare('SELECT * FROM book_delivery_package_versions WHERE package_version_id = ?').get(firstId) as Record<string, string | number>;
-        const record = JSON.parse(String(row['canonical_json'])) as { content: { documents: Array<Record<string, unknown>>; exclusions: string[]; limitations: string[] } };
-        expect([record.content.exclusions, record.content.limitations]).toEqual([[], []]);
-        // The same package as it was made before: the delivery sentence stored, its three exclusion keys, a record's raw time.
-        const content = { ...record.content, exclusions: ['editor-notes', 'library-originals', 'intermediate-revisions'],
-          limitations: ['新闻稿：尚未交付，不在包中。', '宣传文章：尚未创建，不在包中。'], documents: record.content.documents.map((entry) => ({ ...entry, deliveryId: randomUUID() })) };
-        const forged = { ...record, packageVersionId: randomUUID(), version: 2, priorVersionId: firstId, contentDigest: canonicalRecord(content).digest, content };
-        const canonical = canonicalRecord(forged);
-        database.prepare(`INSERT INTO book_delivery_package_versions(package_version_id, package_id, book_id, version, prior_version_id, purpose,
-          publication_version_id, content_sha256, actor, prepared_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(forged.packageVersionId, row['package_id']!, row['book_id']!, 2, firstId, row['purpose']!, row['publication_version_id']!,
-            forged.contentDigest, row['actor']!, row['prepared_at']!, canonical.json, canonical.digest);
-        legacy = { packageVersionId: forged.packageVersionId, contentDigest: forged.contentDigest, sha256: canonical.digest };
-      } finally {
-        database.close();
-      }
-      void news;
-    } catch (error) {
-      store.close();
-      throw error;
     }
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    // A package made now carries no delivery sentence and no 不会做 list.
+    const database = new DatabaseSync(path, { readOnly: true });
+    let made: { limitations: string[]; exclusions: string[] };
+    try {
+      made = (JSON.parse(String((database.prepare('SELECT canonical_json FROM book_delivery_package_versions WHERE package_version_id = ?').get(first!) as { canonical_json: string }).canonical_json)) as { content: typeof made }).content;
+    } finally {
+      database.close();
+    }
+    expect([made.exclusions, made.limitations]).toEqual([[], []]);
+    // The same package in the shape it had before: delivery-based, its delivery sentence and its three exclusion keys stored.
+    const legacy = insertLegacyPackageVersion(path, first!, '2026-03-04T05:06:07.000Z');
+    expect(legacy.content['limitations']).toEqual(['新闻稿：交付后有修改，本包按交付时的版本 1。']);
+    expect(legacy.content['exclusions']).toEqual(LEGACY_PACKAGE_EXCLUSIONS);
+    expect((legacy.content['documents'] as Array<{ deliveryId?: string }>).some((entry) => typeof entry.deliveryId === 'string')).toBe(true);
+
+    // The record the store reads back is the record that was inserted: every stored sentence, key and digest, unchanged.
+    const reading = new DatabaseSync(path, { readOnly: true });
+    try {
+      const packages = new BookDeliveryPackages(reading, { publication: () => null, documents: () => [], reviewRuns: () => [] });
+      const found = packages.record(bookId!, legacy.packageVersionId)!;
+      expect(found.record.content).toEqual(legacy.content);
+      expect(found.record.content.limitations).toEqual(['新闻稿：交付后有修改，本包按交付时的版本 1。']);
+      expect(found.record.content.exclusions).toEqual(LEGACY_PACKAGE_EXCLUSIONS);
+      expect([found.record.contentDigest, found.digest, found.record.preparedAt]).toEqual([legacy.contentDigest, legacy.digest, '2026-03-04T05:06:07.000Z']);
+      expect(JSON.stringify(found.record)).toBe(JSON.stringify(JSON.parse(legacy.canonicalJson)));
+    } finally {
+      reading.close();
+    }
+
+    // And the store lists it, verified, beside the package made now.
     const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      // Reading verifies each record against its digest: the stored one is read, whole and unchanged.
       const versions = reopened.inspectBookDeliveryPackage(bookId!).versions;
       expect(versions.map((version) => version.label)).toEqual(['v2', 'v1']);
-      expect([versions[0]!.packageVersionId, versions[0]!.technical.contentDigest, versions[0]!.technical.digest]).toEqual([legacy!.packageVersionId, legacy!.contentDigest, legacy!.sha256]);
-      expect(versions[0]!.preparedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z$/u);
+      expect([versions[0]!.packageVersionId, versions[0]!.technical.contentDigest, versions[0]!.technical.digest, versions[0]!.preparedAt])
+        .toEqual([legacy.packageVersionId, legacy.contentDigest, legacy.digest, '2026-03-04T05:06:07.000Z']);
       reopened.markCleanShutdown();
     } finally {
       reopened.close();

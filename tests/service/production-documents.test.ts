@@ -3,6 +3,7 @@ import { mountDeliverables } from '../../src/renderer/deliverables.js';
 import { mountManuscriptSwitcher } from '../../src/renderer/manuscript-switcher.js';
 import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { insertLegacyPackageVersion } from '../support/legacy-package-version.js';
 import { installMiniDom } from '../support/mini-dom.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
@@ -383,12 +384,17 @@ describe('Production Documents', () => {
     });
   });
 
-  it('shows a derivative with a saved version ticked in a new package, and a stored package with its times in the local format (Issue #1639)', async () => {
+  it('shows a derivative with a saved version ticked, and a package stored before Issue #1639 with its times in the local format', async () => {
     await withBook(async (store, book) => {
       const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '定稿', 'stage-archive', null, '');
       store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
       const news = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '首发通稿' })).document!;
+      await store.recordProductionDocumentDelivery({ bookId: book.bookId, documentId: news.documentId, version: { kind: 'saved', revisionId: news.versions[0]!.revisionId },
+        recipient: { kind: 'publicity', custom: null }, note: null });
       const prepared = store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交出版社存档', expectedContentDigest: store.inspectBookDeliveryPackage(book.bookId).content.digest });
+      // The package as it was stored before: delivery-based, its time the raw instant of its record.
+      const storedAt = '2026-03-04T05:06:07.000Z';
+      insertLegacyPackageVersion(join(roots.dataRoot, 'store', 'ai7.sqlite'), prepared.package.versions[0]!.packageVersionId, storedAt);
       const view = documentSurface(store, book);
       try {
         view.surface.start(); await vi.waitFor(() => expect(view.root.querySelector('.package-version-meta')).not.toBeNull());
@@ -396,10 +402,10 @@ describe('Production Documents', () => {
         expect(box.checked).toBe(true);
         // No 不包含 list, and the stored package's time reads in the local format, never as the stored instant.
         expect(view.root.querySelector('.package-excluded')).toBeNull();
-        const stored = prepared.package.versions[0]!.preparedAt;
-        const meta = view.root.querySelector('.package-version-meta')!.textContent!;
-        expect(meta).toContain(localInstantLabel(stored));
-        expect(meta).not.toContain(stored);
+        const stored = Array.from(view.root.querySelectorAll('.package-version-meta'), (meta) => meta.textContent ?? '');
+        expect(stored).toHaveLength(2);
+        expect(stored[0]).toContain(localInstantLabel(storedAt));
+        expect(stored[0]).not.toContain(storedAt);
       } finally { view.close(); }
     });
   });
