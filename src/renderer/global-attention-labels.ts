@@ -19,7 +19,7 @@ import { RESUMABLE_STOP_REASON_LABELS, TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_B
 import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION } from './proposal-conflict-labels.js';
 import { MAINTENANCE_CLASSIFICATION_LABELS, MAINTENANCE_NEXT_STEP_LABELS } from '../shared/maintenance-wording.js';
-import { LIBRARY_ATTRIBUTE, LIBRARY_ELIGIBILITY, LIBRARY_HOUSE, LIBRARY_KIND_LABELS, LIBRARY_NO_ATTRIBUTION, materialIndexCompletedReason } from './knowledge-base-labels.js';
+import { LIBRARY_USE, LIBRARY_HOUSE, LIBRARY_KIND_LABELS, LIBRARY_NO_ATTRIBUTION, materialIndexCompletedReason } from './knowledge-base-labels.js';
 import { DIALOGUE_CARD_REASONS, DIALOGUE_OPEN_LABEL, DIALOGUE_STATE_LABELS, DIALOGUE_WAITING_LABEL, dialogueQuestionLine } from './dialogue-labels.js';
 
 /**
@@ -181,8 +181,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'maintenance-waiting': '维护事项待处理 · 等待另设发稿版本',
   // A 资料库 item waiting for the editor (Issue #427, S79c; ATTN-009), in the words the material table placed them under.
   get 'library-attribution-pending'() { return technicalWords('资料库归属待定', '资料给谁用待定'); },
-  get 'learning-eligibility-pending'() { return technicalWords('学习准入待定', '是否可用于学习待定'); },
-  get 'learning-eligibility-deferred'() { return technicalWords('学习准入待定 · 稍后决定', '是否可用于学习待定 · 稍后决定'); },
+  get 'learning-eligibility-pending'() { return technicalWords('学习准入待定', '资料给谁用待定'); },
+  get 'learning-eligibility-deferred'() { return technicalWords('学习准入待定 · 稍后决定', '资料给谁用待定 · 稍后决定'); },
   // A Book's Learning Material (Issue #61, S26b; LEARN-002): the words of the spec's attention item.
   get 'learning-materials-pending'() { return technicalWords('学习准入待处理', '学习材料待处理'); },
   get 'learning-materials-deferred'() { return technicalWords('学习准入待处理 · 稍后决定', '学习材料待处理 · 稍后决定'); },
@@ -306,8 +306,8 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'maintenance-write-errata': MAINTENANCE_NEXT_STEP_LABELS['write-errata'],
   'maintenance-conclude': MAINTENANCE_NEXT_STEP_LABELS.conclude,
   // A 资料库 item's own two decisions (Issue #427, S79c), in its card's words.
-  'set-library-attribution': LIBRARY_ATTRIBUTE,
-  'set-learning-eligibility': LIBRARY_ELIGIBILITY,
+  'set-library-attribution': LIBRARY_USE,
+  'set-learning-eligibility': LIBRARY_USE,
   get 'decide-learning-materials'() { return technicalWords('定学习准入…', '处理学习材料…'); },
   'open-dialogue': DIALOGUE_OPEN_LABEL,
   // A 资料库 item's index (Issue #428, S80a): its card, with the layers and 查看分段.
@@ -525,9 +525,9 @@ function attentionReason(item: GlobalAttentionItemProjection): string {
       }
     // A 资料库 item (Issue #427, S79c; KB-007, LEARN-006): what it waits for; nothing about it is inferred meanwhile.
     case 'library-attribution-pending':
-      return technicalWords('放进资料库以后还没有定归属：定了归属与学习准入，任务才能把它列进「允许参考」。', '还没有定给谁用和是否可用于学习：定好后，任务才能参考它。');
+      return technicalWords('放进资料库以后还没有定归属：定了归属与学习准入，任务才能把它列进「允许参考」。', '还没有定给谁用：定好后，任务才能参考它。');
     case 'learning-eligibility-pending':
-      return technicalWords('归属已定，学习准入还没有定：没有你的决定，它不会用来学习，任务也还不能把它列进「允许参考」。', '还没有定是否可用于学习：定好前，它不会用来学习，任务也不能参考它。');
+      return technicalWords('归属已定，学习准入还没有定：没有你的决定，它不会用来学习，任务也还不能把它列进「允许参考」。', '还没有确认给谁用：确认后，任务才能参考它。');
     case 'learning-eligibility-deferred':
       return technicalWords('学习准入记为稍后决定：决定之前，它不会用来学习，任务也还不能把它列进「允许参考」。', '是否可用于学习稍后决定：决定之前，它不会用来学习，任务也不能参考它。');
     // A Book's Learning Material (Issue #61, S26b; LEARN-002, LEARN-006): nothing of it is used to learn until the editor says.
@@ -638,7 +638,7 @@ export function globalAttentionView(projection: GlobalAttentionProjection): Read
 export const GLOBAL_ATTENTION_MATERIAL_GROUPS = [
   { material: 'external-source-retention-failed', label: '外部来源留存失败', group: 'exceptions' },
   { material: 'library-attribution-pending', get label() { return technicalWords('资料库归属待定', '资料给谁用待定'); }, group: 'decisions' },
-  { material: 'learning-eligibility-pending', get label() { return technicalWords('学习准入待定', '是否可用于学习待定'); }, group: 'decisions' },
+  { material: 'learning-eligibility-pending', get label() { return technicalWords('学习准入待定', '资料给谁用待定'); }, group: 'decisions' },
   { material: 'learning-materials-pending', get label() { return technicalWords('学习准入待处理', '学习材料待处理'); }, group: 'decisions' },
   { material: 'indexing-completed', label: '索引完成', group: 'recent' },
 ] as const satisfies ReadonlyArray<{ material: string; label: string; group: GlobalAttentionGroupKey }>;

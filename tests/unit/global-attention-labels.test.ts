@@ -330,8 +330,8 @@ describe('each item', () => {
       'maintenance-write-errata': '编写勘误',
       'maintenance-conclude': '记录维护事项结论',
       // A 资料库 item's own two decisions (Issue #427, S79c): its card's buttons.
-      'set-library-attribution': '定给谁用…',
-      'set-learning-eligibility': '定是否可用于学习…',
+      'set-library-attribution': '给谁用…',
+      'set-learning-eligibility': '给谁用…',
       'decide-learning-materials': '定学习准入…',
       // A dialogue Task's own way to its dialogue (Issue #52, S17a; TASK-044).
       'open-dialogue': '打开对话',

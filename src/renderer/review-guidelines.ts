@@ -189,7 +189,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     if (refusal?.documentId === document.documentId) {
       const note = el('p', 'attention-note guideline-refusal', refusal.message);
       note.setAttribute('role', 'alert');
-      more.append(note);
+      node.append(note);
     }
     if (preview?.documentId === document.documentId) node.append(previewSection(preview));
     else if (fixed === null) {
