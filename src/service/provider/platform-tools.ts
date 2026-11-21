@@ -311,7 +311,7 @@ export const LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.free
     parameters: { type: 'object', properties: { clauseId: { type: 'string', maxLength: 200 } }, additionalProperties: false } },
   { name: 'term_table', description: '读取本次计划固定的本书人名、地名和术语表，可按文字查询；每类最多返回 8 条并注明其余条数；未固定来源或没有匹配时返回空结果。',
     parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 200 } }, additionalProperties: false } },
-  { name: 'search_manuscript', description: '在本次授权固定稿件中精确或分词检索；只返回匹配段落。',
+  { name: 'search_manuscript', description: '在本次授权固定稿件中检索段落：exact 只返回含查询原文的段落；tokenized 按相关程度返回段落，含查询原文的在前。',
     parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 }, mode: { type: 'string', enum: ['exact', 'tokenized'] } }, required: ['query', 'mode'], additionalProperties: false } },
   // The scoped Global Agent's two further tools (#1171); a rule naming neither never registers them.
   { name: 'read_procedure', description: '读取本次对话明确列入范围的工序（工序与规则）的确切版本；未列入范围的工序或版本不返回。',
@@ -454,9 +454,17 @@ export function canonicalToolArguments(name: string, input: unknown): PlatformTo
     const kinds = args.sourceKinds;
     if (kinds !== undefined && (!Array.isArray(kinds) || kinds.length < 1 || kinds.length > 3 || new Set(kinds).size !== kinds.length ||
         !kinds.every((kind) => ['manuscript', 'material', 'retained-source'].includes(String(kind))))) return null;
-    // Loose by design: a junk, empty or repeated phrasing is dropped and only the first four that remain are used; only `query` refuses.
-    const queries = [...new Set((Array.isArray(args.queries) ? args.queries : []).flatMap((entry: unknown) => typeof entry === 'string' && entry.isWellFormed()
-      ? [entry.normalize('NFC').trim().slice(0, 1000)] : []))].filter((entry) => entry.length > 0 && entry !== query).slice(0, RETRIEVAL_LEXICAL.maxQueries).sort();
+    // Loose by design: a lone string is one phrasing; a junk, empty or ill-formed entry is dropped, an over-long one cut first (never
+    // inside a surrogate pair); one phrasing per form the ranker reads (NFKC, lower case), none the query's own; the first four kept.
+    const forms = new Map<string, string>([[query.normalize('NFKC').toLowerCase(), query]]);
+    for (const entry of typeof args.queries === 'string' ? [args.queries] : Array.isArray(args.queries) ? args.queries : []) {
+      if (typeof entry !== 'string' || forms.size > RETRIEVAL_LEXICAL.maxQueries) continue;
+      let phrasing = entry.normalize('NFC').trim().slice(0, 1000);
+      if (/[\uD800-\uDBFF]$/.test(phrasing)) phrasing = phrasing.slice(0, -1);
+      const form = phrasing.normalize('NFKC').toLowerCase();
+      if (phrasing.length > 0 && phrasing.isWellFormed() && !forms.has(form)) forms.set(form, phrasing);
+    }
+    const queries = [...forms.values()].slice(1).sort();
     return { tool: 'retrieve', query, k, ...(kinds === undefined ? {} : { sourceKinds: [...kinds].sort() as Array<'manuscript' | 'material' | 'retained-source'> }),
       ...(queries.length === 0 ? {} : { queries }) };
   }

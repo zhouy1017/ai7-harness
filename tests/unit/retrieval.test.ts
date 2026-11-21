@@ -307,7 +307,12 @@ describe('registered local tools without egress', () => {
     // #1623: further phrasings are taken loosely — junk, empty, repeated and the query itself are dropped, then the first four kept.
     expect(canonicalToolArguments('retrieve', { query: 'alpha', queries: ['e', 'd', 'c', 'b', 'a'] })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8, queries: ['b', 'c', 'd', 'e'] });
     expect(canonicalToolArguments('retrieve', { query: 'alpha', queries: [7, '', '  ', 'alpha', ' beta ', 'beta', null, { x: 1 }] })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8, queries: ['beta'] });
-    expect(canonicalToolArguments('retrieve', { query: 'alpha', queries: 'beta' })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8 });
+    expect(canonicalToolArguments('retrieve', { query: 'alpha', queries: 'beta' })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8, queries: ['beta'] });
+    // One phrasing per form the ranker reads: Ａ, a and ａ are one, and so is the query's own ＡＬＰＨＡ.
+    expect(canonicalToolArguments('retrieve', { query: 'alpha', queries: ['Ａ', 'a', 'ａ', 'ＡＬＰＨＡ'] })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8, queries: ['Ａ'] });
+    // An over-long phrasing is cut first, never inside a surrogate pair.
+    const cut = (canonicalToolArguments('retrieve', { query: 'alpha', queries: ['x'.repeat(999) + '𠮷'] }) as { queries: string[] }).queries[0]!;
+    expect([cut.length, cut.isWellFormed()]).toEqual([999, true]);
     expect(canonicalToolArguments('retrieve', { queries: ['beta'] })).toBeNull();
     // Only the rule-declared set (composition v2) offers them; composition v1 keeps its legacy bytes.
     const declaredRule = { ...localRetrievalRule(), declarations: [{ name: 'retrieve', readOnly: true as const, concurrencySafe: true as const }], parallelCallsAllowed: false };
@@ -349,22 +354,31 @@ describe('registered local tools without egress', () => {
 });
 
 describe('a retrieve call with further phrasings (#1623)', () => {
-  it('answers five phrasings from the first four and a junk-laden call from what remains, as one call', async () => {
+  const corpus = () => words('修订', '修改', '改动', '违约', '毁约', '首印', '初印', '印数', '天气');
+  const sessionUnder = (rule: NonNullable<EgressBindingFacts['localTools']>) => {
     const facts: EgressBindingFacts = { bindingDigest: 'b'.repeat(64), route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL,
-      systemPrompt: 'synthetic', outboundDataCategory: 'public-or-synthetic', admittedUserMessages: new Set(['synthetic']), localTools,
+      systemPrompt: 'synthetic', outboundDataCategory: 'public-or-synthetic', admittedUserMessages: new Set(['synthetic']), localTools: rule,
       policy: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 } };
-    const corpus = () => words('修订', '修改', '改动', '违约', '毁约', '首印', '初印', '印数', '天气');
     const session = new PlatformToolSession({ binding: facts, scope: { currentBindingDigest: () => facts.bindingDigest, acceptedOutputDigests: new Set() },
       retrieval: new RetrievalIndex(corpus()), purpose: 'synthetic',
       fetch: async () => { throw new Error('socket seam reached'); }, admitHost: () => { throw new Error('host seam reached'); } });
     const signal = new AbortController().signal;
     const call = async (callId: string, args: unknown) => JSON.parse((await session.execute({ callId, tool: 'retrieve', arguments: args, signal,
       dispatch: { token: Symbol(), active: () => !signal.aborted } })).text) as unknown;
+    return { session, call };
+  };
+  it('answers five phrasings from the first four and a junk-laden call from what remains, as one call', async () => {
+    const { session, call } = sessionUnder({ ...localTools, declarations: [{ name: 'retrieve', readOnly: true as const, concurrencySafe: true as const }], parallelCallsAllowed: false });
     const expected = await new RetrievalIndex(corpus()).retrieve('修订', 8, undefined, ['首印', '违约', '天气', '初印']);
+    expect(expected).not.toEqual(await new RetrievalIndex(corpus()).retrieve('修订'));
     expect(await call('1', { query: '修订', queries: ['首印', '违约', '天气', '初印', '毁约'] })).toEqual(expected);
     expect(await call('2', { query: '修订', queries: [1, '', '修订', '违约', '违约'] })).toEqual(await new RetrievalIndex(corpus()).retrieve('修订', 8, undefined, ['违约']));
     expect(session.usage).toMatchObject({ retrievalCalls: 2 });
     expect(session.usage.refusedRetrievalCalls ?? 0).toBe(0);
+  });
+  it('ignores further phrasings under composition v1, which never offered them', async () => {
+    const { call } = sessionUnder(localTools);
+    expect(await call('1', { query: '修订', queries: ['首印', '违约'] })).toEqual(await new RetrievalIndex(corpus()).retrieve('修订'));
   });
 });
 
