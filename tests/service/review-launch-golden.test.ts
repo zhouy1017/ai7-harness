@@ -23,7 +23,9 @@ it('keeps the no-options review launch records byte-identical to the S-tasks bas
   try {
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
     const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-review-cross-chapter-authored');
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: {
       fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage } });
     const book = await importSample1Book(store, roots.codeRoot, 'sample1');
     await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
@@ -40,6 +42,39 @@ it('keeps the no-options review launch records byte-identical to the S-tasks bas
         { table: 'analysis_plan_records', digests: ['d1fd2c06457050a135e4aebc0fe3661c87fef2b2c04ca7b6ca44dce2b4c366bb',
           'dc3ee2ee0362195cdc05ab2419ad4664e6cc66fa07702fd24df3b38f3c06203a'] },
         { table: 'task_launch_snapshots', digests: ['737ff0d6a1d31046c1a369d2c0d8658c088cc12ea000a4b43ed4a6d884818f5c'] },
+      ]);
+    } finally { db.close(); }
+  } finally { store?.close(); await roots.dispose(); vi.useRealTimers(); }
+});
+
+// Also captured with the unchanged dd09959e7 product tree, before restoring the #1657 implementation.
+it.each(['now', 'when-online'] as const)('keeps legacy model-free launch options byte-identical: %s (#1657)', async startWhen => {
+  sequence.value = 0;
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-21T00:00:00.000Z'));
+  const roots = await createServiceTestRoots('ai7-local-launch-golden-');
+  let store: EditorialStore | undefined;
+  try {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const book = await importSample1Book(store, roots.codeRoot, 'sample1');
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+    recordMissingCredentialConnection(store, 'sample1');
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+    store.launchReviewRun({ bookId: book.bookId, clientCommandId: '10000000-0000-4000-8000-000000000001',
+      categoryIds: ['local-text-check'], scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null },
+      executionConfig: { modelId: 'legacy-choice', reasoningEffort: 'off' }, rememberedChoice: true, startWhen,
+      localCheck: { punctuation: 'chinese-prose', numerals: 'off', publication: 'unknown', numeralRules: [],
+        numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [] } }, policy);
+    const db = new DatabaseSync(join(roots.dataRoot, 'store/ai7.sqlite'), { readOnly: true });
+    try {
+      const digests = ['review_run_authorizations', 'task_launch_snapshots'].map(table => ({ table,
+        digests: db.prepare(`SELECT canonical_json FROM ${table} ORDER BY rowid`).all().map(row =>
+          createHash('sha256').update(String(row.canonical_json)).digest('hex')) }));
+      expect(digests).toEqual([
+        { table: 'review_run_authorizations', digests: ['9342f3f8abcedc3cc22e12fa40f523bb33524d4e52cbed67b6efb43be02c7f9f'] },
+        { table: 'task_launch_snapshots', digests: [startWhen === 'now'
+          ? '6043352590a86e5a8440bd60b0e01811b7d451155129dfd165315215bb52259b'
+          : 'f41adcb933404970a68e781ea6a4ae0a042ae6a14dfd119073c6877f59fc52ef'] },
       ]);
     } finally { db.close(); }
   } finally { store?.close(); await roots.dispose(); vi.useRealTimers(); }
