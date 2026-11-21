@@ -1217,7 +1217,7 @@ async function main() {
       const always=search.querySelector('[data-action="always-use-selected-search-backend"]')?.parentElement?.textContent;
       const source=text.slice(text.indexOf('当前生效来源：'));
       return !text.includes('后端') && !text.includes('设置 › 联网检索') && always==='总是使用选定的检索服务' &&
-        (!source.startsWith('当前生效来源：暂不可用') || source.includes('请在下面的检索服务里，为其中一个保存密钥。'));
+        (!source.startsWith('当前生效来源：暂不可用') || source.includes('请在下面的检索服务里，为其中一个保存密钥'));
     })()`, 'ordinary-search-says-search-service');
     // The 未实测 disclosure names hit rates; detailed measurement labels and numeric values remain technical-only.
     await assertRenderer(primary, `!/评测参考|p50|中文命中率|国际命中率|命中率[ ：:]*[0-9]/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-detailed-measurements');

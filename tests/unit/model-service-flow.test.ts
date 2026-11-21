@@ -961,7 +961,7 @@ describe('the sentence while no model is chosen (ordinary mode)', () => {
   });
   it('sends the editor to 渠道 when the channel on screen is not connected in this version', () => {
     const node = noModel([], (projection) => ({ ...projection, routeChoice: { ...projection.routeChoice, routes: projection.routeChoice.routes.filter((option) => option.route !== 'anthropic-claude') } }));
-    expect(sentence(node)).toBe('尚未选择模型。这个渠道在当前版本里还不能使用，请先在上面的「1. 渠道」里选择其他渠道。');
+    expect(sentence(node)).toBe('尚未选择模型。这个渠道暂时还不能使用，请先在上面的「1. 渠道」里选择其他渠道。');
   });
 });
 

@@ -91,9 +91,9 @@ describe('the direct-search candidate in 联网检索', () => {
     const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
     const text = node.textContent;
     expect(text.includes('后端')).toBe(technical);
-    expect(text.includes('请在 设置 › 联网检索 保存一个后端密钥。')).toBe(technical);
+    expect(text.includes('请在 设置 › 联网检索 保存一个后端密钥')).toBe(technical);
     // The ordinary state line says what to do on this page, not where this page is.
-    expect(text.includes('请在下面的检索服务里，为其中一个保存密钥。')).toBe(!technical);
+    expect(text.includes('请在下面的检索服务里，为其中一个保存密钥')).toBe(!technical);
     expect(text.includes('总是使用选定的检索服务')).toBe(!technical);
     expect(text.includes('总是使用联网检索里选定的后端')).toBe(technical);
   });

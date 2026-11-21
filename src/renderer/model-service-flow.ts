@@ -183,7 +183,7 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
 
 /** What to do first when no model is chosen yet: only a control the editor can use now is named, in the order the page's own steps unlock. */
 function noModelSentence(projection: ModelServiceSettingsProjection, channel: ModelServiceChannelProjection): string {
-  if (channel.route === null || !projection.routeChoice.routes.some((option) => option.route === channel.route)) return '尚未选择模型。这个渠道在当前版本里还不能使用，请先在上面的「1. 渠道」里选择其他渠道。';
+  if (channel.route === null || !projection.routeChoice.routes.some((option) => option.route === channel.route)) return '尚未选择模型。这个渠道暂时还不能使用，请先在上面的「1. 渠道」里选择其他渠道。';
   if (!credentialReady(projection, channel.route)) return '尚未选择模型。请先在上面的「2. 填写密钥并获取模型」里保存这个渠道的密钥，再选择模型并点击「使用这个模型」。';
   if (channel.models.filter(bothEligible).length === 0) return '尚未选择模型。模型列表还没有取到，请先点击上面的「刷新模型列表」，取到后选择模型并点击「使用这个模型」。';
   return '尚未选择模型，请在上方选择模型并点击「使用这个模型」。';
