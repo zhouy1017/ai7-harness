@@ -1,6 +1,6 @@
 import { pointerClick, pointerElementDescription, pointerFailureDetail } from './dispatch-chooser.mjs';
 import { SIDEBAR, manuscriptRailJump, sidebarNavigate } from './controller.mjs';
-import { loadEveryMark } from './marks-paging.mjs';
+import { loadEveryMark, assertCardActionReachable } from './marks-paging.mjs';
 
 // Docking is possible only when an icon sidebar leaves the full reading measure, padding and edge rail. The rail counts at its
 // design width (4.75rem), never at the page's own measured width, so a rail moved on top of the pane cannot excuse an overlay.
@@ -775,16 +775,7 @@ async function triageKey(renderer, key, code, windowsVirtualKeyCode, modifiers =
 const TRIAGE_FIRST = `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]').dataset.blockId`;
 
 // The seeded card is selected, holds focus and is read: its single keys act now.
-const triageReady = (index) => `(() => {
-  const node=document.querySelector('[data-comment-card="'+__triage.ids[${index}]+'"]');
-  const button=node?.querySelector('[data-mark-action="accept-and-apply"]'), scroll=document.querySelector('.manuscript-comments-scroll');
-  if (!button || !scroll) return false;
-  const r=button.getBoundingClientRect(), p=scroll.getBoundingClientRect();
-  const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
-  return node?.dataset.selected==='true' && document.activeElement===node && node.dataset.revalidating==='false' && node.querySelector('[data-mark-card] [data-mark-action="reject"]')?.disabled===false
-    && r.width>0 && r.height>0 && r.left>=Math.max(0,p.left) && r.right<=Math.min(innerWidth,p.left+scroll.clientWidth)
-    && r.top>=Math.max(0,p.top) && r.bottom<=Math.min(innerHeight,p.top+scroll.clientHeight) && (hit===button || button.contains(hit));
-})()`;
+const triageReady = (index) => `(() => { const node=document.querySelector('[data-comment-card="'+__triage.ids[${index}]+'"]'); return node?.dataset.selected==='true' && document.activeElement===node && node.dataset.revalidating==='false' && node.querySelector('[data-mark-card] [data-mark-action="reject"]')?.disabled===false; })()`;
 
 const triageRecord = (renderer, index, expected) => renderer.evaluate(`(async () => {
   for (let turn = 0; turn < 120; turn++) {
@@ -875,21 +866,27 @@ async function commentsTriage(renderer, check, waitFor, form, keyword) {
   // 下一条待处理 on the page, then across it; the card there stays selected once read.
   await nextClick('comments-triage-next-click');
   await waitFor(renderer, `${triageReady(0)} && ${TRIAGE_FIRST}===__triage.start`, 'comments-triage-next-on-page', 60_000);
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[0]') + '"]', 'comments-triage-next-on-page');
   await nextClick('comments-triage-cross-click');
   await waitFor(renderer, `${TRIAGE_FIRST}!==__triage.start && ${triageReady(1)}`, 'comments-triage-crossed-selected', 60_000);
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[1]') + '"]', 'comments-triage-crossed-selected');
   check(await renderer.evaluate(`(async () => { await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); await new Promise(done=>setTimeout(done,400)); return ${triageReady(1)}; })()`), 'comments-triage-crossed-stays-selected');
   // 上一条待处理 (Alt+↑) goes back across the page to the first seed.
   await triageKey(renderer, 'ArrowUp', 'ArrowUp', 38, 1);
   await waitFor(renderer, `${TRIAGE_FIRST}===__triage.start && ${triageReady(0)}`, 'comments-triage-previous-crossed', 60_000);
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[0]') + '"]', 'comments-triage-previous-crossed');
   // Keyboard only: R on the page's last match walks on across the page; A and R then decide the next two, each next card focused.
   await triageKey(renderer, 'r', 'KeyR', 82);
   await waitFor(renderer, `${TRIAGE_FIRST}!==__triage.start && ${triageReady(1)}`, 'comments-triage-key-reject-crossed', 60_000);
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[1]') + '"]', 'comments-triage-key-reject-crossed');
   check(await triageRecord(renderer, 0, 'rejected'), 'comments-triage-key-reject-recorded');
   await triageKey(renderer, 'a', 'KeyA', 65);
   await waitFor(renderer, triageReady(2), 'comments-triage-key-accept-next', 60_000);
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[2]') + '"]', 'comments-triage-key-accept-next');
   check(await triageRecord(renderer, 1, 'applied'), 'comments-triage-key-accept-applied');
   await triageKey(renderer, 'r', 'KeyR', 82);
   await waitFor(renderer, triageReady(3), 'comments-triage-key-reject-next', 60_000);
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[3]') + '"]', 'comments-triage-key-reject-next');
   check(await triageRecord(renderer, 2, 'rejected'), 'comments-triage-key-second-reject-recorded');
   // 接受 on the last seed's compact card, by pointer: hovered, its controls stand beside the preview, never over it.
   check(await renderer.evaluate(`(() => { document.querySelector('.editor-window [data-mark-id="'+__triage.ids[4]+'"]').scrollIntoView({block:'center',behavior:'instant'}); return true; })()`), 'comments-triage-quick-reveal');

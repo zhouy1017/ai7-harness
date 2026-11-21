@@ -415,7 +415,7 @@ describe('comments command parity and refresh continuity', () => {
     expect(node.getBoundingClientRect().top).toBeGreaterThanOrEqual(100);
     expect(node.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
   });
-  it('reveals the bottom actions of a navigated card taller than the pane (#1604)', async () => {
+  it('keeps the head of a navigated tall card readable and its bottom scrollable (#1604)', async () => {
     const ui = mount(suggestion); await paint();
     const pane = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
     Object.assign(pane, { clientHeight: 300, scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 400, height: 300 }) });
@@ -423,8 +423,30 @@ describe('comments command parity and refresh continuity', () => {
     node.getBoundingClientRect = () => { const top = 100 + (Number.parseFloat(node.style.top) || 0) - pane.scrollTop; return { top, bottom: top + 400, height: 400 } as DOMRect; };
     ui.setCaret(-1); ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click(); await paint();
     expect(node.dataset['selected']).toBe('true');
+    expect(node.getBoundingClientRect().top).toBe(100);
+    const canvas = ui.pane.querySelector<HTMLElement>('.manuscript-comments-canvas')!;
+    expect(Number.parseFloat(canvas.style.height)).toBeGreaterThanOrEqual(Number.parseFloat(node.style.top) + 400);
+    pane.scrollTop += 100;
+    expect(node.getBoundingClientRect().bottom).toBe(400);
+  });
+  it('fits a card whose rendered height grows after the stack measured it (#1604)', async () => {
+    const ui = mount(suggestion); await paint();
+    const pane = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
+    Object.assign(pane, { clientHeight: 300, scrollTop: 0, getBoundingClientRect: () => ({ top: 100, bottom: 400, height: 300 }) });
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    let reads = 0;
+    node.getBoundingClientRect = () => {
+      const height = ++reads === 1 ? 100 : 250;
+      const top = 250 - pane.scrollTop;
+      return { top, bottom: top + height, height } as DOMRect;
+    };
+    ui.setCaret(-1); ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click();
+    for (let turn = 0; turn < 24; turn++) await Promise.resolve();
+    frames.splice(0).forEach(fn => fn());
+    expect(node.dataset['selected']).toBe('true');
+    expect(reads).toBeGreaterThan(1);
+    expect(node.getBoundingClientRect().top).toBeGreaterThanOrEqual(100);
     expect(node.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
-    expect(pane.scrollTop).toBeGreaterThan(0);
   });
   it('keeps the chosen pane card through hover, then clears it when filtered out (#1451)', async () => {
     const ui = mount(card, [{ ...card, markId: 'other' }]); await paint();

@@ -22,11 +22,43 @@ const PLACE = `(() => {
   const first=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((node)=>node.getBoundingClientRect().bottom>top+1);
   return {scrollTop:Math.round(scroll.scrollTop), first:first?.dataset.blockId??null, firstTop:first?Math.round(first.getBoundingClientRect().top-top):null,
     selected:document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard??null, active:document.activeElement?.closest('[data-comment-card]')?.dataset.commentCard??null,
-    // The selected card and focused element intersect the window; a tall card scrolls within the pane.
+    // The head of the selected card and of the focused element stand inside the window.
     boxes:(() => { const box=(node)=>{const r=node?.getBoundingClientRect(); return r?[Math.round(r.left),Math.round(r.top),Math.round(r.right),Math.round(r.bottom)]:null;}; return {selected:box(document.querySelector('[data-comment-card][data-selected="true"]')),active:box(document.activeElement),activeTag:document.activeElement?.tagName+'.'+(document.activeElement?.className??'')+'['+(document.activeElement?.dataset?.markAction??'')+']',pane:box(document.querySelector('.manuscript-comments-scroll')),window:[innerWidth,innerHeight]}; })(),
-    selectedInWindow:(() => { const r=document.querySelector('[data-comment-card][data-selected="true"]')?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.bottom>0 && r.top<innerHeight; })(),
-    activeInWindow:(() => { const r=document.activeElement?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.bottom>0 && r.top<innerHeight; })()};
+    selectedInWindow:(() => { const r=document.querySelector('[data-comment-card][data-selected="true"]')?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.top<=innerHeight-40; })(),
+    activeInWindow:(() => { const r=document.activeElement?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.top<=innerHeight-40; })()};
 })()`;
+
+/** Check final engine geometry; only a taller card needs reader wheel input before its action. */
+export async function assertCardActionReachable(renderer, check, waitFor, selector, name) {
+  const facts = `(() => {
+    const card=document.querySelector(${JSON.stringify(selector)}), pane=document.querySelector('.manuscript-comments-scroll');
+    const button=card?.querySelector('[data-mark-action="accept-and-apply"]');
+    if (!card || !pane || !button) return null;
+    const c=card.getBoundingClientRect(), p=pane.getBoundingClientRect(), b=button.getBoundingClientRect();
+    const view={left:Math.max(0,p.left),top:Math.max(0,p.top),right:Math.min(innerWidth,p.left+pane.clientWidth),bottom:Math.min(innerHeight,p.top+pane.clientHeight)};
+    const inside=r=>r.width>0 && r.height>0 && r.left>=view.left && r.right<=view.right && r.top>=view.top && r.bottom<=view.bottom;
+    const hit=document.elementFromPoint(b.left+b.width/2,b.top+b.height/2);
+    const line=parseFloat(getComputedStyle(card).lineHeight)||parseFloat(getComputedStyle(card).fontSize)*1.2;
+    return {branch:c.height<=view.bottom-view.top?'fits':'tall',cardHeight:c.height,paneHeight:view.bottom-view.top,whole:inside(c),head:c.top>=view.top && c.top+line<=view.bottom,
+      action:inside(b) && (hit===button || button.contains(hit)),card:[c.left,c.top,c.right,c.bottom],button:[b.left,b.top,b.right,b.bottom],pane:view,window:[innerWidth,innerHeight],scrollTop:pane.scrollTop,
+      x:(view.left+view.right)/2,y:(view.top+view.bottom)/2,delta:Math.max(40,Math.min((view.bottom-view.top)*0.7,b.bottom-view.bottom+8))};
+  })()`;
+  await waitFor(renderer, `new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`, name+'-rest');
+  const before=await renderer.evaluate(facts);
+  check(before!==null && (before.branch==='fits'?before.whole && before.action:before.head), name+'-arrival', before);
+  if (before.branch==='tall') {
+    for (let turn=0;turn<12;turn++) {
+      const now=await renderer.evaluate(facts);
+      if (now.action) break;
+      await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:now.x,y:now.y,deltaX:0,deltaY:now.delta});
+      await waitFor(renderer, `(${facts})?.scrollTop!==${now.scrollTop}`, name+'-wheel');
+      await waitFor(renderer, `new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`, name+'-wheel-rest');
+    }
+  }
+  const after=await renderer.evaluate(facts);
+  console.log('COMMENTS_ACTION/'+name+'/'+JSON.stringify({arrival:before,after}));
+  check(after?.action===true,name+'-action',{...after,branch:before.branch,arrival:before});
+}
 
 /** The row's words and where it stands: inside the pane, which is inside the window, with its control under the pointer. */
 const SENTENCE = `(() => {
@@ -171,10 +203,8 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     const inside=(a,b)=>a!==null && b!==null && a.width>0 && a.height>0 && a.left>=b.left-1 && a.right<=b.right+1 && a.top>=b.top-1 && a.bottom<=b.bottom+1;
     const rect=(element)=>element?.getBoundingClientRect()??null, view={left:0,top:0,right:innerWidth,bottom:innerHeight};
     const cardBox=rect(node), paneBox=rect(scroll);
-    const action=node?.querySelector('[data-mark-action="accept-and-apply"]'), button=rect(action);
-    const paneView=paneBox && {left:paneBox.left,top:paneBox.top,right:paneBox.left+scroll.clientWidth,bottom:paneBox.top+scroll.clientHeight};
-    const hit=button && document.elementFromPoint(button.left+button.width/2,button.top+button.height/2);
-    return {card:inside(button,paneView) && button.top>=paneView.top && button.bottom<=paneView.bottom && button.left>=paneView.left && button.right<=paneView.right && inside(button,view) && button.top>=0 && button.bottom<=innerHeight && button.left>=0 && button.right<=innerWidth && (hit===action || action?.contains(hit)), words:inside(rect(words),rect(editor)) && inside(rect(words),view), row:${rowNow}, cardBox:cardBox&&[cardBox.left,cardBox.top,cardBox.right,cardBox.bottom], button:button&&[button.left,button.top,button.right,button.bottom], pane:paneView, viewport:[innerWidth,innerHeight]};
+    const visibleHeight=Math.min(innerHeight,paneBox.top+scroll.clientHeight)-Math.max(0,paneBox.top);
+    return {card:cardBox.height<=visibleHeight?inside(cardBox,paneBox) && inside(cardBox,view):cardBox.top>=Math.max(0,paneBox.top) && cardBox.top+24<=Math.min(innerHeight,paneBox.bottom), words:inside(rect(words),rect(editor)) && inside(rect(words),view), row:${rowNow}, cardBox:[cardBox.left,cardBox.top,cardBox.right,cardBox.bottom], cardHeight:cardBox.height,paneHeight:visibleHeight,branch:cardBox.height<=visibleHeight?'fits':'tall',viewport:[innerWidth,innerHeight]};
   })()`);
   check(arrived.card && arrived.words && arrived.row === rowWant, 'marks-paging-arrived-beyond-first-page', { ...arrived, rowWant });
   // It can be accepted: 接受并应用 on its card, by a real click (a pointer decision stays on the page); the service records the Apply.
@@ -183,6 +213,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     return read.marks.slice(at+1).find((mark)=>mark.kind!=='personal-highlight' && mark.status==='open' && mark.categoryKey===${JSON.stringify(expected.category)})?.markId??null; })()`);
   const wantSelected = around ?? expected.markId;
   const placeBefore = await renderer.evaluate(PLACE);
+  await assertCardActionReachable(renderer, check, waitFor, card, 'marks-paging-accept');
   await pointerClick(renderer, waitFor, `${card} [data-mark-action="accept-and-apply"]`, 'marks-paging-accept');
   check(await renderer.evaluate(`(async () => {
     for (let turn=0; turn<120; turn++) {
