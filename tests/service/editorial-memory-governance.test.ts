@@ -679,7 +679,8 @@ it('re-enables a stopped memory entry by appending one version per action id, th
   expect(reopened.reviewPreferenceLifecycle({ itemId: a.itemId, expectedRevisionId: last, actionId: deleteId }, 'retire').items).toEqual(deleted.items);
   // Absent from every list, count, source candidate and the published preference; the material's standing is unchanged.
   expect(deleted.items.some((entry) => entry.current.itemId === a.itemId)).toBe(false);
-  expect(reopened.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0, detailItemId: a.itemId }).items).toEqual([]);
+  // A list skips it; a read naming it is refused as deleted.
+  refused(() => reopened.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0, detailItemId: a.itemId }), 'REVIEW_PREFERENCE_DELETED');
   const global = reopened.inspectGlobalAgent();
   expect([...global.items, ...global.sourceCandidates!].some((entry) => entry.itemId === a.itemId)).toBe(false);
   expect(reopened.inspectHouseReviewPreference().current!.lines.some((line) => line.owner?.itemId === a.itemId)).toBe(false);
@@ -720,7 +721,7 @@ it('restores a candidate, a frozen entry and a corrected one to their own state,
   expect(memoryRow(left.itemId)).toMatchObject({ group: 'disabled', reenable: { standing: 'merged', sentence: '已并入另一条，不能单独重新启用。' } });
   refused(() => reenable(left.itemId, memoryRow(left.itemId)!.pin), 'REVIEW_PREFERENCE_MERGED');
   remove(left.itemId, memoryRow(left.itemId)!.pin);
-  expect(memoryRow(left.itemId)).toBeUndefined();
+  refused(() => memoryRow(left.itemId), 'REVIEW_PREFERENCE_DELETED');
   // Corrected through the AI 助手 while stopped: a candidate, not a disabled row.
   const corrected = accept(make(create([signals[3]!.signalId], '合成停用后更正。')));
   subject.deactivateEditorialMemory({ itemId: corrected.itemId, expectedVersionId: corrected.versionId, actionId: randomUUID() });
@@ -755,7 +756,7 @@ it('re-enables a legacy /1 entry by appending activation active and deletes it w
   expect(memoryRow(legacy.current.itemId)).toMatchObject({ group: 'enabled' });
   subject.deactivateEditorialMemory({ itemId: legacy.current.itemId, expectedVersionId: memoryRow(legacy.current.itemId)!.pin });
   remove(legacy.current.itemId, memoryRow(legacy.current.itemId)!.pin);
-  expect(memoryRow(legacy.current.itemId)).toBeUndefined();
+  expect(subject.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).items.some((entry) => entry.current.itemId === legacy.current.itemId)).toBe(false);
   refused(() => subject.deactivateEditorialMemory({ itemId: legacy.current.itemId, expectedVersionId: stopped.pin }), 'REVIEW_PREFERENCE_DELETED');
   validateOnOpen();
 });
@@ -823,7 +824,42 @@ it('brings a stopped derived line back derived with today\'s words, an editor\'s
   refused(() => subject.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: derived.itemId, revisionId: back.revisionId }],
     scope: { kind: 'category', categoryId: 'typos-and-usage' }, categoryId: 'typos-and-usage', text: '', effect: 'guide' }), 'REVIEW_PREFERENCE_DELETED');
   refused(() => reenable(derived.itemId, back.row!.pin), 'REVIEW_PREFERENCE_DELETED');
+  // Still deleted after the group's material is stopped and the house rebuilt: the 删除 is read from its own record.
+  const source = subject.inspectLearningMaterial(book.bookId, explicit.source.materialKey);
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: source.materialKey, materialDigest: source.digest, expectedDecisions: source.decisions, choice: 'excluded', note: null });
+  subject.rebuildHouseReviewPreference();
+  refused(() => reenable(derived.itemId, back.row!.pin), 'REVIEW_PREFERENCE_DELETED');
+  refused(() => remove(derived.itemId, back.row!.pin), 'REVIEW_PREFERENCE_DELETED');
+  refused(() => subject.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: derived.itemId, revisionId: back.revisionId }],
+    scope: { kind: 'category', categoryId: 'typos-and-usage' }, categoryId: 'typos-and-usage', text: '', effect: 'guide' }), 'REVIEW_PREFERENCE_DELETED');
   validateOnOpen();
+});
+
+it('names one request by one action id across a memory entry and a preference line (#1655)', async () => {
+  const { subject, signals, make, create, accept, current } = await sourceDecisions();
+  const { reenable, remove, memoryRow, preferenceRow } = lifecycle(subject);
+  const stopMemory = () => { const memory = accept(make(create([signals[0]!.signalId], `合成记忆${randomUUID().slice(0, 4)}。`)));
+    subject.deactivateEditorialMemory({ itemId: memory.itemId, expectedVersionId: memory.versionId, actionId: randomUUID() }); return memory.itemId; };
+  const stopLine = (text: string) => { const line = subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'style-and-format',
+    text, effect: 'guide' }).items.find((item) => item.text === text)!; subject.recordLearningSupervision({ operation: 'deactivate',
+    targets: [{ itemId: line.itemId, revisionId: preferenceRow(line.itemId)!.revisionId }], scope: { kind: 'house' }, categoryId: 'style-and-format', text: '', effect: 'guide' }); return line.itemId; };
+  // A memory entry first, then a preference line with the same action id.
+  const memoryFirst = stopMemory(); const lineSecond = stopLine('合成规则一。');
+  const shared = randomUUID();
+  reenable(memoryFirst, memoryRow(memoryFirst)!.pin, shared);
+  const counts = rowCounts();
+  refused(() => reenable(lineSecond, preferenceRow(lineSecond)!.row!.pin, shared), 'REVIEW_PREFERENCE_CHANGED');
+  // A preference line first, then a memory entry with the same action id.
+  const lineFirst = stopLine('合成规则二。'); const memorySecond = stopMemory();
+  const other = randomUUID();
+  remove(lineFirst, preferenceRow(lineFirst)!.row!.pin, other);
+  const after = rowCounts();
+  refused(() => reenable(memorySecond, memoryRow(memorySecond)!.pin, other), 'REVIEW_PREFERENCE_CHANGED');
+  expect(rowCounts()).toEqual(after);
+  expect(after.learning_supervision_directives).toBeGreaterThan(counts.learning_supervision_directives!);
+  // Within one owner, the same action id sent as another request is refused as changed, not as an invalid record.
+  refused(() => remove(memoryFirst, memoryRow(memoryFirst)!.pin, shared), 'REVIEW_PREFERENCE_CHANGED');
+  expect(current(memoryFirst).action).toBe('reactivate');
 });
 
 it('refuses a merged or vanished preference line and keeps a corrected one\'s words (#1655)', async () => {
@@ -863,7 +899,7 @@ it('refuses a merged or vanished preference line and keeps a corrected one\'s wo
   validateOnOpen();
 });
 
-it('keeps the AI 助手 pins of a store without the new records byte for byte (#1655)', async () => {
+it('lists the own pin of each preference line beside its unchanged listed revision, and source candidates carry no row (#1655)', async () => {
   const { subject, signals, make, create, accept } = await sourceDecisions();
   subject.rebuildHouseReviewPreference();
   accept(make(create([signals[0]!.signalId], '合成助手可读的记忆。')));

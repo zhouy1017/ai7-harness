@@ -69,8 +69,8 @@ export class EditorialMemoryFacade {
     try { directive = new SupervisionDirectives(this.db).record(scope, input, items); } catch (error) {
       // A 删除-ed entry is listed nowhere, so its pin reads as stale: it is refused as deleted instead (Issue #1655).
       if (!(error instanceof LearningEligibilityError && error.code === 'LEARNING_SUPERVISION_STALE')) throw error;
-      const replay = memoryTargets.length > 0 ? null : this.preferenceReplay(scope).entries;
-      if (input.targets.some((pin) => replay === null ? this.learning().retired(pin.itemId) : replay.get(pin.itemId)?.retired === true)) refuseReviewPreference('DELETED');
+      const retired = memoryTargets.length > 0 ? null : this.preferenceReplay(scope).retired;
+      if (input.targets.some((pin) => retired === null ? this.learning().retired(pin.itemId) : retired.has(pin.itemId))) refuseReviewPreference('DELETED');
       throw error;
     }
     if (memoryTargets.length > 0) this.learning().govern(directive, memoryTargets);
@@ -79,12 +79,17 @@ export class EditorialMemoryFacade {
     this.#preferences().refreshGovernance(scope, this.peopleNames(), addsText && (memoryTargets.length > 0 ? 'memory' : true));
   }
 
-  /** The preference lines exactly as `inspectGlobalAgent` replays them, retired ones kept and marked. */
+  /**
+   * The preference lines exactly as `inspectGlobalAgent` replays them, and every line a 删除 names: read from the directives
+   * themselves, so a deleted group stays deleted after its derived line vanished from today's base.
+   */
   preferenceReplay(scope: TrustedOperationalScope) {
     const preference = this.history(scope).at(-1) ?? null;
     const directives = new SupervisionDirectives(this.db);
+    const legacy = directives.legacyDirectives(directives.history(scope));
     const base = preference === null ? null : { ...preference, lines: preference.governance?.baseLines ?? preference.lines };
-    return { preference, entries: governedPreferences(preferenceItems(base), directives.legacyDirectives(directives.history(scope))) };
+    return { preference, entries: governedPreferences(preferenceItems(base), legacy),
+      retired: new Set(legacy.filter((directive) => directive.operation === 'retire').flatMap((directive) => directive.targets.map((pin) => pin.itemId))) };
   }
 
   /**
@@ -93,21 +98,24 @@ export class EditorialMemoryFacade {
    */
   lifecycle(scope: TrustedOperationalScope, input: ReviewPreferenceLifecycleInput, action: 'reactivate' | 'retire'): void {
     const directives = new SupervisionDirectives(this.db);
-    if (directives.memoryTargets([{ itemId: input.itemId, revisionId: input.expectedRevisionId }]).length > 0) {
+    const memory = directives.memoryTargets([{ itemId: input.itemId, revisionId: input.expectedRevisionId }]).length > 0;
+    const prior = directives.history(scope).find((directive) => directive.actionId === input.actionId);
+    // One action id names one request across both owners: already used by the other one, it names something that changed.
+    if (memory ? prior !== undefined : this.learning().actionUsed(input.actionId)) refuseReviewPreference('CHANGED');
+    if (memory) {
       const state = this.learning().lifecycle(input, action, scope);
       if (state !== 'replayed') this.#preferences().refreshGovernance(scope, this.peopleNames(), state === 'active' ? 'memory' : false);
       return;
     }
-    const prior = directives.history(scope).find((directive) => directive.actionId === input.actionId);
     if (prior !== undefined) {
       // The same action id answers the same request again; reused for another request, it names something that changed.
       if (prior.operation !== action || prior.targets[0]?.itemId !== input.itemId || prior.targets[0]?.revisionId !== input.expectedRevisionId) refuseReviewPreference('CHANGED');
       return;
     }
-    const { preference, entries } = this.preferenceReplay(scope);
+    const { preference, entries, retired } = this.preferenceReplay(scope);
+    if (retired.has(input.itemId)) refuseReviewPreference('DELETED');
     const entry = entries.get(input.itemId);
     if (entry === undefined) refuseReviewPreference('CHANGED');
-    if (entry.retired) refuseReviewPreference('DELETED');
     if (entry.item.revisionId !== input.expectedRevisionId) refuseReviewPreference(action === 'reactivate' && entry.last?.operation === 'reactivate' ? 'ALREADY_REENABLED' : 'CHANGED');
     if (entry.item.state === 'active') refuseReviewPreference('CHANGED');
     if (action === 'reactivate' && entry.merged) refuseReviewPreference('MERGED');

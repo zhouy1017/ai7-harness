@@ -1562,6 +1562,9 @@ export class EditorialLearningLedger {
 
   accept(input: AcceptEditorialMemoryInput, scope: TrustedOperationalScope): void { this.#transition(input, 'accept', scope); }
 
+  /** Whether any memory version carries this action id (Issue #1655: one action id names one request across both owners). */
+  actionUsed(actionId: string): boolean { return this.#read(() => this.#action(actionId).length > 0); }
+
   /** Whether an entry is 删除-ed (Issue #1655): any later request naming it is refused as deleted. */
   retired(itemId: string): boolean {
     const current = this.version(itemId);
@@ -1581,8 +1584,9 @@ export class EditorialLearningLedger {
       if (current.schema !== 'ai7.global-editorial-memory/2') return this.#legacyLifecycle(history as LegacyEditorialMemoryVersion[], input, action);
       const replay = this.#action(input.actionId);
       if (replay.length > 0) {
-        requireLearning(replay.length === 1 && replay[0]!.itemId === input.itemId && replay[0]!.action === action &&
-          replay[0]!.parentVersions[0]?.versionId === input.expectedRevisionId && replay[0]!.operationalScope === scope);
+        // The same request answers again; an action id another request already used names something that changed.
+        if (!(replay.length === 1 && replay[0]!.itemId === input.itemId && replay[0]!.action === action &&
+          replay[0]!.parentVersions[0]?.versionId === input.expectedRevisionId && replay[0]!.operationalScope === scope)) refuseReviewPreference('CHANGED');
         return 'replayed';
       }
       requireLearning(current.operationalScope === scope);
@@ -1884,7 +1888,8 @@ export class EditorialLearningLedger {
       const history = this.#versions(String(row.item_id)); const current = history.at(-1)!;
       const usable = current.schema === 'ai7.global-editorial-memory/2' ? this.usable(current) : current.activation === 'active' && this.#legacyUsable(current, controls);
       const facts = this.#row(history, usable, controls);
-      if (facts === null) { read += 1; continue; }
+      // A list skips a deleted entry; a read naming one is refused (Issue #1655).
+      if (facts === null) { if (input.detailItemId !== undefined) refuseReviewPreference('DELETED'); read += 1; continue; }
       const historyEnd = Math.max(0, history.length - (input.historyOffset ?? 0));
       const historyStart = Math.max(0, historyEnd - PAGE_SIZE);
       const sources = current.schema === 'ai7.global-editorial-memory/2' ? this.effectiveSources(current) : [];
