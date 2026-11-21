@@ -83,7 +83,6 @@ import {
   type BaselineAnalysisResultSetRevisionProjection,
   type BaselineAnalysisRevisionUpdateProjection,
   type BaselineAnalysisRunState,
-  type ResumableStopReason,
   type BaselineAnalysisSelectedRange,
   type BaselineAnalysisUnitProjection,
   type BaselineAnalysisUpdateControlsProjection,
@@ -107,11 +106,6 @@ import {
   MODEL_SERVICE_SETUP_REQUIRED_REASON,
 } from '../../shared/protocol.js';
 
-function resumableStopReasonOf(value: unknown): ResumableStopReason | undefined {
-  if (!isRecord(value)) return undefined;
-  return value.stopReason === 'proxy-unreachable' || value.stopReason === 'model-service-unreachable' || value.stopReason === 'outcome-unknown' || value.stopReason === 'shutdown'
-    ? value.stopReason : undefined;
-}
 import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
@@ -309,6 +303,7 @@ import {
   runBudgetCeilingStateOf,
   runIsActive,
   runStopOf,
+  runStopReasonOf,
   sameRange,
   transact,
   unconfirmedOutcomeKey,
@@ -1248,8 +1243,8 @@ export class BaselineAnalysisStore {
               const detail = parseCanonicalJson(asString(row.last_state_json)) as { resumeFailure?: string };
               return typeof detail.resumeFailure === 'string' ? { resumeFailure: detail.resumeFailure } : {};
             })()),
-            ...(state === 'resumable' && row.last_state_json !== null
-              ? (() => { const stopReason = resumableStopReasonOf(parseCanonicalJson(asString(row.last_state_json))); return stopReason === undefined ? {} : { stopReason }; })() : {}),
+            ...(row.last_state_json !== null
+              ? (() => { const stopReason = runStopReasonOf(this.#db, runRecordId, state, parseCanonicalJson(asString(row.last_state_json))); return stopReason === undefined ? {} : { stopReason }; })() : {}),
             // 需要重新确认计划 (Issue #536; OFF-008): a waiting Run blocked because its plan moved.
             planMoved: state === 'blocked-before-dispatch' && this.blockedByOf(runRecordId) === 'plan-moved',
           },
@@ -2246,7 +2241,7 @@ export class BaselineAnalysisStore {
     // exactly as a Result Set Revision keeps its own policy pin. Only a record written before those
     // reasons were durable falls back to the bound launch.
     const currentRecord = parseCanonicalJson(asString(states[states.length - 1]!.canonical_json)) as Record<string, unknown>;
-    const stopReason = current.state === 'resumable' ? resumableStopReasonOf(currentRecord) : undefined;
+    const stopReason = runStopReasonOf(this.#db, runRecordId, current.state, currentRecord);
     const recordedReasons = Array.isArray(currentRecord.reasons) && currentRecord.reasons.every((reason) => typeof reason === 'string')
       ? currentRecord.reasons as ReadonlyArray<string>
       : null;

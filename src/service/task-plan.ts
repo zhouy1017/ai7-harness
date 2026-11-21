@@ -806,6 +806,11 @@ const BASELINE_GOAL_SENTENCES: Readonly<Record<string, string>> = {
 };
 
 function baselineState(projection: BaselineAnalysisProjection, stopped?: BaselineStoppedRunFacts): TaskPlanProjection['state'] {
+  const state = baselineStateOf(projection, stopped);
+  return projection.run?.stopReason === undefined ? state : { ...state, stopReason: projection.run.stopReason };
+}
+
+function baselineStateOf(projection: BaselineAnalysisProjection, stopped?: BaselineStoppedRunFacts): TaskPlanProjection['state'] {
   switch (projection.state) {
     case 'prepared':
       return projection.planRevision !== null || (projection.update !== null && !projection.update.predecessorCurrent)

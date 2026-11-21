@@ -351,7 +351,7 @@ export interface TaskPlanProjection {
   kind: TaskPlanKind;
   /** The Task Intent or the Review Run this plan belongs to. */
   ref: string;
-  state: { key: TaskPlanStateKey; label: string };
+  state: { key: TaskPlanStateKey; label: string; stopReason?: import('../protocol.js').ResumableStopReason };
   runOutcome?: { label: string; reason: string | null; classification: 'failed' | 'completed-with-gaps' };
   /** The plan version shown; `null` for a kind that keeps no plan versions. */
   planVersion: number | null;
