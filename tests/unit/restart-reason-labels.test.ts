@@ -29,7 +29,7 @@ it.each(['yielded', 'pausing-to-yield', 'queued', 'editor-paused', 'no-route', '
     const item: TaskOverviewItemProjection = {
       itemId: attention.itemId, bookId: 'book', bookTitle: '合成书名', taskKind: 'baseline-analysis', label: '分析',
       at: attention.at, detail: null, attention, selection: null, plan: null, result: null,
-      state: queued || found === 'running' ? 'waiting' : 'paused', progress: null, queuePosition: null, eta: null, usage: null,
+      state: queued ? 'waiting' : 'paused', progress: null, queuePosition: null, eta: null, usage: null,
       nextAction: 'view-run', runRecordId: 'run', target: attention.target,
     };
     const line = taskOverviewCard(item, () => undefined).querySelector('.task-overview-card-line')?.textContent;
@@ -46,4 +46,20 @@ it.each(['yielded', 'pausing-to-yield', 'queued', 'editor-paused', 'no-route', '
     expect(globalAttentionReason({ ...attention, state: 'analysis-blocked', facts: { progress: null, categories: [], revisionOrdinal: null } }))
       .toBe('模型服务当前不可用，任务尚未开始。');
   } finally { restore(); }
+});
+
+it('keeps the restart-paused drawer statement and paused status beside continue (#1656 B1)', () => {
+  const plan = taskPlanFixture({ state: { key: 'paused', label: '已暂停', stopReason: 'shutdown' }, runControl: {
+    runRecordId: 'run', stopReason: 'shutdown', cancelling: false, pausing: false,
+    cancel: { reason: null, impact: [] }, pause: { reason: null }, resume: { reason: null }, redo: { reason: null },
+    activity: null, executingSince: null, update: null, continuation: null, accountLimit: null, outcomeUnknown: null,
+  } });
+  const view = taskBarView({ ...plan, start: { ...plan.start, readiness: 'started' } });
+  expect(view.statement).toBe(PAUSED);
+  expect(view.status).toBe('已暂停');
+});
+
+it('explains the restart-queued baseline in the drawer without run controls (#1656 B1)', () => {
+  const plan = taskPlanFixture({ state: { key: 'blocked', label: '没有开始', stopReason: 'shutdown' } });
+  expect(taskBarView({ ...plan, start: { ...plan.start, readiness: 'started' } }).statement).toBe(QUEUED);
 });

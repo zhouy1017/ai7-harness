@@ -106,7 +106,6 @@ import {
   MODEL_SERVICE_SETUP_REQUIRED_REASON,
 } from '../../shared/protocol.js';
 
-import { runStopReasonOf } from './run-state.js';
 import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
@@ -304,6 +303,7 @@ import {
   runBudgetCeilingStateOf,
   runIsActive,
   runStopOf,
+  runStopReasonOf,
   sameRange,
   transact,
   unconfirmedOutcomeKey,
