@@ -93,3 +93,28 @@ it('returns the Word choice and restores it from the staged read after restart (
   } finally { direct.close(); await directRoots.dispose(); }
   await reopen();
 }, 180_000);
+
+it.each([false, true])('recovers a stale reviewed target through continueImportDraft (source=%s) (#1638 re-check)', async (sourceOnly) => {
+  const path = join(roots.inputRoot, 'stale.docx');
+  await composeManuscriptDocx(path, { source: ADMITTED_BASELINE_DOCX, startBlock: 21, blocks: 6, title: '旧目标' });
+  const staged = await store.stageSelectedManuscript(randomUUID(), path);
+  const creation = store.prepareBookCreation('来源目标', null);
+  const bookId = store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+  const sourceTarget = { kind: 'existing-book' as const, bookId, relationship: 'source-only' as const, reuseSourceVersionId: null };
+  const review = sourceOnly ? store.prepareSourceImportReview(staged.draftId, staged.draftVersion, sourceTarget)
+    : store.prepareNewBookReview(staged.draftId, staged.draftVersion, target('旧目标'), false);
+  const otherPath = join(roots.inputRoot, 'other.docx');
+  await composeManuscriptDocx(otherPath, { source: ADMITTED_BASELINE_DOCX, startBlock: sourceOnly ? 31 : 21, blocks: 6, title: '另一次导入' });
+  const other = await store.stageSelectedManuscript(randomUUID(), sourceOnly ? otherPath : path);
+  if (sourceOnly) {
+    const next = store.prepareSourceImportReview(other.draftId, other.draftVersion, sourceTarget);
+    await store.commitSourceImport({ draftId: other.draftId, expectedDraftVersion: next.draftVersion, reviewDigest: next.reviewDigest, commitId: randomUUID() });
+  } else {
+    await finish(store.prepareNewBookReview(other.draftId, other.draftVersion, target('另一次导入'), false));
+  }
+  expect(() => store.returnImportToEditing(staged.draftId, review.draftVersion)).toThrow(expect.objectContaining({ code: 'REVIEW_CHANGED' }));
+  const continued = await store.continueImportDraft(staged.draftId, review.draftVersion);
+  expect(continued).toMatchObject({ state: 'target-review-required', reviewInvalidated: true, staged: { draftVersion: review.draftVersion + 1 } });
+  if (continued.state !== 'target-review-required') throw new Error('Expected fresh target choices');
+  expect(continued.staged.targetChoices.every((c) => c.selected === false)).toBe(true);
+});

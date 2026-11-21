@@ -733,3 +733,36 @@ it('records inline acceptance exactly like separate accept-then-submit in every 
     await other.dispose();
   }
 }, 180_000);
+
+it('refuses an unresolved submission with acceptance without writing anything (#1638 re-check)', async () => {
+  const first = await compose('open-base', [21, 22, 23].map((b) => paragraph(span(b))));
+  const second = join(roots.inputRoot, 'open-new.md');
+  await writeFile(second, (await Promise.all([21, 24, 23].map((b) => sourceSpanText(SOURCE, span(b))))).join('\n\n') + '\n\n*' + await sourceSpanText(SOURCE, span(25)) + '*\n');
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const book = await importBook(store, first);
+    const review = await prepareReimport(store, book, second);
+    expect(review.comparison.unresolvedMappings).toBeGreaterThan(0);
+    const before = tableState();
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const version = db.prepare('PRAGMA data_version').get();
+      await expect(store.createManuscriptReimportCommitWork({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
+        reviewDigest: review.reviewDigest, commitId: randomUUID(), acceptDegradation: true })).rejects.toMatchObject({ code: 'REIMPORT_MAPPING_UNRESOLVED' });
+      expect(db.prepare('PRAGMA data_version').get()).toEqual(version);
+      expect(tableState()).toEqual(before);
+    } finally { db.close(); }
+    store.markCleanShutdown();
+  } finally { store.close(); }
+});
+
+it.each([false, true])('keeps the ordinary missing-draft refusal with acceptance=%s (#1638 re-check)', async (acceptDegradation) => {
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const before = tableState();
+    await expect(store.createManuscriptReimportCommitWork({ draftId: randomUUID(), expectedDraftVersion: 1, reviewDigest: 'a'.repeat(64),
+      commitId: randomUUID(), acceptDegradation })).rejects.toMatchObject({ code: 'DRAFT_NOT_FOUND' });
+    expect(tableState()).toEqual(before);
+    store.markCleanShutdown();
+  } finally { store.close(); }
+});

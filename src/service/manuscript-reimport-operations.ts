@@ -917,10 +917,10 @@ function acceptedReimportSubmission(host: ManuscriptReimportOperationsHost,
   input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string; acceptDegradation?: boolean }, allowAccept = true) {
   const { acceptDegradation, ...commit } = input;
   if (acceptDegradation !== true) return commit;
-  const row = one(host.authority.prepare(`SELECT c.*, d.*, b.stable_identity FROM manuscript_reimport_comparisons c
+  const row = host.authority.prepare(`SELECT c.*, d.*, b.stable_identity FROM manuscript_reimport_comparisons c
     JOIN import_drafts d ON d.draft_id = c.draft_id JOIN books b ON b.book_id = d.reviewed_existing_book_id
-    WHERE c.draft_id = ?`).all(input.draftId) as SqlRow[],
-    'REIMPORT_COMPARISON_INVALID', '重新导入比较不存在。');
+    WHERE c.draft_id = ?`).get(input.draftId) as SqlRow | undefined;
+  if (row === undefined || asNumber(row.unresolved_mappings) > 0) return commit;
   if (asNumber(row.degradation_accepted) === 0) {
     if (!allowAccept || row.state === 'committed') return commit;
     const snapshot = host.loadDraftSnapshot(input.draftId);
