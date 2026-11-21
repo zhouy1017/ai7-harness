@@ -1110,15 +1110,16 @@ async function main() {
     // Issue #1430: the overlap relaunch answers its Save dialog with the one-step 导出审阅报告（DOCX）'s file instead.
     const bookReportExportPath = resolve(exportsRoot, BOOK_REPORT_EXPORT_FILE);
     let saveAnswerPath = reportExportPath;
-    // Issue #1641: 在浏览器中打开 writes each address it hands over to this file instead of opening the system browser.
-    browserRecordPath = resolve(runRoot, 'browser-record.txt');
+    // Issue #1641: under the bare --j04-browser-record switch, 在浏览器中打开 appends each address it hands over to this fixed
+    // file the main process places inside the data root, instead of opening the system browser.
+    browserRecordPath = resolve(dataRoot, 'e2e-browser-record', 'addresses.txt');
     const launchArgs = () => [
       '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
       '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
       resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       '--j04-picker-path', SAMPLE1_PATH, '--j04-model-adapter', modelAdapterIdentity, '--j04-connectivity-path', connectivityPath,
       '--j04-save-path', saveAnswerPath, '--j10-unit-hold-path', unitHoldPath,
-      '--j04-browser-record', browserRecordPath,
+      '--j04-browser-record', 'on',
     ];
     requireJourney(!launchArgs().some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
     launchForCleanup = async (forCleanup = false) => {

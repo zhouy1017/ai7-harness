@@ -159,6 +159,9 @@ export interface RetainedSourceForMaterial {
  * `research_evidence_materials` the 资料库 item 保存为来源材料 made of a retained source. Nothing here sends, publishes or
  * exports anything, and a row grants no Run Source Scope.
  */
+/** The one answer of 在浏览器中打开's read for a retained source this Book does not hold, whether or not it exists elsewhere. */
+export const RESEARCH_EVIDENCE_NOT_IN_BOOK = '这本书里没有这条外部来源留存。';
+
 export class ResearchEvidenceLedger {
   readonly #db: DatabaseSync;
 
@@ -345,20 +348,14 @@ export class ResearchEvidenceLedger {
     return row === undefined ? null : String(row.material_id);
   }
 
-  /** One retained source of this Book; refused when the evidence is not this Book's. */
-  #stored(bookId: string, evidenceId: string): StoredEvidence {
+  /** One retained source and its captured text, for 保存为来源材料; refused when the evidence is not this Book's. */
+  source(bookId: string, evidenceId: string): RetainedSourceForMaterial {
     requireEvidence(UUID_PATTERN.test(evidenceId), 'RESEARCH_EVIDENCE_INVALID', '外部来源标识无效。');
     requireEvidence(this.#present(), 'RESEARCH_EVIDENCE_NOT_FOUND', '没有这条外部来源留存。');
     const row = this.#db.prepare('SELECT rowid, * FROM research_evidence WHERE evidence_id = ?').get(evidenceId) as SqlRow | undefined;
     requireEvidence(row !== undefined, 'RESEARCH_EVIDENCE_NOT_FOUND', '没有这条外部来源留存。');
     const stored = this.#evidence(row);
     requireEvidence(stored.bookId === bookId, 'RESEARCH_EVIDENCE_NOT_FOUND', '这条外部来源留存不属于这本书。');
-    return stored;
-  }
-
-  /** One retained source and its captured text, for 保存为来源材料; refused when the evidence is not this Book's. */
-  source(bookId: string, evidenceId: string): RetainedSourceForMaterial {
-    const stored = this.#stored(bookId, evidenceId);
     return {
       evidenceId: stored.evidenceId, bookId: stored.bookId, url: stored.url, sourceTitle: stored.sourceTitle, capturedAt: stored.capturedAt,
       captureState: stored.captureState, contentSha256: stored.contentSha256, pageSha256: stored.pageSha256, snapshotDigest: stored.snapshotDigest,
@@ -367,9 +364,17 @@ export class ResearchEvidenceLedger {
     };
   }
 
-  /** 在浏览器中打开 (Issue #1641): the address one retained source of this Book was captured from; refused for another Book's. */
+  /**
+   * 在浏览器中打开 (Issue #1641): the address one retained source of this Book was captured from. The row is selected by the Book
+   * and the evidence together, so a source that does not exist and one of another Book answer the same sentence.
+   */
   recordedAddress(bookId: string, evidenceId: string): string {
-    return this.#stored(bookId, evidenceId).url;
+    requireEvidence(UUID_PATTERN.test(evidenceId), 'RESEARCH_EVIDENCE_INVALID', '外部来源标识无效。');
+    const row = this.#present()
+      ? this.#db.prepare('SELECT rowid, * FROM research_evidence WHERE evidence_id = ? AND book_id = ?').get(evidenceId, bookId) as SqlRow | undefined
+      : undefined;
+    requireEvidence(row !== undefined, 'RESEARCH_EVIDENCE_NOT_FOUND', RESEARCH_EVIDENCE_NOT_IN_BOOK);
+    return this.#evidence(row).url;
   }
 
   /** Link the 资料库 item 保存为来源材料 made of a retained source, inside the caller's transaction; once per source. */

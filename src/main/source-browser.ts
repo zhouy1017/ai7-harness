@@ -1,5 +1,7 @@
 import { ipcMain, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { appendFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { IPC_CHANNELS, type ResolvedBookWorkbenchRoute, type SourceIdentityInput, type SourceOpenedProjection } from '../shared/protocol.js';
 import { checkBrowserAddress } from '../shared/browser-address.js';
 import { ServiceCallError, type ServiceClient } from './service-client.js';
@@ -29,13 +31,21 @@ export function lockWindowNavigation(contents: Pick<BrowserWindow['webContents']
   contents.on('will-attach-webview', (event: { preventDefault(): void }) => event.preventDefault());
 }
 
+/** Where J-04's record stands in for the browser: one fixed file in its own directory of the launch's canonical data root. */
+export const BROWSER_RECORD_DIRECTORY = 'e2e-browser-record';
+export const BROWSER_RECORD_FILE = 'addresses.txt';
+
 /**
- * The system browser — or, under a Journey that names a record file (`--j04-browser-record`, admitted only under the E2E
- * harness), that file, which receives each address handed over on its own line instead of any browser opening.
+ * The system browser — or, under J-04's bare `--j04-browser-record on` (admitted only under the E2E harness), a record file
+ * the main process places inside the launch's own data root, never a path a caller names: each address handed over is
+ * appended on its own line instead of any browser opening. The directory is created or checked as a real directory of the
+ * data root, so a link out of it refuses the launch.
  */
-export function createSourceOpener(recordPath: string | undefined): SourceOpener {
-  if (recordPath !== undefined) return (address) => appendFile(recordPath, `${address}\n`, 'utf8');
-  return (address) => shell.openExternal(address);
+export async function createSourceOpener(dataRoot: string | undefined, record: boolean): Promise<SourceOpener> {
+  if (!record) return (address) => shell.openExternal(address);
+  requireDesktop(dataRoot !== undefined, 'AI7_DESKTOP_STARTUP_INVALID');
+  const recordPath = resolve(await ensureCanonicalDataDirectory(dataRoot, BROWSER_RECORD_DIRECTORY), BROWSER_RECORD_FILE);
+  return (address) => appendFile(recordPath, `${address}\n`, 'utf8');
 }
 
 function sourceIdentity(input: unknown): SourceIdentityInput {
@@ -61,28 +71,43 @@ export function registerSourceBrowserHandler(context: {
   requireSender: (event: IpcMainInvokeEvent | IpcMainEvent) => OwnedRendererWindow;
   requireAuthority: () => void;
   requireCurrentBookRoute: (owned: OwnedRendererWindow) => Extract<ResolvedBookWorkbenchRoute, { kind: 'book' }>;
+  requireCurrentRouteGeneration: (owned: OwnedRendererWindow, routeGeneration: number) => void;
   service: Pick<ServiceClient, 'call'>;
   opener: SourceOpener;
 }): void {
-  const { requireSender, requireAuthority, requireCurrentBookRoute, service, opener } = context;
+  const { requireSender, requireAuthority, requireCurrentBookRoute, requireCurrentRouteGeneration, service, opener } = context;
+  // One opening per window, route generation and source while it is in flight: a second identical press joins the first.
+  const inFlight = new WeakMap<OwnedRendererWindow, Map<string, Promise<SourceOpenedProjection>>>();
+  const open = async (owned: OwnedRendererWindow, identity: SourceIdentityInput, routeGeneration: number): Promise<SourceOpenedProjection> => {
+    requireAuthority();
+    const recorded = await service.call('inspectSourceAddress', identity);
+    // Still the same opening of the same Book: leaving and reopening it, or moving to another, opens nothing.
+    requireCurrentRouteGeneration(owned, routeGeneration);
+    if (requireCurrentBookRoute(owned).bookId !== identity.bookId) refuse('AI7_SOURCE_NOT_IN_WINDOW');
+    if (recorded.sourceKind !== 'web') return refuse('AI7_SOURCE_NO_ADDRESS');
+    const checked = checkBrowserAddress(recorded.address);
+    if (!checked.ok) throw new ServiceCallError('AI7_SOURCE_ADDRESS_REFUSED', checked.sentence);
+    try {
+      await opener(checked.address);
+    } catch {
+      refuse('AI7_SOURCE_OPEN_FAILED');
+    }
+    return { host: checked.host };
+  };
   ipcMain.handle(IPC_CHANNELS.openSourceInBrowser, (event, input: unknown) =>
     envelope(async (): Promise<SourceOpenedProjection> => {
       const owned = requireSender(event);
       const identity = sourceIdentity(input);
-      // The window must hold the source's Book when it asks and still when the answer comes back.
       if (requireCurrentBookRoute(owned).bookId !== identity.bookId) refuse('AI7_SOURCE_NOT_IN_WINDOW');
-      requireAuthority();
-      const recorded = await service.call('inspectSourceAddress', identity);
-      if (requireCurrentBookRoute(owned).bookId !== identity.bookId) refuse('AI7_SOURCE_NOT_IN_WINDOW');
-      if (recorded.sourceKind !== 'web') return refuse('AI7_SOURCE_NO_ADDRESS');
-      const checked = checkBrowserAddress(recorded.address);
-      if (!checked.ok) throw new ServiceCallError('AI7_SOURCE_ADDRESS_REFUSED', checked.sentence);
-      try {
-        await opener(checked.address);
-      } catch {
-        refuse('AI7_SOURCE_OPEN_FAILED');
-      }
-      return { host: checked.host };
+      const routeGeneration = owned.routeGeneration;
+      const key = `${routeGeneration}:${'evidenceId' in identity ? `evidence:${identity.evidenceId}` : `card:${identity.resultId}:${identity.cardId}`}`;
+      const pending = inFlight.get(owned) ?? new Map<string, Promise<SourceOpenedProjection>>();
+      inFlight.set(owned, pending);
+      const joined = pending.get(key);
+      if (joined !== undefined) return joined;
+      const opening = open(owned, identity, routeGeneration).finally(() => pending.delete(key));
+      pending.set(key, opening);
+      return opening;
     }),
   );
 }

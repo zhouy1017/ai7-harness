@@ -32,8 +32,8 @@ export interface LaunchArguments {
   injectedSavePath: string | undefined;
   /** J-07's answer to the folder dialog of a 图书交付包 export (Issue #416, S67b): single-use, like the Save dialog's. */
   injectedFolderPath: string | undefined;
-  /** J-04 only (Issue #1641): the file 在浏览器中打开 writes each address to instead of opening the system browser. */
-  browserRecordPath: string | undefined;
+  /** J-04 only (Issue #1641): 在浏览器中打开 appends each address to a file inside the data root instead of opening a browser. */
+  browserRecord: boolean;
   injectedDiagnosticsFolder: string | undefined;
   importControl: J01ImportControl | undefined;
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
@@ -222,9 +222,10 @@ export function parseArguments(argv: string[]): LaunchArguments {
   const injectedSavePath = j07SavePath ?? j04SavePath ?? j12SavePath ?? j11SavePath ?? j13SavePath;
   const injectedFolderPath = values.get('--j07-folder-path');
   requireDesktop(injectedFolderPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(injectedFolderPath)));
-  // J-04 shows the factual-check sources and 来源与证据; its record file stands in for the system browser (Issue #1641).
-  const browserRecordPath = values.get('--j04-browser-record');
-  requireDesktop(browserRecordPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(browserRecordPath)));
+  // J-04 shows the factual-check sources and 来源与证据; a record file stands in for the system browser (Issue #1641). The
+  // switch names no path: the main process places the file inside the launch's own data root.
+  const browserRecordValue = values.get('--j04-browser-record');
+  requireDesktop(browserRecordValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && browserRecordValue === 'on'));
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
@@ -319,7 +320,7 @@ export function parseArguments(argv: string[]): LaunchArguments {
     launchForm.trustedOperationalScope === 'development-ci' ||
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
-        applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && injectedDiagnosticsFolder === undefined && connectivityPath === undefined && browserRecordPath === undefined &&
+        applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && injectedDiagnosticsFolder === undefined && connectivityPath === undefined && browserRecordValue === undefined &&
         unitHoldPath === undefined && answerHoldPath === undefined && navigationAnswerHoldPath === undefined && backgroundQuietValue === undefined && calibrationMinBooksValue === undefined),
   );
   return {
@@ -329,7 +330,7 @@ export function parseArguments(argv: string[]): LaunchArguments {
     injectedPickerPath,
     injectedSavePath,
     injectedFolderPath,
-    browserRecordPath,
+    browserRecord: browserRecordValue === 'on',
     injectedDiagnosticsFolder,
     importControl,
     foregroundExecutionControl,

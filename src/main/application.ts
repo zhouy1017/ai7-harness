@@ -216,7 +216,7 @@ export function registerRendererHandlers(
   notificationWindows: () => ReadonlyArray<OwnedRendererWindow>,
   journalFaultArmed: boolean,
   navigationAnswerHoldPath?: string,
-  sourceOpener: SourceOpener = createSourceOpener(undefined),
+  sourceOpener: SourceOpener = (address) => shell.openExternal(address),
 ): () => void {
   const notifier = createNotifier({
     preferences: () => preferences.read().values,
@@ -2853,7 +2853,7 @@ export function registerRendererHandlers(
   registerKnowledgeBaseHandlers({ chooseDeveloperProposalFile, requireSender, requireAuthority, service, serializeEffect, requireCurrentBookRoute, requireCurrentRouteReadEpoch, requireCurrentRouteGeneration });
   registerEvaluationHandlers({ requireSender, requireAuthority, service, requireCurrentBookRoute, requireCurrentRouteReadEpoch, serializeEffect, requireCurrentRouteGeneration, rememberEditorResource });
   registerLibraryLearningHandlers({ chooseLibraryMaterialFile, requireSender, requireAuthority, service, serializeEffect, preferences });
-  registerSourceBrowserHandler({ requireSender, requireAuthority, requireCurrentBookRoute, service, opener: sourceOpener });
+  registerSourceBrowserHandler({ requireSender, requireAuthority, requireCurrentBookRoute, requireCurrentRouteGeneration, service, opener: sourceOpener });
   registerSeriesHandlers({ requireSender, requireAuthority, service, serializeEffect });
   registerDataStorageHandlers({ chooseDatabaseExportFile, chooseUsageCsvFile, chooseDatabaseImportFile, requireSender, serializeEffect, requireAuthority, service, preferences, requireNothingUnsaved, quitApplication });
   registerSeriesKnowledgeHandlers({ requireSender, serializeEffect, requireAuthority, requireManuscriptCapability, service });
@@ -3774,7 +3774,7 @@ export async function runApplication(): Promise<void> {
     if (packaged !== null) {
       launch = {
         dataRoot: undefined, allowFirstRunChooser: false, launchForm: packaged.launchForm,
-        injectedPickerPath: undefined, injectedSavePath: undefined, injectedFolderPath: undefined, browserRecordPath: undefined,
+        injectedPickerPath: undefined, injectedSavePath: undefined, injectedFolderPath: undefined, browserRecord: false,
         injectedDiagnosticsFolder: undefined, importControl: undefined, foregroundExecutionControl: undefined,
         recoveryControl: undefined, modelAdapterControl: undefined, connectivityPath: undefined, unitHoldPath: undefined,
         answerHoldPath: undefined, navigationAnswerHoldPath: undefined, backgroundQuietMs: undefined, calibrationMinBooks: undefined,
@@ -4455,7 +4455,7 @@ export async function runApplication(): Promise<void> {
       () => [...ownedWindows.values()],
       launch.journalFaultArmed,
       launch.navigationAnswerHoldPath,
-      createSourceOpener(launch.browserRecordPath),
+      await createSourceOpener(dataRoot, launch.browserRecord),
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

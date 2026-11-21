@@ -21,6 +21,7 @@ import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import type { ReviewRunDriveSteps } from '../../src/service/review/review-run-driver.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { EditorialMarkStore } from '../../src/service/editorial-marks.js';
+import { RESEARCH_EVIDENCE_NOT_IN_BOOK } from '../../src/service/research-evidence.js';
 import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
 import { armPerTicketHostAdmission } from '../../src/shared/network-denial.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
@@ -995,7 +996,11 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
     expect(store.inspectSourceAddress({ bookId: book.bookId, evidenceId: source.evidenceId! })).toEqual({ sourceKind: 'web', address: MUSEUM });
     expect(storeError(() => store.inspectSourceAddress({ ...card, cardId: `src_${'0'.repeat(20)}` }))).toBe('FACTUAL_VERIFICATION_SOURCE_NOT_FOUND');
     expect(storeError(() => store.inspectSourceAddress({ ...card, bookId: randomUUID() }))).toBe('FACTUAL_VERIFICATION_NOT_FOUND');
-    expect(storeError(() => store.inspectSourceAddress({ bookId: randomUUID(), evidenceId: source.evidenceId! }))).toBe('RESEARCH_EVIDENCE_NOT_FOUND');
+    // Another Book's row and a row that does not exist answer alike, so the read says nothing about other Books.
+    const refusal = (input: { bookId: string; evidenceId: string }) => { try { store.inspectSourceAddress(input); } catch (error) { return error; } return null; };
+    for (const input of [{ bookId: randomUUID(), evidenceId: source.evidenceId! }, { bookId: book.bookId, evidenceId: randomUUID() }]) {
+      expect(refusal(input)).toMatchObject({ code: 'RESEARCH_EVIDENCE_NOT_FOUND', message: RESEARCH_EVIDENCE_NOT_IN_BOOK });
+    }
     const before = databaseState(false);
     for (const result of results) expect(store.inspectEvidenceWorkspace({ bookId: book.bookId, resultId: result.resultId, sourcesAfter: null }).result.resultId).toBe(result.resultId);
     expect(databaseState(false)).toEqual(before);
