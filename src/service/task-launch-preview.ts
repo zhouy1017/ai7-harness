@@ -31,6 +31,7 @@ export function previewTaskLaunch(store: EditorialStore, input: TaskLaunchPrevie
 
 export function launchPreviewProjection(plan: import('../shared/protocol.js').TaskPlanProjection, units: number): TaskLaunchPreviewProjection {
   return { steps: plan.steps.map(step => `${step.label}${step.removed ? '（本次不做）' : ''}`),
-    scope: plan.scope.process, units, reference: plan.scope.reference, send: `${plan.scope.send}；${plan.service.send}`, usage: plan.service.usage,
-    adaptations: plan.boundary.adaptable.map(entry => `${entry.label}：${entry.removed ? '不允许' : entry.askFirst ? '先问我' : '允许'}`) };
+    scope: plan.scope.process, units, reference: plan.scope.reference, send: plan.kind === 'review-run' ? plan.service.send : `${plan.scope.send}；${plan.service.send}`, usage: plan.service.usage,
+    adaptations: plan.boundary.adaptable.map(entry => entry.id === 'factual-tool-retry' ? entry.label
+      : `${entry.label}：${entry.removed ? '不允许' : entry.askFirst ? '先问我' : '允许'}`) };
 }

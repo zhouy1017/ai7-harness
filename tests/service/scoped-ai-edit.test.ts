@@ -3,7 +3,9 @@ import { writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS } from '../../src/service/launch-policy.js';
+import { planModelDestination } from '../../src/service/task-plan.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { aiLocksOfWindow } from '../../src/service/ai-edit-locks.js';
 import { FastRoleExecutionOwner } from '../../src/service/fast-role/fast-role-execution.js';
@@ -47,6 +49,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   db?.close();
   try { store.close(); } catch { /* closed by its test */ }
   requestGovernor.close();
@@ -128,6 +131,34 @@ function rowCounts() {
 }
 
 describe('就选中部分让 AI 修改: the scoped splice guard', () => {
+  it('names the channel and display model destination without a raw off effort (#1657 F2)', () => {
+    const target = primary(), { blocks } = threeParagraphs(target);
+    const input = { ...base(target, '检查选中的文字', spanOver(blocks)), clientCommandId: randomUUID() };
+    const prepared = frozen(input), requests = answering(prepared, { schema: SCOPED_EDIT_RESULT_SCHEMA, targets: [] });
+    const binding = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find(entry => entry.route === 'opencode-go')!, credentialReference: randomUUID(), reasoningEffort: 'off' };
+    vi.spyOn(store, 'scopedAiEditLaunchChoice').mockReturnValue({ executionConfig: {}, binding });
+    const preview = requests.previewScopedEdit(book.bookId, input);
+    expect(preview.send).toContain(`，发往 ${planModelDestination({ kind: binding.route, model: binding.model, reasoningEffort: 'off' })}`);
+    expect(preview.send).not.toContain('@off');
+  });
+
+  it('keeps stale-revision and all-locked scope refusals before legacy model resolution (#1657 F2)', () => {
+    const target = primary(), { blocks } = threeParagraphs(target);
+    const input = base(target, '检查选中的文字', spanOver(blocks));
+    const prepared = frozen(input), requests = answering(prepared, { schema: SCOPED_EDIT_RESULT_SCHEMA, targets: [] });
+    const resolver = vi.spyOn(store, 'scopedAiEditLaunchChoice').mockImplementation(() => { throw new Error('scope must be checked first'); });
+    const stale = { ...input, baseRevisionId: randomUUID() };
+    const before = rowCounts();
+    expect(() => requests.previewScopedEdit(book.bookId, stale)).toThrow(expect.objectContaining({ code: 'MARK_BINDING_CHANGED' }));
+    expect(() => requests.scopedEdit(book.bookId, stale)).toThrow(expect.objectContaining({ code: 'MARK_BINDING_CHANGED' }));
+    expect(rowCounts()).toEqual(before);
+    store.setAiEditLocks({ ...target, targets: blocks.map(block => ({ kind: 'block' as const, blockId: block.blockId })), locked: true, expectedLocksDigest: locksDigest(target) });
+    const locked = base(target, input.instruction, input.scope), afterLock = rowCounts();
+    expect(() => requests.previewScopedEdit(book.bookId, locked)).toThrow(expect.objectContaining({ code: 'AI_EDIT_SCOPE_LOCKED' }));
+    expect(() => requests.scopedEdit(book.bookId, locked)).toThrow(expect.objectContaining({ code: 'AI_EDIT_SCOPE_LOCKED' }));
+    expect(rowCounts()).toEqual(afterLock);
+    expect(resolver).not.toHaveBeenCalled();
+  });
   it('previews the frozen selection without rows, request entries or a send, with unchanged refusals (#1657)', async () => {
     const target = primary(), { blocks } = threeParagraphs(target);
     const input = { ...base(target, '检查选中的文字', spanOver(blocks)), clientCommandId: randomUUID() };

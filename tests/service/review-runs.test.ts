@@ -1,4 +1,4 @@
-import { frozenReviewOptions, frozenReviewUnits } from '../support/review-launch-inputs.js';
+import { frozenReviewOptions, frozenReviewUnits, frozenReviewCeiling } from '../support/review-launch-inputs.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
@@ -173,6 +173,7 @@ describe('review launch options and read-only preview (#1657)', () => {
       expect(previewRowCounts()).toEqual(before);
       const launched = session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy);
       const run = launched.projection.run!;
+      expect(frozenReviewCeiling(roots.dataRoot, run.reviewRunId, 'run-synthesis')).toEqual({ kind: 'tokens', maxTotalTokens: categoryIds.length === 3 ? 30000 : 10000 });
       const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
       expect(plan.boundary.adaptable.every(entry => entry.movable === false)).toBe(true);
       expect(preview).toEqual(launchPreviewProjection(plan, frozenReviewUnits(roots.dataRoot, run.reviewRunId)));
@@ -188,7 +189,7 @@ describe('review launch options and read-only preview (#1657)', () => {
       const input = { clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE,
         planEdits: { removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] as const } };
       const before = previewRowCounts();
-      const refusal = expect.objectContaining({ code: 'REVIEW_RETRY_CHOICE_UNAVAILABLE', message: '审阅暂不支持“失败时先问我”；可以选自动重试或不重试。' });
+      const refusal = expect.objectContaining({ code: 'REVIEW_RETRY_CHOICE_UNAVAILABLE', message: '审阅暂不支持“失败时先问你”；可以选自动重试或不重试。' });
       expect(() => session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input } }, launchPolicy)).toThrowError(refusal);
       expect(() => session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy)).toThrowError(refusal);
       expect(previewRowCounts()).toEqual(before);
@@ -2766,6 +2767,13 @@ describe('house preference review consumption (#911)', () => {
 
 
 describe('one-step review launch (#1455)', () => {
+  it('explains a review cancellation refusal without naming only a series stop (#1656)', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const run = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!;
+      await session.driver.drive(run.reviewRunId);
+      expect(() => session.store.cancelReviewRun(book.bookId, run.reviewRunId)).toThrowError(expect.objectContaining({ code: 'REVIEW_RUN_NOT_CANCELLABLE', message: '这次审阅不能在这里取消；如有正在运行或已暂停的任务，请从任务计划中取消。' }));
+    });
+  });
   it.each([false, true])('relaunches a finished review through its original request, remembered=%s (#1656)', async remembered => {
     await withCapturedReviewBook(async (session, book) => {
       const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE };

@@ -7,7 +7,7 @@ export type ReviewLaunchOptions = Pick<ReviewExecutionLaunchInput, 'planEdits' |
 
 export function requireReviewRetryChoice(edits: { askFirstAdaptations?: ReadonlyArray<string> } | undefined): void {
   requireStore((edits?.askFirstAdaptations?.length ?? 0) === 0, 'REVIEW_RETRY_CHOICE_UNAVAILABLE',
-    '审阅暂不支持“失败时先问我”；可以选自动重试或不重试。');
+    '审阅暂不支持“失败时先问你”；可以选自动重试或不重试。');
 }
 
 /** The same shared edit applies to each model category; a summary uses the members' allowance. */

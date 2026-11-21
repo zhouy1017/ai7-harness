@@ -355,10 +355,12 @@ export function launchReviewRun(host: ReviewOperationsHost, input: import('../..
   startWhen: 'now' | 'when-online' = 'now'): { projection: ReviewWorkspaceProjection; repeated: boolean } {
   try {
     const { clientCommandId, executionConfig = {}, ...request } = input;
+    let modelBacked = false;
     const launched = launchFromSnapshot(host.authority, { clientCommandId, bookId: input.bookId, kind: 'review-run', input: { ...request, executionConfig } },
-      () => !host.reviewRuns.requiresModel(input.bookId, input.categoryIds) ? { executionConfig: {}, binding: null } : host.launchChoice('main-editorial', executionConfig, input.rememberedChoice), (choice, snapshotId) => {
+      () => { modelBacked = host.reviewRuns.requiresModel(input.bookId, input.categoryIds);
+        return !modelBacked ? { executionConfig: {}, binding: null } : host.launchChoice('main-editorial', executionConfig, input.rememberedChoice); }, (choice, snapshotId) => {
         host.requireRelaunchSource(input.bookId, input.relaunchOf);
-        requireStore(host.reviewRuns.requiresModel(input.bookId, input.categoryIds) || (input.planEdits === undefined && input.startWhen !== 'idle'),
+        requireStore(modelBacked || (input.planEdits === undefined && input.startWhen !== 'idle'),
           'REVIEW_LAUNCH_OPTIONS_UNAVAILABLE', '这次审阅不使用模型，无需选择运行选项。');
         requireReviewRetryChoice(input.planEdits);
         const policy = choice.binding !== null && host.baselineAnalysis.launch.operationalScope === 'ordinary-production'

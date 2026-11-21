@@ -1,4 +1,5 @@
 import { fastRoleMemoryContext } from '../learning/memory-facade.js';
+import { planModelDestination } from '../task-plan.js';
 import { randomUUID } from 'node:crypto';
 import { UUID_PATTERN } from '../analysis/canonical.js';
 import type { ProducedEditorialMarkInput } from '../editorial-marks.js';
@@ -403,17 +404,20 @@ export class FastRoleRequests {
     const store = this.#store;
     require(store.getManuscriptWindow !== undefined && store.scopedEditWorkingBlocks !== undefined && store.applyChangeSuggestion !== undefined,
       'FAST_ROLE_ROUTE_UNAVAILABLE', '这次运行不能进行 AI 局部修改。');
-    const choice = store.scopedAiEditLaunchChoice?.(input);
-    const owner = (input.clientCommandId !== undefined || input.executionConfig !== undefined) && choice !== undefined
+    const resolvesAtLaunch = store.captureScopedAiEditLaunch !== undefined && (input.clientCommandId !== undefined || input.executionConfig !== undefined);
+    let choice = resolvesAtLaunch ? store.scopedAiEditLaunchChoice?.(input) : undefined;
+    const owner = resolvesAtLaunch && choice !== undefined
       ? this.scopedOwner?.(choice.binding) ?? this.#owner : this.#owner;
     try {
       const prepared = prepareScopedEdit(owner, store as ScopedEditStore, bookId, input);
-      const model = choice?.binding?.model;
+      choice ??= store.scopedAiEditLaunchChoice?.(input);
+      const binding = choice?.binding;
       const scope = input.scope.mode === 'selected-only' ? '所选文字中未锁定的部分'
         : input.scope.range.kind === 'section' ? '所选章节中未锁定的段落' : '稿件中未锁定的段落';
       return { steps: ['检查修改范围和锁定状态', '按修改要求修改未锁定的文字'], scope, units: prepared.targets.length,
         reference: ['相邻文字与锁定的段落只供参考'],
-        send: `修改要求、可修改的文字和只供参考的上下文${model === undefined ? '' : `；使用 ${model}${choice?.binding?.reasoningEffort == null ? '' : `@${choice.binding.reasoningEffort}`}`}`,
+        send: `修改要求、可修改的文字和只供参考的上下文${binding == null ? '' : `，发往 ${planModelDestination({ kind: binding.route, model: binding.model,
+          ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }) })}`}`,
         usage: '调用模型 1 次；实际用量在完成后确定。', adaptations: ['只修改范围内未锁定的文字'] };
     } finally { if (owner !== this.#owner) owner.dispose(); }
   }

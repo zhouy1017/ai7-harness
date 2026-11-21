@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { frozenReviewOptions, frozenReviewUnits } from '../support/review-launch-inputs.js';
+import { frozenReviewOptions, frozenReviewUnits, frozenReviewCeiling } from '../support/review-launch-inputs.js';
 import { launchPreviewProjection } from '../../src/service/task-launch-preview.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
@@ -89,6 +89,7 @@ describe('composite procedures and 全文审校 (#1173)', () => {
       const before = count(), preview = target.previewTaskLaunch({ bookId: second, launch: { operation: 'launchReviewRun', input } }, policy);
       expect(count()).toEqual(before);
       const launched = target.launchReviewRun({ ...input, bookId: second }, policy).projection.run!;
+      if (planEdits.runBudgetCeiling !== undefined) expect(frozenReviewCeiling(roots.dataRoot, launched.reviewRunId, 'run-synthesis')).toEqual({ kind: 'tokens', maxTotalTokens: 10000 });
       expect(frozenReviewOptions(roots.dataRoot, launched.reviewRunId)).toEqual(frozenReviewOptions(roots.dataRoot, prepared.reviewRunId));
       expect(preview).toEqual(launchPreviewProjection(target.inspectTaskPlan({ bookId: second, kind: 'review-run', ref: launched.reviewRunId }), frozenReviewUnits(roots.dataRoot, launched.reviewRunId)));
     } finally { db.close(); }

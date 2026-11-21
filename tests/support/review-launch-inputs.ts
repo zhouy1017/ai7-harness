@@ -1,6 +1,15 @@
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 
+export function frozenReviewCeiling(dataRoot: string, reviewRunId: string, categoryId: string): unknown {
+  const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try { return JSON.parse(String(db.prepare(`SELECT p.canonical_json FROM review_runs r, json_each(r.canonical_json, '$.categories') c
+    JOIN analysis_plan_records p ON p.task_intent_id = json_extract(c.value, '$.task.taskIntentId')
+    WHERE r.review_run_id = ? AND json_extract(c.value, '$.categoryId') = ? AND p.component = 'provider-resolution-plan'
+    ORDER BY p.plan_version DESC LIMIT 1`).get(reviewRunId, categoryId)!.canonical_json)).runBudgetCeiling; }
+  finally { db.close(); }
+}
+
 export function frozenReviewUnits(dataRoot: string, reviewRunId: string): number {
   const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
   try {

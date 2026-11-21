@@ -400,7 +400,7 @@ function providerLabel(providerId: string): string {
 }
 
 /** Editorial display only: reads the plan's frozen route and never changes stored plan bytes. */
-function planModelDestination(route: { kind: string; model: string; reasoningEffort?: string | null }): string {
+export function planModelDestination(route: { kind: string; model: string; reasoningEffort?: string | null }): string {
   return `${providerLabel(route.kind)} · ${markModelLabels({ route: route.kind, model: route.model,
     ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort }) }).modelLabel}`;
 }
