@@ -103,7 +103,11 @@ export function retrievalTokens(text: string): string[] {
 function retrievalNormalized(text: string): string {
   return text.normalize('NFKC').toLowerCase();
 }
-const WORD_RUNS = /\p{Script=Han}+|[\p{Script=Latin}\p{N}]+/gu;
+/** A query as verbatim containment reads it: normalised, without the quotes, title marks or stops that wrap it ('' when nothing is left). */
+function verbatimNeedle(text: string): string {
+  return retrievalNormalized(text).replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+}
+const WORD_RUNS =/\p{Script=Han}+|[\p{Script=Latin}\p{N}]+/gu;
 function normalizedFeatures(normalized: string): string[] {
   const words = [...HAN_WORDS.segment(normalized)].filter((part) => /^\p{Script=Han}+$/u.test(part.segment) && [...part.segment].length > 1);
   const features: string[] = [];
@@ -243,10 +247,10 @@ export class RetrievalIndex {
     if (mode === 'exact') return blocks.filter((block) => block.text.normalize('NFC').includes(query)).slice(0, RETRIEVAL_MAX_CANDIDATES);
     const features = new Set(retrievalTokens(query));
     if (features.size === 0 || blocks.length === 0) return [];
-    const needle = retrievalNormalized(query);
+    const needle = verbatimNeedle(query);
     const documents = blocks.map((block, index) => this.#blockDocument(block.blockId ?? `#${index}`, block.text));
     const scores = bm25Scores(documents, features);
-    return blocks.map((block, index) => ({ block, index, verbatim: documents[index]!.normalized.includes(needle), score: scores[index]! })).filter((entry) => entry.score > 0)
+    return blocks.map((block, index) => ({ block, index, verbatim: needle.length > 0 && documents[index]!.normalized.includes(needle), score: scores[index]! })).filter((entry) => entry.score > 0)
       .sort((a, b) => Number(b.verbatim) - Number(a.verbatim) || b.score - a.score || a.index - b.index).slice(0, RETRIEVAL_MAX_CANDIDATES).map((entry) => entry.block);
   }
   #blockDocument(key: string, text: string): LexicalDocument {
@@ -257,10 +261,10 @@ export class RetrievalIndex {
     return document;
   }
   /**
-   * The other pinned names of every baseline entity or term the query names (ADR 0107 §4 point 2), as features. A name counts only
+   * The other pinned names (normalised) of every baseline entity or term the query names (ADR 0107 §4 point 2). A name counts only
    * where it stands as whole words of the query, so 先生的 does not name 生的.
    */
-  #aliasFeatures(query: string): string[] {
+  #aliasNames(query: string): string[] {
     const { aliasMinLength, aliasExpansionLimit } = RETRIEVAL_LEXICAL;
     const rows = [...(this.#records?.baseline?.entities ?? []), ...(this.#records?.terms ?? [])];
     if (rows.length === 0) return [];
@@ -273,7 +277,7 @@ export class RetrievalIndex {
         .flatMap((name) => typeof name === 'string' ? [retrievalNormalized(name).trim()] : []))].filter((name) => [...name].length >= aliasMinLength);
       if (names.some((name) => namesWholeWords(needle, boundaries, name))) siblings.push(...names.filter((name) => !needle.includes(name)));
     }
-    return [...new Set(siblings)].slice(0, aliasExpansionLimit).flatMap((name) => retrievalTokens(name));
+    return [...new Set(siblings)].slice(0, aliasExpansionLimit);
   }
   /**
    * `guideline_clause` names one clause or all. `baseline_facts` and `term_table` answer a query section by section — entities,
@@ -324,7 +328,7 @@ export class RetrievalIndex {
    * BM25 over the pinned chunks, fused with the local vectors by reciprocal rank when they are ready. `queries` are further
    * phrasings of `query` (ADR 0107 §4 point 3): each phrasing ranks on its own and every ranking joins one fusion; without them
    * the scores are the single query's. A query naming a pinned entity or term also matches its other names. After the scores, one
-   * rule orders: a passage holding a phrasing verbatim comes first ("literal matches still rank first", #1623).
+   * rule orders: a passage holding a phrasing, or another name of an entity it names, verbatim comes first (#1623).
    */
   async retrieve(query: string, k = RETRIEVAL_MAX_CANDIDATES, sourceKinds?: readonly RetrievalSourceKind[], queries: readonly string[] = []): Promise<RetrievalCandidate[]> {
     if (this.#disposed) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
@@ -357,9 +361,13 @@ export class RetrievalIndex {
     const forms = new Map<string, string>([[retrievalNormalized(query), query]]);
     for (const phrasing of queries) if (forms.size <= RETRIEVAL_LEXICAL.maxQueries && !forms.has(retrievalNormalized(phrasing))) forms.set(retrievalNormalized(phrasing), phrasing);
     const phrasings = [query, ...[...forms.values()].slice(1).sort()];
-    const needles = [...forms.keys()];
-    const lexical = phrasings.map((phrasing) => {
-      const scores = bm25Scores(chunks, new Set([...retrievalTokens(phrasing), ...this.#aliasFeatures(phrasing)]));
+    // What counts as verbatim: each phrasing, and every other name of a pinned entity a phrasing names — so a common name cannot
+    // fill every place with its own spelling and hide the passages that use another (#1623 review A). One group, BM25 inside it:
+    // the queried spelling matches more of the query's features and so leads among equals without excluding the others.
+    const aliases = phrasings.map((phrasing) => this.#aliasNames(phrasing));
+    const needles = [...new Set([...phrasings, ...aliases.flat()].map(verbatimNeedle))].filter((needle) => needle.length > 0);
+    const lexical = phrasings.map((phrasing, ordinal) => {
+      const scores = bm25Scores(chunks, new Set([...retrievalTokens(phrasing), ...aliases[ordinal]!.flatMap((name) => retrievalTokens(name))]));
       return chunks.map((chunk, index) => ({ id: chunk.candidate.candidateId, score: scores[index]! })).filter((entry) => entry.score > 0).sort(rank);
     });
     let scores = phrasings.length === 1 ? new Map(lexical[0]!.map((entry) => [entry.id, entry.score])) : reciprocalRankFusion(lexical.map((ranking) => ranking.map((entry) => entry.id)));
@@ -390,7 +398,7 @@ export class RetrievalIndex {
     // Verify again after an asynchronous embed: withdrawal during ranking cannot leak a cached preview.
     const available = new Set<string>();
     for (const [key, source] of this.#sources) { try { this.#read(source); available.add(key); } catch { this.#chunks.delete(key); } }
-    // A passage that holds the query or another phrasing verbatim comes before every passage that holds none; inside each group,
+    // A passage that holds one of the needles verbatim comes before every passage that holds none; inside each group,
     // the ranking above (BM25, or the fusion).
     const results = chunks.filter((chunk) => available.has(this.#sourceKey(chunk.candidate.sourceKind, chunk.candidate.sourceId)) && scores.has(chunk.candidate.candidateId))
       .map((chunk) => ({ candidate: { ...chunk.candidate, score: scores.get(chunk.candidate.candidateId)! }, verbatim: needles.some((needle) => chunk.normalized.includes(needle)) }))

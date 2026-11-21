@@ -436,7 +436,8 @@ export class PlatformToolSession implements PlatformToolOwner {
     try {
       let value: unknown;
       switch (args.tool) {
-        // Further phrasings only where the rule-declared set offered them (#1623); a composition v1 call keeps its v1 behaviour.
+        // No declaration offers further phrasings yet (#1623): ones a model sends anyway are tolerated under a rule that declares
+        // its tools; a composition v1 call keeps its v1 behaviour.
         case 'retrieve': value = await this.#retrieval.retrieve(args.query, args.k, args.sourceKinds, rule.declarations === undefined ? undefined : args.queries); break;
         case 'exact_fetch': value = this.#retrieval.exactFetch(args.candidateId); break;
         case 'read_blocks': value = this.#retrieval.readBlocks(args.blockId, args.radius); break;

@@ -169,6 +169,9 @@ async function sampleBook(id: string, file: string): Promise<RetrievalSource & {
 /** Pinned orders over 呐喊 for 首印 (with 初印 and 印数), by block position: computed on Node 24.18.1 at #1623. */
 const FUSED_ORDER = ['nahan-26', 'nahan-312', 'nahan-152', 'nahan-596', 'nahan-807', 'nahan-842', 'nahan-834', 'nahan-956'];
 const TOKENIZED_ORDER = ['nahan-26', 'nahan-312', 'nahan-807', 'nahan-288', 'nahan-152', 'nahan-596', 'nahan-303', 'nahan-68'];
+/** In 朝花夕拾 with 长妈妈 / 阿长 pinned: of the 8 found for 阿长, those that say only 长妈妈; of the 8 for 长妈妈, those that say only 阿长. */
+const ONLY_CHANG_MAMA = 3;
+const ONLY_A_CHANG = 1;
 const words = (...items: string[]): RetrievalSource[] => items.map((text, index) => source(`w${index}`, text));
 
 describe('local lexical retrieval over Han text (#1623)', () => {
@@ -235,7 +238,9 @@ describe('local lexical retrieval over Han text (#1623)', () => {
     const books = [await sampleBook('nahan', 'luxun-nahan.docx'), await sampleBook('zhaohua', 'luxun-zhaohua-xishi.docx')];
     const index = new RetrievalIndex(books);
     const blocks = books.flatMap((book) => [...book.texts.values()]);
-    const holds = (passage: string, phrase: string) => passage.normalize('NFKC').toLowerCase().includes(phrase.normalize('NFKC').toLowerCase());
+    // Verbatim is read without what wraps the phrase at either end: quotes, title marks, a stop (#1623 review B).
+    const core = (phrase: string) => phrase.normalize('NFKC').toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+    const holds = (passage: string, phrase: string) => passage.normalize('NFKC').toLowerCase().includes(core(phrase));
     let phrases = 0;
     for (let ordinal = 0; ordinal * 37 < blocks.length; ordinal += 1) {
       const passage = blocks[ordinal * 37]!;
@@ -244,8 +249,10 @@ describe('local lexical retrieval over Han text (#1623)', () => {
       const phrase = passage.slice(4, 4 + length);
       if (retrievalTokens(phrase).length === 0 || !phrase.isWellFormed()) continue;
       phrases += 1;
-      expect(holds(index.searchManuscript(phrase, 'tokenized')[0]!.text, phrase), `search_manuscript ${ordinal}`).toBe(true);
-      expect(holds(index.exactFetch((await index.retrieve(phrase))[0]!.candidateId).text, phrase), `retrieve ${ordinal}`).toBe(true);
+      for (const query of [phrase, `“${phrase}”`, `"${phrase}"`, `《${phrase}》`, `${phrase}。`]) {
+        expect(holds(index.searchManuscript(query, 'tokenized')[0]!.text, phrase), `search_manuscript ${ordinal} ${query.length}`).toBe(true);
+        expect(holds(index.exactFetch((await index.retrieve(query))[0]!.candidateId).text, phrase), `retrieve ${ordinal} ${query.length}`).toBe(true);
+      }
     }
     expect(phrases).toBeGreaterThan(25);
   }, 120_000);
@@ -265,9 +272,18 @@ describe('local lexical retrieval over Han text (#1623)', () => {
     // Without the records only the shared 长 reaches a few of them; with them all eight candidates name her.
     expect(await naming(new RetrievalIndex([book]))).toBe(3);
     expect(await naming(new RetrievalIndex([book], null, null, records))).toBe(8);
+    // A frequent name does not hide the other: 阿长 also reaches passages that say only 长妈妈, and 长妈妈 those that say only 阿长,
+    // which the verbatim rule alone fills with the queried spelling (#1623 review A).
+    const onlyOther = async (index: RetrievalIndex, query: string, other: string) => (await index.retrieve(query))
+      .filter((candidate) => { const passage = book.texts.get(candidate.anchor.blockId!)!; return passage.includes(other) && !passage.includes(query); }).length;
+    expect([await onlyOther(new RetrievalIndex([book]), '阿长', '长妈妈'), await onlyOther(new RetrievalIndex([book]), '长妈妈', '阿长')]).toEqual([0, 0]);
+    expect(await onlyOther(new RetrievalIndex([book], null, null, records), '阿长', '长妈妈')).toBe(ONLY_CHANG_MAMA);
+    expect(await onlyOther(new RetrievalIndex([book], null, null, records), '长妈妈', '阿长')).toBe(ONLY_A_CHANG);
     // No name matches, only a one-character name, or a name that straddles a word boundary (先生的 holds 生的 across 先生|的):
     // the same ranking as without pinned records.
     for (const query of ['天气', '甲', '先生的']) expect(await new RetrievalIndex([book], null, null, records).retrieve(query), query).toEqual(await new RetrievalIndex([book]).retrieve(query));
+    // The straddling name, where only its sibling could reach a passage: substring matching would find 熟的 here.
+    expect(await new RetrievalIndex(words('熟的', '天气'), null, null, records).retrieve('先生的书')).toEqual([]);
     // At most eight other names: of nine siblings in the pinned order, the first (夏荷) and eighth (中原) are found, the ninth (上林) not.
     const names = ['春雨', '夏荷', '秋月', '冬雪', '东风', '西山', '南湖', '北海', '中原', '上林'];
     const many = { baseline: null, guidelines: [], terms: [{ kind: 'term', name: names[0], aliases: names.slice(1) }] };
