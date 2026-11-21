@@ -15,7 +15,14 @@ interface DumpRow { readonly type: string; readonly name: string; readonly tbl_n
  * Every change of the 117 shape the R5 storage train makes on purpose, named here until the train lands (#1540): each entry
  * is an object (`type:name`) the baseline adds, drops or changes against revision 116, with the train slice that owns it.
  */
-const INTENDED_DELTA: ReadonlyArray<{ readonly object: string; readonly change: 'added' | 'removed' | 'changed'; readonly slice: string }> = [];
+const INTENDED_DELTA: ReadonlyArray<{ readonly object: string; readonly change: 'added' | 'removed' | 'changed'; readonly slice: string }> = [
+  // R5-F1a
+  { object: 'table:model_service_connections', change: 'changed', slice: 'R5-F1a' },
+  { object: 'index:sqlite_autoindex_model_service_connections_3', change: 'removed', slice: 'R5-F1a' },
+  { object: 'index:sqlite_autoindex_model_service_connections_4', change: 'removed', slice: 'R5-F1a' },
+  { object: 'table:model_role_choices', change: 'added', slice: 'R5-F1a' },
+  { object: 'index:sqlite_autoindex_model_role_choices_1', change: 'added', slice: 'R5-F1a' },
+];
 
 const reference = JSON.parse(readFileSync('tests/fixtures/database/revision-116-schema.json', 'utf8')) as { userVersion: number; rows: DumpRow[] };
 

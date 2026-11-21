@@ -1,3 +1,4 @@
+import { writeModelRoleChoice } from '../../src/service/model-service-connections.js';
 import { launchLocalForSnapshot, inspectLaunchSnapshots } from '../support/task-launch.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
@@ -118,6 +119,29 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
 const backups = (): string => `${roots.dataRoot}-backups`;
 
 describe('导入数据库 over the real store', () => {
+  it('replaces all model choices with the exported roles, without retaining destination overrides (#1650)', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const connection = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+      store.selectMainRoleModel('anthropic-claude', 'claude-opus-5', 'high');
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        writeModelRoleChoice(db, 'underlying-pro', { connectionId: connection.connectionId, modelId: 'claude-sonnet-5', reasoningEffort: 'xhigh' });
+        writeModelRoleChoice(db, 'underlying-flash', { connectionId: connection.connectionId, modelId: 'claude-haiku-4-5', reasoningEffort: 'low' });
+      } finally { db.close(); }
+      const original = store.getModelRoles();
+      const source = await exported(store, 'role-choices.ai7db');
+      store.selectFastRoleModel('anthropic-claude', 'claude-fable-5-1');
+      store.selectMainRoleModel('anthropic-claude', 'claude-sonnet-5');
+      expect(store.getModelRoles()).not.toEqual(original);
+      const preview = await store.inspectDatabaseImport(source);
+      await store.prepareDatabaseReplacement(preview.previewId, T);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getModelRoles()).toEqual(original);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
   it('retains custom versions and their stop state through public database replacement (#1170)', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

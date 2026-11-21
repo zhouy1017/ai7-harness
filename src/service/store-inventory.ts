@@ -178,6 +178,7 @@ export const INVENTORY_TABLES = [
   'milestone_signoff_records',
   'milestone_versions',
   'model_service_connections',
+  'model_role_choices', // R5-F1a
   'native_artifact_book_enablements',
   'native_artifact_installations',
   'plan_envelopes',
@@ -360,7 +361,7 @@ export function inventoryStore(path: string): string {
     // The D7 entities. Relations the upgrade changes by design (revisions, offset nodes, store versions) are left out.
     const relations = ['books', 'production_documents', 'production_document_versions', 'content_objects', 'source_versions', 'editorial_mark_replies',
       'milestone_versions', 'publication_versions', 'analysis_result_sets', 'review_runs', 'review_findings', 'review_reports', 'review_run_synthesis',
-      'evaluation_records', 'readers_report_drafts', 'writing_drafts', 'model_service_connections', 'search_backend_connections', 'backup_preferences', 'evaluation_preferences'];
+      'evaluation_records', 'readers_report_drafts', 'writing_drafts', 'model_service_connections', 'model_role_choices', 'search_backend_connections', 'backup_preferences', 'evaluation_preferences'];
     return JSON.stringify({
       entities: {
         relations: Object.fromEntries(relations.map((table) => [table, tables[table]])),

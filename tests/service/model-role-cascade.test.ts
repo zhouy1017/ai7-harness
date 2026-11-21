@@ -1,3 +1,4 @@
+import { writeModelRoleChoice } from '../../src/service/model-service-connections.js';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -114,7 +115,8 @@ describe('the four Model Roles (Issue #1620)', () => {
     // A row 0.7.3 saved: its first key also chose the Flash model, and its role is the legacy `main-editorial`.
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      database.prepare('UPDATE model_service_connections SET fast_selected = 1, fast_model_id = ? WHERE connection_id = ?').run('glm-5.3-flash', go.connectionId);
+      database.prepare('UPDATE model_service_connections SET fast_model_id = ? WHERE connection_id = ?').run('glm-5.3-flash', go.connectionId);
+      writeModelRoleChoice(database, 'foreground-flash', { connectionId: go.connectionId, modelId: 'glm-5.3-flash' });
       expect(database.prepare('SELECT role_id FROM model_service_connections').all()).toEqual([{ role_id: 'main-editorial' }]);
     } finally { database.close(); }
     return EditorialStore.open(roots.dataRoot, roots.codeRoot).then((reopened) => {
@@ -142,7 +144,7 @@ describe('a model declared on another route of its channel (#1582)', () => {
     // A choice stored before 0.7.4 resolves to no binding, so no Task can send it.
     store.close();
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    try { database.prepare('UPDATE model_service_connections SET model_id = ? WHERE connection_id = ?').run('gpt-5.6-luna', go.connectionId); } finally { database.close(); }
+    try { database.prepare('UPDATE model_service_connections SET model_id = ? WHERE connection_id = ?').run('gpt-5.6-luna', go.connectionId); writeModelRoleChoice(database, 'foreground-pro', { connectionId: go.connectionId, modelId: 'gpt-5.6-luna' }); } finally { database.close(); }
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(binding('main-editorial')).toBeNull();
     expect(binding('fast-interaction')).toBeNull();
@@ -161,6 +163,7 @@ describe('a model declared on another route of its channel (#1582)', () => {
       try { database.prepare(sql).run(...values, go.connectionId); } finally { database.close(); }
     };
     update('UPDATE model_service_connections SET model_id = ? WHERE connection_id = ?', 'gpt-5.6-luna');
+    update("UPDATE model_role_choices SET model_id = ? WHERE role_id = 'foreground-pro' AND connection_id = ?", 'gpt-5.6-luna');
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(store.getModelRoles().map((role) => [role.roleId, role.source, role.status, role.statusDetail])).toEqual([
       ['foreground-pro', 'pro-tier', 'needs-attention', MODEL_ROUTE_NOT_SERVED_REASON],
@@ -170,7 +173,10 @@ describe('a model declared on another route of its channel (#1582)', () => {
     ]);
     // A Flash choice it cannot send is kept while the Flash roles follow 前台 Pro, which can be sent.
     store.close();
-    update("UPDATE model_service_connections SET model_id = 'deepseek-v4.1-flash', fast_selected = 1, fast_model_id = ? WHERE connection_id = ?", 'grok-4.6');
+    update("UPDATE model_service_connections SET model_id = 'deepseek-v4.1-flash', fast_model_id = ? WHERE connection_id = ?", 'grok-4.6');
+    const choices = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    writeModelRoleChoice(choices, 'foreground-pro', { connectionId: go.connectionId, modelId: 'deepseek-v4.1-flash' });
+    writeModelRoleChoice(choices, 'foreground-flash', { connectionId: go.connectionId, modelId: 'grok-4.6' }); choices.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(store.getModelRoles().find((role) => role.roleId === 'underlying-flash')).toMatchObject({ source: 'flash-not-served-follows-foreground-pro',
       sourceLabel: '这个渠道暂时还不能使用已选的 Flash 模型，现在跟随前台 Pro', status: 'available', statusDetail: null, binding: { modelId: 'deepseek-v4.1-flash' } });
@@ -186,4 +192,70 @@ describe('a model declared on another route of its channel (#1582)', () => {
     store.selectMainRoleModel('opencode-zen', 'zen-account-custom-model');
     expect(binding('main-editorial')).toMatchObject({ route: 'opencode-zen', endpoint: 'https://opencode.ai/inference/openai/v1/chat/completions', model: 'zen-account-custom-model' });
   });
+});
+
+
+/** The internal choice seam deliberately stays off the request protocol (#1650). */
+function choose(role: import('../../src/shared/protocol.js').ModelRoleId, modelId: string | null, connectionId = 'anthropic-claude', reasoningEffort = 'high'): void {
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  try { db.exec('PRAGMA foreign_keys = ON'); writeModelRoleChoice(db, role, modelId === null ? null : { connectionId, modelId, reasoningEffort }); }
+  finally { db.close(); }
+}
+
+it('stores four independent choices and efforts without changing channel defaults (#1650)', () => {
+  const saved = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+  const models = ['claude-opus-5', 'claude-haiku-4-5', 'claude-sonnet-5', 'claude-fable-5-1'];
+  const efforts = ['high', 'low', 'medium', 'xhigh'];
+  for (const [i, role] of ['foreground-pro', 'foreground-flash', 'underlying-pro', 'underlying-flash'].entries())
+    choose(role as import('../../src/shared/protocol.js').ModelRoleId, models[i]!, saved.connectionId, efforts[i]!);
+  expect(store.getModelRoles().map(role => [role.binding?.modelId, role.binding?.reasoningEffort])).toEqual(models.map((id, i) => [id, efforts[i]]));
+  expect(store.getConfiguredModelRoleBinding('underlying-pro')).toMatchObject({ model: models[2], reasoningEffort: efforts[2] });
+  expect(binding('fast-interaction')).toMatchObject({ model: models[3], reasoningEffort: efforts[3] });
+  expect(store.getModelServiceRouteConnection('anthropic-claude')?.binding).toEqual(saved.binding);
+});
+
+it('moves every following role with Pro, and underlying Flash follows foreground Flash first (#1650)', () => {
+  store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+  store.selectMainRoleModel('anthropic-claude', 'claude-opus-5', 'high');
+  expect(store.getModelRoles().map(role => role.binding?.modelId)).toEqual(Array(4).fill('claude-opus-5'));
+  store.selectMainRoleModel('anthropic-claude', 'claude-sonnet-5', 'medium');
+  expect(store.getModelRoles().map(role => role.binding?.modelId)).toEqual(Array(4).fill('claude-sonnet-5'));
+  choose('foreground-flash', 'claude-haiku-4-5');
+  expect(binding('fast-interaction')?.model).toBe('claude-haiku-4-5');
+  choose('underlying-flash', 'claude-fable-5-1');
+  expect(binding('fast-interaction')?.model).toBe('claude-fable-5-1');
+  choose('underlying-flash', null);
+  expect(binding('fast-interaction')?.model).toBe('claude-haiku-4-5');
+});
+
+it('keeps an unavailable underlying Flash choice while following foreground Flash (#1650)', () => {
+  store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+  const go = store.saveModelServiceConnection('Synthetic Go', null, 'ready', 'opencode-go');
+  store.selectFastRoleModel('anthropic-claude', 'claude-haiku-4-5');
+  choose('underlying-flash', 'glm-5.3-flash', go.connectionId);
+  store.setModelServiceCredentialState(go.credentialReference, 'missing');
+  expect(binding('fast-interaction')?.model).toBe('claude-haiku-4-5');
+  store.setModelServiceCredentialState(go.credentialReference, 'ready');
+  expect(binding('fast-interaction')?.model).toBe('glm-5.3-flash');
+});
+
+it('legacy Flash selection clears the underlying override, and clear clears both (#1650; F1 revisits)', () => {
+  store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+  choose('underlying-flash', 'claude-fable-5-1');
+  store.selectFastRoleModel('anthropic-claude', 'claude-haiku-4-5');
+  expect(binding('fast-interaction')?.model).toBe('claude-haiku-4-5');
+  choose('underlying-flash', 'claude-fable-5-1');
+  store.clearFlashModel();
+  expect(binding('fast-interaction')).toEqual(binding('main-editorial'));
+});
+
+it('connection deletion cascades its choices and a later save inherits afresh (#1650)', () => {
+  store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+  choose('underlying-pro', 'claude-sonnet-5'); choose('foreground-flash', 'claude-haiku-4-5'); choose('underlying-flash', 'claude-fable-5-1');
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  try { db.exec('PRAGMA foreign_keys = ON'); db.exec('DELETE FROM model_service_connections'); } finally { db.close(); }
+  expect(store.getModelRoles().map(role => role.binding)).toEqual(Array(4).fill(null));
+  store.saveModelServiceConnection('Synthetic Claude again', null, 'ready', 'anthropic-claude');
+  expect(binding('fast-interaction')).toEqual(binding('main-editorial'));
+  expect(store.getConfiguredModelRoleBinding('underlying-pro')).toEqual(binding('main-editorial'));
 });
