@@ -1144,6 +1144,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.bookId) || !validUuid(input.resultId) || !(input.sourcesAfter === null || isSafeInteger(input.sourcesAfter, 0))) throw new ProtocolError(tentativeId);
       break;
     }
+    // 在浏览器中打开 (Issue #1641): exactly one identity form — a result's source card, or a retained source — and nothing else.
+    case 'inspectSourceAddress': {
+      const byEvidence = isRecord(value.input) && Object.hasOwn(value.input, 'evidenceId');
+      const input = requireInput(value.input, byEvidence ? ['bookId', 'evidenceId'] : ['bookId', 'resultId', 'cardId'], tentativeId);
+      if (!validUuid(input.bookId) || !(byEvidence ? validUuid(input.evidenceId)
+        : validUuid(input.resultId) && typeof input.cardId === 'string' && /^src_[0-9a-f]{20}$/u.test(input.cardId))) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'recordVerificationReviewDecision': {
       const input = requireInputWithOptional(value.input, ['bookId', 'resultId', 'resultVersion', 'disposition', 'ownWords', 'reason'], ['excludedSourceRefs'], tentativeId);
       if (input.excludedSourceRefs !== undefined && (input.disposition !== 'request-evidence' || !Array.isArray(input.excludedSourceRefs) ||
