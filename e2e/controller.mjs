@@ -910,6 +910,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'accessibility-reflow-forced-colors',
     'knowledge-guidelines',
     'knowledge-guideline-import',
+    'knowledge-library-use',
     'j14-knowledge-keyboard',
     'j14-knowledge-reflow-forced-colors',
     'knowledge-guideline-restart',
