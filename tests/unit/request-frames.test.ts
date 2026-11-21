@@ -2465,3 +2465,16 @@ it('decodes independent two-role efforts only on the atomic two-role selector (#
     expect(() => decodeRequest(new TextEncoder().encode(JSON.stringify({ ...frame, op })))).toThrow(ProtocolError);
   expect(() => decodeRequest(new TextEncoder().encode(JSON.stringify({ ...frame, input: { ...input, fastReasoningEffort: 'invalid value' } })))).toThrow(ProtocolError);
 });
+
+it('decodes the Pro / Flash tier selectors and the Flash clear with their own inputs only (#1620)', () => {
+  const decode = (op: string, input: unknown) => decodeRequest(new TextEncoder().encode(JSON.stringify({ id: randomUUID(), op, input })));
+  for (const op of ['selectProModel', 'selectFlashModel']) {
+    expect(decode(op, { route: 'opencode-go', modelId: 'kimi-k3' })).toMatchObject({ op, input: { route: 'opencode-go', modelId: 'kimi-k3' } });
+    expect(decode(op, { route: 'opencode-go', modelId: 'kimi-k3', reasoningEffort: 'high' })).toMatchObject({ input: { reasoningEffort: 'high' } });
+    for (const input of [{ route: 'opencode-go', modelId: 'kimi-k3', fastReasoningEffort: 'low' }, { route: 'opencode-go', modelId: 'kimi-k3', tier: 'pro' },
+      { route: 'not-a-channel', modelId: 'kimi-k3' }, { route: 'opencode-go', modelId: 'kimi-k3', reasoningEffort: 'invalid value' }, { route: 'opencode-go' }])
+      expect(() => decode(op, input), `${op} ${JSON.stringify(input)}`).toThrow(ProtocolError);
+  }
+  expect(decode('clearFlashModel', {})).toMatchObject({ op: 'clearFlashModel', input: {} });
+  for (const input of [{ route: 'opencode-go' }, { modelId: 'kimi-k3' }]) expect(() => decode('clearFlashModel', input)).toThrow(ProtocolError);
+});

@@ -2289,12 +2289,25 @@ async function main() {
         !refreshed.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.models.some(model=>model.modelId==='deepseek-flash'))return false;
       let settings=await window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'j12-custom-main'});
       const binding=(id)=>settings.roles.find(role=>role.roleId===id)?.binding;
-      if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='deepseek-flash')return false;
+      // #1620: the first key chose no Flash model, so the Flash roles follow the Pro model the editor just chose.
+      if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='j12-custom-main')return false;
       settings=await window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'j12-custom-fast'});
       if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='j12-custom-fast')return false;
       settings=await window.ai7.selectBothRoleModels({route:'deepseek-open-platform',modelId:'deepseek-flash'});
       return binding('main-editorial')?.modelId==='deepseek-flash'&&binding('fast-interaction')?.modelId==='deepseek-flash';
     })()`), 'independent-role-models-without-test');
+    // #1620: the Pro / Flash requests beside the 0.7.3 ones; the four roles say where their model comes from, and Flash follows Pro once cleared.
+    requireJourney(await primary.evaluate(`(async () => {
+      let settings=await window.ai7.selectFlashModel({route:'deepseek-open-platform',modelId:'j12-tier-flash'});
+      const role=(id)=>settings.modelRoles.find(item=>item.roleId===id);
+      if(settings.modelRoles.map(item=>item.roleId).join(',')!=='foreground-pro,foreground-flash,underlying-pro,underlying-flash')return false;
+      if(role('underlying-flash')?.binding?.modelId!=='j12-tier-flash'||role('underlying-flash').source!=='flash-tier'||role('foreground-pro').binding?.modelId!=='deepseek-flash')return false;
+      settings=await window.ai7.clearFlashModel();
+      if(role('foreground-flash')?.source!=='follows-foreground-pro'||role('foreground-flash').sourceLabel!=='跟随前台 Pro'||role('foreground-flash').binding?.modelId!=='deepseek-flash')return false;
+      await window.ai7.selectProModel({route:'deepseek-open-platform',modelId:'deepseek-flash'});
+      settings=await window.ai7.selectFlashModel({route:'deepseek-open-platform',modelId:'deepseek-flash'});
+      return role('foreground-flash')?.source==='flash-tier'&&settings.roles.find(item=>item.roleId==='fast-interaction')?.binding?.modelId==='deepseek-flash';
+    })()`) === true, 'tier-model-requests');
     await assertRenderer(primary, `(() => { const refresh=document.querySelector('[data-action="retry-model-list"]'); if(!(refresh instanceof HTMLButtonElement)||refresh.disabled||refresh.textContent!=='刷新模型列表')return false; refresh.click(); return true; })()`, 'model-refresh-click');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent==='模型服务不可达，请检查网络或网络代理设置' && document.querySelector('.model-service-technical:is(:not([open]), [hidden]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')`, 'model-refresh-discovery-failure-visible');
     await assertRenderer(primary, `document.querySelector('[data-action="test-flow-connection"]')?.disabled===false && document.querySelector('.model-service-flow-feedback')?.textContent.includes('尚未测试')`, 'inline-model-connection-test-surface');
