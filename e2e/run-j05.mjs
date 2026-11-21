@@ -10,7 +10,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { READING_REVISION, DIRECT_EDIT, applyRendererDiagnostics, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { READING_REVISION, DIRECT_EDIT, applyRendererDiagnostics, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, manuscriptRailJump, runJ14DarkPass } from './controller.mjs';
 
 // J-05, first slice (Issue #407): Editorial Marks on the manuscript. An editor marks exact text with a
 // highlight, a 批注, a 备注 and a 修改建议, reads each on its Mark Card with its source, previews a
@@ -1186,6 +1186,11 @@ async function main() {
     try {
       for (const viewport of [{width:1280,height:800},{width:1008,height:681}]) {
         at(viewport.width===1280?'review-keyboard-wide':'review-keyboard-gate');
+        // The Run's paragraph stands in the middle of the Book, so the windows the stages after this block read (the first, the last)
+        // do not carry its 400 and more marks; the way home is below.
+        await assertRenderer(renderer, `(() => { window.__j05HomeBlock=window.__j05HomeBlock??document.querySelector('[data-testid="manuscript-editor"] [data-block-id]').dataset.blockId; return true; })()`, 'review-triage-home-block');
+        await assertRenderer(renderer, manuscriptRailJump('0.5'), 'review-triage-middle-jump');
+        await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId!==window.__j05HomeBlock`, 'review-triage-middle-loaded');
         // Each form reviews its own tester edit, and takes away what it leaves (below), so the Book is as it found it.
         // Each form edits its own short, unmarked paragraph: the edit and the Apply of its 「……」 together add about 1,100
         // characters, and a paragraph holds at most 2,048 (MAX_BLOCK_GRAPHEMES), so two forms in one paragraph cannot both apply.
@@ -1320,6 +1325,9 @@ async function main() {
         }
         await triageClick(renderer,'[data-nav-book-section="manuscript"]');
         await waitFor(renderer, `document.querySelector('[data-screen="editor"]')!==null`, 'review-triage-cleanup-back-on-text');
+        // Home again: the stages after this block read the Book's first page.
+        await assertRenderer(renderer, manuscriptRailJump('0'), 'review-triage-home-jump');
+        await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId===window.__j05HomeBlock`, 'review-triage-home-loaded');
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
