@@ -190,7 +190,7 @@ export function modelServiceSummary(projection: ModelServiceSettingsProjection):
   if (main?.binding == null) text = '尚未选择模型，请在上方选择模型并点击「使用这个模型」。';
   else if (main.status !== 'available') {
     const reason = main.statusDetail?.split('。')[0];
-    text = `${name(main)} · ${main.statusLabel}：${reason ?? (main.status === 'setup-required' ? '请保存这个渠道的密钥，或选择其他模型' : main.status === 'needs-attention' ? '请重新保存这个渠道的密钥，或选择其他模型' : '这个模型暂不可用，请检查密钥或选择其他模型')}。`;
+    text = `${name(main)} · ${main.statusLabel}：${reason ?? (main.status === 'setup-required' ? '请保存这个渠道的密钥，或选择其他模型' : main.status === 'needs-attention' ? '请重新保存这个渠道的密钥，或选择其他模型' : '系统的安全存储暂不可用，请先恢复本机安全存储后重试')}。`;
   } else text = `AI7 当前使用：${name(main)}；${flash?.source === 'flash-tier' ? `对话、润色和 AI 助手使用：${name(flash)}。` : '对话、润色和 AI 助手也使用同一个模型。'}`;
   const follows = main?.status === 'available' ? '现在这些任务使用主要模型。' : '请先处理上方主要模型的设置。';
   if (flash?.source === 'flash-unavailable-follows-foreground-pro') text += ` 单独选择的较轻模型密钥不可用，请保存对应渠道的密钥或重新选择；${follows}`;
@@ -241,13 +241,16 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   const flashSelect = el('select'); flashSelect.setAttribute('aria-label', '较轻的模型'); flashSelect.dataset['flashModel'] = 'true'; flashSelect.disabled = !ready || offered.length === 0;
   for (const model of offered) { const option = el('option', undefined, modelLabelWords(model)); option.value = model.modelId; flashSelect.append(option); }
   const savedFlash = flashChosen && flashRole?.binding?.providerId === channel.route ? flashRole.binding.modelId : undefined;
-  flashSelect.value = options.flashModelId || savedFlash || offered[0]?.modelId || '';
+  const recommendedFlash = channel.recommended?.flash.find(id => offered.some(model => model.modelId === id));
+  flashSelect.value = options.flashModelId || savedFlash || recommendedFlash || offered[0]?.modelId || '';
   const flashCustom = el('input'); flashCustom.type = 'text'; flashCustom.maxLength = 128; flashCustom.disabled = !ready; flashCustom.dataset['customFlashModelId'] = 'true'; flashCustom.setAttribute('aria-label', '较轻模型的自定义名称');
+  const flashCustomLabel = el('label', undefined, '手动输入较轻模型 ID'); flashCustomLabel.append(flashCustom);
   if (options.flashModelId && !offered.some(model => model.modelId === options.flashModelId)) flashCustom.value = options.flashModelId;
   const flashModel = (): ModelServiceChannelModelProjection | null => {
     const id = technicalLayerVisible && flashCustom.value.trim() ? flashCustom.value.trim() : flashSelect.value;
     return offered.find(model => model.modelId === id) ?? (id ? { modelId: id, modelLabel: id, family: '', main: 'eligible', fast: 'eligible', capabilities: { text: 'supported', stream: 'supported', functionTools: 'supported' } } : null);
   };
+  const flashFeedback = el('p', 'field-note'); flashFeedback.dataset['flashConnectionTest'] = 'true';
   const effortValues = new Map<'main' | 'fast', string>();
   const otherEfforts = new Map<'main' | 'fast', boolean>();
   const effortInputs = new Map<'main' | 'fast', HTMLInputElement>();
@@ -277,7 +280,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   const roleButtons: HTMLButtonElement[] = [];
   const paint = (): void => {
     test.disabled = testing || !ready || checked === null;
-    testFast.disabled = testing || !ready || flashModel() === null; testFast.hidden = !flashChosen;
+    testFast.disabled = testing || !ready || flashModel() === null;
     for (const [role, select] of effortSelects) {
       const model = role === 'main' ? checked : flashModel();
       const runtime = channel.route === null || model === null ? undefined : modelServiceRuntimeBinding(channel.route, model.modelId, role);
@@ -294,6 +297,9 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     const sameEffort = (pro?.binding?.reasoningEffort ?? 'off') === chosenEffort();
     use.disabled = !ready || checked === null || (current?.route === channel.route && current.modelId === checked.modelId && sameEffort);
     for (const [index, button] of roleButtons.entries()) button.disabled = !ready || (index === 0 ? checked : flashModel()) === null;
+    const flashTest = projection.routeChoice.routes.find(option => option.route === channel.route)?.connection?.connectionTest;
+    const ownFlashTest = flashTest?.modelId === flashModel()?.modelId ? flashTest : null;
+    flashFeedback.textContent = ownFlashTest == null ? '' : technicalLayerVisible ? modelConnectionTestLabel(ownFlashTest) : ownFlashTest.outcome === 'passed' ? '较轻模型连接成功，可以使用。' : '较轻模型连接未通过，请检查密钥和所选模型后重试。';
     const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
     const own = tested !== null && tested.modelId === checked?.modelId ? tested : null;
     // Ordinary mode reads the test's outcome only (Issue #1431 item 96); the capability matrix and the test's technical scope are developer words.
@@ -453,7 +459,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
       const next = await options.api.selectProModel({ route: channel.route, modelId: checked.modelId, reasoningEffort: chosenEffort() });
       options.setEffortDraft?.(channel.channelId, 'main', undefined); options.setEffortOtherDraft?.(channel.channelId, 'main', undefined);
       options.render(next);
-      options.setStatus(`AI7 的主要任务将使用 ${channel.channelLabel} / ${modelLabelWords(checked)}。`, 'success');
+      options.setStatus(`AI7 的主要任务将使用 ${channel.channelLabel} / ${modelLabelWords(checked)}。已在进行的任务不受影响。`, 'success');
     } catch (error) { use.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
   })());
   paint();
@@ -461,7 +467,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   const actions = el('div', 'button-row');
   actions.append(use);
   const optional = el('section', 'model-service-optional');
-  optional.append(el('h4', undefined, '可选：为较轻的任务另选一个模型'), el('p', 'field-note', '对话、润色和 AI 助手可以使用较轻的模型。'), flashSelect, ...(technicalLayerVisible ? [flashCustom] : []), effortLabels[1]!, roleButtons[1]!, testFast);
+  optional.append(el('h4', undefined, '可选：为较轻的任务另选一个模型'), el('p', 'field-note', '对话、润色和 AI 助手可以使用较轻的模型。'), flashSelect, ...(technicalLayerVisible ? [flashCustomLabel] : []), effortLabels[1]!, roleButtons[1]!, ...(flashChosen ? [testFast, flashFeedback] : []));
   const clear = el('button', 'quiet', '不单独选择'); clear.type = 'button'; clear.dataset['action'] = 'clear-flash-model';
   clear.disabled = !flashChosen;
   clear.addEventListener('click', () => void (async () => {

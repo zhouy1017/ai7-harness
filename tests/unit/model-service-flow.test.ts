@@ -829,7 +829,8 @@ it('keeps Other open for blank and suggested text and sends the shown dropdown s
 
 it('shows all four developer roles, their sources and their own effort', async () => {
   setTechnicalLayerVisible(true);
-  const projection = completeSettings();
+  const base = completeSettings();
+  const projection = { ...base, modelRoles: base.modelRoles.map(role => ({ ...role, statusDetail: '这个渠道不能发送所选模型，请换一个模型。这次没有发送任何内容。' })) };
   const { screen, node } = mountSettings(api(projection));
   try {
     await screen.renderModelServiceSettings();
@@ -838,6 +839,8 @@ it('shows all four developer roles, their sources and their own effort', async (
       expect(rows[index]!.textContent).toContain(role.roleLabel);
       expect(rows[index]!.textContent).toContain(role.sourceLabel);
       expect(rows[index]!.textContent).toContain('思考强度');
+      expect(rows[index]!.textContent).toContain('这个渠道不能发送所选模型，请换一个模型。');
+      expect(rows[index]!.textContent).not.toContain('这次没有发送任何内容');
     }
   } finally { vi.unstubAllGlobals(); }
 });
@@ -858,7 +861,7 @@ it.each(['setup-required', 'needs-attention', 'unavailable'] as const)('does not
   const projection = settings(['anthropic-claude']);
   const { node } = flow({ ...projection, modelRoles: projection.modelRoles.map(role => role.roleId === 'foreground-pro' ? { ...role, status } : role) });
   expect(node.querySelector('[data-model-summary]')!.textContent).not.toContain('AI7 当前使用');
-  expect(node.querySelector('[data-model-summary]')!.textContent).toContain('模型');
+  expect(node.querySelector('[data-model-summary]')!.textContent).toContain(status === 'unavailable' ? '系统的安全存储暂不可用' : '模型');
 });
 
 it('tests the optional model with its own selected model and effort', async () => {
@@ -876,7 +879,7 @@ it('starts the optional effort at service default when no lighter model is chose
   const { node, calls } = flow({ ...projection, modelRoles: projection.modelRoles.map(role => ({ ...role, binding: role.binding && { ...role.binding, reasoningEffort: 'high' } })) });
   expect(node.querySelector('select[aria-label="思考强度"]')!.value).toBe('high');
   expect(node.querySelector('select[aria-label="较轻模型的思考强度"]')!.value).toBe('');
-  expect(button(node, 'test-fast-flow-connection').hidden).toBe(true);
+  expect(node.querySelector('[data-action="test-fast-flow-connection"]')).toBeNull();
   button(node, 'select-fast-role-model').click();
   await vi.waitFor(() => expect(calls.selectFlashModel).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'off' })));
 });
@@ -890,4 +893,43 @@ it('keeps favourite and unmatched-selection marks on a recommended option', () =
   const selected = node.querySelectorAll('optgroup option').find(option => option.value === id)!;
   expect(selected.textContent).toContain('★');
   expect(selected.textContent).toContain('已选（不匹配筛选）');
+});
+
+
+it('uses the configured lighter recommendation and labels its developer custom field', () => {
+  const projection = settings(['anthropic-claude'], 'anthropic-claude', null);
+  const channel = projection.channels.find(item => item.route === 'anthropic-claude')!;
+  const recommended = channel.models.at(-1)!.modelId;
+  const { node } = flow({ ...projection, channels: projection.channels.map(item => item === channel ? { ...item, recommended: { pro: [], flash: [recommended] } } : item) });
+  expect(node.querySelector('select[data-flash-model]')!.value).toBe(recommended);
+  expect(node.querySelector('[data-custom-flash-model-id]')!.parentElement!.textContent).toContain('手动输入较轻模型 ID');
+});
+
+it('drops unsaved lighter selection and Other mode on explicit re-entry, without rendering an empty ordinary role section', async () => {
+  setTechnicalLayerVisible(false);
+  const { screen, node } = mountSettings(api(completeSettings()));
+  try {
+    await screen.renderModelServiceSettings();
+    const chosen = node.querySelector('select[data-flash-model]')!.value;
+    const select = node.querySelector('select[data-flash-model]')!;
+    select.value = select.querySelectorAll('option').at(-1)!.value; select.dispatchEvent({ type: 'change' });
+    const effort = node.querySelector('select[aria-label="较轻模型的思考强度"]')!;
+    effort.value = '__other'; effort.dispatchEvent({ type: 'change' });
+    const other = node.querySelector('input[data-reasoning-effort="fast"]')!; other.value = 'vendor-future-level'; other.dispatchEvent({ type: 'input' });
+    await screen.renderModelServiceSettings();
+    expect(node.querySelector('select[data-flash-model]')!.value).toBe(chosen);
+    expect(node.querySelector('select[aria-label="较轻模型的思考强度"]')!.value).not.toBe('__other');
+    expect(node.querySelector('.model-service-current-roles')).toBeNull();
+  } finally { vi.unstubAllGlobals(); }
+});
+
+
+it('keeps the selected lighter model connection-test result beside its controls', () => {
+  setTechnicalLayerVisible(false);
+  const projection = settings(['anthropic-claude']);
+  const binding = projection.modelRoles.find(role => role.roleId === 'foreground-flash')!.binding!;
+  const route = projection.routeChoice.routes.find(item => item.route === 'anthropic-claude')!;
+  Object.assign(route.connection!, { connectionTest: { modelId: binding.modelId, outcome: 'passed', code: null, testedAt: '2026-11-21T00:00:00.000Z', credentialUpdatedAt: '2026-11-21T00:00:00.000Z', verified: 'buffered-text-only' } });
+  const { node } = flow(projection);
+  expect(node.querySelector('[data-flash-connection-test]')!.textContent).toBe('较轻模型连接成功，可以使用。');
 });

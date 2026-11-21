@@ -453,6 +453,7 @@ async function assertOrdinaryModelReachability(renderer) {
     await waitFor(renderer, `innerWidth===${viewport.width} && innerHeight===${viewport.height}`, 'ordinary-model-supported-viewport');
     const geometry = await renderer.evaluate(`(async () => {
       const selectors=['select[aria-label="渠道"]','.model-credential-form input[type="password"]','[data-action="save-channel-credential"]','[data-action="retry-model-list"]','[data-action="remove-model-service-credential"]','input[aria-label="筛选模型"]','select[aria-label="AI7 使用的模型"]','select[aria-label="思考强度"]', 'select[aria-label="较轻模型的思考强度"]','[data-favorite-model]','[data-action="select-fast-role-model"]','[data-action="use-model-for-both-roles"]','[data-action="test-flow-connection"]','[data-action="clear-flash-model"]','select[data-flash-model]','[data-model-summary]'];
+      if(document.querySelector('[data-action="test-fast-flow-connection"]'))selectors.push('[data-action="test-fast-flow-connection"]');
       const heading=document.querySelector('[data-flow-step="credential"] h4').getBoundingClientRect();
       const form=document.querySelector('.model-credential-form').getBoundingClientRect();
       if(heading.bottom>form.top+1)return {ok:false,width:innerWidth,height:innerHeight,overlap:true};
@@ -1175,7 +1176,7 @@ async function main() {
     await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'ordinary-reduced-motion-reset');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-model-settings-hub');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'ordinary-model-settings-ready');
-    await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="use-model-for-both-roles"]') && document.querySelector('[data-action="select-fast-role-model"]') && !document.querySelector('[data-custom-model-id]') && document.querySelector('.model-service-current-roles') && document.querySelectorAll('[data-search-backend]').length===5`, 'ordinary-model-single-view');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="use-model-for-both-roles"]') && document.querySelector('[data-action="select-fast-role-model"]') && !document.querySelector('[data-custom-model-id]') && document.querySelector('[data-model-summary]') && document.querySelectorAll('[data-search-backend]').length===5`, 'ordinary-model-single-view');
     await assertOrdinaryModelReachability(primary);
     // #1370: both configuration sections are directly mounted in ordinary mode. CI has no search keys;
     // credential save/test success is covered by the ordinary-production renderer/service tests, never a live provider.
@@ -2430,7 +2431,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-model-service-mode="ordinary"]') && document.querySelector('.model-service-settings:not([data-choice-entry-old])')`, 'model-choice-entry-ready');
     await assertRenderer(primary, `(() => {const b=document.querySelector('.model-service-settings h2').getBoundingClientRect();return b.top>=document.querySelector('#context-header').getBoundingClientRect().bottom&&b.bottom<=innerHeight;})()`, 'model-choice-heading-visible');
     await pointerClick(primary, waitFor, '[data-action="clear-flash-model"]', 'model-choice-clear');
-    await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('也使用同一个模型')`, 'model-choice-one-sentence');
+    await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('也使用同一个模型') && !document.querySelector('[data-action="test-fast-flow-connection"]')`, 'model-choice-one-sentence');
     const chooseModel = async (id, lighter = false) => {
       const selector = lighter ? 'select[data-flash-model]' : 'select[aria-label="AI7 使用的模型"]';
       const index = await primary.evaluate(`Array.from(document.querySelector(${JSON.stringify(selector)}).options).findIndex(option=>option.value===${JSON.stringify(id)})`);
@@ -2444,7 +2445,8 @@ async function main() {
       }
       await pointerClick(primary, waitFor, `.ui-select-popover:not([hidden]) [role="option"][data-index="${index}"]`, 'model-choice-option');
     };
-    const alternative = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.channels.find(channel=>channel.route==='deepseek-open-platform').models.find(model=>model.main==='eligible'&&model.fast==='eligible'&&model.modelId!=='deepseek-flash').modelId)`);
+    const alternative = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.channels.find(channel=>channel.route==='deepseek-open-platform').models.find(model=>model.main==='eligible'&&model.fast==='eligible'&&model.modelId!=='deepseek-flash')?.modelId ?? null)`);
+    requireJourney(typeof alternative==='string', 'model-choice-alternative-offered');
     const flashBefore = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.modelRoles.find(role=>role.roleId==='foreground-flash').source))`);
     await chooseModel(alternative);
     await pointerClick(primary, waitFor, '[data-action="use-model-for-both-roles"]', 'model-choice-use');
@@ -2452,7 +2454,7 @@ async function main() {
     requireJourney((await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.modelRoles.find(role=>role.roleId==='foreground-flash').source))`))===flashBefore, 'model-choice-primary-keeps-light');
     await chooseModel('deepseek-flash', true);
     await pointerClick(primary, waitFor, '[data-action="select-fast-role-model"]', 'model-choice-light');
-    await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('AI 助手使用：')`, 'model-choice-two-sentence');
+    await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('AI 助手使用：') && document.querySelector('[data-action="test-fast-flow-connection"]')`, 'model-choice-two-sentence');
     await pointerClick(primary, waitFor, '[data-action="clear-flash-model"]', 'model-choice-remove-light');
     await waitFor(primary, `document.querySelector('[data-model-summary]')?.textContent.includes('也使用同一个模型')`, 'model-choice-return-one');
     await waitFor(primary, `document.activeElement===document.querySelector('select[data-flash-model]')?.nextElementSibling && document.querySelector('[data-action="clear-flash-model"]')?.disabled===true`, 'model-choice-clear-focus');

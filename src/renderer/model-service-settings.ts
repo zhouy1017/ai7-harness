@@ -182,7 +182,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
         currentRoles.append(line);
       }
     }
-    content.append(currentRoles);
+    if (technicalLayerVisible) content.append(currentRoles);
     const unsupported = element('section', 'review-section model-unsupported-providers');
     unsupported.dataset['unsupportedProviders'] = 'true';
     unsupported.setAttribute('aria-label', '尚未支持的模型服务');
@@ -280,6 +280,9 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     setStatus('正在读取模型服务状态…', 'busy');
     modelServiceChannel = null;
     modelChoices.clear();
+    flashModelChoices.clear();
+    effortOtherDrafts.clear();
+    effortDrafts.clear();
     modelFilters.clear();
     let read: [ModelServiceSettingsProjection, Awaited<ReturnType<typeof rendererApi.getPreferences>>];
     try {
