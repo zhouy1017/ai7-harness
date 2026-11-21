@@ -131,9 +131,10 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     if (mounted?.isConnected) paintModelServiceSettings(projection, passive);
   }
 
-  function paintModelServiceSettings(projection: ModelServiceSettingsProjection, passive = false): void {
-    const searchHadFocus = document.activeElement !== null && document.activeElement === document.querySelector('[data-search-backends="true"] h3');
-    const previous = document.querySelector<HTMLElement>('.model-service-settings');
+  function paintModelServiceSettings(projection: ModelServiceSettingsProjection, passive = false, entry = false): void {
+    const searchHadFocus = !entry && document.activeElement !== null && document.activeElement === document.querySelector('[data-search-backends="true"] h3');
+    // Explicit navigation keeps the shell's top-of-page reset; only updates retain the old interaction.
+    const previous = entry ? null : document.querySelector<HTMLElement>('.model-service-settings');
     const restoreInteraction = previous ? retainPollInteraction(previous, passive) : () => {};
     stopFollow?.();
     const content = panel();
@@ -297,7 +298,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       const [projection, preferences] = read;
       if (!route.isCurrent()) return;
       favourites = preferences.values['model.favourites'];
-      paintModelServiceSettings(projection);
+      paintModelServiceSettings(projection, false, true);
       setStatus('模型服务设置已打开');
       if (focus === 'search') focusSearchSettings();
     } catch (error) {

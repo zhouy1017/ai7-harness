@@ -66,7 +66,7 @@ function completeSettings(): ModelServiceSettingsProjection {
   } as unknown as ModelServiceSettingsProjection;
 }
 
-function mountSettings(calls: ReturnType<typeof api>) {
+function mountSettings(calls: ReturnType<typeof api>, resetScroll = false) {
   let poll: (() => void) | undefined;
   vi.stubGlobal('window', { ai7: calls, setInterval: (tick: () => void) => { poll = tick; return 0; }, clearInterval: () => undefined });
   const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] => {
@@ -75,7 +75,7 @@ function mountSettings(calls: ReturnType<typeof api>) {
   const root = element('main'); document.body.append(root);
   const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(),
     button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
-    rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (_state, content) => root.replaceChildren(content) });
+    rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (_state, content) => { root.replaceChildren(content); if (resetScroll) root.scrollTop = 0; } });
   return { screen, node: root as unknown as MiniElement, poll: () => poll!() };
 }
 
@@ -768,4 +768,15 @@ it('groups configured recommendations before the remaining models and offers def
   expect(node.querySelector('input[data-reasoning-effort="main"]')!.hidden).toBe(false);
   const plain = { ...projection, channels: projection.channels.map(channel => { const { recommended: _recommendations, ...plain } = channel; return plain; }) };
   expect(flow(plain).node.querySelectorAll('optgroup')).toHaveLength(0);
+});
+
+
+it('lets an explicit settings entry reset the previous page scroll instead of restoring it', async () => {
+  const { screen, node } = mountSettings(api(completeSettings()), true);
+  try {
+    await screen.renderModelServiceSettings();
+    node.scrollTop = 240;
+    await screen.renderModelServiceSettings();
+    expect(node.scrollTop).toBe(0);
+  } finally { vi.unstubAllGlobals(); }
 });
