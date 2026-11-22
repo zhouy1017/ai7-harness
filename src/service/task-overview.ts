@@ -1,4 +1,6 @@
-import type { BookTaskItemProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewGroupKey, TaskOverviewItemProjection, TaskOverviewProjection, TaskPlanKind } from '../shared/protocol.js';
+import type { TaskWorkReader } from './task-work.js';
+import type { ProgressReader } from './analysis/baseline-analysis-types.js';
+import type { BookTaskItemProjection, BookTasksProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewGroupKey, TaskOverviewItemProjection, TaskOverviewProjection, TaskPlanKind } from '../shared/protocol.js';
 
 const GROUPS: readonly TaskOverviewGroupKey[] = ['running', 'queued', 'waiting', 'paused', 'recent'];
 /** Bulk controls isolate stale individual tasks; resuming always restores dispatch. */
@@ -53,7 +55,8 @@ export function composeTaskOverview(attention: GlobalAttentionProjection, capaci
   for (const entry of source) {
     if (!['analysis', 'analysis-plan', 'review', 'review-plan', 'task-plan', 'dialogue', 'task-intent-draft'].includes(entry.item.target.kind)) continue;
     const item = taskOverviewItem(entry.item, queuePosition, entry.result);
-    unique.set(item.itemId, { ...item, selection: entry.selection ?? null, label: item.label + (entry.selection ? ' · 所选段落' : ''), usage: usage(item) });
+    unique.set(item.itemId, { ...item, selection: entry.selection ?? null, label: item.label + (entry.selection ? ' · 所选段落' : ''), usage: usage(item),
+      ...(entry.work === undefined ? {} : { work: entry.work }) });
   }
   const groups = GROUPS.map((key) => {
     const items = [...unique.values()].filter((item) => key === 'recent' ? ['completed', 'cancelled', 'stopped'].includes(item.state) : item.state === key);
@@ -91,4 +94,45 @@ export function estimateTaskStarts(projection: TaskOverviewProjection, now = Dat
     return { ...item, eta: earliest };
   });
   return { ...projection, groups: projection.groups.map((group) => group.key === 'queued' ? { ...group, items: queued } : group) };
+}
+
+/** 用时 of the rows of the Book's 任务 panel (Issue #1670), read for the whole Book at once: the reading the plan of each Task gives. */
+export function withBookTaskWork(work: TaskWorkReader | null, live: (attemptId: string) => unknown, projection: BookTasksProjection): BookTasksProjection {
+  if (work === null) return projection;
+  const entries = projection.groups.flatMap((group) => group.items);
+  const read = work.ofItems(entries.map((entry) => entry.item), (attemptId) => live(attemptId) !== null);
+  const of = new Map(entries.map((entry, index) => [entry, read[index]!]));
+  return { ...projection, groups: projection.groups.map((group) => ({ ...group, items: group.items.map((entry) => ({ ...entry, work: of.get(entry) ?? null })) })) };
+}
+
+/** The finished card's 处理用时 · 约 N 次调用 as it always read: the Run Reports' stage wall times and requests; a dialogue's attempts. */
+export function overviewUsage(owners: {
+  taskSummary(target: { runRecordId: string } | { taskIntentIds: readonly string[] }): { calls: number; elapsed: number } | null;
+  reviewTaskIntentIds(bookId: string, reviewRunId: string): string[];
+  dialogueAttempts(bookId: string, dialogueId: string): ReadonlyArray<{ startedAt: string; settledAt: string | null }>;
+}): (item: TaskOverviewItemProjection) => TaskOverviewItemProjection['usage'] {
+  return (item) => {
+    if (!['completed', 'cancelled', 'stopped'].includes(item.state)) return null;
+    if (item.runRecordId !== null) return owners.taskSummary({ runRecordId: item.runRecordId });
+    if (item.target.kind === 'review' || item.target.kind === 'review-plan') return owners.taskSummary({ taskIntentIds: owners.reviewTaskIntentIds(item.target.bookId, item.target.reviewRunId) });
+    if (item.target.kind === 'dialogue') {
+      const attempts = owners.dialogueAttempts(item.target.bookId, item.target.dialogueId);
+      return { calls: attempts.length, elapsed: attempts.reduce((sum, attempt) => sum + (attempt.settledAt === null ? 0 : Math.max(0, Date.parse(attempt.settledAt) - Date.parse(attempt.startedAt))), 0) };
+    }
+    return null;
+  };
+}
+
+/** A running or queued row's progress: its Run's parts, the one under way, and 已用时 counted from the Run's record, as before. */
+export function withRunningProgress(projection: TaskOverviewProjection, progress: ProgressReader,
+  executionPlan: (runRecordId: string) => { manifest: { units: ReadonlyArray<{ ordinal: number; headingText: string | null }> } }): TaskOverviewProjection {
+  return { ...projection, groups: projection.groups.map((group) => ({ ...group, items: group.items.map((item) => {
+    if (item.runRecordId === null || !['running', 'queued'].includes(item.state)) return item;
+    const facts = executionPlan(item.runRecordId);
+    const current = progress(item.runRecordId);
+    const unit = facts.manifest.units.find((unit) => unit.ordinal === current?.currentUnitOrdinal);
+    return { ...item, progress: { done: current?.unitsSettled ?? 0, total: facts.manifest.units.length,
+      currentUnitLabel: unit?.headingText ?? null, elapsedMs: current === null ? null : Math.max(0, Date.now() - Date.parse(item.at)),
+      modelWaiting: current?.attemptState === 'awaiting-response' } };
+  }) })) };
 }

@@ -33,7 +33,8 @@ import { initializeAiEditLockSchema } from './ai-edit-locks.js';
 import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInput } from '../shared/protocol/scoped-edit.js';
 import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } from '../shared/protocol/series.js';
 import { effectiveModelReasoningEffort, modelProfileFor } from './provider/model-profile.js';
-import { composeTaskOverview, estimateTaskStarts } from './task-overview.js';
+import { composeTaskOverview, estimateTaskStarts, overviewUsage, withBookTaskWork, withRunningProgress } from './task-overview.js';
+import { TaskWorkReader } from './task-work.js';
 import { customAnalysisModeGoal, modelServiceRouteRefusal, type LegacyModelRoleId, type ModelRoleId, type ModelRoleResolutionProjection } from '../shared/protocol.js';
 import * as modelSearchSettings from './model-search-settings.js';
 import * as materialIndexOperations from './material-index-operations.js';
@@ -1921,6 +1922,7 @@ export class EditorialStore {
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
   readonly #usage: UsageLedger;
+  readonly #taskWork: TaskWorkReader;
   readonly #seriesKnowledge: SeriesKnowledgeLedger;
   /** 书系检索排除 (Issue #64, S29b): each Series' Retrieval Exclusions and their revisions. */
   readonly #seriesExclusions: SeriesExclusionLedger;
@@ -2028,6 +2030,8 @@ export class EditorialStore {
     this.#series = new SeriesLedger(authority);
     this.#usage = new UsageLedger(authority, { sessionLogRoot: join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
       operationalScope: () => this.#baselineAnalysis.launch.operationalScope });
+    this.#taskWork = new TaskWorkReader(authority, { reviewTaskIntents: (reviewRunId) => this.#reviewRuns.workTaskIntents(reviewRunId),
+      reviewModelLabel: (reviewRunId) => this.#reviewRuns.modelLabelOf(reviewRunId) }, join(dataRoot, 'store', 'ai7.sqlite'));
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#seriesExclusions = new SeriesExclusionLedger(authority);
     this.#dialogues = new DialogueLedger(authority);
@@ -2557,6 +2561,7 @@ export class EditorialStore {
       }).catch(() => {
         throw new StoreError('DATA_VERSION_MARKER_UNWRITABLE', DATA_VERSION_MARKER_UNWRITABLE);
       });
+      store.#taskWork.acquire();
       return store;
     } catch (error) {
       // A refused open leaves no handle behind, so the caller can remove the Agent Data Root
@@ -3206,7 +3211,7 @@ export class EditorialStore {
 
   previewTaskLaunch(input: import('../shared/protocol.js').TaskLaunchPreviewInput, policy: LaunchPolicyProjection) {
     return previewTaskLaunch(this, input, policy, bookId => this.#evaluationBookTitle(bookId),
-      request => reviewOperations.previewReviewRun(this.#reviewOperationsHost, request, policy, this.#evaluationBookTitle(input.bookId)));
+      request => this.#taskWork.previewRead(reviewOperations.previewReviewRun(this.#reviewOperationsHost, request, policy, this.#evaluationBookTitle(input.bookId)), 'review-run'), this.#taskWork);
   }
 
   scopedAiEditLaunchChoice(input: import('../shared/protocol/scoped-edit.js').StartScopedAiEditInput) {
@@ -3298,7 +3303,7 @@ export class EditorialStore {
    * checks see the same ledger. The range the chips name is the current plan version's (#288).
    */
   inspectTaskPlan(input: InspectTaskPlanInput, progress?: ProgressReader): TaskPlanProjection {
-    return this.#taskPlanWithRoute(input, progress).plan;
+    return this.#taskWork.planRead(this.#taskPlanWithRoute(input, progress).plan);
   }
 
   getTaskPlanPage(input: import('../shared/protocol.js').ServiceOperationMap['getTaskPlanPage']['input'], connectedPlan?: TaskPlanProjection | BookTasksProjection) {
@@ -3573,7 +3578,7 @@ export class EditorialStore {
   ): Promise<TaskPlanProjection> {
     const { plan: frozen, routeKind, provider } = this.#taskPlanWithRoute(input, progress, (runRecordId) => connectivity.carriesStoppedRun?.(runRecordId) ?? true);
     const binding = this.#productionCredentialBinding(provider);
-    let plan = frozen;
+    let plan = this.#taskWork.planRead(frozen);
     if (plan.start.needsModelConnection && plan.start.readiness === 'ready') plan = withConnectionReadiness(plan, await credentialReadiness(binding));
     // Connectivity (Issue #502): only a plan whose route reaches its model over the network can be offline,
     // and only once its credential is known to be there — 模型未连接 is decided first.
@@ -5062,6 +5067,7 @@ export class EditorialStore {
   }
 
   close(): void {
+    this.#taskWork.release();
     this.#checkpointWorker?.abort();
     // An index build under way stops at its next step and records nothing; the next open builds it again (Issue #428, S80a).
     this.#indexStopped = true;
@@ -9607,7 +9613,7 @@ export class EditorialStore {
         const review = this.#reviewRuns.attentionReadings(progress, since, limit);
         return composeGlobalAttention({
           bookTasks: (this.#authority.prepare('SELECT book_id FROM books').all() as SqlRow[]).flatMap((book) =>
-            this.inspectBookTasks(asString(book.book_id), progress, waitingFor, () => null, limit).groups.flatMap((group) => group.items)
+            this.inspectBookTasks(asString(book.book_id), progress, waitingFor, () => null, limit, false).groups.flatMap((group) => group.items)
               .map((entry) => entry.item).filter((item) => item.target.kind === 'dialogue' || item.group === 'recent' && item.target.kind === 'task-plan')),
           globalDialogues: this.#globalAgentHistory(() => null),
           applyOutcomes: readApplyOutcomeAttention(this.#authority, limit),
@@ -9646,28 +9652,11 @@ export class EditorialStore {
       .map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
     const entries = books.flatMap((book) => this.inspectBookTasks(book.bookId, progress, waitingFor, dialogueLive, GLOBAL_ATTENTION_READ_LIMIT).groups.flatMap((group) => group.items));
     const attention: GlobalAttentionProjection = { groups: [], actionableCount: 0, running: false, processing: { state: 'local' } };
-    const overview = composeTaskOverview(attention, capacity, queuePosition, entries, books, queueFrozen, (item) => {
-      if (!['completed', 'cancelled', 'stopped'].includes(item.state)) return null;
-      if (item.runRecordId !== null) return this.#usage.taskSummary({ runRecordId: item.runRecordId });
-      if (item.target.kind === 'review' || item.target.kind === 'review-plan') {
-        return this.#usage.taskSummary({ taskIntentIds: this.#reviewRuns.controlTasks(item.target.bookId, item.target.reviewRunId).map((task) => task.taskIntentId) });
-      }
-      if (item.target.kind === 'dialogue') {
-        const dialogue = this.inspectDialogue(item.target.bookId, item.target.dialogueId, 0, () => null);
-        return { calls: dialogue.attempts.length, elapsed: dialogue.attempts.reduce((sum, attempt) => sum + (attempt.settledAt === null ? 0 : Math.max(0, Date.parse(attempt.settledAt) - Date.parse(attempt.startedAt))), 0) };
-      }
-      return null;
-    });
+    const overview = composeTaskOverview(attention, capacity, queuePosition, entries, books, queueFrozen, overviewUsage({ taskSummary: (target) => this.#usage.taskSummary(target),
+      reviewTaskIntentIds: (bookId, reviewRunId) => this.#reviewRuns.controlTasks(bookId, reviewRunId).map((task) => task.taskIntentId),
+      dialogueAttempts: (bookId, dialogueId) => this.inspectDialogue(bookId, dialogueId, 0, () => null).attempts }));
     const quickStarts = this.inspectDefaultExecutionRules().rules.filter((rule) => rule.state === 'active').map((rule) => ({ bookId: rule.bookId, procedureId: `rule:${rule.pattern}`, label: rule.name }));
-    return estimateTaskStarts({ ...overview, quickStarts, groups: overview.groups.map((group) => ({ ...group, items: group.items.map((item) => {
-      if (item.runRecordId === null || !['running', 'queued'].includes(item.state)) return item;
-      const facts = this.executionLedgerForRun(item.runRecordId).loadExecutionPlan(item.runRecordId);
-      const current = progress(item.runRecordId);
-      const unit = facts.manifest.units.find((unit) => unit.ordinal === current?.currentUnitOrdinal);
-      return { ...item, progress: { done: current?.unitsSettled ?? 0, total: facts.manifest.units.length,
-        currentUnitLabel: unit?.headingText ?? null, elapsedMs: current === null ? null : Math.max(0, Date.now() - Date.parse(item.at)),
-        modelWaiting: current?.attemptState === 'awaiting-response' } };
-    }) })) });
+    return estimateTaskStarts(withRunningProgress({ ...overview, quickStarts }, progress, (runRecordId) => this.executionLedgerForRun(runRecordId).loadExecutionPlan(runRecordId)));
   }
 
   /**
@@ -9676,7 +9665,7 @@ export class EditorialStore {
    * cancelled included — composed into 等你处理, 进行中 and 最近完成 by `global-attention.ts`. A read: nothing is written,
    * claimed or terminalized.
    */
-  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null, recentLimit?: number): BookTasksProjection {
+  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null, recentLimit?: number, work = true): BookTasksProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
@@ -9690,7 +9679,7 @@ export class EditorialStore {
           const ledger = kind === 'initial-evaluation' ? this.#initialEvaluation : this.#anyLedgerOfKind(kind);
           return ledger === null ? [] : ledger.attentionReadings(progress, '', limit, { bookId, cancelled: true }).outcomes.map((outcome) => ({ kind, outcome }));
         });
-        return composeBookTasks({
+        return withBookTaskWork(work ? this.#taskWork : null, dialogueLive, composeBookTasks({
           bookId, otherOutcomes, ...(recentLimit === undefined ? {} : { recentLimit }),
           analysisTasks: [...baseline.tasks, ...custom.tasks],
           analysisOutcomes: [...baseline.outcomes, ...custom.outcomes],
@@ -9702,7 +9691,7 @@ export class EditorialStore {
           dialogues: this.#dialogueCall(() => this.#dialogueTaskReadings(bookId, dialogueLive)),
           // Its unfinished Task Intent Drafts (Issue #423, slice 7a), in 等你处理.
           drafts: this.#draftCall(() => this.#draftAttention(bookId)),
-        });
+        }));
       } catch (error) {
         if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);
         throw error;

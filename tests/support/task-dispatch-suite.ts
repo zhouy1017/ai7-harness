@@ -605,7 +605,14 @@ if (ONE_STEP_KINDS[subject].length > 0) describe.each(ONE_STEP_KINDS[subject])('
     first = command(kind, target, {})(); driveLaunchedLedgerRun(capture!.owner, first); await capture!.owner.whenIdle();
     expect(first.ledger.currentRunState(first.runRecordId)).toMatch(/^completed/u);
     const taskKind = kind === 'custom-analysis' ? 'baseline-analysis' : kind;
-    const recipe = store.inspectTaskPlan({ bookId: target.bookId, kind: taskKind, ref: first.taskIntentId }).relaunch!;
+    const ended = store.inspectTaskPlan({ bookId: target.bookId, kind: taskKind, ref: first.taskIntentId });
+    // 用时 with the requests and model once ended (#1670), and 「至少」 true: every addend of the estimate is a request the Run made.
+    expect(ended.work).toMatchObject({ workingSince: null, finished: { requests: expect.any(Number), modelLabel: expect.any(String) } });
+    expect(ended.work!.finished!.requests).toBeGreaterThanOrEqual(ended.estimate!.fewestRequests);
+    const recipe = ended.relaunch!;
+    // The relaunch preview reads the same estimate, now with the duration this completed Task measured.
+    expect(store.previewTaskLaunch({ bookId: target.bookId, launch: { operation: recipe.operation, input: { ...recipe.input, clientCommandId: randomUUID() } } as import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch'] }, policy).estimate)
+      .toMatchObject({ parts: ended.estimate!.parts, fewestRequests: ended.estimate!.fewestRequests, durationMs: expect.any(Number) });
     expect(recipe.summary).toEqual(['按原来的要求重新开始一项新任务。']); expect(recipe.cancelsFirst).toBeNull();
     const repeat = store.repeatTaskRequest(target.bookId, { kind: taskKind, ref: first.taskIntentId });
     const { bookId: _book, relaunchOf: _source, ...request } = recipe.input;
@@ -791,6 +798,10 @@ if (ONE_STEP_KINDS[subject].length > 0) describe.each(ONE_STEP_KINDS[subject])('
       if(materialId!==undefined)expect(preview.reference.join('')).toContain('样书背景资料');
       if(kind==='readers-report')expect(preview.send).toContain('定稿的评估记录');
       if(kind==='baseline-analysis')expect(preview.steps).toContain('核对与抽检（本次不做）');
+      // 预计 (#1670): the preview's estimate is the plan's; the ceiling is named without a figure, the disallowed retry and removed sample are not.
+      expect(preview.estimate).toEqual(plan.estimate);
+      expect(plan.estimate!.more).not.toContain('retry'); expect(plan.estimate!.more).not.toContain('sampling');
+      expect(plan.estimate!.sentence).toContain('，用量到上限后不再发送新的请求；'); expect(plan.estimate!.sentence).not.toMatch(/12,345|tokens/u);
     } finally {db.close();}
   });
 

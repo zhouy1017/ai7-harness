@@ -2,16 +2,18 @@ import type { EditorialStore } from './store.js';
 import { StoreError } from './store-records.js';
 import { TaskLaunchPreview, type TaskLaunchContext } from './task-plan-creation.js';
 import { baselineAnalysisPlan, withLedgerRunControls } from './task-plan.js';
+import type { TaskWorkReader } from './task-work.js';
 import type { BaselineAnalysisProjection, LaunchPolicyProjection } from '../shared/protocol.js';
 import type { TaskLaunchPreviewInput, TaskLaunchPreviewProjection, ReviewExecutionLaunchInput } from '../shared/runtime-execution-config.js';
 
 export function previewTaskLaunch(store: EditorialStore, input: TaskLaunchPreviewInput, policy: LaunchPolicyProjection,
-  title: (bookId: string) => string, review: (input: ReviewExecutionLaunchInput) => TaskLaunchPreviewProjection): TaskLaunchPreviewProjection {
+  title: (bookId: string) => string, review: (input: ReviewExecutionLaunchInput) => TaskLaunchPreviewProjection, work: TaskWorkReader): TaskLaunchPreviewProjection {
   const preview: NonNullable<TaskLaunchContext['preview']> = (ledger, task, describe) => ledger.previewLaunch(task,
     'planEdits' in input.launch.input ? input.launch.input.planEdits : undefined, (projection, blocks) => {
       const plan = describe === undefined ? baselineAnalysisPlan({ projection: projection as BaselineAnalysisProjection, bookTitle: title(input.bookId), blocks })
         : describe(projection, blocks, title(input.bookId));
-      throw new TaskLaunchPreview(launchPreviewProjection(withLedgerRunControls(plan, projection as BaselineAnalysisProjection, blocks), projection.coverageManifest!.units.length));
+      throw new TaskLaunchPreview(work.previewRead(launchPreviewProjection(withLedgerRunControls(plan, projection as BaselineAnalysisProjection, blocks),
+        projection.coverageManifest!.units.length), ledger.definition.kind));
     }, 'relaunchOf' in input.launch.input && input.launch.input.relaunchOf?.cancelsFirst === true);
   const launch = input.launch;
   try {
@@ -33,5 +35,6 @@ export function launchPreviewProjection(plan: import('../shared/protocol.js').Ta
   return { steps: plan.steps.map(step => `${step.label}${step.removed ? '（本次不做）' : ''}`),
     scope: plan.scope.process, units, reference: plan.scope.reference, send: plan.kind === 'review-run' ? plan.service.send : `${plan.scope.send}；${plan.service.send}`, usage: plan.service.usage,
     adaptations: plan.boundary.adaptable.map(entry => entry.id === 'factual-tool-retry' ? entry.label
-      : `${entry.label}：${entry.removed ? '不允许' : entry.askFirst ? '先问我' : '允许'}`) };
+      : `${entry.label}：${entry.removed ? '不允许' : entry.askFirst ? '先问我' : '允许'}`),
+    ...(plan.estimate === undefined ? {} : { estimate: plan.estimate }) };
 }
