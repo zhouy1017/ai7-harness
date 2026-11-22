@@ -105,7 +105,7 @@ it('reads a settled Run of 1,024 findings and its report within the reply budget
     return decoded.result;
   });
   expect(findingChunks).toBeGreaterThan(1);
-  expect(mergedFindings).toEqual(directFindings);
+  expect(JSON.stringify(mergedFindings) === JSON.stringify(directFindings)).toBe(true);
   expect(whole.run!.report).not.toBeNull();
   expect(serializedBytes(whole)).toBeGreaterThan(REPLY_BUDGET);
 
