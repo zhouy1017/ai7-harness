@@ -1,4 +1,5 @@
 import { chooseImportTarget } from './import-page.mjs';
+import { pressReachable, assertReachable, wheelIntoView } from './task-card-reach.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { HOUSE_DRAFT_MEASURE, ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, pressEscape, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
@@ -159,7 +160,7 @@ async function createRendererManager(browser) {
 async function waitFor(renderer, expression, name, timeout = 60_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
+    if ((await renderer.evaluate(`Promise.resolve(${expression}).then(Boolean)`).catch(() => false)) === true) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-15', name);
@@ -800,18 +801,20 @@ async function main() {
     await readLibrary(renderer, (page) => page.cards[0]?.segments?.from === '1', 'library-segments-back');
     await clickSelector(renderer, '[data-library-action="segments-close"]', 'library-segments-close');
     await waitFor(renderer, `document.querySelector('.material-segments [data-library-action="segments"]') === document.activeElement`, 'library-segments-closed', 10_000);
-    // 索引完成 sits in 最近完成, names the item and asks nothing: the count stays the decisions'.
-    const indexItem = `library-index:${materialId}`;
-    const indexSelector = `[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(indexItem)}]`;
-    const indexAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection)=>{ const group=projection.groups.find((entry)=>entry.items.some((item)=>item.itemId===${JSON.stringify(indexItem)})); const item=group?.items.find((entry)=>entry.itemId===${JSON.stringify(indexItem)}); return [group?.key ?? null, item?.state ?? null, item?.nextStep ?? null, item?.object.kind ?? null, item?.object.outcome ?? null, projection.actionableCount]; })`);
-    requireJourney(JSON.stringify(indexAttention) === JSON.stringify(['recent', 'indexing-completed', 'view-material-index', 'library-index', 'complete', 0]), 'library-index-attention', indexAttention);
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'library-index-attention-entry');
-    await waitFor(renderer, `document.querySelector(${JSON.stringify(indexSelector)}) !== null`, 'library-index-attention-listed', 30_000);
-    const indexListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(indexSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, object: item.querySelector('.global-attention-object-name')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null }; })()`);
-    requireJourney(indexListed.group === 'recent' && indexListed.pill === '索引完成' && indexListed.object === `资料索引 · 资料「${LIBRARY_TITLE}」` &&
-      indexListed.next === '查看索引', 'library-index-attention-words', indexListed);
-    await clickSelector(renderer, `${indexSelector} button.global-attention-open`, 'library-index-attention-open');
-    await readLibrary(renderer, (page) => page.state === 'ready' && page.cards.some((card) => card.id === materialId && card.index === 'complete'), 'library-index-attention-opened');
+    await setDeveloperMode(renderer, waitFor, false, 'library-reading-mode');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('attention'), 'library-index-attention-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host[data-attention-count="0"]') && !document.querySelector('[data-attention-state="indexing-completed"]')`, 'library-index-attention-clear');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('knowledge'), 'library-index-knowledge');
+    await pressReachable(renderer, waitFor, requireJourney, '[data-knowledge-category="library"]', 'library-index-category');
+    const indexState = `article.library-material[data-material-id="${materialId}"] .knowledge-file-summary .knowledge-file-index`;
+    await readLibrary(renderer, page => page.cards.some(card => card.id === materialId && card.index === 'complete'), 'library-index-complete');
+    await wheelIntoView(renderer, waitFor, indexState, 'library-index-reading');
+    await assertReachable(renderer, waitFor, requireJourney, indexState, 'library-index-reading');
+    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(indexState)}).textContent === '可阅读'`, 'library-index-reading-words');
+    await setDeveloperMode(renderer, waitFor, true, 'library-index-details-mode');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('knowledge'), 'library-index-details-knowledge');
+    await pressReachable(renderer, waitFor, requireJourney, '[data-knowledge-category="library"]', 'library-index-details-category');
+    await pressReachable(renderer, waitFor, requireJourney, `article.library-material[data-material-id="${materialId}"] > details > summary`, 'library-index-details');
 
     // 相似段落检索 (Issue #892): built on this machine only when the editor asks, by the built-in provider on this guest, then
     // searched with the runner's own words. Only anchors are read back here, never the paragraphs' words.

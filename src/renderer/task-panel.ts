@@ -1,7 +1,7 @@
 import { serviceWords } from './service-wording.js';
 import { technicalWords } from './technical-layer.js';
 import { retainPollInteraction } from './poll-interaction.js';
-import { styleInput } from './components/controls.js';
+import { menuPanel, styleInput } from './components/controls.js';
 import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
 import { startPreparedTask } from './one-action-start.js';
 import { attentionSentence } from './global-attention-labels.js';
@@ -27,6 +27,7 @@ import {
   type BookTasksProjection,
   type DefaultExecutionRuleReference,
   type GlobalAttentionTarget,
+  type TaskOverviewProjection,
   type RendererApi,
   type TaskPlanKind,
 } from '../shared/protocol.js';
@@ -60,9 +61,8 @@ import {
   TASK_COMPOSER_WRITING_AUDIENCE,
   TASK_COMPOSER_WRITING_CHANNEL,
   TASK_COMPOSER_WRITING_FIELDS,
-  TASK_PANEL_COMPOSE_ACTIONS,
-  TASK_PANEL_COMPOSE_FIELD,
   TASK_PANEL_COMPOSE_OPEN,
+  TASK_PANEL_COMPOSE_OPEN_NOTE,
   taskComposerAddRangeLimit,
   taskComposerAnswerHeading,
   taskComposerBookLine,
@@ -75,8 +75,6 @@ import {
   TASK_PANEL_COMPOSE_FIRST,
   TASK_PANEL_COMPOSE_MEANINGS,
   TASK_PANEL_COMPOSE_FIRST_QUICK,
-  TASK_PANEL_COMPOSE_HEADING,
-  TASK_PANEL_COMPOSE_NONE,
   TASK_PANEL_NOTE,
   TASK_PANEL_STATUS_LINES,
   taskPanelScopeLine,
@@ -110,6 +108,7 @@ export interface TaskPanelOptions {
   onRecorded(bookId: string): void;
   /** 发起全书任务… (Issue #423, slice 7a; TASK-001): the Context-bound Task Composer on the whole Book. */
   openComposer(): void;
+  configure(bookId: string, kind: 'review' | 'writing'): void;
   /** A draft's card's 继续编辑草稿: the draft in the composer. */
   openDraft(draftId: string): void;
   /** An unfinished draft left on another Book (TASK-006), which 返回继续 opens there; `null` when there is none. */
@@ -210,7 +209,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
   let timer: number | undefined;
   let working = false;
   let paused = false;
-  let selected: ComposeMode | null = null;
+  let rules: NonNullable<TaskOverviewProjection['quickStarts']> = [];
   let overview: TaskOverviewSurface | undefined;
 
   function clearTimer(): void {
@@ -259,7 +258,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
 
   function paint(): void {
     if (tasks === null) return;
-    const key = JSON.stringify([tasks, analysis, working, selected]);
+    const key = JSON.stringify([tasks, analysis, working, rules]);
     if (key === painted) return;
     painted = key;
     const restoreInteraction = retainPollInteraction(element);
@@ -293,92 +292,51 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
   }
 
   function paintCompose(): void {
-    const heading = el('h3', undefined, TASK_PANEL_COMPOSE_HEADING);
-    heading.id = uid('compose');
-    compose.setAttribute('aria-labelledby', heading.id);
-    // The composer first (TASK-001): the editor's own words, saved as a draft; the procedures below stay for 快速开始.
-    const open = el('button', 'secondary task-panel-compose-open', TASK_PANEL_COMPOSE_OPEN);
-    open.type = 'button';
-    open.dataset['taskComposeAction'] = 'compose';
-    open.disabled = working;
-    open.addEventListener('click', () => options.openComposer());
-    const opener = el('div', 'task-panel-compose-opener');
-    opener.append(open);
-    const choices = analysis === null ? [] : composeOptions(analysis);
-    if (choices.length === 0) {
-      heading.append(' · ', el('span', 'task-panel-compose-none', TASK_PANEL_COMPOSE_NONE));
-      compose.replaceChildren(heading, opener);
-      return;
+    const book = bookId;
+    if (book === null) return;
+    const menu = el('details', 'ui-disclosure-menu task-panel-launch');
+    menu.dataset['menuAnchor'] = 'start';
+    const summary = el('summary', 'btn primary', '发起任务 ▾');
+    const list = menuPanel();
+    function entry(id: string, label: string, meaning: string, act: () => void, enabled = true): void {
+      const button = el('button', 'quiet');
+      button.type = 'button';
+      button.dataset['taskComposeAction'] = id;
+      button.append(el('strong', undefined, label), el('span', undefined, meaning));
+      button.disabled = working || !enabled;
+      button.addEventListener('click', () => { menu.open = false; act(); });
+      list.append(button);
     }
-    if (selected === null || !choices.some((choice) => choice.mode === selected && choice.available)) {
-      selected = choices.find((choice) => choice.available)?.mode ?? choices[0]!.mode;
+    entry('compose', TASK_PANEL_COMPOSE_OPEN, TASK_PANEL_COMPOSE_OPEN_NOTE, options.openComposer);
+    for (const choice of analysis ? composeOptions(analysis) : []) {
+      entry(choice.mode, choice.label, choice.available || !choice.reason ? choice.meaning : attentionSentence(choice.reason),
+        () => void perform(() => options.startWholeBook({
+          goal: choice.goal, update: choice.mode === 'first-baseline' ? null : { mode: choice.mode, selectedRange: null }, quick: null,
+        })), choice.available);
     }
-    const fieldset = el('fieldset', 'task-panel-modes');
-    fieldset.append(el('legend', undefined, TASK_PANEL_COMPOSE_FIELD));
-    let selectedReason: HTMLElement | null = null;
-    for (const choice of choices) {
-      const label = el('label', 'task-panel-mode');
-      label.dataset['taskComposeMode'] = choice.mode;
-      const input = el('input');
-      input.type = 'radio';
-      input.name = 'task-panel-mode';
-      input.value = choice.mode;
-      input.checked = choice.mode === selected;
-      input.disabled = !choice.available || working;
-      input.addEventListener('change', () => {
-        if (!input.checked) return;
-        selected = choice.mode;
-        painted = '';
-        paint();
-      });
-      const words = el('span', 'task-panel-mode-words');
-      words.append(el('strong', undefined, choice.label));
-      const meaning = el('span', 'task-panel-mode-meaning', choice.meaning);
-      if (!choice.available && choice.reason !== null) {
-        meaning.textContent = attentionSentence(choice.reason);
-        meaning.title = choice.reason;
-        if (choice.mode === selected) { meaning.classList.add('task-panel-compose-why'); meaning.id = uid('compose-why'); selectedReason = meaning; }
-      }
-      words.append(meaning);
-      label.append(input, words);
-      fieldset.append(label);
+    for (const rule of [{ procedureId: 'initial-evaluation', label: '评估报告' }, ...rules]) {
+      entry(rule.procedureId, rule.label, '为这本书加入一项任务。', () => void perform(async () => {
+        if (options.settle && !await options.settle()) return;
+        if (bookId !== book) return;
+        await api.startQuickTasks({ tasks: [{ bookId: book, procedureId: rule.procedureId }] });
+        options.onRecorded(book);
+      }));
     }
-    const chosen = choices.find((choice) => choice.mode === selected)!;
-    const row = el('div', 'button-row compact-actions');
-    const quick = el('button', 'quiet', TASK_PANEL_COMPOSE_ACTIONS.quick);
-    quick.type = 'button';
-    quick.dataset['taskComposeAction'] = 'quick';
-    const prepare = el('button', 'primary', '开始分析');
-    prepare.type = 'button';
-    prepare.dataset['taskComposeAction'] = 'prepare';
-    prepare.disabled = working || !chosen.available;
-    quick.disabled = working || chosen.quick.rule === null;
-    if (selectedReason !== null) {
-      prepare.setAttribute('aria-describedby', selectedReason.id);
-      quick.setAttribute('aria-describedby', selectedReason.id);
-    }
-    quick.addEventListener('click', () => void start(chosen, true));
-    prepare.addEventListener('click', () => void start(chosen, false));
-    row.append(prepare);
-    compose.replaceChildren(heading, opener, fieldset, row);
+    entry('review', '审阅…', '选择审阅的范围和项目。', () => options.configure(book, 'review'));
+    entry('writing', '写作任务…', '在稿件中填写写作要求。', () => options.configure(book, 'writing'));
+    menu.append(summary, list);
+    compose.replaceChildren(menu);
   }
 
-  async function start(choice: ComposeOption, quick: boolean): Promise<void> {
+  async function perform(action: () => Promise<void>): Promise<void> {
     if (working || bookId === null) return;
     const book = bookId;
     working = true;
-    painted = '';
     paint();
-    try {
-      await options.startWholeBook({
-        goal: choice.goal,
-        update: choice.mode === 'first-baseline' ? null : { mode: choice.mode, selectedRange: null },
-        quick: quick ? choice.quick.rule : null,
-      });
-    } finally {
-      working = false;
-      painted = '';
-      if (bookId === book) read(true);
+    try { await action(); }
+    catch (error) { options.setStatus(options.errorMessage(error, '任务未能开始。'), 'error'); }
+    finally {
+      if (bookId === book) { working = false; read(true); }
     }
   }
 
@@ -386,6 +344,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     element,
     show(next) {
       bookId = next;
+      rules = [];
       paused = false;
       tasks = null;
       analysis = null;
@@ -398,6 +357,10 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
       groups.replaceChildren();
       overview?.destroy();
       overview = mountTaskOverview({ root: groups, api, bookId: next, setStatus: options.setStatus, ...(options.settle ? { beforeStart: options.settle } : {}),
+        onProjection: (projection) => {
+          const nextRules = (projection.quickStarts ?? []).filter((rule) => rule.bookId === next);
+          if (JSON.stringify(rules) !== JSON.stringify(nextRules)) { rules = nextRules; paint(); }
+        },
         onChanged: () => { options.onRecorded(next); read(true); },
         openTarget: (item, view) => { if (item.plan?.ref) options.openPlan(item.plan.kind, item.plan.ref, view === 'cancel', view === 'redo', item, view === 'unconfirmed'); else if (item.target.kind === 'task-intent-draft') options.openDraft(item.target.draftId); else options.openTarget(item.target); },
         openRecord: (item) => options.openTarget(item.target), ...(options.openNetworkProxySettings ? { openNetworkProxySettings: options.openNetworkProxySettings } : {}),
@@ -473,7 +436,7 @@ export interface TaskComposerOptions {
   /** The manuscript's own edits are written first (TASK-039): `false` leaves everything as it is. */
   settle(): Promise<boolean>;
   /** 准备计划 made a prepared Task, or 查看计划 of one: its plan, where it is started. */
-  openPlan(bookId: string, kind: TaskPlanKind, ref: string): void;
+  openPlan(bookId: string, kind: TaskPlanKind, ref: string, view?: 'plan' | 'run'): void;
   /** 另起一份草稿 from a promoted draft: a new composer with its words. */
   openNew(seed: TaskComposerSeed): void;
   /** 收起 / 取消: the composer is done; a saved draft waits in 等你处理. */
@@ -815,7 +778,6 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
 
     // 准备成什么任务: decided from the draft, with a visible choice when several fit (decision 1).
     if (kind === 'draft' && current.resolution !== null) parts.push(resolutionBlock(current, current.resolution));
-    if (kind === 'promoted') parts.push(el('p', 'attention-note task-composer-promoted', TASK_COMPOSER_PROMOTED));
 
     const contextNote = el('p', 'field-note');
     const basis = el('span', 'task-composer-note', TASK_COMPOSER_NOTE);
@@ -1128,7 +1090,20 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       apply(draft, current.manuscript, current.pin?.title ?? null);
       if (draft.promotion === null) throw new Error(TASK_COMPOSER_STATUS.promoteFailed);
       options.setStatus(TASK_COMPOSER_STATUS.prepared, 'success');
-      await startPreparedTask(api, draft.promotion.taskKind, draft.promotion.planRef);
+      const promoted = state;
+      const { taskKind, planRef } = draft.promotion;
+      try {
+        await startPreparedTask(api, taskKind, planRef);
+      } catch (error) {
+        if (state !== promoted || mine !== ticket) return;
+        if (promoted) promoted.note = TASK_COMPOSER_PROMOTED;
+        render();
+        options.openPlan(draft.bookId, taskKind, planRef, 'plan');
+        options.setStatus(options.errorMessage(error, TASK_COMPOSER_PROMOTED), 'error');
+        return;
+      }
+      if (state !== promoted || mine !== ticket) return;
+      options.openPlan(draft.bookId, taskKind, planRef, 'run');
       options.setStatus('已发起任务', 'success');
     } catch (error) {
       if (state === current) problem(options.errorMessage(error, TASK_COMPOSER_STATUS.promoteFailed));

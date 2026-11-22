@@ -619,7 +619,6 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .task-overview-state { margin-left: auto; }
 .task-overview-card-line { color: var(--text-subdued); font-size: .92rem; }
 .task-overview-card-kind, .task-overview-card-time { color: var(--text-subdued); font-size: .82rem; }
-.task-panel-mode-meaning { display: block; color: var(--text-subdued); }
 .task-overview-progress { width: 100%; height: 6px; accent-color: var(--action-text); }
 .task-overview-action-hint { color: var(--action-text); font-size: .86rem; }
 .task-overview-sheet-note { padding: 0 1.2rem; color: var(--text-subdued); }
@@ -1349,11 +1348,10 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .task-panel-scope { margin: 0; }
 .task-panel-compose { min-width: 0; padding: .7rem .8rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface); }
 .task-panel-compose h3, .task-panel-group h3 { margin: 0 0 .4rem; font-size: 1rem; }
-.task-panel-modes { display: grid; gap: .35rem; min-width: 0; margin: .5rem 0; padding: 0; border: 0; }
-.task-panel-modes legend { margin-bottom: .2rem; font-weight: 700; }
-.task-panel-mode { display: flex; gap: .5rem; align-items: flex-start; min-width: 0; }
-.task-panel-mode-words { display: grid; gap: .1rem; min-width: 0; overflow-wrap: anywhere; }
-.task-panel-compose-why[hidden] { display: none; }
+.task-panel-launch > summary { display: inline-flex; cursor: pointer; list-style: none; }
+.task-panel-launch .ui-menu-panel { width: min(21rem, calc(100vw - 16px)); }
+.task-panel-launch .ui-menu-panel button { display: grid; gap: .1rem; text-align: left; white-space: normal; }
+.task-panel-launch .ui-menu-panel button span { font-size: .85rem; color: var(--text-subdued); }
 .task-panel-group { min-width: 0; }
 .task-panel-count { display: inline-block; min-width: 1.4rem; padding: 0 .35rem; border: 1px solid var(--boundary); border-radius: 999px; font-size: .8rem; font-weight: 700; text-align: center; }
 .task-panel-list { display: grid; gap: .55rem; margin: 0; padding: 0; list-style: none; }

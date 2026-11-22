@@ -387,8 +387,6 @@ const READ_PANEL = `(() => {
   const panel = drawer?.querySelector('.task-panel');
   if (!(drawer instanceof HTMLElement) || drawer.hidden || drawer.dataset.taskDrawerView !== 'panel' || !(panel instanceof HTMLElement)) return null;
   const text = (node) => node?.textContent ?? null;
-  const state = (selector) => { const button = panel.querySelector(selector); return button === null ? null : button.disabled ? 'disabled' : 'enabled'; };
-  const why = panel.querySelector('.task-panel-compose-why');
   return {
     state: panel.dataset.taskPanel ?? null,
     running: panel.dataset.taskPanelRunning ?? null,
@@ -396,12 +394,8 @@ const READ_PANEL = `(() => {
     scope: text(panel.querySelector('.task-panel-scope')),
     note: text(panel.querySelector('.task-panel-note')),
     compose: {
-      heading: panel.querySelector('.task-panel-compose h3')?.firstChild?.textContent ?? null,
-      modes: Array.from(panel.querySelectorAll('.task-panel-compose input[name="task-panel-mode"]')).map((input) => [input.value, input.checked, input.disabled]),
-      none: text(panel.querySelector('.task-panel-compose-none')),
-      quick: state('[data-task-compose-action="quick"]'),
-      prepare: state('[data-task-compose-action="prepare"]'),
-      why: why === null || why.hidden ? null : why.textContent,
+      heading: text(panel.querySelector('.task-panel-launch > summary')),
+      entries: Array.from(panel.querySelectorAll('[data-task-compose-action]')).map((button) => [button.dataset.taskComposeAction, button.disabled]),
     },
     groups: Object.fromEntries(Array.from(panel.querySelectorAll('.task-overview-group')).map((group) => [group.dataset.taskGroup, {
       heading: group.querySelector('h3')?.firstChild?.textContent ?? null,
@@ -1059,23 +1053,24 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'panel-result-popup-return');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]')`, 'panel-manuscript-after-popup-off', 120_000);
     const opened = await openPanel(renderer, 'panel-open');
-    requireJourney(opened.title === '任务' && opened.scope === '这本书 · 0 项' && opened.compose.heading === '发起全书任务' &&
-      JSON.stringify(opened.compose.modes) === JSON.stringify([['first-baseline', true, false]]) && opened.compose.prepare === 'enabled' &&
-      opened.compose.quick === null && opened.compose.why === null &&
+    requireJourney(opened.title === '任务' && opened.scope === '这本书 · 0 项' && opened.compose.heading === '发起任务 ▾' &&
+      opened.compose.entries.some(([id, disabled]) => id === 'first-baseline' && !disabled) &&
       JSON.stringify(['pending', 'active', 'recent'].map((key) => [opened.groups[key]?.heading, opened.groups[key]?.count, opened.groups[key]?.empty, opened.groups[key]?.cards.length])) ===
         JSON.stringify([['待处理', '0', '这里暂时没有任务。', 0], ['进行中', '0', '这里暂时没有任务。', 0], ['最近完成', '0', '这里暂时没有任务。', 0]]),
     'panel-empty', opened);
     await assertRenderer(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === true && document.body.dataset.taskDrawer === 'open'`, 'panel-one-slot');
 
-    // The in-Book 发起任务 sheet still opens and closes; it no longer carries the result-window switch (#1528: it is in 设置 › 通知).
-    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-overview-start]')?.disabled===false`, 'panel-sheet-ready');
-    await clickSelector(renderer, '#task-drawer [data-task-overview-start]', 'panel-sheet-open');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('#task-drawer .task-overview-sheet'); return sheet instanceof HTMLDialogElement && sheet.open && sheet.querySelector('[data-task-overview-auto-result]') === null; })()`, 'panel-sheet-without-result-switch');
-    await clickSelector(renderer, '#task-drawer .task-overview-sheet .sheet-foot button:last-child', 'panel-sheet-close');
-
+    at('panel-launch-menu');
+    const menu = '#task-drawer .task-panel-launch';
+    await waitFor(renderer, `document.getAnimations().every(animation => animation.playState !== 'running')`, 'panel-transition-settled');
+    await pressReachable(renderer, waitFor, requireJourney, menu + ' > summary', 'panel-menu-open');
+    requireJourney(['compose', 'first-baseline', 'initial-evaluation', 'review', 'writing'].every(id =>
+      opened.compose.entries.some(([entry]) => entry === id)), 'panel-launch-options', opened.compose.entries);
+    for (const [id] of opened.compose.entries) {
+      await assertReachable(renderer, waitFor, requireJourney, menu + ' [data-task-compose-action=' + JSON.stringify(id) + ']', 'panel-menu-' + id);
+    }
     at('panel-prepare');
-    // The primary action prepares and starts in the panel, with no plan drawer.
-    await clickSelector(renderer, '#task-drawer [data-task-compose-action="prepare"]', 'panel-direct-start');
+    await pressReachable(renderer, waitFor, requireJourney, menu + ' [data-task-compose-action="first-baseline"]', 'panel-direct-start');
     await launchTaskFromBar(renderer, waitFor, 'panel-first-start');
     await openPanel(renderer, 'panel-launched');
     at('panel-start');
@@ -1107,23 +1102,25 @@ async function main() {
     // 续行 on the card: the same Run goes on, and runs to its end — 已完成 in 最近完成, with 查看结果.
     await cardAction(renderer, 'analysis-paused', 'resume', 'panel-resume');
     await waitForPanel(renderer, (panel) => statesOf(panel, 'active').join() === 'analysis-running', 'panel-resumed', 60_000);
-    // #1375: keep the original panel pause/resume checks, then advance its real held Run twice on ordinary attention.
+    // A held Run advances twice on the ordinary task page while its pause button keeps focus.
     const pollTaskId=await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then(page=>page.taskIntent.taskIntentId)`);
     await clickSelector(renderer,'#task-drawer [data-task-drawer-control="close"]','poll-attention-close-pane');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-ordinary-settings');
     await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'poll-attention-ordinary-settings-ready');
     await click(renderer,'帮助','poll-attention-ordinary-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'poll-attention-ordinary-mode');
-    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('attention')),'poll-attention-open');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'poll-tasks-open');
     const pollAttentionId=await renderer.evaluate(`window.ai7.inspectGlobalAttention().then(page=>page.groups.flatMap(group=>group.items).find(item=>item.target.kind==='analysis'&&item.target.taskIntentId===${JSON.stringify(pollTaskId)}).itemId)`);
-    const pollAttentionSelector=`[data-attention-item="${pollAttentionId}"]`;
-    await waitFor(renderer,`document.querySelector(${JSON.stringify(pollAttentionSelector)})?.dataset.attentionState==='analysis-running' && document.documentElement.dataset.technicalLayerVisible==='false'`,'poll-attention-running');
-    await renderer.evaluate(`document.querySelector(${JSON.stringify(pollAttentionSelector)}).querySelector('[data-attention-open]').focus()`);
+    const pollAttentionSelector=`[data-task-item="${pollAttentionId}"]`;
+    await waitFor(renderer,`document.querySelector(${JSON.stringify(pollAttentionSelector)})?.dataset.taskState==='analysis-running' && document.documentElement.dataset.technicalLayerVisible==='false'`,'poll-tasks-running');
+    const pauseFocused = `document.activeElement === document.querySelector(${JSON.stringify(pollAttentionSelector + ' [data-task-action="pause"]')})`;
+    for (let tabs = 0; tabs < 100 && !await renderer.evaluate(pauseFocused); tabs++) await pressTab(renderer);
+    await assertRenderer(renderer, pauseFocused, 'poll-task-action-focused');
     for(const done of [FIRST_HOLD+2,FIRST_HOLD+3]) {
       await renderer.evaluate(`globalThis.__j16PollAttention=document.querySelector(${JSON.stringify(pollAttentionSelector)});globalThis.__j16PollAttentionText=globalThis.__j16PollAttention.textContent`);
       await writeHold(done);
       await new Promise(resolve=>setTimeout(resolve,2200));
-      await waitFor(renderer,`(() => {const current=document.querySelector(${JSON.stringify(pollAttentionSelector)});return current!==globalThis.__j16PollAttention&&current?.textContent!==globalThis.__j16PollAttentionText&&current?.dataset.attentionState==='analysis-running'&&document.activeElement===current.querySelector('[data-attention-open]');})()`,'attention-changed-unit-paint');
+      await waitFor(renderer,`(() => {const current=document.querySelector(${JSON.stringify(pollAttentionSelector)});return current!==globalThis.__j16PollAttention&&current?.textContent!==globalThis.__j16PollAttentionText&&current?.dataset.taskState==='analysis-running'&&document.activeElement===current.querySelector('[data-task-action="pause"]');})()`,'attention-changed-unit-paint');
       requireJourney(await renderer.evaluate(`window.ai7.inspectGlobalAttention().then(page=>page.groups.flatMap(group=>group.items).find(item=>item.itemId===${JSON.stringify(pollAttentionId)})?.facts.progress?.unitsSettled===${done})`),'attention-changed-unit-record');
     }
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-developer-settings');
@@ -1141,13 +1138,12 @@ async function main() {
     at('panel-compose-update');
     // 发起全书任务 now offers the whole-Book updates — 同步到当前稿件 only once the manuscript moved — and 重新分析全书, prepared
     // and started from its plan.
-    const composing = await waitForPanel(renderer, (panel) => panel.compose.modes.length === 2, 'panel-compose-modes');
-    requireJourney(JSON.stringify(composing.compose.modes.map(([mode, , disabled]) => [mode, disabled])) === JSON.stringify([['sync-current', true], ['reanalyze-book', false]]) &&
-      composing.compose.quick === null, 'panel-compose-update-modes', composing.compose);
-    await assertRenderer(renderer, `(() => { const radio = document.querySelector('#task-drawer input[name="task-panel-mode"][value="reanalyze-book"]'); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, 'panel-compose-choose');
-    await waitForPanel(renderer, (panel) => panel.compose.prepare === 'enabled', 'panel-compose-ready');
+    const composing = await waitForPanel(renderer, panel => panel.compose.entries.some(([id]) => id === 'reanalyze-book'), 'panel-compose-modes');
+    requireJourney(composing.compose.entries.some(([id, disabled]) => id === 'sync-current' && disabled) &&
+      composing.compose.entries.some(([id, disabled]) => id === 'reanalyze-book' && !disabled), 'panel-compose-update-modes', composing.compose);
     await writeHold(1);
-    await clickSelector(renderer, '#task-drawer [data-task-compose-action="prepare"]', 'panel-compose-prepare');
+    await pressReachable(renderer, waitFor, requireJourney, menu + ' > summary', 'panel-compose-open');
+    await pressReachable(renderer, waitFor, requireJourney, menu + ' [data-task-compose-action="reanalyze-book"]', 'panel-compose-prepare');
     await launchTaskFromBar(renderer, waitFor, 'panel-update-start');
     await openPanel(renderer, 'panel-update-launched');
     await waitForPanel(renderer, (panel) => statesOf(panel, 'active').join() === 'analysis-running' && cardsOf(panel, 'active')[0].title === '基线分析 · 重新分析全书', 'panel-update-card', 180_000);
@@ -1823,7 +1819,7 @@ async function main() {
     await composerAction(renderer, 'save-draft', 'composer-prepare');
     const saved = await waitForComposer(renderer, (composer) => composer.state === 'draft', 'composer-draft-saved', 30_000);
     const selectionDraft = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({ draftId: null }).then((read) => read.drafts.map((draft) => ({ draftId: draft.draftId, origin: draft.origin, ordinal: draft.version.ordinal, goal: draft.version.goal, target: draft.version.target, ranges: draft.version.ranges.map((range) => range.text), promotion: draft.promotion })))`);
-    requireJourney(saved.title === '任务意图草稿 · 第 1 版' && Array.isArray(selectionDraft) && selectionDraft.length === 1 && selectionDraft[0].draftId === saved.draftId &&
+    requireJourney(saved.title === '任务草稿 · 第 1 版' && Array.isArray(selectionDraft) && selectionDraft.length === 1 && selectionDraft[0].draftId === saved.draftId &&
       selectionDraft[0].origin === 'composer-selection' && selectionDraft[0].ordinal === 1 && selectionDraft[0].goal === COMPOSER_GOAL && selectionDraft[0].target === 'ranges' &&
       JSON.stringify(selectionDraft[0].ranges) === JSON.stringify(composerWords) && selectionDraft[0].promotion === null, 'composer-draft-recorded', { saved, selectionDraft });
     // No Task was prepared for it: the Book's analysis is still the 重新分析所选范围 the editor left prepared.
@@ -1837,19 +1833,22 @@ async function main() {
     requireJourney(JSON.stringify(draftAttention) === JSON.stringify([[bookId, 'task-intent-draft', saved.draftId]]), 'composer-draft-attention', draftAttention);
 
     at('draft-promote-prepared-task');
-    // 发起全书任务… opens the composer on the whole Book; 准备任务 saves the draft and 准备计划 makes it a prepared baseline Task through
-    // the existing preparation — the plan opens in the slot leading with the draft's sentence, and 开始任务 is still the editor's.
-    await clickSelector(renderer, '#task-drawer .task-panel [data-task-compose-action="compose"]', 'promote-compose');
+    // 描述要做的事 opens the whole-Book composer. 发起任务 opens the authorized Run.
+    await pressReachable(renderer, waitFor, requireJourney, menu + ' > summary', 'promote-menu');
+    await pressReachable(renderer, waitFor, requireJourney, menu + ' [data-task-compose-action="compose"]', 'promote-compose');
     const whole = await waitForComposer(renderer, (composer) => composer.state === 'new', 'promote-composer-open', 30_000);
-    requireJourney(whole.title === '发起全书任务' && whole.ranges.length === 0 && whole.target === 'book', 'promote-composer-whole-book', whole);
+    requireJourney(whole.title === '发起任务' && whole.ranges.length === 0 && whole.target === 'book', 'promote-composer-whole-book', whole);
     const PROMOTE_GOAL = '为这本书重新做一次基线分析，重点看人物与设定';
-    await assertRenderer(renderer, writeGoal(PROMOTE_GOAL), 'promote-goal');
-    await assertRenderer(renderer, `(() => { const outcome = document.querySelector('#task-drawer .task-composer [data-task-composer-field="outcome-analysis"]'); if (!(outcome instanceof HTMLInputElement)) return false; outcome.click(); return outcome.checked; })()`, 'promote-outcome');
-    await composerAction(renderer, 'prepare', 'promote-prepare');
-    const resolved = await waitForComposer(renderer, (composer) => composer.state === 'promoted', 'promote-direct', 180_000);
-    const promotion = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({draftId:${JSON.stringify(resolved.draftId)}}).then((read)=>read.drafts[0].promotion)`);
-    const promotedTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis)=>({taskIntentId:analysis.taskIntent?.taskIntentId,goal:analysis.taskIntent?.goal,authorization:analysis.authorization}))`);
-    requireJourney(promotion?.taskKind === 'baseline-analysis' && promotion.taskIntentId === promotedTask.taskIntentId && promotedTask.goal === PROMOTE_GOAL && promotedTask.authorization !== null, 'promote-direct-authorized', {promotion,promotedTask});
+    await pressReachable(renderer, waitFor, requireJourney, '#task-drawer [data-task-composer-field="goal"]', 'promote-goal');
+    await renderer.send('Input.insertText', { text: PROMOTE_GOAL });
+    await pressReachable(renderer, waitFor, requireJourney, '#task-drawer [data-task-composer-field="outcome-analysis"]', 'promote-outcome');
+    await writeHold(1);
+    await pressReachable(renderer, waitFor, requireJourney, '#task-drawer [data-task-composer-action="prepare"]', 'promote-prepare');
+    await waitFor(renderer, `document.querySelector('#task-drawer[data-task-detail-view="run"][data-task-plan-state="running"]')`, 'promote-run-view', 180_000);
+    const planRef = await renderer.evaluate(`document.querySelector('#task-drawer').dataset.taskPlanRef`);
+    const promotedTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then(page => ({ ref: page.taskIntent?.taskIntentId, matches: page.taskIntent?.goal === ${JSON.stringify(PROMOTE_GOAL)}, authorized: page.authorization !== null }))`);
+    requireJourney(promotedTask.ref === planRef && promotedTask.matches && promotedTask.authorized, 'promote-direct-authorized');
+    await writeHold(SAMPLE1_UNITS);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'promote-back');
     await waitForPanel(renderer, (panel)=>cardsOf(panel, 'pending').some((card)=>card.state==='draft-unfinished'), 'promote-panel-draft-retained');
 

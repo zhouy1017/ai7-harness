@@ -1173,13 +1173,19 @@ async function main() {
       stillStopped.run.attempt?.spans?.length === 2, 'resumable-sends-nothing');
 
     at('resumable-task-card');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('attention'), 'resumable-attention-entry');
+    await waitFor(renderer, `document.querySelector('[data-attention-group="exceptions"] [data-attention-state="analysis-resumable"][data-book-id=${JSON.stringify(secondBookId)}]')`, 'resumable-attention-exception');
     // Issue #1680: on the 任务 page and in the Book's 任务 panel the Run AI7 closed under says so — 任务已中断 · AI7 关闭时正在运行,
     // never 「你 … 暂停」 — with 继续 · 重新开始… · 取消任务, each inside the window.
     await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'resumable-tasks-page');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] .task-overview-card[data-task-state="analysis-resumable"]')`, 'resumable-tasks-card', 30_000);
     await assertResumableCard(renderer, '[data-screen="task-overview"] .task-overview-card[data-task-state="analysis-resumable"]', 'resumable-page');
-    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.section('manuscript'), 'resumable-manuscript');
+    // Attention released the Book route. Reopen this interrupted Book from the shelf before checking its own task panel.
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('library'), 'resumable-library');
+    const interruptedBook = `[data-screen="landing"] button[data-book-id=${JSON.stringify(secondBookId)}]`;
+    await pressReachable(renderer, waitFor, requireJourney, interruptedBook, 'resumable-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(secondBookId)}] [data-edge-entry="tasks"]')`, 'resumable-manuscript-ready', 120_000);
+    await assertReachable(renderer, waitFor, requireJourney, SIDEBAR.section('manuscript'), 'resumable-manuscript-section');
     await pressReachable(renderer, waitFor, requireJourney, '[data-edge-entry="tasks"]', 'resumable-panel-entry');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-panel .task-overview-card[data-task-state="analysis-resumable"]')`, 'resumable-panel-card', 30_000);
     // Never measured while the docked drawer still moves (240 ms).

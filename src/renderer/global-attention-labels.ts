@@ -54,6 +54,11 @@ export const GLOBAL_ATTENTION_HEADING = '待我处理';
 /** Nothing waits for the editor: the page says so once, beside the way to start a task. */
 export const GLOBAL_ATTENTION_NONE = '现在没有需要你处理的事项。';
 export const GLOBAL_ATTENTION_START = '发起任务';
+/** Below the groups, or alone beside 发起任务 when nothing waits (Issue #1680): the tasks in progress are the 任务 page's. */
+export function globalAttentionInProgressLine(count: number): string {
+  return `有 ${count} 项任务正在进行。`;
+}
+export const GLOBAL_ATTENTION_VIEW_TASKS = '查看任务';
 export const GLOBAL_ATTENTION_LEDE = '所有图书里需要你处理的事项；点开一项回到它自己的记录，在那里决定。';
 /** IA-013: a Book's own findings stay in that Book's 待办汇总; this view keeps only what crosses Books. */
 export const GLOBAL_ATTENTION_FINDINGS_NOTE = '书内的发现在那本书的「待办汇总」里。';

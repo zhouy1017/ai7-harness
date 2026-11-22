@@ -38,6 +38,15 @@ const STOPPED: ReadonlySet<GlobalAttentionStateKey> = new Set(['analysis-paused'
 /** Waits whose cancellation is the waiting-start cancellation: nothing has been sent. */
 const WAIT_CANCELLED: ReadonlySet<GlobalAttentionStateKey> = new Set(['analysis-waiting-capacity', 'analysis-waiting-slot', 'analysis-waiting-idle',
   'analysis-blocked', 'analysis-plan-moved', 'analysis-waiting-network', 'analysis-waiting-connection', 'analysis-waiting-admission']);
+/**
+ * A task in progress — running, or queued and waiting its turn — as the 任务 sidebar number and 待我处理's 「有 N 项任务正在进行。」 count
+ * it (Issue #1680). A wait for a model connection needs the editor, so 待我处理 lists it instead.
+ */
+const IN_PROGRESS: ReadonlySet<GlobalAttentionStateKey> = new Set(['analysis-running', 'review-running', 'dialogue-answering', 'analysis-cancelling',
+  'analysis-queued', 'analysis-waiting-capacity', 'analysis-waiting-slot', 'analysis-waiting-idle', 'analysis-waiting-network', 'analysis-waiting-admission']);
+export function taskInProgress(state: GlobalAttentionStateKey): boolean {
+  return IN_PROGRESS.has(state);
+}
 /** A finished or ended task: no Run to cancel, a result or a record to read, and a new task to start. */
 const ENDED_AGAIN: ReadonlySet<GlobalAttentionStateKey> = new Set(['analysis-failed', 'analysis-interrupted', 'analysis-orphaned', 'review-failed', 'review-stopped', 'analysis-budget-reached']);
 

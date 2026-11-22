@@ -339,6 +339,7 @@ export interface MountTaskDrawerOptions {
    * 发起全书任务 (TASK-044): prepare the procedure's Task — and start it under its rule when `quick` names one. It answers the
    * Task whose plan the drawer shows next, with why a quick start stopped there; `null` keeps the panel.
    */
+  configureBookTask?(bookId: string, kind: 'review' | 'writing'): void;
   startWholeBookTask(
     bookId: string,
     input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; quick: DefaultExecutionRuleReference | null },
@@ -573,6 +574,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     settle: options.settle,
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,
+    configure: (bookId, kind) => options.configureBookTask?.(bookId, kind),
     openNetworkProxySettings: () => options.openConnectionSettings(),
     openPlan: (kind, ref, cancel, redo, row, unconfirmed) => {
       if (panelBookId !== null) surface.open({ bookId: panelBookId, kind, ref }, returnFocus, undefined, { cancel, unconfirmed: unconfirmed === true, ...(redo === undefined ? {} : { redo }), ...(row === undefined ? {} : { row }) });
@@ -635,7 +637,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       options.openProcedures(book, range);
     },
     settle: () => options.settle(),
-    openPlan: (book, kind, ref) => surface.open({ bookId: book, kind, ref }, returnFocus),
+    openPlan: (book, kind, ref, view = 'plan') => surface.open({ bookId: book, kind, ref }, returnFocus, undefined, { view }),
     openNew: (seed) => {
       const back = composerReturn;
       surface.openComposer(seed, returnFocus);
