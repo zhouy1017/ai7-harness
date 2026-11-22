@@ -684,7 +684,7 @@ describe('the readiness trace (Issue #518)', () => {
   it('has J-01 record what each launch began from and carry the probe of a launch it never acquired (#675)', () => {
     const j01 = readFileSync(join(ROOT, 'e2e', 'run-j01.mjs'), 'utf8').replace(/\r\n/gu, '\n');
     const start = j01.indexOf('const start = await observeLaunchStart(shellRoot, executable).catch(() => null);');
-    const inFlight = j01.indexOf('const inFlight = { scenario: launchScenario, startedAt: Date.now(), target: false, start, stall: null };');
+    const inFlight = j01.indexOf('const inFlight = { scenario: launchScenario, startedAt: Date.now(), shellRoot, target: false, start, stall: null };');
     const launch = j01.indexOf('const launchPromise = chromium.launch({');
     expect(start).toBeGreaterThan(-1);
     expect(start < inFlight && inFlight < launch).toBe(true);

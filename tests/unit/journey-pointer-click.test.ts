@@ -11,6 +11,16 @@ const { pointerClick, pointerElementDescription, pointerFailureDetail } = await 
   pointerFailureDetail(value: unknown): unknown;
 };
 
+it('forwards only bounded readiness counts and flags through hosted failure metadata', () => {
+  expect(pointerFailureDetail({ kind: 'j01-readiness', options: 3, expectedSelected: false,
+    label: 'private-payload', value: 'private-payload', windowTitle: 'private-payload' }))
+    .toEqual({ kind: 'j01-readiness', options: 3, expectedSelected: false });
+  expect(pointerFailureDetail({ kind: 'j01-readiness', options: 'private-payload' })).toBeNull();
+  expect(pointerFailureDetail({ kind: 'j01-readiness', pending: -1 })).toBeNull();
+  expect(pointerFailureDetail({ kind: 'j01-readiness', elapsedMs: Infinity })).toBeNull();
+  expect(pointerFailureDetail({ kind: 'j01-readiness', connected: 'private-payload' })).toBeNull();
+});
+
 function scene({ covered = false, moveOnPress = false, neverSettles = false, moveOnHover = false } = {}) {
   let frame = 0, pressed = false, hovered = false;
   const events: { type: string; frame: number; x: number }[] = [];

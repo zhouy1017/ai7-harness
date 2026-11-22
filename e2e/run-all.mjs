@@ -6,6 +6,7 @@ import {
   collectReadinessTrace,
   collectJourneyDisclosures,
   collectJ02ViewportDisclosures,
+  collectJ01ChooserTiming,
   journeyElapsedSegment,
   normalizePnpmArgs,
   runJourneyProcess,
@@ -55,6 +56,10 @@ if (args.length !== 0) {
       break;
     }
     console.log(`LOCAL_COMPLETION/${journey}/pass/${elapsed}`);
+    if (journey === 'J-01') {
+      const chooserMs = collectJ01ChooserTiming(result);
+      if (chooserMs !== null) console.log(`J01_CHOOSER_READY/ms/${chooserMs}`);
+    }
   }
   if (!process.exitCode) console.log('LOCAL_COMPLETION/all/pass');
 }

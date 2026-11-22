@@ -30,6 +30,7 @@ const controller = (await import(new URL('../../e2e/controller.mjs', import.meta
   journeyElapsedSegment(milliseconds: number): string;
   discloseJ02Viewport(viewport: { width: number; height: number; overlay: boolean }): void;
   collectJ02ViewportDisclosures(result: { stdout: string }): string[];
+  collectJ01ChooserTiming(result: { code: number; stderr: string; signal: null; spawnError: boolean; outputOverflow: boolean }): number | null;
 };
 const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta.url).href)) as {
   parseGateLog(text: string): {
@@ -43,6 +44,15 @@ const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const E2E = resolve(ROOT, 'e2e');
 const J07_LOCATION = controller.JOURNEY_LOCATIONS['J-07']?.[0] as string;
+
+it('forwards only one bounded successful J-01 chooser duration', () => {
+  const result = { code: 0, stderr: 'J-01/chooser-ready/ms/1234\n', signal: null, spawnError: false, outputOverflow: false };
+  expect(controller.collectJ01ChooserTiming(result)).toBe(1234);
+  for (const stderr of ['J-01/chooser-ready/ms/private-payload', 'J-01/chooser-ready/ms/1234 private-payload', 'J-01/chooser-ready/ms/100000000', result.stderr.repeat(2)]) {
+    expect(controller.collectJ01ChooserTiming({ ...result, stderr })).toBeNull();
+  }
+  expect(controller.collectJ01ChooserTiming({ ...result, code: 1 })).toBeNull();
+});
 
 it('discloses J-02 viewport geometry without forwarding arbitrary child text', () => {
   const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);

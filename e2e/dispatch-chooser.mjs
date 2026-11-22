@@ -11,6 +11,25 @@ export function pointerElementDescription(node) {
 export function pointerFailureDetail(value) {
   if (!value || typeof value !== 'object') return null;
   if (value.unavailable === true) return { unavailable: true };
+  // Issue #1673: hosted startup/chooser observations share the existing failure-only carrier.
+  // Reconstruct only fixed numeric/boolean fields; never forward DOM labels, values or IDs.
+  if (value.kind === 'j01-readiness') {
+    const detail = { kind: 'j01-readiness' };
+    for (const key of ['elapsedMs', 'pending', 'targets', 'width', 'height', 'options', 'selected', 'relationships']) {
+      const item = value[key];
+      if (item !== undefined) {
+        if (!Number.isSafeInteger(item) || item < 0 || item > 100_000_000) return null;
+        detail[key] = item;
+      }
+    }
+    for (const key of ['connected', 'detached', 'serviceCrash', 'rendererCrash', 'fatalCrash', 'productReady', 'serviceInterrupted', 'visible', 'focused', 'chooser', 'relationshipChooser', 'existingSelected', 'expectedSelected', 'screenOverview', 'screenLanding', 'screenImport', 'screenRecovery']) {
+      if (value[key] !== undefined) {
+        if (typeof value[key] !== 'boolean') return null;
+        detail[key] = value[key];
+      }
+    }
+    return detail;
+  }
   const numbers = (items, count) => Array.isArray(items) && items.length === count && items.every(item => typeof item === 'number' && Number.isFinite(item) && Math.abs(item) <= 100_000_000) ? items : null;
   const describe = entry => entry === null ? null : pointerElementDescription({ tagName: entry?.tag, id: entry?.id,
     className: Array.isArray(entry?.classes) ? entry.classes.join(' ') : '', getAttributeNames: () => Array.isArray(entry?.data) ? entry.data.filter(item => typeof item === 'string') : [] });

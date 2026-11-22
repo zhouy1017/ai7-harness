@@ -1,12 +1,12 @@
 import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
-import { pointerClick } from './dispatch-chooser.mjs';
+import { pointerClick, pointerFailureDetail } from './dispatch-chooser.mjs';
 import {
   admittedParagraphs,
   admittedSpanText,
@@ -444,6 +444,7 @@ async function attachRendererTarget(browser, onTarget = () => undefined) {
   onTarget();
   let nextId = 1;
   const pending = new Map();
+  let lastWindowState = {};
   rootSession.on('Target.receivedMessageFromTarget', ({ sessionId: incomingSessionId, message }) => {
     if (incomingSessionId !== sessionId) return;
     let response;
@@ -461,7 +462,16 @@ async function attachRendererTarget(browser, onTarget = () => undefined) {
   });
   rootSession.on('Target.detachedFromTarget', ({ sessionId: detachedSessionId }) => {
     if (detachedSessionId !== sessionId) return;
-    for (const completion of pending.values()) completion.reject(RENDERER_SESSION_CLOSED);
+    const error = RENDERER_SESSION_CLOSED;
+    // Only fixed crash-kind flags leave the local runtime root, never record bytes or names.
+    let crashes = [];
+    try { crashes = readdirSync(join(launchInFlight.shellRoot, 'crashes')); } catch { /* no crash directory */ }
+    error.pointerFailure = pointerFailureDetail({ kind: 'j01-readiness', connected: browser.isConnected(), detached: true,
+      ...lastWindowState, serviceCrash: crashes.some(name => /-service-exit(?:-\d+)?\.json$/u.test(name)),
+      rendererCrash: crashes.some(name => /-render-process-gone(?:-\d+)?\.json$/u.test(name)),
+      fatalCrash: crashes.some(name => /-(?:uncaughtException|unhandledRejection)(?:-\d+)?\.json$/u.test(name)),
+      elapsedMs: Date.now() - launchInFlight.startedAt, pending: pending.size, targets: 1 });
+    for (const completion of pending.values()) completion.reject(error);
     pending.clear();
   });
   const send = async (method, params = {}, operationDeadline = Date.now() + PRODUCT_READY_TIMEOUT_MS) => {
@@ -502,6 +512,7 @@ async function attachRendererTarget(browser, onTarget = () => undefined) {
     return response.result.value;
   };
   await send('Runtime.enable', {}, deadline);
+  lastWindowState = await evaluate(`({ width: innerWidth, height: innerHeight, visible: document.visibilityState === 'visible', focused: document.hasFocus(), productReady: document.documentElement.dataset.ai7ProductReady === 'true', serviceInterrupted: document.documentElement.dataset.ai7ServiceState === 'interrupted' })`, deadline);
   let latestCarrierError;
   while (Date.now() < deadline) {
     try {
@@ -2093,9 +2104,29 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'empty-book-sidebar-overview-again');
   await waitFor(renderer, `${sidebarBookCurrent(bookId, 'overview')} && document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(bookId)}]')`, 'empty-book-sidebar-overview-again-ready');
 
+  const chooserStartedAt = Date.now();
   const dropPoint = await renderer.evaluate(`(() => { const b=document.querySelector('.book-overview').getBoundingClientRect(); return {x:Math.min(innerWidth-20,b.left+b.width/2),y:Math.min(innerHeight-20,b.top+50)}; })()`);
   for (const type of ['dragEnter','dragOver','drop']) await renderer.send('Input.dispatchDragEvent', {type,...dropPoint,data:{items:[],files:[SAMPLE1_PATH],dragOperationsMask:1}});
-  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'existing-book-target-selected');
+  try {
+    await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'existing-book-target-selected');
+    process.stderr.write(`J-01/chooser-ready/ms/${Date.now() - chooserStartedAt}\n`);
+  } catch (error) {
+    try {
+      error.pointerFailure = pointerFailureDetail(await renderer.evaluate(`(() => {
+        const selected = document.querySelector('input[name="import-target"]:checked');
+        return { kind: 'j01-readiness', width: innerWidth, height: innerHeight,
+          elapsedMs: ${Date.now() - chooserStartedAt}, productReady: document.documentElement.dataset.ai7ProductReady === 'true',
+          serviceInterrupted: document.documentElement.dataset.ai7ServiceState === 'interrupted', visible: document.visibilityState === 'visible', focused: document.hasFocus(),
+          options: document.querySelectorAll('input[name="import-target"]').length, selected: document.querySelectorAll('input[name="import-target"]:checked').length,
+          relationships: document.querySelectorAll('[data-import-relationship]').length,
+          chooser: !!document.querySelector('[data-import-target-choices]'), relationshipChooser: !!document.querySelector('[data-import-relationship-choices]'),
+          existingSelected: selected?.value.startsWith('existing-book:') === true, expectedSelected: selected?.value === ${JSON.stringify(`existing-book:${bookId}`)},
+          screenOverview: !!document.querySelector('[data-screen="book-overview"]'), screenLanding: !!document.querySelector('[data-screen="landing"]'),
+          screenImport: !!document.querySelector('[data-screen="import-review"]'), screenRecovery: !!document.querySelector('[data-screen="import-recovery"]') };
+      })()`));
+    } catch { error.pointerFailure = { unavailable: true }; }
+    throw error;
+  }
   await assertRenderer(
     renderer,
     `(() => { const selectedTarget = document.querySelector('input[name="import-target"]:checked'); const relationship = document.querySelector('input[aria-label="作为首份稿件导入"]'); const newBook = document.querySelector('input[aria-label="新建图书"]'); const label = selectedTarget?.getAttribute('aria-label') ?? ''; const identity = selectedTarget?.closest('label.choice')?.nextElementSibling; const identityTerms = Array.from(identity?.querySelectorAll('dt') ?? [], (term) => term.textContent); const identityValues = Array.from(identity?.querySelectorAll('dd.technical-identity') ?? [], (value) => value.textContent); return selectedTarget?.value === ${JSON.stringify(`existing-book:${bookId}`)} && label.includes(${JSON.stringify(title)}) && label.includes(${JSON.stringify(internalNumber)}) && !label.includes(${JSON.stringify(bookId)}) && identity instanceof HTMLDetailsElement && identity.classList.contains('technical-details') && (!identity.open || identity.hidden) && JSON.stringify(identityTerms) === ${JSON.stringify(JSON.stringify(['图书 ID']))} && JSON.stringify(identityValues) === ${JSON.stringify(JSON.stringify([bookId]))} && relationship && relationship.checked && newBook && !newBook.checked && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '导入'); })()`,
@@ -2513,7 +2544,7 @@ async function main() {
       // macOS, how many of the same Electron's processes are still running. Only a failure's readiness line carries it.
       const start = await observeLaunchStart(shellRoot, executable).catch(() => null);
       cancellation.throwIfRequested();
-      const inFlight = { scenario: launchScenario, startedAt: Date.now(), target: false, start, stall: null };
+      const inFlight = { scenario: launchScenario, startedAt: Date.now(), shellRoot, target: false, start, stall: null };
       launchInFlight = inFlight;
       const launchPromise = chromium.launch({
         executablePath: executable,
