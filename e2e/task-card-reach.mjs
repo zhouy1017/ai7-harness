@@ -1,3 +1,5 @@
+import { capturePointerFailure } from './dispatch-chooser.mjs';
+
 /**
  * Issue #1680: a control a stage names is asserted reachable at engine level BEFORE it is pressed, without a scripted scroll —
  * its rectangle inside the window and inside its scroller's visible box, and `document.elementFromPoint` at its centre the
@@ -29,7 +31,13 @@ export async function assertReachable(renderer, waitFor, check, selector, name) 
   await waitFor(renderer, `new Promise(resolve => { const before = JSON.stringify(${facts(selector)}); requestAnimationFrame(() => requestAnimationFrame(() => resolve(before !== 'null' && before === JSON.stringify(${facts(selector)})))); })`, `${name}-rest`);
   const seen = await renderer.evaluate(facts(selector));
   console.log(`TASK_CARD_REACH/${name}/${JSON.stringify(seen)}`);
-  check(seen !== null && seen.inWindow && seen.inScroller && seen.hit, `${name}-in-window`, seen);
+  try {
+    check(seen !== null && seen.inWindow && seen.inScroller && seen.hit, `${name}-in-window`, seen);
+  } catch (error) {
+    const detail = await capturePointerFailure(renderer, selector);
+    Object.defineProperty(error, 'pointerFailure', { value: detail, configurable: true });
+    throw error;
+  }
   return seen;
 }
 

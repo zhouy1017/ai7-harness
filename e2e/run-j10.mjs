@@ -1090,6 +1090,7 @@ async function main() {
     await pressReachable(renderer, waitFor, requireJourney, SAMPLING_OPTION, 'redo-remove-sampling');
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-launch-option="sampling"]')?.checked===false`, 'redo-sampling-off');
     await pressReachable(renderer, waitFor, requireJourney, '#task-drawer .task-launch-options > summary', 'redo-options-close');
+    await waitFor(renderer, `(() => { const options = document.querySelector('#task-drawer .task-launch-options'); return options?.open === false && !options.querySelector(':popover-open'); })()`, 'redo-options-dismissed');
 
     at('redo-run-completed');
     // 开始, pressed twice: one new Task and one Run — only the two ranges the cancelled Run never reached — to its end, without
