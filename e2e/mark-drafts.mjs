@@ -76,10 +76,10 @@ export async function draftKey(renderer, key, code, modifiers=0) {
 }
 
 /** Returning to this screen can reopen at the top. Reach the loaded place with real wheel input, without focusing it. */
-export async function draftWheelToAnchor(renderer,check,waitFor,selector,name) {
+export async function draftWheelToAnchor(renderer,check,waitFor,selector,name,{firstLine=false}={}) {
   await draftGeometry(renderer,selector,async()=>{
     const facts=`(() => {const node=document.querySelector(${JSON.stringify(selector)}),scroll=document.querySelector('.editor-window');if(!node||!scroll)return null;
-      const r=node.getBoundingClientRect(),p=scroll.getBoundingClientRect(),left=Math.max(0,p.left+scroll.clientLeft),right=Math.min(innerWidth,p.left+scroll.clientLeft+scroll.clientWidth),top=Math.max(0,p.top+scroll.clientTop),bottom=Math.min(innerHeight,p.top+scroll.clientTop+scroll.clientHeight),x=left+Math.min(16,(right-left)/2),y=(top+bottom)/2;
+      let r;if(${firstLine}){const range=document.createRange();range.selectNodeContents(node);r=Array.from(range.getClientRects()).find(rect=>rect.width>0&&rect.height>0);if(!r)return null;}else r=node.getBoundingClientRect();const p=scroll.getBoundingClientRect(),left=Math.max(0,p.left+scroll.clientLeft),right=Math.min(innerWidth,p.left+scroll.clientLeft+scroll.clientWidth),top=Math.max(0,p.top+scroll.clientTop),bottom=Math.min(innerHeight,p.top+scroll.clientTop+scroll.clientHeight),x=left+Math.min(16,(right-left)/2),y=(top+bottom)/2;
       return {idle:scroll.dataset.scrolling!=='true',whole:r.width>0&&r.height>0&&r.left>=left&&r.right<=right&&r.top>=top&&r.bottom<=bottom,x,y,hit:right>left&&bottom>top&&scroll.contains(document.elementFromPoint(x,y)),scrollTop:scroll.scrollTop,delta:Math.max(-(bottom-top)*.6,Math.min((bottom-top)*.6,(r.top+r.bottom-top-bottom)/2)),rect:[r.left,r.top,r.width,r.height]};})()`;
     for(let turn=0;turn<40;turn++) {
       await waitFor(renderer,`new Promise(resolve=>requestAnimationFrame(()=>{const before=${facts};requestAnimationFrame(()=>resolve(before?.idle===true&&JSON.stringify(before)===JSON.stringify(${facts})));}))`,name+'-stable');
@@ -97,6 +97,7 @@ export async function draftWheelToAnchor(renderer,check,waitFor,selector,name) {
 
 /** Choose manuscript words with native pointer/keys. Reading the snapshot never installs a selection. */
 export async function draftSelect(renderer, check, waitFor, blockId, from, to, name) {
+  await draftWheelToAnchor(renderer,check,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${blockId}"]`,name+'-first-line',{firstLine:true});
   await draftClick(renderer,check,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${blockId}"]`,name+'-text');
   await draftKey(renderer,'Home',36);
   const snapshot=`(() => {const raw=document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot;return raw?JSON.parse(raw):null;})()`;

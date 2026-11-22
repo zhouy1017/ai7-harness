@@ -409,12 +409,30 @@ it.each([0,7])('selects with native Home and shift arrows, rejecting a clipped f
   let anchor=15,head=15; const keys:Array<[string,number]>=[];
   const block={parentElement:null,matches:()=>true,contains:(hit:unknown)=>hit===block};
   const editor={dataset:{get selectionSnapshot(){return JSON.stringify({anchor:{blockId:'block',grapheme:anchor},head:{blockId:'block',grapheme:head}});}}};
-  const document={querySelector:(selector:string)=>selector.includes('[data-block-id=')?block:editor,createRange:()=>({selectNodeContents(){},getClientRects:()=>[{left:10,top:10,right:210,bottom:30,width:200,height:20}]}),elementFromPoint:()=>block};
+  const scroll={dataset:{},clientLeft:0,clientTop:0,clientWidth:1008,clientHeight:681,scrollTop:0,getBoundingClientRect:()=>({left:0,top:0,right:1008,bottom:681}),contains:(node:unknown)=>node===block};
+  const document={querySelector:(selector:string)=>selector==='.editor-window'?scroll:selector.includes('[data-block-id=')?block:editor,createRange:()=>({selectNodeContents(){},getClientRects:()=>[{left:10,top:10,right:210,bottom:30,width:200,height:20}]}),elementFromPoint:()=>block};
   const renderer={evaluate:async(expression:string)=>expression.includes('const describe=')?null:Function('document','requestAnimationFrame','innerWidth','innerHeight','setTimeout',`return (${expression})`)(document,(callback:()=>void)=>queueMicrotask(callback),1008,681,(callback:()=>void)=>callback()),send:async(_method:string,event:{type:string;key:string;modifiers:number})=>{if(event.type!=='keyDown')return;keys.push([event.key,event.modifiers]);if(event.key==='Home')anchor=head=home;else if(event.key==='ArrowRight'){head++;if(event.modifiers!==8)anchor=head;}}};
   const wait=async(_renderer:unknown,expression:string,name:string)=>{if(!await renderer.evaluate(expression))throw Error(name);};
   const result=draftSelect(renderer,(ok:boolean)=>{expect(ok).toBe(true);},wait,'block',2,5,'range');
   if(home===0){await expect(result).resolves.toBeUndefined();expect([anchor,head]).toEqual([2,5]);expect(keys).toEqual([['Home',0],['ArrowRight',0],['ArrowRight',0],['ArrowRight',8],['ArrowRight',8],['ArrowRight',8]]);}
   else {await expect(result).rejects.toThrow('range-start');expect(keys).toEqual([['Home',0]]);}
+});
+
+it('reaches the first text line of a tall paragraph before native Home and selection', async () => {
+  const {draftSelect}=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  let offset=300,anchor=90,head=90,clickedFirst=false;
+  const events:Array<{type:string;key?:string;deltaY?:number}>=[];
+  const first=()=>({left:100,right:300,top:390-offset,bottom:414-offset,width:200,height:24});
+  const scroll={parentElement:null,dataset:{},clientLeft:0,clientTop:0,clientWidth:525,clientHeight:510,get scrollTop(){return offset;},set scrollTop(_value:number){throw Error('scripted scroll forbidden');},getBoundingClientRect:()=>({left:80,top:150,right:605,bottom:660}),contains:(node:unknown):boolean=>node===block};
+  const block={parentElement:scroll,matches:()=>true,contains:(node:unknown)=>node===block,getBoundingClientRect:()=>({...first(),height:1000,bottom:1390-offset})};
+  const editor={dataset:{get selectionSnapshot(){return JSON.stringify({anchor:{blockId:'block',grapheme:anchor},head:{blockId:'block',grapheme:head}});}}};
+  const document={querySelector:(selector:string)=>selector==='.editor-window'?scroll:selector.includes('[data-block-id=')?block:editor,createRange:()=>({selectNodeContents(){},getClientRects:()=>[first(),{...first(),top:520-offset,bottom:544-offset}]}),elementFromPoint:()=>block};
+  const renderer={evaluate:async(expression:string)=>expression.includes('const describe=')?null:Function('document','requestAnimationFrame','innerWidth','innerHeight','setTimeout','getComputedStyle',`return (${expression})`)(document,(callback:()=>void)=>queueMicrotask(callback),1008,681,(callback:()=>void)=>callback(),()=>({position:'static',overflowX:'auto',overflowY:'auto',transform:'none',filter:'none',perspective:'none',contain:'none',willChange:'auto'})),send:async(_method:string,event:{type:string;key?:string;modifiers?:number;deltaY?:number;y?:number})=>{events.push(event);if(event.type==='mouseWheel')offset=Math.max(0,offset+event.deltaY!);if(event.type==='mousePressed')clickedFirst=event.y===first().top+12;if(event.type==='keyDown'&&event.key==='Home')anchor=head=clickedFirst?0:70;if(event.type==='keyDown'&&event.key==='ArrowRight'){head++;if(event.modifiers!==8)anchor=head;}}};
+  const wait=async(_renderer:unknown,expression:string,name:string)=>{if(!await renderer.evaluate(expression))throw Error(name);};
+  await draftSelect(renderer,(ok:boolean,name:string)=>{if(!ok)throw Error(name);},wait,'block',2,5,'range');
+  expect([anchor,head]).toEqual([2,5]);expect(clickedFirst).toBe(true);
+  expect(events.some(event=>event.type==='mouseWheel'&&event.deltaY!<0)).toBe(true);
+  expect(block.getBoundingClientRect().bottom).toBeGreaterThan(660);
 });
 
 it('reaches Reply backwards from its appended textarea without tabbing out and hiding the card (#1689 guest diagnosis)', async () => {
