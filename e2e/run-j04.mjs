@@ -1,4 +1,4 @@
-import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { capturePointerFailure, chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions } from './launch-task-bar.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
@@ -442,7 +442,8 @@ async function waitForOfflineDrawerSettled(renderer, name) {
 }
 
 async function assertOfflineControlReachable(renderer, selector, name) {
-  await assertRenderer(renderer, `(() => {
+  try {
+    await assertRenderer(renderer, `(() => {
     const control=document.querySelector(${JSON.stringify(selector)});
     if(!control)return false;
     const r=control.getBoundingClientRect();
@@ -453,7 +454,11 @@ async function assertOfflineControlReachable(renderer, selector, name) {
       if(/auto|scroll|hidden|clip/.test(style.overflowY)&&(r.top<box.top||r.bottom>box.bottom))return false;
     }
     return control.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));
-  })()`, name);
+    })()`, name);
+  } catch (error) {
+    Object.defineProperty(error, 'pointerFailure', { value: await capturePointerFailure(renderer, selector, { includeTargetAncestors: true }) });
+    throw error;
+  }
 }
 
 /**
