@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { SQLOutputValue } from 'node:sqlite';
+import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 
 /**
  * The authority store's record primitives (Issue #1172): its error types, its assertion, the canonical JSON and SHA-256 its
@@ -47,6 +47,17 @@ export function canonicalJson(value: unknown): string {
   const encoded = JSON.stringify(value);
   if (encoded === undefined) throw new StoreError('CANONICAL_VALUE_INVALID', '无法形成规范记录摘要。');
   return encoded;
+}
+
+/**
+ * How many rows of `tables` hold a reference that does not stand: one `PRAGMA foreign_key_check(<table>)` each. An owner's
+ * open-time check names the relations it owns; the store's one whole-database pass is `validateBoundedStore`'s, so a launch
+ * walks every relation once and not once per owner.
+ */
+export function foreignKeyViolations(db: DatabaseSync, tables: Iterable<string>): number {
+  let violations = 0;
+  for (const table of tables) violations += db.prepare(`PRAGMA foreign_key_check("${table}")`).all().length;
+  return violations;
 }
 
 export function sha256(value: string | Uint8Array): string {

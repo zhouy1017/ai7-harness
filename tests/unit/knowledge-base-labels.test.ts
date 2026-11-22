@@ -16,9 +16,7 @@ import {
   librarySourceLine,
   MATERIAL_INDEX_LAYERS,
   MATERIAL_INDEX_NEEDS_DEPENDENCY,
-  MATERIAL_VECTORS_BUILD,
   materialAnchorLabel,
-  materialEmbeddingLabel,
   materialParagraphAnchorLabel,
   materialVectorResultsHeading,
   materialIndexCompletedReason,
@@ -56,11 +54,11 @@ import {
   guidelineVersionPill,
 } from '../../src/renderer/knowledge-base-labels.js';
 import { MAX_GUIDELINE_CLAUSES, parseGuidelineClauses } from '../../src/service/review-guidelines.js';
-import type { LibraryMaterialProjection, MaterialIndexProjection, MaterialTranslationProjection, MaterialVectorsProjection, ReviewGuidelineVersionProjection } from '../../src/shared/protocol.js';
+import type { LibraryMaterialProjection, MaterialIndexProjection, MaterialTranslationProjection, ReviewGuidelineVersionProjection } from '../../src/shared/protocol.js';
 
 const UNBUILT: MaterialIndexProjection = {
-  state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, vectors: null, translation: null,
-  layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending', vectors: 'pending' },
+  state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, translation: null,
+  layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending' },
 };
 
 // Unit suite for 知识库's words (Issue #427, plan slice S79a; editor-surfaces §8.4, V2-UX-KB-001 to KB-010) and the reading
@@ -286,22 +284,19 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
   it('says every layer waits while the index waits, and what is never provided says so from the start', () => {
     expect(materialIndexStateLine(UNBUILT)).toBe('等待建立索引');
     expect(materialIndexStateLine({ ...UNBUILT, state: 'indexing' })).toBe('正在本机建立索引…');
-    expect(lines(UNBUILT)).toEqual(['已原样保存在本机', '等待建立索引', '等待建立索引', '不需要：文件里就是文字', '等待提取全文', '等待提取全文', '等待建立索引']);
+    expect(lines(UNBUILT)).toEqual(['已原样保存在本机', '等待建立索引', '等待建立索引', '不需要：文件里就是文字', '等待提取全文', '等待提取全文']);
     expect(lines({ ...UNBUILT, state: 'indexing' })[2]).toBe('正在建立…');
     // A PDF waits for its text before recognition can be said needed or not (Issue #892).
     expect(materialIndexLayerLine({ ...UNBUILT, layers: { ...UNBUILT.layers, recognition: 'pending' } }, 'recognition')).toBe('等待建立索引');
     expect(MATERIAL_INDEX_NEEDS_DEPENDENCY).toBe('未提供（需要本地依赖）');
   });
 
-  const VECTORS: MaterialVectorsProjection = { state: 'not-built', embedding: 'ai7-embedding/stub-1', dimensions: 256, built: 0, total: 12, builtAt: null, expectedDigest: null };
-
-  it('states a complete index layer by layer, with the anchors as positions, and the two layers made on request (Issue #892)', () => {
+  it('states a complete index layer by layer, with the anchors as positions, its six layers, and 来源译文 made on request (Issue #892)', () => {
     const complete: MaterialIndexProjection = {
       state: 'complete', reason: null, builtAt: '2026-10-09T01:00:00.000Z', digest: 'c'.repeat(64),
       metadata: { documentTitle: '样书', language: 'zh', paragraphs: 12, headings: 2, sentences: 40, characters: 900, pages: null },
-      vectors: VECTORS,
       translation: null,
-      layers: { original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'not-built' },
+      layers: { original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete' },
     };
     expect(materialIndexStateLine(complete)).toBe('已在本机建好');
     expect(lines(complete)).toEqual([
@@ -311,16 +306,10 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
       '不需要：文件里就是文字',
       '不需要：中文资料',
       '12 段 · 40 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）',
-      `未构建：可以「${MATERIAL_VECTORS_BUILD}」（在本机建立，不发送任何内容）`,
     ]);
-    // The vectors as they are made, once made, part made, and when the provider's model files are missing.
-    const vectorLine = (vectors: Partial<MaterialVectorsProjection> & Pick<MaterialVectorsProjection, 'state'>): string =>
-      materialIndexLayerLine({ ...complete, vectors: { ...VECTORS, ...vectors }, layers: { ...complete.layers, vectors: vectors.state } }, 'vectors');
-    expect(vectorLine({ state: 'building', built: 4 })).toBe('构建中… 4 / 12 段');
-    expect(vectorLine({ state: 'complete', built: 12 })).toBe('已构建：12 段 · 本机内置相似向量（按字词相近）');
-    expect(vectorLine({ state: 'not-built', built: 4 })).toBe(`未构建完：4 / 12 段；可以继续「${MATERIAL_VECTORS_BUILD}」（在本机建立，不发送任何内容）`);
-    expect(vectorLine({ state: 'needs-model', expectedDigest: 'e'.repeat(64) })).toBe(`需要模型文件：在 设置 › 本机 › 相似索引模型 放入摘要为 ${'e'.repeat(64)} 的模型文件`);
-    expect(vectorLine({ state: 'needs-model' })).toBe('需要模型文件：尚未选择嵌入依赖');
+    // 相似段落检索 is no layer and has nothing to build (R5-F2c): the six layers, and no line names a build, a vector or 设置.
+    expect(MATERIAL_INDEX_LAYERS).toEqual(['original', 'metadata', 'text', 'recognition', 'translation', 'segments']);
+    expect(lines(complete).join('\n')).not.toMatch(/构建|向量|设置/u);
     // A non-Chinese item's 来源译文: offered, and said not admitted exactly as the policy says; made; part made with why.
     const translation: MaterialTranslationProjection = { state: 'not-built', translated: 0, total: 12, model: null, request: { available: false, reason: '当前策略未开放来源译文' }, lastFailure: null };
     const english: MaterialIndexProjection = {
@@ -342,7 +331,6 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
     expect(materialAnchorLabel(5, 2, { page: 3, paragraph: 1 })).toBe('第 3 页第 1 段第 2 句');
     expect(materialParagraphAnchorLabel(5, 3, 1)).toBe('第 3 页第 1 段');
     expect(materialParagraphAnchorLabel(5, null, null)).toBe('第 5 段');
-    expect(materialEmbeddingLabel('ai7-embedding/other')).toBe('本机模型 ai7-embedding/other');
     expect([materialVectorResultsHeading(0), materialVectorResultsHeading(3)]).toEqual(['没有找到相近的段落。', '相近段落：3 条（按相近程度排序；原文以分段为准）']);
   });
 
@@ -350,12 +338,12 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
     const pdf: MaterialIndexProjection = {
       state: 'unsupported', reason: 'needs-local-dependency', builtAt: '2026-10-09T01:00:00.000Z', digest: 'd'.repeat(64),
       metadata: { documentTitle: null, language: null, paragraphs: 0, headings: 0, sentences: 0, characters: 0, pages: null },
-      vectors: null, translation: null,
-      layers: { original: 'complete', metadata: 'complete', text: 'deferred', recognition: 'deferred', translation: 'deferred', segments: 'deferred', vectors: 'deferred' },
+      translation: null,
+      layers: { original: 'complete', metadata: 'complete', text: 'deferred', recognition: 'deferred', translation: 'deferred', segments: 'deferred' },
     };
     expect(materialIndexStateLine(pdf)).toBe('已建好可读的层；这种格式的文字未能提取');
     expect(lines(pdf)).toEqual(['已原样保存在本机', '已记录文件名、格式、大小与摘要', '未提供（需要本地依赖）', '未提供（需要本地依赖）：扫描件要先识别文字',
-      '没有提取出全文，无从翻译', '没有提取出全文，无从分段', '没有提取出全文，无从建立相似索引']);
+      '没有提取出全文，无从翻译', '没有提取出全文，无从分段']);
     // A PDF without a text layer needs recognition, which is said as not provided (Issue #892).
     const scan = { ...pdf, reason: 'needs-recognition' as const, layers: { ...pdf.layers, text: 'unsupported' as const, segments: 'unsupported' as const } };
     expect(materialIndexStateLine(scan)).toBe('已建好可读的层；扫描件需要先识别文字');
@@ -394,7 +382,7 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
     expect(materialAnchorLabel(12, 3)).toBe('第 12 段第 3 句');
     expect(materialSegmentsHeading({ from: 17, total: 40, segments: Array.from({ length: 16 }, () => ({ ordinal: 0, kind: 'paragraph' as const, text: 'x', sentences: [], page: null, pageParagraph: null, translation: null })) }))
       .toBe('分段：第 17–32 段，共 40 段');
-    expect(materialIndexCompletedReason('complete')).toBe('资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪；相似段落检索可在资料里按需构建。');
+    expect(materialIndexCompletedReason('complete')).toBe('资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪。');
     expect(materialIndexCompletedReason('unsupported')).toBe('资料索引已建好可读的层：原件与元数据已就绪，这种格式的文字未能提取。');
     expect(materialIndexCompletedReason('failed')).toBe('资料索引已建立，但没能提取文字：打开资料看原因。');
   });

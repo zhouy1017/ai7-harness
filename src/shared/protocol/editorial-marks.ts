@@ -299,7 +299,7 @@ export interface ManuscriptStateProjection {
 export interface ManuscriptApplyProjection {
   effectId: string;
   kind: 'apply' | 'reverse-apply';
-  interaction: 'accept-and-apply' | 'accept-edited-and-apply' | 'apply-recorded-decision' | 'confirm-batch-apply' | 'confirm-reverse-apply';
+  interaction: 'accept-and-apply' | 'accept-edited-and-apply' | 'apply-recorded-decision' | 'confirm-batch-apply' | 'confirm-reverse-apply' | 'undo-step' | 'redo-step';
   approvalId: string;
   dispatchId: string;
   receiptId: string;

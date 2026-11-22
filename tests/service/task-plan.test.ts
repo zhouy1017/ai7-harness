@@ -10,7 +10,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
-import { validateTaskAuthorizationSchema } from '../../src/service/task-authorization.js';
+import { validateTaskAuthorizationRecords } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -161,7 +161,7 @@ function relationDigests(): Record<string, string> {
 function validateLedger(): void {
   const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
   try {
-    validateTaskAuthorizationSchema(database);
+    validateTaskAuthorizationRecords(database);
   } finally {
     database.close();
   }

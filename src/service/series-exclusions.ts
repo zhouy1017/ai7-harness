@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -53,25 +54,9 @@ export const SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const SERIES_RETRIEVAL_EXCLUSION_TRIGGER_SQL: Readonly<Record<string, string>> = {
-  series_retrieval_exclusions_no_update: `CREATE TRIGGER series_retrieval_exclusions_no_update
-    BEFORE UPDATE ON series_retrieval_exclusions
-    BEGIN
-      SELECT RAISE(ABORT, 'SERIES_EXCLUSION_LEDGER_IMMUTABLE');
-    END`,
-  series_retrieval_exclusions_no_delete: `CREATE TRIGGER series_retrieval_exclusions_no_delete
-    BEFORE DELETE ON series_retrieval_exclusions
-    BEGIN
-      SELECT RAISE(ABORT, 'SERIES_EXCLUSION_LEDGER_IMMUTABLE');
-    END`,
-};
-
-export const SERIES_RETRIEVAL_EXCLUSION_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  series_retrieval_exclusions: [
-    'series_id>series.series_id:NO ACTION/NO ACTION/NONE',
-    'supersedes_revision_id>series_retrieval_exclusions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const SERIES_RETRIEVAL_EXCLUSION_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  series_retrieval_exclusions: 'SERIES_EXCLUSION_LEDGER_IMMUTABLE',
+});
 
 export class SeriesExclusionError extends Error {
   constructor(readonly code: string, message: string) {
@@ -92,22 +77,6 @@ const ACTOR = '本机编辑';
 const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'series_retrieval_exclusions'";
 const INVALID = '书系检索排除记录已损坏。';
 const DIGEST = /^[0-9a-f]{64}$/u;
-
-/** Revision 61's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
-export function initializeSeriesRetrievalExclusionSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(SERIES_RETRIEVAL_EXCLUSION_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Series Retrieval Exclusion schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 /** An exclusion's reason as it is recorded: empty, or up to 200 characters on one line, NFC-normalized and trimmed. */
 export function seriesExclusionReason(value: unknown): string | null {

@@ -411,8 +411,6 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['inspectLibraryMaterialSegments']['output']>(IPC_CHANNELS.inspectLibraryMaterialSegments, input),
   searchReferableMaterials: (input: ServiceOperationMap['searchReferableMaterials']['input']) =>
     invoke<ServiceOperationMap['searchReferableMaterials']['output']>(IPC_CHANNELS.searchReferableMaterials, input),
-  buildMaterialVectors: (input: ServiceOperationMap['buildMaterialVectors']['input']) =>
-    invoke<ServiceOperationMap['buildMaterialVectors']['output']>(IPC_CHANNELS.buildMaterialVectors, input),
   queryMaterialVectors: (input: ServiceOperationMap['queryMaterialVectors']['input']) =>
     invoke<ServiceOperationMap['queryMaterialVectors']['output']>(IPC_CHANNELS.queryMaterialVectors, input),
   requestMaterialTranslation: (input: ServiceOperationMap['requestMaterialTranslation']['input']) =>
@@ -621,7 +619,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['rollBackDatabaseReplacement']['output']>(IPC_CHANNELS.rollBackDatabaseReplacement, input),
   prepareDatabaseMerge: (input: Parameters<RendererApi['prepareDatabaseMerge']>[0]) =>
     invoke<ServiceOperationMap['prepareDatabaseMerge']['output']>(IPC_CHANNELS.prepareDatabaseMerge, input),
-  quitApplication: () => invoke<Awaited<ReturnType<RendererApi['quitApplication']>>>(IPC_CHANNELS.quitApplication, {}),
+  quitApplication: (action?: 'rollback-upgrade') => invoke<Awaited<ReturnType<RendererApi['quitApplication']>>>(IPC_CHANNELS.quitApplication, action === 'rollback-upgrade' ? { rollbackUpgrade:true } : {}),
   cancelDatabaseExport: (input: Parameters<RendererApi['cancelDatabaseExport']>[0]) =>
     invoke<ServiceOperationMap['cancelDatabaseExport']['output']>(IPC_CHANNELS.cancelDatabaseExport, input),
   proposeSeriesKnowledge: (input: ServiceOperationMap['proposeSeriesKnowledge']['input']) =>
@@ -709,6 +707,9 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['saveMilestone']['output']>(IPC_CHANNELS.saveMilestone, input),
   inspectDeliverables: () =>
     invoke<ServiceOperationMap['inspectDeliverables']['output']>(IPC_CHANNELS.inspectDeliverables),
+  listBookVersions: (input: ServiceOperationMap['listBookVersions']['input']) => invoke<ServiceOperationMap['listBookVersions']['output']>(IPC_CHANNELS.listBookVersions, input),
+  viewBookVersion: (input: ServiceOperationMap['viewBookVersion']['input']) => invoke<ServiceOperationMap['viewBookVersion']['output']>(IPC_CHANNELS.viewBookVersion, input),
+  restoreBookVersion: (input: ServiceOperationMap['restoreBookVersion']['input']) => invoke<ServiceOperationMap['restoreBookVersion']['output']>(IPC_CHANNELS.restoreBookVersion, input),
   designatePublicationVersion: (input: Omit<ServiceOperationMap['designatePublicationVersion']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['designatePublicationVersion']['output']>(IPC_CHANNELS.designatePublicationVersion, input),
   inspectProductionDocuments: () =>
@@ -835,6 +836,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['undoManuscript']['output']>(IPC_CHANNELS.undoManuscript, input),
   redoManuscript: (input: ServiceOperationMap['redoManuscript']['input']) =>
     invoke<ServiceOperationMap['redoManuscript']['output']>(IPC_CHANNELS.redoManuscript, input),
+  inspectEditorHistory: (input: ServiceOperationMap['inspectEditorHistory']['input']) =>
+    invoke<ServiceOperationMap['inspectEditorHistory']['output']>(IPC_CHANNELS.inspectEditorHistory, input),
   openBookWorkbench: (input: Parameters<RendererApi['openBookWorkbench']>[0]) => {
     isNonActivatingBookOpen(input);
     return invoke<Awaited<ReturnType<RendererApi['openBookWorkbench']>>>(IPC_CHANNELS.openBookWorkbench, input);

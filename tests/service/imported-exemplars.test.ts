@@ -1,4 +1,3 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { writeFile, readFile, readdir, rm } from 'node:fs/promises';
@@ -7,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { readWritingExemplarWords } from '../../src/service/writing-tasks.js';
-import { readImportedExemplar, ImportedExemplars, IMPORTED_EXEMPLAR_OBJECT_DIRECTORY, IMPORTED_EXEMPLAR_SCHEMA_SQL, IMPORTED_EXEMPLAR_TRIGGER_SQL } from '../../src/service/imported-exemplars.js';
+import { readImportedExemplar, ImportedExemplars, IMPORTED_EXEMPLAR_OBJECT_DIRECTORY, IMPORTED_EXEMPLAR_TRIGGER_SQL } from '../../src/service/imported-exemplars.js';
 import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -65,22 +64,6 @@ describe('earlier published Books in 范例', () => {
     expect(normalized.bookTitle).toBe('测试 书名');
     let after = null;
     do { after = store.inspectExemplars(after).nextCursor; } while (after !== null);
-  });
-
-  it('upgrades a real revision-68 store additively without changing existing rows', async () => {
-    const creation = store.prepareBookCreation('升级前的测试项目', null);
-    const existing = store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
-    store.markCleanShutdown(); store.close();
-    const database = db();
-    try {
-      for (const table of Object.keys(IMPORTED_EXEMPLAR_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
-      execPre74Fixture(database, 'PRAGMA user_version = 68');
-    } finally { database.close(); }
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    expect(store.getBookOverview(existing).book).toMatchObject({ title: '升级前的测试项目' });
-    expect(store.inspectExemplars(null).books).toEqual([]);
-    const upgraded = db();
-    try { expect(upgraded.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION); } finally { upgraded.close(); }
   });
 
   it.each(['docx', 'txt', 'md'])('imports %s with attribution, without fabricating a Book project, and keeps an exact revision', async (extension) => {

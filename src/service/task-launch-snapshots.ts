@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { RuntimeExecutionConfig, DispatchTaskKind } from '../shared/runtime-execution-config.js';
@@ -18,19 +19,9 @@ export const TASK_LAUNCH_SCHEMA_SQL = {
   sha256 TEXT NOT NULL CHECK(length(sha256) = 64)
 ) STRICT`,
 };
-export const TASK_LAUNCH_TRIGGER_SQL = Object.fromEntries(['update', 'delete'].map((operation) => [
-  `task_launch_snapshots_no_${operation}`,
-  `CREATE TRIGGER task_launch_snapshots_no_${operation} BEFORE ${operation.toUpperCase()} ON task_launch_snapshots
-    BEGIN SELECT RAISE(ABORT, 'TASK_LAUNCH_IMMUTABLE'); END`,
-]));
-
-export function initializeTaskLaunchSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'task_launch_snapshots'").get() !== undefined) return;
-  transact(db, () => {
-    db.exec(TASK_LAUNCH_SCHEMA_SQL.task_launch_snapshots);
-    for (const sql of Object.values(TASK_LAUNCH_TRIGGER_SQL)) db.exec(sql);
-  });
-}
+export const TASK_LAUNCH_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  task_launch_snapshots: 'TASK_LAUNCH_IMMUTABLE',
+});
 
 export type LaunchTaskKind = DispatchTaskKind;
 export interface LaunchChoice {

@@ -58,8 +58,10 @@ describe('review workspace domain', () => {
     const blocks = Array.from({ length: blockCount }, (_, index) => ({ blockId: 'blk_' + (index + 1).toString(16).padStart(24, '0'), position: index + 1 }));
     for (const block of blocks) {
       db.prepare('INSERT INTO manuscript_blocks VALUES (?, ?, ?)').run(block.blockId, manuscriptId, revisionId);
-      db.prepare('INSERT INTO working_blocks VALUES (?, ?, ?, ?, NULL, ?, ?, 0)').run(branchId, block.blockId, block.position, 'paragraph', '', digest);
+      db.prepare('INSERT INTO working_blocks VALUES (?, ?, ?, ?, NULL, ?, ?, 0)').run(branchId, block.blockId, block.position * 2 ** 20, 'paragraph', '', digest);
     }
+    // The working state's one page (Issue #1654): the paragraph numbers are counted from it.
+    if (blocks.length > 0) db.prepare('INSERT INTO working_pages VALUES (?, 0, ?, 0)').run(branchId, blocks.length);
     db.prepare('INSERT INTO model_service_connections VALUES (?, ?, ?)').run('main-editorial-deepseek-v4-pro', randomUUID(), 'missing');
     return { bookId, host: reviewHost(db), blocks };
   }

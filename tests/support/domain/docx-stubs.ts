@@ -152,14 +152,14 @@ export const DOCX_SOURCE_STUBS = {
   working_blocks: `CREATE TABLE "working_blocks" (
   "branch_id" TEXT NOT NULL,
   "block_id" TEXT NOT NULL,
-  "position" INTEGER NOT NULL,
+  "order_key" INTEGER NOT NULL,
   "kind" TEXT NOT NULL,
   "level" INTEGER,
   "text" TEXT NOT NULL,
   "digest" TEXT NOT NULL,
   "grapheme_length" INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY ("branch_id", "block_id"),
-  UNIQUE ("branch_id", "position")
+  UNIQUE ("branch_id", "order_key")
 ) STRICT`,
   branch_working_state: `CREATE TABLE "branch_working_state" (
   "branch_id" TEXT NOT NULL,

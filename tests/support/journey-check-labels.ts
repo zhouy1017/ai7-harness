@@ -10,10 +10,14 @@ const PART = /^[a-z0-9-]*$/u;
 type FunctionNode = ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration;
 
 function walk(node: ts.Node, visit: (node: ts.Node) => void): void {
-  visit(node);
-  ts.forEachChild(node, (child) => {
-    walk(child, visit);
-  });
+  const pending = [node];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    visit(current);
+    const children: ts.Node[] = [];
+    ts.forEachChild(current, child => { children.push(child); });
+    pending.push(...children.reverse());
+  }
 }
 
 function isFunction(node: ts.Node): node is FunctionNode {

@@ -17,7 +17,6 @@ import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
-import { reportContentDigest } from '../../src/service/review/review-report.js';
 import { renderReportExport } from '../../src/service/report-export.js';
 import { strFromU8, unzipSync } from 'fflate';
 
@@ -329,51 +328,5 @@ it('leaves 暂缺 when AI7 quits while the request is in flight, and sends nothi
     await second.driver.drive(runId);
     expect(second.capture.requests).toHaveLength(0);
   } finally { await closeSession(second); }
-});
-
-it('gives an eligible 0.7.1 run its summary from its stored findings, and the summary travels through export and merge (#1506)', async () => {
-  const source = join(roots.codeRoot, 'tests/fixtures/database/sample1-review-071.ai7db');
-  let target = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  try { await target.prepareDatabaseReplacement((await target.inspectDatabaseImport(source)).previewId, new Date()); }
-  finally { target.markCleanShutdown(); target.close(); }
-  const session = await openSession(null);
-  const destination = join(roots.inputRoot, 'synthesis-only.ai7db');
-  let bookId!: string, runId!: string, written: unknown;
-  try {
-    const archived = session.store.listBooks(null).items.find(book => book.title === 'sample1 · 0.7.1 已归档审阅')!;
-    bookId = archived.bookId;
-    const before = session.store.inspectReviewWorkspace(bookId, null).run!;
-    runId = before.reviewRunId;
-    const archivedReport = before.report!;
-    expect(before.synthesis?.state).toBe('missing');
-    expect(before.synthesis?.canGenerate).toBe(true);
-    generate(session, bookId, runId);
-    await session.driver.drive(runId);
-    const after = run(session, bookId, runId);
-    expect(after.synthesis?.state).toBe('completed');
-    expect(after.synthesis?.modelLabel).toBeDefined();
-    expect(after.findings).toEqual(before.findings);
-    expect(after.categories).toEqual(before.categories);
-    // Built from the Run's own findings: one request, its evidence quoting them.
-    const [request] = synthesisRequests(session);
-    expect(synthesisRequests(session)).toHaveLength(1);
-    const input = JSON.parse(request!.messages.findLast(message => message.role === 'user')!.content);
-    expect(input.findings.length).toBeGreaterThan(0);
-    expect(input.evidence.every((entry: { quote: string }) => before.findings.some(finding => finding.quote.startsWith(entry.quote.slice(0, 20))))).toBe(true);
-    // The archived report stays as it was; a new version carries the summary.
-    expect(run(session, bookId, runId).reportVersions.length).toBeGreaterThan(0);
-    expect(reportContentDigest(session.store.inspectReviewWorkspace(bookId, runId).run!.report!.record)).toBe(reportContentDigest(archivedReport.record));
-    expect(session.store.generateReviewReport(bookId, runId).run!.report!.record.synthesis?.summary).toEqual(after.synthesis?.summary);
-    written = after.synthesis;
-    const prepared = await session.store.prepareDatabaseExport(destination, true);
-    expect((await session.store.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
-  } finally { await closeSession(session); }
-  const mergedRoot = join(roots.inputRoot, 'synthesis-only-merge');
-  target = await EditorialStore.open(mergedRoot, roots.codeRoot);
-  try { await target.prepareDatabaseMerge((await target.inspectDatabaseImport(destination)).previewId, new Date()); }
-  finally { target.markCleanShutdown(); target.close(); }
-  target = await EditorialStore.open(mergedRoot, roots.codeRoot);
-  try { expect(target.inspectReviewWorkspace(bookId, runId).run!.synthesis).toEqual(written); }
-  finally { target.markCleanShutdown(); target.close(); }
 });
 

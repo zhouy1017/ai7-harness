@@ -15,6 +15,7 @@ import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.j
 // #1058 / J04: mount the actual surface/loader/Workspace controls. All browser additions stay local to this test.
 const BOOK = '11111111-1111-4111-8111-111111111111';
 const RUN = '22222222-2222-4222-8222-222222222222';
+const STEP = '33333333-3333-4333-8333-333333333333';
 const OTHER = '33333333-3333-4333-8333-333333333333';
 const RESULT = '44444444-4444-4444-8444-444444444441';
 const SECOND = '44444444-4444-4444-8444-444444444442';
@@ -123,7 +124,9 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1, proc
   const inspectFactualVerification = vi.fn<RendererApi['inspectFactualVerification']>().mockImplementation(async (input) => lens(input.reviewRunId ?? RUN));
   const inspectEvidenceWorkspace = vi.fn<RendererApi['inspectEvidenceWorkspace']>().mockImplementation(async (input) => evidence(result(RUN, input.resultId)));
   const unexpected = vi.fn(async () => { throw new Error('unexpected API operation'); });
-  const calls = { inspectReviewWorkspace, inspectFactualVerification, inspectEvidenceWorkspace };
+  // The steps Ctrl+Z would take (Issue #1654): none until a case says which batch step is the newest.
+  const inspectEditorHistory = vi.fn<RendererApi['inspectEditorHistory']>().mockImplementation(async (input) => ({ branchId: input.branchId, undo: null, redo: null }));
+  const calls = { inspectReviewWorkspace, inspectFactualVerification, inspectEvidenceWorkspace, inspectEditorHistory };
   const api = new Proxy(calls, { get: (target, key) => Reflect.get(target, key) ?? unexpected }) as unknown as MountReviewWorkspaceOptions['api'];
   const status = vi.fn(); const searchSettings = vi.fn(); const goToText = vi.fn(async () => undefined);
   const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: resume ? null : { reviewRunId: RUN, findingId: null }, api, procedureId,
@@ -177,6 +180,26 @@ describe('review triage (#1525)', () => {
     expect(batch).toHaveBeenCalledWith(expect.objectContaining({ markIds: ['m-2', 'm-3'] }));
   });
 
+  it('takes back a batch applied from an older Run’s page after leaving and coming back, when a newer Run found the same marks (#1654)', async () => {
+    const view = mount();
+    const next = workspace(RUN, 'settled', 3);
+    const category = next.run!.categories[0]!;
+    category.categoryId = 'typos-and-usage'; category.output = 'change-suggestion'; category.batchApply = true;
+    next.run!.findings = [1, 2, 3].map((ordinal) => ({ ...finding(), findingId: `finding-${ordinal}`, markId: `mark-${ordinal}`,
+      ordinal, categoryId: category.categoryId, output: 'change-suggestion', replacement: '公开合成替换' }));
+    // The page comes back to the older Run; the step Ctrl+Z would take is this batch, which a newer Run also found.
+    const newer = '44444444-4444-4444-8444-444444444444';
+    view.inspectEditorHistory.mockResolvedValue({ branchId: 'branch-a', redo: null, undo: { stepId: STEP, kind: 'accept-batch', label: '接受本批修改建议（3 条）',
+      changeCount: 3, paragraph: 1, batch: { reviewRunIds: [newer, RUN], categoryId: 'typos-and-usage' } } });
+    const undo = vi.fn().mockResolvedValue({ blocked: false, completionLabel: '' });
+    Object.assign(view.api, { undoManuscript: undo, getManuscriptWindowAt: vi.fn(async () => ({ workingDigest: 'd'.repeat(64) })) });
+    view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
+    expect(view.root.querySelector('section.review-batch-applied [data-review-action="batch-undo"]')).not.toBeNull();
+    view.root.querySelector('[data-review-action="batch-undo"]')!.click(); await flush();
+    expect(undo).toHaveBeenCalledWith(expect.objectContaining({ expectedStepId: STEP }));
+    expect(view.status).toHaveBeenLastCalledWith('已撤销 3 条。', 'success');
+  });
+
   it('reverses a three-finding batch once and reports all three undone', async () => {
     const view = mount();
     const next = workspace(RUN, 'settled', 3);
@@ -184,13 +207,17 @@ describe('review triage (#1525)', () => {
     category.categoryId = 'typos-and-usage'; category.output = 'change-suggestion'; category.batchApply = true;
     next.run!.findings = [1, 2, 3].map((ordinal) => ({ ...finding(), findingId: `finding-${ordinal}`, markId: `mark-${ordinal}`,
       ordinal, categoryId: category.categoryId, output: 'change-suggestion', replacement: '公开合成替换' }));
-    const reverse = vi.fn().mockResolvedValueOnce({ card: null }).mockRejectedValue(new Error('already undone'));
-    Object.assign(view.api, { applyChangeSuggestionBatch: vi.fn().mockResolvedValue({ card: null }),
-      reverseAppliedChangeSuggestion: reverse, getManuscriptApplyOutcome: vi.fn().mockResolvedValue({ state: 'not-committed' }) });
+    const undo = vi.fn().mockResolvedValueOnce({ blocked: false, completionLabel: '' }).mockRejectedValue(new Error('already undone'));
+    Object.assign(view.api, { applyChangeSuggestionBatch: vi.fn().mockResolvedValue({ card: null }), undoManuscript: undo,
+      getManuscriptWindowAt: vi.fn(async () => ({ workingDigest: 'd'.repeat(64) })), getManuscriptApplyOutcome: vi.fn().mockResolvedValue({ state: 'not-committed' }) });
     view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
     view.root.querySelector('[data-review-action="batch-prepare"]')!.click(); await flush();
+    view.inspectEditorHistory.mockResolvedValue({ branchId: 'branch-a', redo: null, undo: { stepId: STEP, kind: 'accept-batch', label: '接受本批修改建议（3 条）',
+      changeCount: 3, paragraph: 1, batch: { reviewRunIds: [RUN], categoryId: 'typos-and-usage' } } });
     view.root.querySelector('[data-review-action="batch-undo"]')!.click(); await flush();
-    expect(reverse).toHaveBeenCalledTimes(1);
+    // 撤销本批应用 is Ctrl+Z on exactly the batch's step (Issue #1654).
+    expect(undo).toHaveBeenCalledTimes(1);
+    expect(undo).toHaveBeenCalledWith(expect.objectContaining({ expectedStepId: STEP, expectedWorkingDigest: 'd'.repeat(64) }));
     expect(view.status).toHaveBeenLastCalledWith('已撤销 3 条。', 'success');
   });
 });
@@ -678,9 +705,10 @@ describe('one-step review actions (#1410)', () => {
 
   it('applies the whole batch in one click and takes it back as one Effect, with 撤销本批应用', async () => {
     const applyBatch = vi.fn(async () => ({ application: { effectId: 'effect' } }));
-    const reverse = vi.fn(async (_input: { markId: string }) => ({ application: { effectId: 'reverse' } }));
+    const undo = vi.fn(async (_input: { expectedStepId?: string }) => ({ blocked: false, completionLabel: '' }));
     const { root, status } = await view([suggestion('m1', 1), suggestion('m2', 2)], {
-      applyChangeSuggestionBatch: applyBatch, reverseAppliedChangeSuggestion: reverse, getManuscriptApplyOutcome: vi.fn(), inspectApplyReceipt: vi.fn(),
+      applyChangeSuggestionBatch: applyBatch, undoManuscript: undo, getManuscriptWindowAt: vi.fn(async () => ({ workingDigest: 'd'.repeat(64) })),
+      getManuscriptApplyOutcome: vi.fn(), inspectApplyReceipt: vi.fn(),
     });
     button(root, 'batch-prepare')!.click(); await flush();
     expect(applyBatch).toHaveBeenCalledOnce();
@@ -690,7 +718,8 @@ describe('one-step review actions (#1410)', () => {
     expect(applied.dataset['reviewBatchState']).toBe('applied');
     expect(applied.textContent).toContain('已把 2 条修改建议写入稿件。');
     button(root, 'batch-undo')!.click(); await flush();
-    expect(reverse.mock.calls.map(([input]) => input.markId)).toEqual(['m1']);
+    // The batch is not the newest step in this harness: the step it names is one no step has, which the service refuses.
+    expect(undo.mock.calls.map(([input]) => input.expectedStepId)).toEqual(['00000000-0000-4000-8000-000000000000']);
     expect(status).toHaveBeenLastCalledWith('已撤销 2 条。', 'success');
     expect(root.querySelector('section.review-batch-applied')).toBeNull();
   });
@@ -707,17 +736,16 @@ describe('one-step review actions (#1410)', () => {
   });
 
   it('keeps batch reversal available when the Effect cannot be reversed', async () => {
-    const reverse = vi.fn(async (input: { markId: string }) => { if (input.markId === 'm1') throw new Error('anchor moved'); return { application: { effectId: 'reverse' } }; });
-    const outcome = vi.fn(async () => ({ state: 'not-committed' }));
+    const undo = vi.fn(async () => { throw new Error('anchor moved'); });
     const { root, status } = await view([suggestion('m1', 1), suggestion('m2', 2)], {
-      applyChangeSuggestionBatch: vi.fn(async () => ({ application: { effectId: 'effect' } })), reverseAppliedChangeSuggestion: reverse,
-      getManuscriptApplyOutcome: outcome, inspectApplyReceipt: vi.fn(),
+      applyChangeSuggestionBatch: vi.fn(async () => ({ application: { effectId: 'effect' } })), undoManuscript: undo,
+      getManuscriptWindowAt: vi.fn(async () => ({ workingDigest: 'd'.repeat(64) })), getManuscriptApplyOutcome: vi.fn(), inspectApplyReceipt: vi.fn(),
     });
     button(root, 'batch-prepare')!.click(); await flush();
     button(root, 'batch-undo')!.click(); await flush();
-    expect(reverse).toHaveBeenCalledTimes(1);
-    expect(outcome).toHaveBeenCalledOnce();
+    expect(undo).toHaveBeenCalledTimes(1);
     expect(status).toHaveBeenLastCalledWith('未能撤销本批应用。', 'error');
+    expect(button(root, 'batch-undo')).not.toBeNull();
   });
 
   it('ignores a finding in one click with the routine reason, and keeps 忽略并备注… for a reason of the editor\'s own', async () => {

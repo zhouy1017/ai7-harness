@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { EVALUATION_AI_LOCK_PARTS } from '../shared/protocol/evaluation.js';
@@ -108,30 +109,10 @@ export const EVALUATION_RECORD_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const EVALUATION_RECORD_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(EVALUATION_RECORD_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'EVALUATION_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'EVALUATION_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const EVALUATION_RECORD_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  evaluation_records: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
-    'previous_record_id>evaluation_records.record_id:NO ACTION/NO ACTION/NONE',
-    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-  evaluation_record_entries: ['record_id>evaluation_records.record_id:NO ACTION/NO ACTION/NONE'],
-};
+export const EVALUATION_RECORD_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  evaluation_records: 'EVALUATION_LEDGER_IMMUTABLE',
+  evaluation_record_entries: 'EVALUATION_LEDGER_IMMUTABLE',
+});
 
 /**
  * Revision 59 (Issue #429, S81b1; EVAL-001, EVAL-006): the AI7 初评 a version began from, one row per such version, written
@@ -148,25 +129,9 @@ export const EVALUATION_INITIAL_DRAFT_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const EVALUATION_INITIAL_DRAFT_TRIGGER_SQL: Readonly<Record<string, string>> = {
-  evaluation_initial_drafts_no_update: `CREATE TRIGGER evaluation_initial_drafts_no_update
-    BEFORE UPDATE ON evaluation_initial_drafts
-    BEGIN
-      SELECT RAISE(ABORT, 'EVALUATION_LEDGER_IMMUTABLE');
-    END`,
-  evaluation_initial_drafts_no_delete: `CREATE TRIGGER evaluation_initial_drafts_no_delete
-    BEFORE DELETE ON evaluation_initial_drafts
-    BEGIN
-      SELECT RAISE(ABORT, 'EVALUATION_LEDGER_IMMUTABLE');
-    END`,
-};
-
-export const EVALUATION_INITIAL_DRAFT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  evaluation_initial_drafts: [
-    'analysis_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'record_id>evaluation_records.record_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const EVALUATION_INITIAL_DRAFT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  evaluation_initial_drafts: 'EVALUATION_LEDGER_IMMUTABLE',
+});
 
 export class EvaluationError extends Error {
   constructor(readonly code: string, message: string) {
@@ -206,7 +171,6 @@ const INITIAL_DRAFT_SCHEMA = 'ai7.evaluation-initial-draft/3';
 const PROFILE_SCHEMA = 'ai7.evaluation-profile/1';
 /** Who scores and finalizes, as the other editor records of this device name it. */
 export const EVALUATION_ACTOR = '本机编辑' as const;
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'evaluation_records'";
 const CONTROL_CHARACTER = /[\p{Zl}\p{Zp}]|(?![\n])\p{Cc}/u;
 const LINE_CONTROL_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 
@@ -253,38 +217,6 @@ export function evaluationProfileDigest(profile: Profile): string {
 
 function withDigest(profile: Profile): EvaluationProfileProjection {
   return { ...profile, sha256: evaluationProfileDigest(profile) };
-}
-
-/** Revision 47's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
-export function initializeEvaluationRecordSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(EVALUATION_RECORD_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(EVALUATION_RECORD_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Evaluation record schema rollback failed.');
-    }
-    throw error;
-  }
-}
-
-/** Revision 59's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
-export function initializeEvaluationInitialDraftSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'evaluation_initial_drafts'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(EVALUATION_INITIAL_DRAFT_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(EVALUATION_INITIAL_DRAFT_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Evaluation initial draft schema rollback failed.');
-    }
-    throw error;
-  }
 }
 
 /** A version's empty content: every item unscored, every risk unrated, nothing listed, no conclusion. */

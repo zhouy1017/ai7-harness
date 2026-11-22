@@ -1,7 +1,5 @@
-import { CURATION_SCHEMA_SQL, FACTUAL_RANGE_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
 import { BaselineAnalysisExecutionOwner, ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,11 +22,6 @@ import {
 } from '../../src/service/evaluation/evaluation-rewrite-contract.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
-  ANALYSIS_LEDGER_REVISION_62_SQL,
-  ANALYSIS_LEDGER_SCHEMA_SQL,
-  CAPTURED_PROCEDURE_SCHEMA_VERSION,
-} from '../../src/service/task-authorization.js';
-import {
   EVALUATION_REWRITE_ASSURANCE_STATEMENT,
   EVALUATION_REWRITE_CONTRACT_VERSION,
   EVALUATION_REWRITE_KIND,
@@ -37,7 +30,6 @@ import {
   type EvaluationRecordProjection,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
-import { KIND_COUPLED_ANALYSIS_RELATIONS, constructPre94PolicyEncoding, downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { AUTHORED_REWRITE_OBSERVATIONS, AUTHORED_REWRITE_WORDS, EVALUATION_REWRITE_FIXTURE_IDENTITY, EVALUATION_REWRITE_V1_FIXTURE_IDENTITY, J11_REWRITE_ADJUSTMENTS, beginRewriteAsJ11 } from '../support/evaluation-rewrite.js';
 import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
@@ -211,28 +203,6 @@ const wordsOf = (itemIds: ReadonlyArray<string>, from: { taskIntentId: string; a
   items: itemIds.map((itemId) => ({ itemId, ...from, sha256: sha256Hex(AUTHORED_REWRITE_WORDS.items.find((item) => item.itemId === itemId)!.comment) })),
   verdict: verdict ? { ...from, sha256: sha256Hex(AUTHORED_REWRITE_WORDS.verdict) } : null,
 });
-
-const kindCoupledRows = (database: DatabaseSync): string => JSON.stringify(KIND_COUPLED_ANALYSIS_RELATIONS
-  .map((table) => database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
-
-async function revision63Book(compatible: boolean): Promise<{ bookId: string; before: string }> {
-  let bookId = '', before = '';
-  await withBook(async (book) => {
-    bookId = book.bookId;
-    if (compatible) await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
-  });
-  withDatabase((database) => {
-    constructPre94PolicyEncoding(database);
-    execPre74Fixture(database, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; PRAGMA user_version = ${CAPTURED_PROCEDURE_SCHEMA_VERSION};`);
-    if (compatible) {
-      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_62_SQL);
-      before = kindCoupledRows(database);
-      expect(() => database.exec(`INSERT INTO analysis_result_sets(result_set_id, book_id, kind, created_at, canonical_json, sha256)
-        VALUES ('${randomUUID()}', (SELECT book_id FROM books LIMIT 1), '${EVALUATION_REWRITE_KIND}', 'x', '{}', '${'a'.repeat(64)}')`)).toThrowError(/CHECK constraint failed/u);
-    }
-  });
-  return { bookId, before };
-}
 
 async function discardedThenPendingBook(): Promise<{ bookId: string; recordId: string }> {
   let bookId = '', recordId = '';
@@ -823,34 +793,6 @@ describe('the market section and 按我的评分重写评语 over the real store
     });
   }, 300_000);
 
-  it('migrates revision 63 so a rewrite can be prepared through the public API', async () => {
-    const { bookId } = await revision63Book(true);
-    await withReopenedStore(async (store) => {
-      finalizeAsJ11(store, bookId);
-      const record = beginRewriteAsJ11(store, bookId);
-      expect(prepareRewrite(store, bookId, record.recordId)).toMatchObject({ kind: EVALUATION_REWRITE_KIND, state: 'prepared' });
-    });
-    withDatabase((database) => {
-      for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
-        expect((database.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql)
-          .toBe(table === 'analysis_task_intents' ? FACTUAL_RANGE_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
-      }
-      expect(Object.keys(EVALUATION_REWRITE_TRIGGER_SQL).every((name) => database.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name) !== undefined)).toBe(true);
-    });
-  }, 300_000);
-
-  it('keeps every populated evaluation-kind row byte for byte through revision-63 migration', async () => {
-    const { before } = await revision63Book(true);
-    await withReopenedStore(async () => {});
-    withDatabase((database) => { expect(kindCoupledRows(database)).toBe(before); });
-  }, 300_000);
-
-  it('refuses a revision-63 store whose kind-coupled relations already read as revision 64’s', async () => {
-    await revision63Book(false);
-    const refused = await openStore().then((store) => { store.close(); return 'opened'; },
-      (error: unknown) => (error instanceof Error && 'code' in error ? `${String((error as { code: unknown }).code)}:${error.message}` : String(error)));
-    expect(refused).toBe('SCHEMA_INVALID:分析任务账本表（修订版 62） analysis_task_intents 结构不兼容。');
-  }, 300_000);
 });
 
 /**

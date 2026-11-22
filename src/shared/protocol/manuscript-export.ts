@@ -32,6 +32,7 @@ export type ManuscriptExportFormat = 'docx' | 'pdf' | 'markdown';
  */
 export type ManuscriptExportTargetInput =
   | { kind: 'current' }
+  | { kind: 'revision'; revisionId: string }
   | { kind: 'milestone'; milestoneId: string }
   | { kind: 'report'; reportId: string }
   // Issue #415 (S66b): one exact version of a Production Document of the route's Book (EXP-024, DELIV-003).
@@ -124,7 +125,7 @@ export interface ExportRetentionDisclosure {
  */
 export interface ManuscriptExportTargetProjection {
   /** `package-manifest` is the service's own target (Issue #416, S67b): a package export's 交付包清单, never the renderer's. */
-  kind: 'current' | 'milestone' | 'report' | 'document' | 'package-manifest';
+  kind: 'current' | 'revision' | 'milestone' | 'report' | 'document' | 'package-manifest';
   milestoneId: string | null;
   milestoneLabel: string | null;
   revisionId: string;

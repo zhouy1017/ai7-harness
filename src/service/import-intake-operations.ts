@@ -119,7 +119,7 @@ export function writeImportedManuscriptRows<T>(db: DatabaseSync, args: {
         ).run(revisionId, input.draftId);
         db.prepare(
           `INSERT INTO working_blocks(
-             branch_id, block_id, position, kind, level, text, digest, grapheme_length
+             branch_id, block_id, order_key, kind, level, text, digest, grapheme_length
            ) SELECT ?, staged_block_id, position, kind, level, text, digest, grapheme_length
              FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
         ).run(branchId, input.draftId);

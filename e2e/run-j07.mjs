@@ -2798,6 +2798,137 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="book-deliverables"]') && document.querySelector('[data-publication-action="actuals"]')`, 'actuals-ordinary-back');
     await setDeveloperMode(renderer, waitFor, true, 'actuals-ordinary-on');
 
+    await close();
+    const versionPath = resolve(exportsRoot, '版本留档.docx');
+    renderer = await launch({ save: versionPath });
+    await reopenDeliverables(renderer, 'version-list');
+    const showVersions = async (name) => {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), `${name}-overview`);
+      await waitFor(renderer, `document.querySelector('.book-versions > summary')`, `${name}-entry`);
+      await clickSelector(renderer, '.book-versions > summary', `${name}-open`);
+      await waitFor(renderer, `document.querySelector('.book-versions[open][data-version-state="ready"] li')`, `${name}-rows`);
+    };
+    const findVersion = async (kind, label, name) => {
+      let restart = true;
+      for (;;) {
+        const page = await renderer.evaluate(`(() => {
+          const root=document.querySelector('.book-versions');
+          const offset=Number(root.dataset.versionOffset);
+          const row=Array.from(root.querySelectorAll('li[data-kind="${kind}"]')).find(item=>item.querySelector('strong').textContent===${JSON.stringify(label)});
+          if(row)return {id:row.dataset.revisionId,index:Array.from(row.parentElement.children).indexOf(row)+1,offset};
+          const buttons=Array.from(root.querySelectorAll(':scope > .button-row button'));
+          const button=buttons.find(item=>item.textContent===(${restart} && offset>0?'上一页版本':'下一页版本'));
+          if(button)button.click();return {offset,moved:Boolean(button)};
+        })()`);
+        if (typeof page.id === 'string') return `.book-versions li[data-kind="${kind}"][data-revision-id="${page.id}"]` + (kind === 'revision' ? '' : `:nth-child(${page.index})`);
+        requireJourney(page.moved, name);
+        await waitFor(renderer, `document.querySelector('.book-versions[data-version-state="ready"]:not([data-version-offset="${page.offset}"])')`, name);
+        if (page.offset === 0) restart = false;
+      }
+    };
+    await showVersions('version-list');
+    for (const direction of ['next','previous']) {
+      const label = direction === 'next' ? '下一页版本' : '上一页版本';
+      let pages = 0;
+      for (;;) {
+        const offset = await renderer.evaluate(`(() => { const root=document.querySelector('.book-versions');const button=Array.from(root.querySelectorAll(':scope > .button-row button')).find(item=>item.textContent===${JSON.stringify(label)});if(!button)return null;button.focus();return root.dataset.versionOffset; })()`);
+        if (offset === null) break;
+        await pressEnter(renderer);
+        await waitFor(renderer, `document.querySelector('.book-versions[data-version-state="ready"]:not([data-version-offset="${offset}"])')`, 'version-list-keyboard-paged');
+        await assertRenderer(renderer, `document.activeElement.matches('.book-versions > .button-row button')`, 'version-list-page-focus');
+        pages++;
+      }
+      requireJourney(pages > 0, 'version-list-reached-edge');
+    }
+    const versionRow = await findVersion('revision', '已保存修订 · r1', 'version-list-original');
+    const revisionId = await renderer.evaluate(`document.querySelector(${JSON.stringify(versionRow)}).dataset.revisionId`);
+    await clickSelector(renderer, `${versionRow} .button-row > button:first-child`, 'version-list-view');
+    await waitFor(renderer, `document.querySelector('.version-selection h4')?.textContent.includes('r1') && document.querySelector('.version-paragraph') && !document.querySelector('.version-selection').textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-readonly');
+    await clickSelector(renderer, `${versionRow} [data-export-menu] > summary`, 'version-list-export-menu');
+    await clickSelector(renderer, `${versionRow} [data-export-clean]`, 'version-list-export-docx');
+    await waitFor(renderer, `document.querySelector('.book-versions .export-receipt')?.dataset.exportOutcome === 'created'`, 'version-list-exported', 120_000);
+    const selectedDocx = await readExportedDocx(versionPath);
+    requireJourney(selectedDocx.paragraphs.length === excerpt.length && selectedDocx.paragraphs.every((para, index) => para.digest === digestOf(excerpt[index])), 'version-list-selected-docx-content');
+    await assertRenderer(renderer, `window.ai7.inspectDeliverables().then(result => result.exports.some(record => record.target.kind === 'revision' && record.target.revisionId === ${JSON.stringify(revisionId)} && record.outcome === 'created'))`, 'version-list-selected-receipt');
+    for (const kind of ['milestone', 'publication']) {
+      const label = kind === 'milestone' ? '里程碑 · ' + SECOND.label : '发稿版本 · 第 2 次';
+      const edit = kind === 'milestone' ? FIRST_EDIT : '';
+      await close();
+      const destination = resolve(exportsRoot, kind + '.docx');
+      renderer = await launch({ save: destination });
+      await reopenDeliverables(renderer, `version-${kind}`);
+      await showVersions(`version-${kind}`);
+      const row = await findVersion(kind, label, 'version-selection-binding');
+      await clickSelector(renderer, row + ' .button-row > button:first-child', `version-${kind}-select`);
+      await waitFor(renderer, `document.activeElement?.matches('.version-selection h4') && document.activeElement.textContent.includes(${JSON.stringify(label)})`, `version-${kind}-preview`);
+      await clickSelector(renderer, row + ' [data-export-menu] > summary', `version-${kind}-menu`);
+      await clickSelector(renderer, row + ' [data-export-clean]', `version-${kind}-docx`);
+      await waitFor(renderer, `document.querySelector('.book-versions .export-receipt')?.dataset.exportOutcome === 'created'`, `version-${kind}-receipt`);
+      const output = await readExportedDocx(destination);
+      requireJourney(output.paragraphs.length === excerpt.length && output.paragraphs.every((para, index) => para.digest === digestOf(index === 0 ? excerpt[0] + edit : excerpt[index])), `version-${kind}-contents`);
+    }
+    await findVersion('revision', '已保存修订 · r1', 'version-list-original-again');
+    await clickSelector(renderer, `${versionRow} .button-row > button:last-child`, 'version-list-restore');
+    await clickSelector(renderer, '.version-selection button.primary', 'version-list-confirm');
+    const editorWords = `document.querySelector('[data-testid="manuscript-editor"]')`;
+    await waitFor(renderer, `${editorWords}?.querySelector('p[data-block-id]') && !${editorWords}.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-restored');
+    const versionKey = async (redo) => {
+      await waitFor(renderer, `document.querySelector('.editor-history-undo:not(:disabled)') && ${editorWords}?.getAttribute('contenteditable') === 'true'`, 'version-history-ready-for-key');
+      await renderer.evaluate(`${editorWords}.focus()`);
+      const key = { key: redo ? 'Z' : 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, modifiers: (process.platform === 'darwin' ? 4 : 2) | (redo ? 8 : 0) };
+      await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key });
+      await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+    };
+    await versionKey(false);
+    await waitFor(renderer, `${editorWords}?.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-ctrl-z');
+    await acknowledgedEdit(renderer, '〔撤销后输入〕', 'version-list-type-after-undo');
+    await versionKey(false);
+    await waitFor(renderer, `!${editorWords}.textContent.includes('〔撤销后输入〕')`, 'version-list-type-after-undo-cleared');
+    await showVersions('version-list-repeat');
+    await findVersion('revision', '已保存修订 · r1', 'version-list-repeat-original');
+    await clickSelector(renderer, `${versionRow} .button-row > button:last-child`, 'version-list-repeat-restore');
+    await clickSelector(renderer, '.version-selection button.primary', 'version-list-repeat-confirm');
+    await waitFor(renderer, `${editorWords}?.querySelector('p[data-block-id]') && !${editorWords}.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-repeat-restored');
+    await versionKey(false);
+    await waitFor(renderer, `${editorWords}?.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-repeat-undone');
+    await versionKey(true);
+    await waitFor(renderer, `${editorWords}?.querySelector('p[data-block-id]') && !${editorWords}.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-redo');
+    const versionBinding = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(bookId)},historyCursor:null}).then(({manuscriptAnchor}) => ({manuscriptId:manuscriptAnchor.manuscriptId,branchId:manuscriptAnchor.branchId}))`);
+    const restoreId = await renderer.evaluate(`window.ai7.inspectEditorHistory(${JSON.stringify(versionBinding)}).then(state => state.undo?.stepId)`);
+    requireJourney(typeof restoreId === 'string', 'version-list-restore-step');
+    await acknowledgedEdit(renderer, FIRST_EDIT, 'version-list-later-edit');
+    await assertRenderer(renderer, `(async () => { const scope=${JSON.stringify(versionBinding)}; const page=await window.ai7.getManuscriptWindow({...scope,cursor:null}); try { await window.ai7.undoManuscript({...scope,expectedWorkingDigest:page.workingDigest,expectedStepId:${JSON.stringify(restoreId)}}); } catch(error) { return error.code === 'HISTORY_STEP_CHANGED' && ${editorWords}.textContent.includes(${JSON.stringify(FIRST_EDIT)}); } return false; })()`, 'version-list-refused-after-edit');
+    await versionKey(false);
+    await waitFor(renderer, `!${editorWords}.textContent.includes(${JSON.stringify(FIRST_EDIT)})`, 'version-list-later-edit-undone');
+    const conflict = await renderer.evaluate(`(async () => {
+      const scope=${JSON.stringify(versionBinding)};
+      const read=()=>window.ai7.getManuscriptWindow({...scope,cursor:null});
+      const page=await read();
+      const block=page.blocks.find(row=>row.kind==='paragraph' && [...row.text].length>16);
+      const binding={...scope,windowStartBlockId:page.blocks[0].blockId};
+      const selectedText=[...new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(block.text)].slice(4,8).map(part=>part.segment).join('');
+      const {markId}=await window.ai7.createEditorialMark({...binding,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:block.blockId,baseBlockDigest:block.digest,fromGrapheme:4,toGrapheme:8,selectedText,kind:'change-suggestion',highlightColor:null,body:'',proposedText:'',rationale:null});
+      await window.ai7.applyChangeSuggestion({...binding,markId,clientEffectId:crypto.randomUUID(),interaction:'accept-and-apply',editedText:null,reason:null});
+      const applied=await read();
+      await window.ai7.flushJournalEdit({...binding,clientEditId:crypto.randomUUID(),baseRevisionId:applied.revisionId,expectedJournalSequence:applied.journalSequence,blockId:block.blockId,baseBlockDigest:applied.blocks.find(row=>row.blockId===block.blockId).digest,fromGrapheme:3,toGrapheme:5,insertText:'〔跨〕'});
+      return {position:block.position,markId,blockId:block.blockId};
+    })()`);
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'version-conflict-overview');
+    await waitFor(renderer, `document.querySelector('.book-versions')`, 'version-conflict-overview-visible');
+    await openManuscript(renderer, 'version-conflict');
+    await versionKey(false);
+    await waitFor(renderer, `window.ai7.inspectEditorHistory(${JSON.stringify(versionBinding)}).then(history=>history.undo?.kind==='accept')`, 'version-conflict-edit-undone');
+    await assertRenderer(renderer, `window.ai7.getEditorialMarkCard({...${JSON.stringify(versionBinding)},markId:${JSON.stringify(conflict.markId)}}).then(card=>card.anchorState==='drifted' && card.status==='applied')`, 'version-conflict-drifted-point');
+    await versionKey(false);
+    await waitFor(renderer, `window.ai7.inspectEditorHistory(${JSON.stringify(versionBinding)}).then(history=>history.undo?.kind==='restore')`, 'version-conflict-accept-kept');
+    const conflictDigest = await renderer.evaluate(`window.ai7.getManuscriptWindow({...${JSON.stringify(versionBinding)},cursor:null}).then(page=>page.workingDigest)`);
+    await versionKey(false);
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('不能撤销这次恢复') || document.querySelector('[data-toast]')?.textContent.includes('不能撤销这次恢复')`, 'version-conflict-whole-state-refusal');
+    await assertRenderer(renderer, `(async()=>{const scope=${JSON.stringify(versionBinding)}; const page=await window.ai7.getManuscriptWindow({...scope,cursor:null});const card=await window.ai7.getEditorialMarkCard({...scope,markId:${JSON.stringify(conflict.markId)}});return page.workingDigest===${JSON.stringify(conflictDigest)} && card.status==='applied';})()`, 'version-conflict-decision-and-text-kept');
+    await showVersions('version-list-find-autosave');
+    await assertRenderer(renderer, `(() => { const row=Array.from(document.querySelectorAll('.book-versions li')).find(item=>item.querySelector('strong').textContent.startsWith('恢复前自动保存')); if(!row)return false; row.querySelector('button').click(); return true; })()`, 'version-list-open-autosave');
+    await waitFor(renderer, `document.querySelector('.version-selection h4')?.textContent.includes('恢复前自动保存') && document.querySelector('.version-selection').textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-autosave-retrievable');
+
     // Twenty further real Books make the last Deliverables entry fall beyond the first bounded settings page.
     for (let index = 0; index < 20; index += 1) {
       await close();

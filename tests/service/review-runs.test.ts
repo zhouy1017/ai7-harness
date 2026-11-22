@@ -1,5 +1,4 @@
 import { frozenReviewOptions, frozenReviewUnits, frozenReviewCeiling } from '../support/review-launch-inputs.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { startQuickTasks } from '../support/quick-tasks.js';
@@ -10,7 +9,6 @@ import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-un
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { withHouseReviewPreferenceFor } from '../support/policy-rules.js';
 import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
 import { HOUSE_PREFERENCE_CLOSED, HOUSE_PREFERENCE_NOT_RULE } from '../../src/service/task-plan.js';
@@ -20,7 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -683,29 +681,6 @@ function selectionContext(session: Session, book: Book) {
   return { at, on };
 }
 
-/** Only coverage of the genuine revision-84 review-contract widening; the database suites start elsewhere. */
-function revision84ReviewStore(): Array<{ table: string; rows: unknown[] }> {
-  const before: Array<{ table: string; rows: unknown[] }> = [];
-  return withDatabase((db) => {
-    constructPre94PolicyEncoding(db);
-    execPre74Fixture(db, 'PRAGMA user_version = 95');
-    db.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE');
-    for (const table of ['analysis_task_intents', 'analysis_result_set_revisions', 'analysis_plan_adaptations']) {
-      const sql = String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)!.sql);
-      const triggers = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ?").all(table);
-      before.push({ table, rows: db.prepare(`SELECT canonical_json, sha256 FROM ${table} ORDER BY rowid`).all() });
-      db.exec(`CREATE TEMP TABLE old_review_rows AS SELECT * FROM ${table}; DROP TABLE ${table};`);
-      db.exec(sql.replaceAll("'ai7.editorial-review/1', 'ai7.editorial-review/2'", "'ai7.editorial-review/1'")
-        .replaceAll("contract_version IN ('ai7.editorial-review/1')", "contract_version = 'ai7.editorial-review/1'")
-        .replace("adaptation_class IN ('safe-retry', 'contract-retry')", "adaptation_class = 'safe-retry'"));
-      db.exec(`INSERT INTO ${table} SELECT * FROM temp.old_review_rows; DROP TABLE temp.old_review_rows;`);
-      for (const trigger of triggers) db.exec(String(trigger.sql));
-    }
-    execPre74Fixture(db, 'DROP TABLE review_excluded_findings; PRAGMA user_version = 84; COMMIT');
-    return before;
-  });
-}
-
 /** The editor's mark actions used to arrange report versioning. */
 function handleReviewFindings(session: Session, book: Book, run: ReviewRunProjection) {
   const [annotation, anotherAnnotation] = run.findings.filter((finding) => finding.categoryId === STYLE);
@@ -723,9 +698,12 @@ function standBlocks(session: Session, book: Book, moves: ReadonlyArray<readonly
   const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
   withDatabase((db) => {
     db.exec('PRAGMA foreign_keys = OFF');
-    const move = db.prepare('UPDATE working_blocks SET position = ? WHERE branch_id = ? AND block_id = ?');
-    for (const [read] of moves) move.run(100000 + read, book.branchId, blocks.find((block) => block.position === read)!.blockId);
-    for (const [read, now] of moves) move.run(now, book.branchId, blocks.find((block) => block.position === read)!.blockId);
+    // The paragraph read at `read` takes the order key of the one at `now` (Issue #1654: the order is the keys').
+    const keyAt = new Map(blocks.map((block) => [block.position, Number((db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?')
+      .get(book.branchId, block.blockId) as { order_key: number }).order_key)] as const));
+    const move = db.prepare('UPDATE working_blocks SET order_key = ? WHERE branch_id = ? AND block_id = ?');
+    for (const [read] of moves) move.run(2 ** 52 + read, book.branchId, blocks.find((block) => block.position === read)!.blockId);
+    for (const [read, now] of moves) move.run(keyAt.get(now)!, book.branchId, blocks.find((block) => block.position === read)!.blockId);
   });
 }
 
@@ -995,33 +973,12 @@ describe('a Review Run over the real store on exact sample1', () => {
     } finally { await close(current); }
   }, 300_000);
 
-  it('widens a v1 revision-84 store without changing its recorded bytes (#1084)', async () => {
-    const legacy = await open('review-overlap-authored');
-    const book = await importBook(legacy);
-    // This retained v1 fixture closes no units under the current outcome rule (#1307).
-    try { expect((await authorizeAndDrive(legacy, book, prepare(legacy, book, [TYPOS], WHOLE))).state).toBe('failed'); }
-    finally { await close(legacy); }
-    const before = revision84ReviewStore();
-    const session = await open('review-overlap-authored');
-    try {
-      // Inherited at integration-24: this two-paragraph synthetic fixture has no sample1 request entries.
-      expect(workspace(session, book).runs[0]!.state).toBe('failed');
-      const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
-      expect(projection.resultSetRevision).toBeNull();
-      expect(projection.run!.transitions.some((entry) => entry.detail?.includes('确定性夹具没有该单元与请求摘要对应的响应'))).toBe(true);
-      withDatabase((after) => {
-        for (const snapshot of before) expect(after.prepare(`SELECT canonical_json, sha256 FROM ${snapshot.table} ORDER BY rowid`).all()).toEqual(snapshot.rows);
-        expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-      });
-    } finally { await close(session); }
-  }, 300_000);
-
   it('refuses a terminal store missing its excluded findings relation (#1084)', async () => {
     const session = await open('review-overlap-authored');
     await close(session);
     const broken = database();
     try { broken.exec('DROP TABLE review_excluded_findings'); } finally { broken.close(); }
-    await expect(open('review-overlap-authored')).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
+    await expect(open('review-overlap-authored')).rejects.toMatchObject({ code: 'SCHEMA_INVALID' });
   }, 300_000);
 
   it('counts a safe retry and one later contract retry separately, with no third contract retry (#1084)', async () => {
@@ -1424,7 +1381,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const second = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
       const third = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
       const workspaceSpy = vi.spyOn(session.store, 'inspectReviewWorkspace');
-      const querySpy = vi.spyOn(DatabaseSync.prototype, 'prepare');
+      const querySpy = vi.spyOn(StatementSync.prototype, 'all');
       try {
         const oldRead = () => [third, second, first].flatMap((identity) => {
           const findings = [];
@@ -1442,7 +1399,7 @@ describe('a Review Run over the real store on exact sample1', () => {
         const oldCalls = workspaceSpy.mock.calls.length;
         querySpy.mockClear(); workspaceSpy.mockClear();
         const merged = session.store.inspectBookFindings(book.bookId, { whole: true });
-        const findingReads = () => querySpy.mock.calls.filter(([sql]) => sql.includes('FROM review_findings f')).length;
+        const findingReads = () => querySpy.mock.contexts.filter(statement => statement instanceof StatementSync && statement.sourceSQL.includes('FROM review_findings f')).length;
         expect(findingReads()).toBe(3);
         expect(workspaceSpy).not.toHaveBeenCalled();
         console.info(`FINDINGS_COST/${JSON.stringify({ legacyWorkspaceReads: oldCalls, mergedFindingReads: findingReads() })}`);
@@ -1512,16 +1469,17 @@ describe('a Review Run over the real store on exact sample1', () => {
         fromGrapheme: previous.graphemes, toGrapheme: previous.graphemes, insertText: '',
         structure: { kind: 'merge', mergedBlockId: finding.blockId, mergedBlockDigest: removed.digest } });
       const card = workspace(session, book, run.reviewRunId).run!.findings.find((entry) => entry.findingId === finding.findingId)!;
-      expect(card.blockPosition).toBeNull();
+      expect(card.blockId).toBe(previous.blockId);
+      expect(card.blockPosition).toBe(previous.position);
       const row = session.store.inspectBookFindings(book.bookId, { whole: true }).items.find((entry) => entry.id === finding.findingId)!;
-      expect(row.place).toMatchObject({ blockId: card.blockId, blockExists: false, ordinal: card.ordinal });
+      expect(row.place).toMatchObject({ blockId: card.blockId, blockExists: true, ordinal: card.ordinal });
       expect(row.decision?.kind).toBe('reject');
       const decision = row.decision;
       if (decision?.kind !== 'reject') throw new Error('missing current-block reject input');
       expect(decision.input.windowStartBlockId).toBe(previous.blockId);
       const clientDecisionId = randomUUID();
       expect(() => session.store.recordChangeSuggestionDecision({ ...decision.input, clientDecisionId })).not.toThrow();
-      expect(storeError(() => session.store.recordChangeSuggestionDecision({ ...decision.input, windowStartBlockId: card.blockId, clientDecisionId })))
+      expect(storeError(() => session.store.recordChangeSuggestionDecision({ ...decision.input, windowStartBlockId: removed.blockId, clientDecisionId })))
         .toMatchObject({ code: 'MARK_BINDING_CHANGED', message: '稿件窗口已变化，请刷新后再试。' });
     });
   }, 300_000);

@@ -62,7 +62,7 @@ describe('declared local-tool turns', () => {
     const sources = { baseline: { revisionId: 'fixed', digest: 'a'.repeat(64), entities: [{ name: '合成名', kind: 'person' }], events: [], settingClaims: [] },
       guidelines: [{ documentId: 'fixed-guideline', version: '2', clauses: [{ clauseId: 'clause/1', text: '固定条款' }] }], terms: [{ name: '固定术语', kind: 'term' }] };
     const index = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'one-book', digest: 'a'.repeat(64),
-      read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: '合成文本' }, { blockId: 'two', text: '另一段' }] }) }], null, null, sources);
+      read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: '合成文本' }, { blockId: 'two', text: '另一段' }] }) }], sources);
     sources.terms[0]!.name = '改动后的表';
     expect(index.readBlocks('one', 1)).toHaveLength(2);
     expect(() => index.readBlocks('other-book-block', 1)).toThrow('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
@@ -98,7 +98,7 @@ describe('declared local-tool turns', () => {
     expect(Buffer.byteLength(JSON.stringify(baseline))).toBeGreaterThan(LOCAL_TOOL_RESULT_MAX_BYTES);
     const digest = 'a'.repeat(64);
     const index = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'synthetic', digest, read: () => ({ digest, segments: [{ blockId: 'one', text: '合成段落。' }] }) }],
-      null, null, { baseline, guidelines: [], terms });
+      { baseline, guidelines: [], terms });
     const binding = { bindingDigest: digest, route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL, systemPrompt: '合成审阅',
       outboundDataCategory: 'public-or-synthetic' as const, localTools: rule, admittedUserMessages: new Set<string>(),
       policy: { operationalScope: 'development-ci' as const, providerProcessingVersion: 'v1' as const, liveTransmissionAllowed: false as const, authorizedLiveTransmissionCount: 0 as const } };

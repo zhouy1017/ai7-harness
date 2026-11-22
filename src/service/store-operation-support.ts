@@ -5,7 +5,6 @@ import type { WritingCopyRules, WritingExemplarInput } from './writing/writing-c
 import type { BaselineAnalysisRouteFacts } from './analysis/baseline-analysis-store.js';
 import type { BaselinePromptContractSelection } from './analysis/kind-definition.js';
 import { clarificationPlanBaseDigest } from './provider/clarification-contract.js';
-import type { ClassifiedSchemaRevision } from './data-version.js';
 import type { StartWhenOnlineTaskKind } from '../shared/protocol.js';
 
 /** The Fact-check Lens's words (Issue #901). */
@@ -71,16 +70,6 @@ export interface StoreControl {
    */
   softwareVersion?: string;
   /**
-   * The suites' own classification of schema revisions (Issue #433, S85b), so an upgrade to a later Data Version can be
-   * opened before a later revision is classified breaking. The service entry never sets it.
-   */
-  schemaRevisionClasses?: ReadonlyArray<ClassifiedSchemaRevision>;
-  /**
-   * The suites stop an open here (Issue #433 review): after every migration and just before the versions that opened the store
-   * are recorded, or just after, before the upgrade's note is cleared. The service entry never sets it.
-   */
-  interruptUpgradeAt?: 'before-record' | 'after-record';
-  /**
    * The suites record a new writing Task under these copy rules (#707): `1` composes its contract, its plan and its row as the
    * software before #698 did — a row naming no rules — so a genuine `/1` Task is driven through the store's authorize, run and
    * parse wiring. The service entry never sets it; absent, every Task is `/2`.
@@ -122,10 +111,7 @@ export const EVALUATION_PROFILE_UNKNOWN_ID = 'unknown/merged-profile';
 
 export const EVALUATION_PROFILE_UNKNOWN_TITLE = '未知版本';
 
-/** How many paragraphs 构建相似索引 embeds and writes at a time (Issue #892): the service takes its other work between two. */
-export const MATERIAL_VECTOR_BATCH = 256;
-
-/** Why the two on-request layers are not made while a database replacement waits (Issue #892). */
+/** Why 来源译文, the on-request layer, is not made while a database replacement waits (Issue #892). */
 export const MATERIAL_LAYERS_READ_ONLY = '数据库替换正在等待：资料索引暂不建立新的层。';
 
 /** 准备计划's draft as a preparation carries it (Issue #423, slice 7a): its version, its sentence, and how the promotion is recorded. */

@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import { appendOnly } from '../append-only.js';
 
 /**
  * The continuation point of a Run (Issue #422, plan slice S76b; V2-UX-CTRL-001, CTRL-002, CONT-014, CONT-015).
@@ -23,53 +23,13 @@ export const RUN_CHECKPOINT_SCHEMA_SQL = {
 } as const;
 
 /** A checkpoint is appended once and never rewritten or removed, like every ledger row. */
-export const RUN_CHECKPOINT_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(RUN_CHECKPOINT_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'TASK_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'TASK_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign key of the relation, in the exact-schema validator's own spelling. */
-export const RUN_CHECKPOINT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  analysis_unit_checkpoints: ['run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE'],
-};
+export const RUN_CHECKPOINT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  analysis_unit_checkpoints: 'TASK_LEDGER_IMMUTABLE',
+});
 
 export class RunCheckpointSchemaError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
     this.name = 'RunCheckpointSchemaError';
-  }
-}
-
-/**
- * Revision 33's relation and its ledger triggers, created once and never rebuilt: a store that predates it gains one
- * empty relation and nothing existing moves. Shape-detected like revisions 21 to 31, and run before the version is
- * stamped in `task-authorization.ts`.
- */
-export function initializeRunCheckpointSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_unit_checkpoints'").get();
-  if (existing !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(RUN_CHECKPOINT_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(RUN_CHECKPOINT_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Run checkpoint schema rollback failed.');
-    }
-    throw error;
-  }
-  if (db.prepare('PRAGMA foreign_key_check').all().length !== 0) {
-    throw new RunCheckpointSchemaError('SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
   }
 }

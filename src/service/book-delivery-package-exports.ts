@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
@@ -72,31 +73,10 @@ export const BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const BOOK_DELIVERY_PACKAGE_EXPORT_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'BOOK_DELIVERY_PACKAGE_EXPORT_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'BOOK_DELIVERY_PACKAGE_EXPORT_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const BOOK_DELIVERY_PACKAGE_EXPORT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  book_delivery_package_exports: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'package_version_id>book_delivery_package_versions.package_version_id:NO ACTION/NO ACTION/NONE',
-  ],
-  book_delivery_package_export_files: [
-    'export_id>book_delivery_package_exports.export_id:NO ACTION/NO ACTION/NONE',
-    'preparation_id>export_preparations.preparation_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const BOOK_DELIVERY_PACKAGE_EXPORT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  book_delivery_package_exports: 'BOOK_DELIVERY_PACKAGE_EXPORT_LEDGER_IMMUTABLE',
+  book_delivery_package_export_files: 'BOOK_DELIVERY_PACKAGE_EXPORT_LEDGER_IMMUTABLE',
+});
 
 export class BookDeliveryPackageExportError extends Error {
   constructor(readonly code: string, message: string) {
@@ -116,23 +96,6 @@ export type BookDeliveryPackageExportRoute = 'folder' | 'archive';
 export function packageExportWrongRoute(actual: BookDeliveryPackageExportRoute): BookDeliveryPackageExportError {
   const label = actual === 'archive' ? '导出为压缩包' : '导出为文件夹';
   return new BookDeliveryPackageExportError('BOOK_DELIVERY_PACKAGE_EXPORT_WRONG_ROUTE', `这次导出是「${label}」；请在「${label}」里继续。`);
-}
-
-/** Revision 41's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
-export function initializeBookDeliveryPackageExportSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'book_delivery_package_exports'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(BOOK_DELIVERY_PACKAGE_EXPORT_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Book delivery package export schema rollback failed.');
-    }
-    throw error;
-  }
-  requirePackageExport(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_INVALID', '图书交付包导出的关系与已有记录不一致。');
 }
 
 // ---- words ----------------------------------------------------------------------------------------------------

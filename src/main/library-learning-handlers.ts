@@ -146,19 +146,7 @@ export function registerLibraryLearningHandlers(context: {
     }),
   );
 
-  // 构建相似索引 (Issue #892): the item's vectors made on this machine, on request.
-  ipcMain.handle(IPC_CHANNELS.buildMaterialVectors, (event, input: ServiceOperationMap['buildMaterialVectors']['input']) =>
-    envelope(async () => {
-      requireSender(event);
-      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
-      return serializeEffect(async () => {
-        requireAuthority();
-        return service.call('buildMaterialVectors', { materialId: input.materialId });
-      });
-    }),
-  );
-
-  // 相似段落检索 (Issue #892): an item's paragraphs nearest the editor's text; read-only.
+  // 相似段落检索 (Issue #892): an item's paragraphs that best match the editor's words, ranked by words; read-only.
   ipcMain.handle(IPC_CHANNELS.queryMaterialVectors, (event, input: ServiceOperationMap['queryMaterialVectors']['input']) =>
     envelope(async () => {
       requireSender(event);

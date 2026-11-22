@@ -4,7 +4,7 @@ import { PassThrough, Writable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { journeyStartupRelay, ServiceClient, type ServiceStartupStep } from '../../src/main/service-client.js';
 import { SERVICE_PROTOCOL_VERSION, type ServiceReadiness } from '../../src/shared/protocol.js';
-import { DATA_VERSION_MARKER_UNREADABLE, DATA_VERSION_MARKER_UNWRITABLE, UPGRADE_BACKUP_EXISTS, UPGRADE_BACKUP_FAILED, UPGRADE_BACKUP_UNSUPPORTED, newerDataVersionMessage } from '../../src/shared/data-version-labels.js';
+import { DATA_VERSION_MARKER_UNREADABLE, DATA_VERSION_MARKER_UNWRITABLE, FOREIGN_DATABASE, UPGRADE_BACKUP_EXISTS, UPGRADE_BACKUP_FAILED, UPGRADE_BACKUP_UNSUPPORTED, newerDataVersionMessage, olderDataVersionMessage } from '../../src/shared/data-version-labels.js';
 
 const childProcess = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock('node:child_process', () => ({ spawn: childProcess.spawn }));
@@ -118,6 +118,8 @@ describe('the service startup trace (Issue #675)', () => {
 
   it.each([
     ['DATA_VERSION_NEWER', newerDataVersionMessage(2, 90)],
+    ['DATA_VERSION_OLDER', olderDataVersionMessage(1)],
+    ['DATA_STORE_FOREIGN', FOREIGN_DATABASE],
     ['DATA_VERSION_MARKER_UNREADABLE', DATA_VERSION_MARKER_UNREADABLE],
     ['DATA_VERSION_MARKER_UNWRITABLE', DATA_VERSION_MARKER_UNWRITABLE],
     ['UPGRADE_BACKUP_FAILED', UPGRADE_BACKUP_FAILED],

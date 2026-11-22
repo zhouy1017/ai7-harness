@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { ManualCommandSource } from '../shared/protocol/learning.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
@@ -70,27 +71,9 @@ export const LEARNING_ELIGIBILITY_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const LEARNING_ELIGIBILITY_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(LEARNING_ELIGIBILITY_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'LEARNING_ELIGIBILITY_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'LEARNING_ELIGIBILITY_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const LEARNING_ELIGIBILITY_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  learning_eligibility_decisions: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'supersedes_decision_id>learning_eligibility_decisions.decision_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const LEARNING_ELIGIBILITY_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  learning_eligibility_decisions: 'LEARNING_ELIGIBILITY_LEDGER_IMMUTABLE',
+});
 
 export class LearningEligibilityError extends Error {
   constructor(readonly code: string, message: string) {
@@ -108,7 +91,6 @@ type SqlRow = Record<string, SQLOutputValue>;
 const MATERIAL_SCHEMA = 'ai7.learning-material/1';
 const DECISION_SCHEMA = 'ai7.learning-eligibility-decision/1';
 const ACTOR = '本机编辑';
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'learning_eligibility_decisions'";
 const CONTROL_CHARACTER = /[\p{Zl}\p{Zp}]|(?![\n])\p{Cc}/u;
 const CHOICES: readonly LearningEligibilityChoice[] = ['book', 'house', 'excluded', 'deferred'];
 /** How long one excerpt line may run before it is cut with `…`. */
@@ -145,22 +127,6 @@ const KNOWN_LEARNING_ELIGIBILITY_BASES: ReadonlyArray<unknown> = [LEARNING_ELIGI
 
 function knownBasis(value: unknown): boolean {
   return KNOWN_LEARNING_ELIGIBILITY_BASES.some((basis) => canonicalJson(basis) === canonicalJson(value));
-}
-
-/** Revision 50's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
-export function initializeLearningEligibilitySchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(LEARNING_ELIGIBILITY_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(LEARNING_ELIGIBILITY_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Learning eligibility schema rollback failed.');
-    }
-    throw error;
-  }
 }
 
 // ---- candidates: identified from the records that own them -------------------------------------------------------------

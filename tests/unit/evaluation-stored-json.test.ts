@@ -1,16 +1,12 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
-import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from '../../src/service/evaluation-calibration.js';
-import {
-  EvaluationError,
-  EvaluationRecords,
-  initializeEvaluationInitialDraftSchema,
-  initializeEvaluationRecordSchema,
-} from '../../src/service/evaluation-records.js';
-import { EvaluationRewriteError, EvaluationRewrites, initializeEvaluationRewriteSchema } from '../../src/service/evaluation-rewrites.js';
-import { SeriesError, SeriesLedger, initializeSeriesSchema } from '../../src/service/series.js';
+import { EvaluationCalibrationError, EvaluationCalibrationLedger, EVALUATION_CALIBRATION_SCHEMA_SQL } from '../../src/service/evaluation-calibration.js';
+import { EvaluationError, EvaluationRecords, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL, EVALUATION_RECORD_SCHEMA_SQL } from '../../src/service/evaluation-records.js';
+import { EvaluationRewriteError, EvaluationRewrites, EVALUATION_REWRITE_SCHEMA_SQL } from '../../src/service/evaluation-rewrites.js';
+import { SeriesError, SeriesLedger, SERIES_SCHEMA_SQL } from '../../src/service/series.js';
 
 // The readers 评估 guards (Issue #689, from #682's review): a row whose digest was forged to match text that is not JSON is a
 // damaged row like any other, so each reader throws its owner's own error — which the store's guards turn into a `StoreError`
@@ -46,7 +42,7 @@ function thrown(read: () => unknown): string {
 
 describe('a forged-digest row that is not JSON reads as damaged, in the owner\'s own error (Issue #689)', () => {
   it('定价与首印 and 评估设置', () => {
-    initializeEvaluationCalibrationSchema(db);
+    createBaselineRelations(db, EVALUATION_CALIBRATION_SCHEMA_SQL);
     const bookId = randomUUID();
     db.prepare('INSERT INTO publication_actuals(actual_id, book_id, publication_version_id, ordinal, price_fen, first_print, supersedes_actual_id, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, 1, 3900, 3000, NULL, ?, ?, ?)')
       .run(randomUUID(), bookId, randomUUID(), NOW, NOT_JSON, DIGEST);
@@ -59,7 +55,7 @@ describe('a forged-digest row that is not JSON reads as damaged, in the owner\'s
   });
 
   it('书系 and its membership chain', () => {
-    initializeSeriesSchema(db);
+    createBaselineRelations(db, SERIES_SCHEMA_SQL);
     const seriesId = randomUUID();
     const bookId = randomUUID();
     db.prepare('INSERT INTO series(series_id, title, title_key, note, created_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -73,7 +69,7 @@ describe('a forged-digest row that is not JSON reads as damaged, in the owner\'s
   });
 
   it('a rewrite Task, its frozen plan and the editor\'s decision', () => {
-    initializeEvaluationRewriteSchema(db);
+    createBaselineRelations(db, EVALUATION_REWRITE_SCHEMA_SQL);
     db.exec('CREATE TABLE analysis_plan_records (task_intent_id TEXT, component TEXT, plan_version INTEGER, canonical_json TEXT, sha256 TEXT)');
     const taskIntentId = randomUUID();
     const revisionId = randomUUID();
@@ -93,8 +89,8 @@ describe('a forged-digest row that is not JSON reads as damaged, in the owner\'s
   });
 
   it('a version, a saved entry of it, and the 初评 it began from', () => {
-    initializeEvaluationRecordSchema(db);
-    initializeEvaluationInitialDraftSchema(db);
+    createBaselineRelations(db, EVALUATION_RECORD_SCHEMA_SQL);
+    createBaselineRelations(db, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL);
     const bookId = randomUUID();
     const records = new EvaluationRecords(db, { current: () => ({ manuscriptId: randomUUID(), revisionId: randomUUID(), revisionLabel: 'r1', uncheckpointed: false }) });
     const recordId = records.start(bookId);

@@ -1,3 +1,4 @@
+import { appendOnly } from '../append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type {
@@ -85,18 +86,12 @@ export const EDITORIAL_LEARNING_SCHEMA_SQL = {
   UNIQUE(item_id, ordinal)
 ) STRICT`,
 } as const;
-export const EDITORIAL_LEARNING_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(EDITORIAL_LEARNING_SCHEMA_SQL).flatMap((table) => ['update', 'delete'].map((operation) => [
-    `${table}_no_${operation}`, `CREATE TRIGGER ${table}_no_${operation} BEFORE ${operation.toUpperCase()} ON ${table}
-    BEGIN SELECT RAISE(ABORT, 'EDITORIAL_LEARNING_IMMUTABLE'); END`,
-  ])),
-);
-export const EDITORIAL_LEARNING_FOREIGN_KEYS = {
-  learning_signals: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE'],
-  editorial_learning_controls: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE'],
-  global_editorial_memory_items: ['source_signal_id>learning_signals.signal_id:NO ACTION/NO ACTION/NONE'],
-  global_editorial_memory_item_versions: ['item_id>global_editorial_memory_items.item_id:NO ACTION/NO ACTION/NONE', 'supersedes>global_editorial_memory_item_versions.version_id:NO ACTION/NO ACTION/NONE'],
-};
+export const EDITORIAL_LEARNING_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  learning_signals: 'EDITORIAL_LEARNING_IMMUTABLE',
+  editorial_learning_controls: 'EDITORIAL_LEARNING_IMMUTABLE',
+  global_editorial_memory_items: 'EDITORIAL_LEARNING_IMMUTABLE',
+  global_editorial_memory_item_versions: 'EDITORIAL_LEARNING_IMMUTABLE',
+});
 
 function requireLearning(condition: unknown): asserts condition {
   if (!condition) throw new LearningEligibilityError('EDITORIAL_LEARNING_INVALID', '学习记录已变化或不可用，请重新查看。');
@@ -149,17 +144,6 @@ export function validateEditorialMemorySourceShape(value: unknown): asserts valu
       canonicalJson({ policy: LOCAL_LEARNING_POLICY_BASIS.policy, mode: LOCAL_LEARNING_POLICY_BASIS.mode, version: 2 }));
   requireLearning(value.sourceKey === sha256Hex(canonicalJson({ signalId: value.signalId, materialDigest: source.materialDigest, reasonRevision: source.reasonRevision })) &&
     value.feedbackKey === sha256Hex(canonicalJson({ bookId: source.bookId, materialKey: source.materialKey, materialDigest: source.materialDigest })));
-}
-
-/** Add all relations atomically. A partial or malformed interrupted upgrade is refused by the whole-store validator. */
-export function initializeEditorialLearningSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'learning_signals'").get()) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(EDITORIAL_LEARNING_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(EDITORIAL_LEARNING_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
 interface Controls { enabled: boolean; entries: number; excludedBooks: Set<string> }

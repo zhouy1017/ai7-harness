@@ -1,3 +1,4 @@
+import { createBaselineRelations } from '../baseline-relations.js';
 import { BaselineAnalysisStore } from '../../../src/service/analysis/baseline-analysis-store.js';
 import { factualReviewKindDefinition } from '../../../src/service/analysis/kind-definition.js';
 import { EditorialMarkStore } from '../../../src/service/editorial-marks.js';
@@ -5,8 +6,8 @@ import { RecentCache } from '../../../src/service/recent-cache.js';
 import { ReviewRunStore } from '../../../src/service/review/review-runs.js';
 import { reviewLedgerOf, type ReviewOperationsHost } from '../../../src/service/review/review-operations.js';
 import { DatabaseSync } from 'node:sqlite';
-import { initializeReviewRunSchema, initializeLocalStageSchema, REVIEW_RUN_SCHEMA_SQL } from '../../../src/service/review/review-runs.js';
-import { initializeRunSynthesisSchema } from '../../../src/service/review/run-synthesis-storage.js';
+import { LOCAL_STAGE_SCHEMA_SQL, REVIEW_RUN_SCHEMA_SQL } from '../../../src/service/review/review-runs.js';
+import { RUN_SYNTHESIS_SCHEMA_SQL } from '../../../src/service/review/run-synthesis-storage.js';
 
 export const REVIEW_DOMAIN_TABLES = [...Object.keys(REVIEW_RUN_SCHEMA_SQL), 'review_local_stage_artifacts', 'review_run_synthesis'];
 /** external-owner stub — not a schema or provenance proof. Parity checks every column's type, NOT NULL and key position. */
@@ -18,13 +19,14 @@ export const REVIEW_EXTERNAL_STUBS = {
   manuscript_revisions: 'revision_id TEXT NOT NULL, manuscript_id TEXT NOT NULL, branch_id TEXT NOT NULL, ordinal INTEGER NOT NULL, revision_label TEXT NOT NULL, parent_revision_id TEXT, source_version_id TEXT NOT NULL, revision_digest TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(revision_id)',
   manuscript_blocks: 'block_id TEXT NOT NULL, manuscript_id TEXT NOT NULL, created_revision_id TEXT NOT NULL, PRIMARY KEY(block_id)',
   branch_working_state: 'branch_id TEXT NOT NULL, manuscript_id TEXT NOT NULL, base_revision_id TEXT NOT NULL, journal_sequence INTEGER NOT NULL, working_digest TEXT NOT NULL, PRIMARY KEY(branch_id)',
-  working_blocks: 'branch_id TEXT NOT NULL, block_id TEXT NOT NULL, position INTEGER NOT NULL, kind TEXT NOT NULL, level INTEGER, text TEXT NOT NULL, digest TEXT NOT NULL, grapheme_length INTEGER NOT NULL, PRIMARY KEY(branch_id, block_id)',
+  working_blocks: 'branch_id TEXT NOT NULL, block_id TEXT NOT NULL, order_key INTEGER NOT NULL, kind TEXT NOT NULL, level INTEGER, text TEXT NOT NULL, digest TEXT NOT NULL, grapheme_length INTEGER NOT NULL, PRIMARY KEY(branch_id, block_id)',
+  working_pages: 'branch_id TEXT NOT NULL, first_order_key INTEGER NOT NULL, block_count INTEGER NOT NULL, grapheme_total INTEGER NOT NULL, PRIMARY KEY(branch_id, first_order_key)',
   analysis_run_records: 'run_record_id TEXT NOT NULL, PRIMARY KEY(run_record_id)',
   analysis_result_set_revisions: 'revision_id TEXT NOT NULL, PRIMARY KEY(revision_id)',
   production_document_categories: 'type_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY(type_id)',
   production_documents: 'document_id TEXT NOT NULL, book_id TEXT NOT NULL, type_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(document_id)',
   production_document_metadata: 'document_id TEXT NOT NULL, type_id TEXT NOT NULL, deleted INTEGER NOT NULL, PRIMARY KEY(document_id)',
-  manuscript_outline: 'branch_id TEXT NOT NULL, block_id TEXT NOT NULL, kind TEXT NOT NULL, position INTEGER NOT NULL, level INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY(branch_id, block_id)',
+  manuscript_outline: 'branch_id TEXT NOT NULL, block_id TEXT NOT NULL, kind TEXT NOT NULL, order_key INTEGER NOT NULL, level INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY(branch_id, block_id)',
   editorial_marks: 'mark_id TEXT NOT NULL, PRIMARY KEY(mark_id)',
   analysis_task_intents: 'task_intent_id TEXT NOT NULL, book_id TEXT NOT NULL, kind TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(task_intent_id)',
   model_service_connections: 'connection_id TEXT NOT NULL, credential_reference TEXT NOT NULL, credential_operation_state TEXT NOT NULL, PRIMARY KEY(connection_id)',
@@ -38,9 +40,9 @@ export function reviewDatabase(): DatabaseSync {
   try {
     db.exec('PRAGMA foreign_keys=ON');
     for (const [table, columns] of Object.entries(REVIEW_EXTERNAL_STUBS)) db.exec(`CREATE TABLE ${table} (${columns}) STRICT`);
-    initializeReviewRunSchema(db);
-    initializeLocalStageSchema(db);
-    initializeRunSynthesisSchema(db);
+    createBaselineRelations(db, REVIEW_RUN_SCHEMA_SQL);
+    createBaselineRelations(db, LOCAL_STAGE_SCHEMA_SQL);
+    createBaselineRelations(db, RUN_SYNTHESIS_SCHEMA_SQL);
     return db;
   } catch (error) { db.close(); throw error; }
 }

@@ -185,3 +185,37 @@ describe('registered local retrieval in a non-web authorized Run', () => {
     } finally { await s.dispose(); }
   });
 });
+
+describe('a Run\'s own retrieval binding after the vectors left (R5-F2c; inherited from #1623 review)', () => {
+  it('reaches the passages that use only another pinned name: 阿长 finds three that say only 长妈妈 in 朝花夕拾', async () => {
+    // The store's real `retrievalIndexForRun` over the product's own read of an imported Public SampleBook. The ledger is a seam
+    // double answering only `loadExecutionPlan` (the Book, its revision, no 资料), `definition` (a non-writing kind with no
+    // material references) and `pinnedToolSourcesForRun` (the 长妈妈 / 阿长 records R5-F2a's unit case pins); it writes nothing.
+    const roots = await createServiceTestRoots('ai7-local-retrieval-run-alias-');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), join(roots.codeRoot, 'SampleBooks', 'luxun-zhaohua-xishi.docx'));
+      const choice = staged.targetChoices.find((entry) => entry.kind === 'new-book')!;
+      const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: choice.id as 'new-book', confirmedTitle: '朝花夕拾' }, false);
+      const commitId = randomUUID();
+      const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
+      await store.acknowledgeImportCompletion(commitId);
+      const records = { baseline: { revisionId: 'fixed', digest: 'b'.repeat(64), entities: [{ kind: 'person', name: '长妈妈', aliases: ['阿长', '长姑'] }], events: [], settingClaims: [] },
+        guidelines: [], terms: [] };
+      const ledger = {
+        definition: { kind: KIND },
+        loadExecutionPlan: () => ({ bookId: book.bookId, checkpoint: { manuscriptId: book.manuscriptId, revisionId: book.revisionId }, update: null, manifest: { units: [] } }),
+        pinnedToolSourcesForRun: () => records,
+      } as unknown as Parameters<EditorialStore['retrievalIndexForRun']>[1];
+      const index = store.retrievalIndexForRun(randomUUID(), ledger);
+      try {
+        const found = await index.retrieve('阿长');
+        expect(found).toHaveLength(8);
+        // Each passage whole, as the Run reads it (`read_blocks` with no neighbours).
+        const onlyOther = found.filter((candidate) => { const passage = index.readBlocks(candidate.anchor.blockId!, 0)[0]!.text; return passage.includes('长妈妈') && !passage.includes('阿长'); });
+        expect(onlyOther).toHaveLength(3);
+      } finally { index.dispose(); }
+      store.markCleanShutdown();
+    } finally { store.close(); await roots.dispose(); }
+  }, 120_000);
+});

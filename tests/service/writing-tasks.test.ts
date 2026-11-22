@@ -1,14 +1,11 @@
-import { asMultiDocumentRevision108, productionDocumentDigestBytes } from '../support/production-documents.js';
 import { taskSynopsisRequestDigest } from '../../src/service/analysis/baseline-synopsis.js';
-import { initializeMultiDocumentSchema } from '../../src/service/production-document-ledger.js';
-import { CURATION_SCHEMA_SQL, FACTUAL_RANGE_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
+
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { clarificationPlanBaseDigest, clarificationPromptContractDigest } from '../../src/service/provider/clarification-contract.js';
 import { parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { parseInitialEvaluationUnitMessageHeader, parseInitialEvaluationSynthesisMessageHeader } from '../../src/service/evaluation/initial-evaluation-contract.js';
 import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -19,12 +16,7 @@ import { ALWAYS_ONLINE } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import {
-  ANALYSIS_LEDGER_REVISION_64_SQL,
-  ANALYSIS_LEDGER_SCHEMA_SQL,
-  EVALUATION_REWRITE_SCHEMA_VERSION,
-  LATEST_SCHEMA_VERSION,
-} from '../../src/service/task-authorization.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { WRITING_EXEMPLAR_GONE_LABEL, WRITING_EXEMPLAR_GONE_SUFFIX, WRITING_NOT_DRAFTED_LABEL, writingCopyNotDo } from '../../src/service/task-plan.js';
 import { quickStartNoRuleReason, writingRulePattern } from '../../src/service/default-execution-rules.js';
 import { WRITING_EXEMPLAR_MOVED, WRITING_TASK_TRIGGER_SQL, writingDraftBlocks } from '../../src/service/writing-tasks.js';
@@ -48,7 +40,6 @@ import {
   type LaunchPolicyProjection,
   type WritingProjection,
 } from '../../src/shared/protocol.js';
-import { constructPre94PolicyEncoding, KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
@@ -218,40 +209,6 @@ async function run(session: Session, bookId: string, prepared: WritingProjection
   await session.owner.whenIdle();
   return session.store.inspectWriting(bookId)!;
 }
-
-it.each(['before migration', 'after relations commit'] as const)('preserves a historical writing draft and admits a peer after reopening 108→109 %s', async (interruption) => {
-  const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
-  let bookId = '', documentId = '';
-  await withSession(fixture, async (session) => {
-    bookId = await sample1Book(session.store, WRITING_BOOK_TITLE);
-    const settled = await run(session, bookId, prepare(session.store, bookId));
-    documentId = session.store.createWritingDraft(bookId, settled.resultSetRevision!.revisionId, '独立写作题目').document.documentId;
-  });
-  const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-  const old = new DatabaseSync(path);
-  asMultiDocumentRevision108(old);
-  const before = productionDocumentDigestBytes(old);
-  if (interruption === 'after relations commit') initializeMultiDocumentSchema(old);
-  expect(old.prepare('PRAGMA user_version').get()!.user_version).toBe(108);
-  old.close();
-  await withSession(fixture, async (session) => {
-    const store = session.store;
-    const check = new DatabaseSync(path);
-    try {
-      expect(productionDocumentDigestBytes(check) === before).toBe(true);
-      expect(check.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(check.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-      for (const table of ['production_documents', 'writing_drafts']) {
-        expect(() => check.prepare(`UPDATE ${table} SET document_id = document_id WHERE document_id = ?`).run(documentId)).toThrow(/LEDGER_IMMUTABLE/);
-        expect(() => check.prepare(`DELETE FROM ${table} WHERE document_id = ?`).run(documentId)).toThrow(/LEDGER_IMMUTABLE/);
-      }
-    } finally { check.close(); }
-    const settled = await run(session, bookId, prepare(store, bookId));
-    const second = store.createWritingDraft(bookId, settled.resultSetRevision!.revisionId, '后续写作').document;
-    expect(second.documentId).not.toBe(documentId);
-    expect(store.inspectProductionDocuments(bookId).types.find((type) => type.typeId === 'promotion-article')!.documents.map((doc) => doc.title)).toEqual(['独立写作题目', '后续写作']);
-  });
-});
 
 it('does not resurface a superseded draft after the newest result becomes a document', async () => {
   const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
@@ -832,63 +789,4 @@ describe('写作任务 over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('rebuilds a revision-64 store\'s kind-coupled relations for the writing kind, every row kept byte for byte', async () => {
-    const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
-    const baselineFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
-    await withSession(baselineFixture, async ({ store }) => {
-      const bookId = await sample1Book(store, WRITING_BOOK_TITLE);
-      // A baseline Task, so the rebuilt relations carry rows.
-      let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
-      while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
-    });
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const rows = (database: DatabaseSync): string => JSON.stringify(KIND_COUPLED_ANALYSIS_RELATIONS.map((table) => database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
-    const plant = new DatabaseSync(path);
-    let before: string;
-    try {
-      constructPre94PolicyEncoding(plant);
-      // Revision 64 exactly: the three relations as revision 64 left them, and no relation of revision 65.
-      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; PRAGMA user_version = ${EVALUATION_REWRITE_SCHEMA_VERSION};`);
-      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_64_SQL);
-      before = rows(plant);
-      expect(() => plant.exec(`INSERT INTO analysis_result_sets(result_set_id, book_id, kind, created_at, canonical_json, sha256)
-        VALUES ('${randomUUID()}', (SELECT book_id FROM books LIMIT 1), '${WRITING_KIND}', 'x', '{}', '${'a'.repeat(64)}')`)).toThrowError(/CHECK constraint failed/u);
-    } finally {
-      plant.close();
-    }
-    const migrated = await openStore(fixture);
-    try {
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    const after = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(rows(after)).toBe(before!);
-      for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
-        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(table === 'analysis_task_intents' ? FACTUAL_RANGE_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
-      }
-      expect(Object.keys(WRITING_TASK_TRIGGER_SQL).every((name) => after.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name) !== undefined)).toBe(true);
-    } finally {
-      after.close();
-    }
-  }, 300_000);
-
-  it('refuses a revision-64 store whose kind-coupled relations already read as revision 65\'s', async () => {
-    const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
-    await withSession(fixture, async () => undefined);
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const plant = new DatabaseSync(path);
-    try {
-      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; PRAGMA user_version = ${EVALUATION_REWRITE_SCHEMA_VERSION};`);
-    } finally {
-      plant.close();
-    }
-    const refused = await openStore(fixture).then((store) => {
-      store.close();
-      return 'opened';
-    }, (error: unknown) => (error instanceof Error && 'code' in error ? `${String((error as { code: unknown }).code)}:${error.message}` : String(error)));
-    expect(refused).toBe('SCHEMA_INVALID:分析任务账本表（修订版 64） analysis_task_intents 结构不兼容。');
-  }, 300_000);
 });

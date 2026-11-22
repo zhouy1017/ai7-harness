@@ -1,7 +1,4 @@
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
-import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -19,7 +16,6 @@ import {
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EXPORT_LEDGER_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { RUN_CONTROL_CANCELLING_REASON, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import {
@@ -28,15 +24,8 @@ import {
   type BaselineAnalysisProjection,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
-import { plantRevision30Relations } from '../support/default-execution-rules.js';
-import { plantRevision31Relations, runCancellationShape } from '../support/run-cancellation.js';
-import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
-import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
-import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
-import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -135,135 +124,6 @@ function withDatabase<T>(readOnly: boolean, operation: (database: DatabaseSync) 
   }
 }
 
-/** Every relation's exact text and a digest of its rows, so a migration can say exactly what it moved. */
-function relationTruth(database: DatabaseSync): Map<string, { sql: string; content: string }> {
-  const relations = database.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Row[];
-  return new Map(relations.map((relation) => {
-    const rows = database.prepare(`SELECT * FROM "${relation.name}"`).all() as Row[];
-    const hash = createHash('sha256');
-    for (const row of rows) {
-      for (const column of Object.keys(row).sort()) {
-        const value = row[column]!;
-        hash.update(JSON.stringify([column, value instanceof Uint8Array ? [...value] : typeof value === 'bigint' ? value.toString() : value]));
-      }
-    }
-    return [String(relation.name), { sql: String(relation.sql), content: `${rows.length}:${hash.digest('hex')}` }];
-  }));
-}
-
-describe('schema revision 32 over the real store', () => {
-  it('widens a planted revision-31 store\'s Run states and Task Outcomes with every row as it was, and moves nothing else', async () => {
-    // A Run that ran to its end: its states and its outcome are ones revision 31 already admitted.
-    const first = await openWithRoute();
-    const execution = owner(first, null);
-    try {
-      const { bookId, prepared } = await preparedBook(first, 'L2 sample1 取消迁移');
-      const authorized = first.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-      execution.admitAndDispatch(authorized.dispatchRunRecordId!);
-      await execution.whenIdle();
-      expect(first.inspectBaselineAnalysis(bookId, () => null).taskOutcome?.classification).toBe('completed');
-      first.markCleanShutdown();
-    } finally {
-      await execution.dispose();
-      first.close();
-    }
-    const before = withDatabase(false, (database) => {
-      constructPre94PolicyEncoding(database);
-      plantRevision31Relations(database);
-      execPre74Fixture(database, `PRAGMA user_version = 31`);
-      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
-      expect(runCancellationShape(database, 'analysis_run_states')).toBe('revision-31');
-      expect(runCancellationShape(database, 'analysis_task_outcomes')).toBe('revision-31');
-      return {
-        states: database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all() as Row[],
-        outcomes: database.prepare('SELECT rowid, * FROM analysis_task_outcomes ORDER BY rowid').all() as Row[],
-        truth: relationTruth(database),
-      };
-    });
-    expect(before.states.map((row) => row.state)).toEqual(['authorized', 'admitted', 'executing', 'completed']);
-    expect(before.outcomes).toHaveLength(1);
-
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(runCancellationShape(database, 'analysis_run_states')).toBe('current');
-      expect(runCancellationShape(database, 'analysis_task_outcomes')).toBe('current');
-      expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
-      expect(database.prepare('SELECT rowid, * FROM analysis_task_outcomes ORDER BY rowid').all()).toEqual(before.outcomes);
-      const after = relationTruth(database);
-      // Revision 33 (S76b) then adds its checkpoint relation, empty.
-      expect([...after.keys()]).toEqual([...before.truth.keys(), 'review_run_synthesis', ...RESEARCH_EVIDENCE_RELATIONS, ...MATERIAL_INDEX_LAYER_RELATIONS, ...PROPOSAL_REVIEW_RELATIONS, ...FACTUAL_VERIFICATION_RELATIONS, ...HOUSE_REVIEW_PREFERENCE_RELATIONS, ...TASK_INTENT_DRAFT_RELATIONS, ...IMPORTED_SKILL_RELATIONS, ...CUSTOM_ANALYSIS_RELATIONS, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER].sort());
-      for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(after.get(relation)?.content).toMatch(/^0:/);
-      for (const relation of RUN_CHECKPOINT_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
-      // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name))
-        .toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_run_states', 'analysis_task_intents', 'analysis_task_outcomes', 'proposal_item_decisions']);
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
-      for (const table of ['analysis_run_states', 'analysis_task_outcomes']) {
-        expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ? ORDER BY name").all(table))
-          .toEqual([{ name: `${table}_no_delete` }, { name: `${table}_no_update` }]);
-      }
-      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    });
-  }, 300_000);
-
-  it('widens a store as old as revision 29 in one step, both relations from the texts it holds', async () => {
-    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      first.markCleanShutdown();
-    } finally {
-      first.close();
-    }
-    withDatabase(false, (database) => {
-      // Revision 31's rule ledger and origin, then revision 32's two widenings, taken back; revision 29's Run states
-      // are revision 31's without the two Connectivity Wait states, and no Run exists to hold either.
-      plantRevision30Relations(database);
-      plantRevision31Relations(database);
-      execPre74Fixture(database, `PRAGMA user_version = ${EXPORT_LEDGER_SCHEMA_VERSION}`);
-      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
-    });
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(runCancellationShape(database, 'analysis_run_states')).toBe('current');
-      expect(runCancellationShape(database, 'analysis_task_outcomes')).toBe('current');
-    });
-  }, 300_000);
-
-  it('refuses a store whose Task Outcomes match no shape, rather than rebuilding them', async () => {
-    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      first.markCleanShutdown();
-    } finally {
-      first.close();
-    }
-    withDatabase(false, (database) => {
-      plantRevision31Relations(database);
-      // A hand-altered relation: a column no revision ever wrote.
-      execPre74Fixture(database, `PRAGMA foreign_keys = OFF;
-        BEGIN IMMEDIATE;
-        DROP TRIGGER analysis_task_outcomes_no_update;
-        DROP TRIGGER analysis_task_outcomes_no_delete;
-        ALTER TABLE analysis_task_outcomes ADD COLUMN note TEXT;
-        PRAGMA user_version = 31;
-        COMMIT;
-        PRAGMA foreign_keys = ON;`);
-      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
-      expect(runCancellationShape(database, 'analysis_task_outcomes')).toBe('other');
-    });
-    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
-  }, 300_000);
-});
 
 describe('取消任务 over the real store', () => {
   it('keeps an active unknown range distinct from read and unattempted ranges before cancelling', async () => {

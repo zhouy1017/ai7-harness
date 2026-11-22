@@ -1,18 +1,9 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
-import {
-  BUILTIN_EVALUATION_PROFILE,
-  EVALUATION_INITIAL_DRAFT_TRIGGER_SQL,
-  EVALUATION_RECORD_TRIGGER_SQL,
-  EvaluationError,
-  EvaluationRecords,
-  evaluationProfileDigest,
-  initializeEvaluationInitialDraftSchema,
-  initializeEvaluationRecordSchema,
-  type InitialEvaluationFacts,
-} from '../../src/service/evaluation-records.js';
+import { BUILTIN_EVALUATION_PROFILE, EVALUATION_INITIAL_DRAFT_TRIGGER_SQL, EVALUATION_RECORD_TRIGGER_SQL, EvaluationError, EvaluationRecords, evaluationProfileDigest, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL, EVALUATION_RECORD_SCHEMA_SQL, type InitialEvaluationFacts } from '../../src/service/evaluation-records.js';
 import type { EvaluationContent, EvaluationProfileProjection } from '../../src/shared/protocol.js';
 
 // The house calibration offset (Issue #429, EVAL-011a; V2-UX-EVAL-011, §8.6 「10 本调分记录」) over the record owner on an
@@ -78,8 +69,8 @@ function facts(bookId: string): InitialEvaluationFacts {
 
 beforeEach(() => {
   db = new DatabaseSync(':memory:', { enableForeignKeyConstraints: false });
-  initializeEvaluationRecordSchema(db);
-  initializeEvaluationInitialDraftSchema(db);
+  createBaselineRelations(db, EVALUATION_RECORD_SCHEMA_SQL);
+  createBaselineRelations(db, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL);
   activeProfile = { ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) };
   calibrationOn = true;
   profileDamaged = false;

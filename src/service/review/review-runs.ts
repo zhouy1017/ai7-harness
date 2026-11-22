@@ -1,3 +1,5 @@
+import { appendOnly } from '../append-only.js';
+import { paragraphCount, placesOfKeys, positionsOfBlocks, rowsFrom, workingBlock } from '../manuscript/working-positions.js';
 import { launchPreviewProjection } from '../task-launch-preview.js';
 import { reviewRunPlan } from '../task-plan.js';
 import { reviewLaunchEdits, type ReviewLaunchOptions } from './review-launch-options.js';
@@ -19,7 +21,6 @@ import { compositeReviewRun, type CompositeReviewRun } from '../procedures/compo
 import { procedureContent } from '../procedures/execution.js';
 import { compositeMembers, readProcedurePlanView, resolveProcedureForKind } from '../procedures/composite.js';
 import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
-import { LOCAL_REVIEW_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
 import { LocalCheckError, freezeLocalPlan, freezeLocalPlanV3, freezeLocalPlanV4, isLocalTablePlan, numeralBasis, validLocalOptions, validateAnyLocalPlan, type AnyLocalCheckPlan, type LocalCheckBlock } from './deterministic/plan.js';
 import { exactLocalCandidateIds, checkLocalPlan, anyLocalCandidateNote, mechanicalReplacement, validateLocalResultV3, type AnyLocalCheckResult } from './deterministic/checker.js';
 import { LOCAL_CHECK_CATEGORY, LOCAL_CHECK_PROCEDURE, LOCAL_CHECK_LIMITATION, LOCAL_TABLE_LIMITATION, LOCAL_RULE_IDS } from './deterministic/rules.js';
@@ -220,9 +221,9 @@ import {
  * - `quality_signals`: the minimal Quality Signal an ignored finding records (REV-004).
  * - `review_reports`: the versioned 审阅报告 (REV-009).
  *
- * Nothing existing moves (ADR 0079: an additive revision keeps the same Data Version). The relations are
- * created shape-detected in `EditorialStore.open` before `initializeTaskAuthorizationSchema` stamps the
- * version, exactly as revisions 21 to 23 add theirs, and join the exact-schema validator the same way.
+ * The storage baseline (#1634) creates these relations once, with every other, when it builds an empty store
+ * (`createStoreAtBaseline`); an open checks them exactly against the baseline (`requireBaselineSchema`)
+ * and creates nothing.
  */
 /** Revision 90: a local stage has no model Run or analysis-result FK. Old event SQL is untouched. */
 export const LOCAL_STAGE_SCHEMA_SQL = { review_local_stage_artifacts: `CREATE TABLE review_local_stage_artifacts (
@@ -237,21 +238,10 @@ export const LOCAL_STAGE_SCHEMA_SQL = { review_local_stage_artifacts: `CREATE TA
   PRIMARY KEY(review_run_id, sequence),
   UNIQUE(review_run_id, attempt_id, state)
 ) STRICT` } as const;
-export const LOCAL_STAGE_TRIGGER_SQL = Object.fromEntries(['update', 'delete'].map((operation) => [
-  `review_local_stage_artifacts_no_${operation}`,
-  `CREATE TRIGGER review_local_stage_artifacts_no_${operation} BEFORE ${operation.toUpperCase()} ON review_local_stage_artifacts
-    BEGIN SELECT RAISE(ABORT, 'REVIEW_LOCAL_STAGE_IMMUTABLE'); END`,
-]));
-export const LOCAL_STAGE_FOREIGN_KEYS = { review_local_stage_artifacts: ['review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE'] };
+export const LOCAL_STAGE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  review_local_stage_artifacts: 'REVIEW_LOCAL_STAGE_IMMUTABLE',
+});
 
-export function initializeLocalStageSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'review_local_stage_artifacts'").get() !== undefined) return;
-  requireReview(Number(db.prepare('PRAGMA user_version').get()?.user_version) < LOCAL_REVIEW_SCHEMA_VERSION, 'SCHEMA_INVALID', '本地工序记录表缺失。');
-  transact(db, () => {
-    db.exec(LOCAL_STAGE_SCHEMA_SQL.review_local_stage_artifacts);
-    for (const sql of Object.values(LOCAL_STAGE_TRIGGER_SQL)) db.exec(sql);
-  });
-}
 type LocalStageState = 'started' | 'completed' | 'materialized' | 'interrupted' | 'cancelled' | 'failed' | 'refused';
 interface LocalStageArtifact {
   schema: 'ai7.review.local-stage-artifact/1' | 'ai7.review.local-stage-artifact/3'; reviewRunId: string; categoryId: typeof LOCAL_CHECK_CATEGORY;
@@ -470,54 +460,16 @@ export const REVIEW_RUN_SCHEMA_SQL = {
 } as const;
 
 /** Every Review Run relation is a ledger: a row is appended once and never rewritten or removed. */
-export const REVIEW_RUN_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(REVIEW_RUN_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'REVIEW_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'REVIEW_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the seven relations, in the exact-schema validator's own spelling. */
-export const REVIEW_RUN_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  review_runs: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
-    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
-    'manuscript_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-  ],
-  review_run_authorizations: ['review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE'],
-  review_run_category_events: [
-    'result_set_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE',
-    'run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE',
-  ],
-  review_excluded_findings: ['result_set_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE', 'review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE'],
-  review_findings: [
-    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
-    'mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE',
-    'review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE',
-  ],
-  review_finding_dispositions: [
-    'finding_id>review_findings.finding_id:NO ACTION/NO ACTION/NONE',
-    'review_run_id>review_findings.review_run_id:NO ACTION/NO ACTION/NONE',
-  ],
-  quality_signals: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'disposition_id>review_finding_dispositions.disposition_id:NO ACTION/NO ACTION/NONE',
-    'finding_id>review_findings.finding_id:NO ACTION/NO ACTION/NONE',
-    'mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE',
-    'review_run_id>review_findings.review_run_id:NO ACTION/NO ACTION/NONE',
-  ],
-  review_reports: ['review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE'],
-};
+export const REVIEW_RUN_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  review_runs: 'REVIEW_LEDGER_IMMUTABLE',
+  review_run_authorizations: 'REVIEW_LEDGER_IMMUTABLE',
+  review_run_category_events: 'REVIEW_LEDGER_IMMUTABLE',
+  review_excluded_findings: 'REVIEW_LEDGER_IMMUTABLE',
+  review_findings: 'REVIEW_LEDGER_IMMUTABLE',
+  review_finding_dispositions: 'REVIEW_LEDGER_IMMUTABLE',
+  quality_signals: 'REVIEW_LEDGER_IMMUTABLE',
+  review_reports: 'REVIEW_LEDGER_IMMUTABLE',
+});
 
 export class ReviewRunError extends Error {
   constructor(readonly code: string, message: string) {
@@ -543,37 +495,6 @@ export function selectionOutsideLine(count: number): string {
 /** A 当前选区 Run names the reading ranges and actual reasons for its excluded findings. */
 export function selectionExcludedLine(count: number, reasonLabels: ReadonlyArray<string>): string {
   return `所读范围内另有 ${count} 条发现未采用，列在排除附录中：${[...new Set(reasonLabels)].join('；')}`;
-}
-
-/**
- * The seven relations and their ledger triggers. Created once and never rebuilt: a store that predates
- * them gains seven empty relations and nothing existing moves. Like revisions 21 to 23 this runs before
- * the version is stamped in `task-authorization.ts` and is shape-detected, so a store that already has
- * them does no work here. On a store older than revision 15 the analysis relations two of them refer to
- * are created after this, by the version stamp's own migration; SQLite resolves a reference when a row
- * uses it, and no row is written before both exist.
- */
-export function initializeReviewRunSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'review_runs'").get();
-  if (existing !== undefined && db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'review_excluded_findings'").get() !== undefined) return;
-  requireReview(existing === undefined || Number(db.prepare('PRAGMA user_version').get()?.user_version) < REVIEW_CONTRACT_SCHEMA_VERSION,
-    'SCHEMA_INVALID', '数据库缺少本版本的审阅排除记录。');
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    if (existing === undefined) {
-      for (const sql of Object.values(REVIEW_RUN_SCHEMA_SQL)) db.exec(sql);
-      for (const sql of Object.values(REVIEW_RUN_TRIGGER_SQL)) db.exec(sql);
-    } else {
-      db.exec(REVIEW_RUN_SCHEMA_SQL.review_excluded_findings);
-      db.exec(REVIEW_RUN_TRIGGER_SQL['review_excluded_findings_no_update']!);
-      db.exec(REVIEW_RUN_TRIGGER_SQL['review_excluded_findings_no_delete']!);
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-  requireReview(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
 // ---- the store ------------------------------------------------------------------------------------
@@ -932,6 +853,8 @@ interface SuggestionVersionView {
   readonly kind: EditorialMarkKind | null;
   readonly markStatus: ReviewMarkStatus | null;
   readonly anchor: string | null;
+  /** The paragraph the mark stands in now, which a split or join may have moved it to (Issue #1654, loss 5). */
+  readonly blockId: string | null;
   readonly from: number | null;
   readonly to: number | null;
   readonly decision: string | null;
@@ -1262,9 +1185,10 @@ export class ReviewRunStore {
 
   #localBlocks(branchId: string, scope: RunSnapshot['scope'] | ResolvedReviewScope): LocalCheckBlock[] {
     const range = scope.selectedRange;
-    return (this.#db.prepare('SELECT block_id, position, text FROM working_blocks WHERE branch_id = ? AND position >= ? AND position <= ? ORDER BY position')
-      .all(branchId, range?.startPosition ?? 1, range?.endPosition ?? Number.MAX_SAFE_INTEGER) as SqlRow[])
-      .map((row) => ({ blockId: text(row.block_id), position: integer(row.position), text: text(row.text) }));
+    const total = paragraphCount(this.#db, branchId);
+    const from = range?.startPosition ?? 1;
+    const to = Math.min(range?.endPosition ?? total, total);
+    return to < from ? [] : rowsFrom(this.#db, branchId, from, to - from + 1).map((row) => ({ blockId: row.blockId, position: row.position, text: row.text }));
   }
 
   #localWork(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, head: ManuscriptHead): PreparationWork {
@@ -2103,12 +2027,13 @@ export class ReviewRunStore {
   #selectionMoved(snapshot: RunSnapshot): boolean {
     const blockIds = snapshot.scope.kind === 'selection' ? snapshot.scope.blockIds : undefined;
     if (blockIds === undefined) return false;
-    const read = this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+    // Order is the blocks' keys' order (ADR 0105 §6); no paragraph number is needed to compare them.
+    const read = this.#db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?');
     let previous = 0;
     for (const blockId of blockIds) {
       const row = read.get(snapshot.manuscript.branchId, blockId) as SqlRow | undefined;
-      if (row === undefined || integer(row.position) <= previous) return true;
-      previous = integer(row.position);
+      if (row === undefined || integer(row.order_key) <= previous) return true;
+      previous = integer(row.order_key);
     }
     return false;
   }
@@ -3719,8 +3644,8 @@ export class ReviewRunStore {
     }
     const blocks = new Map(baseline.readRevisionBlocks(revision.manuscriptPin.manuscriptId, revision.manuscriptPin.revisionId)
       .map((block) => [block.blockId, block] as const));
-    const working = new Map((this.#db.prepare('SELECT block_id, position FROM working_blocks WHERE branch_id = ?').all(snapshot.manuscript.branchId) as SqlRow[])
-      .map((row) => [text(row.block_id), integer(row.position)] as const));
+    const working = new Map(rowsFrom(this.#db, snapshot.manuscript.branchId, 1, paragraphCount(this.#db, snapshot.manuscript.branchId))
+      .map((row) => [row.blockId, row.position] as const));
     const range = category.selectedRange;
     // A 当前选区 keeps the leads anchored on its paragraphs by identity (Issue #423 review, P2-2): positions move with every edit.
     const selected = selectionBlocks(snapshot);
@@ -4312,11 +4237,13 @@ export class ReviewRunStore {
    * which follow every body block, belong to no chapter: the last chapter ends at the last body block.
    */
   #chapterOptions(bookId: string, head: ManuscriptHead): ChapterOptions {
-    const headings = (this.#db.prepare(
-      "SELECT block_id, position, level, text FROM manuscript_outline WHERE branch_id = ? AND kind = 'heading' ORDER BY position",
-    ).all(head.branchId) as SqlRow[]).map((row) => ({
+    const outline = this.#db.prepare(
+      "SELECT block_id, order_key, level, text FROM manuscript_outline WHERE branch_id = ? AND kind = 'heading' ORDER BY order_key",
+    ).all(head.branchId) as SqlRow[];
+    const places = placesOfKeys(this.#db, head.branchId, outline.map((row) => integer(row.order_key)));
+    const headings = outline.map((row) => ({
       blockId: text(row.block_id),
-      position: integer(row.position),
+      position: places.get(integer(row.order_key))!.position,
       level: integer(row.level),
       title: boundedTitle(text(row.text)),
     }));
@@ -4373,16 +4300,12 @@ export class ReviewRunStore {
   #resolveSelection(request: ReviewRunScopeRequest, head: ManuscriptHead): ResolvedReviewScope {
     requireReview(typeof request.fromChapterBlockId === 'string' && BLOCK_ID_PATTERN.test(request.fromChapterBlockId) &&
       typeof request.toChapterBlockId === 'string' && BLOCK_ID_PATTERN.test(request.toChapterBlockId), 'REVIEW_SCOPE_INVALID', SELECTION_UNAVAILABLE_REASON);
-    const position = (blockId: string): number | null => {
-      const row = this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(head.branchId, blockId) as SqlRow | undefined;
-      return row === undefined ? null : integer(row.position);
-    };
+    const position = (blockId: string): number | null => workingBlock(this.#db, head.branchId, blockId)?.position ?? null;
     const from = position(request.fromChapterBlockId);
     const to = position(request.toChapterBlockId);
     requireReview(from !== null && to !== null && from <= to, 'REVIEW_SCOPE_INVALID', SELECTION_GONE_REASON);
     requireReview(to - from < MAX_SELECTION_BLOCKS, 'REVIEW_SCOPE_INVALID', SELECTION_TOO_LONG_REASON);
-    const blockIds = (this.#db.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? AND position BETWEEN ? AND ? ORDER BY position')
-      .all(head.branchId, from, to) as SqlRow[]).map((row) => text(row.block_id));
+    const blockIds = rowsFrom(this.#db, head.branchId, from, to - from + 1).map((row) => row.blockId);
     return { kind: 'selection', selectedRange: { startPosition: from, endPosition: to }, blockIds };
   }
 
@@ -5436,7 +5359,7 @@ export class ReviewRunStore {
    */
   #findingViews(reviewRunId: string, branchId: string, findingId: string | null): FindingView[] {
     const rows = this.#db.prepare(
-      `SELECT f.*, em.kind mark_kind, em.status mark_status, em.anchor_state mark_anchor, em.from_grapheme mark_from, em.to_grapheme mark_to,
+      `SELECT f.*, em.kind mark_kind, em.status mark_status, em.anchor_state mark_anchor, em.block_id mark_block, em.from_grapheme mark_from, em.to_grapheme mark_to,
               COALESCE((SELECT d.decision_id FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id WHERE i.mark_id = f.mark_id ORDER BY d.ordinal DESC LIMIT 1),
                 (SELECT d.disposition_id FROM review_finding_dispositions d WHERE d.review_run_id = f.review_run_id AND d.finding_id = f.finding_id ORDER BY d.ordinal DESC LIMIT 1)) learning_decision_id,
               (SELECT d.disposition FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id
@@ -5447,20 +5370,24 @@ export class ReviewRunStore {
                 WHERE x.disposition = 'ignored'
                   AND ((y.review_run_id = f.review_run_id AND y.finding_id = f.finding_id) OR (f.mark_id IS NOT NULL AND y.mark_id = f.mark_id))
                 ORDER BY x.recorded_at DESC, x.ordinal DESC LIMIT 1) ignore_reason,
-              wb.position block_position
+              f.block_id finding_block
        FROM review_findings f
        LEFT JOIN editorial_marks em ON em.mark_id = f.mark_id
-       LEFT JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = f.block_id
        WHERE f.review_run_id = ? AND (? IS NULL OR f.finding_id = ?)
        ORDER BY f.ordinal`,
-    ).all(branchId, reviewRunId, findingId, findingId) as SqlRow[];
-    return rows.map((row): FindingView => {
+    ).all(reviewRunId, findingId, findingId) as SqlRow[];
+    const views = rows.map((row) => ({ row, mark: newestSuggestionVersion(this.#versionView(row), (version) =>
+      version.convertedTo === 'change-suggestion' && version.markId !== null ? this.#nextVersion(version.markId) : null) }));
+    // A finding with a mark reads the mark's paragraph and offsets together (Issue #1654, loss 5): a split or join moves the
+    // mark, never the finding's own record. The paragraph numbers come in one pass over the pages.
+    const placeOf = (view: typeof views[number]): string => view.mark.markId !== null && view.mark.blockId !== null ? view.mark.blockId : text(view.row.finding_block);
+    const positions = positionsOfBlocks(this.#db, branchId, views.map(placeOf));
+    return views.map(({ row, mark }): FindingView => {
       const originMarkId = nullableText(row.mark_id);
       const ignoreReason = nullableText(row.ignore_reason);
       // A suggestion a conflict saved as a new version is the same finding's: it reads the newest version.
-      const mark = newestSuggestionVersion(this.#versionView(row), (version) =>
-        version.convertedTo === 'change-suggestion' && version.markId !== null ? this.#nextVersion(version.markId) : null);
       const { markId, markStatus, decision } = mark;
+      const blockId = placeOf({ row, mark });
       const { status, statusDetail } = reviewFindingStatus({
         ignored: ignoreReason !== null,
         markId,
@@ -5476,7 +5403,7 @@ export class ReviewRunStore {
         severity: text(row.severity) as ReviewFindingSeverity,
         output: text(row.output) as FindingView['output'],
         riskPoint: integer(row.risk_point) === 1,
-        blockId: text(row.block_id),
+        blockId,
         fromGrapheme: markId === null || mark.from === null ? integer(row.from_grapheme) : mark.from,
         toGrapheme: markId === null || mark.to === null ? integer(row.to_grapheme) : mark.to,
         quote: text(row.quote),
@@ -5491,7 +5418,7 @@ export class ReviewRunStore {
         originMarkId,
         markStatus,
         anchorState: markId === null ? 'anchor-changed' : mark.anchor as FindingView['anchorState'],
-        blockPosition: row.block_position === null || row.block_position === undefined ? null : integer(row.block_position),
+        blockPosition: positions.get(blockId) ?? null,
         ignoreReason,
         status,
         statusDetail,
@@ -5506,6 +5433,7 @@ export class ReviewRunStore {
       kind: nullableText(row.mark_kind) as EditorialMarkKind | null,
       markStatus: nullableText(row.mark_status) as ReviewMarkStatus | null,
       anchor: nullableText(row.mark_anchor),
+      blockId: nullableText(row.mark_block),
       from: row.mark_from === null || row.mark_from === undefined ? null : integer(row.mark_from),
       to: row.mark_to === null || row.mark_to === undefined ? null : integer(row.mark_to),
       decision: nullableText(row.decision),
@@ -5516,7 +5444,7 @@ export class ReviewRunStore {
   /** The 修改建议 saved from a mark as its next version, with what the finding reads of it, or `null`. */
   #nextVersion(markId: string): SuggestionVersionView | null {
     const row = this.#db.prepare(
-      `SELECT c.mark_id, c.kind mark_kind, c.status mark_status, c.anchor_state mark_anchor, c.from_grapheme mark_from, c.to_grapheme mark_to,
+      `SELECT c.mark_id, c.kind mark_kind, c.status mark_status, c.anchor_state mark_anchor, c.block_id mark_block, c.from_grapheme mark_from, c.to_grapheme mark_to,
               (SELECT d.disposition FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id
                 WHERE i.mark_id = c.mark_id ORDER BY d.ordinal DESC LIMIT 1) decision,
               (SELECT x.kind FROM editorial_marks x WHERE x.converted_from_mark_id = c.mark_id ORDER BY x.created_at LIMIT 1) converted_to

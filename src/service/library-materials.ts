@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
 import { copyFile, open, opendir, rename, rm, stat } from 'node:fs/promises';
@@ -65,28 +66,10 @@ export const LIBRARY_MATERIAL_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const LIBRARY_MATERIAL_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(LIBRARY_MATERIAL_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'LIBRARY_MATERIAL_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'LIBRARY_MATERIAL_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const LIBRARY_MATERIAL_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  library_materials: [],
-  library_material_decisions: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'material_id>library_materials.material_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const LIBRARY_MATERIAL_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  library_materials: 'LIBRARY_MATERIAL_LEDGER_IMMUTABLE',
+  library_material_decisions: 'LIBRARY_MATERIAL_LEDGER_IMMUTABLE',
+});
 
 export class LibraryMaterialError extends Error {
   constructor(readonly code: string, message: string) {
@@ -153,22 +136,6 @@ const HTML_START = /^(?:\s|<!--(?:(?!-->)[\s\S])*-->)*<(?:!doctype\s+html|html)[
 const PARTIAL_NAME = /^\.partial-[0-9a-f-]{36}$/u;
 const OBJECT_NAME = /^([0-9a-f]{64})\.[a-z]+$/u;
 const PREFIX_NAME = /^[0-9a-f]{2}$/u;
-
-/** Revision 46's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
-export function initializeLibraryMaterialSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(LIBRARY_MATERIAL_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(LIBRARY_MATERIAL_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Library material schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 function startsWith(head: Uint8Array, expected: Uint8Array, offset = 0): boolean {
   if (head.length < offset + expected.length) return false;
@@ -403,8 +370,8 @@ export interface LibraryMaterialPlace {
 export type LibraryMaterialIndexReader = (material: LibraryMaterialOriginal) => MaterialIndexProjection;
 
 const UNBUILT_INDEX: MaterialIndexProjection = {
-  state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, vectors: null, translation: null,
-  layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending', vectors: 'pending' },
+  state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, translation: null,
+  layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending' },
 };
 
 export class LibraryMaterialLedger {

@@ -1,19 +1,9 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
-import {
-  BUILTIN_EVALUATION_PROFILE,
-  EVALUATION_RECORD_TRIGGER_SQL,
-  EvaluationError,
-  EvaluationRecords,
-  emptyEvaluationContent,
-  evaluationAdoptionsNotice,
-  evaluationCarriedMarksNotice,
-  evaluationDamagedLatestReason,
-  initializeEvaluationInitialDraftSchema,
-  initializeEvaluationRecordSchema,
-} from '../../src/service/evaluation-records.js';
+import { BUILTIN_EVALUATION_PROFILE, EVALUATION_RECORD_TRIGGER_SQL, EvaluationError, EvaluationRecords, emptyEvaluationContent, evaluationAdoptionsNotice, evaluationCarriedMarksNotice, evaluationDamagedLatestReason, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL, EVALUATION_RECORD_SCHEMA_SQL } from '../../src/service/evaluation-records.js';
 import type { EvaluationContent } from '../../src/shared/protocol.js';
 
 // Evaluation provenance regressions: #689, #696, #702, #708 and #726.
@@ -34,8 +24,8 @@ let bookOf: Map<string, string>;
 
 beforeEach(() => {
   db = new DatabaseSync(':memory:', { enableForeignKeyConstraints: false });
-  initializeEvaluationRecordSchema(db);
-  initializeEvaluationInitialDraftSchema(db);
+  createBaselineRelations(db, EVALUATION_RECORD_SCHEMA_SQL);
+  createBaselineRelations(db, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL);
   adoptions = new Map();
   decisionsReadable = true;
   accepted = new Map();

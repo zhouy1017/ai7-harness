@@ -1,6 +1,4 @@
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -12,30 +10,8 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import type { SecretResolver } from '../../src/service/provider/credential-broker.js';
-import {
-  ANALYSIS_LEDGER_REVISION_15_SQL,
-  ANALYSIS_LEDGER_REVISION_16_SQL,
-  ANALYSIS_LEDGER_REVISION_19_SQL,
-  ANALYSIS_LEDGER_REVISION_17_TABLES,
-  ANALYSIS_LEDGER_SCHEMA_SQL,
-  ANALYSIS_LEDGER_TRIGGER_SQL,
-  J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
-  SUCCESSIVE_TASK_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION,
-  TEXT_CONVERSION_SCHEMA_VERSION,
-  TASK_AUTHORIZATION_SCHEMA_SQL,
-} from '../../src/service/task-authorization.js';
-import {
-  BASELINE_ANALYSIS_MODE_GOALS,
-  BASELINE_ANALYSIS_TASK_GOAL,
-  J03_TASK_GOAL,
-  type AnalysisReusePlanProjection,
-  type BaselineAnalysisProjection,
-  type BaselineAnalysisUpdateRequest,
-  type CoverageManifestProjection,
-  type JournalAcknowledgement,
-  type LaunchPolicyProjection,
-} from '../../src/shared/protocol.js';
+import { ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, type AnalysisReusePlanProjection, type BaselineAnalysisProjection, type BaselineAnalysisUpdateRequest, type CoverageManifestProjection, type JournalAcknowledgement, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { canonicalJson, canonicalRecord, parseCanonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { SAFE_RETRY_REPETITION_DIFFERS } from '../../src/service/analysis/plan-boundary.js';
 import {
@@ -47,13 +23,6 @@ import {
 } from '../../src/service/analysis/run-report.js';
 import { RUN_REPORT_STAGES } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
-import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
-import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
-import { IMPORT_RETENTION_RELATIONS_DROP_ORDER } from '../support/import-retention.js';
-import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
-import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
-import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
 import {
   SAMPLE1_BLOCKS,
   SAMPLE1_UNITS,
@@ -62,10 +31,6 @@ import {
   recordMissingCredentialConnection,
   requireExactSample1,
 } from '../support/sample1-baseline.js';
-import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
-import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
-import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
-import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -181,75 +146,6 @@ function tableRows(database: DatabaseSync, table: string, columns = '*'): Row[] 
   return database.prepare(`SELECT ${columns} FROM ${table} ORDER BY rowid`).all() as Row[];
 }
 
-const REVISION_15_INTENT_COLUMNS = 'task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256';
-const PRE_17_PLAN_COLUMNS = 'task_intent_id, component, canonical_json, sha256, created_at';
-
-/** Drop the three revision-17 relations and rebuild `analysis_plan_records` in its exact revision-16 shape (plan version 1 only). */
-function downgradePlanRecordsToRevision16(database: DatabaseSync): void {
-  database.exec('DROP TABLE procedure_run_choices; DROP TABLE procedure_version_stops; DROP TABLE procedure_version_origins; DROP TABLE procedure_plan_pins; DROP TABLE procedure_definition_versions; DROP TABLE procedure_definitions');
-  for (const table of [...ANALYSIS_LEDGER_REVISION_17_TABLES].reverse()) database.exec(`DROP TABLE ${table}`);
-  database.exec('CREATE TEMP TABLE downgrade_plans AS SELECT rowid AS r, * FROM analysis_plan_records WHERE plan_version = 1');
-  database.exec('DROP TABLE analysis_plan_records');
-  database.exec(ANALYSIS_LEDGER_REVISION_16_SQL.analysis_plan_records);
-  database.exec(`INSERT INTO analysis_plan_records(${PRE_17_PLAN_COLUMNS}) SELECT ${PRE_17_PLAN_COLUMNS} FROM temp.downgrade_plans ORDER BY r`);
-  database.exec('DROP TABLE temp.downgrade_plans');
-  database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_update']!);
-  database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_delete']!);
-}
-
-/**
- * Revision 21's entry-position relation, revision 22's editorial-mark relations, revision 23's
- * manuscript-effect relations, revision 24's Review Run relations, revision 25's Publication Version
- * relations and revision 26's proposal-conflict relations are simply not there below them, so a store taken back to any earlier revision loses them again — otherwise the
- * downgraded store is not the shape it claims. So are revision 27's import-retention relations and
- * revision 28's staged imported marks.
- */
-function dropEntryPositionRelation(database: DatabaseSync): void {
-  for (const relation of [...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE ${relation}`);
-  for (const relation of IMPORTED_MARK_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
-  for (const relation of IMPORT_RETENTION_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
-  for (const relation of PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
-  for (const relation of PUBLICATION_VERSION_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
-  for (const relation of REVIEW_RUN_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
-  for (const relation of ['manuscript_effect_receipts', 'manuscript_effect_dispatches', 'manuscript_effect_approvals', 'manuscript_effect_targets', 'manuscript_effect_intents', 'proposal_decision_reasons', 'proposal_item_decisions', 'proposal_change_items', 'editorial_mark_replies', 'editorial_marks']) {
-    database.exec(`DROP TABLE ${relation}`);
-  }
-  database.exec('DROP TABLE manuscript_entry_positions');
-}
-
-/** Rebuild the revision-17 store in its exact revision-16 shape and stamp it as revision 16. */
-function downgradeToRevision16(databasePath: string): void {
-  const database = new DatabaseSync(databasePath);
-  try {
-    database.exec('PRAGMA foreign_keys = OFF');
-    database.exec('BEGIN IMMEDIATE');
-    downgradePlanRecordsToRevision16(database);
-    dropEntryPositionRelation(database);
-    execPre74Fixture(database, `PRAGMA user_version = ${SUCCESSIVE_TASK_SCHEMA_VERSION}`);
-    database.exec('COMMIT');
-    database.exec('PRAGMA foreign_keys = ON');
-  } finally {
-    database.close();
-  }
-}
-
-const REVISION_19_INTENT_COLUMNS =
-  'task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256, mode, predecessor_revision_id, selected_start_position, selected_end_position';
-const RESULT_SET_COLUMNS = 'result_set_id, book_id, kind, created_at, canonical_json, sha256';
-const RESULT_SET_REVISION_COLUMNS =
-  'revision_id, result_set_id, ordinal, task_intent_id, run_record_id, attempt_id, manuscript_revision_id, manuscript_revision_digest, coverage_manifest_sha256, contract_version, created_at, canonical_json, sha256';
-
-/** Rebuild one relation in an exact earlier shape with every row copied in its original order. */
-function downgradeRelation(database: DatabaseSync, table: string, sql: string, columns: string): void {
-  database.exec(`CREATE TEMP TABLE downgrade_${table} AS SELECT rowid AS r, * FROM ${table}`);
-  database.exec(`DROP TABLE ${table}`);
-  database.exec(sql);
-  database.exec(`INSERT INTO ${table}(${columns}) SELECT ${columns} FROM temp.downgrade_${table} ORDER BY r`);
-  database.exec(`DROP TABLE temp.downgrade_${table}`);
-  database.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_update`]!);
-  database.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
-}
-
 const TASK_OUTCOME_COLUMNS =
   'outcome_id, task_intent_id, run_record_id, classification, result_set_revision_id, recorded_at, canonical_json, sha256';
 
@@ -278,54 +174,6 @@ function stripRunReportsFromOutcomes(databasePath: string): void {
     }
     database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_task_outcomes_no_update']!);
     database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_task_outcomes_no_delete']!);
-    database.exec('COMMIT');
-    database.exec('PRAGMA foreign_keys = ON');
-  } finally {
-    database.close();
-  }
-}
-
-/** Rebuild the revision-20 store in its exact revision-19 shape (one analysis kind) and stamp it as revision 19. */
-function downgradeToRevision19(databasePath: string): void {
-  const database = new DatabaseSync(databasePath);
-  try {
-    database.exec('PRAGMA foreign_keys = OFF');
-    database.exec('BEGIN IMMEDIATE');
-    downgradeRelation(database, 'analysis_result_set_revisions', ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_set_revisions, RESULT_SET_REVISION_COLUMNS);
-    downgradeRelation(database, 'analysis_result_sets', ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_sets, RESULT_SET_COLUMNS);
-    downgradeRelation(database, 'analysis_task_intents', ANALYSIS_LEDGER_REVISION_19_SQL.analysis_task_intents, REVISION_19_INTENT_COLUMNS);
-    dropEntryPositionRelation(database);
-    execPre74Fixture(database, `PRAGMA user_version = ${TEXT_CONVERSION_SCHEMA_VERSION}`);
-    database.exec('COMMIT');
-    database.exec('PRAGMA foreign_keys = ON');
-  } finally {
-    database.close();
-  }
-}
-
-/** Rebuild the revision-17 store in its exact revision-15 shape (the two rev-16 relations as rev 15) and stamp it as revision 15. */
-function downgradeToRevision15(databasePath: string): void {
-  const database = new DatabaseSync(databasePath);
-  try {
-    database.exec('PRAGMA foreign_keys = OFF');
-    database.exec('BEGIN IMMEDIATE');
-    downgradePlanRecordsToRevision16(database);
-    database.exec('CREATE TEMP TABLE downgrade_intents AS SELECT rowid AS r, * FROM analysis_task_intents');
-    database.exec('DROP TABLE analysis_task_intents');
-    database.exec(ANALYSIS_LEDGER_REVISION_15_SQL.analysis_task_intents);
-    database.exec(`INSERT INTO analysis_task_intents(${REVISION_15_INTENT_COLUMNS}) SELECT ${REVISION_15_INTENT_COLUMNS} FROM temp.downgrade_intents ORDER BY r`);
-    database.exec('DROP TABLE temp.downgrade_intents');
-    database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_task_intents_no_update']!);
-    database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_task_intents_no_delete']!);
-    database.exec('CREATE TEMP TABLE downgrade_plans_15 AS SELECT rowid AS r, * FROM analysis_plan_records');
-    database.exec('DROP TABLE analysis_plan_records');
-    database.exec(ANALYSIS_LEDGER_REVISION_15_SQL.analysis_plan_records);
-    database.exec(`INSERT INTO analysis_plan_records(${PRE_17_PLAN_COLUMNS}) SELECT ${PRE_17_PLAN_COLUMNS} FROM temp.downgrade_plans_15 ORDER BY r`);
-    database.exec('DROP TABLE temp.downgrade_plans_15');
-    database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_update']!);
-    database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_delete']!);
-    dropEntryPositionRelation(database);
-    execPre74Fixture(database, `PRAGMA user_version = ${J04_BASELINE_ANALYSIS_SCHEMA_VERSION}`);
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');
   } finally {
@@ -977,10 +825,13 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       try {
         database.exec('PRAGMA foreign_keys = OFF');
         const twentyOne = store.baselineAnalysisLedger.readWorkingBlocks(branchId).find((block) => block.position === 21)!;
-        const move = database.prepare('UPDATE working_blocks SET position = ? WHERE branch_id = ? AND block_id = ?');
-        move.run(100020, branchId, twenty.blockId);
-        move.run(20, branchId, twentyOne.blockId);
-        move.run(21, branchId, twenty.blockId);
+        // The two paragraphs swap their order keys (Issue #1654): the 20th paragraph is then the other block.
+        const keyOf = (blockId: string): number => Number((database.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(branchId, blockId) as { order_key: number }).order_key);
+        const [atTwenty, atTwentyOne] = [keyOf(twenty.blockId), keyOf(twentyOne.blockId)];
+        const move = database.prepare('UPDATE working_blocks SET order_key = ? WHERE branch_id = ? AND block_id = ?');
+        move.run(2 ** 52, branchId, twenty.blockId);
+        move.run(atTwenty, branchId, twentyOne.blockId);
+        move.run(atTwentyOne, branchId, twenty.blockId);
       } finally {
         database.close();
       }
@@ -1503,210 +1354,6 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     }
   }, 300_000);
 
-  it('migrates a revision-15 store forward copying every intent, plan record, and J-03 row byte for byte', async () => {
-    await requireExactSample1(roots.codeRoot);
-    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const store = await openWithRoute(roots.dataRoot, fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
-    let bookId: string;
-    let manuscriptId: string;
-    let branchId: string;
-    try {
-      const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 迁移');
-      bookId = imported.bookId;
-      manuscriptId = imported.manuscriptId;
-      branchId = imported.branchId;
-      await pinEditorialWorkspaceProfileRevision2(store, bookId);
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
-      // One recorded J-03 Task beside the settled first baseline, so the migration has J-03 rows to leave alone.
-      let progress = store.createTaskAuthorizationPreparationWork(bookId, J03_TASK_GOAL, launchPolicy);
-      while (!progress.done) progress = store.advanceTaskAuthorizationPreparationWork(progress.workId!);
-      const j03 = progress.projection!;
-      store.authorizeTaskAuthorization(bookId, j03.taskIntent!.taskIntentId, j03.planEnvelope!.digest);
-      const first = await runToSettled(store, owner, bookId, null);
-      expect(first.settled.resultSetRevision!.ordinal).toBe(1);
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
-    const predecessorEncoding = new DatabaseSync(databasePath);
-    try { constructPre94PolicyEncoding(predecessorEncoding); } finally { predecessorEncoding.close(); }
-    const j03Tables = Object.keys(TASK_AUTHORIZATION_SCHEMA_SQL);
-    const seededTables = new Set<string>(ANALYSIS_LEDGER_REVISION_17_TABLES);
-    const analysisTables = Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL).filter((table) => !seededTables.has(table));
-    const before = new DatabaseSync(databasePath, { readOnly: true });
-    let j03Before: Record<string, Row[]>;
-    let analysisBefore: Record<string, Row[]>;
-    let versionsBefore: Row[];
-    try {
-      j03Before = Object.fromEntries(j03Tables.map((table) => [table, tableRows(before, table)]));
-      analysisBefore = Object.fromEntries(analysisTables.map((table) => [table, tableRows(before, table, table === 'analysis_task_intents' ? REVISION_15_INTENT_COLUMNS : '*')]));
-      versionsBefore = tableRows(before, 'analysis_plan_versions', 'task_intent_id, ordinal, plan_revision_id, plan_envelope_sha256, created_at');
-      expect(j03Before['task_intents']).toHaveLength(1);
-      expect(analysisBefore['analysis_task_intents']).toHaveLength(1);
-      expect(versionsBefore).toHaveLength(1);
-    } finally {
-      before.close();
-    }
-    // Both predecessor revisions migrate forward: 15 (two rebuilt relations) and, after the first migration, 16 (the plan records).
-    for (const [downgrade, expectedVersion] of [[downgradeToRevision15, J04_BASELINE_ANALYSIS_SCHEMA_VERSION], [downgradeToRevision16, SUCCESSIVE_TASK_SCHEMA_VERSION]] as const) {
-      downgrade(databasePath);
-      const downgraded = new DatabaseSync(databasePath, { readOnly: true });
-      try {
-        expect((downgraded.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(expectedVersion);
-        expect(() => downgraded.prepare('SELECT plan_version FROM analysis_plan_records').all()).toThrow();
-        expect(() => downgraded.prepare('SELECT count(*) FROM analysis_plan_versions').all()).toThrow();
-        if (expectedVersion === J04_BASELINE_ANALYSIS_SCHEMA_VERSION) expect(() => downgraded.prepare('SELECT mode FROM analysis_task_intents').all()).toThrow();
-      } finally {
-        downgraded.close();
-      }
-      // Opening the store migrates forward; every pre-17 row is byte for byte the row it was, and the one frozen plan is seeded as version 1.
-      const migrated = await openWithRoute(roots.dataRoot, fixture);
-      try {
-        const after = new DatabaseSync(databasePath, { readOnly: true });
-        try {
-          expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-          for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
-          for (const table of analysisTables) {
-            expect(tableRows(after, table, table === 'analysis_task_intents' ? REVISION_15_INTENT_COLUMNS : '*')).toEqual(analysisBefore[table]);
-          }
-          expect(tableRows(after, 'analysis_task_intents', 'mode, predecessor_revision_id, selected_start_position, selected_end_position'))
-            .toEqual([{ mode: 'first-baseline', predecessor_revision_id: null, selected_start_position: null, selected_end_position: null }]);
-          expect(tableRows(after, 'analysis_plan_versions', 'task_intent_id, ordinal, plan_revision_id, plan_envelope_sha256, created_at')).toEqual(versionsBefore);
-          expect(tableRows(after, 'analysis_plan_revisions')).toEqual([]);
-          expect(tableRows(after, 'analysis_plan_adaptations')).toEqual([]);
-        } finally {
-          after.close();
-        }
-        const restarted = migrated.inspectBaselineAnalysis(bookId);
-        expect(restarted).toMatchObject({ state: 'settled', taskIntent: { mode: 'first-baseline' }, history: { latestOrdinal: 1 }, authorization: { planVersionOrdinal: 1 } });
-        expect(restarted.planVersions.map((version) => [version.ordinal, version.state])).toEqual([[1, 'bound']]);
-        expect(migrated.inspectTaskAuthorization(bookId).state).toBe('authorized');
-        migrated.markCleanShutdown();
-      } finally {
-        migrated.close();
-      }
-    }
-
-    // The migrated first baseline then serves as the predecessor of a real update.
-    const migrated = await openWithRoute(roots.dataRoot, fixture);
-    const migratedOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: migrated.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
-    try {
-      appendToFirstBlock(migrated, manuscriptId, branchId, J04_EDIT_SUFFIX);
-      const sync = await runToSettled(migrated, migratedOwner, bookId, { mode: 'sync-current', selectedRange: null });
-      expect(sync.settled.resultSetRevision).toMatchObject({ ordinal: 2, update: { mode: 'sync-current', counts: { reused: 6, recomputed: 2, invalidated: 2, bypassed: 0 } }, provenance: { planVersion: 1 } });
-      migrated.markCleanShutdown();
-    } finally {
-      await migratedOwner.dispose();
-      migrated.close();
-    }
-  }, 300_000);
-
-  it('migrates a revision-19 store forward to the two-kind schema with every row byte for byte', async () => {
-    await requireExactSample1(roots.codeRoot);
-    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const store = await openWithRoute(roots.dataRoot, fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
-    let bookId: string;
-    try {
-      const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 修订版 19 迁移');
-      bookId = imported.bookId;
-      await pinEditorialWorkspaceProfileRevision2(store, bookId);
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
-      const first = await runToSettled(store, owner, bookId, null);
-      expect(first.settled.resultSetRevision!.ordinal).toBe(1);
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
-    // Every row of the three relations revision 20 rebuilds, exactly as revision 19 wrote them.
-    const predecessorEncoding = new DatabaseSync(databasePath);
-    try { constructPre94PolicyEncoding(predecessorEncoding); } finally { predecessorEncoding.close(); }
-    const j03Tables = Object.keys(TASK_AUTHORIZATION_SCHEMA_SQL);
-    const analysisTables = Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL);
-    const before = new DatabaseSync(databasePath, { readOnly: true });
-    let j03Before: Record<string, Row[]>;
-    let analysisBefore: Record<string, Row[]>;
-    try {
-      j03Before = Object.fromEntries(j03Tables.map((table) => [table, tableRows(before, table)]));
-      analysisBefore = Object.fromEntries(analysisTables.map((table) => [table, tableRows(before, table)]));
-      expect(analysisBefore['analysis_task_intents']).toHaveLength(1);
-      expect(analysisBefore['analysis_result_sets']).toHaveLength(1);
-      expect(analysisBefore['analysis_result_set_revisions']).toHaveLength(1);
-    } finally {
-      before.close();
-    }
-
-    downgradeToRevision19(databasePath);
-    const downgraded = new DatabaseSync(databasePath, { readOnly: true });
-    try {
-      expect((downgraded.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(TEXT_CONVERSION_SCHEMA_VERSION);
-      // The revision-19 CHECKs admit one kind and nothing else, which is what makes this a migration.
-      expect(() => downgraded.prepare('SELECT 1').all()).not.toThrow();
-    } finally {
-      downgraded.close();
-    }
-
-    const migrated = await openWithRoute(roots.dataRoot, fixture);
-    try {
-      const after = new DatabaseSync(databasePath, { readOnly: true });
-      try {
-        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-        for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
-        for (const table of analysisTables) expect(tableRows(after, table)).toEqual(analysisBefore[table]);
-        // The widened CHECKs are in place: the second kind is admissible where it was not before.
-        const intents = after.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() as { sql: string };
-        expect(intents.sql).toContain("'factual-review'");
-        const sets = after.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_result_sets'").get() as { sql: string };
-        expect(sets.sql).toContain("'factual-review'");
-        const revisions = after.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_result_set_revisions'").get() as { sql: string };
-        expect(revisions.sql).toContain("'ai7.factual-review/1'");
-      } finally {
-        after.close();
-      }
-      const restarted = migrated.inspectBaselineAnalysis(bookId);
-      expect(restarted).toMatchObject({ state: 'settled', taskIntent: { mode: 'first-baseline' }, history: { latestOrdinal: 1 } });
-      expect(migrated.inspectFactualReview(bookId).state).toBe('available');
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-  }, 300_000);
-
-  it('migrates a revision-14 store forward without rewriting any J-03 row', async () => {
-    const store = await openWithRoute(roots.dataRoot, null);
-    store.markCleanShutdown();
-    store.close();
-    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const database = new DatabaseSync(databasePath);
-    try {
-      // Rebuild the exact revision-14 shape: drop only the additive relations and their triggers.
-      for (const name of Object.keys(ANALYSIS_LEDGER_TRIGGER_SQL)) database.exec(`DROP TRIGGER ${name}`);
-      for (const name of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${name}`);
-      dropEntryPositionRelation(database);
-      execPre74Fixture(database, 'PRAGMA user_version = 14');
-    } finally {
-      database.close();
-    }
-    const migrated = await openWithRoute(roots.dataRoot, null);
-    try {
-      await expect(migrated.getStartup()).resolves.toBeDefined();
-    } finally {
-      migrated.markCleanShutdown();
-      migrated.close();
-    }
-    const verify = new DatabaseSync(databasePath);
-    try {
-      expect((verify.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      for (const table of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL)) {
-        expect((verify.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total).toBe(0);
-      }
-    } finally {
-      verify.close();
-    }
-  }, 120_000);
 });
 
 

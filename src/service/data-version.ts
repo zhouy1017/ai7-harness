@@ -1,11 +1,12 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { closeSync, lstatSync, openSync, readFileSync, readSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { readSmallFile, writeAtomic } from './database-replacement.js';
-import { DATA_VERSION_MARKER_UNREADABLE, newerDataVersionMessage } from '../shared/data-version-labels.js';
+import { DATA_VERSION_MARKER_UNREADABLE, FOREIGN_DATABASE, newerDataVersionMessage, olderDataVersionMessage } from '../shared/data-version-labels.js';
 import packageMetadata from '../../package.json' with { type: 'json' };
 
 /**
@@ -91,6 +92,8 @@ export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = 
   { revision: 114, class: 'additive' }, // #1453: nullable independent role-default efforts.
   { revision: 115, class: 'additive' }, // #1455: instance-local immutable launch snapshots.
   { revision: 116, class: 'additive' }, // #1433: Book-owned review-run synthesis.
+  // #1634 (ADR 0105 §4; Owner D3 and item 10): the folded baseline. Earlier AI7 cannot read it, so it is Data Version 2.
+  { revision: 117, class: 'breaking', change: '数据整理为新的存储格式' },
 ];
 
 /**
@@ -150,22 +153,9 @@ export const DATA_VERSION_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const DATA_VERSION_TRIGGER_SQL: Readonly<Record<string, string>> = {
-  store_versions_no_update: `CREATE TRIGGER store_versions_no_update
-    BEFORE UPDATE ON store_versions
-    BEGIN
-      SELECT RAISE(ABORT, 'STORE_VERSIONS_IMMUTABLE');
-    END`,
-  store_versions_no_delete: `CREATE TRIGGER store_versions_no_delete
-    BEFORE DELETE ON store_versions
-    BEGIN
-      SELECT RAISE(ABORT, 'STORE_VERSIONS_IMMUTABLE');
-    END`,
-};
-
-export const DATA_VERSION_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  store_versions: ['supersedes_record_id>store_versions.record_id:NO ACTION/NO ACTION/NONE'],
-};
+export const DATA_VERSION_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  store_versions: 'STORE_VERSIONS_IMMUTABLE',
+});
 
 export class DataVersionError extends Error {
   constructor(readonly code: string, message: string) {
@@ -181,7 +171,6 @@ function requireDataVersion(condition: unknown, code: string, message: string): 
 type SqlRow = Record<string, SQLOutputValue>;
 
 const RECORD_SCHEMA = 'ai7.store-version/1';
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'store_versions'";
 const INVALID = '数据版本记录已损坏。';
 /**
  * A released or development software version: `0.1.0`, `0.1.0-beta.2`, or either with build metadata, `0.1.0+build.7` —
@@ -222,22 +211,6 @@ export function compareSoftwareVersions(left: string, right: string): number {
     }
   }
   return 0;
-}
-
-/** Revision 54's relation, created once: a store that predates it gains an empty ledger and nothing existing moves. */
-export function initializeDataVersionSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(DATA_VERSION_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(DATA_VERSION_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Data version schema rollback failed.');
-    }
-    throw error;
-  }
 }
 
 /** The software version this build is, from the package it ships in; refused when the package does not name one. */
@@ -552,6 +525,112 @@ export function refuseNewerDataVersion(marker: DataVersionMarker, reader: { read
     throw new DataVersionError('DATA_VERSION_NEWER',
       newerDataVersionMessage(marker.dataVersion, marker.schemaRevision));
   }
+}
+
+/**
+ * Refuse data an earlier AI7 wrote (#1634; ADR 0105 §4): a store of an earlier Data Version is no longer brought up to date as it
+ * opens, so it is refused before anything touches it — by its marker, or, for a store without one, by the revision its own files
+ * hold. Nothing is created, converted, backed up or marked.
+ */
+export function refuseOlderDataVersion(
+  marker: DataVersionMarker | null,
+  revisionOnDisk: number | null,
+  reader: { readonly dataVersion: number },
+  classes: ReadonlyArray<ClassifiedSchemaRevision> = SCHEMA_REVISION_CLASSES,
+): void {
+  const older = marker !== null && marker.dataVersion < reader.dataVersion ? marker.dataVersion
+    : revisionOnDisk !== null && revisionOnDisk > 0 && dataVersionAt(revisionOnDisk, classes) < reader.dataVersion
+      ? dataVersionAt(revisionOnDisk, classes) : null;
+  if (older !== null) throw new DataVersionError('DATA_VERSION_OLDER', olderDataVersionMessage(older));
+}
+
+const SQLITE_MAGIC = 'SQLite format 3' + String.fromCharCode(0);
+const USER_VERSION_OFFSET = 60;
+
+/**
+ * The schema revision a store's own files hold, read as bytes without opening SQLite, so reading it changes nothing (#1634): the
+ * `user_version` of page 1 — from the last committed copy of page 1 in the write-ahead log when the log holds one (a store whose
+ * writer stopped before a checkpoint), else from the database file. `0` for an absent or empty store; `null` when the file is
+ * not an SQLite database, which the open itself then refuses. A database that holds any schema object but no revision was not
+ * made by AI7 — every store AI7 makes is stamped in the transaction that builds it — and is refused here, as it lies.
+ */
+export function storeRevisionOnDisk(databasePath: string): number | null {
+  const header = readPrefix(databasePath, PAGE_ONE_PREFIX);
+  if (header !== null && header.length > 0 && (header.length < 100 || header.toString('latin1', 0, 16) !== SQLITE_MAGIC)) return null;
+  const page = committedPageOne(`${databasePath}-wal`) ?? (header === null || header.length === 0 ? null : header);
+  if (page === null) return 0;
+  const revision = page.readUInt32BE(USER_VERSION_OFFSET);
+  if (revision === 0 && !emptySchema(page)) throw new DataVersionError('DATA_STORE_FOREIGN', FOREIGN_DATABASE);
+  return revision;
+}
+
+/** The 100-byte header and page 1's b-tree header: enough to read the revision and whether the schema holds anything. */
+const PAGE_ONE_PREFIX = 108;
+
+/** Page 1 is the schema's b-tree: empty while it is a leaf with no cell. */
+function emptySchema(page: Buffer): boolean {
+  return page.length >= PAGE_ONE_PREFIX && page[100] === 0x0d && page.readUInt16BE(103) === 0;
+}
+
+function readPrefix(path: string, length: number): Buffer | null {
+  let handle: number;
+  try { handle = openSync(path, 'r'); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  try {
+    const buffer = Buffer.alloc(length);
+    return buffer.subarray(0, readSync(handle, buffer, 0, length, 0));
+  } finally {
+    closeSync(handle);
+  }
+}
+
+/**
+ * The last committed copy of page 1 in the write-ahead log, its frames read as SQLite itself validates them: their salts, and
+ * the running checksum from the log header on. `null` when the log is absent, empty, or commits no page 1.
+ */
+function committedPageOne(walPath: string): Buffer | null {
+  let handle: number;
+  try { handle = openSync(walPath, 'r'); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  try {
+    const header = Buffer.alloc(32);
+    if (readSync(handle, header, 0, 32, 0) < 32) return null;
+    const magic = header.readUInt32BE(0);
+    if (magic !== 0x377f0682 && magic !== 0x377f0683) return null;
+    const bigEndian = magic === 0x377f0683;
+    const pageSize = header.readUInt32BE(8) === 1 ? 65536 : header.readUInt32BE(8);
+    if (pageSize < 512 || pageSize > 65536 || (pageSize & (pageSize - 1)) !== 0) return null;
+    let sum = walChecksum(header.subarray(0, 24), bigEndian, [0, 0]);
+    if (sum[0] !== header.readUInt32BE(24) || sum[1] !== header.readUInt32BE(28)) return null;
+    const frame = Buffer.alloc(24 + pageSize);
+    let pending: Buffer | null = null;
+    let committed: Buffer | null = null;
+    for (let offset = 32; readSync(handle, frame, 0, frame.length, offset) === frame.length; offset += frame.length) {
+      if (frame.readUInt32BE(8) !== header.readUInt32BE(16) || frame.readUInt32BE(12) !== header.readUInt32BE(20)) break;
+      sum = walChecksum(frame.subarray(24), bigEndian, walChecksum(frame.subarray(0, 8), bigEndian, sum));
+      if (sum[0] !== frame.readUInt32BE(16) || sum[1] !== frame.readUInt32BE(20)) break;
+      if (frame.readUInt32BE(0) === 1) pending = Buffer.from(frame.subarray(24, 24 + PAGE_ONE_PREFIX));
+      if (frame.readUInt32BE(4) !== 0) { if (pending !== null) committed = pending; pending = null; }
+    }
+    return committed;
+  } finally {
+    closeSync(handle);
+  }
+}
+
+function walChecksum(data: Buffer, bigEndian: boolean, [first, second]: readonly [number, number] | number[]): [number, number] {
+  let s0 = first; let s1 = second;
+  for (let index = 0; index < data.length; index += 8) {
+    const x0 = bigEndian ? data.readUInt32BE(index) : data.readUInt32LE(index);
+    const x1 = bigEndian ? data.readUInt32BE(index + 4) : data.readUInt32LE(index + 4);
+    s0 = (s0 + x0 + s1) >>> 0;
+    s1 = (s1 + x1 + s0) >>> 0;
+  }
+  return [s0, s1];
 }
 
 /**

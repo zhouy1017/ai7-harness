@@ -54,6 +54,9 @@ import {
   type WordReadingKind
 } from './import-retention.js';
 import { requireUncommittedImportDraft } from './import-editing-operations.js';
+import { replaceWorkingState } from './manuscript/working-positions.js';
+import { supersedeAllSteps } from './manuscript/editor-steps.js';
+import type { ManuscriptBlockKind } from '../shared/protocol.js';
 import * as importReviewOperations from './import-review-records.js';
 import { MANUSCRIPT_REIMPORT_NON_EFFECTS, MANUSCRIPT_REIMPORT_RECORD_SCHEMA, REIMPORT_COMMIT_FILE_BATCH_BYTES, REIMPORT_GROUPING, REIMPORT_GROUP_PAGE_SIZE, REIMPORT_MAPPING_BATCH_SIZE, REIMPORT_WIRE_HEADROOM_BYTES, appendReimportOffsetSegment, canonicalDegradationDecision, commitRequestFingerprint, createReimportComparisonHasher, createReimportResolutionHasher, createReimportReviewDigest, degradationReview, emptyReimportResolutionDigest, manuscriptBlockDigest, type CommitAttempt, type DraftSnapshot, type IngestedDocx, type ReimportBlockFact, type ReimportCommitWork, type ReimportMappingBatch, type ReimportMappingFact, type ReimportPendingResolution, type ReimportPreparationWork, type ResolvedReimportTarget, type StoredImportCommitProjection } from './import-review-records.js';
 import {
@@ -1634,47 +1637,17 @@ export function finalizeManuscriptReimportCommit(host: ManuscriptReimportOperati
           `UPDATE manuscript_command_groups SET status = 'superseded'
            WHERE branch_id = ? AND status IN ('applied', 'undone')`,
         ).run(target.branchId);
-        host.authority.prepare('DELETE FROM manuscript_outline WHERE branch_id = ?').run(target.branchId);
-        host.authority.prepare('DELETE FROM working_block_search WHERE branch_id = ?').run(target.branchId);
-        host.authority.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ?').run(target.branchId);
+        // A reimport is not undone, and no step before it can be (ADR 0105 §1).
+        supersedeAllSteps(host.authority, target.branchId);
         // Which blocks the rewrite leaves as they were (Issue #533): a point in one stands where it stood.
         const blocksBefore = workingBlockDigests(host.authority, target.branchId);
-        host.authority.prepare('DELETE FROM working_blocks WHERE branch_id = ?').run(target.branchId);
-        const insertedWorking = host.authority.prepare(
-          `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
-           SELECT ?, block_id, position, kind, level, text, digest, grapheme_length
-           FROM temp.reimport_commit_rows WHERE work_id = ? ORDER BY position`,
-        ).run(target.branchId, work.workId);
-        requireStore(insertedWorking.changes === snapshot.blockCount,
-          'REIMPORT_COMPARISON_INVALID', '重新导入工作稿块无法完整提交。');
-        const insertedOutline = host.authority.prepare(
-          `INSERT INTO manuscript_outline(branch_id, block_id, position, kind, level, text, digest)
-           SELECT ?, block_id, position, kind,
-                  CASE WHEN kind = 'title' THEN 1 ELSE COALESCE(level, 1) END,
-                  text, digest
-           FROM temp.reimport_commit_rows
-           WHERE work_id = ? AND kind IN ('title', 'heading') ORDER BY position`,
-        ).run(target.branchId, work.workId);
-        const plannedOutline = asNumber(one(host.authority.prepare(
-          `SELECT count(*) total FROM temp.reimport_commit_rows
-           WHERE work_id = ? AND kind IN ('title', 'heading')`,
-        ).all(work.workId) as SqlRow[], 'REIMPORT_COMPARISON_INVALID', '无法核对重新导入大纲计划。').total);
-        requireStore(insertedOutline.changes === plannedOutline,
-          'REIMPORT_COMPARISON_INVALID', '重新导入大纲计划无法完整提交。');
-        const insertedSearch = host.authority.prepare(
-          `INSERT INTO working_block_search(branch_id, block_id, text)
-           SELECT ?, block_id, text FROM temp.reimport_commit_rows
-           WHERE work_id = ? ORDER BY position`,
-        ).run(target.branchId, work.workId);
-        requireStore(insertedSearch.changes === snapshot.blockCount,
-          'REIMPORT_COMPARISON_INVALID', '重新导入搜索投影无法完整提交。');
-        const insertedOffsets = host.authority.prepare(
-          `INSERT INTO working_offset_nodes(branch_id, position, span_graphemes)
-           SELECT ?, position, offset_span FROM temp.reimport_commit_rows
-           WHERE work_id = ? ORDER BY position`,
-        ).run(target.branchId, work.workId);
-        requireStore(insertedOffsets.changes === snapshot.blockCount,
-          'REIMPORT_COMPARISON_INVALID', '重新导入偏移投影无法完整提交。');
+        // The working state replaced whole through its positions owner (Issue #1654; ADR 0105 §7 need 1): keys, pages, the
+        // outline and the search rows are all derived there.
+        const committedRows = host.authority.prepare('SELECT block_id, kind, level, text, digest FROM temp.reimport_commit_rows WHERE work_id = ? ORDER BY position')
+          .all(work.workId) as SqlRow[];
+        requireStore(committedRows.length === snapshot.blockCount, 'REIMPORT_COMPARISON_INVALID', '重新导入工作稿块无法完整提交。');
+        replaceWorkingState(host.authority, target.branchId, committedRows.map((row) => ({ blockId: asString(row.block_id),
+          kind: asString(row.kind) as ManuscriptBlockKind, level: row.level === null ? null : asNumber(row.level), text: asString(row.text), digest: asString(row.digest) })));
         const stateUpdate = host.authority.prepare(
           `UPDATE branch_working_state
            SET base_revision_id = ?, working_digest = ?, total_graphemes = ?, last_checkpoint_sequence = journal_sequence,

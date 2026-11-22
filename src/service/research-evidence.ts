@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL, RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL, RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL } from './research-evidence-schema.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   MAX_RESEARCH_EVIDENCE_PAGE,
@@ -53,58 +52,6 @@ type SqlRow = Record<string, SQLOutputValue>;
 export const MAX_RESEARCH_EVIDENCE_UNITS = 64;
 export const MAX_RESEARCH_EVIDENCE_FINDINGS = 400;
 const PROJECTION_SECTION_BYTES = 192 * 1024;
-
-const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
-
-/**
- * Revision 75's relations, created once on a store below it; a store that has them is checked against their exact text,
- * never rebuilt. A store stamped 75 or later without them is refused.
- */
-export function initializeResearchEvidenceSchema(db: DatabaseSync, version: number): void {
-  const present = Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL).filter((table) =>
-    db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) !== undefined);
-  if (present.length > 0) {
-    validateResearchEvidenceSchema(db);
-    return;
-  }
-  requireEvidence(version < 75, 'SCHEMA_INVALID', '外部来源留存表缺失。');
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(RESEARCH_EVIDENCE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(RESEARCH_EVIDENCE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Research evidence schema rollback failed.');
-    }
-    throw error;
-  }
-}
-
-/** Every relation and trigger of revision 75 exactly as written, and nothing of it missing. */
-export function validateResearchEvidenceSchema(db: DatabaseSync): void {
-  for (const [name, sql] of [...Object.entries(RESEARCH_EVIDENCE_SCHEMA_SQL), ...Object.entries(RESEARCH_EVIDENCE_TRIGGER_SQL)]) {
-    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name = ?').get(name) as SqlRow | undefined;
-    requireEvidence(row !== undefined && typeof row.sql === 'string' && fold(row.sql) === fold(sql), 'SCHEMA_INVALID', '外部来源留存表结构不兼容。');
-  }
-}
-
-export function initializeResearchEvidenceUnitRevisionSchema(db: DatabaseSync, version: number): void {
-  const tables = RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL;
-  const triggers = RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL;
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name='research_evidence_unit_revisions'").get() === undefined) {
-    requireEvidence(version < 107, 'SCHEMA_INVALID', '外部来源留存修订表缺失。');
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      for (const sql of [...Object.values(tables), ...Object.values(triggers)]) db.exec(sql);
-      db.exec('COMMIT');
-    } catch (error) { db.exec('ROLLBACK'); throw error; }
-  }
-  for (const [name, sql] of [...Object.entries(tables), ...Object.entries(triggers)]) {
-    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name=?').get(name);
-    requireEvidence(typeof row?.sql === 'string' && fold(row.sql) === fold(sql), 'SCHEMA_INVALID', '外部来源留存修订表结构不兼容。');
-  }
-}
 
 /** One retained citation as the ledger reads it back, its record verified against its digest and its columns. */
 interface StoredEvidence {

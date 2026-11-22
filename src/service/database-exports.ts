@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { TASK_LAUNCH_TRIGGER_SQL } from './task-launch-snapshots.js';
 import { IMPORTED_EXEMPLAR_OBJECT_DIRECTORY } from './imported-exemplars.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -64,6 +65,11 @@ export const DATABASE_PACKAGE_STORE_MEMBER = 'store/ai7.sqlite' as const;
 export const DATABASE_PACKAGE_MANIFEST_MEMBER = 'manifest.json' as const;
 /** The Agent Data Root's own directories a package never carries: the live store — copied consistently instead — the export staging area and the shell's browser profile. */
 export const DATABASE_PACKAGE_EXCLUDED_ROOTS: ReadonlySet<string> = new Set(['store', EXPORT_STAGING_DIRECTORY, 'shell']);
+/** A retained store belongs to its upgrade, outside every later backup or replacement. */
+export function isUpgradeDirectory(name: string): boolean {
+  return name === 'store.upgrading' || /^store-(?:before|after)-0\.8\.0-\d{13}-[a-f0-9-]{36}$/.test(name);
+}
+
 /** Device environment settings never migrate with editorial databases or backups. */
 export function isProxyEnvironmentMember(member: string): boolean {
   return /^settings\/(?:model-service-proxy\.json|proxy-[^/]+\.tmp)$/iu.test(member);
@@ -125,28 +131,11 @@ export const DATABASE_EXPORT_SCHEMA_SQL = {
 } as const;
 
 /** Every database export relation is a ledger: a row is appended once and never rewritten or removed. */
-export const DATABASE_EXPORT_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(DATABASE_EXPORT_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_EXPORT_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'DATABASE_EXPORT_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const DATABASE_EXPORT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  database_export_approvals: ['preparation_id>database_export_preparations.preparation_id:NO ACTION/NO ACTION/NONE'],
-  database_export_receipts: [
-    'approval_id>database_export_approvals.approval_id:NO ACTION/NO ACTION/NONE',
-    'preparation_id>database_export_preparations.preparation_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const DATABASE_EXPORT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  database_export_preparations: 'DATABASE_EXPORT_LEDGER_IMMUTABLE',
+  database_export_approvals: 'DATABASE_EXPORT_LEDGER_IMMUTABLE',
+  database_export_receipts: 'DATABASE_EXPORT_LEDGER_IMMUTABLE',
+});
 
 export class DatabaseExportError extends Error {
   constructor(readonly code: string, message: string) {
@@ -160,24 +149,6 @@ function requireDatabaseExport(condition: unknown, code: string, message: string
 }
 
 type SqlRow = Record<string, SQLOutputValue>;
-
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'database_export_preparations'";
-
-/** Revision 55's relations, created once: a store that predates them gains three empty ledgers and nothing existing moves. */
-export function initializeDatabaseExportSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(DATABASE_EXPORT_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(DATABASE_EXPORT_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Database export schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 // ---- the package --------------------------------------------------------------------------------------
 
@@ -236,7 +207,7 @@ export async function databasePackageSources(dataRoot: string, bounds: DatabaseP
     if (directories > bounds.directories) refuse();
     const entries: Array<{ name: string; directory: boolean }> = [];
     for await (const entry of await opendir(directory)) {
-      if (prefix === '' && DATABASE_PACKAGE_EXCLUDED_ROOTS.has(entry.name)) continue;
+      if (prefix === '' && (DATABASE_PACKAGE_EXCLUDED_ROOTS.has(entry.name) || isUpgradeDirectory(entry.name))) continue;
       if (isProxyEnvironmentMember(`${prefix}/${entry.name}`.replace(/^\//u, ''))) continue;
       // The Agent Data Root holds no link; a link found there is not followed and not carried.
       if (entry.isSymbolicLink() || !(entry.isDirectory() || entry.isFile())) continue;
@@ -336,6 +307,7 @@ export async function verifyCopiedPayloads(
   schemaRevision: number,
   signal?: AbortSignal,
   live?: DatabaseSync,
+  canRecover?: (path: string, sha256: string, bytes: number) => boolean,
 ): Promise<void> {
   const incomplete = (): never => { throw new DatabaseExportError('DATABASE_PACKAGE_INCOMPLETE', '数据文件在打包期间发生变化或已损坏；没有生成完整备份，请重试。'); };
   const copy = openPackageStore(path);
@@ -353,6 +325,7 @@ export async function verifyCopiedPayloads(
     const member = packed.get(key);
     if (typeof digest !== 'string' || !DIGEST_PATTERN.test(digest) || typeof bytes !== 'number' || !Number.isSafeInteger(bytes) || bytes <= 0) incomplete();
     if (member === undefined || member.sha256 !== digest || member.bytes !== bytes) {
+      if (typeof digest === 'string' && typeof bytes === 'number' && canRecover?.(key, digest, bytes)) return;
       if (!stillHeld()) incomplete();
       damaged[kind] += 1;
     }
@@ -367,9 +340,36 @@ export async function verifyCopiedPayloads(
     return exists;
   };
   try {
+    const removed = new Set<string>();
+    if (schemaRevision >= 116 && copy.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'import_abandonment_cleanup_intents'").get()) {
+      for (const row of copy.prepare(`SELECT i.state,i.object_digest,i.relative_key,i.working_object_digest,w.relative_key working_key
+        FROM import_abandonment_cleanup_intents i
+        JOIN import_drafts d ON d.draft_id=i.draft_id AND d.state IN ('staged','reviewed')
+        AND d.draft_version=i.expected_draft_version AND d.object_digest=i.object_digest AND d.working_object_digest IS i.working_object_digest
+        JOIN content_objects o ON o.object_digest=i.object_digest AND o.relative_key=i.relative_key
+        LEFT JOIN content_objects w ON w.object_digest=i.working_object_digest
+        WHERE (i.state='prepared' AND i.bytes_removed_at IS NULL OR i.state='bytes-removed' AND i.bytes_removed_at IS NOT NULL)
+        AND (i.working_object_digest IS NULL OR w.relative_key='sha256/' || substr(w.object_digest,1,2) || '/' || w.object_digest || '.docx')
+        AND NOT EXISTS (SELECT 1 FROM source_versions s WHERE s.object_digest IN (i.object_digest,i.working_object_digest)
+          OR s.working_object_digest IN (i.object_digest,i.working_object_digest))
+        AND NOT EXISTS (SELECT 1 FROM import_drafts other WHERE other.draft_id != d.draft_id AND
+          (other.object_digest IN (i.object_digest,i.working_object_digest) OR other.working_object_digest IN (i.object_digest,i.working_object_digest)))
+        AND NOT EXISTS (SELECT 1 FROM import_commits c WHERE c.draft_id=d.draft_id)
+        AND NOT EXISTS (SELECT 1 FROM import_commit_attempts a WHERE a.draft_id=d.draft_id AND a.state!='prepared')`).iterate()) {
+        // Old AI7 unlinks the original first and the working DOCX second, then commits bytes-removed.
+        const originalPresent = packed.has(`objects/${row.relative_key}`);
+        const hasWorking = row.working_object_digest !== null;
+        const workingPresent = hasWorking && packed.has(`objects/${row.working_key}`);
+        if (row.state === 'bytes-removed' && (originalPresent || workingPresent)) incomplete();
+        if (originalPresent && hasWorking && !workingPresent) incomplete();
+        if (!originalPresent) removed.add(String(row.object_digest));
+        if (hasWorking && !workingPresent) removed.add(String(row.working_object_digest));
+      }
+    }
     if (present('content_objects')) for (const row of copy.prepare('SELECT object_digest, relative_key, byte_length FROM content_objects').iterate()) {
       if (typeof row.object_digest !== 'string' || typeof row.relative_key !== 'string' || !isManuscriptObjectKey(row.object_digest, row.relative_key)) incomplete();
       const { object_digest: digest, relative_key: key } = row;
+      if (removed.has(String(digest))) continue;
       await compare(`objects/${key}`, digest, row.byte_length, 'manuscript',
         () => held('SELECT 1 FROM content_objects WHERE relative_key = ? AND object_digest = ?', key as SQLInputValue, digest as SQLInputValue));
     }

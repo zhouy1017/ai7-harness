@@ -28,7 +28,7 @@ const children = vi.hoisted(() => ({
   realParagraphAnalysis: false,
   destroyed: [] as string[],
   editors: [] as unknown[],
-  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn> }>,
+  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn>; flush: ReturnType<typeof vi.fn> }>,
   marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn>; bookPendingChanged: ReturnType<typeof vi.fn>; refreshComments: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
   writingStates: [] as Array<(state: { underWay: boolean; drafted: number }) => void>,
@@ -420,6 +420,104 @@ describe('the Manuscript screen lifecycle', () => {
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
       .toEqual(['修订 · 自动应用改动留痕，停笔后自动写入稿件，可逐条撤销。', '修订 · 待我确认改动留痕为待处理的修订卡，由你逐条应用。', '直接改稿 · 不留痕直接改动正文，不生成修订卡。', '让 AI 修改…', '', '', '重试权威刷新']);
+    app.showing?.destroy();
+  });
+
+  it('saves the words just typed before Ctrl+Z reads the history, so they are the step it takes back; a step set aside answers in the error tone (#1654)', async () => {
+    const calls: string[] = [];
+    let flushed = false;
+    let readable: () => void = () => undefined;
+    const read = new Promise<void>((resolve) => { readable = resolve; });
+    const typing = { stepId: 'step-1', kind: 'typing', label: '编辑文字', changeCount: 1, paragraph: 3, batch: null };
+    const answers = [{ blocked: false, completionLabel: '已撤销：编辑文字（第 3 段）' }, { blocked: true, completionLabel: '第 3 段在「编辑文字」之后又改过，这一步不能撤销。再按 Ctrl+Z 撤销更早的一步。' }];
+    const history = new Proxy({
+      platform: 'win32', recordManuscriptEntryPosition: async () => undefined,
+      inspectEditorHistory: async () => { calls.push('inspect'); await read; return { branchId: 'branch-main', undo: flushed ? typing : null, redo: null }; },
+      undoManuscript: async () => {
+        calls.push('undo');
+        return { action: 'undo', branchId: 'branch-main', revisionId: 'rev-2', revisionLabel: 'r2', journalSequence: 6, workingDigest: 'c'.repeat(64), commandGroupId: null,
+          canUndo: true, canRedo: true, stepLabel: '编辑文字', anchorBlockId: null, paragraph: 3, ...answers.shift()! };
+      },
+      getManuscriptWindowAt: async () => ({ ...windowOf('book-one'), journalSequence: 6, workingDigest: 'c'.repeat(64) }),
+      getOutline: async () => ({ entries: [], nextCursor: null }),
+    } as Record<string | symbol, unknown>, { get: (known, key) => key in known ? known[key] : () => new Promise<never>(() => undefined) }) as unknown as RendererApi;
+    const tones: Array<[string, string | undefined]> = [];
+    const app = shell(history);
+    app.open(windowOf('book-one'), { setStatus: (message, tone) => { tones.push([message, tone]); } });
+    const editor = children.editors.at(-1) as EditorOptions;
+    const surface = children.editorSurfaces.at(-1)!;
+    // Typed within the auto-save delay: the edit is still local when Ctrl+Z comes.
+    editor.onStateChange(state({ dirty: true }));
+    surface.flush.mockImplementation(async () => { calls.push('flush'); flushed = true; editor.onStateChange(state({ journalSequence: 5 })); });
+    const undoButton = app.screen.querySelector<HTMLButtonElement>('.editor-history-undo')!;
+    const settle = async (): Promise<void> => { for (let index = 0; index < 50; index += 1) await Promise.resolve(); };
+    undoButton.click();
+    await settle();
+    // From the press on the controls stand busy, while the edit is saved and the step is read too: no second press starts.
+    expect(calls).toEqual(['flush', 'inspect']);
+    expect(undoButton.disabled).toBe(true);
+    readable();
+    await settle();
+    expect(calls.slice(0, 3)).toEqual(['flush', 'inspect', 'undo']);
+    expect(tones.at(-1)).toEqual(['已撤销：编辑文字（第 3 段）', 'success']);
+    undoButton.click();
+    await settle();
+    expect(tones.at(-1)).toEqual([expect.stringContaining('这一步不能撤销'), 'error']);
+    app.showing?.destroy();
+  });
+
+  it.each(['undo', 'redo'] as const)('reopens a valid window without repeating a committed restore %s if the first paragraph disappeared', async action => {
+    const initial = windowOf('book-one');
+    const next = { ...initial, revisionId: 'next', workingDigest: 'c'.repeat(64), blocks: initial.blocks.map(block => ({ ...block, blockId: 'replacement' })) };
+    const step = { stepId: 'restore-step', kind: 'restore', label: '恢复稿件版本', changeCount: 1 };
+    const history = vi.fn(async () => ({ revisionId: next.revisionId, journalSequence: next.journalSequence, workingDigest: next.workingDigest,
+      completionLabel: '稿件已刷新。', anchorBlockId: null, blocked: false }));
+    const load = vi.fn(async ({ target }: { target: { kind: string } }) => {
+      if (target.kind === 'window-start') throw { code: 'WINDOW_NOT_FOUND', message: '稿件位置不存在。' };
+      return next;
+    });
+    const app = shell(new Proxy({ platform: 'win32', recordManuscriptEntryPosition: async () => undefined,
+      inspectEditorHistory: async () => ({ undo: step, redo: step }), undoManuscript: history, redoManuscript: history,
+      getManuscriptWindowAt: load, getOutline: async () => ({ entries: [], nextCursor: null }),
+    } as Record<string | symbol, unknown>, { get: (known, key) => key in known ? known[key] : () => new Promise<never>(() => undefined) }) as unknown as RendererApi);
+    const status = vi.fn();
+    app.open(initial, { setStatus: status });
+    const control = app.screen.querySelector<HTMLButtonElement>(action === 'undo' ? '[aria-label="撤销"]' : '[aria-label="重做"]')!;
+    control.click();
+    for (let tick = 0; tick < 60; tick += 1) await Promise.resolve();
+    expect(history).toHaveBeenCalledTimes(1);
+    expect(load.mock.calls.map(([input]) => input.target.kind)).toEqual(['window-start', 'start']);
+    expect(status).toHaveBeenLastCalledWith('稿件已刷新。', 'success');
+    expect(control.disabled).toBe(false);
+    app.showing?.destroy();
+  });
+
+  it('reopens the later stable state only for the same editable book and branch, without replaying an acknowledged restore', async () => {
+    const initial = windowOf('book-one');
+    const committed = { ...initial, revisionId: 'restored', journalSequence: 5, completionLabel: '已撤销', anchorBlockId: null };
+    const later = { ...initial, revisionId: 'later', journalSequence: 6, workingDigest: 'c'.repeat(64) };
+    let reply = later;
+    let interrupted = false;
+    const send = vi.fn(async () => committed);
+    const app = shell(new Proxy({ platform: 'win32', recordManuscriptEntryPosition: async () => undefined,
+      inspectEditorHistory: async () => ({ undo: { kind: 'restore', changeCount: 1 } }), undoManuscript: send,
+      getManuscriptWindowAt: async () => reply, getOutline: async () => ({ entries: [], nextCursor: null }),
+    } as Record<string | symbol, unknown>, { get: (known, key) => key in known ? known[key] : () => new Promise<never>(() => undefined) }) as unknown as RendererApi);
+    const status = vi.fn();
+    app.open(initial, { setStatus: status, interrupted: () => interrupted });
+    const retry = [...app.screen.querySelectorAll('button')].find(item => item.textContent === '重试权威刷新')!;
+    const settle = async () => { for (let tick = 0; tick < 60; tick += 1) await Promise.resolve(); };
+    app.screen.querySelector<HTMLButtonElement>('.editor-history-undo')!.click();
+    await settle();
+    expect(retry.hidden).toBe(false);
+    for (const invalid of [{ ...later, bookId: 'other' }, { ...later, branchId: 'other' }]) {
+      reply = invalid; retry.click(); await settle(); expect(retry.hidden).toBe(false);
+    }
+    reply = later; interrupted = true; retry.click(); await settle(); expect(retry.hidden).toBe(false);
+    interrupted = false; retry.click(); await settle();
+    expect(retry.hidden).toBe(true);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(status).toHaveBeenLastCalledWith(expect.stringContaining('最新稿件'), 'success');
     app.showing?.destroy();
   });
 

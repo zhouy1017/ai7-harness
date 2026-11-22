@@ -1,5 +1,5 @@
+import { appendOnly } from '../append-only.js';
 import { stripModelJsonFence } from './canonical.js';
-import type { DatabaseSync } from 'node:sqlite';
 
 /**
  * Clarification Requests of a Run (Issue #422, plan slice S76d; V2-UX-CLAR-001 to CLAR-007, INPUT-001 to INPUT-004).
@@ -9,7 +9,7 @@ import type { DatabaseSync } from 'node:sqlite';
  * option chosen, the note that qualifies it, and when. Neither is ever rewritten; an answer grants no authority, and
  * the Run it continues goes on inside its unchanged envelope.
  */
-export const CLARIFICATION_REVISION_72_SQL = {
+export const CLARIFICATION_SCHEMA_SQL = {
   analysis_clarification_requests: `CREATE TABLE analysis_clarification_requests (
   request_id TEXT PRIMARY KEY,
   run_record_id TEXT NOT NULL REFERENCES analysis_run_records(run_record_id),
@@ -18,6 +18,7 @@ export const CLARIFICATION_REVISION_72_SQL = {
   raised_at TEXT NOT NULL,
   canonical_json TEXT NOT NULL,
   sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+  model_question_json TEXT,
   UNIQUE(run_record_id, unit_ordinal)
 ) STRICT`,
   analysis_clarification_answers: `CREATE TABLE analysis_clarification_answers (
@@ -30,69 +31,16 @@ export const CLARIFICATION_REVISION_72_SQL = {
 ) STRICT`,
 } as const;
 
-/** Revision 73 adds one nullable column; the original CHECK carriers and every old row stay intact. */
-export const CLARIFICATION_SCHEMA_SQL = {
-  ...CLARIFICATION_REVISION_72_SQL,
-  analysis_clarification_requests: CLARIFICATION_REVISION_72_SQL.analysis_clarification_requests
-    .replace('  UNIQUE(run_record_id, unit_ordinal)', '  model_question_json TEXT,\n  UNIQUE(run_record_id, unit_ordinal)'),
-} as const;
-
 /** A request and its answer are appended once and never rewritten or removed, like every ledger row. */
-export const CLARIFICATION_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(CLARIFICATION_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'TASK_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'TASK_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the two relations, in the exact-schema validator's own spelling. */
-export const CLARIFICATION_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  analysis_clarification_requests: ['run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE'],
-  analysis_clarification_answers: ['request_id>analysis_clarification_requests.request_id:NO ACTION/NO ACTION/NONE'],
-};
+export const CLARIFICATION_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  analysis_clarification_requests: 'TASK_LEDGER_IMMUTABLE',
+  analysis_clarification_answers: 'TASK_LEDGER_IMMUTABLE',
+});
 
 export class ClarificationSchemaError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
     this.name = 'ClarificationSchemaError';
-  }
-}
-
-/**
- * Revision 35's relations and their ledger triggers, created once and never rebuilt: a store that predates them gains
- * two empty relations and nothing existing moves. Shape-detected like revision 33's, and run before the version is
- * stamped in `task-authorization.ts`.
- */
-export function initializeClarificationSchema(db: DatabaseSync): void {
-  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_clarification_requests'").get();
-  if (existing !== undefined) {
-    const columns = db.prepare('PRAGMA table_info(analysis_clarification_requests)').all();
-    if (!columns.some((column) => column.name === 'model_question_json')) {
-      db.exec('ALTER TABLE analysis_clarification_requests ADD COLUMN model_question_json TEXT');
-    }
-    return;
-  }
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(CLARIFICATION_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(CLARIFICATION_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Clarification schema rollback failed.');
-    }
-    throw error;
-  }
-  if (db.prepare('PRAGMA foreign_key_check').all().length !== 0) {
-    throw new ClarificationSchemaError('SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
   }
 }
 

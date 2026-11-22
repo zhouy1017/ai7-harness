@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { evaluationRewriteScoredItems } from './evaluation/evaluation-rewrite-contract.js';
 import { evaluationRewritePlan } from './task-plan.js';
 import { launchedTaskModelLabels } from './editorial-mark-source.js';
@@ -86,35 +87,10 @@ export const EVALUATION_REWRITE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const EVALUATION_REWRITE_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(EVALUATION_REWRITE_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'EVALUATION_REWRITE_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'EVALUATION_REWRITE_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-/** The foreign keys of the two relations, in the exact-schema validator's own spelling. */
-export const EVALUATION_REWRITE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  evaluation_rewrite_tasks: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'record_id>evaluation_records.record_id:NO ACTION/NO ACTION/NONE',
-    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
-  ],
-  evaluation_rewrite_decisions: [
-    'analysis_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE',
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'record_id>evaluation_records.record_id:NO ACTION/NO ACTION/NONE',
-    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const EVALUATION_REWRITE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  evaluation_rewrite_tasks: 'EVALUATION_REWRITE_LEDGER_IMMUTABLE',
+  evaluation_rewrite_decisions: 'EVALUATION_REWRITE_LEDGER_IMMUTABLE',
+});
 
 export class EvaluationRewriteError extends Error {
   constructor(readonly code: string, message: string) {
@@ -144,23 +120,6 @@ export interface EvaluationRewriteWords {
 export const EVALUATION_REWRITE_ALL_LOCKED = '报告的各项评语、总评、优点和问题都已锁定：没有可以重新生成的内容；先解锁要重新生成的部分。';
 export const EVALUATION_REWRITE_NEEDS_EDIT = '先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。';
 const corrupt = (): EvaluationRewriteError => new EvaluationRewriteError('EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'evaluation_rewrite_tasks'";
-
-/** Revision 64's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
-export function initializeEvaluationRewriteSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(EVALUATION_REWRITE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(EVALUATION_REWRITE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Evaluation rewrite schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 /** One version at its latest saved entry, as a rewrite reads it (`EvaluationRecords.rewritable`). */
 export interface RewritableEvaluation {

@@ -1,12 +1,9 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LIBRARY_MATERIAL_TRIGGER_SQL, LIBRARY_OBJECT_DIRECTORY, identifyLibraryMaterialFormat } from '../../src/service/library-materials.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { LATEST_SCHEMA_VERSION, REVIEW_GUIDELINE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN,
   MAX_LIBRARY_MATERIALS_PAGE,
@@ -17,7 +14,6 @@ import {
 } from '../../src/shared/protocol.js';
 import { sample1Path } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 知识库 › 资料库 (Issue #427, plan slice S79c; V2-UX-KB-007, KB-002, ATTN-009,
 // LEARN-004 to LEARN-007) over the real store on a temporary Agent Data Root. The collected item is exact `sample1` — an
@@ -274,36 +270,4 @@ describe('知识库 › 资料库 over the real store', () => {
     }
   }, 120_000);
 
-  it('adds revision 46 to a revision-45 store with nothing else moved', async () => {
-    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      emptyBook(first, '迁移之书');
-      first.markCleanShutdown();
-    } finally {
-      first.close();
-    }
-    // A revision-45 store never held the relations: planted by dropping them, it gains them again, empty.
-    const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    try {
-      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; DROP TABLE library_material_decisions; DROP TABLE library_materials; PRAGMA user_version = ${REVIEW_GUIDELINE_SCHEMA_VERSION};`);
-      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
-    } finally {
-      plant.close();
-    }
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      expect(migrated.inspectLibraryMaterials(null)).toEqual({ materials: [], nextCursor: null });
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
-    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-    try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect((database.prepare('SELECT count(*) count FROM library_materials').get() as { count: number }).count).toBe(0);
-      expect((database.prepare('SELECT count(*) count FROM library_material_decisions').get() as { count: number }).count).toBe(0);
-    } finally {
-      database.close();
-    }
-  }, 120_000);
 });

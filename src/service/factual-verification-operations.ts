@@ -416,14 +416,15 @@ export function inspectFactualVerification(host: FactualVerificationOperationsHo
         chapters: [], run: null, policyPin, statement: FACTUAL_LENS_EMPTY };
     }
     const reader = internalManuscriptReader(host, binding.branchId, binding.manuscriptId);
-    const chapterRows = host.authority.prepare("SELECT block_id, text, position FROM working_blocks WHERE branch_id = ? AND kind = 'heading' ORDER BY position").all(binding.branchId) as SqlRow[];
-    const chapters = chapterRows.map((row) => ({ blockId: asString(row.block_id), heading: asString(row.text), position: asNumber(row.position) }));
-    const positionOf = host.authority.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+    // Reading order is the blocks' order keys' order (ADR 0105 §6): a chapter is the last heading at or before the block.
+    const chapterRows = host.authority.prepare("SELECT block_id, text, order_key FROM working_blocks WHERE branch_id = ? AND kind = 'heading' ORDER BY order_key").all(binding.branchId) as SqlRow[];
+    const chapters = chapterRows.map((row) => ({ blockId: asString(row.block_id), heading: asString(row.text), key: asNumber(row.order_key) }));
+    const keyOf = host.authority.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?');
     const chapterOf = (blockId: string): string | null => {
-      const row = positionOf.get(binding.branchId, blockId) as SqlRow | undefined;
+      const row = keyOf.get(binding.branchId, blockId) as SqlRow | undefined;
       if (row === undefined) return null;
-      const position = asNumber(row.position);
-      return chapters.filter((chapter) => chapter.position <= position).at(-1)?.blockId ?? null;
+      const key = asNumber(row.order_key);
+      return chapters.filter((chapter) => chapter.key <= key).at(-1)?.blockId ?? null;
     };
     const page = host.factualVerification.lens({ bookId: input.bookId, reviewRunId: input.reviewRunId, after: input.after, chapterOf, filters: {
       chapterBlockId: input.chapterBlockId, outcome: input.outcome, severity: input.severity, sourceCondition: input.sourceCondition, actionNeed: input.actionNeed,

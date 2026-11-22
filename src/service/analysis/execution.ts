@@ -1925,7 +1925,7 @@ export class BaselineAnalysisExecutionOwner {
           digest: facts.checkpoint.revisionDigest, segments: ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId)
             .filter((block) => (facts.compositionOptions?.version ?? 1) < 2 || readableBlocks.has(block.blockId)).map((block) => ({ blockId: block.blockId, text: block.text }))
         }),
-      }], null, null, ledger.pinnedToolSourcesForRun(facts.runRecordId));
+      }], ledger.pinnedToolSourcesForRun(facts.runRecordId));
       const validationContractOf = (): string => {
         if (validationStep === 'reflection') return RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
         if (validationStep === 'reduction') return definition.crossUnit!.promptContractDigest;

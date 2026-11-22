@@ -74,8 +74,6 @@ import {
   MATERIAL_TRANSLATION_FAILED,
   MATERIAL_TRANSLATION_REQUEST,
   MATERIAL_TRANSLATION_TERM,
-  MATERIAL_VECTORS_BUILD,
-  MATERIAL_VECTORS_BUILD_FAILED,
   MATERIAL_VECTORS_SEARCH,
   MATERIAL_VECTORS_SEARCH_FAILED,
   MATERIAL_VECTORS_SEARCH_LABEL,
@@ -106,15 +104,15 @@ import { localInstantLabel } from './plan-preview-labels.js';
  * position anchor. While an index waits or is being built its item alone is read again, every second, and only the card's index
  * is drawn again, until it is built.
  *
- * Issue #892 adds the two layers made on request: `构建相似索引` makes the item's similarity vectors on this machine, and once
- * they are built `相似段落检索` finds its paragraphs nearest a text the editor writes; `生成来源译文` asks for a non-Chinese item's
+ * Once the index is built, `相似段落检索` finds the item's paragraphs that best match the words the editor writes, ranked on this
+ * machine with nothing to build (R5-F2c). Issue #892 adds the layer made on request: `生成来源译文` asks for a non-Chinese item's
  * machine translation — shown disabled, with why, when the selected policy names no rule for it — and 查看分段 shows each
- * paragraph's 来源译文 beneath it, labelled. While either is being made the item is read again as an index being built is.
+ * paragraph's 来源译文 beneath it, labelled. While it is being made the item is read again as an index being built is.
  */
 export interface MountLibraryMaterialsOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi, 'inspectLibraryMaterials' | 'inspectLibraryMaterial' | 'previewLibraryMaterial' | 'addLibraryMaterial' |
-    'decideLibraryMaterial' | 'listBooks' | 'readLibraryDecisionReason' | 'inspectLibraryMaterialSegments' | 'buildMaterialVectors' |
+    'decideLibraryMaterial' | 'listBooks' | 'readLibraryDecisionReason' | 'inspectLibraryMaterialSegments' |
     'queryMaterialVectors' | 'requestMaterialTranslation'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
@@ -184,12 +182,12 @@ export function startsWaiting(waiting: ReadonlyArray<string>, polled: ReadonlySe
 
 /** Whether a card's index is still being made: built, or one of its two on-request layers (Issue #892). */
 const indexWaits = (material: LibraryMaterialProjection): boolean => material.index.state === 'queued' || material.index.state === 'indexing' ||
-  material.index.vectors?.state === 'building' || material.index.translation?.state === 'building';
+  material.index.translation?.state === 'building';
 
 /** What a read of a waiting card compares to say whether its index moved. */
 function indexSignature(material: LibraryMaterialProjection): string {
   const { index } = material;
-  return JSON.stringify([index.state, index.digest, index.vectors?.state ?? null, index.vectors?.built ?? null, index.translation?.state ?? null,
+  return JSON.stringify([index.state, index.digest, index.translation?.state ?? null,
     index.translation?.translated ?? null, index.translation?.request.available ?? null, index.translation?.lastFailure ?? null]);
 }
 
@@ -509,8 +507,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     if (technicalLayerVisible) section.append(layers, el('p', 'field-note material-index-boundary', MATERIAL_INDEX_BOUNDARY));
     const layerActions = indexActions(material);
     if (layerActions !== null) section.append(layerActions);
-    if (index.vectors?.state === 'complete') section.append(vectorSearch(material));
-    if (index.state === 'complete') section.append(segmentsReader(material));
+    if (index.state === 'complete') section.append(vectorSearch(material), segmentsReader(material));
     if (index.digest !== null) {
       section.append(technicalDetails('material-index-facts', el('dt', undefined, '资料索引摘要'), el('dd', 'technical-identity', index.digest)));
     }
@@ -518,19 +515,14 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   };
 
   /**
-   * The two on-request layers' actions (Issue #892): 构建相似索引 while the vectors are not complete, and 生成来源译文 while a
-   * non-Chinese item's translation is not — disabled, with the reason beside it, when it cannot be asked now.
+   * The on-request layer's action (Issue #892): 生成来源译文 while a non-Chinese item's translation is not complete — disabled,
+   * with the reason beside it, when it cannot be asked now.
    */
   const indexActions = (material: LibraryMaterialProjection): HTMLElement | null => {
-    const { vectors, translation } = material.index;
+    const { translation } = material.index;
     const row = el('div', 'button-row material-index-actions');
-    if (vectors !== null && (vectors.state === 'not-built' || vectors.state === 'building')) {
-      const build = action(MATERIAL_VECTORS_BUILD, 'secondary', 'build-vectors', () => void layerRequest(material, 'vectors'));
-      build.disabled = busy || vectors.state === 'building';
-      row.append(build);
-    }
     if (translation !== null && translation.state !== 'complete') {
-      const request = action(MATERIAL_TRANSLATION_REQUEST, 'secondary', 'request-translation', () => void layerRequest(material, 'translation'));
+      const request = action(MATERIAL_TRANSLATION_REQUEST, 'secondary', 'request-translation', () => void layerRequest(material));
       request.disabled = busy || !translation.request.available;
       row.append(request);
       if (!translation.request.available && translation.request.reason !== null) {
@@ -546,27 +538,25 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     return wrapper;
   };
 
-  /** 构建相似索引 or 生成来源译文: asked once; the item as it then reads, and its index read again while it is made. */
-  const layerRequest = async (material: LibraryMaterialProjection, layer: 'vectors' | 'translation'): Promise<void> => {
+  /** 生成来源译文: asked once; the item as it then reads, and its index read again while it is made. */
+  const layerRequest = async (material: LibraryMaterialProjection): Promise<void> => {
     if (busy) return;
     busy = true;
     refusal = null;
-    setStatus(layer === 'vectors' ? `正在请求${MATERIAL_VECTORS_BUILD}…` : `正在请求${MATERIAL_TRANSLATION_REQUEST}…`, 'busy');
+    setStatus(`正在请求${MATERIAL_TRANSLATION_REQUEST}…`, 'busy');
     paint(null);
     const focus = `[data-material-id="${material.materialId}"] .material-index-heading h4`;
     try {
-      const now = layer === 'vectors'
-        ? await api.buildMaterialVectors({ materialId: material.materialId })
-        : await api.requestMaterialTranslation({ materialId: material.materialId });
+      const now = await api.requestMaterialTranslation({ materialId: material.materialId });
       if (!root.isConnected) return;
       replace(now);
       busy = false;
-      setStatus(layer === 'vectors' ? `已开始在本机${MATERIAL_VECTORS_BUILD}：「${material.title}」。` : `已开始${MATERIAL_TRANSLATION_REQUEST}：「${material.title}」。`, 'success');
+      setStatus(`已开始${MATERIAL_TRANSLATION_REQUEST}：「${material.title}」。`, 'success');
       paint(focus);
     } catch (error) {
       if (!root.isConnected) return;
       busy = false;
-      const message = errorMessage(error, layer === 'vectors' ? MATERIAL_VECTORS_BUILD_FAILED : MATERIAL_TRANSLATION_FAILED);
+      const message = errorMessage(error, MATERIAL_TRANSLATION_FAILED);
       refusal = { materialId: material.materialId, message };
       setStatus(message, 'error');
       try {
@@ -580,8 +570,8 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   };
 
   /**
-   * 相似段落检索 (Issue #892): the item's paragraphs nearest a text the editor writes, by the vectors built on this machine,
-   * each with its anchor and its first words. The ranking is a lead, never the text: 查看分段 shows the paragraph itself.
+   * 相似段落检索 (Issue #892): the item's paragraphs that best match the words the editor writes, ranked by words on this machine
+   * as soon as the index is built (R5-F2c), each with its anchor and its first words. The ranking is a lead, never the text: 查看分段 shows the paragraph itself.
    */
   const vectorSearch = (material: LibraryMaterialProjection): HTMLElement => {
     const section = el('section', 'material-vector-search');

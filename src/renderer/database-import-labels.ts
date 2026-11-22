@@ -89,9 +89,9 @@ export const DATABASE_PACKAGE_ORIGIN_LABELS: Readonly<Record<DatabasePackageOrig
 /** The file's Data Version against this AI7's, and the software that made it. */
 export function databaseImportVersionLine(preview: Pick<DatabaseImportPreviewProjection, 'dataVersion' | 'localDataVersion' | 'compatibility' | 'softwareVersion'>): string {
   const fit = {
-    compatible: '与本机相同',
+    compatible: preview.dataVersion < preview.localDataVersion ? '可在导入时升级' : '与本机相同',
     'newer-data-version': `比本机的数据版本 ${preview.localDataVersion} 新，请先更新 AI7`,
-    'older-data-version': `比本机的数据版本 ${preview.localDataVersion} 旧，暂不能导入`,
+    'older-data-version': `比本机的数据版本 ${preview.localDataVersion} 旧，请先用 0.7.4 导入并重新导出`,
     'newer-schema': '由更新的 AI7 做成，请先更新 AI7',
   }[preview.compatibility];
   return `${technicalWords(`数据版本 ${preview.dataVersion} · `)}${fit}${technicalWords(` · 软件 ${preview.softwareVersion}`)}`;

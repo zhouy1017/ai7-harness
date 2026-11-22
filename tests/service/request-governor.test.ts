@@ -1,6 +1,5 @@
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cp, readFile, unlink, writeFile } from 'node:fs/promises';
+import { cp, readFile, unlink } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
 import ts from 'typescript';
@@ -17,6 +16,7 @@ import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { DataVersionError, dataVersionMarkerPath, readDataVersionMarker, refuseNewerDataVersion } from '../../src/service/data-version.js';
+import * as dataVersion from '../../src/service/data-version.js';
 import { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
@@ -329,10 +329,11 @@ describe('durable request reader compatibility', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(shutdown);
-      if (refused) await expect(EditorialStore.open(crash.snapshot, crash.roots.codeRoot, { induceUnprovableReconciliation: false,
-        persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false,
-        interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: null, interruptUpgradeAt: 'before-record' }))
-        .rejects.toMatchObject({ code: 'E2E_CONTROL_INTERRUPTED' });
+      if (refused) {
+        const marker = vi.spyOn(dataVersion, 'writeDataVersionMarker').mockRejectedValueOnce(new Error('write refused'));
+        try { await expect(EditorialStore.open(crash.snapshot, crash.roots.codeRoot)).rejects.toMatchObject({ code: 'DATA_VERSION_MARKER_UNWRITABLE' }); }
+        finally { marker.mockRestore(); }
+      }
       vi.setSystemTime(shutdown + 1000);
       const opened = await EditorialStore.open(crash.snapshot, crash.roots.codeRoot); bind(opened);
       opened.executionLedgerForRun(crash.runRecordId).recordRunState(crash.runRecordId, 'cancelling', { detail: '正在取消' });
@@ -353,22 +354,6 @@ describe('durable request reader compatibility', () => {
     await expect(EditorialStore.open(crash.snapshot, crash.roots.codeRoot)).rejects.toMatchObject({ code: 'SCHEMA_UNSUPPORTED' });
     const after = new DatabaseSync(path); try { expect(requestRows(after)).toEqual(before); } finally { after.close(); }
   });
-
-  it.each([90, 91].flatMap((revision) => requestFields.flatMap(([table, field]) => [null, { malformed: true }].map((value) => ({ revision, table, field, location: `${table}.${field}`, value })))))
-    ('refuses property presence under predecessor $revision at $location ($value), without restamping', async ({ revision, table, field, value }) => {
-      const crash = await admittedCrash(table === 'analysis_unit_checkpoints' ? 'unit' : table === 'analysis_clarification_requests' ? 'clarification' : 'held');
-      const path = join(crash.snapshot, 'store', 'ai7.sqlite'); const db = new DatabaseSync(path);
-      constructPre94PolicyEncoding(db);
-      for (const [target, property] of requestFields) rewriteRequestRows(db, target, (record) => { delete record[property]; });
-      expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()!.total).toBeGreaterThan(0);
-      rewriteRequestRows(db, table, (record, index) => { if (index === 0) record[field] = value; });
-      db.exec(`PRAGMA user_version = ${revision}`); const before = requestRows(db); db.close();
-      const marker = (await readDataVersionMarker(crash.snapshot))!;
-      await writeFile(dataVersionMarkerPath(crash.snapshot), JSON.stringify({ ...marker, schemaRevision: revision }));
-      await expect(EditorialStore.open(crash.snapshot, crash.roots.codeRoot)).rejects.toMatchObject({ code: 'ANALYSIS_RECORD_INVALID' });
-      const after = new DatabaseSync(path); try { expect(requestRows(after)).toEqual(before); } finally { after.close(); }
-      expect((await readDataVersionMarker(crash.snapshot))!.schemaRevision).toBe(revision);
-    });
 
   it.each(['digest', 'chain', 'sequence', 'binding', 'foreign-run', 'foreign-unit', 'input', 'logical-request', 'ordinal', 'unknown-event', 'extra-key', 'orphan-array', 'orphan-refusal', 'duplicate-array', 'foreign-array', 'no-send-correlation'] as const)
     ('refuses rehashed current-format $0 corruption before any reconciliation or canonical mutation', async (damage) => {
@@ -433,7 +418,7 @@ describe('durable request reader compatibility', () => {
     const crash = await admittedCrash(); const path = join(crash.snapshot, 'store', 'ai7.sqlite'); const db = new DatabaseSync(path);
     rewriteRequestRows(db, 'analysis_run_states', (record, index) => { if (index === 0) record.requestRefusal = null; });
     const destination = join(crash.roots.inputRoot, 'invalid-request-evidence.ai7db');
-    try { await writeDatabasePackage(db, crash.snapshot, destination, () => ({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '0.1.0',
+    try { await writeDatabasePackage(db, crash.snapshot, destination, () => ({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '0.1.0',
       createdAt: new Date().toISOString(), origin: 'database-export' })); } finally { db.close(); }
     const targetRoot = join(crash.roots.dataRoot, '..', 'request-target'); let target = await EditorialStore.open(targetRoot, crash.roots.codeRoot);
     crash.opened.push(target);
@@ -465,17 +450,6 @@ describe('durable request reader compatibility', () => {
     const before = requestRows(db); db.close();
     await expect(EditorialStore.open(crash.snapshot, crash.roots.codeRoot)).rejects.toMatchObject({ code: 'ANALYSIS_RECORD_INVALID' });
     const after = new DatabaseSync(path); try { expect(requestRows(after)).toEqual(before); } finally { after.close(); }
-  });
-
-  it('refuses a governed append under a predecessor stamp before writing any positive no-send evidence', async () => {
-    const crash = await admittedCrash(); const path = join(crash.roots.dataRoot, 'store', 'ai7.sqlite'); const db = new DatabaseSync(path);
-    const original = crash.opened[0]!; const ledger = original.executionLedgerForRun(crash.runRecordId);
-    const request = [...ledger.requestAdmissionOf(crash.runRecordId)!.open.values()][0]!;
-    db.exec('PRAGMA user_version = 91'); const before = requestRows(db);
-    try {
-      expect(() => ledger.recordModelRequestNotSent(crash.runRecordId, request.requestId)).toThrow('读者修订');
-      expect(requestRows(db)).toEqual(before);
-    } finally { db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`); db.close(); }
   });
 
   it.each([null, true, ['ordinary-production-editorial-review']])('refuses a coercible nonstring rule pin %j instead of treating it as a string', async (rule) => {

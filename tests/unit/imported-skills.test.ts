@@ -1,3 +1,4 @@
+import { createBaselineRelations } from '../support/baseline-relations.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile, cp, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { zipSync, strToU8 } from 'fflate';
 import { acquireSkillPackage, ImportedSkills, MAX_SKILL_PACKAGE_BYTES, SkillAcquisitions } from '../../src/service/imported-skills.js';
-import { initializeImportedSkillSchema, initializeImportedSkillUpdateSchema, IMPORTED_SKILL_SCHEMA_SQL } from '../../src/service/imported-skill-schema.js';
+import { IMPORTED_SKILL_UPDATE_SCHEMA_SQL, IMPORTED_SKILL_SCHEMA_SQL } from '../../src/service/imported-skill-schema.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { MAX_FRAME_BYTES } from '../../src/shared/protocol.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
@@ -25,9 +26,9 @@ beforeEach(async () => {
   db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON; CREATE TABLE books(book_id TEXT PRIMARY KEY) STRICT');
   db.prepare('INSERT INTO books VALUES (?)').run(bookId);
-  initializeImportedSkillSchema(db, 0);
+  createBaselineRelations(db, IMPORTED_SKILL_SCHEMA_SQL);
   // Synchronized delta with #89: a Skill's current selection is read from revision 83's relation.
-  initializeImportedSkillUpdateSchema(db, 0);
+  createBaselineRelations(db, IMPORTED_SKILL_UPDATE_SCHEMA_SQL);
   skills = new ImportedSkills(db);
 });
 afterEach(async () => { vi.restoreAllMocks(); db.close(); await rm(scratch, { recursive: true, force: true }); });

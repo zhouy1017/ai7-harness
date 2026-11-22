@@ -3,6 +3,7 @@
  * ledger, kept apart from it and free of imports so that every schema owner that validates the whole store can read them at
  * load. `research-evidence.ts` owns the rows.
  */
+import { appendOnly } from './append-only.js';
 export const RESEARCH_EVIDENCE_BACKEND_IDS = "('search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai')";
 
 export const RESEARCH_EVIDENCE_SCHEMA_SQL = {
@@ -59,20 +60,12 @@ export const RESEARCH_EVIDENCE_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const RESEARCH_EVIDENCE_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'RESEARCH_EVIDENCE_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'RESEARCH_EVIDENCE_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
+export const RESEARCH_EVIDENCE_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  research_evidence_contents: 'RESEARCH_EVIDENCE_LEDGER_IMMUTABLE',
+  research_evidence: 'RESEARCH_EVIDENCE_LEDGER_IMMUTABLE',
+  research_evidence_units: 'RESEARCH_EVIDENCE_LEDGER_IMMUTABLE',
+  research_evidence_materials: 'RESEARCH_EVIDENCE_LEDGER_IMMUTABLE',
+});
 
 /** Additive revision 107: complete a claim Run's older retained prefix without rewriting its history. */
 export const RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL = {
@@ -82,25 +75,7 @@ export const RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL = {
   PRIMARY KEY(run_record_id, unit_ordinal, revision),
   FOREIGN KEY(run_record_id, unit_ordinal) REFERENCES research_evidence_units(run_record_id, unit_ordinal)`),
 } as const;
-export const RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL = Object.fromEntries(
-  Object.entries(RESEARCH_EVIDENCE_TRIGGER_SQL).filter(([name]) => name.startsWith('research_evidence_units_'))
-    .map(([name, sql]) => [name.replace('research_evidence_units', 'research_evidence_unit_revisions'), sql.replaceAll('research_evidence_units', 'research_evidence_unit_revisions')]),
-);
+export const RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  research_evidence_unit_revisions: 'RESEARCH_EVIDENCE_LEDGER_IMMUTABLE',
+});
 
-export const RESEARCH_EVIDENCE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  research_evidence_contents: [],
-  research_evidence: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'content_sha256>research_evidence_contents.content_sha256:NO ACTION/NO ACTION/NONE',
-  ],
-  research_evidence_units: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE'],
-  research_evidence_unit_revisions: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'run_record_id>research_evidence_units.run_record_id:NO ACTION/NO ACTION/NONE',
-    'unit_ordinal>research_evidence_units.unit_ordinal:NO ACTION/NO ACTION/NONE',
-  ],
-  research_evidence_materials: [
-    'evidence_id>research_evidence.evidence_id:NO ACTION/NO ACTION/NONE',
-    'material_id>library_materials.material_id:NO ACTION/NO ACTION/NONE',
-  ],
-};

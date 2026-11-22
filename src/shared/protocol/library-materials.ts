@@ -185,7 +185,6 @@ export interface MaterialIndexProjection {
     readonly recognition: MaterialIndexLayerState;
     readonly translation: MaterialIndexLayerState;
     readonly segments: MaterialIndexLayerState;
-    readonly vectors: MaterialIndexLayerState;
   };
   /** What the metadata layer read of the file: its own title when it names one, the language, and the counts. */
   readonly metadata: null | {
@@ -198,28 +197,8 @@ export interface MaterialIndexProjection {
     /** A PDF's page count (Issue #892); `null` for every format without pages. */
     readonly pages: number | null;
   };
-  /**
-   * 相似段落检索 (Issue #892): the similarity vectors of the current build, made only when the editor asks, never on open;
-   * `null` until the text was read.
-   */
-  readonly vectors: null | MaterialVectorsProjection;
   /** 来源译文 (Issue #892): the machine translation of a non-Chinese item's text, a separate layer; `null` when none is needed. */
   readonly translation: null | MaterialTranslationProjection;
-}
-
-/** Where the current build's similarity vectors stand, and what makes them (Issue #892). */
-export interface MaterialVectorsProjection {
-  readonly state: 'not-built' | 'building' | 'complete' | 'needs-model';
-  /** The provider's identity, e.g. `ai7-embedding/stub-1`: what the vectors are made by. */
-  readonly embedding: string;
-  readonly dimensions: number;
-  /** How many of the build's paragraphs have their vector, of `total`. */
-  readonly built: number;
-  readonly total: number;
-  /** When the last vector was recorded; `null` before any. */
-  readonly builtAt: string | null;
-  /** The model digest the provider expects when its model files are missing or do not match; `null` otherwise. */
-  readonly expectedDigest: string | null;
 }
 
 /** Where the current build's 来源译文 stands, and whether the editor may ask for it now (Issue #892). */
@@ -252,19 +231,22 @@ export interface MaterialTranslationAttemptProjection {
 /** What a 来源译文 is labelled wherever it is shown or read: it is the machine's, never the original. */
 export const MATERIAL_TRANSLATION_LABEL = '来源译文';
 
-/** The candidates one 相似段落检索 answers at most, and the longest text it compares. */
-export const MAX_MATERIAL_VECTOR_CANDIDATES = 32;
+/**
+ * The candidates one 相似段落检索 answers at most, and the longest text it compares: the lexical ranker's own bounds
+ * (R5-F2c). Its names are historical: the search ranks by words since R5-F2c, and their rename waits for the round's protocol bump.
+ */
+export const MAX_MATERIAL_VECTOR_CANDIDATES = 8;
 
-export const MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS = 2_000;
+export const MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS = 1_000;
 
 /**
- * 相似段落检索 in an item's 查看索引 (Issue #892): its paragraphs nearest the editor's text, each with its anchor and a short
- * preview. The ranking finds candidates; the words are read where the anchor points (ADR 0026).
+ * 相似段落检索 in an item's 查看索引 (Issue #892): its paragraphs that best match the editor's words, ranked on this machine by
+ * the lexical ranker (R5-F2c), each with its anchor and a short preview. The ranking finds candidates; the words are read where
+ * the anchor points (ADR 0026). Its names are historical: the search ranks by words since R5-F2c, and their rename waits for the round's protocol bump.
  */
 export interface MaterialVectorSearchProjection {
   readonly materialId: string;
   readonly indexDigest: string;
-  readonly embedding: string;
   readonly candidates: ReadonlyArray<{
     readonly ordinal: number;
     readonly page: number | null;

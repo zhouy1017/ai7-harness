@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { canonicalRecord, sha256Hex } from './analysis/canonical.js';
 
@@ -21,27 +22,9 @@ export const PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const PRODUCTION_DOCUMENT_ORIGIN_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'PRODUCTION_DOCUMENT_ORIGIN_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'PRODUCTION_DOCUMENT_ORIGIN_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const PRODUCTION_DOCUMENT_ORIGIN_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  production_document_origin_readings: [
-    'document_id>production_documents.document_id:NO ACTION/NO ACTION/NONE',
-    'source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const PRODUCTION_DOCUMENT_ORIGIN_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  production_document_origin_readings: 'PRODUCTION_DOCUMENT_ORIGIN_LEDGER_IMMUTABLE',
+});
 
 export class ProductionDocumentOriginError extends Error {
   constructor(readonly code: string, message: string) {
@@ -62,24 +45,6 @@ const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name
 
 function originRecord(documentId: string, sourceVersionId: string, marksNotCarried: number, recordedAt: string) {
   return canonicalRecord({ schema: RECORD_SCHEMA, documentId, sourceVersionId, reading: READING, marksNotCarried, recordedAt });
-}
-
-/** Revision 42's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
-export function initializeProductionDocumentOriginSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'production_documents'").get() === undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(PRODUCTION_DOCUMENT_ORIGIN_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Production Document origin schema rollback failed.');
-    }
-    throw error;
-  }
-  requireOrigin(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_INVALID', '生产文档来源读取记录与已有记录不一致。');
 }
 
 /** How the document's material was read, recorded with the document: the caller holds the transaction that makes it. */

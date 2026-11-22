@@ -1,13 +1,10 @@
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { BASELINE_CROSS_UNIT_RESULT_SCHEMA } from '../../src/service/analysis/cross-unit-contract.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { execPre74Fixture } from '../support/pre74-schema.js';
 import { basename, join, resolve } from 'node:path';
 import { cpSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { randomUUID } from 'node:crypto';
 import { globalAttentionReason } from '../../src/renderer/global-attention-labels.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
@@ -123,34 +120,6 @@ describe('one model question per Run unit', () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     store.close(); store = undefined;
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  });
-  it('adds only the nullable question column to revision 72, preserving a product request byte for byte', async () => {
-    const run = await start(false);
-    const ledger = store!.baselineAnalysisLedger;
-    const facts = ledger.loadExecutionPlan(run.runRecordId);
-    ledger.recordClarificationRequest({ runRecordId: run.runRecordId, taskIntentId: run.taskIntentId, attemptId: randomUUID(), unitOrdinal: 2,
-      planVersion: facts.planVersionOrdinal, planEnvelopeDigest: facts.planEnvelopeDigest, requestDigest: 'a'.repeat(64),
-      failure: { code: 'SYNTHETIC_RETRY', failureClass: 'provider', status: 503, reason: '合成暂时错误' },
-      firstPayloadDigest: null, firstUnitMessageDigest: 'b'.repeat(64), firstUsage: null, firstWallMs: 1 });
-    await owner!.dispose(); owner = undefined;
-    store!.close(); store = undefined;
-    const db = new DatabaseSync(resolve(roots.dataRoot, 'store', 'ai7.sqlite'));
-    constructPre94PolicyEncoding(db);
-    const before = db.prepare('SELECT request_id, canonical_json, sha256 FROM analysis_clarification_requests').all();
-    execPre74Fixture(db, 'ALTER TABLE analysis_clarification_requests DROP COLUMN model_question_json; PRAGMA user_version = 72');
-    db.close();
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const read = new DatabaseSync(resolve(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-    try {
-      // Synchronized delta with #66 and #89: revisions 81 (imported Skill relations) and 83 (their updates) follow revision 80 (Task Intent Drafts).
-      expect(read.prepare('PRAGMA user_version').get()!.user_version).toBe(116);
-      expect(read.prepare('SELECT request_id, canonical_json, sha256 FROM analysis_clarification_requests').all()).toEqual(before);
-      expect(read.prepare('SELECT model_question_json FROM analysis_clarification_requests').get()!.model_question_json).toBeNull();
-    } finally { read.close(); }
-    // SQLite records the added column's text in place, not as revision 73 creates it; the migrated store must still open.
-    store!.close(); store = undefined;
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    expect(store.baselineAnalysisLedger.clarificationsOf(run.runRecordId)).toHaveLength(1);
   });
   it('keeps the other seven units, releases its slot, answers once and removes only the decision item', async () => {
     const run = await start();

@@ -1,3 +1,4 @@
+import { appendOnly } from './append-only.js';
 import { randomUUID, createHash } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -196,29 +197,10 @@ export function seriesHistoryOrder(
     right.ordinal - left.ordinal;
 }
 
-export const SERIES_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(SERIES_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'SERIES_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'SERIES_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
-
-export const SERIES_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  series: [],
-  series_membership_changes: [
-    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
-    'series_id>series.series_id:NO ACTION/NO ACTION/NONE',
-    'supersedes_change_id>series_membership_changes.change_id:NO ACTION/NO ACTION/NONE',
-  ],
-};
+export const SERIES_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  series: 'SERIES_LEDGER_IMMUTABLE',
+  series_membership_changes: 'SERIES_LEDGER_IMMUTABLE',
+});
 
 export class SeriesError extends Error {
   constructor(readonly code: string, message: string) {
@@ -246,22 +228,6 @@ export const SERIES_IMPACT_GROUPS = [
   { key: 'knowledge-learning', title: '书系知识与学习' },
   { key: 'history', title: '历史记录' },
 ] as const;
-
-/** Revision 52's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
-export function initializeSeriesSchema(db: DatabaseSync): void {
-  if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(SERIES_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(SERIES_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Series schema rollback failed.');
-    }
-    throw error;
-  }
-}
 
 /** A Series name as it is recorded: 1 to 40 characters on one line, NFC-normalized and trimmed, spaces collapsed. */
 export function seriesTitle(value: unknown): string | null {

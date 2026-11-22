@@ -119,7 +119,7 @@ describe('Enter and Backspace as structural journal commands', () => {
     expect(window().blocks.find((block) => block.blockId === first.blockId)!.digest).toBe(first.digest);
   });
 
-  it('follows every mark to its words with its state, drifts what the caret cuts, and 撤销 moves them back (ED-044, ADR 0105 §2)', () => {
+  it('follows every mark to its words with its state, drifts what the caret cuts, and 撤销 puts every one back (ED-044, ADR 0105 §1–§2)', () => {
     const target = paragraphs()[0]!;
     const head = mark(target.blockId, 2, 6, 'annotation');
     const cut = mark(target.blockId, 8, 14, 'annotation');
@@ -134,7 +134,8 @@ describe('Enter and Backspace as structural journal commands', () => {
     undo();
     expect(markAt(tail)).toEqual({ blockId: target.blockId, fromGrapheme: 16, toGrapheme: 20, anchorState: 'exact' });
     expect(markAt(suggestion)).toEqual({ blockId: target.blockId, fromGrapheme: 22, toGrapheme: 26, anchorState: 'exact' });
-    expect(markAt(cut)).toMatchObject({ blockId: target.blockId, anchorState: 'drifted' });
+    // The split's step recorded the cut mark's anchor; the paragraph is byte-identical again, so it stands on its words (#1654).
+    expect(markAt(cut)).toEqual({ blockId: target.blockId, fromGrapheme: 8, toGrapheme: 14, anchorState: 'exact' });
   });
 
   it('carries the absorbed paragraph’s marks into the merged one with their state', () => {
@@ -271,7 +272,11 @@ describe('撤销本次修改 across 分段 and 合段 (ADR 0105 §2)', () => {
     db.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const before = window();
+    // The card and the guard agree (Issue #1654, loss 4): the card reads the point as drifted, offering no 撤销本次修改, and the
+    // guard refuses both of its callers — the card's reversal and the accepting step's undo, which is set aside instead.
+    expect(markAt(point).anchorState).toBe('drifted');
     expect(reverse(point)).toBe('APPLY_INVALID');
+    expect(store.undoManuscript(book.manuscriptId, book.branchId, window().workingDigest).blocked).toBe(true);
     expect(window().journalSequence).toBe(before.journalSequence);
     expect(textOf(first.blockId) === first.text && textOf(second.blockId) === before.blocks.find((block) => block.blockId === second.blockId)!.text).toBe(true);
   });
@@ -344,7 +349,7 @@ describe('撤销本次修改 across 分段 and 合段 (ADR 0105 §2)', () => {
     expect(status(kept)).toBe('applied');
   });
 
-  it('refuses, writing nothing, the touching reversal of two applied deletions in two paragraphs joined into one; after 撤销 of the join both points drift', () => {
+  it('refuses, writing nothing, the touching reversal of two applied deletions in two paragraphs joined into one; after 撤销 of the join both points stand again', () => {
     const [first, second] = adjacentParagraphs();
     const length = graphemesOf(first.text).length;
     // The original ranges meet by number — B's ends where A's starts — so only their paragraphs tell their order apart.
@@ -360,11 +365,13 @@ describe('撤销本次修改 across 分段 and 合段 (ADR 0105 §2)', () => {
     expect(reverse(start)).toBe('APPLY_TARGET_DRIFTED');
     expect(window().journalSequence).toBe(before.journalSequence);
     expect(textOf(first.blockId) === before.blocks.find((block) => block.blockId === first.blockId)!.text).toBe(true);
-    // Known narrow loss: the undone join is a split at the caret where both points sit, inside the joined paragraph, so both drift
-    // (R5-4 restores them). A single applied deletion at A's end drifts the same way once B is joined and the join undone.
+    // The undone join is a split at the caret where both points sit; the join's step recorded their anchors, and the text is
+    // byte-identical again, so each point stands where it stood before the join (Issue #1654, loss 3) and the batch reverses.
     undo();
-    expect([markAt(end).anchorState, markAt(start).anchorState]).toEqual(['drifted', 'drifted']);
-    expect(reverse(end)).toBe('APPLY_TARGET_DRIFTED');
+    expect([markAt(end), markAt(start)].map((at) => [at.blockId, at.fromGrapheme, at.toGrapheme, at.anchorState]))
+      .toEqual([[first.blockId, 2, 2, 'exact'], [second.blockId, 0, 0, 'exact']]);
+    expect(reverse(end)).toBe('no-error');
+    expect(textOf(first.blockId) === first.text && textOf(second.blockId) === second.text).toBe(true);
   });
 });
 
@@ -375,26 +382,31 @@ describe('undo continuity across an Apply', () => {
       interaction: 'accept-and-apply', editedText: null, reason: null });
   };
 
-  it('steps over the Apply to the edit typed before it, and redoes it, while the applied words stay', () => {
+  it('takes back the Apply first, then the edit typed before it, and redoes them in order (ADR 0105 §1)', () => {
     const [typed, applied] = paragraphs() as [ManuscriptWindowProjection['blocks'][number], ManuscriptWindowProjection['blocks'][number]];
     journal(typed.blockId, 0, undefined, '〔先改〕');
     apply(applied.blockId, 4, 8);
     const appliedText = window().blocks.find((block) => block.blockId === applied.blockId)!.text;
     undo();
-    expect(window().blocks.find((block) => block.blockId === typed.blockId)!.digest).toBe(typed.digest);
-    expect(window().blocks.find((block) => block.blockId === applied.blockId)!.text === appliedText).toBe(true);
-    redo();
+    expect(window().blocks.find((block) => block.blockId === applied.blockId)!.digest).toBe(applied.digest);
     expect(window().blocks.find((block) => block.blockId === typed.blockId)!.text.startsWith('〔先改〕')).toBe(true);
+    undo();
+    expect(window().blocks.find((block) => block.blockId === typed.blockId)!.digest).toBe(typed.digest);
+    redo();
+    redo();
+    expect(window().blocks.find((block) => block.blockId === applied.blockId)!.text === appliedText).toBe(true);
+    undo();
     undo();
     expect(code(undo)).toBe('NOTHING_TO_UNDO');
   });
 
-  it('refuses plainly to undo an edit whose paragraph a later Apply changed', () => {
+  it('undoes an edit whose paragraph a later Apply changed once the Apply is taken back: HISTORY_AFTER_APPLY is not reached', () => {
     const target = paragraphs()[0]!;
     journal(target.blockId, 0, undefined, '〔先改〕');
     apply(target.blockId, 10, 14);
-    expect(code(undo)).toBe('HISTORY_AFTER_APPLY');
-    expect(window().blocks.find((block) => block.blockId === target.blockId)!.text.startsWith('〔先改〕')).toBe(true);
+    expect(code(undo)).toBe('no-error');
+    expect(code(undo)).toBe('no-error');
+    expect(window().blocks.find((block) => block.blockId === target.blockId)!.digest).toBe(target.digest);
   });
 });
 

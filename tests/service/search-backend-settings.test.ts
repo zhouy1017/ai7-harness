@@ -1,10 +1,5 @@
-import { execPre74Fixture } from '../support/pre74-schema.js';
-import { join } from 'node:path';
-import { restoreTaskIntentDraftPredecessor } from '../support/pre74-schema.js';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { probeConfiguredSearchBackend } from '../../src/service/provider/search-service.js';
@@ -109,29 +104,4 @@ describe('the persisted search settings and schema 74', () => {
     } finally { store?.close(); await roots.dispose(); }
   });
 
-  it('migrates exact revision 73 once and refuses a malformed terminal CHECK', async () => {
-    const roots = await createServiceTestRoots();
-    let store: EditorialStore | undefined;
-    try {
-      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); store.close(); store = undefined;
-      const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-      const db = new DatabaseSync(path);
-      // Synchronized delta with Issue #423 (slice 7a): a predecessor of revision 80 has no drafts and the narrower Task Intents.
-      restoreTaskIntentDraftPredecessor(db);
-      db.exec('DROP TABLE search_backend_connections; DROP TABLE analysis_plan_records;');
-      db.exec(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records);
-      db.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_update']!);
-      db.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_delete']!);
-      execPre74Fixture(db, 'PRAGMA user_version = 73'); db.close();
-      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-      expect(store.getSearchBackendConnections()).toHaveLength(5); store.close(); store = undefined;
-      const terminal = new DatabaseSync(path);
-      // Synchronized delta with #66 and #89: revisions 81 (imported Skill relations) and 83 (their updates) follow revision 80 (Task Intent Drafts).
-      expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(116);
-      expect(String(terminal.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_plan_records'").get()!.sql)).toContain('web-tools-backend');
-      expect(() => terminal.prepare("INSERT INTO search_backend_connections (backend_id, credential_reference, credential_operation_state, selected, selected_at) VALUES ('search-kimi', NULL, 'missing', NULL, 'now')").run()).toThrow(/CHECK constraint failed: backend_id IN/u);
-      terminal.exec('DROP TABLE search_backend_connections'); terminal.close();
-      await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
-    } finally { store?.close(); await roots.dispose(); }
-  });
 });

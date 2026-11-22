@@ -243,6 +243,8 @@ type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWo
   'getTaskPlanPage' | 'searchReferableMaterials' |
   'generateReviewReport' | 'generateReviewSynthesis' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'recordChangeSuggestionDecision' | 'updateEditorialMark' | 'getEditorialMarkCard' | 'reverseAppliedChangeSuggestion' |
+  // 撤销本批应用 as the batch's editor step (Issue #1654).
+  'inspectEditorHistory' | 'undoManuscript' | 'getManuscriptWindowAt' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
   'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' | 'recommendProcedures' | 'procedureLibrary' |
@@ -426,6 +428,8 @@ function sheetPreparationReason(workspace: ReviewWorkspaceProjection, state: She
 /** 运行此工序… names a Procedure Definition version as `id@version`; a Captured Procedure is named by its UUID alone. */
 const PROCEDURE_DEFINITION_KEY = /^ai7-procedure\/[^@]+@[1-9][0-9]*$/u;
 
+/** A step identity no step has: 撤销本批应用 when its batch is no longer the newest step, which the service refuses by name. */
+const BATCH_STEP_GONE = '00000000-0000-4000-8000-000000000000';
 const NO_FILTERS: Filters = { categoryId: null, severity: null, status: null, chapterBlockId: null };
 const FILTER_KEYS: Readonly<Record<FilterName, keyof Filters>> = {
   category: 'categoryId',
@@ -594,13 +598,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** Whether 历史 is open: as the fold on screen shows it, or as last kept while none is drawn. */
   const historyShown = (): boolean => card?.querySelector<HTMLDetailsElement>('details.review-history-fold')?.open ?? historyOpen;
   const ui: { ignore: IgnoreForm | null; convert: ConvertForm | null; batch: BatchStrip | null; capabilityFindingId: string | null;
-    applied?: { categoryId: string; markIds: string[]; blockIds: string[]; skipped: number } | null; } = {
+    applied?: { categoryId: string; count: number; skipped: number } | null; } = {
     ignore: null,
     convert: null,
     batch: null,
     capabilityFindingId: null,
   };
   let sheetState: SheetState | null = null;
+  /** The editor closed the applied batch's strip with 完成: it is not shown again from the step while this page stands. */
+  let batchDismissed = false;
+  /** The Run and manuscript state the batch step was last read for (`followBatchStep`). */
+  let batchStepReadFor: string | null = null;
   /** The Run whose 取消任务 waits for its confirmation (Issue #64, S29b); `null` while none does. */
   let scopeCancel: string | null = null;
   let sheetOpening = false;
@@ -973,6 +981,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const previous = projection;
     next = retainTaskPlanPages(next, previous);
     projection = next;
+    if (next.run !== null) followBatchStep(next.run);
     // A failed page of another Run's list is not this Run's to say.
     if ((previous?.run?.reviewRunId ?? null) !== (next.run?.reviewRunId ?? null)) pageFailures.clear();
     // A read that succeeds after refused ones ends the error they raised, silently, unless another has replaced it.
@@ -2246,10 +2255,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     node.dataset['reviewCategory'] = applied.categoryId;
     node.dataset['reviewBatchState'] = 'applied';
     node.setAttribute('role', 'status');
-    node.append(el('p', 'review-batch-scope', `${reviewBatchAppliedLine(applied.markIds.length, false)}${applied.skipped > 0 ? reviewBatchExcludedLine(applied.skipped) : ''}`));
+    node.append(el('p', 'review-batch-scope', `${reviewBatchAppliedLine(applied.count, false)}${applied.skipped > 0 ? reviewBatchExcludedLine(applied.skipped) : ''}`));
     const row = el('div', 'button-row');
     const undo = actionButton('batch-undo', 'secondary', () => void undoBatch(run));
-    const close = actionButton('batch-cancel', 'quiet', () => { ui.applied = null; if (projection !== null) renderCard(projection); }, REVIEW_BATCH_DONE);
+    const close = actionButton('batch-cancel', 'quiet', () => { ui.applied = null; batchDismissed = true; if (projection !== null) renderCard(projection); }, REVIEW_BATCH_DONE);
     holdForWork(undo, close);
     row.append(undo, close);
     node.append(row);
@@ -2888,18 +2897,42 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (strip !== null && strip.categoryId === category.categoryId && strip.items.length > 0 && !strip.refused) await confirmBatch(run, strip);
   }
 
-  /** One member reverses the entire batch Effect. */
+  /**
+   * 撤销本批应用 is the batch's editor step (Issue #1654): Ctrl+Z on exactly that step, so it works after leaving the page and
+   * after a restart. The service refuses it in plain words when a newer change stands after it.
+   */
   async function undoBatch(run: ReviewRunProjection): Promise<void> {
     const last = ui.applied;
-    if (!last?.markIds.length) return;
+    if (!last) return;
     await act(REVIEW_STATUS_LINES.applying, REVIEW_BATCH_UNDO_FAILED, async () => {
-      const reversed = await applyOnce(run.manuscript,
-        (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(run, { blockId: last.blockIds[0]! }), markId: last.markIds[0]!, clientEffectId }),
-        (input) => api.getManuscriptApplyOutcome(input));
-      if (!reversed.acknowledged && reversed.outcome?.state !== 'committed') throw reversed.failure;
+      const scope = { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId };
+      const history = await api.inspectEditorHistory(scope);
+      const step = history.undo !== null && history.undo.batch?.reviewRunIds.includes(run.reviewRunId) === true && history.undo.batch.categoryId === last.categoryId ? history.undo : null;
+      const window = await api.getManuscriptWindowAt({ ...scope, target: { kind: 'start' } });
+      const undone = await api.undoManuscript({ ...scope, expectedWorkingDigest: window.workingDigest, ...(step === null ? { expectedStepId: BATCH_STEP_GONE } : { expectedStepId: step.stepId }) });
       ui.applied = null;
-      options.setStatus(reviewBatchUndoneLine(last.markIds.length), 'success');
+      options.setStatus(undone.blocked ? undone.completionLabel : reviewBatchUndoneLine(last.count), undone.blocked ? 'error' : 'success');
     });
+  }
+
+  /**
+   * The batch step Ctrl+Z would take next, when it is this Run's (Issue #1654): its strip with 撤销本批应用 stands again on entering
+   * the page and after a restart. A strip the page holds is never taken away here; 撤销本批应用 names its step, and the service
+   * refuses it in plain words once a newer change stands. It is read once per Run and manuscript state the page shows, not on
+   * every refresh of the projection.
+   */
+  function followBatchStep(run: ReviewRunProjection): void {
+    if (ui.batch !== null || ui.applied != null || batchDismissed) return;
+    const state = `${run.reviewRunId} ${run.manuscript.workingDigest}`;
+    if (state === batchStepReadFor) return;
+    batchStepReadFor = state;
+    void api.inspectEditorHistory({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId }).then((history) => {
+      if (destroyed || ui.batch !== null || ui.applied != null || projection?.run?.reviewRunId !== run.reviewRunId) return;
+      const step = history.undo;
+      if (step === null || step.kind !== 'accept-batch' || step.batch?.reviewRunIds.includes(run.reviewRunId) !== true) return;
+      ui.applied = { categoryId: step.batch.categoryId, count: step.changeCount, skipped: 0 };
+      if (projection !== null) renderCard(projection);
+    }).catch(() => {});
   }
 
   async function confirmBatch(run: ReviewRunProjection, strip: BatchStrip): Promise<void> {
@@ -2915,7 +2948,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       );
       if (applied.acknowledged || applied.outcome?.state === 'committed') {
         ui.batch = null;
-        ui.applied = { categoryId: strip.categoryId, markIds: strip.items.map((item) => item.markId), blockIds: strip.items.map((item) => item.blockId), skipped: strip.excluded };
+        ui.applied = { categoryId: strip.categoryId, count: strip.items.length, skipped: strip.excluded };
         options.setStatus(`${reviewBatchAppliedLine(strip.items.length, !applied.acknowledged)}${strip.excluded > 0 ? reviewBatchExcludedLine(strip.excluded) : ''}`, 'success');
         // The Apply is finished. Read its decisions in bounded pages; optional asks never hold the batch or its next action.
         void (async () => {

@@ -3,13 +3,13 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { BoundedManuscriptStore } from './bounded-manuscript.js';
 import type { EditorialMarkStore } from './editorial-marks.js';
 import type { ManuscriptApplyStore } from './manuscript-apply.js';
-import { transact } from './manuscript/bounded-kernel.js';
+import { stepQuote, withEditorStep } from './manuscript/editor-steps.js';
 import { replacementRevisionRationale } from '../shared/editor-revision-words.js';
 
 // 全部替换 as editor revisions (Issue #1409, #1411): every included match of a frozen, validated replacement becomes one 修改建议
 // of the editor's — `编辑替换「A」→「B」` — applied at once through AI7 Apply as an Effect of its own, so each occurrence keeps a
-// durable applied card with its before and after, and is undone on its own. The whole set is one transaction: a failure on any
-// occurrence writes none of them and leaves the preview frozen, exactly as the single replacement command did.
+// durable applied card with its before and after, and its own 撤销本次修改. The whole set is one transaction and one editor
+// step (Issue #1654): Ctrl+Z takes it back at once. A failure on any occurrence writes none of them and leaves the preview frozen.
 
 export interface ReplacementRevisionsInput {
   previewId: string;
@@ -37,12 +37,14 @@ export interface ReplacementRevisionStores {
 }
 
 export function replacementRevisionsLabel(count: number): string {
-  return `已替换 ${count.toLocaleString('zh-CN')} 处；每处都留有已应用的修订卡片，可逐处撤销`;
+  return `已替换 ${count.toLocaleString('zh-CN')} 处；Ctrl+Z 可整批撤销，每处卡片仍可单独撤销本次修改`;
 }
 
 export function commitReplacementAsRevisions(stores: ReplacementRevisionStores, input: ReplacementRevisionsInput): ReplacementRevisionsResult {
-  return transact(stores.db, () => {
-    const plan = stores.manuscript.replacementRevisionPlan(input.previewId);
+  const plan = stores.manuscript.replacementRevisionPlan(input.previewId);
+  return withEditorStep(stores.db, plan.branchId, {
+    kind: 'replace-all', label: (count) => `全部替换「${stepQuote(plan.query)}」→「${stepQuote(plan.replacement)}」${count.toLocaleString('zh-CN')} 处`,
+  }, () => {
     const binding = { manuscriptId: plan.manuscriptId, branchId: plan.branchId, windowStartBlockId: input.windowStartBlockId };
     const rationale = replacementRevisionRationale(plan.query, plan.replacement);
     const markIds: string[] = [];
@@ -71,7 +73,7 @@ export function commitReplacementAsRevisions(stores: ReplacementRevisionStores, 
         interaction: 'accept-and-apply',
         editedText: null,
         reason: null,
-      });
+      }, false);
       markIds.push(created.markId);
     }
     stores.manuscript.closeReplacementAsRevisions(input.previewId);

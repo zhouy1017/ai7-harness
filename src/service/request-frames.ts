@@ -393,6 +393,7 @@ function validExportFormat(value: unknown): boolean {
 function validExportTarget(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (value.kind === 'current') return hasExactKeys(value, ['kind']);
+  if (value.kind === 'revision') return hasExactKeys(value, ['kind', 'revisionId']) && validUuid(value.revisionId);
   // One recorded version of a 审阅报告 (Issue #500, S64b part 2).
   if (value.kind === 'report') return hasExactKeys(value, ['kind', 'reportId']) && validUuid(value.reportId);
   // One saved version of a Production Document (Issue #415, S66b).
@@ -1097,14 +1098,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.materialId) || !isSafeInteger(input.from, 1)) throw new ProtocolError(tentativeId);
       break;
     }
-    // 构建相似索引 and 生成来源译文 (Issue #892): one item.
-    case 'buildMaterialVectors':
+    // 生成来源译文 (Issue #892): one item.
     case 'requestMaterialTranslation': {
       const input = requireInput(value.input, ['materialId'], tentativeId);
       if (!validUuid(input.materialId)) throw new ProtocolError(tentativeId);
       break;
     }
-    // 相似段落检索 (Issue #892): one item, the editor's text within its bound, and how many candidates.
+    // 相似段落检索 (Issue #892): one item, the editor's text within the lexical ranker's bound, and how many candidates (R5-F2c).
     case 'queryMaterialVectors': {
       const input = requireInput(value.input, ['materialId', 'text', 'k'], tentativeId);
       if (!validUuid(input.materialId) || !isBoundedString(input.text, MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS) ||
@@ -2830,6 +2830,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'listBookVersions':
+    case 'viewBookVersion':
+    case 'restoreBookVersion': {
+      const keys = op === 'restoreBookVersion' ? ['revisionId', 'expectedBase', 'expectedDigest'] : op === 'viewBookVersion' ? ['revisionId', 'cursor'] : ['offset'];
+      const input = requireInput(value.input, ['bookId', 'manuscriptId', 'branchId', ...keys], tentativeId);
+      if (![input.bookId, input.manuscriptId, input.branchId].every(validUuid) || (op !== 'listBookVersions' && !validUuid(input.revisionId)) ||
+        (op === 'restoreBookVersion' && (!validUuid(input.expectedBase) || typeof input.expectedDigest !== 'string' || !HEX_DIGEST_PATTERN.test(input.expectedDigest))) ||
+        (op === 'listBookVersions' && !isSafeInteger(input.offset)) || (op === 'viewBookVersion' && !(input.cursor === null || isBoundedString(input.cursor, 1024)))) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'designatePublicationVersion': {
       const input = requireInput(value.input, ['bookId', 'milestoneId', 'scope', 'basis'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.milestoneId) ||
@@ -3265,15 +3275,24 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'undoManuscript':
     case 'redoManuscript': {
-      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'expectedWorkingDigest'], tentativeId);
+      // `expectedStepId` (Issue #1654): the review page's 撤销本批应用 names the batch step it means.
+      const input = requireInputWithOptional(value.input, ['manuscriptId', 'branchId', 'expectedWorkingDigest'], value.op === 'undoManuscript' ? ['expectedStepId'] : [], tentativeId);
       if (
         !isBoundedString(input.manuscriptId, 36) ||
         !UUID_PATTERN.test(input.manuscriptId) ||
         !isBoundedString(input.branchId, 36) ||
         !UUID_PATTERN.test(input.branchId) ||
         !isBoundedString(input.expectedWorkingDigest, 64) ||
-        !HEX_DIGEST_PATTERN.test(input.expectedWorkingDigest)
+        !HEX_DIGEST_PATTERN.test(input.expectedWorkingDigest) ||
+        (Object.hasOwn(input, 'expectedStepId') && !(isBoundedString(input.expectedStepId, 36) && UUID_PATTERN.test(input.expectedStepId as string)))
       ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectEditorHistory': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId'], tentativeId);
+      if (!isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) || !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId)) {
         throw new ProtocolError(tentativeId);
       }
       break;

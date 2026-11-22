@@ -4,6 +4,7 @@
  * whole store can read them at load. `factual-verification.ts` owns the rows. All four relations are append-only: a later
  * result is a new version, a later decision is a new row, and nothing is ever rewritten.
  */
+import { appendOnly } from './append-only.js';
 const LEVELS = "('quick', 'standard', 'strict')";
 const OUTCOMES = "('待核查', '证据支持', '疑似错误', '证据不足', '证据冲突', '无法核实')";
 
@@ -43,17 +44,11 @@ export const FACTUAL_CLAIM_SCHEMA_SQL: Readonly<Record<string, string>> = {
 ) STRICT`,
 };
 
-export const FACTUAL_CLAIM_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(FACTUAL_CLAIM_SCHEMA_SQL).flatMap((table) => ['update', 'delete'].map((action) =>
-    [`${table}_no_${action}`, `CREATE TRIGGER ${table}_no_${action} BEFORE ${action.toUpperCase()} ON ${table}
-    BEGIN SELECT RAISE(ABORT, 'FACTUAL_VERIFICATION_LEDGER_IMMUTABLE'); END`])),
-);
-
-export const FACTUAL_CLAIM_FOREIGN_KEYS: Readonly<Record<string, readonly string[]>> = {
-  factual_claim_ledgers: ['run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE'],
-  factual_claim_sessions: ['run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE'],
-  factual_claim_events: ['session_id>factual_claim_sessions.session_id:NO ACTION/NO ACTION/NONE'],
-};
+export const FACTUAL_CLAIM_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  factual_claim_ledgers: 'FACTUAL_VERIFICATION_LEDGER_IMMUTABLE',
+  factual_claim_sessions: 'FACTUAL_VERIFICATION_LEDGER_IMMUTABLE',
+  factual_claim_events: 'FACTUAL_VERIFICATION_LEDGER_IMMUTABLE',
+});
 
 export const FACTUAL_VERIFICATION_SCHEMA_SQL = {
   factual_run_assurance: `CREATE TABLE factual_run_assurance (
@@ -136,20 +131,12 @@ export const FACTUAL_VERIFICATION_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
-export const FACTUAL_VERIFICATION_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL).flatMap((table) => [
-    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
-    BEFORE UPDATE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'FACTUAL_VERIFICATION_LEDGER_IMMUTABLE');
-    END`],
-    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
-    BEFORE DELETE ON ${table}
-    BEGIN
-      SELECT RAISE(ABORT, 'FACTUAL_VERIFICATION_LEDGER_IMMUTABLE');
-    END`],
-  ]),
-);
+export const FACTUAL_VERIFICATION_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  factual_run_assurance: 'FACTUAL_VERIFICATION_LEDGER_IMMUTABLE',
+  factual_verification_results: 'FACTUAL_VERIFICATION_LEDGER_IMMUTABLE',
+  factual_review_decisions: 'FACTUAL_VERIFICATION_LEDGER_IMMUTABLE',
+  correction_proposals: 'FACTUAL_VERIFICATION_LEDGER_IMMUTABLE',
+});
 
 export const FACTUAL_VERIFICATION_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   factual_run_assurance: [
@@ -176,3 +163,4 @@ export const FACTUAL_VERIFICATION_FOREIGN_KEYS: Readonly<Record<string, Readonly
     'result_id>factual_verification_results.result_id:NO ACTION/NO ACTION/NONE',
   ],
 };
+

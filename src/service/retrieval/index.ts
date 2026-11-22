@@ -1,5 +1,4 @@
 import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
-import type { EmbeddingProvider } from '../knowledge/embedding.js';
 
 /** Disposable projections only. Readers own authorization, availability and the authoritative pinned bytes. */
 /** `memory` is one explicitly pinned house memory/preference revision of a scoped Global Agent turn (#1171); lexical only. */
@@ -27,8 +26,6 @@ export interface RetrievalSource {
   /** Must recheck withdrawal and read this pin, never substitute the current revision/build. */
   read(): { readonly digest: string; readonly segments: ReadonlyArray<{ readonly blockId?: string; readonly segmentOrdinal?: number; readonly startOffset?: number; readonly text: string }> };
 }
-/** #892's local embedding seam: the store's provider (the built-in stub until a model adapter is admitted); nothing is sent. */
-export type RetrievalEmbeddingProvider = EmbeddingProvider;
 export class RetrievalError extends Error {
   constructor(readonly code: 'RETRIEVAL_SOURCE_MOVED' | 'RETRIEVAL_SOURCE_NOT_AUTHORIZED' | 'MATERIAL_REFERENCE_UNAVAILABLE') {
     super(code);
@@ -182,8 +179,6 @@ function termFrequencies(tokens: readonly string[]): Map<string, number> {
   for (const token of tokens) result.set(token, (result.get(token) ?? 0) + 1);
   return result;
 }
-/** A Task's material vectors, read at the frozen builds its plan pinned through #892's `queryMaterialVectors`. */
-export type RetrievalMaterialVectorQuery = (query: string, k: number) => Promise<readonly { readonly materialId: string; readonly indexDigest: string; readonly ordinal: number; readonly score: number }[]>;
 function boundaryEnd(text: string, end: number): number {
   return end > 0 && end < text.length && /[\uD800-\uDBFF]/u.test(text[end - 1]!) && /[\uDC00-\uDFFF]/u.test(text[end]!) ? end - 1 : end;
 }
@@ -197,13 +192,6 @@ export function reciprocalRankFusion(rankings: readonly (readonly string[])[]): 
   return scores;
 }
 
-function cosine(left: Float32Array, right: Float32Array): number {
-  if (left.length === 0 || left.length !== right.length || [...left, ...right].some((n) => !Number.isFinite(n))) return 0;
-  const dot = left.reduce((sum, n, index) => sum + n * right[index]!, 0);
-  const norm = Math.sqrt(left.reduce((sum, n) => sum + n * n, 0) * right.reduce((sum, n) => sum + n * n, 0));
-  return norm === 0 ? 0 : dot / norm;
-}
-
 /** One Run (or one editor-side search) owns this instance and discards it at completion. No filesystem or network seam. */
 export class RetrievalIndex {
   readonly #sources: ReadonlyMap<string, RetrievalSource>;
@@ -211,20 +199,15 @@ export class RetrievalIndex {
   readonly #candidates = new Map<string, RetrievalCandidate>();
   readonly #fetched = new Set<string>();
   readonly #readingDigests = new Map<string, string>();
-  readonly #vectors = new Map<string, Float32Array>();
   /** Tokenized `search_manuscript`'s block features, by block identity, kept with the text they were read from. */
   readonly #blockDocuments = new Map<string, { readonly text: string; readonly document: LexicalDocument }>();
-  readonly #embedding: RetrievalEmbeddingProvider | null;
-  readonly #materialVectors: RetrievalMaterialVectorQuery | null;
   #disposed = false;
   readonly #records: PinnedLocalToolSources | null;
-  constructor(sources: readonly RetrievalSource[], embedding: RetrievalEmbeddingProvider | null = null, materialVectors: RetrievalMaterialVectorQuery | null = null,
-    records: PinnedLocalToolSources | null = null) {
+  /** The pinned sources, and the pinned records whose entities and terms lend a query their other names (ADR 0107 §4 point 2). */
+  constructor(sources: readonly RetrievalSource[], records: PinnedLocalToolSources | null = null) {
     this.#records = records === null ? null : JSON.parse(canonicalJson(records)) as PinnedLocalToolSources;
     this.#sources = new Map(sources.map((source) => [this.#sourceKey(source.sourceKind, source.sourceId), Object.freeze({ ...source })]));
     if (this.#sources.size !== sources.length) throw new Error('RETRIEVAL_DUPLICATE_SOURCE');
-    this.#embedding = embedding;
-    this.#materialVectors = materialVectors;
   }
   #sourceKey(kind: RetrievalSourceKind, id: string): string { return `${kind}:${id}`; }
   /** Whole pinned blocks only; the source reader already enforces Book, revision and Run scope. */
@@ -325,7 +308,7 @@ export class RetrievalIndex {
     }
   }
   /**
-   * BM25 over the pinned chunks, fused with the local vectors by reciprocal rank when they are ready. `queries` are further
+   * BM25 over the pinned chunks (#1623), the one ranking since the local vectors were retired (ADR 0107 §4 point 5). `queries` are further
    * phrasings of `query` (ADR 0107 §4 point 3): each phrasing ranks on its own and every ranking joins one fusion; without them
    * the scores are the single query's. A query naming a pinned entity or term also matches its other names. After the scores, one
    * rule orders: a passage holding a phrasing, or another name of an entity it names, verbatim comes first (#1623).
@@ -363,43 +346,19 @@ export class RetrievalIndex {
     const phrasings = [query, ...[...forms.values()].slice(1).sort()];
     // What counts as verbatim: each phrasing, and every other name of a pinned entity a phrasing names — so a common name cannot
     // fill every place with its own spelling and hide the passages that use another (#1623 review A). One group, BM25 inside it:
-    // the queried spelling matches more of the query's features and so leads among equals without excluding the others.
+    // a passage's place there follows its BM25 score alone, so another name's passage can lead the queried spelling's or trail it.
     const aliases = phrasings.map((phrasing) => this.#aliasNames(phrasing));
     const needles = [...new Set([...phrasings, ...aliases.flat()].map(verbatimNeedle))].filter((needle) => needle.length > 0);
     const lexical = phrasings.map((phrasing, ordinal) => {
       const scores = bm25Scores(chunks, new Set([...retrievalTokens(phrasing), ...aliases[ordinal]!.flatMap((name) => retrievalTokens(name))]));
       return chunks.map((chunk, index) => ({ id: chunk.candidate.candidateId, score: scores[index]! })).filter((entry) => entry.score > 0).sort(rank);
     });
-    let scores = phrasings.length === 1 ? new Map(lexical[0]!.map((entry) => [entry.id, entry.score])) : reciprocalRankFusion(lexical.map((ranking) => ranking.map((entry) => entry.id)));
-    if (this.#embedding !== null && this.#embedding.readiness().state === 'ready') {
-      try {
-        const embeddedChunks = this.#materialVectors === null ? chunks : chunks.filter((chunk) => chunk.candidate.sourceKind !== 'material');
-        const missing = embeddedChunks.filter((chunk) => !this.#vectors.has(chunk.candidate.candidateId));
-        const vectors = await this.#embedding.embed([...phrasings, ...missing.map((chunk) => chunk.text)]);
-        if (this.#disposed) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
-        if (vectors.length === missing.length + phrasings.length && vectors.every((vector) => vector.length === this.#embedding!.dimensions)) {
-          missing.forEach((chunk, index) => this.#vectors.set(chunk.candidate.candidateId, vectors[index + phrasings.length]!));
-          const rankings: string[][] = [];
-          for (const [ordinal, phrasing] of phrasings.entries()) {
-            const vector = embeddedChunks.map((chunk) => ({ id: chunk.candidate.candidateId, score: cosine(vectors[ordinal]!, this.#vectors.get(chunk.candidate.candidateId)!) }));
-            const material = this.#materialVectors === null || !chunks.some((chunk) => chunk.candidate.sourceKind === 'material') ? [] : await this.#materialVectors(phrasing, k);
-            for (const hit of material) for (const chunk of chunks) {
-              if (chunk.candidate.sourceKind === 'material' && chunk.candidate.sourceId === hit.materialId && chunk.candidate.revisionOrIndexDigest === hit.indexDigest && chunk.candidate.anchor.segmentOrdinal === hit.ordinal) {
-                vector.push({ id: chunk.candidate.candidateId, score: hit.score });
-              }
-            }
-            rankings.push(lexical[ordinal]!.map((entry) => entry.id), vector.filter((entry) => Number.isFinite(entry.score) && entry.score > 0).sort(rank).map((entry) => entry.id));
-          }
-          scores = reciprocalRankFusion(rankings);
-        }
-      } catch { /* The always-available lexical ranker remains usable when local embeddings are unavailable. */ }
-    }
-    if (this.#disposed) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
-    // Verify again after an asynchronous embed: withdrawal during ranking cannot leak a cached preview.
+    const scores = phrasings.length === 1 ? new Map(lexical[0]!.map((entry) => [entry.id, entry.score])) : reciprocalRankFusion(lexical.map((ranking) => ranking.map((entry) => entry.id)));
+    // Verify again after ranking: a source withdrawn since it was read cannot leak a cached preview.
     const available = new Set<string>();
     for (const [key, source] of this.#sources) { try { this.#read(source); available.add(key); } catch { this.#chunks.delete(key); } }
     // A passage that holds one of the needles verbatim comes before every passage that holds none; inside each group,
-    // the ranking above (BM25, or the fusion).
+    // the ranking above (BM25, or the phrasings' fusion).
     const results = chunks.filter((chunk) => available.has(this.#sourceKey(chunk.candidate.sourceKind, chunk.candidate.sourceId)) && scores.has(chunk.candidate.candidateId))
       .map((chunk) => ({ candidate: { ...chunk.candidate, score: scores.get(chunk.candidate.candidateId)! }, verbatim: needles.some((needle) => chunk.normalized.includes(needle)) }))
       .sort((a, b) => Number(b.verbatim) - Number(a.verbatim) || rank({ id: a.candidate.candidateId, score: a.candidate.score }, { id: b.candidate.candidateId, score: b.candidate.score }))
@@ -428,6 +387,6 @@ export class RetrievalIndex {
   exactFetchedCandidates(): ReadonlyMap<string, RetrievalCandidate> {
     return new Map([...this.#fetched].flatMap((id) => { const candidate = this.citation(id); return candidate === null ? [] : [[id, candidate] as const]; }));
   }
-  dispose(): void { this.#disposed = true; this.#chunks.clear(); this.#candidates.clear(); this.#fetched.clear(); this.#readingDigests.clear(); this.#vectors.clear(); this.#blockDocuments.clear(); }
+  dispose(): void { this.#disposed = true; this.#chunks.clear(); this.#candidates.clear(); this.#fetched.clear(); this.#readingDigests.clear(); this.#blockDocuments.clear(); }
 }
 function rank(a: { id: string; score: number }, b: { id: string; score: number }): number { return b.score - a.score || a.id.localeCompare(b.id, 'en'); }

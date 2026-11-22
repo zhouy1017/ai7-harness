@@ -320,7 +320,7 @@ import type {
   SaveDeveloperProposalInput,
 } from './protocol/captured-procedures.js';
 
-import type { DurableHistoryProjection, JournalAcknowledgement, ManuscriptRailProjection, ManuscriptWindowAtInput, ManuscriptWindowProjection } from './protocol/manuscript-window.js';
+import type { DurableHistoryProjection, EditorHistoryProjection, JournalAcknowledgement, ManuscriptHistoryInput, ManuscriptRailProjection, ManuscriptWindowAtInput, ManuscriptWindowProjection } from './protocol/manuscript-window.js';
 import type {
   ApplyChangeSuggestionBatchInput, ApplyChangeSuggestionInput, ApplyReceiptProjection, BatchProposalDecisionDraftInput, CreateEditorialMarkInput,
   EditorialMarkCardProjection, EditorialMarkCommandProjection, FindPendingMarkInput, InspectApplyReceiptInput, ManuscriptApplyCommandProjection, ManuscriptApplyOutcomeProjection,
@@ -668,7 +668,6 @@ export const IPC_CHANNELS = {
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
   inspectLibraryMaterialSegments: 'ai7:j15:inspect-library-material-segments',
-  buildMaterialVectors: 'ai7:j15:build-material-vectors',
   queryMaterialVectors: 'ai7:j15:query-material-vectors',
   requestMaterialTranslation: 'ai7:j15:request-material-translation',
   searchReferableMaterials: 'ai7:search-referable-materials',
@@ -799,6 +798,9 @@ export const IPC_CHANNELS = {
   startReplacementCommit: 'ai7:j02:start-replacement-commit',
   commitReplacement: 'ai7:j02:commit-replacement',
   saveMilestone: 'ai7:j02:save-milestone',
+  listBookVersions: 'ai7:j02:list-book-versions',
+  viewBookVersion: 'ai7:j02:view-book-version',
+  restoreBookVersion: 'ai7:j02:restore-book-version',
   inspectDeliverables: 'ai7:j07:inspect-deliverables',
   designatePublicationVersion: 'ai7:j07:designate-publication-version',
   inspectProductionDocuments: 'ai7:j07:inspect-production-documents',
@@ -871,6 +873,7 @@ export const IPC_CHANNELS = {
   revealManuscriptExport: 'ai7:j07:reveal-manuscript-export',
   undoManuscript: 'ai7:j02:undo-manuscript',
   redoManuscript: 'ai7:j02:redo-manuscript',
+  inspectEditorHistory: 'ai7:j02:inspect-editor-history',
   openBookWorkbench: 'ai7:j12:open-book-workbench',
   getBookWorkbenchRoute: 'ai7:j12:get-book-workbench-route',
   leaveBookWorkbench: 'ai7:j12:leave-book-workbench',
@@ -1124,6 +1127,9 @@ export interface BookManuscriptAnchorProjection {
     state: 'exact' | 'nearest-anchor';
   };
 }
+
+export interface BookVersionScope { bookId: string; manuscriptId: string; branchId: string }
+export interface BookVersionRow { kind: 'revision' | 'milestone' | 'publication'; label: string; revisionId: string; createdAt: string }
 
 export interface BookWorkOverviewProjection {
   book: {
@@ -4280,12 +4286,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: { materialId: string; from: number };
     output: MaterialSegmentsPageProjection;
   };
-  /** 构建相似索引 (Issue #892): the current build's similarity vectors made on this machine, on request; the item as it now reads. */
-  buildMaterialVectors: {
-    input: { materialId: string };
-    output: LibraryMaterialProjection;
-  };
-  /** 相似段落检索 (Issue #892): an item's paragraphs nearest the editor's text, by its built vectors; read-only. */
+  /** 相似段落检索 (Issue #892): an item's paragraphs that best match the editor's words, ranked by words since R5-F2c; read-only. */
   queryMaterialVectors: {
     input: { materialId: string; text: string; k: number };
     output: MaterialVectorSearchProjection;
@@ -4667,6 +4668,9 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: SaveMilestoneInput;
     output: MilestoneProjection;
   };
+  listBookVersions: { input: BookVersionScope & { offset: number }; output: { rows: BookVersionRow[]; more: boolean; workingDigest: string; baseRevisionId: string } };
+  viewBookVersion: { input: BookVersionScope & { revisionId: string; cursor: string | null }; output: HistoricalRevisionProjection };
+  restoreBookVersion: { input: BookVersionScope & { revisionId: string; expectedDigest: string; expectedBase: string }; output: { stepId: string; revisionId: string } };
   /**
    * ⑥ 交付物 · 发稿 (Issue #414, plan slice S65), Book-scoped. The read lists the Manuscript's milestones and
    * designations; 设为发稿版本 is one deterministic local command that answers with the 交付物 as they stand.
@@ -4776,14 +4780,9 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   inspectManuscriptExportReceipt: { input: InspectManuscriptExportReceiptInput; output: ManuscriptExportReceiptProjection };
   /** Main-only (Issue #500, S64b): stage a prepared PDF's page for the main process to print before it approves. */
   stageManuscriptExport: { input: StageManuscriptExportInput; output: ManuscriptExportStageProjection };
-  undoManuscript: {
-    input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
-    output: DurableHistoryProjection;
-  };
-  redoManuscript: {
-    input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
-    output: DurableHistoryProjection;
-  };
+  undoManuscript: { input: ManuscriptHistoryInput; output: DurableHistoryProjection };
+  redoManuscript: { input: ManuscriptHistoryInput; output: DurableHistoryProjection };
+  inspectEditorHistory: { input: { manuscriptId: string; branchId: string }; output: EditorHistoryProjection };
   resolveBookWorkbenchRoute: {
     input: BookWorkbenchRoute;
     output: ResolvedBookWorkbenchRoute;
@@ -5053,8 +5052,6 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi, R
   readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): Promise<LibraryDecisionReasonPage>;
   /** 查看分段: one page of the item's segments, read-only. */
   inspectLibraryMaterialSegments(input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']): Promise<MaterialSegmentsPageProjection>;
-  /** 构建相似索引: made on this machine; nothing is sent. */
-  buildMaterialVectors(input: ServiceOperationMap['buildMaterialVectors']['input']): Promise<LibraryMaterialProjection>;
   /** 相似段落检索 in 查看索引: read-only. */
   queryMaterialVectors(input: ServiceOperationMap['queryMaterialVectors']['input']): Promise<MaterialVectorSearchProjection>;
   /** 生成来源译文: refused unless the selected policy's rule names it. */
@@ -5212,7 +5209,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi, R
   rollBackDatabaseReplacement(input: { replacementId: string }): Promise<DatabaseReplacementsProjection>;
   prepareDatabaseMerge(input: { previewId: string }): Promise<DatabaseReplacementsProjection>;
   /** `现在关闭 AI7`: AI7 closes, unless a window holds changes not yet saved; a prepared replacement completes at the next start. */
-  quitApplication(): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
+  quitApplication(action?: 'rollback-upgrade'): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
   cancelDatabaseExport(input: { activityId: string }): Promise<DatabaseExportActivityProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   inspectProposalWorkspace(input: ProposalWorkspaceInput): Promise<ProposalWorkspaceProjection>;
@@ -5253,6 +5250,9 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi, R
   startReplacementCommit(input: ServiceOperationMap['startReplacementCommit']['input']): Promise<ServiceWireOutput<ServiceJobProjection>>;
   commitReplacement(input: ServiceOperationMap['commitReplacement']['input']): Promise<ReplacementCommitProjection>;
   saveMilestone(input: ServiceOperationMap['saveMilestone']['input']): Promise<MilestoneProjection>;
+  listBookVersions(input: ServiceOperationMap['listBookVersions']['input']): Promise<ServiceOperationMap['listBookVersions']['output']>;
+  viewBookVersion(input: ServiceOperationMap['viewBookVersion']['input']): Promise<ServiceOperationMap['viewBookVersion']['output']>;
+  restoreBookVersion(input: ServiceOperationMap['restoreBookVersion']['input']): Promise<ServiceOperationMap['restoreBookVersion']['output']>;
   /** 交付物 of the Book the window is showing (Issue #414): its Manuscript's milestones and Publication Versions. */
   inspectDeliverables(): Promise<DeliverablesProjection>;
   /** 设为发稿版本 over one exact milestone of that Book; an identical repeat of the current one is no change. */
@@ -5354,6 +5354,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi, R
   revealManuscriptExport(input: Omit<InspectManuscriptExportReceiptInput, 'bookId'>): Promise<{ state: 'revealed' }>;
   undoManuscript(input: ServiceOperationMap['undoManuscript']['input']): Promise<DurableHistoryProjection>;
   redoManuscript(input: ServiceOperationMap['redoManuscript']['input']): Promise<DurableHistoryProjection>;
+  inspectEditorHistory(input: ServiceOperationMap['inspectEditorHistory']['input']): Promise<EditorHistoryProjection>;
   openBookWorkbench(input: BookWorkbenchOpenInput): Promise<BookWorkbenchOpenProjection>;
   getBookWorkbenchRoute(): Promise<ResolvedBookWorkbenchRoute | null>;
   leaveBookWorkbench(): Promise<{ state: 'library' }>;

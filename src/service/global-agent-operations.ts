@@ -1,3 +1,4 @@
+import type { ResolvedModelRole } from './model-search-settings.js';
 import { editorialMemoryGovernanceItem, governedPreferences, preferenceItems, preferenceRow, supervisionSourceCandidates } from './learning/supervision-directives.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { procedureStopped } from './procedures/editable.js';
@@ -27,7 +28,6 @@ import {
   type GlobalAgentProjection,
   modelServiceChannelOf,
   type ManuscriptWindowProjection,
-  type ModelServiceConnectionProjection,
   type LaunchPolicyProjection,
 } from '../shared/protocol.js';
 import { PROCEDURE_STAGE_LABELS, type ProcedureDefinitionDocument } from '../shared/protocol/procedures.js';
@@ -51,6 +51,7 @@ import {
 import { resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue/dialogue-history.js';
 
 export interface GlobalAgentOperationsHost {
+  resolveModelRole: (role: import('../shared/protocol.js').ModelRoleId) => ResolvedModelRole;
   readonly authority: DatabaseSync;
   readonly baselineAnalysis: BaselineAnalysisStore;
   readonly codeRoot: string;
@@ -63,7 +64,6 @@ export interface GlobalAgentOperationsHost {
   transaction: <T>(db: DatabaseSync, operation: () => T) => T;
   getConfiguredModelRoleBinding: (role: 'main-editorial' | 'fast-interaction') => ConfiguredProviderBinding | null;
   getManuscriptWindow: (manuscriptId: string, branchId: string, cursor: string | null) => ManuscriptWindowProjection;
-  getModelServiceConnections: () => ModelServiceConnectionProjection[];
   globalAgentAttempt: (input: GlobalAgentAttemptInput, kind: 'continue' | 'regenerate' | 'stop', now?: Date, preview?: boolean, qualification?: QualifiedGlobalAttemptMetadata) => DialogueTurnStart | string;
   globalAgentModelConnection: () => { binding: ConfiguredProviderBinding; credentialUpdatedAt: string; policy: LaunchPolicyProjection };
   globalAgentProcedureDocument: (pin: GlobalAgentProcedurePin) => ProcedureDefinitionDocument;
@@ -187,13 +187,16 @@ export function internalGlobalOriginalFieldsSelected(host: GlobalAgentOperations
 }
 
 export function globalAgentModelConnection(host: GlobalAgentOperationsHost): { binding: ConfiguredProviderBinding; credentialUpdatedAt: string; policy: LaunchPolicyProjection } {
+  const resolved = host.resolveModelRole('underlying-flash');
   const binding = host.getConfiguredModelRoleBinding('fast-interaction');
-  const connection = binding === null ? undefined : host.getModelServiceConnections().find((entry) =>
-    entry.credentialOperationState === 'ready' && entry.credentialReference === binding.credentialReference &&
-    entry.binding.providerId === modelServiceChannelOf(binding.route) && entry.binding.credentialSlot === binding.credentialSlot &&
-    // The Flash binding comes from the connection's Flash model, or its Pro model when Flash follows 前台 Pro (Issue #1620).
-    (entry.fastBinding?.modelId === binding.model || entry.binding.modelId === binding.model));
-  requireStore(binding !== null && connection !== undefined, 'GLOBAL_AGENT_POLICY_BLOCKED', '模型服务连接已变化；未发送任何内容。');
+  const used = resolved.usedChoice;
+  const connection = resolved.connection;
+  requireStore(used !== null && binding !== null && connection !== null && connection.credentialOperationState === 'ready' &&
+    connection.connectionId === used.connectionId && connection.credentialReference === binding.credentialReference &&
+    connection.binding.providerId === modelServiceChannelOf(binding.route) && connection.binding.credentialSlot === binding.credentialSlot &&
+    used.modelId === binding.model && used.reasoningEffort === binding.reasoningEffort &&
+    resolved.binding !== null && canonicalJson(resolved.binding) === canonicalJson(binding),
+    'GLOBAL_AGENT_POLICY_BLOCKED', '模型服务连接已变化；未发送任何内容。');
   const policy = resolveSourceCheckoutLaunchPolicySync(host.codeRoot, 'ordinary-production',
     host.getConfiguredModelRoleBinding('main-editorial'), binding);
   requireStore(policy.integrityState === 'verified' && (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || (policy.providerProcessing.version === 'v32' || policy.providerProcessing.version === 'v33' || (policy.providerProcessing.version === 'v34' || policy.providerProcessing.version === 'v35'))) &&

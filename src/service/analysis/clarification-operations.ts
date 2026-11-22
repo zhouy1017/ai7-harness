@@ -1,4 +1,3 @@
-import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from '../task-authorization.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AnalysisProjection, BaselineAnalysisRunState } from '../../shared/protocol.js';
@@ -64,7 +63,6 @@ export function recordClarificationRequest(host: ClarificationOperationsHost, in
   const requests = host.requestAdmissionOf(input.runRecordId);
   const covered = requests === null ? undefined : [...requests.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === input.unitOrdinal).map((request) => request.requestId);
   requireAnalysis(modelJson === null || parseModelClarification(modelJson) !== null, 'ANALYSIS_RECORD_INVALID', '模型澄清问题无效。');
-  if (covered !== undefined) requireAnalysis(Number(host.db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, 'ANALYSIS_RECORD_INVALID', '请求澄清写入需要已验证的读者修订。');
   const record = canonicalRecord({
     schema: CLARIFICATION_REQUEST_SCHEMA,
     ...(modelJson === null ? {} : { origin: 'model', modelQuestion: input.modelQuestion, firstAttempts: input.firstAttempts ?? 1 }),

@@ -1,4 +1,3 @@
-import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from '../task-authorization.js';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AnalysisTaskMode, BaselineAnalysisRunState, CoverageManifestProjection } from '../../shared/protocol.js';
 import type { ClarificationFacts } from './clarifications.js';
@@ -71,8 +70,6 @@ export function internalAppendExecutionEvidence(host: RequestAdmissionOperations
 }
 
 export function internalAppendRequestAdmission(host: RequestAdmissionOperationsHost, runRecordId: string, pins: RequestAdmissionPins, event: RequestAdmissionEvent, detail: Record<string, unknown> = {}): void {
-  requireAnalysis(Number(host.db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION,
-      'ANALYSIS_RECORD_INVALID', '请求准入写入需要已验证的读者修订。');
   transact(host.db, () => {
     const prior = host.requestAdmissionOf(runRecordId);
     const data: RequestAdmissionData = { ...pins, sequence: (prior?.sequence ?? 0) + 1, predecessorDigest: prior?.digest ?? null, event };

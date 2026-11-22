@@ -868,9 +868,7 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: await store.searchReferableMaterials(request.input) };
     case 'inspectLibraryMaterialSegments':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterialSegments(request.input) };
-    // 构建相似索引, 相似段落检索 and 生成来源译文 (Issue #892).
-    case 'buildMaterialVectors':
-      return { id: request.id, ok: true, op: request.op, result: store.buildMaterialVectors(request.input.materialId) };
+    // 相似段落检索 and 生成来源译文 (Issue #892).
     case 'queryMaterialVectors':
       return { id: request.id, ok: true, op: request.op, result: await store.searchLibraryMaterialVectors(request.input) };
     case 'requestMaterialTranslation':
@@ -966,7 +964,7 @@ async function dispatch(
         result: store.inspectSeriesHistory({ seriesId: request.input.seriesId, bookId: request.input.bookId }, request.input.after),
       };
     case 'inspectDataVersion':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectDataVersion() };
+      return { id: request.id, ok: true, op: request.op, result: { ...store.inspectDataVersion(), canRollbackUpgrade: await store.hasLocalUpgradeSource() } };
     // Only under this launch's verified External Export Policy, as every other export (Issue #434, S86a review), and off the
     // request: each answers at once with the export's activity, which the window follows (Issue #434 review, V2-UX-EXP-011).
     case 'prepareDatabaseExport':
@@ -1575,6 +1573,12 @@ async function dispatch(
     // ⑥ 交付物 · 发稿 (Issue #414, plan slice S65): a Book-scoped read and one deterministic, local command.
     case 'inspectDeliverables':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDeliverables(request.input.bookId) };
+    case 'listBookVersions':
+      return { id: request.id, ok: true, op: request.op, result: store.listBookVersions(request.input) };
+    case 'viewBookVersion':
+      return { id: request.id, ok: true, op: request.op, result: store.viewBookVersion(request.input) };
+    case 'restoreBookVersion':
+      return { id: request.id, ok: true, op: request.op, result: store.restoreBookVersion(request.input) };
     case 'designatePublicationVersion':
       return { id: request.id, ok: true, op: request.op, result: store.designatePublicationVersion(request.input) };
     case 'inspectProductionDocuments':
@@ -1824,8 +1828,11 @@ async function dispatch(
           request.input.manuscriptId,
           request.input.branchId,
           request.input.expectedWorkingDigest,
+          request.input.expectedStepId,
         ),
       };
+    case 'inspectEditorHistory':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEditorHistory(request.input.manuscriptId, request.input.branchId) };
     case 'redoManuscript':
       return {
         id: request.id,
@@ -2106,6 +2113,12 @@ function reachServiceStartup(step: 'process' | 'store' | 'owners' | 'serving'): 
 }
 
 async function run(): Promise<void> {
+  if (process.argv[2] === '--storage-maintenance') {
+    installNodeNetworkDenial();
+    const { runStorageMaintenance } = await import('./storage-maintenance.js');
+    await runStorageMaintenance(process.argv.slice(3), fileURLToPath(new URL('../', import.meta.url)));
+    return;
+  }
   // The native `fetch` is captured before the denial replaces the global; only the developer-live
   // `opencode-go` transport ever receives it, and only through the adapter's transmit step.
   const nativeFetch: typeof fetch = globalThis.fetch;

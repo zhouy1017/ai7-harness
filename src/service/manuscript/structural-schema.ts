@@ -45,46 +45,21 @@ export const STRUCTURAL_EDIT_SCHEMA_SQL = {
   ) STRICT`,
 } as const;
 
-export const STRUCTURAL_EDIT_FOREIGN_KEYS = {
-  manuscript_block_lineage: [
-    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
-    'command_group_id>manuscript_command_groups.command_group_id:NO ACTION/NO ACTION/NONE',
-    'related_block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
-  ],
+/**
+ * The lineage walk's index (Issue #1654, from R5-1's review): a reversal reaches a moved target by following `split-from` rows
+ * from the block they name, so each step of the walk is a lookup by `related_block_id`.
+ */
+export const STRUCTURAL_EDIT_INDEX_SQL = {
+  manuscript_block_lineage_related: `CREATE INDEX manuscript_block_lineage_related ON manuscript_block_lineage(related_block_id, relation)`,
 } as const;
-
-const COMMAND_HISTORY_STATE_INDEX_SQL = 'CREATE INDEX command_history_state ON manuscript_command_groups(branch_id, status, ordinal)';
 
 /** Whether this store holds revision 100's relations: the lineage relation is created in the transaction that rebuilds the other two. */
 export function hasStructuralEditSchema(db: DatabaseSync): boolean {
-  return db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_block_lineage'").get() !== undefined;
+  // A relation never leaves a connection's schema once there; the answer is read once per connection (Issue #1654: every
+  // command's evidence digest asks, 2,000 times in one undo of a 全部替换).
+  let known = structuralSchemaKnown.get(db);
+  if (known !== true) structuralSchemaKnown.set(db, known = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_block_lineage'").get() !== undefined);
+  return known;
 }
 
-/** Revision 100's step: the two command relations rebuilt row for row, the lineage relation beside them, in one transaction. */
-export function initializeStructuralEditSchema(db: DatabaseSync): void {
-  if (hasStructuralEditSchema(db)) return;
-  const foreignKeys = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
-  db.exec('PRAGMA foreign_keys = OFF');
-  try {
-    db.exec('BEGIN IMMEDIATE');
-    for (const table of ['manuscript_command_groups', 'manuscript_command_edits'] as const) {
-      const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)).join(', ');
-      db.exec(`CREATE TEMP TABLE structural_edit_migration AS SELECT rowid AS prior_rowid, * FROM ${table}`);
-      db.exec(`DROP TABLE ${table}`);
-      db.exec(STRUCTURAL_EDIT_SCHEMA_SQL[table]);
-      db.exec(`INSERT INTO ${table}(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM temp.structural_edit_migration ORDER BY prior_rowid`);
-      db.exec('DROP TABLE temp.structural_edit_migration');
-    }
-    db.exec(COMMAND_HISTORY_STATE_INDEX_SQL);
-    db.exec(STRUCTURAL_EDIT_SCHEMA_SQL.manuscript_block_lineage);
-    for (const table of ['manuscript_command_groups', 'manuscript_command_edits']) {
-      if (db.prepare(`PRAGMA foreign_key_check(${table})`).all().length !== 0) throw new Error('Revision 100 command history references do not resolve.');
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  } finally {
-    if (foreignKeys) db.exec('PRAGMA foreign_keys = ON');
-  }
-}
+const structuralSchemaKnown = new WeakMap<DatabaseSync, boolean>();

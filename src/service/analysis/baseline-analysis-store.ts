@@ -1,5 +1,6 @@
 import { analysisUsesAutomaticMemory } from '../learning/memory-facade.js';
 import { launchedRunModelLabels } from '../editorial-mark-source.js';
+import { paragraphCount, rowsFrom } from '../manuscript/working-positions.js';
 import { freezeTaskBaselineSynopses, remainingSynopsisMessageBytes } from './baseline-synopsis.js';
 import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
 import { allowedProductionBindingOf } from '../launch-policy.js';
@@ -4929,10 +4930,9 @@ export class BaselineAnalysisStore {
 
   readWorkingBlocks(branchId: string): ManifestBlockInput[] {
     requireAnalysis(UUID_PATTERN.test(branchId), 'ANALYSIS_RECORD_INVALID', '分支身份无效。');
-    const rows = this.#db.prepare(
-      `SELECT block_id, position, kind, level, text, digest, grapheme_length
-       FROM working_blocks WHERE branch_id = ? ORDER BY position`,
-    ).all(branchId) as SqlRow[];
+    // The working state in reading order, numbered from 1 (ADR 0105 §6: the paragraph number is computed, not stored).
+    const rows = rowsFrom(this.#db, branchId, 1, paragraphCount(this.#db, branchId)).map((row) => ({ block_id: row.blockId, position: row.position,
+      kind: row.kind, level: row.level, text: row.text, digest: row.digest, grapheme_length: row.graphemeLength })) as SqlRow[];
     return rows.map((row) => this.#blockInput(row));
   }
 

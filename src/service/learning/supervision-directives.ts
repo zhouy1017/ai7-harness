@@ -1,3 +1,4 @@
+import { appendOnly } from '../append-only.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { GlobalAgentSourceCandidate, GlobalEditorialMemoryVersion, EditorialMemoryVersion, LegacyEditorialMemoryVersion, GlobalMemoryItem, GlobalMemoryPin, HouseReviewPreferenceVersion, LearningSupervisionDirective, RecordLearningSupervisionInput, ReviewPreferenceRow, StoredLearningSupervisionInput, TrustedOperationalScope } from '../../shared/protocol.js';
@@ -17,14 +18,9 @@ export const SUPERVISION_SCHEMA_SQL = {
   UNIQUE(operational_scope, ordinal)
 ) STRICT`,
 } as const;
-export const SUPERVISION_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(['update', 'delete'].map((op) => [
-  `learning_supervision_directives_no_${op}`, `CREATE TRIGGER learning_supervision_directives_no_${op}
-  BEFORE ${op.toUpperCase()} ON learning_supervision_directives
-  BEGIN SELECT RAISE(ABORT, 'LEARNING_SUPERVISION_IMMUTABLE'); END`,
-]));
-export const SUPERVISION_FOREIGN_KEYS = {
-  learning_supervision_directives: ['supersedes>learning_supervision_directives.directive_id:NO ACTION/NO ACTION/NONE'],
-};
+export const SUPERVISION_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
+  learning_supervision_directives: 'LEARNING_SUPERVISION_IMMUTABLE',
+});
 
 /**
  * The F-05 owner (Issue #1082) keeps examples, eligibility and version writes; this seam reads its memory versions by their
@@ -75,15 +71,6 @@ export const REVIEW_PREFERENCE_REENABLE_SENTENCES: Readonly<Record<NonNullable<R
   merged: '已并入另一条，不能单独重新启用。',
   'material-stopped': '依据的学习材料已停止今后使用，不能重新启用。',
 };
-export function initializeSupervisionSchema(db: DatabaseSync, version: number): void {
-  if (version >= 87 || db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'learning_supervision_directives'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(SUPERVISION_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(SUPERVISION_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
-}
 
 /**
  * One check for a request, an AI 助手 proposal and a stored record. Only a stored record (`stored`) may hold 重新启用 / 删除 of one

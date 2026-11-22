@@ -296,7 +296,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     },
     // 交付物 opens the card for a manuscript version, and for a document's delivered version from its Delivery Record
     // (Issue #415, S66b); a 审阅报告 is exported from 审阅.
-    openerOf: (target) => target.kind === 'report' ? null : target.kind === 'document'
+    openerOf: (target) => target.kind === 'report' || target.kind === 'revision' ? null : target.kind === 'document'
       ? documentsBlock?.querySelector<HTMLElement>(`ol.production-document-deliveries > li[data-revision-id="${CSS.escape(target.revisionId)}"] [data-export-menu] > summary`) ?? null
       : block?.querySelector<HTMLElement>(target.kind === 'current'
         ? '[data-export-menu="current"] > summary'
