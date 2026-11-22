@@ -118,6 +118,27 @@ describe('任务 page', () => {
     expect(six.querySelectorAll('.task-overview-filter-row select')).toHaveLength(0);
     expect(six.querySelectorAll('.task-overview-filter-row')[0]!.querySelectorAll('button')).toHaveLength(7);
   });
+  it.each([3, 7])('filters restart-queued tasks from every ledger kind by Book with %i Books (#1656)', async count => {
+    const books = named(count), source = books[0]!, empty = books[1]!;
+    const items: GlobalAttentionItemProjection[] = (['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const).map(kind => ({
+      ...running(kind, source), group: 'exceptions', state: 'analysis-blocked', blocked: true,
+      object: { kind: 'task', taskKind: kind }, facts: { progress: null, categories: [], revisionOrdinal: null, stopReason: 'shutdown' },
+      target: { kind: 'task-plan', bookId: source.bookId, taskKind: kind, ref: kind },
+    }));
+    for (const id of ['baseline', 'custom']) items.push({ ...running(id, source), group: 'exceptions', state: 'analysis-blocked', blocked: true,
+      facts: { progress: null, categories: [], revisionOrdinal: null, stopReason: 'shutdown' } });
+    const root = await mount(items, books);
+    expect(root.querySelectorAll('[data-task-group="waiting"] .task-overview-card')).toHaveLength(6);
+    const choose = (book: typeof source): void => {
+      const select = root.querySelector('.task-overview-filter-row select');
+      if (select) { select.value = book.bookId; select.dispatchEvent({ type: 'change', bubbles: true }); }
+      else root.querySelectorAll('.task-overview-filter-row')[0]!.querySelectorAll('button').find(button => button.textContent === book.title)!.click();
+    };
+    choose(empty); expect(root.querySelectorAll('.task-overview-card')).toHaveLength(0);
+    expect(root.querySelector('.task-overview-none')!.textContent).toBe('没有符合所选筛选的任务。');
+    choose(source); expect(root.querySelectorAll('.task-overview-card')).toHaveLength(6);
+  });
+
   it('offers a list above six Books', async () => {
     const lots = await mount([running('a')], named(7));
     expect(lots.querySelector('.task-overview-filter-row select')).not.toBeNull();

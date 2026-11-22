@@ -36,6 +36,40 @@ describe('one-step drawer launch frames (#1455)', () => {
     ['launchInitialEvaluation', {}], ['launchReadersReport', { template: 'author' }],
     ['launchEvaluationRewrite', { recordId: bookId }],
   ] as const;
+  it('admits review options and both new preview operations with closed inputs (#1657)', () => {
+    const input = { bookId, categoryIds: ['typos-and-usage'], clientCommandId: randomUUID(),
+      scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, startWhen: 'idle',
+      planEdits: { removedSteps: ['assurance-sampling'], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1000 } } };
+    const decode = (op: string, input: unknown) => decodeRequest(encoder.encode(JSON.stringify({ id: bookId, op, input })));
+    expect(decode('launchReviewRun', input).input).toEqual(input);
+    for (const bad of [{ ...input, startWhen: 'later' }, { ...input, planEdits: { ...input.planEdits, extra: true } },
+      { ...input, planEdits: { ...input.planEdits, evidenceAssuranceLevel: 'quick' } }]) expect(() => decode('launchReviewRun', bad)).toThrow(ProtocolError);
+    const { bookId: _book, ...review } = input;
+    const scoped = { manuscriptId: bookId, branchId: bookId, baseRevisionId: bookId, expectedJournalSequence: 0,
+      expectedLocksDigest: 'a'.repeat(64), instruction: '检查选中文字', scope: { mode: 'unlocked-only', range: { kind: 'document' } } };
+    for (const [operation, launchInput] of [['launchReviewRun', review], ['startScopedAiEdit', scoped]]) {
+      const preview = { bookId, launch: { operation, input: launchInput } };
+      expect(decode('previewTaskLaunch', preview).input).toEqual(preview);
+    }
+    expect(() => decode('previewTaskLaunch', { bookId, launch: { operation: 'prepareReviewRun', input: review } })).toThrow(ProtocolError);
+  });
+  it('decodes review relaunch through the existing review launch operation (#1656)', () => {
+    const frame = { id: randomUUID(), op: 'launchReviewRun', input: { bookId, categoryIds: ['typos-and-usage'],
+      scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, clientCommandId: randomUUID(),
+      relaunchOf: { kind: 'review-run', ref: bookId, runRecordId: bookId, revision: `0:0:0:${'a'.repeat(64)}`, cancelsFirst: false } } };
+    expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...frame.input, relaunchOf: { ...frame.input.relaunchOf, revision: 'invalid' } } })))).toThrow(ProtocolError);
+  });
+  it.each(commands)('decodes %s relaunch source and redo metadata additively (#1656)', (op, task) => {
+    const kind = op === 'launchWritingTask' ? 'writing' : op === 'launchInitialEvaluation' ? 'initial-evaluation'
+      : op === 'launchReadersReport' ? 'readers-report' : op === 'launchEvaluationRewrite' ? 'evaluation-rewrite' : 'baseline-analysis';
+    const relaunchOf = { kind, ref: bookId, runRecordId: bookId, revision: 'a'.repeat(64), cancelsFirst: false };
+    const frame = { id: randomUUID(), op, input: { bookId, ...task, clientCommandId: randomUUID(), redoOf: bookId, relaunchOf } };
+    expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    for (const invalid of [{ ...relaunchOf, extra: true }, { ...relaunchOf, revision: 'broken' }, { ...relaunchOf, runRecordId: 'broken' }, { ...relaunchOf, cancelsFirst: 'yes' }]) {
+      expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...frame.input, relaunchOf: invalid } })))).toThrow(ProtocolError);
+    }
+  });
   it.each(commands)('decodes %s with a closed choice and command identity', (op, task) => {
     const input = { bookId, ...task, clientCommandId: randomUUID(), executionConfig: { modelConnectionId: 'instance-reference', modelId: 'account/model', reasoningEffort: 'high' }, rememberedChoice: true };
     const frame = { id: randomUUID(), op, input };
@@ -2295,6 +2329,7 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 1, decision: { kind: 'attribution', attribution: { scope: 'house' } } } },
       { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } } },
       { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'excluded', reason: '版权未清' } } },
+      { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 4, decision: { kind: 'not-used' } } },
     ]);
     expectRejectedInputs([
       ['decideLibraryMaterial', { materialId, expectedDecisions: -1, decision: house }],
@@ -2306,6 +2341,9 @@ describe('decodeRequest rejects malformed frames', () => {
       ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'eligibility', choice: 'series', reason: null } }],
       ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'eligibility', choice: 'house' } }],
       ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'eligibility', choice: 'house', reason: null, inferred: true } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'not-used', reason: null } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'not-used', choice: 'deferred' } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'unused' } }],
     ]);
   });
 

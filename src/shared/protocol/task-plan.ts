@@ -334,7 +334,46 @@ export interface TaskPlanDriftEntryProjection {
  * `technical`, unabridged. It states the plan and grants nothing (PLAN-007); `start` states what the
  * drawer's authorization bar offers, and only the bar's own activation records anything (Issue #420).
  */
+/**
+ * 用时 (Issue #1670): the time a Task's Runs were working — from each entry into `executing` to the next recorded state that is
+ * not `executing`, `pausing` or `cancelling` — read from the recorded run states, so it holds for Runs recorded before it existed.
+ * A review's is the union of its Runs' stretches; a dialogue's the sum of its attempts. While a stretch is under way the reader
+ * adds now − `workingSince` to `workedMs`; once the Task ended, `workedMs` is the figure.
+ */
+export interface TaskWorkProjection {
+  /** The closed stretches, in milliseconds. */
+  readonly workedMs: number;
+  /** The start of the stretch under way; `null` when none is. */
+  readonly workingSince: string | null;
+  /** Once the Task ended: the requests it made (`null` when no Run Report recorded them) and its model label (`名称@思考强度`). */
+  readonly finished: null | { readonly requests: number | null; readonly modelLabel: string | null };
+}
+
+/** Why a Task may make more requests than `fewestRequests`, in a fixed order. */
+export type TaskEstimateMore = 'retry' | 'sampling' | 'synthesis' | 'tool-turns' | 'web-search' | 'reflection';
+export const TASK_ESTIMATE_MORE: readonly TaskEstimateMore[] = ['retry', 'sampling', 'synthesis', 'tool-turns', 'web-search', 'reflection'];
+
+/** 预计 (Issue #1670): what the plan holds about its cost before the start; read-only, it creates and sends nothing. */
+export interface TaskEstimateProjection {
+  /** The parts the Task reads (the plan's recomputed units). */
+  readonly parts: number;
+  /** Requests the Run always makes: one per part, plus each later model step it always takes. */
+  readonly fewestRequests: number;
+  readonly more: ReadonlyArray<TaskEstimateMore>;
+  /** The plan froze a Run Budget Ceiling. */
+  readonly ceiling: boolean;
+  /** Only when measured: the same kind's Tasks completed on this machine in the last 7 days, per part. */
+  readonly durationMs: number | null;
+  readonly sentence: string;
+}
+
 export interface TaskPlanProjection {
+  /** Reuses the existing launch operation with a new command and the editor's execution choices. */
+  relaunch?: TaskPlanRelaunchProjection | null;
+  /** 用时 of this Task's Runs (Issue #1670); `null` when it has no Run. */
+  work?: TaskWorkProjection | null;
+  /** 预计 before the start (Issue #1670). */
+  estimate?: TaskEstimateProjection;
   /** Transport-only composed fragments: source/editor text is always a string, metadata is explicitly marked. */
   wording?: {
     goal?: ReadonlyArray<string | { technical: string }>;
@@ -351,7 +390,7 @@ export interface TaskPlanProjection {
   kind: TaskPlanKind;
   /** The Task Intent or the Review Run this plan belongs to. */
   ref: string;
-  state: { key: TaskPlanStateKey; label: string };
+  state: { key: TaskPlanStateKey; label: string; stopReason?: import('../protocol.js').ResumableStopReason };
   runOutcome?: { label: string; reason: string | null; classification: 'failed' | 'completed-with-gaps' };
   /** The plan version shown; `null` for a kind that keeps no plan versions. */
   planVersion: number | null;
@@ -509,6 +548,22 @@ export interface TaskPlanRedoProjection {
   prepare: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; redoOf: string }
     | { kind: StartWhenOnlineTaskKind; ref: string; redoOf: string };
 }
+
+export type TaskRelaunchOperation = 'launchBaselineAnalysis' | 'launchCustomAnalysis' | 'launchInitialEvaluation' | 'launchReadersReport' | 'launchEvaluationRewrite' | 'launchWritingTask' | 'launchReviewRun';
+export type TaskRelaunchCancellation =
+  | { operation: 'cancelReviewRun'; input: { bookId: string; reviewRunId: string } }
+  | { operation: 'cancelBaselineAnalysisRun'; input: { bookId: string; taskIntentId: string } }
+  | { operation: 'cancelWaitingBaselineAnalysis'; input: { bookId: string; taskIntentId: string } }
+  | { operation: 'cancelWaitingTask'; input: import('../protocol.js').CancelWaitingTaskInput }
+  | { operation: 'controlTaskRun'; input: ControlTaskRunInput };
+export type TaskPlanRelaunchProjection = {
+  [Operation in TaskRelaunchOperation]: {
+    operation: Operation;
+    input: Omit<import('../protocol.js').ServiceOperationMap[Operation]['input'], 'clientCommandId' | 'executionConfig'>;
+    summary: ReadonlyArray<string>;
+    cancelsFirst: TaskRelaunchCancellation | null;
+  }
+}[TaskRelaunchOperation];
 
 /**
  * 默认执行规则 (Issue #421, plan slice S75; V2-UX-TASK-017, TASK-019, TASK-020, TASK-028, AUTH-009): the task

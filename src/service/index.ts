@@ -477,8 +477,12 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectBookFindings(request.input.bookId, request.input.offset) };
     case 'inspectParagraphAnalysis':
       return { id: request.id, ok: true, op: request.op, result: store.inspectParagraphAnalysis(request.input.bookId, request.input.manuscriptId, request.input.blockId, request.input.radius) };
-    case 'previewTaskLaunch':
-      return { id: request.id, ok: true, op: request.op, result: store.previewTaskLaunch(request.input, launchPolicy) };
+    case 'previewTaskLaunch': {
+      const launch = request.input.launch;
+      return { id: request.id, ok: true, op: request.op, result: launch.operation === 'startScopedAiEdit'
+        ? fastRoleCall(() => fastRole.requests.previewScopedEdit(request.input.bookId, launch.input))
+        : store.previewTaskLaunch(request.input, launchPolicy) };
+    }
     case 'launchBaselineAnalysis':
     case 'launchCustomAnalysis':
     case 'launchWritingTask':
@@ -1191,6 +1195,11 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.saveHouseWordList(request.input) };
     case 'launchReviewRun': {
       const launched = store.launchReviewRun(request.input, launchPolicy, connectivity.planConnectivity.reading() === 'offline' ? 'when-online' : 'now');
+      if (request.input.startWhen === 'idle' && launched.projection.run?.state === 'waiting') {
+        background.nudge();
+        const reviewRunId = launched.projection.run.reviewRunId;
+        void analysisExecution.whenBackgroundIdle().then(() => store.admitIdleReview(reviewRunId, () => driveReviewRun(reviewRuns, reviewRunId))).catch(() => {});
+      }
       driveReviewRun(reviewRuns, launched.projection.run!.reviewRunId, false, launched);
       if (launched.projection.run?.state === 'waiting') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
       return { id: request.id, ok: true, op: request.op, result: { ...store.inspectReviewWorkspace(request.input.bookId, launched.projection.run!.reviewRunId, analysisProgress),

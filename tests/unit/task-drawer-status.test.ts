@@ -50,23 +50,24 @@ const row = (state: 'running' | 'completed', overrides: Record<string, unknown> 
 });
 const overviewOf = (...items: unknown[]) => ({ groups: [{ key: 'recent', items, total: items.length }] });
 
-interface Opening { overview?: () => Promise<unknown>; how?: Parameters<ReturnType<typeof mountTaskDrawer>['open']>[3] }
+interface Opening { overview?: () => Promise<unknown>; how?: Parameters<ReturnType<typeof mountTaskDrawer>['open']>[3]; api?: Record<string, unknown> }
 async function openDrawer(plan: TaskPlanProjection, opening: Opening = {}) {
   const root = miniDocument.createElement('aside');
   miniDocument.body.append(root);
   const openTaskResult = vi.fn();
   const inspectTaskOverview = vi.fn(opening.overview ?? (async () => overviewOf(row(plan.state.key === 'settled' ? 'completed' : 'running'))));
   const inspectTaskPlan = vi.fn(async () => plan);
-  const api = { inspectTaskPlan, inspectTaskOverview };
+  const api = { inspectTaskPlan, inspectTaskOverview, ...opening.api };
+  const setStatus = vi.fn();
   const technicalDetails = (_className: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement => {
     const details = document.createElement('details'); details.append(...rows); return details;
   };
   const drawer = mountTaskDrawer({ root, shell: document.body, api, technicalDetails, errorMessage: (_error: unknown, fallback: string) => fallback,
-    errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onRecorded: vi.fn(), openTaskResult } as unknown as MountTaskDrawerOptions);
+    errorCode: () => null, setStatus, onOpen: vi.fn(), onRecorded: vi.fn(), openTaskResult } as unknown as MountTaskDrawerOptions);
   const task: TaskPlanRequest = { bookId: 'book', kind: 'baseline-analysis', ref: 'task' };
   const open = async () => { drawer.open(task, () => null, undefined, opening.how); await vi.waitFor(() => expect(root.dataset['taskPlanState']).toBe(plan.state.key)); };
   await open();
-  return { root, drawer, open, openTaskResult, inspectTaskOverview, inspectTaskPlan };
+  return { root, drawer, open, openTaskResult, inspectTaskOverview, inspectTaskPlan, setStatus };
 }
 
 const shown = (node: MiniElement): boolean => { for (let at: MiniElement | null = node; at !== null; at = at.parentElement) if (at.hidden) return false; return true; };
@@ -79,6 +80,17 @@ const controls = (root: MiniElement): string[] => root.querySelectorAll('[data-t
 const model = (root: MiniElement) => vi.waitFor(() => expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@high'));
 
 describe('the status card of a started Task in ordinary mode', () => {
+  it('continues a restart-paused baseline without observing a repeated transport stop (#1656 N3)', async () => {
+    const resume = vi.fn(async () => ({ run: { runRecordId: 'run', state: 'admitted' } }));
+    const timer = vi.spyOn(window, 'setTimeout');
+    const { root, setStatus } = await openDrawer(runningPlan({ state: { key: 'paused', label: '已暂停', stopReason: 'shutdown' } },
+      { ...paused(), stopReason: 'shutdown' }), { api: { resumeBaselineAnalysisRun: resume } });
+    root.querySelector('[data-task-drawer-control="resume"]')!.click();
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('已继续，从已保存的进度接着读。', 'success'));
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(timer.mock.calls.some((call) => call[1] === 25)).toBe(false);
+  });
+
   it('shows a running Task in at most eight lines: its name, state, progress, stage, model, and its actions', async () => {
     const { root } = await openDrawer(runningPlan());
     await model(root);

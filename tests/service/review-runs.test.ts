@@ -1,7 +1,9 @@
+import { frozenReviewOptions, frozenReviewUnits, frozenReviewCeiling } from '../support/review-launch-inputs.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { startQuickTasks } from '../support/quick-tasks.js';
+import { launchPreviewProjection } from '../../src/service/task-launch-preview.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
@@ -95,6 +97,127 @@ const STYLE = STYLE_AND_FORMAT.categoryId;
 const LITERARY = LITERARY_EXPRESSION.categoryId;
 const PLOT = 'plot-consistency';
 const FACTUAL = 'factual-review';
+
+/** Count every relation around a preview, without reading editorial payloads. */
+function previewRowCounts(): unknown {
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try { return db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map(row =>
+    [row.name, db.prepare(`SELECT count(*) n FROM "${String(row.name).replaceAll('"', '""')}"`).get()!.n]); }
+  finally { db.close(); }
+}
+
+describe('review launch options and read-only preview (#1657)', () => {
+  it('waits for quiet before admitting an idle launch', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      session.owner.setBackgroundIdle(false);
+      const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE, startWhen: 'idle' }, launchPolicy);
+      expect(launched.projection.run!.state).toBe('waiting');
+      await driveLaunchedReviewRun(session.driver, launched);
+      expect(session.driver.driving).toBe(false);
+      let loop: Promise<void> | null = null;
+      const ready = session.owner.whenBackgroundIdle().then(() => session.store.admitIdleReview(launched.projection.run!.reviewRunId,
+        () => { loop = session.driver.drive(launched.projection.run!.reviewRunId); }));
+      await Promise.resolve();
+      expect(loop).toBeNull();
+      session.owner.setBackgroundIdle(true);
+      await ready; await loop;
+      expect(workspace(session, book, launched.projection.run!.reviewRunId).run!.state).toBe('settled');
+    });
+  });
+
+  it('keeps the existing restart refusal for an idle approval that never began', async () => {
+    const first = await open('sample1-review-cross-chapter-authored');
+    let book!: Book, reviewRunId!: string;
+    try {
+      book = await importBook(first);
+      reviewRunId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE, startWhen: 'idle' }, launchPolicy).projection.run!.reviewRunId;
+    } finally { await close(first); }
+    const second = await open('sample1-review-cross-chapter-authored');
+    try {
+      second.store.reconcileStoppedReviewCategoryRuns();
+      const before = previewRowCounts();
+      second.store.admitIdleReview(reviewRunId, () => { throw new Error('must not restart'); });
+      expect(previewRowCounts()).toEqual(before);
+      expect(workspace(second, book, reviewRunId).run!.state).toBe('failed');
+    } finally { await close(second); }
+  });
+  const choices: import('../../src/shared/protocol.js').PlanEditsProjection[] = [
+    { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 10000 } },
+    { removedSteps: [], disallowedAdaptations: ['safe-retry'] },
+    { removedSteps: ['assurance-sampling'], disallowedAdaptations: [] },
+    { removedSteps: ['assurance-sampling'], disallowedAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 10000 } },
+  ];
+  it.each(choices.flatMap(planEdits => [[TYPOS], [TYPOS, STYLE, FACTUAL]].map(categoryIds => ({ planEdits, categoryIds }))))
+    ('freezes the same options as prepared, edited and authorized review: %j', async ({ planEdits, categoryIds }) => {
+      await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+        const prepared = prepare(session, book, categoryIds, WHOLE);
+        const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: prepared.reviewRunId });
+        session.store.editTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: prepared.reviewRunId,
+          planEnvelopeDigest: plan.edit.planEnvelopeDigest!, ...planEdits });
+        const edited = workspace(session, book, prepared.reviewRunId).run!;
+        session.store.authorizeReviewRun(book.bookId, edited.reviewRunId, approvals(edited));
+        const expected = frozenReviewOptions(roots.dataRoot, edited.reviewRunId);
+        const another = await importSample1Book(session.store, roots.codeRoot, 'sample1 启动选项');
+        await pinEditorialWorkspaceProfileRevision2(session.store, another.bookId);
+        const launched = session.store.launchReviewRun({ bookId: another.bookId, clientCommandId: randomUUID(), categoryIds, scope: WHOLE, planEdits }, launchPolicy);
+        expect(frozenReviewOptions(roots.dataRoot, launched.projection.run!.reviewRunId)).toEqual(expected);
+      });
+    });
+  it.each([{ categoryIds: [TYPOS] }, { categoryIds: [TYPOS, STYLE, FACTUAL] }])('previews and freezes the same category choices: %j', async ({ categoryIds }) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const input = { clientCommandId: randomUUID(), categoryIds, scope: WHOLE, startWhen: 'idle' as const,
+        planEdits: { removedSteps: ['assurance-sampling'] as const, disallowedAdaptations: ['safe-retry'] as const,
+          runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 10000 } } };
+      const before = previewRowCounts();
+      const preview = session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input } }, launchPolicy);
+      expect(previewRowCounts()).toEqual(before);
+      const launched = session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy);
+      const run = launched.projection.run!;
+      expect(frozenReviewCeiling(roots.dataRoot, run.reviewRunId, 'run-synthesis')).toEqual({ kind: 'tokens', maxTotalTokens: categoryIds.length === 3 ? 30000 : 10000 });
+      const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
+      expect(plan.boundary.adaptable.every(entry => entry.movable === false)).toBe(true);
+      expect(preview).toEqual(launchPreviewProjection(plan, frozenReviewUnits(roots.dataRoot, run.reviewRunId)));
+      expect(preview.adaptations.some(line => line.endsWith('不允许'))).toBe(true);
+      expect(session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy).repeated).toBe(true);
+      expect(() => session.store.launchReviewRun({ ...input, bookId: book.bookId, startWhen: 'now' }, launchPolicy))
+        .toThrowError(expect.objectContaining({ code: 'TASK_LAUNCH_COMMAND_CHANGED' }));
+    });
+  });
+
+  it('refuses ask-first identically in launch and preview before writing', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const input = { clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE,
+        planEdits: { removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] as const } };
+      const before = previewRowCounts();
+      const refusal = expect.objectContaining({ code: 'REVIEW_RETRY_CHOICE_UNAVAILABLE', message: '审阅暂不支持“失败时先问你”；可以选自动重试或不重试。' });
+      expect(() => session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input } }, launchPolicy)).toThrowError(refusal);
+      expect(() => session.store.launchReviewRun({ ...input, bookId: book.bookId }, launchPolicy)).toThrowError(refusal);
+      expect(previewRowCounts()).toEqual(before);
+    });
+  });
+
+  it('previews a local review without writes, keeps old options and refuses only new model options', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: ['local-text-check'], scope: WHOLE,
+        localCheck: { punctuation: 'chinese-prose' as const, numerals: 'off' as const, publication: 'unknown' as const,
+          numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [] } };
+      const before = previewRowCounts();
+      const preview = session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input } }, launchPolicy);
+      expect(preview.units).toBeGreaterThan(0);
+      expect(previewRowCounts()).toEqual(before);
+      for (const options of [{ startWhen: 'idle' as const }, { planEdits: { removedSteps: [], disallowedAdaptations: [] } },
+        { planEdits: { removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] as const } }]) {
+        expect(() => session.store.launchReviewRun({ ...input, ...options }, launchPolicy)).toThrowError(expect.objectContaining({
+          code: 'REVIEW_LAUNCH_OPTIONS_UNAVAILABLE', message: '这次审阅不使用模型，无需选择运行选项。' }));
+        expect(() => session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input: { ...input, ...options } } }, launchPolicy))
+          .toThrowError(expect.objectContaining({ code: 'REVIEW_LAUNCH_OPTIONS_UNAVAILABLE' }));
+        expect(previewRowCounts()).toEqual(before);
+      }
+      const run = session.store.launchReviewRun({ ...input, executionConfig: { modelId: 'ignored-choice' }, rememberedChoice: true, startWhen: 'when-online' }, launchPolicy).projection.run!;
+      expect(preview).toEqual(launchPreviewProjection(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }), frozenReviewUnits(roots.dataRoot, run.reviewRunId)));
+    });
+  });
+});
 
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
@@ -1537,6 +1660,8 @@ describe('a Review Run over the real store on exact sample1', () => {
       const failed = await authorizeAndDrive(session, book, chosen);
       expect(failed.state).toBe('failed');
       expect(failed.categories[0]!.state).toBe('failed');
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: failed.reviewRunId }).relaunch)
+        .toMatchObject({ operation: 'launchReviewRun', cancelsFirst: null, summary: ['重新开始一项新任务，已完成的内容不会带入。'] });
       const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       expect(projection.run!.transitions.some((entry) => entry.detail?.includes('确定性夹具没有该单元与请求摘要对应的响应'))).toBe(true);
       expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 1, changedBlocks: 0 });
@@ -2642,6 +2767,38 @@ describe('house preference review consumption (#911)', () => {
 
 
 describe('one-step review launch (#1455)', () => {
+  it('explains a review cancellation refusal without naming only a series stop (#1656)', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const run = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!;
+      await session.driver.drive(run.reviewRunId);
+      expect(() => session.store.cancelReviewRun(book.bookId, run.reviewRunId)).toThrowError(expect.objectContaining({ code: 'REVIEW_RUN_NOT_CANCELLABLE', message: '这次审阅不能在这里取消；如有正在运行或已暂停的任务，请从任务计划中取消。' }));
+    });
+  });
+  it.each([false, true])('relaunches a finished review through its original request, remembered=%s (#1656)', async remembered => {
+    await withCapturedReviewBook(async (session, book) => {
+      const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE };
+      const first = session.store.launchReviewRun(input, launchPolicy).projection.run!;
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch).toBeNull();
+      await session.driver.drive(first.reviewRunId);
+      const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
+      const before = session.store.inspectReviewCategory(book.bookId, definition);
+      const recipe = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch!;
+      expect(recipe.operation).toBe('launchReviewRun');
+      if (recipe.operation !== 'launchReviewRun') throw new Error('expected review launch');
+      expect(recipe.input).toMatchObject({ categoryIds: input.categoryIds, scope: input.scope });
+      const request = { ...recipe.input, clientCommandId: randomUUID(), rememberedChoice: remembered,
+        executionConfig: remembered ? { modelConnectionId: randomUUID(), modelId: 'removed-review-model' } : { modelId: 'account-future-model', reasoningEffort: 'low' } };
+      const launched = session.store.launchReviewRun(request, launchPolicy).projection;
+      const next = launched.run!;
+      const after = session.store.inspectReviewCategory(book.bookId, definition);
+      expect(after.providerResolutionPlan!.executionRoute).toMatchObject(remembered ? { model: session.store.getConfiguredModelRoleBinding('main-editorial')!.model } : { model: 'account-future-model', reasoningEffort: 'low' });
+      if (remembered) expect(launched.launchNotice).toBe('上次选择的模型已不可用，本次已使用角色默认模型。');
+      expect(after.planEnvelope!.promptContractDigest).toBe(before.planEnvelope!.promptContractDigest);
+      expect(session.store.launchReviewRun(request, launchPolicy).projection.run!.reviewRunId).toBe(next.reviewRunId);
+      expect(() => session.store.launchReviewRun({ ...request, clientCommandId: randomUUID() }, launchPolicy)).toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      await session.driver.drive(next.reviewRunId);
+    });
+  });
   it('omits an unsent effort from the request, card, report and task row while keeping the role default', async () => {
     await withCapturedReviewBook(async (session, book) => {
       const binding = session.store.getConfiguredModelRoleBinding('main-editorial')!;
@@ -2766,6 +2923,63 @@ async function openLaunchedLifecycle(scope: 'development-ci' | 'ordinary-product
 }
 
 describe.each(['development-ci', 'ordinary-production'] as const)('%s launched review lifecycle regressions (#1455)', scope => {
+  it('cancels a review stopped between categories before relaunch (#1656)', async () => {
+    const session = await openLaunchedLifecycle(scope, undefined, true);
+    try {
+      const book = await importBook(session);
+      const first = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+      const steps = session.store.reviewRunDriveSteps;
+      const firstCategory = new ReviewRunDriver({ ...steps, begin: id => steps.begin(id).slice(0, 1) }, session.owner);
+      try { await firstCategory.drive(first.reviewRunId); } finally { await firstCategory.dispose(); }
+      expect(workspace(session, book, first.reviewRunId).run).toMatchObject({ state: 'partial', canContinue: true });
+      const recipe = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch!;
+      expect(recipe.cancelsFirst).toEqual({ operation: 'cancelReviewRun', input: { bookId: book.bookId, reviewRunId: first.reviewRunId } });
+      expect(recipe.summary).toEqual(['先取消这项未完成的任务，再重新开始。', '重新开始一项新任务，已完成的内容不会带入。']);
+      if (recipe.operation !== 'launchReviewRun') throw new Error('expected review launch');
+      const request = { ...recipe.input, clientCommandId: randomUUID() };
+      const { bookId: _book, ...previewInput } = request;
+      const beforePreview = previewRowCounts();
+      const preview = session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input: previewInput } }, launchPolicy);
+      expect(previewRowCounts()).toEqual(beforePreview);
+      expect(() => session.store.launchReviewRun(request, launchPolicy)).toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      session.store.cancelReviewRun(book.bookId, first.reviewRunId);
+      expect(workspace(session, book, first.reviewRunId).run).toMatchObject({ state: 'cancelled', canContinue: false });
+      const next = session.store.launchReviewRun(request, launchPolicy).projection.run!;
+      expect(preview).toEqual(launchPreviewProjection(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: next.reviewRunId }), frozenReviewUnits(roots.dataRoot, next.reviewRunId)));
+      await session.driver.drive(next.reviewRunId);
+    } finally { await close(session); }
+  });
+
+  it('relaunches a paused review only after its own cancellation settles (#1656)', async () => {
+    let gated: GatedOwner | null = null;
+    const session = await openLaunchedLifecycle(scope, inner => (gated = new GatedOwner(inner, 2)), true);
+    try {
+      const book = await importBook(session);
+      const first = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+      const loop = session.driver.drive(first.reviewRunId); await gated!.reached;
+      const paused = session.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId, action: 'pause' });
+      session.owner.pauseRun(paused.runRecordId!, paused.ledger); gated!.release(); await loop;
+      const recipe = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch!;
+      expect(recipe.cancelsFirst?.operation).toBe('controlTaskRun');
+      if (recipe.operation !== 'launchReviewRun') throw new Error('expected review launch');
+      const request = { ...recipe.input, clientCommandId: randomUUID() };
+      const { bookId: _book, ...previewInput } = request;
+      const beforePreview = previewRowCounts();
+      const preview = session.store.previewTaskLaunch({ bookId: book.bookId, launch: { operation: 'launchReviewRun', input: previewInput } }, launchPolicy);
+      expect(previewRowCounts()).toEqual(beforePreview);
+      expect(() => session.store.launchReviewRun(request, launchPolicy)).toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      const cancelled = session.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId, action: 'cancel' });
+      session.owner.cancelRun(cancelled.runRecordId!, cancelled.ledger); await session.owner.whenIdle();
+      session.store.finishCancelledReviewRun(cancelled.runRecordId!);
+      expect(() => session.store.launchReviewRun({ ...request, relaunchOf: { ...request.relaunchOf!, revision: `0:0:0:${'a'.repeat(64)}` } }, launchPolicy))
+        .toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      const next = session.store.launchReviewRun(request, launchPolicy).projection.run!;
+      expect(next.reviewRunId).not.toBe(first.reviewRunId);
+      expect(preview).toEqual(launchPreviewProjection(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: next.reviewRunId }), frozenReviewUnits(roots.dataRoot, next.reviewRunId)));
+      await session.driver.drive(next.reviewRunId);
+    } finally { (gated as GatedOwner | null)?.release(); await close(session); }
+  });
+
   it.each(['cancel', 'pause'] as const)('keeps undispatched categories free when the first category is %s', async (action) => {
     let gated: GatedOwner | null = null;
     const session = await openLaunchedLifecycle(scope, inner => (gated = new GatedOwner(inner, 2)), true);
@@ -2779,6 +2993,8 @@ describe.each(['development-ci', 'ordinary-production'] as const)('%s launched r
       if (action === 'cancel') session.owner.cancelRun(stopped.runRecordId!, stopped.ledger);
       else session.owner.pauseRun(stopped.runRecordId!, stopped.ledger);
       gated!.release(); await loop;
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }).relaunch)
+        .toMatchObject({ operation: 'launchReviewRun' });
       const beforeReplay = categoryEventTrail(run.reviewRunId), sent = session.capture?.wireRequests.length;
       await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
       expect(categoryEventTrail(run.reviewRunId)).toEqual(beforeReplay);

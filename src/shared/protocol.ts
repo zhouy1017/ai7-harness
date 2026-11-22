@@ -9,7 +9,7 @@ export { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type M
 import type { BookFindingsProjection } from './protocol/review.js';
 import type { TransportSettings } from './protocol/transport-settings.js';
 export type { TransportSettings } from './protocol/transport-settings.js';
-import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, LedgerTaskLaunchOperation } from './runtime-execution-config.js';
+import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, TaskLaunchPreviewInput, ReviewExecutionLaunchInput } from './runtime-execution-config.js';
 export type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
@@ -18,6 +18,7 @@ import type { JournalEditInput } from './protocol/manuscript-structure.js';
 import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js';
 import type { AiEditLocksProjection, InspectAiEditLocksInput, InspectScopedAiEditInput, ScopedAiEditProjection, SetAiEditLocksInput, StartScopedAiEditInput } from './protocol/scoped-edit.js';
 import type { GlobalAttentionProjection } from './protocol/global-attention.js';
+import type { BookTasksProjection, TaskOverviewProjection } from './protocol/task-overview.js';
 import type { BothRoleModelSelectionInput, FastModelSelectionInput, ModelConnectionTestStatus, ModelCredentialOperationState, ModelRoleCardProjection, ModelRoleResolutionProjection, ModelRoleStatus, ModelRoleStatusLabel, ModelServiceConnectionProjection, ModelTierSelectionInput } from './protocol/model-roles.js';
 import type {
   ModelServiceBindingProjection,
@@ -366,6 +367,7 @@ export * from './protocol/review-synthesis.js';
 export * from './protocol/evaluation.js';
 export * from './protocol/writing.js';
 export * from './protocol/task-plan.js';
+export * from './protocol/task-overview.js';
 export * from './protocol/knowledge-base.js';
 export * from './protocol/captured-procedures.js';
 export * from './protocol/library-materials.js';
@@ -1242,7 +1244,7 @@ export interface BookSummaryProjection {
   people: { authors: ReadonlyArray<string>; editors: ReadonlyArray<string>; related: ReadonlyArray<{ roleLabel: string; name: string }> };
   manuscriptState: 'empty' | 'populated';
   manuscriptStateLabel: '尚无稿件' | '已有主稿件';
-  reimportLineageSourceVersionIds: ReadonlyArray<string>;
+  reimportLineageSourceVersionIds: ReimportLineageSourceVersionPageProjection['items'];
   reimportLineageNextCursor: string | null;
 }
 
@@ -3247,116 +3249,9 @@ export interface GlobalAttentionGroupProjection {
   total: number;
 }
 
-// ---- ① 任务面 (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044, TASK-045) --------------------
-
-/**
- * The three groups of a Book's 任务 panel, in their one fixed order (V2-UX-TASK-044): 等你处理 · 进行中 · 最近完成. They are
- * 待我处理's groups for this Book's Tasks: 等你处理 holds its 异常与结果待确认 and 等待你的决定, 进行中 its 运行中与已暂停.
- */
-export type BookTaskGroupKey = 'waiting' | 'running' | 'recent';
-
-export const BOOK_TASK_GROUP_KEYS: readonly BookTaskGroupKey[] = ['waiting', 'running', 'recent'];
-
-/** How many finished Tasks 最近完成 lists, newest first; the panel has no age limit. */
-export const BOOK_TASK_RECENT_LIMIT = 10;
-
-/** What a finished Task's `查看结果` opens (V2-UX-TASK-045): the result it formed, read as its own screen reads it. */
-export type BookTaskResultRef =
-  | { kind: 'analysis-revision'; revisionId: string }
-  | { kind: 'review-run'; reviewRunId: string }
-  // A dialogue Task's `回答` (Issue #52, S17a; TASK-044): its latest answer, read from the Harness Session Ledger.
-  | { kind: 'dialogue'; dialogueId: string };
-
-/** One Task of the Book as the panel shows it: 待我处理's item for it, and the result `查看结果` opens. */
-export interface BookTaskItemProjection {
-  item: GlobalAttentionItemProjection;
-  /** `null` for a Task that formed no result — a Run that stopped before it read anything. */
-  result: BookTaskResultRef | null;
-  /**
-   * The paragraphs a selection Task was started on, by block identity — the first and the last — in the manuscript named
-   * (Issue #423, S77 deferred item d): the card's `跳到所选文字` moves the caret there, or says the paragraph is gone. Absent for
-   * every other Task.
-   */
-  selection?: { manuscriptId: string; fromBlockId: string; toBlockId: string };
-}
-
-export interface BookTaskGroupProjection {
-  key: BookTaskGroupKey;
-  items: ReadonlyArray<BookTaskItemProjection>;
-  /** How many Tasks the group holds; more than `items` when the group is longer than one answer lists. */
-  total: number;
-}
-
-/**
- * The Book's 任务 panel (editor-surfaces §1 任务面; V2-UX-TASK-044): its Tasks — baseline analysis and 审阅 — in the three
- * groups. A read: it records, claims and terminalizes nothing, as 待我处理 does not. The panel lists only this Book's Tasks;
- * work across Books stays in 待我处理.
- */
-export interface BookTasksProjection {
-  bookId: string;
-  /** Always the three groups, in the fixed order. */
-  groups: ReadonlyArray<BookTaskGroupProjection>;
-  /** A Run of this Book is in flight, a Review Run is being driven, or a Run waits to start: the panel follows it. */
-  running: boolean;
-  /** Snapshot-pinned pages retain every card field when a group exceeds the reply budget. */
-  readonly listPages?: TaskPlanProjection['listPages'];
-}
-
-// ---- 任务总览 (Issue #1328, T1 rev 2) ---------------------------------------------------------------
-
-export type TaskOverviewGroupKey = 'running' | 'queued' | 'waiting' | 'paused' | 'recent';
-
-export interface TaskOverviewProgressProjection {
-  readonly done: number;
-  readonly total: number;
-  readonly currentUnitLabel: string | null;
-  readonly elapsedMs: number | null;
-  readonly modelWaiting: boolean;
-}
-
-export interface TaskOverviewItemProjection {
-  readonly itemId: string;
-  readonly bookId: string | null;
-  readonly bookTitle: string | null;
-  readonly taskKind: string;
-  readonly label: string;
-  readonly at: string;
-  readonly detail: string | null;
-  readonly attention: GlobalAttentionItemProjection;
-  readonly selection: BookTaskItemProjection['selection'] | null;
-  readonly plan: { readonly kind: TaskPlanKind; readonly ref: string | null } | null;
-  readonly result: BookTaskResultRef | null;
-  readonly state: 'running' | 'queued' | 'waiting' | 'paused' | 'completed' | 'cancelled' | 'stopped';
-  readonly progress: TaskOverviewProgressProjection | null;
-  readonly queuePosition: number | null;
-  /** An estimate is deliberately absent until an owner can provide authoritative timing data. */
-  readonly eta: number | null;
-  readonly usage: { readonly calls: number; readonly elapsed: number } | null;
-  readonly nextAction: GlobalAttentionNextStep;
-  readonly runRecordId: string | null;
-  readonly target: GlobalAttentionTarget;
-}
-
-export interface TaskOverviewGroupProjection {
-  readonly key: TaskOverviewGroupKey;
-  readonly items: ReadonlyArray<TaskOverviewItemProjection>;
-  readonly total: number;
-}
-
-export interface TaskOverviewProjection {
-  readonly quickStarts?: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string; readonly label: string }>;
-  readonly groups: ReadonlyArray<TaskOverviewGroupProjection>;
-  readonly capacity: number;
-  readonly queueFrozen: boolean;
-  readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
-  readonly runningCount: number;
-  readonly queuedCount: number;
-  readonly actionableCount: number;
-}
-
 /** Existing Book-owned drawer commands reachable from the cross-Book task page. */
 export const TASK_OVERVIEW_OPERATIONS = ['inspectTaskPlan', 'getTaskPlanPage', 'controlTaskRun', 'redoTaskPlan',
-  'cancelWaitingTask', 'cancelWaitingBaselineAnalysis', 'answerBaselineAnalysisClarification',
+  'cancelWaitingTask', 'cancelWaitingBaselineAnalysis', 'cancelReviewRun', 'answerBaselineAnalysisClarification',
   'inspectDialogue', 'stopDialogueAnswer', 'continueDialogueAnswer', 'regenerateDialogueAnswer',
   'convertDialogueToChangeSuggestion', 'authorizeBaselineAnalysis', 'authorizeReviewRun', 'authorizeInitialEvaluation',
   'authorizeReadersReport', 'authorizeEvaluationRewrite', 'authorizeWritingTask', 'authorizeTaskAuthorization',
@@ -3370,9 +3265,7 @@ export type TaskOverviewOperation = (typeof TASK_OVERVIEW_OPERATIONS)[number];
 export type TaskOverviewCall = { [K in TaskOverviewOperation]: { operation: K; bookId: string; input: Omit<ServiceOperationMap[K]['input'], 'bookId'> } }[TaskOverviewOperation];
 export type TaskOverviewCallResult = ServiceOperationMap[TaskOverviewOperation]['output'];
 
-export type TaskLaunchPreviewInput = { bookId: string; launch: { [K in LedgerTaskLaunchOperation]: {
-  operation: K; input: Omit<ServiceOperationMap[K]['input'], 'bookId'>;
-} }[LedgerTaskLaunchOperation] };
+export type { TaskLaunchPreviewInput } from './runtime-execution-config.js';
 
 export interface StartQuickTasksInput {
   readonly tasks: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string;
@@ -4564,8 +4457,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * decisions other than 忽略并说明 go through the mark and Apply operations with the finding's `markId`.
    */
   inspectReviewWorkspace: { input: InspectReviewWorkspaceInput; output: ReviewWorkspaceProjection };
-  launchReviewRun: { input: PrepareReviewRunInput & TaskExecutionLaunchInput & {
-    evidenceAssuranceLevel?: EvidenceAssuranceLevel; startWhen?: 'now' | 'when-online' }; output: ReviewWorkspaceProjection };
+  launchReviewRun: { input: ReviewExecutionLaunchInput; output: ReviewWorkspaceProjection };
   prepareReviewRun: { input: PrepareReviewRunInput; output: ServiceJobProjection };
   authorizeReviewRun: { input: AuthorizeReviewRunInput; output: ReviewWorkspaceProjection };
   continueReviewRun: { input: ContinueReviewRunInput; output: ReviewWorkspaceProjection };

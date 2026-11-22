@@ -1,4 +1,5 @@
 import type { CheckpointOwner } from '../analysis/baseline-analysis-types.js';
+import { requireReviewRetryChoice } from './review-launch-options.js';
 import type { FactualVerificationLedger } from '../factual-verification.js';
 import type { EditorialMemoryFacade } from '../learning/memory-facade.js';
 import { withModelClarification } from '../provider/clarification-contract.js';
@@ -58,6 +59,7 @@ export interface ReviewOperationsHost extends ReviewEvidenceReader {
   prepareTaskMaterials(bookId: string, materialIds: ReadonlyArray<string>): ReadonlyArray<TaskMaterialSource>;
   resultBinding(bookId: string, resultId: string): { reader: ManuscriptReader };
   launchChoice(role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig, remembered?: boolean): LaunchChoice;
+  requireRelaunchSource(bookId: string, source: import('../../shared/runtime-execution-config.js').TaskRelaunchSource | undefined, preview?: boolean): void;
   executionLedgerForRun(runRecordId: string): BaselineAnalysisStore;
   materializeFactualVerification(reviewRunId: string): void;
   inspectTaskPlanWithConnection(input: InspectTaskPlanInput, credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>, connectivity: TaskPlanConnectivity, progress?: ProgressReader): Promise<TaskPlanProjection>;
@@ -332,18 +334,42 @@ export function reviewRunRequest(host: ReviewOperationsHost,
   };
 }
 
+export function previewReviewRun(host: ReviewOperationsHost, input: import('../../shared/runtime-execution-config.js').ReviewExecutionLaunchInput,
+  launchPolicy: LaunchPolicyProjection, bookTitle: string): import('../../shared/runtime-execution-config.js').TaskLaunchPreviewProjection {
+  return host.reviewCall(() => {
+    host.requireRelaunchSource(input.bookId, input.relaunchOf, true);
+    const model = host.reviewRuns.requiresModel(input.bookId, input.categoryIds);
+    requireStore(model || (input.planEdits === undefined && input.startWhen !== 'idle'),
+      'REVIEW_LAUNCH_OPTIONS_UNAVAILABLE', '这次审阅不使用模型，无需选择运行选项。');
+    requireReviewRetryChoice(input.planEdits);
+    const choice = model ? host.launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice) : { binding: null };
+    const policy = choice.binding !== null && host.baselineAnalysis.launch.operationalScope === 'ordinary-production'
+      ? resolveSourceCheckoutLaunchPolicySync(host.codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
+    const planned = reviewRunRequest(host, input.bookId, input.categoryIds, input.scope, policy,
+      input.capturedProcedure ?? null, input.materialIds ?? [], null, null, input.seriesId ?? null, input.localCheck, input.decisionId, input.procedureDefinition ?? null);
+    return host.reviewRuns.preview(planned, choice.binding, input, bookTitle, input.relaunchOf?.cancelsFirst === true);
+  });
+}
+
 export function launchReviewRun(host: ReviewOperationsHost, input: import('../../shared/protocol.js').ServiceOperationMap['launchReviewRun']['input'], launchPolicy: LaunchPolicyProjection,
   startWhen: 'now' | 'when-online' = 'now'): { projection: ReviewWorkspaceProjection; repeated: boolean } {
   try {
     const { clientCommandId, executionConfig = {}, ...request } = input;
+    let modelBacked = false;
     const launched = launchFromSnapshot(host.authority, { clientCommandId, bookId: input.bookId, kind: 'review-run', input: { ...request, executionConfig } },
-      () => !host.reviewRuns.requiresModel(input.bookId, input.categoryIds) ? { executionConfig: {}, binding: null } : host.launchChoice('main-editorial', executionConfig, input.rememberedChoice), (choice, snapshotId) => {
+      () => { modelBacked = host.reviewRuns.requiresModel(input.bookId, input.categoryIds);
+        return !modelBacked ? { executionConfig: {}, binding: null } : host.launchChoice('main-editorial', executionConfig, input.rememberedChoice); }, (choice, snapshotId) => {
+        host.requireRelaunchSource(input.bookId, input.relaunchOf);
+        requireStore(modelBacked || (input.planEdits === undefined && input.startWhen !== 'idle'),
+          'REVIEW_LAUNCH_OPTIONS_UNAVAILABLE', '这次审阅不使用模型，无需选择运行选项。');
+        requireReviewRetryChoice(input.planEdits);
         const policy = choice.binding !== null && host.baselineAnalysis.launch.operationalScope === 'ordinary-production'
           ? resolveSourceCheckoutLaunchPolicySync(host.codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
         const planned = reviewRunRequest(host, input.bookId, input.categoryIds, input.scope, policy,
           input.capturedProcedure ?? null, input.materialIds ?? [], null, null, input.seriesId ?? null, input.localCheck, input.decisionId, input.procedureDefinition ?? null);
         const run = host.reviewRuns.launch(planned, snapshotId, choice.binding, {
-          ...(input.evidenceAssuranceLevel === undefined ? {} : { evidenceAssuranceLevel: input.evidenceAssuranceLevel }), startWhen: input.startWhen ?? startWhen });
+          ...(input.evidenceAssuranceLevel === undefined ? {} : { evidenceAssuranceLevel: input.evidenceAssuranceLevel }),
+          ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }), startWhen: input.startWhen ?? startWhen });
         return { runId: run.reviewRunId, manuscript: run.manuscript };
       });
     return { projection: { ...host.reviewRuns.workspace(input.bookId, launched.runId), ...(launched.notice === undefined ? {} : { launchNotice: launched.notice }) }, repeated: launched.repeated };

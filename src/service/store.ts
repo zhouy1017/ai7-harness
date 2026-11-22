@@ -1,3 +1,4 @@
+import { repeatTaskRequest, redoTaskRequest, withTaskRelaunch, requireTaskRelaunchSource, type TaskRelaunchHost } from './task-relaunch.js';
 import * as importEditingOperations from './import-editing-operations.js';
 import { inspectManuscriptExportReceipt as inspectExportReceipt } from './manuscript-export.js';
 import * as importRetentionOperations from './import-retention.js';
@@ -19,7 +20,8 @@ import { launchedTaskPlan } from './task-plan-creation.js';
 import { RUN_SYNTHESIS_ENTRY } from './review/run-synthesis-kind.js';
 import { launchedRunModelLabels } from './editorial-mark-source.js';
 import { transact as transactLaunch } from './analysis/run-state.js';
-import { TaskLaunchPreview } from './task-plan-creation.js';
+import { previewTaskLaunch } from './task-launch-preview.js';
+import { reviewCategoryEdits, requireReviewRetryChoice } from './review/review-launch-options.js';
 import { launchFromSnapshot, TaskLaunchError } from './task-launch-snapshots.js';
 import { WalCheckpointMaintenance, type CheckpointWorkerFactory } from './wal-checkpoint-maintenance.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
@@ -31,7 +33,8 @@ import { initializeAiEditLockSchema } from './ai-edit-locks.js';
 import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInput } from '../shared/protocol/scoped-edit.js';
 import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } from '../shared/protocol/series.js';
 import { effectiveModelReasoningEffort, modelProfileFor } from './provider/model-profile.js';
-import { composeTaskOverview, estimateTaskStarts } from './task-overview.js';
+import { composeTaskOverview, estimateTaskStarts, overviewUsage, withBookTaskWork, withRunningProgress } from './task-overview.js';
+import { TaskWorkReader } from './task-work.js';
 import { customAnalysisModeGoal, modelServiceRouteRefusal, type LegacyModelRoleId, type ModelRoleId, type ModelRoleResolutionProjection } from '../shared/protocol.js';
 import * as modelSearchSettings from './model-search-settings.js';
 import * as materialIndexOperations from './material-index-operations.js';
@@ -1919,6 +1922,7 @@ export class EditorialStore {
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
   readonly #usage: UsageLedger;
+  readonly #taskWork: TaskWorkReader;
   readonly #seriesKnowledge: SeriesKnowledgeLedger;
   /** 书系检索排除 (Issue #64, S29b): each Series' Retrieval Exclusions and their revisions. */
   readonly #seriesExclusions: SeriesExclusionLedger;
@@ -2026,6 +2030,8 @@ export class EditorialStore {
     this.#series = new SeriesLedger(authority);
     this.#usage = new UsageLedger(authority, { sessionLogRoot: join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
       operationalScope: () => this.#baselineAnalysis.launch.operationalScope });
+    this.#taskWork = new TaskWorkReader(authority, { reviewTaskIntents: (reviewRunId) => this.#reviewRuns.workTaskIntents(reviewRunId),
+      reviewModelLabel: (reviewRunId) => this.#reviewRuns.modelLabelOf(reviewRunId) }, join(dataRoot, 'store', 'ai7.sqlite'));
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#seriesExclusions = new SeriesExclusionLedger(authority);
     this.#dialogues = new DialogueLedger(authority);
@@ -2555,6 +2561,7 @@ export class EditorialStore {
       }).catch(() => {
         throw new StoreError('DATA_VERSION_MARKER_UNWRITABLE', DATA_VERSION_MARKER_UNWRITABLE);
       });
+      store.#taskWork.acquire();
       return store;
     } catch (error) {
       // A refused open leaves no handle behind, so the caller can remove the Agent Data Root
@@ -2812,6 +2819,7 @@ export class EditorialStore {
       prepareTaskMaterials: this.#prepareTaskMaterials.bind(this),
       resultBinding: this.#resultBinding.bind(this),
       launchChoice: this.#launchChoice.bind(this),
+      requireRelaunchSource: (bookId, source, preview) => requireTaskRelaunchSource(this.#taskRelaunchHost(), bookId, source, 'review-run', preview),
       executionLedgerForRun: (runRecordId) => this.executionLedgerForRun(runRecordId),
       materializeFactualVerification: (reviewRunId) => this.materializeFactualVerification(reviewRunId),
       inspectTaskPlanWithConnection: (input, credentialReadiness, connectivity, progress) => this.inspectTaskPlanWithConnection(input, credentialReadiness, connectivity, progress),
@@ -3124,10 +3132,11 @@ export class EditorialStore {
     create: (context: import('./task-plan-creation.js').TaskLaunchContext, policy: LaunchPolicyProjection) => ReturnType<BaselineAnalysisStore['launchTask']>,
     startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     if (preview !== undefined) {
+      requireTaskRelaunchSource(this.#taskRelaunchHost(), input.bookId, input.relaunchOf, kind, true);
       const choice = this.#launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice);
       const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
         ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
-      this.#analysisCall(() => create({ snapshotId: randomUUID(), execution: this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch, preview,
+      this.#analysisCall(() => create({ snapshotId: randomUUID(), execution: this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch, preview, previewAfterCancellation: input.relaunchOf?.cancelsFirst === true,
         ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }) }, policy));
       throw new StoreError('TASK_PREVIEW_FAILED', '这次计划暂时无法读取。');
     }
@@ -3136,6 +3145,7 @@ export class EditorialStore {
     try {
       const launched = launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind, input: request },
         () => this.#launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice), (choice, snapshotId) => {
+          requireTaskRelaunchSource(this.#taskRelaunchHost(), input.bookId, input.relaunchOf, kind);
           const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
             ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
           execution = this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch;
@@ -3172,12 +3182,12 @@ export class EditorialStore {
 
   launchWritingTask(input: import('../shared/protocol.js').ServiceOperationMap['launchWritingTask']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('writing', input, policy, (context, launchPolicy) => writingTaskOperations.launchWritingTask(
-      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, null, null, context), startWhen, preview);
+      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, input.redoOf ?? null, null, context), startWhen, preview);
   }
 
   launchInitialEvaluation(input: import('../shared/protocol.js').ServiceOperationMap['launchInitialEvaluation']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('initial-evaluation', input, policy, (context, launchPolicy) => initialEvaluationOperations.launchInitialEvaluationTask(
-      this.#launchInitialHost(context.execution), input.bookId, launchPolicy, input.materialIds ?? [], null, input.seriesId ?? null, context), startWhen, preview);
+      this.#launchInitialHost(context.execution), input.bookId, launchPolicy, input.materialIds ?? [], input.redoOf ?? null, input.seriesId ?? null, context), startWhen, preview);
   }
 
   launchReadersReport(input: import('../shared/protocol.js').ServiceOperationMap['launchReadersReport']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
@@ -3186,7 +3196,7 @@ export class EditorialStore {
       return readersReportOperations.launchReadersReportTask({ ...this.#readersReportHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind),
         requireEvaluationMaterialScope: (has, kind) => initialEvaluationOperations.internalRequireEvaluationMaterialScope(evaluation, has, kind) },
-        input.bookId, input.template, launchPolicy, input.materialIds ?? [], null, context);
+        input.bookId, input.template, launchPolicy, input.materialIds ?? [], input.redoOf ?? null, context);
     }, startWhen, preview);
   }
 
@@ -3195,35 +3205,17 @@ export class EditorialStore {
       const evaluation = this.#launchInitialHost(context.execution);
       return evaluationRewriteOperations.launchEvaluationRewriteTask({ ...this.#evaluationRewriteHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind) },
-        input.bookId, input.recordId, launchPolicy, null, context);
+        input.bookId, input.recordId, launchPolicy, input.redoOf ?? null, context);
     }, startWhen, preview);
   }
 
-  previewTaskLaunch(input: import('../shared/protocol.js').TaskLaunchPreviewInput, policy: LaunchPolicyProjection): import('../shared/runtime-execution-config.js').TaskLaunchPreviewProjection {
-    const preview: NonNullable<import('./task-plan-creation.js').TaskLaunchContext['preview']> = (ledger, task, describe) => {
-      return ledger.previewLaunch(task, input.launch.input.planEdits, (projection, blocks) => {
-        const bookTitle = this.#evaluationBookTitle(input.bookId);
-        const plan = describe === undefined ? baselineAnalysisPlan({ projection: projection as BaselineAnalysisProjection, bookTitle, blocks })
-          : describe(projection, blocks, bookTitle);
-        const controlled = withLedgerRunControls(plan, projection as BaselineAnalysisProjection, blocks);
-        throw new TaskLaunchPreview({ steps: controlled.steps.map(step => `${step.label}${step.removed ? '（本次不做）' : ''}`),
-          scope: controlled.scope.process, units: projection.coverageManifest!.units.length, reference: controlled.scope.reference,
-          send: `${controlled.scope.send}；${controlled.service.send}`, usage: controlled.service.usage,
-          adaptations: controlled.boundary.adaptable.map(entry => `${entry.label}：${entry.removed ? '不允许' : entry.askFirst ? '先问我' : '允许'}`) });
-      });
-    };
-    const launch = input.launch;
-    try {
-      switch (launch.operation) {
-        case 'launchBaselineAnalysis': this.launchBaselineAnalysis({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchCustomAnalysis': this.launchCustomAnalysis({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchWritingTask': this.launchWritingTask({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchInitialEvaluation': this.launchInitialEvaluation({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchReadersReport': this.launchReadersReport({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchEvaluationRewrite': this.launchEvaluationRewrite({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-      }
-    } catch (result) { if (result instanceof TaskLaunchPreview) return result.projection; throw result; }
-    throw new StoreError('TASK_PREVIEW_FAILED', '这次计划暂时无法读取。');
+  previewTaskLaunch(input: import('../shared/protocol.js').TaskLaunchPreviewInput, policy: LaunchPolicyProjection) {
+    return previewTaskLaunch(this, input, policy, bookId => this.#evaluationBookTitle(bookId),
+      request => this.#taskWork.previewRead(reviewOperations.previewReviewRun(this.#reviewOperationsHost, request, policy, this.#evaluationBookTitle(input.bookId)), 'review-run'), this.#taskWork);
+  }
+
+  scopedAiEditLaunchChoice(input: import('../shared/protocol/scoped-edit.js').StartScopedAiEditInput) {
+    return this.#launchChoice('fast-interaction', input.executionConfig ?? {}, input.rememberedChoice);
   }
 
   launchReviewRun(input: import('../shared/protocol.js').ServiceOperationMap['launchReviewRun']['input'], launchPolicy: LaunchPolicyProjection,
@@ -3311,7 +3303,7 @@ export class EditorialStore {
    * checks see the same ledger. The range the chips name is the current plan version's (#288).
    */
   inspectTaskPlan(input: InspectTaskPlanInput, progress?: ProgressReader): TaskPlanProjection {
-    return this.#taskPlanWithRoute(input, progress).plan;
+    return this.#taskWork.planRead(this.#taskPlanWithRoute(input, progress).plan);
   }
 
   getTaskPlanPage(input: import('../shared/protocol.js').ServiceOperationMap['getTaskPlanPage']['input'], connectedPlan?: TaskPlanProjection | BookTasksProjection) {
@@ -3381,6 +3373,7 @@ export class EditorialStore {
           const originalState = plan.state;
           plan = withLedgerRunControls(plan, projection, [], stopped ?? undefined, controlling.ledger.launch.operationalScope === 'developer-live',
             this.#liveCancellationRanges(projection, controlling.ledger));
+          plan = { ...plan, boundary: found.plan.boundary };
           if (active === undefined && projection.run?.state !== 'cancelled') plan = { ...plan, state: originalState, runControl: null };
           plan = { ...plan, edit: { ...plan.edit, planEnvelopeDigest: plan.edit.editable
             ? canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest : null } };
@@ -3416,7 +3409,7 @@ export class EditorialStore {
       plan = { ...plan, goal: { ...plan.goal, draft: { draftId: promoted.draftId, sentence: promoted.latest.goal } } };
       if (promoted.latest.target === 'ranges') plan = draftRangesPlan(plan, promoted.latest.ranges);
     }
-    return { ...found, plan: { ...plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) } };
+    return { ...found, plan: withTaskRelaunch(this.#taskRelaunchHost(), { ...plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) }) };
   }
 
   #taskPlanOfKind(
@@ -3585,7 +3578,7 @@ export class EditorialStore {
   ): Promise<TaskPlanProjection> {
     const { plan: frozen, routeKind, provider } = this.#taskPlanWithRoute(input, progress, (runRecordId) => connectivity.carriesStoppedRun?.(runRecordId) ?? true);
     const binding = this.#productionCredentialBinding(provider);
-    let plan = frozen;
+    let plan = this.#taskWork.planRead(frozen);
     if (plan.start.needsModelConnection && plan.start.readiness === 'ready') plan = withConnectionReadiness(plan, await credentialReadiness(binding));
     // Connectivity (Issue #502): only a plan whose route reaches its model over the network can be offline,
     // and only once its credential is known to be there — 模型未连接 is decided first.
@@ -3794,39 +3787,21 @@ export class EditorialStore {
   }
 
   /** Redo prepares the same kind and request through its ordinary, cancellable preparation owner. */
+  #taskRelaunchHost(): TaskRelaunchHost {
+    return { authority: this.#authority, analysisLedger: this.#analysisLedgerOfTask.bind(this), ledger: this.taskRunLedger.bind(this),
+      reviewRepeat: (bookId, ref) => this.#reviewCall(() => this.#reviewRuns.repeatRequest(bookId, ref)),
+      reviewRedo: (bookId, ref) => this.#reviewCall(() => this.#reviewRuns.redoRequest(bookId, ref)),
+      materialIds: ref => this.#evaluationMaterialPlan(ref)?.boundary.references.map(entry => entry.materialId) ?? [],
+      readersTask: ref => this.#readersReportCall(() => this.#readersReports.task(ref)),
+      rewriteTask: ref => this.#evaluationRewriteCall(() => this.#evaluationRewrites.task(ref)),
+      writingTask: ref => this.#writingCall(() => this.#writingTasks.task(ref)),
+      latestReaders: bookId => readersReportOperations.latestReadersReport(this.#readersReportHost, bookId),
+      latestRewrite: bookId => evaluationRewriteOperations.latestEvaluationRewrite(this.#evaluationRewriteHost, bookId),
+      latestWriting: bookId => this.#latestWriting(bookId), taskPlan: input => this.inspectTaskPlan(input), reviewFacts: (bookId, ref) => this.#reviewCall(() => this.#reviewRuns.planFacts(bookId, ref)) };
+  }
+
   repeatTaskRequest(bookId: string, source: NonNullable<import('../shared/protocol.js').StartQuickTasksInput['tasks'][number]['repeat']>) {
-    if (source.kind === 'review-run') return { kind: source.kind, ...this.#reviewCall(() => this.#reviewRuns.repeatRequest(bookId, source.ref)) };
-    const row = this.#authority.prepare(`SELECT r.run_record_id, t.kind FROM analysis_run_records r
-      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
-      WHERE t.book_id = ? AND t.task_intent_id = ? ORDER BY r.rowid DESC LIMIT 1`).get(bookId, source.ref) as SqlRow | undefined;
-    requireStore(row !== undefined, 'TASK_REPEAT_UNAVAILABLE', '原任务的运行记录不存在。');
-    const expected = source.kind === 'baseline-analysis' ? BASELINE_ANALYSIS_KIND : source.kind === 'writing' ? WRITING_KIND
-      : source.kind === 'initial-evaluation' ? INITIAL_EVALUATION_KIND : source.kind === 'readers-report' ? READERS_REPORT_KIND : EVALUATION_REWRITE_KIND;
-    requireStore(asString(row.kind) === expected || source.kind === 'baseline-analysis' && isCustomAnalysisKindId(row.kind), 'TASK_REPEAT_UNAVAILABLE', '原任务类型不一致。');
-    if (source.kind === 'baseline-analysis') {
-      const ledger = this.#analysisLedgerOfTask(bookId, source.ref);
-      const facts = ledger.loadExecutionPlan(asString(row.run_record_id));
-      const mode = facts.update?.mode;
-      const update = mode === 'sync-current' || mode === 'reanalyze-range' || mode === 'reanalyze-book' ? { mode, selectedRange: facts.update!.selectedRange }
-        : ledger.inspect(bookId).resultSetRevision === null ? null : { mode: 'reanalyze-book' as const, selectedRange: null };
-      return { kind: source.kind, update, customRef: isCustomAnalysisKindId(row.kind) ? source.ref : null };
-    }
-    const materialIds = this.#evaluationMaterialPlan(source.ref)?.boundary.references.map((entry) => entry.materialId) ?? [];
-    if (source.kind === 'initial-evaluation') return { kind: source.kind, materialIds };
-    if (source.kind === 'readers-report') {
-      const task = this.#readersReportCall(() => this.#readersReports.task(source.ref));
-      requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原审稿意见任务不存在。');
-      return { kind: source.kind, template: task.template, materialIds };
-    }
-    if (source.kind === 'evaluation-rewrite') {
-      const task = this.#evaluationRewriteCall(() => this.#evaluationRewrites.task(source.ref));
-      requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原评估重写任务不存在。');
-      return { kind: source.kind, recordId: task.recordId };
-    }
-    const task = this.#writingCall(() => this.#writingTasks.task(source.ref));
-    requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原写作任务不存在。');
-    return { kind: source.kind, request: { typeId: task.typeId, audience: task.input.audience, channel: task.input.channel,
-      requirements: task.input.requirements, materialIds: task.materials.map((material) => material.source.materialId) } };
+    return this.#analysisCall(() => repeatTaskRequest(this.#taskRelaunchHost(), bookId, source));
   }
 
   quickTaskRule(bookId: string, ruleId: string) {
@@ -3844,24 +3819,7 @@ export class EditorialStore {
   }
 
   redoTaskRequest(input: Pick<ControlTaskRunInput, 'bookId' | 'kind' | 'ref'>) {
-    if (input.kind === 'review-run') return { kind: input.kind, ...this.#reviewCall(() => this.#reviewRuns.redoRequest(input.bookId, input.ref)) };
-    const ledger = this.taskRunLedger(input);
-    const projection = this.#analysisCall(() => ledger.inspect(input.bookId));
-    requireStore(projection.taskIntent?.taskIntentId === input.ref && projection.run !== null &&
-      (projection.run.state === 'cancelled' || (projection.run.state === 'interrupted' && projection.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached')) &&
-      projection.run.transitions.some((entry) => entry.state === 'executing'), 'ANALYSIS_REDO_STALE', '只有开始后取消的运行可以改计划重做。');
-    const redoOf = projection.run.runRecordId;
-    const materialIds = ledger.definition.materialReferences?.sources.map((source) => source.materialId) ?? [];
-    switch (input.kind) {
-      case 'initial-evaluation': return { kind: input.kind, redoOf, materialIds };
-      case 'readers-report': return { kind: input.kind, redoOf, materialIds, template: readersReportOperations.latestReadersReport(this.#readersReportHost, input.bookId)!.task.template };
-      case 'evaluation-rewrite': return { kind: input.kind, redoOf, recordId: evaluationRewriteOperations.latestEvaluationRewrite(this.#evaluationRewriteHost, input.bookId)!.task.recordId };
-      case 'writing': {
-        const task = this.#latestWriting(input.bookId)!.task;
-        return { kind: input.kind, redoOf, request: { typeId: task.typeId, audience: task.input.audience,
-          channel: task.input.channel, requirements: task.input.requirements, materialIds: task.materials.map((material) => material.source.materialId) } };
-      }
-    }
+    return this.#analysisCall(() => redoTaskRequest(this.#taskRelaunchHost(), input));
   }
 
   requestTaskRunControl(input: ControlTaskRunInput): { runRecordId: string | null; ledger: BaselineAnalysisStore } {
@@ -3877,6 +3835,7 @@ export class EditorialStore {
 
   editTaskPlan(input: EditTaskPlanInput, progress?: ProgressReader): TaskPlanProjection {
     if (input.kind === 'review-run') {
+      requireReviewRetryChoice(input);
       const tasks = this.#reviewCall(() => this.#reviewRuns.controlTasks(input.bookId, input.ref));
       const digest = canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest;
       requireStore(digest === input.planEnvelopeDigest && tasks.length > 0, 'ANALYSIS_PLAN_EDIT_STALE', '计划已经变了；请重新查看计划后再修改。');
@@ -3890,15 +3849,13 @@ export class EditorialStore {
       this.#transaction(this.#authority, () => {
         let changed = 0;
         for (const task of tasks) {
-          const factual = task.categoryId === 'factual-review';
           try {
-            const summaryCeiling = task.categoryId === 'run-synthesis' && shared.runBudgetCeiling != null
-              ? { runBudgetCeiling: { ...shared.runBudgetCeiling, maxTotalTokens: shared.runBudgetCeiling.maxTotalTokens * budgetMembers } } : {};
-            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...shared, ...summaryCeiling, ...(factual && evidenceAssuranceLevel !== undefined ? { evidenceAssuranceLevel } : {}),
+            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...reviewCategoryEdits({ ...shared,
+              ...(evidenceAssuranceLevel === undefined ? {} : { evidenceAssuranceLevel }) }, task.categoryId, budgetMembers, task.ledger.definition.assurance !== null),
               taskIntentId: task.taskIntentId, planEnvelopeDigest: task.planEnvelopeDigest }));
             changed += 1;
           } catch (error) {
-            if (evidenceAssuranceLevel !== undefined && error instanceof StoreError && error.code === 'ANALYSIS_PLAN_EDIT_UNCHANGED') continue;
+            if (error instanceof StoreError && error.code === 'ANALYSIS_PLAN_EDIT_UNCHANGED') continue;
             throw error;
           }
         }
@@ -4409,7 +4366,7 @@ export class EditorialStore {
           bookId === null ? null : { bookId, cancelled: false })).tasks;
         for (const control of controls) {
           const run = control.run;
-          if (run === null || !runIsActive(run.state) || run.state === 'awaiting-connectivity') continue;
+          if (run === null || (!runIsActive(run.state) && !(run.state === 'blocked-before-dispatch' && run.stopReason === 'shutdown')) || run.state === 'awaiting-connectivity') continue;
           readings.push({ kind, bookId: control.bookId, bookTitle: control.bookTitle, taskIntentId: control.taskIntentId,
             runRecordId: run.runRecordId, state: run.state, stateAt: run.stateAt, control });
         }
@@ -5110,6 +5067,7 @@ export class EditorialStore {
   }
 
   close(): void {
+    this.#taskWork.release();
     this.#checkpointWorker?.abort();
     // An index build under way stops at its next step and records nothing; the next open builds it again (Issue #428, S80a).
     this.#indexStopped = true;
@@ -5711,7 +5669,7 @@ export class EditorialStore {
       const projectedManuscriptState: 'empty' | 'populated' =
         manuscriptState === 'empty' ? 'empty' : 'populated';
       const lineagePage = projectedManuscriptState === 'empty'
-        ? { items: [] as string[], nextCursor: null }
+        ? { items: [], nextCursor: null }
         : this.#reimportLineageSourceVersionPage(bookId, null);
       return {
         bookId,
@@ -7670,11 +7628,7 @@ export class EditorialStore {
     after: string | null,
   ): ReimportLineageSourceVersionPageProjection { return manuscriptReimportOperations.getReimportLineageSourceVersionPage(this.#manuscriptReimportOperationsHost, bookId, after); }
 
-  #reimportLineageSourceVersionPage(bookId: string, after: string | null): {
-    items: string[];
-    previousCursor: string | null;
-    nextCursor: string | null;
-  } { return importReviewOperations.reimportLineageSourceVersionPage(this.#importReviewRecordsHost, bookId, after); }
+  #reimportLineageSourceVersionPage(bookId: string, after: string | null): Pick<ReimportLineageSourceVersionPageProjection, 'items' | 'previousCursor' | 'nextCursor'> { return importReviewOperations.reimportLineageSourceVersionPage(this.#importReviewRecordsHost, bookId, after); }
 
   private prepareBookCreationReviewForExactIdentity(
     bookId: string,
@@ -9659,7 +9613,7 @@ export class EditorialStore {
         const review = this.#reviewRuns.attentionReadings(progress, since, limit);
         return composeGlobalAttention({
           bookTasks: (this.#authority.prepare('SELECT book_id FROM books').all() as SqlRow[]).flatMap((book) =>
-            this.inspectBookTasks(asString(book.book_id), progress, waitingFor, () => null, limit).groups.flatMap((group) => group.items)
+            this.inspectBookTasks(asString(book.book_id), progress, waitingFor, () => null, limit, false).groups.flatMap((group) => group.items)
               .map((entry) => entry.item).filter((item) => item.target.kind === 'dialogue' || item.group === 'recent' && item.target.kind === 'task-plan')),
           globalDialogues: this.#globalAgentHistory(() => null),
           applyOutcomes: readApplyOutcomeAttention(this.#authority, limit),
@@ -9698,28 +9652,11 @@ export class EditorialStore {
       .map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
     const entries = books.flatMap((book) => this.inspectBookTasks(book.bookId, progress, waitingFor, dialogueLive, GLOBAL_ATTENTION_READ_LIMIT).groups.flatMap((group) => group.items));
     const attention: GlobalAttentionProjection = { groups: [], actionableCount: 0, running: false, processing: { state: 'local' } };
-    const overview = composeTaskOverview(attention, capacity, queuePosition, entries, books, queueFrozen, (item) => {
-      if (!['completed', 'cancelled', 'stopped'].includes(item.state)) return null;
-      if (item.runRecordId !== null) return this.#usage.taskSummary({ runRecordId: item.runRecordId });
-      if (item.target.kind === 'review' || item.target.kind === 'review-plan') {
-        return this.#usage.taskSummary({ taskIntentIds: this.#reviewRuns.controlTasks(item.target.bookId, item.target.reviewRunId).map((task) => task.taskIntentId) });
-      }
-      if (item.target.kind === 'dialogue') {
-        const dialogue = this.inspectDialogue(item.target.bookId, item.target.dialogueId, 0, () => null);
-        return { calls: dialogue.attempts.length, elapsed: dialogue.attempts.reduce((sum, attempt) => sum + (attempt.settledAt === null ? 0 : Math.max(0, Date.parse(attempt.settledAt) - Date.parse(attempt.startedAt))), 0) };
-      }
-      return null;
-    });
+    const overview = composeTaskOverview(attention, capacity, queuePosition, entries, books, queueFrozen, overviewUsage({ taskSummary: (target) => this.#usage.taskSummary(target),
+      reviewTaskIntentIds: (bookId, reviewRunId) => this.#reviewRuns.controlTasks(bookId, reviewRunId).map((task) => task.taskIntentId),
+      dialogueAttempts: (bookId, dialogueId) => this.inspectDialogue(bookId, dialogueId, 0, () => null).attempts }));
     const quickStarts = this.inspectDefaultExecutionRules().rules.filter((rule) => rule.state === 'active').map((rule) => ({ bookId: rule.bookId, procedureId: `rule:${rule.pattern}`, label: rule.name }));
-    return estimateTaskStarts({ ...overview, quickStarts, groups: overview.groups.map((group) => ({ ...group, items: group.items.map((item) => {
-      if (item.runRecordId === null || !['running', 'queued'].includes(item.state)) return item;
-      const facts = this.executionLedgerForRun(item.runRecordId).loadExecutionPlan(item.runRecordId);
-      const current = progress(item.runRecordId);
-      const unit = facts.manifest.units.find((unit) => unit.ordinal === current?.currentUnitOrdinal);
-      return { ...item, progress: { done: current?.unitsSettled ?? 0, total: facts.manifest.units.length,
-        currentUnitLabel: unit?.headingText ?? null, elapsedMs: current === null ? null : Math.max(0, Date.now() - Date.parse(item.at)),
-        modelWaiting: current?.attemptState === 'awaiting-response' } };
-    }) })) });
+    return estimateTaskStarts(withRunningProgress({ ...overview, quickStarts }, progress, (runRecordId) => this.executionLedgerForRun(runRecordId).loadExecutionPlan(runRecordId)));
   }
 
   /**
@@ -9728,7 +9665,7 @@ export class EditorialStore {
    * cancelled included — composed into 等你处理, 进行中 and 最近完成 by `global-attention.ts`. A read: nothing is written,
    * claimed or terminalized.
    */
-  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null, recentLimit?: number): BookTasksProjection {
+  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null, recentLimit?: number, work = true): BookTasksProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
@@ -9742,7 +9679,7 @@ export class EditorialStore {
           const ledger = kind === 'initial-evaluation' ? this.#initialEvaluation : this.#anyLedgerOfKind(kind);
           return ledger === null ? [] : ledger.attentionReadings(progress, '', limit, { bookId, cancelled: true }).outcomes.map((outcome) => ({ kind, outcome }));
         });
-        return composeBookTasks({
+        return withBookTaskWork(work ? this.#taskWork : null, dialogueLive, composeBookTasks({
           bookId, otherOutcomes, ...(recentLimit === undefined ? {} : { recentLimit }),
           analysisTasks: [...baseline.tasks, ...custom.tasks],
           analysisOutcomes: [...baseline.outcomes, ...custom.outcomes],
@@ -9754,7 +9691,7 @@ export class EditorialStore {
           dialogues: this.#dialogueCall(() => this.#dialogueTaskReadings(bookId, dialogueLive)),
           // Its unfinished Task Intent Drafts (Issue #423, slice 7a), in 等你处理.
           drafts: this.#draftCall(() => this.#draftAttention(bookId)),
-        });
+        }));
       } catch (error) {
         if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);
         throw error;

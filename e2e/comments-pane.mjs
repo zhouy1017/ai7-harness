@@ -1,6 +1,6 @@
 import { pointerClick, pointerElementDescription, pointerFailureDetail } from './dispatch-chooser.mjs';
 import { SIDEBAR, manuscriptRailJump, sidebarNavigate } from './controller.mjs';
-import { loadEveryMark } from './marks-paging.mjs';
+import { loadEveryMark, assertCardActionReachable, assertCommentsHeader } from './marks-paging.mjs';
 
 // Docking is possible only when an icon sidebar leaves the full reading measure, padding and edge rail. The rail counts at its
 // design width (4.75rem), never at the page's own measured width, so a rail moved on top of the pane cannot excuse an overlay.
@@ -211,11 +211,12 @@ export async function seedCommentsPane(renderer, check, waitFor, size = {width:1
   // A window that holds more marks than one answer carries (#1604) shows the seeds only once the pages are read.
   await loadEveryMark(renderer, waitFor);
   try { await waitFor(renderer, `(() => { const scroll=document.querySelector('.editor-window'),v=scroll.getBoundingClientRect(),first=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]'),last=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]'); if(first&&last&&(first.getBoundingClientRect().top<v.top||last.getBoundingClientRect().bottom>v.bottom)){scroll.scrollTop+=first.getBoundingClientRect().top-v.top-100;return false;} return __comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===false) && document.querySelector('.manuscript-comments-canvas').dataset.loading==='false'; })()`, 'comments-five-visible'); } catch {
-    const geometry=await renderer.evaluate(`(() => { const scroll=document.querySelector('.editor-window'),pane=document.querySelector('.manuscript-comments-scroll'),canvas=document.querySelector('.manuscript-comments-canvas'),v=scroll.getBoundingClientRect(); return {viewportTop:v.top,viewportBottom:v.bottom,textScroll:scroll.scrollTop,paneScroll:pane.scrollTop,loading:canvas.dataset.loading,reads:canvas.dataset.cardReads,seeds:__comments.ids.map(id=>{const a=document.querySelector('.editor-window [data-mark-id="'+id+'"]'),c=document.querySelector('[data-comment-card="'+id+'"]'),r=a?.getBoundingClientRect();return {anchor:!!a,top:r?.top,bottom:r?.bottom,card:!!c,hidden:c?.hidden,read:c?.dataset.revalidating};})}; })()`);
+    const geometry=await renderer.evaluate(`(() => { const scroll=document.querySelector('.editor-window'),pane=document.querySelector('.manuscript-comments-scroll'),canvas=document.querySelector('.manuscript-comments-canvas'),v=scroll.getBoundingClientRect(); return {viewportTop:v.top,viewportBottom:v.bottom,textScroll:scroll.scrollTop,paneScroll:pane.scrollTop,paneBox:(()=>{const r=pane.getBoundingClientRect();return [r.left,r.top,r.right,r.bottom]})(),selected:document.querySelector('[data-comment-card][data-selected="true"]')?.dataset.commentCard??null,active:{tag:document.activeElement?.tagName,card:document.activeElement?.closest('[data-comment-card]')?.dataset.commentCard??null,action:document.activeElement?.dataset?.markAction??null},loading:canvas.dataset.loading,reads:canvas.dataset.cardReads,seeds:__comments.ids.map(id=>{const a=document.querySelector('.editor-window [data-mark-id="'+id+'"]'),c=document.querySelector('[data-comment-card="'+id+'"]'),r=a?.getBoundingClientRect();return {anchor:!!a,top:r?.top,bottom:r?.bottom,card:!!c,hidden:c?.hidden,read:c?.dataset.revalidating,box:c?(()=>{const r=c.getBoundingClientRect();return [r.left,r.top,r.right,r.bottom]})():null};})}; })()`);
+    console.log('COMMENTS_SEED_FAILURE/'+JSON.stringify(geometry));
     check(false,'comments-five-visible',geometry);
   }
   // #1429: use the existing complete comments journey to exercise category/search linkage.
-  const category=await renderer.evaluate(`(() => {
+  const category=await renderer.evaluate(`(async () => {
     const pane=document.querySelector('.manuscript-comments-pane');
     const cards=__comments.ids.map(id=>pane.querySelector('[data-mark-card="'+id+'"]'));
     const inline=__comments.ids.map(id=>document.querySelector('.editor-window [data-mark-id="'+id+'"]'));
@@ -225,11 +226,12 @@ export async function seedCommentsPane(renderer, check, waitFor, size = {width:1
     pane.querySelector('[data-mark-filter-toggle]').click();
     pane.querySelector('[data-mark-category-filter="editor"]').click();
     const input=pane.querySelector('[data-mark-search-input]'); input.value='公开合成批注 2'; input.dispatchEvent(new Event('input',{bubbles:true}));
-    globalThis.__commentsSearch=input; const heading=document.querySelector('.manuscript-comments-heading').getBoundingClientRect().height,filters=document.querySelector('.editorial-mark-filters').getBoundingClientRect().height; return {cardsReady,inlineReady,headerReady:heading+filters<=84,heading,filters};
+    globalThis.__commentsSearch=input;
+    return {cardsReady,inlineReady};
   })()`);
   check(category.cardsReady,'comments-category-badges-and-search-cards',category);
   check(category.inlineReady,'comments-category-badges-and-search-words',category);
-  check(category.cardsReady&&category.inlineReady&&category.headerReady,'comments-category-badges-and-search',category);
+  await assertCommentsHeader(renderer,check,waitFor,'comments-category-badges-and-search');
   await waitFor(renderer, `(() => {
     const pane=document.querySelector('.manuscript-comments-pane');
     return __comments.ids.every((id,index)=>pane.querySelector('[data-comment-card="'+id+'"]')?.hidden===(index!==2)) &&
@@ -866,21 +868,27 @@ async function commentsTriage(renderer, check, waitFor, form, keyword) {
   // 下一条待处理 on the page, then across it; the card there stays selected once read.
   await nextClick('comments-triage-next-click');
   await waitFor(renderer, `${triageReady(0)} && ${TRIAGE_FIRST}===__triage.start`, 'comments-triage-next-on-page', 60_000);
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[0]') + '"]', 'comments-triage-next-on-page', {returnToCard:true});
   await nextClick('comments-triage-cross-click');
   await waitFor(renderer, `${TRIAGE_FIRST}!==__triage.start && ${triageReady(1)}`, 'comments-triage-crossed-selected', 60_000);
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[1]') + '"]', 'comments-triage-crossed-selected', {returnToCard:true});
   check(await renderer.evaluate(`(async () => { await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); await new Promise(done=>setTimeout(done,400)); return ${triageReady(1)}; })()`), 'comments-triage-crossed-stays-selected');
   // 上一条待处理 (Alt+↑) goes back across the page to the first seed.
   await triageKey(renderer, 'ArrowUp', 'ArrowUp', 38, 1);
   await waitFor(renderer, `${TRIAGE_FIRST}===__triage.start && ${triageReady(0)}`, 'comments-triage-previous-crossed', 60_000);
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[0]') + '"]', 'comments-triage-previous-crossed', {returnToCard:true});
   // Keyboard only: R on the page's last match walks on across the page; A and R then decide the next two, each next card focused.
   await triageKey(renderer, 'r', 'KeyR', 82);
   await waitFor(renderer, `${TRIAGE_FIRST}!==__triage.start && ${triageReady(1)}`, 'comments-triage-key-reject-crossed', 60_000);
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[1]') + '"]', 'comments-triage-key-reject-crossed', {returnToCard:true});
   check(await triageRecord(renderer, 0, 'rejected'), 'comments-triage-key-reject-recorded');
   await triageKey(renderer, 'a', 'KeyA', 65);
   await waitFor(renderer, triageReady(2), 'comments-triage-key-accept-next', 60_000);
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[2]') + '"]', 'comments-triage-key-accept-next', {returnToCard:true});
   check(await triageRecord(renderer, 1, 'applied'), 'comments-triage-key-accept-applied');
   await triageKey(renderer, 'r', 'KeyR', 82);
   await waitFor(renderer, triageReady(3), 'comments-triage-key-reject-next', 60_000);
+  await assertCardActionReachable(renderer, check, waitFor, '[data-comment-card="' + await renderer.evaluate('__triage.ids[3]') + '"]', 'comments-triage-key-reject-next', {returnToCard:true});
   check(await triageRecord(renderer, 2, 'rejected'), 'comments-triage-key-second-reject-recorded');
   // 接受 on the last seed's compact card, by pointer: hovered, its controls stand beside the preview, never over it.
   check(await renderer.evaluate(`(() => { document.querySelector('.editor-window [data-mark-id="'+__triage.ids[4]+'"]').scrollIntoView({block:'center',behavior:'instant'}); return true; })()`), 'comments-triage-quick-reveal');
