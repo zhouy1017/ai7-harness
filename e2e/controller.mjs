@@ -2040,6 +2040,17 @@ export function journeyCheckLabel(error) {
   return isContentFreeCheckLabel(label) ? label : null;
 }
 
+export function labelViewPlanInputFailure(error) {
+  if (!(error instanceof Error) || !Object.isExtensible(error) || Object.hasOwn(error, JOURNEY_CHECK)) return;
+  let label = 'review-sheet-view-plan-input-unclassified';
+  switch (error.message) {
+    case 'review-sheet-view-plan-target-moved-before-press': label = 'review-sheet-view-plan-target-moved-before-press'; break;
+    case 'review-sheet-view-plan-pointer-rest': label = 'review-sheet-view-plan-pointer-rest'; break;
+    case 'review-sheet-view-plan-target-moved-after-press': label = 'review-sheet-view-plan-target-moved-after-press'; break;
+  }
+  Object.defineProperty(error, JOURNEY_CHECK, { value: label });
+}
+
 /** The extra stderr line a failure prints beside its location line, or `null` when it names no content-free check. */
 export function formatJourneyCheckLine(journey, location, error) {
   const label = journeyCheckLabel(error);

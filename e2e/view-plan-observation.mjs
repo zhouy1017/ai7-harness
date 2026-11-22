@@ -1,4 +1,4 @@
-import { journeyCheckLabel } from './controller.mjs';
+import { journeyCheckLabel, labelViewPlanInputFailure } from './controller.mjs';
 
 function observePlan(expectedRun) {
   const button = () => document.querySelector('.review-run [data-review-action="view-plan"]');
@@ -57,6 +57,7 @@ export async function observeViewPlan(renderer, runId, press, awaitPlan) {
     await awaitPlan();
     outcome = 'complete';
   } catch (error) {
+    if (outcome === 'input-error') labelViewPlanInputFailure(error);
     for (const stage of ['target-moved-before-press', 'pointer-rest', 'target-moved-after-press']) {
       if (error.message === `review-sheet-view-plan-${stage}`) outcome = stage;
     }
