@@ -4002,6 +4002,64 @@ async function main() {
       JSON.stringify(rangeReopened.taskOutcome) === JSON.stringify(rangeRecorded.taskOutcome) && loopback.healthy() && loopback.observedRequests() === 0,
     'range-recorded-restart-preserves-result');
 
+    at('evaluation-relaunch-references');
+    // A source with no series in its saved scope. The window stays on its original Book while editing the other Book's references.
+    await writeFile(connectivityPath, 'offline');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'evaluation-reference-tasks');
+    const referenceBook = recordedPausedBook.bookId;
+    const priorBook = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then(route => route?.bookId ?? null)`);
+    requireJourney(priorBook === recordedBook.bookId && priorBook !== referenceBook, 'evaluation-reference-foreign-book');
+    const fixture = await renderer.evaluate(`(async () => {
+      const bookId = ${JSON.stringify(referenceBook)};
+      await window.ai7.inspectTaskOverview();
+      const { seriesId } = await window.ai7.createSeries({ title: '初评参考书系', note: '' });
+      const change = { seriesId, bookId, kind: 'add' };
+      const { previewDigest } = await window.ai7.previewSeriesMembershipChange(change);
+      await window.ai7.changeSeriesMembership({ ...change, previewDigest });
+      const run = await window.ai7.taskOverviewCall({ operation: 'launchInitialEvaluation', bookId, input: { clientCommandId: crypto.randomUUID(), startWhen: 'when-online' } });
+      return { seriesId, ref: run.taskIntentId };
+    })()`);
+    const referenceCard = `[data-task-item=${JSON.stringify('task:' + fixture.ref)}] .task-overview-card-title strong`;
+    await pressReachable(renderer, waitFor, requireJourney, referenceCard, 'evaluation-reference-source');
+    const drawerButton = name => `#task-drawer [data-task-drawer-control=${JSON.stringify(name)}]:not(:disabled)`;
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef === ${JSON.stringify(fixture.ref)}`, 'evaluation-reference-source-open');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('cancel-wait'), 'evaluation-reference-cancel-wait');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('redo'), 'evaluation-reference-redo');
+    const options = '#task-drawer .task-launch-options > summary';
+    await pressReachable(renderer, waitFor, requireJourney, options, 'evaluation-reference-options');
+    const series = '#task-drawer select[aria-label="本次任务的书系参考"]';
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(series)})?.value === ''`, 'evaluation-reference-original-book-only');
+    const choice = await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(series)}).options).findIndex(o => o.value === ${JSON.stringify(fixture.seriesId)})`);
+    requireJourney(choice > 0, 'evaluation-reference-target-series');
+    const chooseSeries = async (index, value, label) => {
+      await pressReachable(renderer, waitFor, requireJourney, series + ' + .ui-select-trigger', `evaluation-reference-${label}-chooser`);
+      await pressReachable(renderer, waitFor, requireJourney, series + ` ~ .ui-select-popover [data-index="${index}"]`, `evaluation-reference-${label}-choice`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(series)})?.value === ${JSON.stringify(value)}`, `evaluation-reference-${label}-selected`);
+    };
+    const closeOptions = async label => {
+      await pressReachable(renderer, waitFor, requireJourney, options, `evaluation-reference-${label}-close`);
+      await waitFor(renderer, `(() => { const node = document.querySelector('#task-drawer .task-launch-options'); return node?.open === false && !node.querySelector(':popover-open'); })()`, `evaluation-reference-${label}-closed`);
+    };
+    await chooseSeries(choice, fixture.seriesId, 'series');
+    await closeOptions('series');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('launch'), 'evaluation-reference-series-start');
+    // This provider-free policy refuses evaluation with series knowledge. It must retain the chosen series after refusal.
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-bar-refusal')?.textContent.includes('书系') && document.querySelector(${JSON.stringify(series)})?.value === ${JSON.stringify(fixture.seriesId)}`, 'evaluation-reference-series-refusal');
+    await pressReachable(renderer, waitFor, requireJourney, options, 'evaluation-reference-options-reopen');
+    await chooseSeries(0, '', 'book');
+    await closeOptions('book');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('launch'), 'evaluation-reference-start');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanKind === 'initial-evaluation' && drawer.dataset.taskPlanRef && drawer.dataset.taskPlanRef !== ${JSON.stringify(fixture.ref)}; })()`, 'evaluation-reference-new-run');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('cancel-wait'), 'evaluation-reference-settle');
+    await waitFor(renderer, `(async () => {
+      const ref = document.querySelector('#task-drawer')?.dataset.taskPlanRef;
+      if (!ref || ref === ${JSON.stringify(fixture.ref)}) return false;
+      const plan = await window.ai7.taskOverviewCall({ operation: 'inspectTaskPlan', bookId: ${JSON.stringify(referenceBook)}, input: { kind: 'initial-evaluation', ref } });
+      const route = await window.ai7.getBookWorkbenchRoute();
+      return plan.state.key === 'cancelled' && plan.relaunch?.operation === 'launchInitialEvaluation' && !Object.hasOwn(plan.relaunch.input, 'seriesId') && (route?.bookId ?? null) === ${JSON.stringify(priorBook)};
+    })()`, 'evaluation-reference-saved-book-only');
+    await writeFile(connectivityPath, 'online');
+
     // #1169: a standalone authored stock review, through the normal UI and the same native unit-child
     // composition the service test verifies by its eight distinct child Session spans. No capture is inherited.
     at('review-relaunch');
@@ -4137,51 +4195,6 @@ async function main() {
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
-    at('evaluation-relaunch-references');
-    // A source with no series in its saved scope. The window stays on its original Book while editing the other Book's references.
-    await writeFile(connectivityPath, 'offline');
-    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'evaluation-reference-tasks');
-    const referenceBook = recordedBook.bookId;
-    const priorBook = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then(route => route?.bookId ?? null)`);
-    requireJourney(priorBook !== referenceBook, 'evaluation-reference-foreign-book');
-    const fixture = await renderer.evaluate(`(async () => {
-      const bookId = ${JSON.stringify(referenceBook)};
-      await window.ai7.inspectTaskOverview();
-      const { seriesId } = await window.ai7.createSeries({ title: '初评参考书系', note: '' });
-      const change = { seriesId, bookId, kind: 'add' };
-      const { previewDigest } = await window.ai7.previewSeriesMembershipChange(change);
-      await window.ai7.changeSeriesMembership({ ...change, previewDigest });
-      const run = await window.ai7.taskOverviewCall({ operation: 'launchInitialEvaluation', bookId, input: { clientCommandId: crypto.randomUUID(), startWhen: 'when-online' } });
-      return { seriesId, ref: run.taskIntentId };
-    })()`);
-    const referenceCard = `[data-task-item=${JSON.stringify('task:' + fixture.ref)}] .task-overview-card-title strong`;
-    await pressReachable(renderer, waitFor, requireJourney, referenceCard, 'evaluation-reference-source');
-    const drawerButton = name => `#task-drawer [data-task-drawer-control=${JSON.stringify(name)}]:not(:disabled)`;
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef === ${JSON.stringify(fixture.ref)}`, 'evaluation-reference-source-open');
-    await pressReachable(renderer, waitFor, requireJourney, drawerButton('cancel-wait'), 'evaluation-reference-cancel-wait');
-    await pressReachable(renderer, waitFor, requireJourney, drawerButton('redo'), 'evaluation-reference-redo');
-    const options = '#task-drawer .task-launch-options > summary';
-    await pressReachable(renderer, waitFor, requireJourney, options, 'evaluation-reference-options');
-    const series = '#task-drawer select[aria-label="本次任务的书系参考"]';
-    await waitFor(renderer, `document.querySelector(${JSON.stringify(series)})?.value === ''`, 'evaluation-reference-original-book-only');
-    const choice = await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(series)}).options).findIndex(o => o.value === ${JSON.stringify(fixture.seriesId)})`);
-    requireJourney(choice > 0, 'evaluation-reference-target-series');
-    for (const [index, value, label] of [[choice, fixture.seriesId, 'series'], [0, '', 'book']]) {
-      await pressReachable(renderer, waitFor, requireJourney, series + ' + .ui-select-trigger', `evaluation-reference-${label}-chooser`);
-      await pressReachable(renderer, waitFor, requireJourney, series + ` ~ .ui-select-popover [data-index="${index}"]`, `evaluation-reference-${label}-choice`);
-      await waitFor(renderer, `document.querySelector(${JSON.stringify(series)})?.value === ${JSON.stringify(value)}`, `evaluation-reference-${label}-selected`);
-    }
-    await pressReachable(renderer, waitFor, requireJourney, options, 'evaluation-reference-options-close');
-    await pressReachable(renderer, waitFor, requireJourney, drawerButton('launch'), 'evaluation-reference-start');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanKind === 'initial-evaluation' && drawer.dataset.taskPlanRef && drawer.dataset.taskPlanRef !== ${JSON.stringify(fixture.ref)}; })()`, 'evaluation-reference-new-run');
-    await pressReachable(renderer, waitFor, requireJourney, drawerButton('cancel-wait'), 'evaluation-reference-settle');
-    await waitFor(renderer, `(async () => {
-      const ref = document.querySelector('#task-drawer')?.dataset.taskPlanRef;
-      if (!ref || ref === ${JSON.stringify(fixture.ref)}) return false;
-      const plan = await window.ai7.taskOverviewCall({ operation: 'inspectTaskPlan', bookId: ${JSON.stringify(referenceBook)}, input: { kind: 'initial-evaluation', ref } });
-      const route = await window.ai7.getBookWorkbenchRoute();
-      return plan.state.key === 'cancelled' && plan.relaunch?.operation === 'launchInitialEvaluation' && !Object.hasOwn(plan.relaunch.input, 'seriesId') && (route?.bookId ?? null) === ${JSON.stringify(priorBook)};
-    })()`, 'evaluation-reference-saved-book-only');
   } finally {
     finalCleanupRequested = true;
     try { await cancellation.cleanup(); } finally { cancellation.dispose(); }
