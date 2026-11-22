@@ -76,13 +76,8 @@ function inventoryText(state: UpgradeState,files: DatabasePackageMember[],digest
   return JSON.stringify({upgradeId:state.id,rollbackAttempt:state.rollbackAttempt,sha256:digest,members:files});
 }
 
-async function attemptManifest(directory: string,name: string,state: UpgradeState): Promise<string | null | undefined> {
-  const bound = state.currentManifestDigest;
-  // These files are published independently. A trusted content digest authenticates the member list
-  // even if the adjacent receipt's rename did not persist or its directory belonged to an earlier attempt.
-  const receipt = bound ? null : await recoveryReceipt(join(directory,'rollback-ready.json'));
-  if (receipt && !sameRollbackAttempt(receipt,state)) return undefined;
-  const text = await readSmallFile(join(directory,name),MAX_MANIFEST_BYTES + 512);
+async function readInventory(path: string) {
+  const text = await readSmallFile(path,MAX_MANIFEST_BYTES + 512);
   if (text === null) return null;
   let record;
   try { record = JSON.parse(text); } catch { return null; }
@@ -90,6 +85,18 @@ async function attemptManifest(directory: string,name: string,state: UpgradeStat
   if (!legacy && !Array.isArray(record?.members)) return null;
   const json = legacy ? text : JSON.stringify(record.members);
   const digest = createHash('sha256').update(json).digest('hex');
+  return {record,json,digest,legacy,members:legacy ? record : record.members};
+}
+
+async function attemptManifest(directory: string,name: string,state: UpgradeState): Promise<string | null | undefined> {
+  const bound = state.currentManifestDigest;
+  // These files are published independently. A trusted content digest authenticates the member list
+  // even if the adjacent receipt's rename did not persist or its directory belonged to an earlier attempt.
+  const receipt = bound ? null : await recoveryReceipt(join(directory,'rollback-ready.json'));
+  if (receipt && !sameRollbackAttempt(receipt,state)) return undefined;
+  const inventory = await readInventory(join(directory,name));
+  if (!inventory) return null;
+  const {record,json,digest,legacy} = inventory;
   if (bound) return digest === bound ? json : null;
   if (legacy || record.upgradeId !== state.id || record.rollbackAttempt !== state.rollbackAttempt) return undefined;
   return digest === record.sha256 && (!receipt?.currentManifestDigest || receipt.currentManifestDigest === digest) ? json : null;
@@ -300,6 +307,11 @@ async function verifyCurrentLibrary(root: string,dir: string,state: UpgradeState
   await verifyCopiedPayloads(database(dir),files,117);
 }
 
+function rollbackInventoryFingerprint(store: string,files: Iterable<DatabasePackageMember>): string {
+  const members = [...files].sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  return createHash('sha256').update(canonicalJson({store,members})).digest('hex');
+}
+
 async function rollbackStartFingerprint(root: string): Promise<string> {
   const store = join(root,'store');
   const files = await readMembers(root);
@@ -308,8 +320,7 @@ async function rollbackStartFingerprint(root: string): Promise<string> {
   await verifyCopiedPayloads(database(store),files,117,undefined,undefined,(path,sha256,bytes) => {
     intended.set(path,{path,sha256,bytes}); return true;
   });
-  const members = [...intended.values()].sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  return createHash('sha256').update(canonicalJson({store:await sourceFingerprint(root,store),members})).digest('hex');
+  return rollbackInventoryFingerprint(await sourceFingerprint(root,store),intended.values());
 }
 
 async function canPrepareRollback(root: string,state: UpgradeState): Promise<boolean> {
@@ -363,6 +374,36 @@ async function copyCurrentDatabase(root: string,from: string,to: string): Promis
 
 function independentDirectories(note: string): string[] {
   return [join(note,'current-database'),join(note,'prepared-database')];
+}
+
+async function bindRollbackStart(root: string,store: string,note: string,state: UpgradeState): Promise<void> {
+  const copies = independentDirectories(note);
+  const databases = new Set<string>();
+  for (const dir of [store,...copies]) {
+    const digest = await sourceFingerprint(root,dir).catch(() => null);
+    if (digest && (!state.currentDigest || state.currentDigest === digest)) databases.add(digest);
+  }
+  const inventories: Array<() => Promise<{members:unknown[];digest:string} | null>> =
+    [join(note,'current-files.json'),...copies.map(dir => join(dir,'files.json'))].map(path => () => readInventory(path));
+  inventories.push(async () => {
+    const members = await readMembers(join(store,'payloads'));
+    const json = JSON.stringify(members);
+    return {members,digest:createHash('sha256').update(json).digest('hex')};
+  });
+  for (const read of inventories) {
+    const candidate = await read().catch(() => null);
+    if (!candidate || !candidate.members.every(isDatabasePackageMember) ||
+        (state.currentManifestDigest && state.currentManifestDigest !== candidate.digest)) continue;
+    for (const digest of databases) {
+      if (rollbackInventoryFingerprint(digest,candidate.members) !== state.rollbackStartFingerprint) continue;
+      // This pair matches consent even if the independent renames left either half beside an old receipt.
+      // The caller still verifies the database identity, references and every physical member before publishing.
+      state.currentDigest = digest;
+      state.currentManifestDigest = candidate.digest;
+      return;
+    }
+  }
+  requireStore(false,'UPGRADE_MISMATCH','保存的数据库与完整文件清单无法共同核对回退开始时的书库。');
 }
 
 async function databaseCopyAtDigest(root: string,state: UpgradeState,expected: string,locations: string[]): Promise<string> {
@@ -756,6 +797,9 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         break;
       }
       if (unreadable && (!state.currentDigest || !state.currentManifestDigest)) throw unreadable;
+    }
+    if (!existsSync(newer) && state.rollbackStartFingerprint && (!state.currentDigest || !state.currentManifestDigest)) {
+      await bindRollbackStart(root,currentStore,note,state);
     }
     const liveDigest = await sourceFingerprint(root,currentStore).catch(() => null);
     const spare = state.currentDigest && (state.stage === 'return-new' || state.currentManifestDigest)

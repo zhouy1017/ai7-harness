@@ -1043,20 +1043,37 @@ it.each([['historical','removed'],['historical','added'],['current','removed'],[
   delete incomplete.currentManifestDigest;
   const missingCommitment = JSON.stringify(incomplete);
   await writeFile(join(prepared,receipt),first);
+  const savedMember = join(root,'store','payloads',member);
+  const isolatedMember = join(area,'held-b-member');
+  if (format === 'current') {
+    // Pair B's SQLite with A's inventory and members. Neither state matches B's start commitment.
+    await writeFile(join(note,'current-files.json'),firstManifest);
+    await writeFile(join(prepared,'files.json'),firstManifest);
+    if (change === 'added') await rename(savedMember,isolatedMember);
+    else await writeFile(savedMember,contents);
+  }
   for (const replay of [Buffer.from(missingCommitment),stale]) {
     await writeFile(phase,replay);
     await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
     expect(await readFile(phase)).toEqual(replay);
     expect(existsSync(join(root,member))).toBe(change === 'removed');
-    expect(existsSync(join(root,'store','payloads',member))).toBe(change === 'added');
+    expect(existsSync(savedMember)).toBe(format === 'current' ? change === 'removed' : change === 'added');
     expect(await readFile(join(note,receipt))).toEqual(first);
   }
-  // Restore the evidence, not the missing journal fields. The live SQLite has the correct bytes but a lost startup marker.
-  await writeFile(phase,change === 'added' ? missingCommitment : stale);
+  // Historical writers need their receipt. A current writer can prove the exact pair without one.
+  if (format === 'current') {
+    if (change === 'added') await rename(isolatedMember,savedMember);
+    else await rm(savedMember);
+    await writeFile(join(prepared,'files.json'),secondManifest);
+    expect(await readFile(phase)).toEqual(stale);
+  } else {
+    await writeFile(phase,change === 'added' ? missingCommitment : stale);
+    await writeFile(join(root,'store',receipt),JSON.stringify(second));
+  }
+  // The live SQLite has the correct bytes, while only an independent database has a valid startup marker.
   const marker = join(root,'store','ai7-data-version.json');
   await rm(marker);
   expect(existsSync(join(independent,'ai7-data-version.json'))).toBe(true);
-  await writeFile(join(root,'store',receipt),JSON.stringify(second));
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
   expect((await readDataVersionMarker(root))?.dataVersion).toBe(2);
   expect(existsSync(join(root,member))).toBe(change === 'added');
@@ -1069,6 +1086,10 @@ it.each([['historical','removed'],['historical','added'],['current','removed'],[
     await reopened.approveDatabaseExport(prep.preparationId,true);
   } finally { reopened.markCleanShutdown(); reopened.close(); }
   const pkg = await verifyDatabasePackage(exported,{dataRoot:root});
+  const inventory = JSON.parse(secondManifest.toString('utf8'));
+  const expected: DatabasePackageMember[] = Array.isArray(inventory) ? inventory : inventory.members;
+  const byPath = (files: DatabasePackageMember[]) => new Map(files.map(file => [file.path,file]));
+  expect(byPath(pkg.manifest.members.filter(file => file.path !== 'store/ai7.sqlite'))).toEqual(byPath(expected));
   const kept = pkg.manifest.members.find(file => file.path === member);
   if (change === 'added') expect(kept).toEqual({path:member,bytes:contents.length,sha256:createHash('sha256').update(contents).digest('hex')});
   else expect(kept).toBeUndefined();
