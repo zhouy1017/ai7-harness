@@ -641,7 +641,7 @@ async function dispatch(
           }
         }
         if (request.input.kind === 'review-run' && request.input.action === 'cancel') {
-          void analysisExecution.whenDone(runRecordId).then(() => store.finishCancelledReviewRun(runRecordId)).catch(() => undefined);
+          void store.finishCancelledReviewRunWhenDone(analysisExecution, runRecordId);
         }
       }
       return { id: request.id, ok: true, op: request.op, result: store.inspectTaskPlan(request.input, analysisProgress) };
@@ -2430,13 +2430,8 @@ async function run(): Promise<void> {
     } catch {
       // Reported where ②A's 自定义 tab reads the dimension.
     }
-    for (const runRecordId of store.cancellingLedgerRuns()) {
-      try {
-        analysisExecution.cancelRun(runRecordId, store.executionLedgerForRun(runRecordId));
-        void analysisExecution.whenDone(runRecordId).then(() => store!.finishCancelledReviewRun(runRecordId)).catch(() => undefined);
-      }
-      catch { /* The drawer keeps offering cancellation when the frozen contract cannot be read. */ }
-    }
+    // A Run of any other kind left cancelling is finished the same way, and its review category settles.
+    void store.finishStoppedReviewCancellations(analysisExecution);
     try {
       for (const launched of store.pendingLaunchedLedgerRuns()) {
         try { driveLaunchedLedgerRun(analysisExecution, launched); }
