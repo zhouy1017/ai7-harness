@@ -610,14 +610,17 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let view: EditorView;
 
   const applyEditableState = (): void => {
+    // A history write temporarily removes contenteditable. Keep its keyboard target
+    // focusable through the lock so the next shortcut reaches the editor.
+    if (deferredNavigationContinuity) view.dom.setAttribute('tabindex', '0');
+    else if (operationLocked) view.dom.setAttribute('tabindex', '-1');
     view.setProps({ editable: isEditable });
+    if (!deferredNavigationContinuity && !operationLocked) view.dom.removeAttribute('tabindex');
     view.dom.setAttribute('aria-readonly', isEditable() ? 'false' : 'true');
     view.dom.dataset['operationLocked'] = operationLocked ? 'true' : 'false';
     view.dom.dataset['inputMode'] = inputMode;
     // Whether an input method's composition is open in the text: a key command waits on it (#579).
     view.dom.dataset['composing'] = composing ? 'true' : 'false';
-    if (deferredNavigationContinuity) view.dom.setAttribute('tabindex', '0');
-    else view.dom.removeAttribute('tabindex');
   };
 
   const captureRenderedContinuity = (): EditorContinuity => {
