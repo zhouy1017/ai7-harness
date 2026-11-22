@@ -1107,6 +1107,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-relaunch',
     'review-destination',
     'dispatch-model-choice',
+    'evaluation-relaunch-references',
     'task-status-finished',
     'review-sheet',
     'review-prepare',

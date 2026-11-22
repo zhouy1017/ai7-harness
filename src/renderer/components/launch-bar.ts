@@ -263,14 +263,23 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     references.append(similarMaterialsField(api, request.bookId, page.materials?.items ?? [], selected, id => {
       selected.add(id); request.input = { ...request.input, materialIds: [...selected] }; commandId = crypto.randomUUID(); invalidatePreview(); paintReferences(); updateAdjusted();
     }));
-    if (request.operation === 'launchInitialEvaluation' && page.market.series.length > 0) {
+    const savedSeries = request.operation === 'launchInitialEvaluation' && request.input.relaunchOf ? request.input.seriesId : null;
+    if (request.operation === 'launchInitialEvaluation' && (page.market.series.length > 0 || savedSeries)) {
       const label = el('label', undefined, '书系参考');
       const select = el('select'); select.setAttribute('aria-label', '本次任务的书系参考');
       for (const [value, title] of [['', '仅本书'], ...page.market.series.map(series => [series.seriesId, `书系《${series.title}》`])]) {
         const option = el('option', undefined, title); option.value = value!; select.append(option);
       }
+      if (savedSeries && !page.market.series.some(series => series.seriesId === savedSeries)) {
+        const saved = el('option', undefined, '原任务的书系（当前不可用）');
+        saved.value = savedSeries; saved.disabled = true; select.append(saved);
+      }
       select.value = request.input.seriesId ?? '';
-      select.addEventListener('change', () => { request.input = { ...request.input, seriesId: select.value || null }; commandId = crypto.randomUUID(); });
+      select.addEventListener('change', () => {
+        request.input = { ...request.input, seriesId: select.value || null };
+        commandId = crypto.randomUUID();
+        if (savedSeries) invalidatePreview();
+      });
       label.append(select); references.append(label);
     }
   }).catch(error => { if (!stopped) references.append(el('p', undefined, errorMessage(error, '参考资料暂时无法读取，请重新打开开始栏。'))); });
