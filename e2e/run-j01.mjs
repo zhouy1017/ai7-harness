@@ -2104,16 +2104,18 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'empty-book-sidebar-overview-again');
   await waitFor(renderer, `${sidebarBookCurrent(bookId, 'overview')} && document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(bookId)}]')`, 'empty-book-sidebar-overview-again-ready');
 
+  const chooserStartedAt = Date.now();
   const dropPoint = await renderer.evaluate(`(() => { const b=document.querySelector('.book-overview').getBoundingClientRect(); return {x:Math.min(innerWidth-20,b.left+b.width/2),y:Math.min(innerHeight-20,b.top+50)}; })()`);
   for (const type of ['dragEnter','dragOver','drop']) await renderer.send('Input.dispatchDragEvent', {type,...dropPoint,data:{items:[],files:[SAMPLE1_PATH],dragOperationsMask:1}});
   try {
     await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'existing-book-target-selected');
+    process.stderr.write(`J-01/chooser-ready/ms/${Date.now() - chooserStartedAt}\n`);
   } catch (error) {
     try {
       error.pointerFailure = pointerFailureDetail(await renderer.evaluate(`(() => {
         const selected = document.querySelector('input[name="import-target"]:checked');
         return { kind: 'j01-readiness', width: innerWidth, height: innerHeight,
-          elapsedMs: Math.round(performance.now()), productReady: document.documentElement.dataset.ai7ProductReady === 'true',
+          elapsedMs: ${Date.now() - chooserStartedAt}, productReady: document.documentElement.dataset.ai7ProductReady === 'true',
           serviceInterrupted: document.documentElement.dataset.ai7ServiceState === 'interrupted', visible: document.visibilityState === 'visible', focused: document.hasFocus(),
           options: document.querySelectorAll('input[name="import-target"]').length, selected: document.querySelectorAll('input[name="import-target"]:checked').length,
           relationships: document.querySelectorAll('[data-import-relationship]').length,

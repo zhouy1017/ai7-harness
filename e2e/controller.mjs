@@ -2511,6 +2511,14 @@ export function collectJourneyPointerFailure(result, journey, failure) {
   catch { return null; }
 }
 
+/** Issue #1673: a successful chooser wait exposes only its bounded elapsed milliseconds. */
+export function collectJ01ChooserTiming(result) {
+  if (result.code !== 0 || result.signal !== null || result.spawnError || result.outputOverflow) return null;
+  const lines = result.stderr.split(/\r?\n/u).filter(line => line.startsWith('J-01/chooser-ready/ms/'));
+  if (lines.length !== 1 || !/^J-01\/chooser-ready\/ms\/(?:0|[1-9]\d{0,7})$/u.test(lines[0])) return null;
+  return Number(lines[0].slice('J-01/chooser-ready/ms/'.length));
+}
+
 /** Classify a finished journey process the same way the payload-safe diagnostic does. */
 export function classifyJourneyResult(result, journey) {
   if (result.spawnError) return { location: 'controller', errorClass: 'controller-spawn' };
