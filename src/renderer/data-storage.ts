@@ -108,7 +108,7 @@ export function createDataStorage(options: DataStorageOptions) {
       mountScheduledBackup({ root: scheduledBackup, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
       void rendererApi.inspectDataVersion().then((version) => {
         if (!summary.isConnected) return;
-        if (version.upgrades[0]?.fromDataVersion === 1 && version.upgrades[0].toDataVersion === 2) {
+        if (version.canRollbackUpgrade) {
           summary.append(button('回到升级前的数据','secondary',async () => {
             try { await rendererApi.quitApplication('rollback-upgrade'); }
             catch (error) { setStatus(rendererErrorMessage(error,'无法恢复升级前的数据。'),'error'); }
@@ -136,7 +136,7 @@ export function createDataStorage(options: DataStorageOptions) {
           lines.append(element('p', undefined, `${dataVersionUpgradeLine(upgraded, localInstantLabel).replace(/。$/u, '')}；${dataVersionUpgradeBackupLine(upgraded)}`));
           // Going back uses the earlier complete backup when this upgrade began from an unfinished one's middle state, so the steps
           // stand while that backup does, whatever became of this upgrade's own (Issue #433 review).
-          if (upgraded.rollback?.backupPresent ?? upgraded.backupPresent) {
+          if (upgraded.toDataVersion !== 2 && (upgraded.rollback?.backupPresent ?? upgraded.backupPresent)) {
             const rollback = dataVersionRollbackSteps(upgraded, { dataRoot: projection.canonicalRoot, backupLocation: version.backupLocation });
             const steps = element('ol', 'data-version-rollback');
             for (const step of rollback.steps) steps.append(element('li', 'field-note', step));

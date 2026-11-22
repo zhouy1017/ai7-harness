@@ -964,7 +964,7 @@ async function dispatch(
         result: store.inspectSeriesHistory({ seriesId: request.input.seriesId, bookId: request.input.bookId }, request.input.after),
       };
     case 'inspectDataVersion':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectDataVersion() };
+      return { id: request.id, ok: true, op: request.op, result: { ...store.inspectDataVersion(), canRollbackUpgrade: await store.hasLocalUpgradeSource() } };
     // Only under this launch's verified External Export Policy, as every other export (Issue #434, S86a review), and off the
     // request: each answers at once with the export's activity, which the window follows (Issue #434 review, V2-UX-EXP-011).
     case 'prepareDatabaseExport':

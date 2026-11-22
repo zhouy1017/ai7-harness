@@ -2,21 +2,25 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { baselineSchemaObjects, createBaselineSchema, requireBaselineSchema } from './baseline-schema.js';
 import { snapshotWorkingRevision } from './bounded-manuscript.js';
+import { canonicalSchemaSql } from './manuscript/bounded-kernel.js';
 import { openPackageStore } from './database-exports.js';
 import { assignKeysAndPages, validateBranchPositions } from './manuscript/working-positions.js';
 import { mapRevision116ModelRoleChoices, writeModelRoleChoice, type Revision116ModelRoleRow } from './model-service-connections.js';
 import { installPreinstalledStandardTables } from './standard-tables.js';
+import { validateProcedureDefinitions } from './procedures/definition-store.js';
 import { inventoryStore, NOT_COUNTED } from './store-inventory.js';
 import { requireStore } from './store-records.js';
 
 // The complete sqlite_schema dump from the supported revision, including implicit indexes.
-const SOURCE_SHAPE = '1accacc9e7e75bf4aa0ebbc99387ca21d44741c7ba9f6ab580867aba1d1effb9';
+const SOURCE_SHAPE = '5090023e9251e80bc2d89ab3592561c73efae079e8d76365e7132210032bf0e7';
 
 export function requireUpgradeSource(db: DatabaseSync): void {
-  const rows = db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type, name').all();
+  const rows = db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type, name').all()
+    .map(row => ({ ...row, sql: row.sql === null ? null : canonicalSchemaSql(String(row.sql)) }));
   requireStore(db.prepare('PRAGMA user_version').get()?.user_version === 116 &&
     createHash('sha256').update(JSON.stringify(rows)).digest('hex') === SOURCE_SHAPE,
-  'UPGRADE_SOURCE_INVALID', '无法识别这份旧数据库的结构。请先用 0.7.4 打开并重新导出。');
+    'UPGRADE_SOURCE_INVALID', '无法识别这份旧数据库的结构。请先用 0.7.4 打开并重新导出。');
+  validateProcedureDefinitions(db);
 }
 
 const lateGuards = new Set([
@@ -97,6 +101,8 @@ function upgradeVersions(db: DatabaseSync): void {
       .run(revision, branch.manuscript_id!, id, '升级时的稿件', branch.base_revision_id!, branch.source_version_id!,
         branch.working_digest!, new Date().toISOString(), branch.manuscript_id!);
     snapshotWorkingRevision(db, id, revision, total);
+    db.prepare('UPDATE branch_working_state SET base_revision_id=?, last_checkpoint_sequence=journal_sequence WHERE branch_id=?').run(revision, id);
+    db.prepare('UPDATE manuscript_branches SET base_revision_id=? WHERE branch_id=?').run(revision, id);
   }
 }
 
@@ -115,13 +121,13 @@ export function convertUpgradeStore(oldPath: string, newPath: string): void {
         ORDER BY name='import_abandonment_cleanup_intents', name`).all();
       for (const row of tables) {
         const name = String(row.name);
-        if (Object.hasOwn(NOT_COUNTED, name) || ['working_offset_nodes','material_index_vectors','manuscript_outline'].includes(name)) continue;
+        if (Object.hasOwn(NOT_COUNTED, name) || ['working_offset_nodes', 'material_index_vectors', 'manuscript_outline'].includes(name)) continue;
         copyTable(source, target, name);
       }
       const roles = source.prepare('SELECT * FROM model_service_connections').all() as unknown as Revision116ModelRoleRow[];
       for (const choice of mapRevision116ModelRoleChoices(roles)) writeModelRoleChoice(target, choice.roleId, choice);
       verifyGuards(target);
-      check(rowDigest(source,'imported_skill_update_candidates') === rowDigest(target,'imported_skill_update_candidates'), '技能采用记录');
+      check(rowDigest(source, 'imported_skill_update_candidates') === rowDigest(target, 'imported_skill_update_candidates'), '技能采用记录');
       for (const guard of guards) target.exec(guard.sql);
       installPreinstalledStandardTables(target);
       upgradeVersions(target);
@@ -142,14 +148,22 @@ export function verifyUpgradeStore(oldPath: string, newPath: string): string {
       requireBaselineSchema(target);
       check(target.prepare('PRAGMA integrity_check').get()?.integrity_check === 'ok', '数据库完整性');
       check(!target.prepare('PRAGMA foreign_key_check').get(), '数据库引用');
-      check(textDigest(source,'position') === textDigest(target,'order_key'), '稿件段落顺序与正文');
+      check(textDigest(source, 'position') === textDigest(target, 'order_key'), '稿件段落顺序与正文');
       for (const { branch_id } of target.prepare('SELECT branch_id FROM branch_working_state').all()) validateBranchPositions(target, String(branch_id));
-      const expected = { ...before.tables, standard_tables: 4, standard_table_versions: 4, standard_table_entries: 68507,
+      const roleChoices = mapRevision116ModelRoleChoices(source.prepare('SELECT * FROM model_service_connections').all() as unknown as Revision116ModelRoleRow[]);
+      for (const role of roleChoices) {
+        const stored = target.prepare('SELECT connection_id,model_id,reasoning_effort FROM model_role_choices WHERE role_id=?').get(role.roleId);
+        check(stored?.connection_id === role.connectionId && stored.model_id === role.modelId && stored.reasoning_effort === (role.reasoningEffort ?? null), '模型角色');
+      }
+      const expected = {
+        ...before.tables, standard_tables: 4, standard_table_versions: 4, standard_table_entries: 68507,
         manuscript_revisions: before.tables.manuscript_revisions + before.tables.manuscripts,
         manuscript_block_versions: before.tables.manuscript_block_versions + before.tables.working_blocks,
-        model_role_choices: mapRevision116ModelRoleChoices(source.prepare('SELECT * FROM model_service_connections').all() as unknown as Revision116ModelRoleRow[]).length,
-        working_pages: after.tables.working_pages };
-      for (const [name,count] of Object.entries(expected)) check(after.tables[name] === count, name);
+        model_role_choices: roleChoices.length,
+        working_pages: source.prepare(`SELECT coalesce(sum(max(1, (n + 192) / 256)),0) n
+          FROM (SELECT count(*) n FROM working_blocks GROUP BY branch_id)`).get()!.n
+      };
+      for (const [name, count] of Object.entries(expected)) check(after.tables[name] === count, name);
       const entities = { ...before.entities, library: { tables: 4, versions: 4, entries: 68507, sourceFiles: 0 } };
       for (const name of Object.keys(entities)) check(JSON.stringify(entities[name]) === JSON.stringify(after.entities[name]), name);
       const counts = before.tables;

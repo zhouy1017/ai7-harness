@@ -8245,6 +8245,11 @@ export class EditorialStore {
   // ---- 设置 › 数据与存储 › 版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1) --------------------------------
 
   /** The software version and the Data Version apart, the latest software update, and the store's version records. A read. */
+  async hasLocalUpgradeSource(): Promise<boolean> {
+    const { hasLocalUpgradeSource } = await import('./in-app-upgrade.js');
+    return hasLocalUpgradeSource(this.#dataRoot);
+  }
+
   inspectDataVersion(): DataVersionProjection {
     return this.#dataVersionCall(() => {
       const { latest, recent, update, count, upgrades } = this.#dataVersions.standing();
