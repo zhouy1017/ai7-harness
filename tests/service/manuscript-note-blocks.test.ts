@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { StatementSync } from 'node:sqlite';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
@@ -69,7 +69,7 @@ describe('the note block (#1204)', () => {
     noted.view();
     const reads = vi.spyOn(StatementSync.prototype, 'get');
     const walks = () => reads.mock.contexts.filter(statement => statement instanceof StatementSync &&
-      statement.sourceSQL.includes('WITH RECURSIVE lineage AS') && statement.sourceSQL.includes('manuscript_note_sources')).length;
+      /\bWITH\s+RECURSIVE\s+lineage\s+AS\b/i.test(statement.sourceSQL)).length;
     try {
       for (let ordinal = 13; ordinal <= 15; ordinal++) {
         await checkpoint(plain, ordinal);
@@ -83,6 +83,17 @@ describe('the note block (#1204)', () => {
         expect(noted.view().blocks.some(row => row.noteLinks?.length)).toBe(true);
       }
       expect(walks()).toBe(initialWalks);
+      const plans = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const probes = new Set(reads.mock.contexts.filter(statement => statement instanceof StatementSync).map(statement => statement.sourceSQL)
+          .filter(sql => sql.startsWith('SELECT source_version_id, parent_revision_id,') || sql.startsWith('SELECT 1 FROM manuscript_note_sources WHERE') ||
+            sql.startsWith('SELECT 1 FROM manuscript_block_versions WHERE revision_id = ? AND kind')));
+        expect(probes.size).toBeGreaterThan(1);
+        for (const sql of probes) {
+          const plan = plans.prepare('EXPLAIN QUERY PLAN ' + sql).all(...Array<null>(sql.split('?').length - 1).fill(null));
+          expect(plan.map(row => row.detail).some(detail => typeof detail === 'string' && /^SCAN\b/.test(detail))).toBe(false);
+        }
+      } finally { plans.close(); }
     } finally { reads.mockRestore(); }
   });
   it('keeps both note links on the absorbing paragraph through a merge and undo', async () => {
