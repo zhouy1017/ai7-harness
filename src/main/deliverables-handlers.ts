@@ -57,6 +57,23 @@ export function registerDeliverablesHandlers(context: {
     }),
   );
 
+  for (const operation of ['listBookVersions', 'viewBookVersion', 'restoreBookVersion'] as const) {
+    ipcMain.handle(IPC_CHANNELS[operation], (event, input: ServiceOperationMap[typeof operation]['input']) => envelope(async () => {
+      const owned = requireSender(event);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const run = async () => {
+        requireAuthority();
+        requireCurrentRouteReadEpoch(owned, generation, sequence);
+        if (requireCurrentBookRoute(owned).bookId !== input.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '版本不属于当前图书。');
+        const result = await service.call(operation, input);
+        requireCurrentRouteReadEpoch(owned, generation, sequence);
+        return result;
+      };
+      return operation === 'restoreBookVersion' ? serializeEffect(run) : run();
+    }));
+  }
+
   ipcMain.handle(
     IPC_CHANNELS.designatePublicationVersion,
     (event, input: Omit<DesignatePublicationVersionInput, 'bookId'>) =>

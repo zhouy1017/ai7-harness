@@ -461,6 +461,8 @@ Not proven here: a conflict whose words were deleted outright, where `保存为�
 
 ## J-07 发稿: Milestone Versions, 设为发稿版本, 导出 · DOCX and 交付 · 生产文档
 
+The 工作概览 version-list stages open an existing historical revision, compare the selected clean DOCX with that revision (not the working text), restore it, undo and redo in the editor, refuse a targeted undo after a later edit and reopen the pre-restore autosave. The service cases also exercise a still-standing change at the top of undo, anchor recovery, and a failure after the working state has been replaced.
+
 Wave 23 #1288 places the last two admitted input paragraphs inside a source table and adds a local raster image. The manuscript shows a read-only table and a decoded image with the source-restoration label; DOCX export preserves the table XML and the media bytes. PDF/Markdown fidelity continues to disclose their unavailable table/image restoration. Service tests refuse table journal edits and verify the preserved image relationship and full source table XML.
 
 J-07's inventory of renderer members matching `/export|publish|send/` covers the paths that take Book material out of AI7. `saveDeveloperProposalFile` (Issue #65, S30) writes a 开发建议 — which holds no Book material and is not an External Export Policy target ([ADR 0087](../adr/0087-make-a-captured-procedure-runnable-through-the-review-run-path.md) §6) — through the same Save dialog, and is deliberately not named as an export; J-13 covers it.

@@ -707,6 +707,9 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['saveMilestone']['output']>(IPC_CHANNELS.saveMilestone, input),
   inspectDeliverables: () =>
     invoke<ServiceOperationMap['inspectDeliverables']['output']>(IPC_CHANNELS.inspectDeliverables),
+  listBookVersions: (input: ServiceOperationMap['listBookVersions']['input']) => invoke<ServiceOperationMap['listBookVersions']['output']>(IPC_CHANNELS.listBookVersions, input),
+  viewBookVersion: (input: ServiceOperationMap['viewBookVersion']['input']) => invoke<ServiceOperationMap['viewBookVersion']['output']>(IPC_CHANNELS.viewBookVersion, input),
+  restoreBookVersion: (input: ServiceOperationMap['restoreBookVersion']['input']) => invoke<ServiceOperationMap['restoreBookVersion']['output']>(IPC_CHANNELS.restoreBookVersion, input),
   designatePublicationVersion: (input: Omit<ServiceOperationMap['designatePublicationVersion']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['designatePublicationVersion']['output']>(IPC_CHANNELS.designatePublicationVersion, input),
   inspectProductionDocuments: () =>

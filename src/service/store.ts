@@ -7935,6 +7935,18 @@ export class EditorialStore {
     return this.#publicationCall(() => this.#withActuals(this.#publicationVersions.deliverables(bookId)));
   }
 
+  listBookVersions(input: ServiceOperationMap['listBookVersions']['input']) {
+    return this.#boundedCall(() => this.#bounded.listBookVersions(input));
+  }
+
+  viewBookVersion(input: ServiceOperationMap['viewBookVersion']['input']) {
+    return this.#boundedCall(() => this.#bounded.viewBookVersion(input));
+  }
+
+  restoreBookVersion(input: ServiceOperationMap['restoreBookVersion']['input']) {
+    return this.#boundedCall(() => this.#boundedAuthority.restoreBookVersion(input));
+  }
+
   /** 交付物's 录入定价与首印 line with what was entered for its 发稿版本 (Issue #430, S82). */
   #withActuals(deliverables: DeliverablesProjection): DeliverablesProjection {
     return evaluationCalibrationOperations.withActuals(this.#evaluationCalibrationHost, deliverables);

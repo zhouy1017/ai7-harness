@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { MAX_BLOCK_CODE_UNITS, MAX_BLOCK_GRAPHEMES, type JournalEditInput, type JournalStructuralEdit, type ManuscriptBlockKind } from '../../shared/protocol.js';
 import {
-  BLOCK_PATTERN, BoundedStoreError, HISTORY_BATCH, MIGRATION_BATCH, asNumber, asString, graphemes, one, requireBounded, stagedBlockLength, type SqlRow,
+  BLOCK_PATTERN, BoundedStoreError, HISTORY_BATCH, MIGRATION_BATCH, REVISION_IMPORT_LINEAGE, asNumber, asString, graphemes, one, requireBounded, stagedBlockLength, type SqlRow,
 } from './bounded-kernel.js';
 import { blockDigest, blockShapeFromDigest, memberPresenceColumns, recoveryCommandEvidenceDigest, recoveryWorkingDigest } from './command-history.js';
 import { schemaHas } from '../statement-cache.js';
@@ -247,6 +247,22 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
   ).run(sequence, workingDigest, binding.historySequence + 1, binding.branchId, binding.journalSequence, binding.workingDigest);
   requireBounded(state.changes === 1, 'EDIT_SEQUENCE_CHANGED', '修订日志在保存时已前进。');
   hooks.recordLifetimeWrite(sequence, workingDigest, durableAt);
+}
+
+export function restoreRevisionMergeLineage(db: DatabaseSync, branchId: string, revisionId: string): void {
+  db.prepare(`WITH RECURSIVE ${REVISION_IMPORT_LINEAGE}, cutoffs AS (
+      SELECT journal.base_revision_id, max(journal.sequence) last_sequence FROM lineage
+        JOIN lineage parent ON parent.revision_id = lineage.parent_revision_id
+        JOIN edit_journal_entries journal ON journal.base_revision_id = lineage.parent_revision_id AND journal.resulting_working_digest = lineage.revision_digest
+        WHERE journal.branch_id = ? GROUP BY journal.base_revision_id
+    ), states AS (
+      SELECT journal.command_group_id, journal.command_kind, row_number() OVER (PARTITION BY journal.command_group_id ORDER BY journal.sequence DESC) latest
+        FROM edit_journal_entries journal JOIN cutoffs ON journal.base_revision_id = cutoffs.base_revision_id AND journal.sequence <= cutoffs.last_sequence
+        WHERE journal.branch_id = ? AND journal.command_kind IN ('merge','undo','redo')
+    ), applied AS (SELECT command_group_id FROM states WHERE latest = 1 AND command_kind IN ('merge','redo'))
+    UPDATE manuscript_command_groups SET status = CASE WHEN command_group_id IN applied THEN 'applied' ELSE 'superseded' END
+    WHERE branch_id = ? AND kind = 'merge' AND (status = 'applied' OR command_group_id IN applied)`)
+    .run(revisionId, branchId, branchId, branchId, branchId);
 }
 
 /** Whether a command group is a structural one, which 撤销 and 重做 replay here rather than member by member. */

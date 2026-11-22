@@ -466,6 +466,61 @@ describe('the Manuscript screen lifecycle', () => {
     app.showing?.destroy();
   });
 
+  it.each(['undo', 'redo'] as const)('reopens a valid window without repeating a committed restore %s if the first paragraph disappeared', async action => {
+    const initial = windowOf('book-one');
+    const next = { ...initial, revisionId: 'next', workingDigest: 'c'.repeat(64), blocks: initial.blocks.map(block => ({ ...block, blockId: 'replacement' })) };
+    const step = { stepId: 'restore-step', kind: 'restore', label: '恢复稿件版本', changeCount: 1 };
+    const history = vi.fn(async () => ({ revisionId: next.revisionId, journalSequence: next.journalSequence, workingDigest: next.workingDigest,
+      completionLabel: '稿件已刷新。', anchorBlockId: null, blocked: false }));
+    const load = vi.fn(async ({ target }: { target: { kind: string } }) => {
+      if (target.kind === 'window-start') throw { code: 'WINDOW_NOT_FOUND', message: '稿件位置不存在。' };
+      return next;
+    });
+    const app = shell(new Proxy({ platform: 'win32', recordManuscriptEntryPosition: async () => undefined,
+      inspectEditorHistory: async () => ({ undo: step, redo: step }), undoManuscript: history, redoManuscript: history,
+      getManuscriptWindowAt: load, getOutline: async () => ({ entries: [], nextCursor: null }),
+    } as Record<string | symbol, unknown>, { get: (known, key) => key in known ? known[key] : () => new Promise<never>(() => undefined) }) as unknown as RendererApi);
+    const status = vi.fn();
+    app.open(initial, { setStatus: status });
+    const control = app.screen.querySelector<HTMLButtonElement>(action === 'undo' ? '[aria-label="撤销"]' : '[aria-label="重做"]')!;
+    control.click();
+    for (let tick = 0; tick < 60; tick += 1) await Promise.resolve();
+    expect(history).toHaveBeenCalledTimes(1);
+    expect(load.mock.calls.map(([input]) => input.target.kind)).toEqual(['window-start', 'start']);
+    expect(status).toHaveBeenLastCalledWith('稿件已刷新。', 'success');
+    expect(control.disabled).toBe(false);
+    app.showing?.destroy();
+  });
+
+  it('reopens the later stable state only for the same editable book and branch, without replaying an acknowledged restore', async () => {
+    const initial = windowOf('book-one');
+    const committed = { ...initial, revisionId: 'restored', journalSequence: 5, completionLabel: '已撤销', anchorBlockId: null };
+    const later = { ...initial, revisionId: 'later', journalSequence: 6, workingDigest: 'c'.repeat(64) };
+    let reply = later;
+    let interrupted = false;
+    const send = vi.fn(async () => committed);
+    const app = shell(new Proxy({ platform: 'win32', recordManuscriptEntryPosition: async () => undefined,
+      inspectEditorHistory: async () => ({ undo: { kind: 'restore', changeCount: 1 } }), undoManuscript: send,
+      getManuscriptWindowAt: async () => reply, getOutline: async () => ({ entries: [], nextCursor: null }),
+    } as Record<string | symbol, unknown>, { get: (known, key) => key in known ? known[key] : () => new Promise<never>(() => undefined) }) as unknown as RendererApi);
+    const status = vi.fn();
+    app.open(initial, { setStatus: status, interrupted: () => interrupted });
+    const retry = [...app.screen.querySelectorAll('button')].find(item => item.textContent === '重试权威刷新')!;
+    const settle = async () => { for (let tick = 0; tick < 60; tick += 1) await Promise.resolve(); };
+    app.screen.querySelector<HTMLButtonElement>('.editor-history-undo')!.click();
+    await settle();
+    expect(retry.hidden).toBe(false);
+    for (const invalid of [{ ...later, bookId: 'other' }, { ...later, branchId: 'other' }]) {
+      reply = invalid; retry.click(); await settle(); expect(retry.hidden).toBe(false);
+    }
+    reply = later; interrupted = true; retry.click(); await settle(); expect(retry.hidden).toBe(false);
+    interrupted = false; retry.click(); await settle();
+    expect(retry.hidden).toBe(true);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(status).toHaveBeenLastCalledWith(expect.stringContaining('最新稿件'), 'success');
+    app.showing?.destroy();
+  });
+
   it('reads the existing preference and maps each menu choice without losing it in direct edit', async () => {
     setAutoApplyEditorRevisions(false);
     const app = shell();

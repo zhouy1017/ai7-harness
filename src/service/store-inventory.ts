@@ -103,6 +103,7 @@ export const INVENTORY_TABLES = [
   'editor_step_effects',
   'editor_step_mark_anchors',
   'editor_step_parts',
+  'editor_step_restore_revisions',
   'editor_steps',
   'editorial_learning_controls',
   'editorial_mark_replies',

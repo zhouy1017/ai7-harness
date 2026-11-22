@@ -1573,6 +1573,12 @@ async function dispatch(
     // ⑥ 交付物 · 发稿 (Issue #414, plan slice S65): a Book-scoped read and one deterministic, local command.
     case 'inspectDeliverables':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDeliverables(request.input.bookId) };
+    case 'listBookVersions':
+      return { id: request.id, ok: true, op: request.op, result: store.listBookVersions(request.input) };
+    case 'viewBookVersion':
+      return { id: request.id, ok: true, op: request.op, result: store.viewBookVersion(request.input) };
+    case 'restoreBookVersion':
+      return { id: request.id, ok: true, op: request.op, result: store.restoreBookVersion(request.input) };
     case 'designatePublicationVersion':
       return { id: request.id, ok: true, op: request.op, result: store.designatePublicationVersion(request.input) };
     case 'inspectProductionDocuments':

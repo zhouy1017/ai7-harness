@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { DurableHistoryProjection, JournalStructuralEdit, ManuscriptWindowProjection } from '../../src/shared/protocol.js';
+import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -20,16 +21,20 @@ let book: { manuscriptId: string; branchId: string };
 beforeEach(async () => {
   roots = await createServiceTestRoots();
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  const path = join(roots.inputRoot, 'steps.docx');
-  await composeManuscriptDocx(path, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 30, title: '步骤组稿' });
+  book = await importBook('步骤组稿', 1);
+});
+
+async function importBook(title: string, startBlock: number) {
+  const path = join(roots.inputRoot, title + '.docx');
+  await composeManuscriptDocx(path, { source: ADMITTED_BASELINE_DOCX, startBlock, blocks: 30, title });
   const staged = await store.stageSelectedManuscript(randomUUID(), path);
   const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
     { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false);
   const commitId = randomUUID();
   const commit = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
   await store.acknowledgeImportCompletion(commitId);
-  book = { manuscriptId: commit.manuscriptId, branchId: commit.branchId };
-});
+  return { manuscriptId: commit.manuscriptId, branchId: commit.branchId };
+}
 
 afterEach(async () => {
   store.markCleanShutdown();
@@ -88,6 +93,104 @@ const interactions = (): string[] => ledger((db) => (db.prepare(`SELECT a.intera
 const steps = (): Array<{ kind: string; status: string }> => ledger((db) => db.prepare('SELECT kind, status FROM editor_steps WHERE branch_id = ? ORDER BY ordinal').all(book.branchId) as Array<{ kind: string; status: string }>);
 
 describe('undo by editor step (ADR 0105 §1)', () => {
+  const scope = () => ({ ...book, bookId: window().bookId });
+  const versions = () => store.listBookVersions({ ...scope(), offset: 0 });
+  const restore = (revisionId: string) => store.restoreBookVersion({ ...scope(), revisionId, expectedBase: window().revisionId, expectedDigest: window().workingDigest });
+
+  it('keeps the pre-restore revision, anchor positions and later decisions across restart, undo and redo', async () => {
+    const original = window().revisionId;
+    const [target, other] = paragraphs();
+    const stable = suggestion(other!.blockId, 1, 4);
+    const stableAnchor = markAt(stable);
+    const addedBlock = `blk_${randomBytes(12).toString('hex')}`;
+    journal(target!.blockId, 18, '', 18, { kind: 'split', newBlockId: addedBlock });
+    const removed = suggestion(addedBlock, 1, 3);
+    const removedAnchor = markAt(removed);
+    journal(target!.blockId, 0, '〔恢复测试〕');
+    const changed = suggestion(target!.blockId, 0, 6);
+    const before = texts();
+    const result = restore(original);
+    const autosave = versions().rows.find(row => row.label.startsWith('恢复前自动保存'))!;
+    expect(store.viewBookVersion({ ...scope(), revisionId: autosave.revisionId, cursor: null }).blocks.every((block, index) => block.text === before[index])).toBe(true);
+    expect(markAt(stable)).toEqual(stableAnchor);
+    expect(markAt(removed).anchorState).toBe('detached');
+    expect(markAt(changed).anchorState).toBe('drifted');
+    store.recordChangeSuggestionDecision({ ...binding(), markId: stable, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: null });
+    const decision = markAt(stable).status;
+    expect(decision).toBe('resolved');
+    store.markCleanShutdown(); store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(undo(result.stepId)).toMatchObject({ blocked: false, canUndo: false });
+    expect(JSON.stringify(texts()) === JSON.stringify(before)).toBe(true);
+    expect(markAt(removed)).toEqual(removedAnchor);
+    expect(markAt(changed).anchorState).toBe('exact');
+    expect(markAt(stable).status).toBe(decision);
+    expect(redo().blocked).toBe(false);
+    expect(markAt(removed).anchorState).toBe('detached');
+    expect(markAt(stable).status).toBe(decision);
+    expect(versions().rows.some(row => row.revisionId === autosave.revisionId)).toBe(true);
+  });
+
+  it('refuses a whole-version undo while a later accepted change still stands', () => {
+    const target = paragraphs()[0]!;
+    const revision = window().revisionId;
+    journal(target.blockId, 0, '〔旧稿〕');
+    restore(revision);
+    const deletion = suggestion(target.blockId, 4, 8, '');
+    accept(deletion);
+    journal(target.blockId, 3, '〔跨〕', 5);
+    undo();
+    expect(undo().blocked).toBe(true);
+    const before = window();
+    const count = versions().rows.length;
+    expect(undo()).toMatchObject({ blocked: true, stepLabel: '恢复稿件版本', paragraph: target.position, anchorBlockId: target.blockId,
+      completionLabel: expect.stringContaining('第 ' + target.position + ' 段') });
+    expect(window().workingDigest).toBe(before.workingDigest);
+    expect(window().revisionId).toBe(before.revisionId);
+    expect(versions().rows).toHaveLength(count);
+  });
+
+  it('refuses another existing book’s revision for view, export and restore without changing either book', async () => {
+    const other = await importBook('另一本步骤组稿', 8);
+    const otherPage = store.getManuscriptWindow(other.manuscriptId, other.branchId, null);
+    const list = versions();
+    const otherScope = { ...other, bookId: otherPage.bookId };
+    const otherList = store.listBookVersions({ ...otherScope, offset: 0 });
+    expect(list.rows.some(row => row.revisionId === otherPage.revisionId)).toBe(false);
+    expect(code(() => store.viewBookVersion({ ...scope(), revisionId: otherPage.revisionId, cursor: null }))).toBe('VERSION_NOT_FOUND');
+    expect(code(() => store.listBookVersions({ ...otherScope, bookId: scope().bookId, offset: 0 }))).toBe('VERSION_SCOPE_INVALID');
+    expect(code(() => restore(otherPage.revisionId))).toBe('VERSION_NOT_FOUND');
+    await expect(store.reviewManuscriptExport({ bookId: scope().bookId, target: { kind: 'revision', revisionId: otherPage.revisionId },
+      options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } }, true)).rejects.toMatchObject({ code: 'EXPORT_TARGET_NOT_FOUND' });
+    expect(versions()).toEqual(list);
+    expect(store.listBookVersions({ ...otherScope, offset: 0 })).toEqual(otherList);
+  });
+
+  it('rejects stale selections and rolls back the autosave, history, anchors and working state together', () => {
+    const revision = window().revisionId;
+    const target = paragraphs()[0]!;
+    const mark = suggestion(target.blockId, 4, 8);
+    const stale = versions();
+    journal(target.blockId, 0, '〔旧稿〕');
+    const before = window();
+    const list = versions();
+    const history = steps();
+    const anchor = markAt(mark);
+    expect(code(() => store.restoreBookVersion({ ...scope(), revisionId: revision, expectedBase: stale.baseRevisionId, expectedDigest: stale.workingDigest }))).toBe('VERSION_STALE');
+    expect(code(() => store.listBookVersions({ ...scope(), bookId: randomUUID(), offset: 0 }))).toBe('VERSION_SCOPE_INVALID');
+    expect(code(() => store.viewBookVersion({ ...scope(), revisionId: randomUUID(), cursor: null }))).toBe('VERSION_NOT_FOUND');
+    expect(code(() => restore(randomUUID()))).toBe('VERSION_NOT_FOUND');
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      db.exec("CREATE TRIGGER stop_restore BEFORE INSERT ON editor_step_mark_anchors WHEN NEW.side='post' BEGIN SELECT RAISE(ABORT,'restore stopped'); END");
+      expect(() => restore(revision)).toThrow('restore stopped');
+    } finally { db.close(); }
+    expect(versions()).toEqual(list);
+    expect(window().workingDigest).toBe(before.workingDigest);
+    expect(JSON.stringify(window().blocks) === JSON.stringify(before.blocks)).toBe(true);
+    expect(markAt(mark)).toEqual(anchor);
+    expect(steps()).toEqual(history);
+  });
   it('accept X, type B, Ctrl+Z, Ctrl+Z, redo, redo: B stays undone until its own redo, and the text equals the state after B', () => {
     const [x, b] = paragraphs() as [ManuscriptWindowProjection['blocks'][number], ManuscriptWindowProjection['blocks'][number]];
     const original = texts();

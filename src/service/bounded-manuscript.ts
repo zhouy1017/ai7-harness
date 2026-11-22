@@ -2,7 +2,8 @@ import type { ManualCommandRequestPin, ManualCommandSource } from '../shared/pro
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { BoundedStoreError, BoundedStoreFatalError, requireBounded, one, asString, asNumber, canonicalJson, sha256, graphemes,
   transact, stagedBlockLength, UUID_PATTERN, DIGEST_PATTERN, BLOCK_PATTERN, HISTORY_BATCH, MIGRATION_BATCH } from './manuscript/bounded-kernel.js';
-import { recordGroupPart, stepQuote, supersedeAllSteps, type EditorStepHost } from './manuscript/editor-steps.js';
+import { openRestoreStep, recordStepAnchors, recordGroupPart, RestoreConflict, stepQuote, supersedeAllSteps, type EditorStepHost } from './manuscript/editor-steps.js';
+import type { BookVersionScope, BookVersionRow, ServiceOperationMap } from '../shared/protocol.js';
 import {
   assignKeysAndPages, blockAtCharacter, keyAtParagraph, offsetBefore, paragraphAtKey, paragraphCount, placesOfKeys, positionsOfBlocks,
   replaceWorkingState, rewriteBlock, rowsFrom, validateBranchPositions, workingBlock as workingRow,
@@ -11,7 +12,7 @@ import { withNoteReferences } from './manuscript/note-blocks.js';
 import type { ManuscriptSourceObjects } from './manuscript/source-objects.js';
 import { inlineRevisionBaseline, recordInlineEditorRevision, syncInlineEditorRevision } from './inline-editor-revisions.js';
 import { aiLocksOfWindow } from './ai-edit-locks.js';
-import { blockReachesThroughLineage, historyStale, inverseTargetsTouchInOrder, type InverseTarget, isStructuralGroup, journalHasStructuralEdits, replayStructuralGroup, verifyStructuralReconstruction, writeStructuralEdit } from './manuscript/structural-edits.js';
+import { blockReachesThroughLineage, historyStale, inverseTargetsTouchInOrder, type InverseTarget, isStructuralGroup, journalHasStructuralEdits, replayStructuralGroup, restoreRevisionMergeLineage, verifyStructuralReconstruction, writeStructuralEdit } from './manuscript/structural-edits.js';
 import { blockDigest, blockShapeFromDigest, CommandEvidenceReader, recoveryCommandEvidenceDigest, recoveryWorkingDigest, validateCommandHistoryGroup, type CommandEvidenceHeader, type CommandEvidenceMember } from './manuscript/command-history.js';
 export { BoundedStoreError, BoundedStoreFatalError } from './manuscript/bounded-kernel.js';
 export type { CommandEvidenceHeader, CommandEvidenceMember } from './manuscript/command-history.js';
@@ -3302,7 +3303,7 @@ export class BoundedManuscriptStore {
     const startPosition = Math.min(Math.max(1, targetPosition - (focusBlockId ? Math.floor(MAX_WINDOW_BLOCKS / 2) : 0)), Math.max(1, totalBlocks - MAX_WINDOW_BLOCKS + 1));
     const rows = rowsFrom(this.#db, branchId, startPosition, MAX_WINDOW_BLOCKS + 1);
     const visible = rows.slice(0, MAX_WINDOW_BLOCKS);
-    let blocks = withNoteReferences(this.#db, branchId, visible.map((row) => ({
+    let blocks = withNoteReferences(this.#db, branchId, binding.revisionId, visible.map((row) => ({
       blockId: row.blockId, position: row.position, kind: row.kind, level: row.level, text: row.text, digest: row.digest,
     })));
     blocks = this.sourceObjects?.project(binding.revisionId, blocks, branchId) ?? blocks;
@@ -4502,10 +4503,25 @@ export class BoundedManuscriptStore {
    * What the editor-step owner replays through (Issue #1654): the branch as it stands now — refused while it awaits recovery —
    * and the service lifetime's high-water mark each journal write records.
    */
-  editorStepHost(manuscriptId: string, branchId: string, serviceLifetimeId: string): Pick<EditorStepHost, 'binding' | 'recordLifetimeWrite' | 'lifetimeId'> {
+  editorStepHost(manuscriptId: string, branchId: string, serviceLifetimeId: string): Pick<EditorStepHost, 'binding' | 'recordLifetimeWrite' | 'lifetimeId' | 'replaceFromRevision'> {
     requireBounded(UUID_PATTERN.test(serviceLifetimeId), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
     return {
       lifetimeId: serviceLifetimeId,
+      replaceFromRevision: (revisionId, expected) => {
+        const binding = this.#binding(manuscriptId, branchId);
+        this.#versionBinding(binding);
+        const expectedRevision = this.#versionRow(binding, expected);
+        const current = this.#versionRow(binding, binding.revisionId);
+        const mismatch = this.#db.prepare(`WITH working AS (SELECT row_number() OVER (ORDER BY order_key) position, block_id, kind, level, text, digest FROM working_blocks WHERE branch_id = ?),
+          saved AS (SELECT position, block_id, kind, level, text, digest FROM manuscript_block_versions WHERE revision_id = ?)
+          SELECT coalesce(working.position,saved.position) position, working.block_id
+          FROM saved FULL JOIN working USING (block_id)
+          WHERE (saved.position,saved.kind,saved.level,saved.text,saved.digest) IS NOT (working.position,working.kind,working.level,working.text,working.digest)
+          ORDER BY position, working.block_id LIMIT 1`).get(branchId, expected);
+        if (mismatch) throw new RestoreConflict(asNumber(mismatch.position), mismatch.block_id === null ? null : asString(mismatch.block_id));
+        if (current.source_version_id !== expectedRevision.source_version_id) throw new RestoreConflict(null, null);
+        this.#replaceFromVersion(binding, revisionId);
+      },
       binding: () => {
         this.#requireBranchEditable(branchId);
         return this.#binding(manuscriptId, branchId);
@@ -4745,6 +4761,81 @@ export class BoundedManuscriptStore {
       },
     };
     return { ...facts, digest: sha256(canonicalJson(facts)) };
+  }
+
+  #versionBinding(scope: BookVersionScope): BranchBinding {
+    const binding = this.#binding(scope.manuscriptId, scope.branchId);
+    requireBounded(binding.bookId === scope.bookId && this.#db.prepare("SELECT 1 FROM manuscripts WHERE manuscript_id = ? AND book_id = ? AND role = 'primary'").get(scope.manuscriptId, scope.bookId),
+      'VERSION_SCOPE_INVALID', '所选版本不属于本书主稿。');
+    return binding;
+  }
+
+  #versionRow(binding: BranchBinding, revisionId: string): SqlRow {
+    return one(this.#db.prepare(`SELECT r.* FROM manuscript_revisions r JOIN source_versions sv ON sv.source_version_id = r.source_version_id
+      WHERE r.revision_id = ? AND r.manuscript_id = ? AND r.branch_id = ? AND sv.book_id = ?`).all(revisionId, binding.manuscriptId, binding.branchId, binding.bookId) as SqlRow[],
+      'VERSION_NOT_FOUND', '所选版本不存在或不属于本书主稿。');
+  }
+
+  listBookVersions(input: ServiceOperationMap['listBookVersions']['input']): ServiceOperationMap['listBookVersions']['output'] {
+    const binding = this.#versionBinding(input);
+    const result = this.#db.prepare(`WITH revisions AS (SELECT revision_id, revision_label, created_at FROM manuscript_revisions WHERE manuscript_id = ? AND branch_id = ?), versions AS (
+      SELECT 'revision' kind, CASE WHEN EXISTS (SELECT 1 FROM editor_step_restore_revisions WHERE pre_revision_id = r.revision_id) THEN '恢复前自动保存' ELSE '已保存修订' END || ' · ' || revision_label label,
+        revision_id, created_at, revision_id id FROM revisions r
+      UNION ALL SELECT 'milestone', '里程碑 · ' || m.label, r.revision_id, m.created_at, m.milestone_id FROM milestone_versions m JOIN revisions r USING(revision_id) WHERE m.manuscript_id = ? AND m.branch_id = ?
+      UNION ALL SELECT 'publication', '发稿版本 · 第 ' || p.ordinal || ' 次', r.revision_id, p.created_at, p.publication_version_id FROM publication_versions p JOIN revisions r USING(revision_id)
+        WHERE p.book_id = ? AND p.manuscript_id = ? AND p.branch_id = ?) SELECT * FROM versions ORDER BY created_at DESC, id DESC LIMIT 31 OFFSET ?`)
+      .all(input.manuscriptId, input.branchId, input.manuscriptId, input.branchId, input.bookId, input.manuscriptId, input.branchId, input.offset) as SqlRow[];
+    return { rows: result.slice(0, 30).map(row => ({ kind: asString(row.kind) as BookVersionRow['kind'], label: asString(row.label), revisionId: asString(row.revision_id), createdAt: asString(row.created_at) })),
+      more: result.length > 30, workingDigest: binding.workingDigest, baseRevisionId: binding.revisionId };
+  }
+
+  viewBookVersion(input: ServiceOperationMap['viewBookVersion']['input']): ServiceOperationMap['viewBookVersion']['output'] {
+    this.#versionRow(this.#versionBinding(input), input.revisionId);
+    return this.getHistoricalRevision(input.revisionId, input.cursor);
+  }
+
+  #appendVersion(binding: BranchBinding, parent: string, sourceVersionId: string, digest: string): string {
+    const revisionId = randomUUID();
+    const ordinal = asNumber(this.#db.prepare('SELECT max(ordinal) + 1 n FROM manuscript_revisions WHERE manuscript_id = ?').get(binding.manuscriptId)!.n);
+    this.#db.prepare(`INSERT INTO manuscript_revisions(revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id, source_version_id, revision_digest, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(revisionId, binding.manuscriptId, binding.branchId, ordinal, `r${ordinal}`, parent, sourceVersionId, digest, new Date().toISOString());
+    return revisionId;
+  }
+
+  #replaceFromVersion(binding: BranchBinding, revisionId: string): string {
+    const revision = this.#versionRow(binding, revisionId);
+    const before = workingBlockDigests(this.#db, binding.branchId);
+    const rows = this.#db.prepare('SELECT block_id, kind, level, text, digest FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(revisionId) as SqlRow[];
+    requireBounded(rows.length > 0, 'VERSION_NOT_FOUND', '所选版本没有内容块。');
+    const total = replaceWorkingState(this.#db, binding.branchId, rows.map(row => ({ blockId: asString(row.block_id), kind: asString(row.kind) as ManuscriptBlockProjection['kind'],
+      level: row.level === null ? null : asNumber(row.level), text: asString(row.text), digest: asString(row.digest) })));
+    const digest = asString(revision.revision_digest);
+    const descendant = this.#appendVersion(binding, revisionId, asString(revision.source_version_id), digest);
+    restoreRevisionMergeLineage(this.#db, binding.branchId, revisionId);
+    snapshotWorkingRevision(this.#db, binding.branchId, descendant, total);
+    resolveBranchMarksAfterRewrite(this.#db, binding.branchId, before, true);
+    this.#db.prepare(`UPDATE branch_working_state SET base_revision_id = ?, working_digest = ?, total_graphemes = ?, last_checkpoint_sequence = journal_sequence WHERE branch_id = ?`).run(descendant, digest, total, binding.branchId);
+    this.#db.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(descendant, binding.branchId);
+    return descendant;
+  }
+
+  restoreBookVersion(input: ServiceOperationMap['restoreBookVersion']['input']): ServiceOperationMap['restoreBookVersion']['output'] {
+    return transact(this.#db, () => {
+      const binding = this.#versionBinding(input);
+      this.#requireBranchEditable(input.branchId);
+      this.#versionRow(binding, input.revisionId);
+      requireBounded(binding.revisionId === input.expectedBase && binding.workingDigest === input.expectedDigest, 'VERSION_STALE', '工作稿已变化，请刷新版本列表。');
+      const current = this.#versionRow(binding, binding.revisionId);
+      const pre = this.#appendVersion(binding, binding.revisionId, asString(current.source_version_id), binding.workingDigest);
+      snapshotWorkingRevision(this.#db, binding.branchId, pre, binding.totalCharacters);
+      const marks = this.#db.prepare("SELECT mark_id FROM editorial_marks WHERE branch_id = ? AND status IN ('open','resolved','applied')").all(input.branchId).map(row => asString(row.mark_id));
+      const stepId = openRestoreStep(this.#db, input.branchId, pre, input.revisionId);
+      recordStepAnchors(this.#db, stepId, 'pre', marks);
+      const revisionId = this.#replaceFromVersion(binding, input.revisionId);
+      this.#db.prepare('UPDATE branch_working_state SET history_boundary_sequence = history_sequence WHERE branch_id = ?').run(input.branchId);
+      recordStepAnchors(this.#db, stepId, 'post', marks);
+      return { stepId, revisionId };
+    });
   }
 
   #binding(manuscriptId: string, branchId: string): BranchBinding {
