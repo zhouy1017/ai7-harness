@@ -11,7 +11,8 @@ import { reimportVersion } from '../support/reimport-version.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { readDataVersionMarker, storeRevisionOnDisk } from '../../src/service/data-version.js';
 import { beginUpgrade, beginUpgradeRollback, resumeUpgrade, rollbackDataPeak, upgradePreflight, upgradeSpaceShortfall } from '../../src/service/in-app-upgrade.js';
-import { replacementStagingFor } from '../../src/service/database-replacement.js';
+import { extractReplacement, replacementStagingFor } from '../../src/service/database-replacement.js';
+import * as replacement from '../../src/service/database-replacement.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { backupLocationFor } from '../../src/service/scheduled-backups.js';
 import { databasePackageSources, verifyCopiedPayloads } from '../../src/service/database-exports.js';
@@ -727,8 +728,8 @@ it('restores from the package recorded by the earlier converter without disk-siz
   try { expect(old.listBooks(null).items).toHaveLength(2); } finally { old.markCleanShutdown(); old.close(); }
 },180_000);
 
-it('keeps the backup phase retryable after a native SQLite FULL result',async () => {
-  const root = join(roots.inputRoot,'sqlite-full');
+it.each(['write','read'] as const)('keeps the backup phase retryable after a native SQLite FULL during %s',async side => {
+  const root = join(roots.inputRoot,'sqlite-full-'+side);
   await cp(roots.dataRoot,root,{recursive:true});
   await beginUpgrade(root);
   const db = new DatabaseSync(':memory:');
@@ -738,10 +739,98 @@ it('keeps the backup phase retryable after a native SQLite FULL result',async ()
     try { db.exec('INSERT INTO capacity VALUES(zeroblob(4096))'); } catch (error) { full = error; }
   } finally { db.close(); }
   expect(full).toMatchObject({errcode:13});
-  const writer = vi.spyOn(packageWriter,'writeDatabasePackage').mockRejectedValueOnce(full);
+  const openStore = packageWriter.openPackageStore;
+  let readFault = false;
+  const fault = side === 'write' ? vi.spyOn(packageWriter,'writeDatabasePackage').mockRejectedValueOnce(full)
+    : vi.spyOn(packageWriter,'openPackageStore').mockImplementation(path => {
+      if (/\.[0-9a-f-]{36}\.ai7db\.store$/u.test(path)) { readFault = true; throw full; }
+      return openStore(path);
+    });
   try { await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_SPACE'}); }
-  finally { writer.mockRestore(); }
+  finally { fault.mockRestore(); }
+  if (side === 'read') expect(readFault).toBe(true);
   expect(JSON.parse(await readFile(join(root,'shell','storage-upgrade.json'),'utf8')).stage).toBe('backup');
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
   await verifyLibraryFiles(root,117);
+},180_000);
+
+it.each(['old-payloads','incoming','archive','unavailable'] as const)('preserves the bound inventory and recovers an unreferenced member from %s',async source => {
+  const root = join(roots.inputRoot,'retained-inventory-'+source);
+  await cp(roots.dataRoot,root,{recursive:true});
+  const member = 'retained-entry.bin';
+  const contents = Buffer.from([23,117,2]);
+  await writeFile(join(root,member),contents);
+  await beginUpgrade(root);
+  await resumeUpgrade(root,'0.8.0');
+  await writeFile(join(root,'new-entry.bin'),Buffer.from([8,0]));
+  await beginUpgradeRollback(root);
+  const phase = join(root,'shell','storage-upgrade.json');
+  const stale = await readFile(phase);
+  const {id,backup} = JSON.parse(stale.toString('utf8'));
+  const note = join(root,'shell','upgrade-'+id);
+  const parked = join(root,'shell','store-after-0.8.0-'+id);
+  await expect(resumeUpgrade(root,'0.8.0',stage => { if (stage === 'publish-old') throw Error('interrupted'); })).rejects.toThrow('interrupted');
+  await rm(join(parked,'rollback-ready.json'));
+  await rm(join(note,'rollback-ready.json'));
+  const manifest = join(note,'current-files.json');
+  const complete = JSON.parse(await readFile(manifest,'utf8')) as Array<{path:string}>;
+  const shortened = JSON.stringify(complete.filter(file => file.path !== member));
+  await writeFile(manifest,shortened);
+  if (source !== 'archive') await rm(join(backupLocationFor(root),backup.backup.fileName));
+  if (source === 'old-payloads' || source === 'incoming') {
+    const dir = source === 'incoming' ? join(replacementStagingFor(join(note,'restore')),'incoming') : join(note,source);
+    await mkdir(dir,{recursive:true});
+    await rename(join(root,member),join(dir,member));
+  } else await rm(join(root,member));
+  await rm(join(parked,'payloads',member));
+  await writeFile(phase,stale);
+  if (source === 'unavailable') {
+    await writeFile(join(note,'current-database','files.json'),shortened);
+    await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+    expect(existsSync(phase)).toBe(true);
+    await writeFile(join(root,member),contents);
+  }
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  expect(await readFile(join(root,member))).toEqual(contents);
+  expect(await readFile(join(root,'new-entry.bin'))).toEqual(Buffer.from([8,0]));
+  await verifyLibraryFiles(root,117);
+  const opened = await EditorialStore.open(root,roots.codeRoot);
+  try { expect(opened.listBooks(null).items).toHaveLength(2); } finally { opened.markCleanShutdown(); opened.close(); }
+},180_000);
+
+it('reuses a verified extraction after the backup volume goes offline and reclaims space before caching its inventory',async () => {
+  const root = join(roots.inputRoot,'offline-extraction');
+  await cp(roots.dataRoot,root,{recursive:true});
+  await beginUpgrade(root);
+  await resumeUpgrade(root,'0.8.0');
+  const {id,backup} = JSON.parse(await readFile(join(root,'store','upgrade-origin.json'),'utf8'));
+  const note = join(root,'shell','upgrade-'+id);
+  const archive = join(backupLocationFor(root),backup.backup.fileName);
+  const area = join(note,'restore');
+  await mkdir(area,{recursive:true});
+  await extractReplacement(area,archive,backup.backup.sha256);
+  await rm(archive);
+  await rm(join(root,'store-before-0.8.0-'+id),{recursive:true});
+  const manifest = join(note,'payloads.json');
+  await rm(manifest);
+  const prepared = join(note,'prepared-payloads');
+  await mkdir(prepared,{recursive:true});
+  await writeFile(join(prepared,'partial.bin'),Buffer.alloc(4096));
+  const write = replacement.writeAtomic;
+  let reclaimed = false;
+  const disk = vi.spyOn(replacement,'writeAtomic').mockImplementation(async (path,contents) => {
+    if (path === manifest) {
+      if (existsSync(prepared)) throw Object.assign(Error('disk full'),{code:'ENOSPC'});
+      reclaimed = true;
+    }
+    await write(path,contents);
+  });
+  try {
+    await beginUpgradeRollback(root);
+    expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  } finally { disk.mockRestore(); }
+  expect(reclaimed).toBe(true);
+  await verifyLibraryFiles(root,116);
+  const opened = await legacy.openLegacy(root);
+  try { expect(opened.listBooks(null).items).toHaveLength(2); } finally { opened.markCleanShutdown(); opened.close(); }
 },180_000);
