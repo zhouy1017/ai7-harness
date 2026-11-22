@@ -1,6 +1,6 @@
 import { styleInput } from './controls.js';
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation, type RuntimeExecutionConfig, type TaskExecutionLaunchResult } from '../../shared/runtime-execution-config.js';
-import type { ServiceOperationMap, TaskLaunchPreviewInput, TaskPlanKind, RendererApi } from '../../shared/protocol.js';
+import type { EvaluationReferencesProjection, ServiceOperationMap, TaskLaunchPreviewInput, TaskPlanKind, RendererApi } from '../../shared/protocol.js';
 import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
 import type { PreferencesRendererApi } from '../../shared/preferences.js';
 import { createDispatchChooser } from './dispatch-chooser.js';
@@ -41,6 +41,7 @@ export type LaunchBarApi = Pick<
 
 export interface MountLaunchBarOptions {
   readonly api: LaunchBarApi;
+  readonly readEvaluationReferences?: () => Promise<EvaluationReferencesProjection>;
   readonly request: TaskLaunchRequest;
   /** A failure's words (the drawer's `errorMessage`). */
   readonly errorMessage: (error: unknown, fallback: string) => string;
@@ -248,7 +249,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   const timingLabel = el('label', undefined, '开始时间'); timingLabel.append(timing, el('small', undefined, '只安排这一次任务的开始时间。')); runOptions.append(timingLabel);
 
   const references = el('div', 'task-launch-references');
-  const readReferences = request.operation !== 'launchInitialEvaluation' && request.operation !== 'launchReadersReport' ? Promise.resolve() : api.inspectEvaluation({ recordId: null }).then(page => {
+  const readReferences = request.operation !== 'launchInitialEvaluation' && request.operation !== 'launchReadersReport' ? Promise.resolve() : (options.readEvaluationReferences ? options.readEvaluationReferences() : api.inspectEvaluation({ recordId: null })).then(page => {
     if (stopped || page.bookId !== request.bookId) return;
     const selected = new Set('materialIds' in request.input ? request.input.materialIds ?? [] : []);
     const materials = el('div'); references.append(materials);
@@ -262,14 +263,23 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     references.append(similarMaterialsField(api, request.bookId, page.materials?.items ?? [], selected, id => {
       selected.add(id); request.input = { ...request.input, materialIds: [...selected] }; commandId = crypto.randomUUID(); invalidatePreview(); paintReferences(); updateAdjusted();
     }));
-    if (request.operation === 'launchInitialEvaluation' && page.market.series.length > 0) {
+    const savedSeries = request.operation === 'launchInitialEvaluation' && request.input.relaunchOf ? request.input.seriesId : null;
+    if (request.operation === 'launchInitialEvaluation' && (page.market.series.length > 0 || savedSeries)) {
       const label = el('label', undefined, '书系参考');
       const select = el('select'); select.setAttribute('aria-label', '本次任务的书系参考');
       for (const [value, title] of [['', '仅本书'], ...page.market.series.map(series => [series.seriesId, `书系《${series.title}》`])]) {
         const option = el('option', undefined, title); option.value = value!; select.append(option);
       }
+      if (savedSeries && !page.market.series.some(series => series.seriesId === savedSeries)) {
+        const saved = el('option', undefined, '原任务的书系（当前不可用）');
+        saved.value = savedSeries; saved.disabled = true; select.append(saved);
+      }
       select.value = request.input.seriesId ?? '';
-      select.addEventListener('change', () => { request.input = { ...request.input, seriesId: select.value || null }; commandId = crypto.randomUUID(); });
+      select.addEventListener('change', () => {
+        request.input = { ...request.input, seriesId: select.value || null };
+        commandId = crypto.randomUUID();
+        if (savedSeries) invalidatePreview();
+      });
       label.append(select); references.append(label);
     }
   }).catch(error => { if (!stopped) references.append(el('p', undefined, errorMessage(error, '参考资料暂时无法读取，请重新打开开始栏。'))); });

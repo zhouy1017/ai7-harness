@@ -35,6 +35,7 @@ import { localInstantLabel, RUN_LIVENESS_STAGE_LABELS } from './plan-preview-lab
 import { mountTaskComposer, mountTaskPanel, type ComposerRange, type TaskComposerSeed } from './task-panel.js';
 import { mountDialogue } from './dialogue.js';
 import { DIALOGUE_TITLE } from './dialogue-labels.js';
+import { mountRelaunch } from './task-relaunch.js';
 import { TASK_COMPOSER_TITLES, TASK_PANEL_TITLE } from './task-panel-labels.js';
 import {
   parseBudgetCeiling,
@@ -161,10 +162,11 @@ import {
   taskStatusEnded,
   taskStatusLines,
   taskStatusName,
+  TASK_BAR_REDO,
   taskStatusOutcome,
   taskStatusRowEnded,
   type TaskStatusFacts,
-  type TaskStatusRow,
+  betweenReviewCategories, type TaskStatusRow,
   type TaskBarAction,
   type TaskDrawerMode,
   TASK_PLAN_ASSURANCE_HEADING,
@@ -208,7 +210,7 @@ export interface TaskDrawerSurface {
    * beside the bar's actions until the next one — why a quick start stopped at this plan (Issue #421).
    */
   open(request: TaskPlanRequest, returnFocus: () => HTMLElement | null, note?: string, how?: {
-    readonly cancel?: boolean; readonly view?: 'plan' | 'run'; readonly redo?: boolean;
+    readonly unconfirmed?: boolean; readonly cancel?: boolean; readonly view?: 'plan' | 'run'; readonly redo?: boolean;
     /** The Task's row in the 任务总览 when the opener holds it: the status card reads its model, duration and result from it and asks for no other (Issue #1527). */
     readonly row?: TaskStatusRow;
   }): void;
@@ -258,6 +260,8 @@ type DrawerApi = Pick<
   | 'controlAllTasks'
   | 'startQuickTasks'
   | 'reorderQueuedRun'
+  | 'launchReviewRun'
+  | 'cancelReviewRun'
   | 'taskOverviewCall'
   | 'pollServiceJob'
   | 'inspectBookTasks'
@@ -307,6 +311,7 @@ export interface MountTaskDrawerOptions {
   /** The element whose `data-task-drawer` says whether the central area makes room for the drawer. */
   readonly shell: HTMLElement;
   readonly api: DrawerApi;
+  readonly overviewApiForBook?: (bookId: string) => DrawerApi | undefined;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   errorMessage(error: unknown, fallback: string): string;
   errorCode(error: unknown): string | null;
@@ -497,6 +502,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let parked: null | { readonly bookId: string; readonly bookTitle: string; readonly draftId: string | null; readonly resume: () => void } = null;
   let panelBookId: string | null = null;
   /** The plan was opened from a card's 取消任务: its Cancellation Impact Summary opens once the plan is painted. */
+  let unconfirmedOnOpen = false;
   let cancelOnOpen = false;
   let redoOnOpen = false;
   root.classList.add('task-drawer');
@@ -567,8 +573,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     settle: options.settle,
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,
-    openPlan: (kind, ref, cancel, redo, row) => {
-      if (panelBookId !== null) surface.open({ bookId: panelBookId, kind, ref }, returnFocus, undefined, { cancel, ...(redo === undefined ? {} : { redo }), ...(row === undefined ? {} : { row }) });
+    openNetworkProxySettings: () => options.openConnectionSettings(),
+    openPlan: (kind, ref, cancel, redo, row, unconfirmed) => {
+      if (panelBookId !== null) surface.open({ bookId: panelBookId, kind, ref }, returnFocus, undefined, { cancel, unconfirmed: unconfirmed === true, ...(redo === undefined ? {} : { redo }), ...(row === undefined ? {} : { row }) });
     },
     // A dialogue Task's 打开对话 brings its dialogue to the foreground in the same slot (TASK-044, DIALOG-011).
     openTarget: (target) => {
@@ -797,7 +804,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (force && next === plan && deferredPlan !== null) next = deferredPlan;
     next = taskPlanWording(next);
     const key = JSON.stringify(next);
-    const sameItem = plan !== null && plan.ref === next.ref && plan.kind === next.kind;
+    const sameItem = plan !== null && plan.bookId === next.bookId && plan.ref === next.ref && plan.kind === next.kind;
     const sameVersion = sameItem && plan!.planVersion === next.planVersion;
     if (!force && key === painted && plan !== null) {
       tickActivity(next);
@@ -812,15 +819,22 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       refusal = null;
     }
     // The summary stays open only while there is still a Run 取消任务 can name.
-    if (next.runControl === null || next.runControl.cancel.reason !== null) cancelConfirmShown = false;
+    const cancellable = next.runControl?.cancel.reason === null || betweenReviewCategories(next);
+    if (!cancellable) cancelConfirmShown = false;
     // …and the unconfirmed list only while the Run stands at 结果待确认.
     if (next.runControl?.outcomeUnknown == null) unconfirmedShown = false;
     // A card's 取消任务 (Issue #423, S77a) opens the summary here, where the cancellation is confirmed; a Run that can no
     // longer be cancelled shows its bar instead, which says why.
+    const focusUnconfirmed = unconfirmedOnOpen;
+    if (unconfirmedOnOpen) {
+      unconfirmedOnOpen = false;
+      unconfirmedShown = next.runControl?.outcomeUnknown != null;
+      unconfirmedRecordShown = next.unconfirmed != null;
+    }
     let focusCancelImpact = false;
     if (cancelOnOpen) {
       cancelOnOpen = false;
-      if (next.runControl !== null && next.runControl.cancel.reason === null) {
+      if (cancellable) {
         cancelConfirmShown = true;
         focusCancelImpact = true;
       }
@@ -884,20 +898,38 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     paintBar(next);
     restoreInteraction();
-    if (redoOnOpen) { redoOnOpen = false; bar.querySelector<HTMLButtonElement>('[data-task-drawer-control="redo"]')?.click(); }
+    if (redoOnOpen) { redoOnOpen = false; if (next.relaunch) bar.querySelector<HTMLButtonElement>('[data-task-drawer-control="redo"]')?.click(); }
     footer.textContent = TASK_DRAWER_FOOTER;
     footer.hidden = !technicalLayerVisible;
     if (next.state.key === 'queued') void api.inspectTaskOverview().then((overview) => {
-      if (plan?.ref !== next.ref || root.hidden) return;
-      const item = overview.groups.flatMap((group) => group.items).find((item) => item.bookId === next.bookId && item.plan?.ref === next.ref);
+      if (plan !== next || root.hidden || view !== 'plan') return;
+      const item = overview.groups.flatMap((group) => group.items).find((item) => item.bookId === next.bookId && item.plan?.kind === next.kind && item.plan.ref === next.ref);
       footer.hidden = false;
       footer.replaceChildren(document.createTextNode(`已记录 · ${item?.queuePosition == null ? '排队中' : `排在第 ${item.queuePosition} 位`} · `));
+      if (item?.runRecordId && item.queuePosition !== null) {
+        const { runRecordId, queuePosition } = item;
+        for (const [label, position] of [['上移', Math.max(1, queuePosition - 1)], ['置顶', 1]] as const) {
+          const move = control(label, 'quiet', label === '上移' ? 'queue-up' : 'queue-top');
+          move.disabled = working || queuePosition === 1;
+          move.addEventListener('click', async () => {
+            if (plan !== next || !beginWork()) return;
+            const asked = request;
+            try { await api.reorderQueuedRun({ runRecordId, position }); }
+            catch (error) { if (plan === next) refusal = options.errorMessage(error, '无法更新队列顺序。'); }
+            finally { painted = ''; endWork(asked); }
+          });
+          footer.append(move);
+        }
+      }
       const link = control('查看任务总览', 'quiet', 'overview'); link.addEventListener('click', () => options.openTaskOverview?.()); footer.append(link);
-    });
+    }, () => {});
     if (interrupted) disableAll();
     if (focusCancelImpact && bar.querySelector<HTMLElement>(`#${CANCEL_IMPACT_ID} h4`) !== null) {
       focusTitle = false;
       bar.querySelector<HTMLElement>(`#${CANCEL_IMPACT_ID} h4`)!.focus();
+    } else if (focusUnconfirmed && (unconfirmedShown || unconfirmedRecordShown)) {
+      focusTitle = false;
+      root.querySelector<HTMLElement>(unconfirmedShown ? `#${UNCONFIRMED_ID} h4` : '[data-task-drawer-control="unconfirmed-record-heading"]')?.focus();
     } else if (focusTitle) {
       focusTitle = false;
       title.focus();
@@ -1043,6 +1075,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     section.setAttribute('role', 'group');
     const heading = el('h4', undefined, unconfirmedHeading(listed));
     heading.id = uid('unconfirmed-record');
+    heading.tabIndex = -1;
+    heading.dataset['taskDrawerControl'] = 'unconfirmed-record-heading';
     section.setAttribute('aria-labelledby', heading.id);
     section.append(heading, el('p', 'attention-note', unconfirmedStatement(listed, plan?.listPages?.['unconfirmed.ranges']?.total)));
     const listId = uid('unconfirmed-list');
@@ -1547,8 +1581,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const begin = control(offline ? TASK_BAR_START_WHEN_ONLINE : '开始任务', 'primary', offline ? 'start-when-online' : 'start');
       begin.disabled = working || interrupted || !['ready', 'offline', 'record-only', 'no-route'].includes(next.start.readiness);
       begin.addEventListener('click', () => { if (pendingEdits(next) > 0) void updatePlan(true, true); else if (offline) void startWhenOnline(); else void start(); });
-      const model = el('span', 'task-launch-retained-model', next.service.send);
-      model.setAttribute('aria-label', '沿用本次计划的模型与思考强度');
+      // The fixed 「沿用本次计划的模型与思考强度」 line is retired (Issue #1680): the plan says its model where it states one.
+      const model = el('span', 'task-launch-retained-model', next.work?.finished?.modelLabel ?? '');
       const preview = el('div'); preview.append(el('p', undefined, next.scope.process), el('p', undefined, next.scope.send), listOf(next.steps.map(step => step.label), 'task-plan-list'));
       parts.push(createLaunchBarPresentation(model, begin, { title: '选项', content: optionRows }, preview));
       // 更新计划 stays beside the start, which itself revises then starts (保存并开始): the edited plan can be saved without starting.
@@ -1557,7 +1591,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
 
     const run = next.runControl;
     if (run !== null && run.outcomeUnknown !== null && unconfirmedShown) parts.push(unconfirmedBlock(run.outcomeUnknown.units));
-    if (run !== null && run.cancel.reason === null && cancelConfirmShown) parts.push(cancelImpactBlock(run));
+    if (cancelConfirmShown && (run?.cancel.reason === null || betweenReviewCategories(next))) parts.push(cancelImpactBlock(run));
     if (next.redo !== null && next.redo.summary.length > 0 && redoConfirmShown) parts.push(redoSummaryBlock(next.redo));
     bar.replaceChildren(...parts);
     if (working) for (const button of bar.querySelectorAll<HTMLButtonElement>('button')) button.disabled = true;
@@ -1645,7 +1679,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         break;
       // 改计划重做 (Issue #422, S76c): a stopped Run opens its summary first; a Run already cancelled is redone at once.
       case 'redo':
-        if ((plan?.redo?.summary.length ?? 0) > 0) {
+        // 重新开始… (Issue #1680): the plan's relaunch, wherever it offers one; else the legacy redo of a plan with no recipe.
+        if (plan?.relaunch != null) {
+          const current = plan;
+          button.addEventListener('click', () => openRelaunch(current));
+        } else if ((plan?.redo?.summary.length ?? 0) > 0) {
           button.setAttribute('aria-controls', REDO_SUMMARY_ID);
           button.setAttribute('aria-expanded', redoConfirmShown ? 'true' : 'false');
           button.addEventListener('click', () => {
@@ -2408,7 +2446,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     return section;
   }
 
-  function cancelImpactBlock(run: TaskPlanRunControlProjection): HTMLElement {
+  function cancelImpactBlock(run: TaskPlanRunControlProjection | null): HTMLElement {
     const section = el('section', 'task-bar-cancel-impact');
     section.id = CANCEL_IMPACT_ID;
     section.setAttribute('role', 'group');
@@ -2419,7 +2457,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     heading.dataset['taskDrawerControl'] = 'cancel-impact';
     section.setAttribute('aria-labelledby', heading.id);
     const lines = el('ul', 'task-bar-cancel-lines');
-    for (const line of run.cancel.impact) lines.append(el('li', undefined, line));
+    for (const line of run?.cancel.impact ?? ['这次审阅将结束，已经记录的结果会保留。']) lines.append(el('li', undefined, line));
     const confirm = control(TASK_BAR_CANCEL_CONFIRM, 'primary', 'confirm-cancel-run');
     const keep = control(TASK_BAR_CANCEL_KEEP, 'secondary', 'keep-running');
     confirm.addEventListener('click', () => void cancelRun());
@@ -2431,7 +2469,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const actions = el('div', 'button-row');
     actions.append(confirm, keep);
     section.append(heading, lines, actions);
-    if (plan !== null) {
+    if (plan !== null && run !== null) {
       const path = 'runControl.cancel.impact';
       const meta = plan.listPages?.[path];
       const count = el('span', undefined, taskPageShown(TASK_PAGE_NAMES[path]!, meta?.shown ?? run.cancel.impact.length, meta?.total ?? run.cancel.impact.length));
@@ -2583,16 +2621,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   async function cancelRun(): Promise<void> {
     const current = plan;
     const asked = request;
-    if (current === null || current.runControl === null || !beginWork()) return;
+    if (current === null || (current.runControl === null && !betweenReviewCategories(current)) || !beginWork()) return;
+    const generation = statusGeneration;
     options.setStatus('正在取消任务…', 'busy');
     try {
-      const cancelling = (await controlRun(current, 'cancel')).cancelling;
+      let cancelling = false;
+      if (betweenReviewCategories(current)) await (options.overviewApiForBook?.(current.bookId) ?? api).cancelReviewRun({ reviewRunId: current.ref });
+      else cancelling = (await controlRun(current, 'cancel')).cancelling;
+      if (generation !== statusGeneration) return;
       cancelConfirmShown = false;
       // A Run under way stops at its next boundary; one nothing was running settled at once.
       options.setStatus(cancelling ? TASK_BAR_CANCELLING_NOTE : TASK_BAR_CANCELLED_NOTE, 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
+      if (generation !== statusGeneration) return;
       refusal = options.errorMessage(error, TASK_BAR_CANCEL_RUN_FAILED);
       options.setStatus(refusal, 'error');
     } finally {
@@ -2972,6 +3015,44 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
   }
 
+  /** The launch bar in the drawer's whole slot: a fresh launch, or 重新开始… of a plan (Issue #1680). */
+  function showLaunch(bookId: string, heading: string, kind: string, finder: () => HTMLElement | null, mount: () => { lead: ReadonlyArray<HTMLElement>; bar: LaunchBar }): void {
+    disposeLaunchBar();
+    ticket += 1;
+    clearPoll(); panel.stop(); dialogueSurface.stop();
+    view = 'launch'; panelBookId = bookId; request = null; plan = null;
+    for (const key of ['taskPlanKind', 'taskPlanRef', 'taskPlanStart', 'taskPlanState', 'taskDetailView']) delete root.dataset[key];
+    returnFocus = finder;
+    root.hidden = false; root.dataset['taskDrawer'] = 'open'; shell.dataset['taskDrawer'] = 'open';
+    showView(); title.textContent = heading; modes.hidden = true;
+    root.dataset['taskLaunchKind'] = kind; delete root.dataset['taskRelaunch'];
+    const mounted = mount();
+    launchBar = mounted.bar;
+    body.replaceChildren(...mounted.lead, ...launchBar.body);
+    bar.hidden = false; bar.replaceChildren(...launchBar.bar);
+    options.onOpen(); title.focus();
+    if (interrupted) disableAll();
+  }
+
+  /** 重新开始… (Issue #1680): the plan's relaunch recipe in the launch bar, with the model chooser; nothing is cancelled before 开始. */
+  function openRelaunch(current: TaskPlanProjection): void {
+    const relaunch = current.relaunch;
+    if (relaunch == null) return;
+    const finder = returnFocus;
+    const source: TaskPlanRequest = { bookId: current.bookId, kind: current.kind, ref: current.ref };
+    const scoped = options.overviewApiForBook?.(current.bookId);
+    const heading = `${TASK_BAR_REDO} · ${taskStatusName(current)}`;
+    showLaunch(current.bookId, heading, relaunch.operation === 'launchReviewRun' ? 'review-run' : LEDGER_TASK_LAUNCH_KINDS[relaunch.operation], finder, () => mountRelaunch({
+      api: scoped ?? api, plan: current, relaunch,
+      ...(scoped ? { readEvaluationReferences: () => scoped.taskOverviewCall({ operation: 'inspectEvaluationReferences', bookId: current.bookId, input: { recordId: null } }) } : {}), title: heading,
+      errorMessage: options.errorMessage, errorCode: options.errorCode, setStatus: options.setStatus, settle: options.settle, onRecorded: options.onRecorded,
+      openRun: (bookId, kind, ref, launchNotice) => surface.open({ bookId, kind, ref }, finder, launchNotice, { view: 'run' }),
+      interrupted, openSettings: options.openConnectionSettings,
+      onStale: (message) => { if (view === 'launch') surface.open(source, finder, message); },
+    }));
+    root.dataset['taskRelaunch'] = relaunch.operation;
+  }
+
   const surface: TaskDrawerSurface = {
     openComposer(seed, finder) {
       returnFocus = finder;
@@ -3015,28 +3096,15 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         queueMicrotask(() => { for (const [otherKey, other] of inlineLaunches) if (!other.request.mount?.isConnected) { other.bar.dispose(); inlineLaunches.delete(otherKey); } });
         return;
       }
-      disposeLaunchBar();
-      ticket += 1;
-      clearPoll(); panel.stop(); dialogueSurface.stop();
-      view = 'launch'; panelBookId = next.bookId; request = null; plan = null;
-      for (const key of ['taskPlanKind', 'taskPlanRef', 'taskPlanStart', 'taskPlanState', 'taskDetailView']) delete root.dataset[key];
-      returnFocus = finder;
-      root.hidden = false; root.dataset['taskDrawer'] = 'open'; shell.dataset['taskDrawer'] = 'open';
-      showView(); title.textContent = next.title; modes.hidden = true;
-      root.dataset['taskLaunchKind'] = LEDGER_TASK_LAUNCH_KINDS[next.operation];
-      launchBar = mountLaunchBar({
+      showLaunch(next.bookId, next.title, LEDGER_TASK_LAUNCH_KINDS[next.operation], finder, () => ({ lead: [], bar: mountLaunchBar({
         api, request: next,
         errorMessage: options.errorMessage, setStatus: options.setStatus, settle: options.settle, onRecorded: options.onRecorded,
         openRun: (bookId, kind, ref, launchNotice) => surface.open({ bookId, kind, ref }, finder, launchNotice, { view: 'run' }),
         interrupted, openSettings: options.openConnectionSettings,
-      });
-      body.replaceChildren(...launchBar.body);
-      bar.hidden = false; bar.replaceChildren(...launchBar.bar);
-      options.onOpen(); title.focus();
-      if (interrupted) disableAll();
+      }) }));
     },
     open(next, finder, note, how) {
-      delete root.dataset['taskLaunchKind'];
+      delete root.dataset['taskLaunchKind']; delete root.dataset['taskRelaunch'];
       disposeLaunchBar();
       ticket += 1;
       panel.stop();
@@ -3044,6 +3112,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       panelBookId = null;
       cancelOnOpen = how?.cancel === true;
       redoOnOpen = how?.redo === true;
+      unconfirmedOnOpen = how?.unconfirmed === true;
+      unconfirmedShown = false;
+      unconfirmedRecordShown = false;
       root.dataset['taskDetailView'] = how?.view ?? 'plan';
       if (how?.view) { mode = how.view === 'run' ? 'compact' : 'full'; syncModeButtons(); }
       for (const button of modeButtons) {

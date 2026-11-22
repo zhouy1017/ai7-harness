@@ -12,6 +12,7 @@ export interface MiniEvent {
   readonly bubbles?: boolean;
   readonly detail?: unknown;
   readonly key?: string;
+  readonly repeat?: boolean;
   readonly ctrlKey?: boolean;
   readonly metaKey?: boolean;
   readonly isComposing?: boolean;

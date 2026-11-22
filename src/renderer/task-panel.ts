@@ -95,9 +95,11 @@ export interface TaskPanelOptions {
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
   /** A Task's plan in the drawer; `cancel` opens it with 取消任务's Cancellation Impact Summary open. */
-  openPlan(kind: TaskPlanKind, ref: string, cancel: boolean, redo?: boolean, row?: TaskStatusRow): void;
+  openPlan(kind: TaskPlanKind, ref: string, cancel: boolean, redo?: boolean, row?: TaskStatusRow, unconfirmed?: boolean): void;
   /** A Task's own record: ②A for an analysis, ②B for a 审阅. */
   openTarget(target: GlobalAttentionTarget): void;
+  /** 去设置 › 模型服务 › 网络代理 of a card whose Run the proxy or the model service stopped. */
+  openNetworkProxySettings?(): void;
   /** 查看结果: the finished Task's result in the floating window beside the text. */
   openResult(entry: BookTaskItemProjection): void;
   /** 跳到所选文字 (Issue #423, S77 deferred item d): the caret moved to the paragraph a selection Task was started on. */
@@ -397,7 +399,8 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
       overview?.destroy();
       overview = mountTaskOverview({ root: groups, api, bookId: next, setStatus: options.setStatus, ...(options.settle ? { beforeStart: options.settle } : {}),
         onChanged: () => { options.onRecorded(next); read(true); },
-        openTarget: (item, view) => { if (item.plan?.ref) options.openPlan(item.plan.kind, item.plan.ref, false, view === 'redo', item); else if (item.target.kind === 'task-intent-draft') options.openDraft(item.target.draftId); else options.openTarget(item.target); },
+        openTarget: (item, view) => { if (item.plan?.ref) options.openPlan(item.plan.kind, item.plan.ref, view === 'cancel', view === 'redo', item, view === 'unconfirmed'); else if (item.target.kind === 'task-intent-draft') options.openDraft(item.target.draftId); else options.openTarget(item.target); },
+        openRecord: (item) => options.openTarget(item.target), ...(options.openNetworkProxySettings ? { openNetworkProxySettings: options.openNetworkProxySettings } : {}),
         jumpToSelection: (item) => { if (item.selection) options.jumpToSelection({ item: item.attention, result: item.result, selection: item.selection }); },
         openBook: () => {}, openResult: (item) => options.openResult({ item: item.attention, result: item.result, ...(item.selection == null ? {} : { selection: item.selection }) }),
       });

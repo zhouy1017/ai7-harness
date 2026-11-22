@@ -1,4 +1,5 @@
 import { chooseImportTarget } from './import-page.mjs';
+import { inWindowPress } from './review-preferences.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, popoverShownInside } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
@@ -3349,21 +3350,36 @@ async function main() {
     const ordinaryRow = await readAudit(renderer, (page) => page.rows.length === 1, 'learning-audit-ordinary-row');
     const ordinaryKey = ordinaryRow.rows[0][0];
     requireJourney(ordinaryRow.note !== null && !ordinaryRow.note.includes('授予') && ordinaryRow.rows[0][1] === 'pending' && ordinaryRow.rows[0][2] === '还没决定' && ordinaryRow.rows[0][4] === false, 'learning-audit-ordinary-row-words', ordinaryRow);
+    // The query press leaves the short window above the decision buttons. Reveal both with the wheel before measuring;
+    // pointerClick's scripted scroll must not supply the evidence that these choices can be reached.
+    for (let step = 0; step < 8; step++) {
+      const wheel = await renderer.evaluate(`(() => {
+        const root=document.querySelector('[data-screen="quality-learning"] .learning-audit');
+        const buttons=Array.from(root.querySelectorAll('li.learning-audit-material .learning-audit-decide button'));
+        const bottom=Math.max(...buttons.map(node=>node.getBoundingClientRect().bottom));
+        const box=root.getBoundingClientRect();
+        return {x:box.left+box.width/2,y:innerHeight-32,deltaY:Math.max(0,bottom-innerHeight+16)};
+      })()`);
+      if (wheel.deltaY <= 0) break;
+      await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheel, deltaX: 0 });
+      await renderer.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+    }
     const ordinaryControls = await renderer.evaluate(`(() => {
       const root = document.querySelector('[data-screen="quality-learning"] .learning-audit');
       const buttons = Array.from(root.querySelectorAll('li.learning-audit-material .learning-audit-decide button'));
-      buttons[0]?.scrollIntoView({ block: 'center', behavior: 'instant' });
       const filters = Array.from(root.querySelectorAll('.learning-audit-filter .ui-select-trigger'));
       const query = root.querySelector('#learning-audit-query');
       const fits = (node) => { const box = node.getBoundingClientRect(); return box.width > 0 && box.left >= 0 && box.right <= innerWidth; };
       // Each choice is inside the window and is what a pointer meets at its centre.
       const meets = (node) => { const box = node.getBoundingClientRect(); return box.top >= 0 && box.bottom <= innerHeight && node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)); };
       return { labels: buttons.map((node) => node.textContent), reachable: buttons.every((node) => fits(node) && meets(node)), buttons: buttons.length,
-        buttonChoices: root.querySelectorAll('.filter-choices').length, filters: filters.length, filtersFit: filters.every(fits), queryFits: fits(query), fromFits: fits(root.querySelector('#learning-audit-filter-from')),
+        buttonChoices: root.querySelectorAll('.filter-choices').length, filters: filters.length, filtersFit: filters.every(fits), queryFits: fits(query), fromFits: fits(root.querySelector('#learning-audit-filter-from')), datesTogether: Math.abs(root.querySelector('#learning-audit-filter-from').getBoundingClientRect().top-root.querySelector('#learning-audit-filter-to').getBoundingClientRect().top)<=1,
+        datesVisible: ['from','to'].every(key=>{const node=root.querySelector('#learning-audit-filter-'+key);return fits(node)&&meets(node);}),
+        decisionRects: buttons.map(node=>{const r=node.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right};}),
         queryRadius: getComputedStyle(query).borderTopLeftRadius, selectRadius: filters[0] ? getComputedStyle(filters[0]).borderTopLeftRadius : null, width: innerWidth, height: innerHeight };
     })()`);
     requireJourney(JSON.stringify(ordinaryControls.labels) === JSON.stringify(['用于学习', '不用']) && ordinaryControls.reachable && ordinaryControls.buttonChoices === 0 && ordinaryControls.filters === 4 &&
-      ordinaryControls.filtersFit && ordinaryControls.queryFits && ordinaryControls.fromFits && ordinaryControls.queryRadius === '8px' && ordinaryControls.selectRadius === '8px', 'learning-audit-ordinary-filters-style', ordinaryControls);
+      ordinaryControls.filtersFit && ordinaryControls.queryFits && ordinaryControls.fromFits && ordinaryControls.datesTogether && ordinaryControls.datesVisible && ordinaryControls.queryRadius === '8px' && ordinaryControls.selectRadius === '8px', 'learning-audit-ordinary-filters-style', ordinaryControls);
     await pointerClick(renderer, waitFor, `${auditRow(ordinaryKey)} [data-learning-audit-action="decide-book"]`, 'learning-audit-ordinary-decide');
     const decidedRow = await readAudit(renderer, (page) => page.rows.length === 1 && page.rows[0][1] === 'book', 'learning-audit-ordinary-decided');
     requireJourney(decidedRow.rows[0][2] === '用于学习 · 仅本书' && decidedRow.rows[0][4] === true, 'learning-audit-ordinary-decided-words', decidedRow);
@@ -3386,6 +3402,17 @@ async function main() {
     await pointerClick(renderer, waitFor, '.learning-lineage [data-learning-audit-action="back"]', 'learning-audit-ordinary-back');
     const stoppedRow = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 1 && page.rows[0][1] === 'excluded', 'learning-audit-ordinary-stopped-row');
     requireJourney(stoppedRow.rows[0][2] === '不用于学习', 'learning-audit-ordinary-stopped-words', stoppedRow);
+    const reincludePress = inWindowPress(renderer, waitFor);
+    await reincludePress(`${auditRow(ordinaryKey)} [data-learning-audit-action="open"]`, 'ordinary-reinclude-open');
+    await waitFor(renderer, `document.querySelector('.learning-lineage [data-learning-audit-action="reinclude"]')!==null`, 'ordinary-reinclude-ready');
+    await reincludePress('.learning-lineage [data-learning-audit-action="reinclude"]', 'ordinary-reinclude-start');
+    await reincludePress('.learning-reinclude input[value="book"]', 'ordinary-reinclude-book');
+    await waitFor(renderer, `document.querySelector('[data-learning-audit-action="reinclude-record"]')?.textContent==='确定'`, 'ordinary-reinclude-confirm-word');
+    await reincludePress('[data-learning-audit-action="reinclude-record"]', 'ordinary-reinclude-confirm');
+    await readAudit(renderer, (page) => page.lineage?.key === ordinaryKey && page.lineage.standing === 'book', 'ordinary-reinclude-recorded');
+    await reincludePress('.learning-lineage [data-learning-audit-action="back"]', 'ordinary-reinclude-back');
+    const reincludedRow = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 1 && page.rows[0][1] === 'book', 'ordinary-reinclude-row');
+    requireJourney(reincludedRow.rows[0][2] === '用于学习 · 仅本书', 'ordinary-reinclude-row-words');
     await auditMode(true, 'learning-audit-ordinary-restore');
 
     // ---- 从第 M 版重新评估 past a damaged latest version (Issue #726), and the house calibration offset (Issue #429, EVAL-011a) ----
@@ -3723,18 +3750,21 @@ async function main() {
         await waitFor(renderer, `document.querySelector('[data-memory-candidates] [data-memory-item="${itemId}"]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-memory-candidate-first');
         await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); return root.querySelector('[data-learning-enabled]') && root.querySelector('[data-preference-editor="new"]') && !root.querySelector('[data-memory-candidate-form]') && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent) && root.textContent.includes('来源与历史'); })()`, 'ordinary-memory-private-labels');
       }
-      await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${itemId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='接受记忆');if(!button||button.disabled)return false;button.click();return true;})()`, `${name}-accept`);
+      const acceptLabel = name === 'memory-governance-first' ? '接受' : '接受记忆';
+      await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${itemId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent===${JSON.stringify(acceptLabel)});if(!button||button.disabled)return false;button.click();return true;})()`, `${name}-accept`);
       await waitFor(renderer, `document.querySelector('[data-memory-item="${itemId}"]')?.textContent.includes('已启用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-active`);
       if (name === 'memory-governance-first') {
         await assertRenderer(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]'); const stop=Array.from(row?.querySelectorAll('button')??[]).find(button=>button.textContent==='停用'); if(!stop||stop.disabled)return false;stop.click();return true; })()`, 'ordinary-preference-stop-after-memory');
-        await waitFor(renderer, `document.querySelector('[data-review-preference="${ordinaryPreference}"]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.disabled===false`, 'ordinary-preference-stopped-after-memory');
+        await waitFor(renderer, `document.querySelector('[data-disabled-preferences] h4')?.textContent==='已停用的审阅偏好' && document.querySelector('[data-disabled-preferences] [data-review-preference="${ordinaryPreference}"]')!==null && document.querySelector('[data-learning-enabled]')?.disabled===false`, 'ordinary-preference-stopped-after-memory');
         await clickSelector(renderer, '#quality-tab-feedback', 'ordinary-history-open');
         await waitFor(renderer, `document.querySelectorAll('[data-feedback-filter]').length===2 && document.querySelectorAll('[data-entry-id]').length>0`, 'ordinary-history-populated');
         await assertRenderer(renderer, `(async () => { const page=await window.ai7.inspectFeedbackHistory(); const rows=Array.from(document.querySelectorAll('[data-entry-id]')); return JSON.stringify(rows.map(row=>row.dataset.entryId))===JSON.stringify(page.entries.map(entry=>entry.entryId)) && rows.every(row=>row.querySelectorAll(':scope > p').length===2 && row.querySelector('.feedback-entry-book') && (row.querySelector('[data-feedback-action="open"]')?.textContent==='查看原处' || row.querySelector('.feedback-entry-detached'))) && !document.querySelector('#feedback-filter-signal, #feedback-filter-author, #feedback-filter-editor, #feedback-filter-dimension, #feedback-filter-from, #feedback-filter-to, #feedback-group-by'); })()`, 'ordinary-history-newest-two-lines');
         await choose(renderer, '#feedback-filter-origin', 'analysis-feedback', 'ordinary-history-filter-source');
         await waitFor(renderer, `document.querySelector('#feedback-filter-origin')?.disabled===false && Array.from(document.querySelectorAll('[data-entry-id]')).every(row=>row.dataset.feedbackOrigin==='analysis-feedback')`, 'ordinary-history-filtered');
         await clickSelector(renderer, '#quality-tab-preferences', 'ordinary-preference-remount');
-        await waitFor(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]');const history=row?.querySelector('details');return row?.textContent.includes('已停用') && history?.textContent.includes('来自《') && /[0-9]+ 月 [0-9]+ 日 [0-9]{2}:[0-9]{2}/u.test(history.textContent) && !/[0-9]{4}-[0-9]{2}-[0-9]{2}T/u.test(history.textContent); })()`, 'ordinary-preference-retained-source-history');
+        await waitFor(renderer, `document.querySelector('[data-disabled-preferences] [data-review-preference="${ordinaryPreference}"] details summary')!==null`, 'ordinary-preference-history-ready');
+        await inWindowPress(renderer, waitFor)(`[data-review-preference="${ordinaryPreference}"] details summary`, 'ordinary-preference-history-expand');
+        await waitFor(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]');const history=row?.querySelector('details');return row?.closest('[data-disabled-preferences]')?.querySelector('h4')?.textContent==='已停用的审阅偏好' && history?.open && Array.from(history.querySelectorAll('p')).some(line=>line.textContent.includes('已停用')&&/[0-9]+ 月 [0-9]+ 日 [0-9]{2}:[0-9]{2}/u.test(line.textContent)) && history?.textContent.includes('来自《') && /[0-9]+ 月 [0-9]+ 日 [0-9]{2}:[0-9]{2}/u.test(history.textContent) && !/[0-9]{4}-[0-9]{2}-[0-9]{2}T/u.test(history.textContent); })()`, 'ordinary-preference-retained-source-history');
         await qualityMode(true, 'ordinary-memory-restore'); await openMemory('ordinary-memory-developer');
       }
       return itemId;
@@ -3770,7 +3800,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-memory-stop-quality');
     await waitFor(renderer, `document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')`, 'ordinary-memory-stop-ready');
     await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${deactivatedMemoryId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='停用');if(!button||button.disabled)return false;button.click();return true;})()`, 'memory-governance-deactivate');
-    await waitFor(renderer, `document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'memory-governance-inactive');
+    await waitFor(renderer, `document.querySelector('[data-disabled-preferences] h4')?.textContent==='已停用的审阅偏好' && document.querySelector('[data-disabled-preferences] [data-memory-item="${deactivatedMemoryId}"]')!==null && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'memory-governance-inactive');
     await qualityMode(true, 'ordinary-memory-stop-restore');
     // returnToLibrary finishes with initializeStartup: only its landing list proves the leave before the page is reopened.
     await backToLibrary(renderer, 'memory-governance-leave');

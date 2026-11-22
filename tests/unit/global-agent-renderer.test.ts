@@ -111,6 +111,12 @@ it('keeps preview optional and contains IDs, hashes, raw tool arguments and raw 
   expect(root.querySelectorAll('.global-agent-technical').every((details) => !details.hasAttribute('open'))).toBe(true);
 });
 
+it.each([['reactivate', '重新启用所选审阅偏好'], ['retire', '删除所选审阅偏好']] as const)('names the %s developer directive', async (operation, label) => {
+  const { root } = harness(dialogue(), false, { ...projection, directives: [{ ...DIRECTIVE, operation, text: '' }] });
+  await settle();
+  expect(root.querySelector('.global-agent-directives')!.textContent).toContain(label);
+});
+
 it('localizes tool results and supervision effects and preserves selections on proposal confirmation', async () => {
   const turn = { ...dialogue(), toolCalls: [{ attemptId: 'internal-attempt-id', callId: 'call', tool: 'retrieve', arguments: '{"query":"原始参数"}', outcome: 'returned' as const, result: '[{},{}]' }],
     supervisionProposals: [{ attemptId: 'internal-attempt-id', callId: 'proposal', input: { operation: 'supervise' as const, targets: [PIN], scope: { kind: 'house' as const }, categoryId: 'typos-and-usage', text: '谨慎归纳。', effect: 'freeze' as const } }] };

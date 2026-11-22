@@ -1,6 +1,7 @@
 import { chooseImportTarget } from './import-page.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
+import { assertReachable, pressReachable, wheelIntoView } from './task-card-reach.mjs';
 import { attentionNoticeClearsMenu, attentionNoticeHolds, closeTaskDrawer, pressQuietResult, READ_CARET } from './attention-notice.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1223,7 +1224,7 @@ async function main() {
     const pendingTaskB = await launchTaskFromBar(renderer, waitFor, 'concurrent-b-start');
     await waitForBar(renderer, {
       state: 'queued', pill: '排队中', status: '排队中', note: QUEUED_NOTE,
-      actions: [['cancel-wait', '取消', 'enabled'], ['run-link', '查看运行', 'enabled']],
+      actions: [['cancel-wait', '取消任务', 'enabled'], ['run-link', '查看运行', 'enabled']],
     }, 'concurrent-b-queued-bar', 30_000);
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='queued' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='排队中'`, 'concurrent-b-queued-card', 30_000);
     const queuedB = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1654,6 +1655,20 @@ async function main() {
       yieldedIdle.run.attempt?.spans?.length === 1 && yieldedIdle.authorization.authorizationId === idleAuthorizationId &&
       yieldedIdle.planVersion.materialInputs.runBudgetCeiling.maxTotalTokens === 100000,
     'idle-yield-keeps-unit-authorization-ceiling');
+    at('idle-yield-card-words');
+    // Issue #1680: on the 任务 page the yielded Run's card says what its record says — 让位给你的任务, never 「你 … 暂停」 — with
+    // 继续 · 重新开始… · 取消任务, each inside the window.
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'idle-yield-tasks');
+    const yieldedCard = '[data-screen="task-overview"] .task-overview-card[data-task-state="analysis-yielded"]';
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(yieldedCard + ' [data-task-action="redo"]')})`, 'idle-yield-card', 30_000);
+    const yieldedWords = await renderer.evaluate(`(() => { const card=document.querySelector(${JSON.stringify(yieldedCard)}); return { pill: card.querySelector('.task-overview-state')?.textContent ?? null, line: card.querySelector('.task-overview-card-line')?.textContent ?? null,
+      actions: Array.from(card.querySelectorAll('[data-task-action]')).filter((button) => !button.closest('details')).map((button) => [button.dataset.taskAction, button.textContent]) }; })()`);
+    requireJourney(yieldedWords.pill === '让位给你的任务' && yieldedWords.line?.startsWith('让位给你的任务') === true && !/你(在)? ?\d/u.test(yieldedWords.line) &&
+      JSON.stringify(yieldedWords.actions) === JSON.stringify([['resume', '继续'], ['redo', '重新开始…'], ['cancel', '取消任务']]), 'idle-yield-card-words', yieldedWords);
+    for (const action of ['resume', 'redo', 'cancel']) {
+      await wheelIntoView(renderer, waitFor, `${yieldedCard} [data-task-action="${action}"]`, `idle-yield-${action}`);
+      await assertReachable(renderer, waitFor, requireJourney, `${yieldedCard} [data-task-action="${action}"]`, `idle-yield-${action}`);
+    }
     // Cancel the foreground work through its existing controls, then idle resumes B without another authorization.
     for (const [foregroundBook, foregroundTask] of [[bookA, taskA], [bookC, idleForegroundTask]]) {
       await toLibrary(renderer, 'idle-foreground-cancel');
@@ -1789,8 +1804,11 @@ async function main() {
     const filterTrigger = '.task-overview-filters select[aria-label="图书"] + .ui-select-trigger';
     const filterIndex = await renderer.evaluate(`Array.from(document.querySelector('.task-overview-filters select[aria-label="图书"]').options).findIndex((option) => option.value === ${JSON.stringify(overviewBooks[3])})`);
     requireJourney(filterIndex > 0, 'overview-filter-lists-the-book', { filterIndex });
-    await pointerClick(renderer, waitFor, filterTrigger, 'overview-filter-open');
-    for (let step = 0; step < filterIndex; step += 1) await press(renderer, 'ArrowDown');
+    // Chosen by key on confirmed state (Issue #1680): the list is open, and its active option follows each key before Enter.
+    const filterActive = `(() => { const trigger=document.querySelector(${JSON.stringify(filterTrigger)}); if (trigger?.getAttribute('aria-expanded')!=='true') return null; const row=document.getElementById(trigger.getAttribute('aria-activedescendant') ?? ''); return row ? Number(row.dataset.index) : -1; })()`;
+    await pressReachable(renderer, waitFor, requireJourney, filterTrigger, 'overview-filter-open');
+    await waitFor(renderer, `${filterActive} === 0`, 'overview-filter-popup-open');
+    for (let step = 0; step < filterIndex; step += 1) { await press(renderer, 'ArrowDown'); await waitFor(renderer, `${filterActive} === ${step + 1}`, 'overview-filter-active-follows-key'); }
     await press(renderer, 'Enter');
     try {
       await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === ${JSON.stringify(overviewBooks[3])} && document.activeElement?.matches('.task-overview-filters .ui-select-trigger') && document.querySelectorAll('.task-overview-card').length === 0`, 'overview-filter-chosen-by-key');
@@ -1809,7 +1827,8 @@ async function main() {
     await renderer.evaluate(`window.ai7.startQuickTasks({ tasks: [{ bookId: ${JSON.stringify(overviewBooks[3])}, procedureId: 'baseline-analysis' }] })`);
     await waitFor(renderer, `document.querySelectorAll('.task-overview-card').length === 1 && document.activeElement?.matches('.task-overview-filters .ui-select-trigger')`, 'overview-repaints-with-focus-on-the-filter', 60000);
     await press(renderer, 'ArrowDown');
-    for (let step = 0; step < filterIndex; step += 1) await press(renderer, 'ArrowUp');
+    await waitFor(renderer, `${filterActive} === ${filterIndex}`, 'overview-filter-reopened-by-key');
+    for (let step = filterIndex - 1; step >= 0; step -= 1) { await press(renderer, 'ArrowUp'); await waitFor(renderer, `${filterActive} === ${step}`, 'overview-filter-back-follows-key'); }
     await press(renderer, 'Enter');
     await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === 'all' && document.querySelectorAll('.task-overview-card').length > 1`, 'overview-filter-back-to-all');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items.some(i=>i.bookId===${JSON.stringify(overviewBooks[3])} && i.queuePosition===2))()`, 'overview-fourth-second', 60000);

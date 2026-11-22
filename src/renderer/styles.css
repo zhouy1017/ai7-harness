@@ -2036,7 +2036,7 @@ body[data-task-drawer="open"] .status-bar { right: max(calc(min(var(--task-drawe
 :root[data-status-bar="shown"] body:not(:has(#screen[data-screen="editor"])) { padding-bottom: calc(var(--status-bar-height, 0px) + 1rem); }
 /* A sticky action bar takes the bar's height as space above itself, so at the page's end the bar stands in that space and the
    control just above the sticky bar is not under it. */
-:root[data-status-bar="shown"] #screen :is(.commit-bar, .workbench-actions, .task-overview-confirm) { margin-top: calc(1.4rem + var(--status-bar-height, 0px) + .45rem); }
+:root[data-status-bar="shown"] #screen :is(.commit-bar, .workbench-actions) { margin-top: calc(1.4rem + var(--status-bar-height, 0px) + .45rem); }
 :root[data-status-bar="shown"] .editor-window { padding-bottom: calc(clamp(1.5rem, 3vw, 2.5rem) + var(--status-bar-height, 0px) + var(--bottom-controls, 0px)); }
 .error-panel { border-color: var(--status-blocked); background: var(--status-blocked-surface); }
 
@@ -2802,6 +2802,8 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 /* #1315: one development disclosure control; disabled technical content has no DOM payload. */
 [data-technical-layer][hidden], [data-technical-layer] > summary[hidden] { display: none !important; }
 .technical-layer-control { position: fixed; right: 1rem; bottom: 3rem; z-index: 90; padding: .6rem .8rem; background: var(--surface); border: 1px solid var(--boundary); border-radius: .4rem; }
+/* Keep the page's developer disclosure beside the drawer, clear of its launch and run controls. */
+body[data-task-drawer="open"] .technical-layer-control { right: calc(min(var(--task-drawer-width), 100vw - 1rem) + 1rem); }
 
 /* T1 task cards and shared in-Book pane (Issue #1328). */
 .task-overview-card-body { min-width:0; flex:1; }
@@ -2815,8 +2817,6 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .task-overview-more[open] { z-index:4; }
 .task-overview-more[open] > button { display:block; background:var(--surface); }
 .task-overview-more > button { white-space:nowrap; }
-.task-overview-confirm { position:sticky; bottom:0; background:var(--surface); border:1px solid var(--boundary); padding:12px; display:flex; gap:12px; align-items:center; z-index:6; }
-.task-overview-confirm[hidden] { display:none; }
 .task-overview-sheet { width:min(760px, calc(100vw - 40px)); }
 .task-overview-sheet-books { display:grid; gap:10px; margin-bottom:18px; }
 .task-overview-sheet-book { display:flex; gap:10px; align-items:center; }
@@ -3231,6 +3231,8 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 
 /* One compact launch bar in page sections and sheet feet (#1526). */
 .task-launch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; min-width: 0; position: relative; }
+/* Keep the relaunch options anchor on its row when its label gains the edited indicator. */
+#task-drawer[data-task-relaunch] .task-launch-options { min-inline-size: min(13em, 100%); }
 .task-launch-bar > details { min-width: 0; }
 .task-launch-bar > details > summary { cursor: pointer; padding: .4rem .5rem; border-radius: .3rem; }
 .task-launch-popover { position: fixed; inset: auto; box-sizing: border-box; width: min(520px, calc(100vw - 1rem)); max-height: min(540px, calc(100vh - 2rem)); overflow: auto; padding: 1rem; margin: 0; border: 1px solid var(--boundary); border-radius: .5rem; background: var(--surface); color: var(--text); box-shadow: 0 8px 30px var(--shadow); }
@@ -3332,6 +3334,10 @@ button.danger:hover { box-shadow: inset 0 0 0 1px var(--status-blocked); }
 .import-page-actions .button-row { margin: 0; }
 /* On the import page the developer disclosure follows the page, clear of its sticky actions. */
 body:has(#screen .import-page-actions) > .technical-layer-control { position: static; align-self: flex-end; margin: .75rem 1rem; }
+.learning-audit-dates { display: flex; flex-wrap: nowrap; gap: .5rem; }
+.review-preference-confirm { grid-column: 1 / -1; min-width: 0; padding: .65rem .8rem; margin-top: .5rem; border: 1px solid var(--boundary); border-radius: .5rem; background: var(--surface-subdued); }
+.review-preference-confirm .danger { color: var(--action-danger); border-color: var(--action-danger); }
+.review-preference-confirm .button-row { display: flex; gap: .5rem; }
 
 /* 要怎样导入？ (Issue #1682): the small question a dropped file asks. */
 .import-entry-sheet { width: min(460px, calc(100vw - 2rem)); }
