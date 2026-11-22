@@ -76,19 +76,22 @@ function inventoryText(state: UpgradeState,files: DatabasePackageMember[],digest
 }
 
 async function attemptManifest(directory: string,name: string,state: UpgradeState): Promise<string | null | undefined> {
-  const receipt = await recoveryReceipt(join(directory,'rollback-ready.json'));
+  const bound = state.currentManifestDigest;
+  // These files are published independently. A trusted content digest authenticates the member list
+  // even if the adjacent receipt's rename did not persist or its directory belonged to an earlier attempt.
+  const receipt = bound ? null : await recoveryReceipt(join(directory,'rollback-ready.json'));
   if (receipt && !sameRollbackAttempt(receipt,state)) return undefined;
-  let json = await readSmallFile(join(directory,name),MAX_MANIFEST_BYTES + 512);
-  if (json !== null && state.inventoryFormat === 1) {
-    let record;
-    try { record = JSON.parse(json); } catch { return null; }
-    if (!record || !Array.isArray(record.members)) return null;
-    if (record.upgradeId !== state.id || record.rollbackAttempt !== state.rollbackAttempt) return undefined;
-    json = JSON.stringify(record.members);
-    if (createHash('sha256').update(json).digest('hex') !== record.sha256) return null;
-  }
-  if (json !== null && receipt?.currentManifestDigest && createHash('sha256').update(json).digest('hex') !== receipt.currentManifestDigest) return null;
-  return json;
+  const text = await readSmallFile(join(directory,name),MAX_MANIFEST_BYTES + 512);
+  if (text === null) return null;
+  let record;
+  try { record = JSON.parse(text); } catch { return null; }
+  const legacy = Array.isArray(record);
+  if (!legacy && !Array.isArray(record?.members)) return null;
+  const json = legacy ? text : JSON.stringify(record.members);
+  const digest = createHash('sha256').update(json).digest('hex');
+  if (bound) return digest === bound ? json : null;
+  if (legacy || record.upgradeId !== state.id || record.rollbackAttempt !== state.rollbackAttempt) return undefined;
+  return digest === record.sha256 && (!receipt?.currentManifestDigest || receipt.currentManifestDigest === digest) ? json : null;
 }
 
 async function checkedStore(root: string, dir: string): Promise<string> {

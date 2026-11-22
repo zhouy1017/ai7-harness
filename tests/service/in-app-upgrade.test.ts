@@ -969,6 +969,7 @@ it.each([['historical','removed'],['historical','added'],['current','removed'],[
   const stale = await readFile(phase);
   await expect(pause('publish-old',true)).rejects.toThrow('interrupted');
   const second = JSON.parse(await readFile(join(independent,receipt),'utf8'));
+  const secondManifest = await readFile(join(independent,'files.json'));
   const earlier = JSON.parse(first.toString('utf8'));
   expect(second.currentDigest).toBe(earlier.currentDigest);
   expect(second.rollbackAttempt).not.toBe(earlier.rollbackAttempt);
@@ -1002,11 +1003,36 @@ it.each([['historical','removed'],['historical','added'],['current','removed'],[
   await rename(copyB,prepared);
   await rm(join(prepared,'ai7.sqlite'));
   await expect(resumeUpgrade(root,'0.8.0',stage => { if (stage === 'return-new') throw Error('interrupted'); })).rejects.toThrow('interrupted');
-  const bound = JSON.parse(await readFile(phase,'utf8'));
+  const boundJournal = await readFile(phase);
+  const bound = JSON.parse(boundJournal.toString('utf8'));
   expect(bound.currentDigest).toBe(second.currentDigest);
   expect(bound.currentManifestDigest).toBe(second.currentManifestDigest);
-  await rm(join(parked,'ai7.sqlite'));
   await rm(join(prepared,receipt));
+  if (change === 'added') {
+    // B's only complete inventory is published at current-files before its adjacent A receipt is replaced.
+    const only = join(note,'current-files.json');
+    await rm(join(prepared,'files.json'));
+    await writeFile(only,firstManifest);
+    await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+    expect(await readFile(phase)).toEqual(boundJournal);
+    await rm(only);
+    await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+    await writeFile(only,secondManifest);
+    const unbound = {...bound};
+    delete unbound.currentManifestDigest;
+    for (const incomplete of [unbound,{...bound,currentManifestDigest:'0'.repeat(64)}]) {
+      const unchanged = JSON.stringify(incomplete);
+      await writeFile(phase,unchanged);
+      await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+      expect(await readFile(phase,'utf8')).toBe(unchanged);
+      expect(await readFile(only)).toEqual(secondManifest);
+      expect(await readFile(join(preparedFiles,member))).toEqual(contents);
+      expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
+    }
+    await writeFile(phase,boundJournal);
+    expect(await readFile(join(note,receipt))).toEqual(first);
+  }
+  await rm(join(parked,'ai7.sqlite'));
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
   expect(existsSync(join(root,member))).toBe(change === 'added');
   await verifyLibraryFiles(root,117);
