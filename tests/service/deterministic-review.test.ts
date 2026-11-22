@@ -94,6 +94,28 @@ describe('provider-free local ReviewRun', () => {
     expect(store.reverseAppliedChangeSuggestion(reverseInput).application.effectId).toBe(reversed.application.effectId);
     expect(store.inspectHouseWordList({ versionId: house.pin.versionId, entryOffset: 0, historyOffset: 0 }).selected!.enabledCount).toBe(1);
   });
+  it('reads each finding at its mark’s paragraph and offsets after 分段 moved the mark (Issue #1654, loss 5)', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '段落移动公开样书');
+    const target = replaceFirst(book, '按纳 合成异称 公开留意词。');
+    const options: LocalCheckOptions = { ...OPTIONS, punctuation: 'off', tables: { characters: false, variantWords: true, houseWordList: null,
+      bookTerms: [{ kind: 'person', preferred: '合成正名', variants: ['合成异称'] }] } };
+    const prepared = prepare(book, policy, options);
+    authorize(book, prepared);
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(prepared.run.reviewRunId); await driver.dispose();
+    const before = store.inspectReviewWorkspace(book.bookId, prepared.run.reviewRunId).run!.findings.filter((finding) => finding.blockId === target && finding.markId !== null);
+    expect(before.length).toBeGreaterThan(0);
+    // Enter at the paragraph's very start: every mark goes with its words into the new paragraph.
+    const created = `blk_${randomUUID().replaceAll('-', '').slice(0, 24)}`;
+    const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: target });
+    store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+      blockId: target, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: window.blocks.find((block) => block.blockId === target)!.digest,
+      expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '', structure: { kind: 'split', newBlockId: created } });
+    const moved = store.inspectReviewWorkspace(book.bookId, prepared.run.reviewRunId).run!.findings.filter((finding) => before.some((item) => item.findingId === finding.findingId));
+    const cards = moved.map((finding) => store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!));
+    expect(cards.every((card) => card.blockId === created)).toBe(true);
+    expect(moved.map((finding) => [finding.blockId, finding.fromGrapheme, finding.toGrapheme])).toEqual(cards.map((card) => [card.blockId, card.fromGrapheme, card.toGrapheme]));
+  });
   it.each(['complete-and-reopen', 'cancel'] as const)('keeps local %s independent of four occupied real model permits (#1131)', async (mode) => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0]; const connection = store.saveModelServiceConnection('本地检查旁的正式连接', null, 'ready', route.route);

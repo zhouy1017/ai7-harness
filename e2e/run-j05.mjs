@@ -229,6 +229,14 @@ async function markTechnicalMode(renderer, visible, name) {
 async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; input.value=${JSON.stringify(value)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, name);
 }
+const CTRL = 2;
+const SHIFT = 8;
+/** A chord as a keyboard sends it, with its code and virtual key (Ctrl+Z, Ctrl+Shift+Z). */
+async function pressChord(renderer, key, code, virtualKey, modifiers) {
+  const chord = { key, code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode: virtualKey, modifiers };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...chord });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...chord });
+}
 async function press(renderer, key, modifiers = 0) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, modifiers });
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, modifiers });
@@ -1057,11 +1065,30 @@ async function main() {
     await assertRenderer(renderer, `window.__j05.act('accept-and-apply')`, 'structure-accept-and-apply');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(${JSON.stringify(appliedBlock)}) === window.__j05Structure.applied.slice(0, 2) + ${JSON.stringify(STRUCTURE_APPLIED_TEXT)} + window.__j05Structure.applied.slice(6)`, 'structure-applied');
     await press(renderer, 'Escape');
-    // 撤销 steps over the Apply to the split before it; the applied words stay, and 重做 splits again.
-    await click(renderer, '撤销', 'undo-over-apply');
-    await waitFor(renderer, `window.__j05.block(window.__j05Split) === null && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split && window.__j05.text(${JSON.stringify(appliedBlock)}).includes(${JSON.stringify(STRUCTURE_APPLIED_TEXT)}) && Array.from(document.querySelectorAll('button')).some((button) => button.getAttribute('aria-label') === '重做' && !button.disabled)`, 'undo-steps-over-apply', 15_000);
-    await click(renderer, '重做', 'redo-split');
+    // Ctrl+Z takes back the newest editor step whatever its kind (Issue #1654; ADR 0105 §1): first the accepted 修改建议, with
+    // no confirmation; the status names its paragraph and the view stands there. A second Ctrl+Z takes back the split; redo
+    // (Ctrl+Shift+Z) replays them oldest first.
+    at('structure-undo-takes-back-apply');
+    const appliedParagraph = await renderer.evaluate(`(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'block', blockId: ${JSON.stringify(appliedBlock)} } }); return page.blocks.find((block) => block.blockId === ${JSON.stringify(appliedBlock)})?.position ?? null; })()`);
+    requireJourney(Number.isSafeInteger(appliedParagraph), 'undo-apply-paragraph-known');
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(appliedBlock)}, 0, 0)`, 'undo-apply-caret');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+    await pressChord(renderer, 'z', 'KeyZ', 90, CTRL);
+    const undoneLine = `已撤销：接受修改建议（第 ${Number(appliedParagraph).toLocaleString('zh-CN')} 段）`;
+    await waitFor(renderer, `window.__j05.text(${JSON.stringify(appliedBlock)}) === window.__j05Structure.applied && window.__j05.block(window.__j05Split) !== null && (window.__j05.status() + window.__j05.notice()).includes(${JSON.stringify(undoneLine)}) && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'undo-apply-names-the-paragraph', 15_000);
+    // The view is at the place, in the engine's own geometry: the paragraph's first line inside the window and the editor's
+    // visible box, and the element under its middle is the paragraph.
+    await waitFor(renderer, `(() => { const block = window.__j05.block(${JSON.stringify(appliedBlock)}); const box = document.querySelector('[data-testid="manuscript-editor"]')?.closest('.editor-window, .manuscript-editor-window') ?? document.querySelector('[data-testid="manuscript-editor"]')?.parentElement; const rect = block?.getClientRects()[0]; const view = box?.getBoundingClientRect(); if (!rect || !view) return false; const x = rect.left + Math.min(rect.width / 2, 40), y = rect.top + Math.min(rect.height / 2, 8); const top = Math.max(0, view.top), bottom = Math.min(innerHeight, view.bottom); return rect.top >= 0 && rect.top < innerHeight && rect.left >= 0 && rect.left < innerWidth && y >= top && y < bottom && block.contains(document.elementFromPoint(x, y)); })()`, 'undo-apply-view-at-the-place', 15_000);
+    await settled(renderer, 'undo-apply-settled');
+    await pressChord(renderer, 'z', 'KeyZ', 90, CTRL);
+    await waitFor(renderer, `window.__j05.block(window.__j05Split) === null && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split && window.__j05.text(${JSON.stringify(appliedBlock)}) === window.__j05Structure.applied && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'undo-split-after-apply', 15_000);
+    await settled(renderer, 'undo-split-settled');
+    await pressChord(renderer, 'z', 'KeyZ', 90, CTRL | SHIFT);
     await waitFor(renderer, `window.__j05.block(window.__j05Split)?.previousElementSibling?.dataset.blockId === ${JSON.stringify(splitBlock)} && window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT}) && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'redo-splits-again', 15_000);
+    await settled(renderer, 'redo-split-settled');
+    await pressChord(renderer, 'z', 'KeyZ', 90, CTRL | SHIFT);
+    await waitFor(renderer, `window.__j05.text(${JSON.stringify(appliedBlock)}) === window.__j05Structure.applied.slice(0, 2) + ${JSON.stringify(STRUCTURE_APPLIED_TEXT)} + window.__j05Structure.applied.slice(6) && window.__j05.mark('change-suggestion', ${JSON.stringify(appliedBlock)})[0]?.dataset.markStatus === 'applied' && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'redo-reapplies-the-suggestion', 15_000);
+    await settled(renderer, 'redo-apply-settled');
 
     at('structure-merge');
     // Enter and Backspace split and merge paragraphs in 自由直接编辑 only (Issue #1411).
@@ -1186,6 +1213,12 @@ async function main() {
     await assertRenderer(renderer, `(() => { const button=document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]'); if(!button||button.disabled||button.textContent!=='批量采纳机械修正')return false; button.click(); return true; })()`, 'local-mechanical-batch-one-action');
     await waitFor(renderer, `!document.querySelector('[data-review-action="batch-confirm"]') && document.querySelector('section.review-batch-applied[data-review-batch-state="applied"] [data-review-action="batch-undo"]') !== null`, 'local-batch-dom-ready');
     requireJourney(await renderer.evaluate(`(async () => { const {manuscript}=await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:manuscript.manuscriptId,branchId:manuscript.branchId,markId:window.__j05LocalMark}); return card.suggestion?.application!=null; })()`), 'local-batch-committed');
+    // 撤销本批应用 is the batch's editor step (Issue #1654): it stands again after leaving the review page and coming back.
+    at('review-batch-undo-after-leaving');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'batch-leave-review');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') !== null && document.querySelector('section.review-batch-applied') === null`, 'batch-left-review');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'batch-back-to-review');
+    await waitFor(renderer, `document.querySelector('section.review-batch-applied[data-review-category="local-text-check"] [data-review-action="batch-undo"]')?.disabled === false`, 'batch-undo-stands-after-leaving', 30_000);
     try {
       for (const viewport of [{width:1280,height:800},{width:1008,height:681}]) {
         at(viewport.width===1280?'review-batch-undo-wide':'review-batch-undo-gate');

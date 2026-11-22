@@ -58,6 +58,7 @@ export const NO_EDIT_QUALITY: DecisionEditQuality = { applied: 0, surviving: 0, 
 function* targetSignals(db: DatabaseSync, bookId: string | null, operationalScope?: TrustedOperationalScope): IterableIterator<TargetSignal> {
   const targets = db.prepare(`SELECT t.*, i.book_id, i.branch_id, r.resulting_journal_sequence, r.receipt_digest,
       d.disposition, d.edited_text, p.proposed_text, m.anchor_state, m.status, m.from_grapheme, m.to_grapheme,
+      -- The words as they stand now are read where the mark stands now: a split or join may have moved them (Issue #1654, loss 5).
       w.digest AS current_digest, w.text AS current_text,
       COALESCE((SELECT f.category_id FROM review_findings f WHERE f.mark_id = m.mark_id ORDER BY rowid DESC LIMIT 1), 'editorial') AS category_id,
       EXISTS(SELECT 1 FROM manuscript_effect_intents reverse WHERE reverse.reverses_effect_id = i.effect_id) AS reversed
@@ -66,7 +67,7 @@ function* targetSignals(db: DatabaseSync, bookId: string | null, operationalScop
     JOIN proposal_item_decisions d ON d.decision_id = t.decision_id
     JOIN proposal_change_items p ON p.item_id = t.item_id
     JOIN editorial_marks m ON m.mark_id = p.mark_id
-    LEFT JOIN working_blocks w ON w.branch_id = i.branch_id AND w.block_id = t.block_id
+    LEFT JOIN working_blocks w ON w.branch_id = i.branch_id AND w.block_id = m.block_id
     WHERE i.kind = 'apply' AND d.disposition IN ('accepted', 'accepted-with-edit') AND (? IS NULL OR i.book_id = ?)
     ORDER BY i.book_id, i.effect_id, t.ordinal`).all(bookId, bookId);
   for (const target of targets) {

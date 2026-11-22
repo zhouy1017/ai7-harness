@@ -503,9 +503,12 @@ function standBlocks(session: Session, book: Book, moves: ReadonlyArray<readonly
   const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
   withDatabase((db) => {
     db.exec('PRAGMA foreign_keys = OFF');
-    const move = db.prepare('UPDATE working_blocks SET position = ? WHERE branch_id = ? AND block_id = ?');
-    for (const [read] of moves) move.run(100000 + read, book.branchId, blocks.find((block) => block.position === read)!.blockId);
-    for (const [read, now] of moves) move.run(now, book.branchId, blocks.find((block) => block.position === read)!.blockId);
+    // The paragraph read at `read` takes the order key of the one at `now` (Issue #1654: the order is the keys').
+    const keyAt = new Map(blocks.map((block) => [block.position, Number((db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?')
+      .get(book.branchId, block.blockId) as { order_key: number }).order_key)] as const));
+    const move = db.prepare('UPDATE working_blocks SET order_key = ? WHERE branch_id = ? AND block_id = ?');
+    for (const [read] of moves) move.run(2 ** 52 + read, book.branchId, blocks.find((block) => block.position === read)!.blockId);
+    for (const [read, now] of moves) move.run(keyAt.get(now)!, book.branchId, blocks.find((block) => block.position === read)!.blockId);
   });
 }
 

@@ -55,5 +55,11 @@ export const STRUCTURAL_EDIT_INDEX_SQL = {
 
 /** Whether this store holds revision 100's relations: the lineage relation is created in the transaction that rebuilds the other two. */
 export function hasStructuralEditSchema(db: DatabaseSync): boolean {
-  return db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_block_lineage'").get() !== undefined;
+  // A relation never leaves a connection's schema once there; the answer is read once per connection (Issue #1654: every
+  // command's evidence digest asks, 2,000 times in one undo of a 全部替换).
+  let known = structuralSchemaKnown.get(db);
+  if (known !== true) structuralSchemaKnown.set(db, known = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_block_lineage'").get() !== undefined);
+  return known;
 }
+
+const structuralSchemaKnown = new WeakMap<DatabaseSync, boolean>();

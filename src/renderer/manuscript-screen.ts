@@ -2394,7 +2394,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     const next = await Promise.resolve().then(() => api.inspectEditorHistory(scope)).catch(() => null);
     const step = next === null ? undefined : action === 'undo' ? next.undo : next.redo;
     if (step === null) {
-      setStatus(`没有可以${verb}的修改。`, 'success');
+      setStatus(`没有可${verb}的修改。`, 'success');
       return;
     }
     if (step !== undefined && step.changeCount >= LARGE_STEP_CHANGES) setStatus(`正在${verb} ${step.changeCount.toLocaleString('zh-CN')} 处修改…`, 'busy');

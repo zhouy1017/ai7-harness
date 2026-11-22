@@ -825,10 +825,13 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       try {
         database.exec('PRAGMA foreign_keys = OFF');
         const twentyOne = store.baselineAnalysisLedger.readWorkingBlocks(branchId).find((block) => block.position === 21)!;
-        const move = database.prepare('UPDATE working_blocks SET position = ? WHERE branch_id = ? AND block_id = ?');
-        move.run(100020, branchId, twenty.blockId);
-        move.run(20, branchId, twentyOne.blockId);
-        move.run(21, branchId, twenty.blockId);
+        // The two paragraphs swap their order keys (Issue #1654): the 20th paragraph is then the other block.
+        const keyOf = (blockId: string): number => Number((database.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(branchId, blockId) as { order_key: number }).order_key);
+        const [atTwenty, atTwentyOne] = [keyOf(twenty.blockId), keyOf(twentyOne.blockId)];
+        const move = database.prepare('UPDATE working_blocks SET order_key = ? WHERE branch_id = ? AND block_id = ?');
+        move.run(2 ** 52, branchId, twenty.blockId);
+        move.run(atTwenty, branchId, twentyOne.blockId);
+        move.run(atTwentyOne, branchId, twenty.blockId);
       } finally {
         database.close();
       }

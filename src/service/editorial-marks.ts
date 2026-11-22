@@ -7,6 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { proposalReviewPosition } from './editorial-workspace-profile.js';
 import { paragraphAtKey, placesOfKeys, windowKeys } from './manuscript/working-positions.js';
+import { blockReachesThroughLineage } from './manuscript/structural-edits.js';
 import {
   coverSpanEdit,
   followGraphemeEdit,
@@ -551,6 +552,17 @@ export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: strin
  * Reverse Apply that counteracted it when there is one. Read from the Effect ledger revision 23 adds;
  * a store without it has applied nothing.
  */
+/**
+ * Whether the latest Apply of `markId`'s item wrote its words in a block that is `blockId` or reaches it through block lineage
+ * — the reversal guard's own paragraph check (`blockReachesThroughLineage`), which the card and the step's undo both meet.
+ */
+export function appliedWordsReach(db: DatabaseSync, branchId: string, markId: string, blockId: string): boolean {
+  const target = db.prepare(`SELECT t.block_id FROM proposal_change_items i JOIN manuscript_effect_targets t ON t.item_id = i.item_id
+    JOIN manuscript_effect_intents e ON e.effect_id = t.effect_id AND e.kind = 'apply' JOIN manuscript_effect_receipts r ON r.effect_id = e.effect_id
+    WHERE i.mark_id = ? ORDER BY r.resulting_journal_sequence DESC LIMIT 1`).get(markId) as SqlRow | undefined;
+  return target === undefined || blockReachesThroughLineage(db, branchId, text(target.block_id), blockId);
+}
+
 export function applicationOfItem(db: DatabaseSync, itemId: string): ManuscriptApplyProjection | null {
   if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_effect_receipts'").get() === undefined) return null;
   const row = db.prepare(
@@ -1199,6 +1211,10 @@ export class EditorialMarkStore {
     const modelLabels = row.source_kind === 'ai7' ? historicalMarkModelLabels(this.#db, markId) : {};
     const category = resolveEditorialMarkCategory({ sourceKind: text(row.source_kind) as EditorialMarkSourceProjection['kind'],
       sourceOrigin: nullableText(row.source_origin) as EditorialMarkSourceProjection['origin'], sourceLabel: nullableText(row.source_label) });
+    // The card offers 撤销本次修改 exactly when the reversal guard would accept it (Issue #1654, loss 4): an applied mark standing in
+    // a paragraph its Apply's words did not flow to reads as drifted, as the guard refuses it.
+    const anchorState = row.status === 'applied' && row.anchor_state === 'exact' && !appliedWordsReach(this.#db, branchId, markId, text(row.block_id))
+      ? 'drifted' : text(row.anchor_state) as EditorialMarkCardProjection['anchorState'];
     return {
       markId,
       categoryKey: category.key,
@@ -1206,7 +1222,7 @@ export class EditorialMarkStore {
       ...(this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() && this.#db.prepare('SELECT 1 FROM editor_inline_revision_marks WHERE mark_id = ?').get(markId) ? { inlineRevision: true } : {}),
       kind,
       status: text(row.status) as EditorialMarkStatus,
-      anchorState: text(row.anchor_state) as EditorialMarkCardProjection['anchorState'],
+      anchorState,
       highlightColor: row.highlight_color === null ? null : integer(row.highlight_color) as PersonalHighlightColor,
       blockId: text(row.block_id),
       fromGrapheme: integer(row.from_grapheme),

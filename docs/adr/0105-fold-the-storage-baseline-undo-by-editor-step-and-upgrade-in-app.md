@@ -45,6 +45,8 @@ Every editor action writes one **editor step** in its existing transaction: typi
 - The Apply Effects it **owns**, by generation.
 - For a restore, the mark anchors before and after.
 
+> Clarification, 2026-11-22 (Commander decision; R5-3 + R5-4, #1654): a split or merge step records the pre / post anchors of the marks at its caret (and of an absorbed block whose boundary fuses graphemes); an undo restores them only when the mark's current anchor equals the recorded post side (ED-044 holds: the words are byte-identical). A step owns its Effects per Effect (one slot per Effect it wrote, each a chain of generations), not per proposal item, because a reversal consumes its whole Effect.
+
 **What Ctrl+Z does.**
 - Ctrl+Z takes back the newest step as **one** transaction, whatever its kind. Redo replays the oldest undone step.
 - Text steps replay their command groups. Apply steps write the governed reversal through the existing Effect path (UI ADR 0003 kept: receipts are never rewritten). The reversal is recorded with its own interaction value, `undo-step` or `redo-step`, never `confirm-reverse-apply`, because no confirmation is shown.

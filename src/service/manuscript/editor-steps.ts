@@ -425,7 +425,7 @@ export function replayEditorStep(host: EditorStepHost, action: 'undo' | 'redo', 
     const before = host.binding();
     requireBounded(before.workingDigest === expectedWorkingDigest, 'HISTORY_STALE', '稿件已变化，请刷新历史状态。');
     const step = nextStep(db, before.branchId, action);
-    if (step === null) throw new BoundedStoreError(action === 'undo' ? 'NOTHING_TO_UNDO' : 'NOTHING_TO_REDO', action === 'undo' ? '没有可以撤销的修改。' : '没有可以重做的修改。');
+    if (step === null) throw new BoundedStoreError(action === 'undo' ? 'NOTHING_TO_UNDO' : 'NOTHING_TO_REDO', action === 'undo' ? '没有可撤销的修改。' : '没有可重做的修改。');
     requireBounded(expectedStepId === undefined || expectedStepId === step.stepId, 'HISTORY_STEP_CHANGED', '这一步之后又有新的修改；请先撤销它们，或在卡片上逐条撤销。');
     const context = contextOf(db);
     requireBounded(context.replay === null, 'HISTORY_CORRUPT', '撤销不能嵌套。');

@@ -265,6 +265,8 @@ type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWo
   'getTaskPlanPage' | 'searchReferableMaterials' |
   'generateReviewReport' | 'generateReviewSynthesis' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'recordChangeSuggestionDecision' | 'updateEditorialMark' | 'getEditorialMarkCard' | 'reverseAppliedChangeSuggestion' |
+  // 撤销本批应用 as the batch's editor step (Issue #1654).
+  'inspectEditorHistory' | 'undoManuscript' | 'getManuscriptWindowAt' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
   'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' | 'recommendProcedures' | 'procedureLibrary' |

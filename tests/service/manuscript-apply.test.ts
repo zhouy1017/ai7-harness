@@ -224,10 +224,11 @@ describe('AI7 Apply on a Change Suggestion', () => {
       // Another identity on the same suggestion is a second Apply, and is refused.
       expect(storeError(() => first.applyChangeSuggestion({ ...binding(first, book), markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null })))
         .toBe('APPLY_ALREADY_COMMITTED');
-      // A committed Apply is not taken back by 撤销, and an applied suggestion is neither re-decided nor converted.
-      expect(storeError(() => first.undoManuscript(book.manuscriptId, book.branchId, applied.window.workingDigest))).toBe('NOTHING_TO_UNDO');
+      // An applied suggestion is neither re-decided nor converted. The committed Apply is the editor step Ctrl+Z would take back
+      // next (#1654); tests/service/editor-steps.test.ts takes it back.
       expect(storeError(() => first.recordChangeSuggestionDecision({ ...binding(first, book), markId, clientDecisionId: randomUUID(), disposition: 'withdrawn', editedText: null, reason: null })))
         .toBe('MARK_DECISION_INVALID');
+      expect(first.inspectEditorHistory(book.manuscriptId, book.branchId).undo).toMatchObject({ kind: 'accept', label: '接受修改建议', changeCount: 1 });
       first.markCleanShutdown();
     } finally {
       first.close();

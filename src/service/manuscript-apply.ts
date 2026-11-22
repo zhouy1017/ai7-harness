@@ -526,10 +526,10 @@ export class ManuscriptApplyStore {
         }, now);
       });
     });
+    // An editor step's dispatch (Issue #1654) and 全部替换's per-occurrence Apply ask for no answer: the caller answers once.
+    if (projectedMarkId === null) return {} as ManuscriptApplyCommandProjection;
     const application = this.#application(clientEffectId, binding.manuscriptId, binding.branchId);
     requireApply(application !== null, 'APPLY_RECEIPT_MISSING', '应用已提交但无法读取凭据。');
-    // An editor step's dispatch (Issue #1654) and 全部替换's per-occurrence Apply ask for no projection: the caller answers once.
-    if (projectedMarkId === null) return { application } as ManuscriptApplyCommandProjection;
     return { ...this.#marks.commandProjection(binding, projectedMarkId), application, window: this.#window(binding) };
   }
 }

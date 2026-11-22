@@ -272,7 +272,7 @@ async function measureSize(size: number, blocks: readonly ParsedDocxBlock[]): Pr
       const page = probe!.prepare(`SELECT first_order_key k, block_count n FROM working_pages WHERE branch_id = ? AND first_order_key >= (
           SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?) ORDER BY first_order_key LIMIT 1 OFFSET 1`)
         .get(book.branchId, book.branchId, allBlocks[Math.floor(size * 0.3)]!) as { k: number; n: number };
-      const carets = (probe!.prepare(`SELECT block_id FROM working_blocks WHERE branch_id = ? AND order_key >= ? ORDER BY order_key LIMIT 16`)
+      const carets = (probe!.prepare(`SELECT block_id FROM working_blocks WHERE branch_id = ? AND order_key >= ? AND kind = 'paragraph' ORDER BY order_key LIMIT 16`)
         .all(book.branchId, page.k) as Array<{ block_id: string }>).map((row) => row.block_id);
       const tails: Array<{ into: string; tail: string }> = [];
       for (let index = 0; index <= 512 - page.n; index += 1) {
@@ -362,6 +362,34 @@ async function measureSize(size: number, blocks: readonly ParsedDocxBlock[]): Pr
         measure(`undo of 全部替换 ${REPLACE_ALL_PLACES} 处 (one transaction: the write lock)`, '-', round, () => store.undoManuscript(book.manuscriptId, book.branchId, digest));
       } else {
         replaceAll(replaced, marker, null, round);
+      }
+    }
+
+    // ---- the largest scoped AI edit (#1654, Commander condition 6): one applied change on every body paragraph of the whole
+    // sample1 document, as one editor step in one transaction (the write lock), then its undo. Only from #1654 on. ----------
+    const withStep = (store as unknown as { withEditorStep?: EditorialStore['withEditorStep'] }).withEditorStep?.bind(store);
+    if (withStep !== undefined) {
+      let sample1Blocks = 0;
+      await parseDocx(admittedSourcePath(SOURCES[0]!), SOURCES[0]!, () => { sample1Blocks += 1; });
+      const document = new Set(allBlocks.slice(0, sample1Blocks));
+      const edited = candidates.filter((row) => document.has(row.block_id) && row.block_id !== dense.block_id && !reserved.has(row.block_id));
+      const suggestions = edited.map((row) => {
+        const now = blockTarget(row.block_id);
+        const block = now.blocks.find((candidate) => candidate.blockId === row.block_id)!;
+        return store.createEditorialMark({
+          ...book, windowStartBlockId: now.blocks[0]!.blockId, clientMarkId: randomUUID(), baseRevisionId: now.revisionId,
+          expectedJournalSequence: now.journalSequence, blockId: row.block_id, baseBlockDigest: block.digest, fromGrapheme: 4, toGrapheme: 6,
+          selectedText: graphemesOf(block.text).slice(4, 6).join(''), kind: 'change-suggestion', highlightColor: null, body: '', proposedText: '〔改〕', rationale: null,
+        }).markId;
+      });
+      const label = `scoped AI edit, whole sample1 (${suggestions.length} changes, one transaction: the write lock)`;
+      for (let round = -1; round < REPS; round += 1) {
+        const windowStart = allBlocks[0]!;
+        measure(label, '-', round, () => withStep(book.branchId, { kind: 'ai-edit', label: (count) => `AI 修改（${count} 处）` }, () => {
+          for (const markId of suggestions) store.applyChangeSuggestion({ ...book, windowStartBlockId: windowStart, markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+        }));
+        const digest = at({ kind: 'start' }).workingDigest;
+        measure(`undo of the scoped AI edit (${suggestions.length} changes, one transaction: the write lock)`, '-', round, () => store.undoManuscript(book.manuscriptId, book.branchId, digest));
       }
     }
     return {

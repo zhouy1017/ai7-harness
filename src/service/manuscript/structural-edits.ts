@@ -19,7 +19,8 @@ import { insertBlockAfter, neighbours, paragraphCount, removeBlock, rewriteBlock
  * The marks of the two blocks (ED-044, ADR 0105 §2): a mark wholly before the caret stays; a mark wholly after it — or on the
  * absorbed paragraph — follows its words to the other block with its anchor state, so an applied 修改建议 keeps its 撤销本次修改;
  * a mark across the caret, or a point exactly at it, stays on the first block as a Drifted Manuscript Range. 撤销 and 重做 follow
- * the same rules, and leave a drifted mark drifted.
+ * the same rules; the editor step then puts back the anchors it recorded for the marks at the caret, once the replay has
+ * proven both paragraphs byte-identical to that side (Issue #1654, `editor-steps.ts`).
  */
 
 export interface StructuralWriteHooks {
