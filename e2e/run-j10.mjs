@@ -1280,6 +1280,10 @@ async function main() {
       thirdPartial.provenance.attemptId === thirdPaused.run.attempt.attemptId &&
       JSON.stringify(thirdPartial.gaps.map((gap) => [gap.unitOrdinal, gap.code])) === JSON.stringify([3, 4, 5, 6, 7, 8].map((ordinal) => [ordinal, 'not-attempted'])),
     'redo-third-cancelled', { state: thirdCancelled?.state, run: thirdCancelled?.run?.state, closed: thirdPartial?.coverage?.unitsClosed, provenance: thirdPartial?.provenance ?? null });
+    const cancelledPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(thirdIntentId)} })`);
+    requireJourney(cancelledPlan?.state?.key === 'cancelled-after-start' && thirdCancelled.run.transitions.filter(step => step.state === 'cancelled').length === 1 &&
+      thirdCancelled.taskOutcome?.classification === 'cancelled' && thirdCancelled.taskOutcome.resultSetRevisionId === thirdPartial.revisionId,
+    'redo-recorded-cancellation');
     await pressReachable(renderer, waitFor, requireJourney, '#task-drawer .task-launch-estimate > summary', 'redo-preview-after-cancel-close');
 
     at('redo-confirmed');
@@ -1297,8 +1301,15 @@ async function main() {
       thirdRedoCounts?.reused === THIRD_HOLD + 1 && thirdRedoCounts.recomputed === SAMPLE1_UNITS - THIRD_HOLD - 1 && thirdRedo.update.predecessor?.revisionId === thirdPartial.revisionId &&
       JSON.stringify(thirdRedo.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([3, 4, 5, 6, 7, 8]),
     'redo-confirmed-task', { state: thirdRedo?.state, run: thirdRedo?.run?.state ?? null, intent: thirdRedo?.taskIntent, counts: thirdRedoCounts, spans: thirdRedo?.run?.attempt?.spans?.map((span) => span.unitOrdinal) });
-    const thirdAfter = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(thirdIntentId)} })`);
-    requireJourney(thirdAfter?.state?.key === 'cancelled-after-start', 'redo-cancelled-once', thirdAfter?.state ?? null);
+    // A baseline plan addresses the current task. After replacement the original run and partial result belong to this Book's history.
+    const history = await renderer.evaluate('window.ai7.inspectBookTasks()');
+    const cancelledRows = history.groups.flatMap(group => group.items).filter(({ item }) =>
+      item.target.kind === 'analysis' && item.target.taskIntentId === thirdIntentId && item.state === 'analysis-cancelled');
+    const source = cancelledRows[0];
+    requireJourney(history.bookId === thirdBookId && cancelledRows.length === 1 && source.item.book.bookId === thirdBookId &&
+      source.item.itemId === 'analysis-outcome:' + thirdCancelled.taskOutcome.outcomeId &&
+      source.item.technical.some(row => row.key === 'run-record' && row.value === thirdPaused.run.runRecordId) &&
+      source.result?.kind === 'analysis-revision' && source.result.revisionId === thirdPartial.revisionId, 'redo-cancelled-once');
 
     // ---- Clarification Requests (Issue #422, S76d; CLAR-001 to CLAR-007, PLAN-011, PLAN-012) ------------------------
     at('relaunch-for-clarification');

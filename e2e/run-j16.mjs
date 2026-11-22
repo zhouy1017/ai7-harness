@@ -1095,11 +1095,13 @@ async function main() {
     await cardAction(renderer, 'analysis-running', 'pause', 'panel-pause');
     await waitForPanel(renderer, (panel) => statesOf(panel, 'active').join() === 'analysis-pausing', 'panel-pausing');
     await writeHold(FIRST_HOLD + 1);
-    const paused = await waitForPanel(renderer, (panel) => statesOf(panel, 'active').join() === 'analysis-paused', 'panel-paused', 120_000);
-    requireJourney(cardsOf(paused, 'active')[0].pill === '已暂停' &&
-      JSON.stringify(cardsOf(paused, 'active')[0].actions) === JSON.stringify([['resume', '继续', 'enabled'], ['redo', '重新开始…', 'enabled'], ['cancel', '取消任务', 'enabled']]) &&
-      cardsOf(paused, 'active')[0].reason.startsWith('你在 ') && cardsOf(paused, 'active')[0].reason.endsWith(' 暂停；继续时接着处理。'),
-    'panel-paused-card', paused);
+    // Relaunch eligibility is read for the exact run after its card is mounted.
+    await waitForPanel(renderer, panel => {
+      const [card] = cardsOf(panel, 'active');
+      return statesOf(panel, 'active').join() === 'analysis-paused' && card.pill === '已暂停' &&
+        JSON.stringify(card.actions) === JSON.stringify([['resume', '继续', 'enabled'], ['redo', '重新开始…', 'enabled'], ['cancel', '取消任务', 'enabled']]) &&
+        card.reason.startsWith('你在 ') && card.reason.endsWith(' 暂停；继续时接着处理。');
+    }, 'panel-paused-card', 120_000);
 
     at('panel-resume');
     // 续行 on the card: the same Run goes on, and runs to its end — 已完成 in 最近完成, with 查看结果.
