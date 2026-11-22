@@ -168,6 +168,26 @@ describe('review triage (#1525)', () => {
     expect(batch).toHaveBeenCalledWith(expect.objectContaining({ markIds: ['m-2', 'm-3'] }));
   });
 
+  it('takes back a batch applied from an older Run’s page after leaving and coming back, when a newer Run found the same marks (#1654)', async () => {
+    const view = mount();
+    const next = workspace(RUN, 'settled', 3);
+    const category = next.run!.categories[0]!;
+    category.categoryId = 'typos-and-usage'; category.output = 'change-suggestion'; category.batchApply = true;
+    next.run!.findings = [1, 2, 3].map((ordinal) => ({ ...finding(), findingId: `finding-${ordinal}`, markId: `mark-${ordinal}`,
+      ordinal, categoryId: category.categoryId, output: 'change-suggestion', replacement: '公开合成替换' }));
+    // The page comes back to the older Run; the step Ctrl+Z would take is this batch, which a newer Run also found.
+    const newer = '44444444-4444-4444-8444-444444444444';
+    view.inspectEditorHistory.mockResolvedValue({ branchId: 'branch-a', redo: null, undo: { stepId: STEP, kind: 'accept-batch', label: '接受本批修改建议（3 条）',
+      changeCount: 3, paragraph: 1, batch: { reviewRunIds: [newer, RUN], categoryId: 'typos-and-usage' } } });
+    const undo = vi.fn().mockResolvedValue({ blocked: false, completionLabel: '' });
+    Object.assign(view.api, { undoManuscript: undo, getManuscriptWindowAt: vi.fn(async () => ({ workingDigest: 'd'.repeat(64) })) });
+    view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
+    expect(view.root.querySelector('section.review-batch-applied [data-review-action="batch-undo"]')).not.toBeNull();
+    view.root.querySelector('[data-review-action="batch-undo"]')!.click(); await flush();
+    expect(undo).toHaveBeenCalledWith(expect.objectContaining({ expectedStepId: STEP }));
+    expect(view.status).toHaveBeenLastCalledWith('已撤销 3 条。', 'success');
+  });
+
   it('reverses a three-finding batch once and reports all three undone', async () => {
     const view = mount();
     const next = workspace(RUN, 'settled', 3);
@@ -181,7 +201,7 @@ describe('review triage (#1525)', () => {
     view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
     view.root.querySelector('[data-review-action="batch-prepare"]')!.click(); await flush();
     view.inspectEditorHistory.mockResolvedValue({ branchId: 'branch-a', redo: null, undo: { stepId: STEP, kind: 'accept-batch', label: '接受本批修改建议（3 条）',
-      changeCount: 3, paragraph: 1, batch: { reviewRunId: RUN, categoryId: 'typos-and-usage' } } });
+      changeCount: 3, paragraph: 1, batch: { reviewRunIds: [RUN], categoryId: 'typos-and-usage' } } });
     view.root.querySelector('[data-review-action="batch-undo"]')!.click(); await flush();
     // 撤销本批应用 is Ctrl+Z on exactly the batch's step (Issue #1654).
     expect(undo).toHaveBeenCalledTimes(1);

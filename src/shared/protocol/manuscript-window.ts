@@ -157,7 +157,8 @@ export interface EditorStepSummary {
   label: string;
   changeCount: number;
   paragraph: number | null;
-  batch: { reviewRunId: string; categoryId: string } | null;
+  /** The review batch it was: every Run that found its marks (a later Run that finds the same words names the same marks), newest first. */
+  batch: { reviewRunIds: ReadonlyArray<string>; categoryId: string } | null;
 }
 
 /** `inspectEditorHistory` (Issue #1654): the steps Ctrl+Z and redo would take next. */

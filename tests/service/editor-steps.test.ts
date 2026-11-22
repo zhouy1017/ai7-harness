@@ -181,6 +181,17 @@ describe('undo by editor step (ADR 0105 §1)', () => {
     expect(standing[0]!.eligibility.decisionId ?? (standing[0]!.source as { decisionId?: string }).decisionId).toBe(decision.decisionId);
   });
 
+  it('keeps a reason given afterwards, with its source, through undo and redo', () => {
+    const x = paragraphs()[0]!;
+    const markId = suggestion(x.blockId, 4, 8);
+    accept(markId);
+    const decisionId = store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).suggestion!.decision!.decisionId;
+    store.recordProposalDecisionReason({ ...binding(), markId, decisionId, reason: '证据不足', reasonSource: 'suggested' });
+    undo();
+    redo();
+    expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).suggestion!.decision).toMatchObject({ reason: '证据不足', reasonSource: 'suggested', reasonState: 'given' });
+  });
+
   it('says a redo meets a suggestion the editor rejected since as handled another way, not as changed words', () => {
     const x = paragraphs()[0]!;
     const markId = suggestion(x.blockId, 4, 8);

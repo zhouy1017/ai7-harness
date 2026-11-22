@@ -35,16 +35,16 @@ function noModel(): ReviewRunExecutionOwner {
     whenPlaceFree() { throw new Error('local stage requested model permit'); }, whenDone() { throw new Error('local stage awaited a model'); } };
 }
 type Book = Awaited<ReturnType<typeof importSample1Book>>;
-function replaceFirst(book: Book, text: string): string {
+function replaceFirst(book: Book, text: string, nth = 0): string {
   const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
-  const block = window.blocks.find((block) => block.kind === 'paragraph')!;
+  const block = window.blocks.filter((block) => block.kind === 'paragraph')[nth]!;
   store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
     blockId: block.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
     fromGrapheme: 0, toGrapheme: graphemeCount(block.text), insertText: text });
   return block.blockId;
 }
-function prepare(book: Book, policy: LaunchPolicyProjection, options = OPTIONS) {
-  let work = store.createReviewRunPreparationWork(book.bookId, ['local-text-check'], WHOLE, policy, null, [], null, null, null, options);
+function prepare(book: Book, policy: LaunchPolicyProjection, options = OPTIONS, scope: ReviewRunScopeRequest = WHOLE) {
+  let work = store.createReviewRunPreparationWork(book.bookId, ['local-text-check'], scope, policy, null, [], null, null, null, options);
   while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
   const run = work.projection!.run!;
   const plan = store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
@@ -94,27 +94,44 @@ describe('provider-free local ReviewRun', () => {
     expect(store.reverseAppliedChangeSuggestion(reverseInput).application.effectId).toBe(reversed.application.effectId);
     expect(store.inspectHouseWordList({ versionId: house.pin.versionId, entryOffset: 0, historyOffset: 0 }).selected!.enabledCount).toBe(1);
   });
-  it('names the newest Run that found a batch’s marks as the batch step’s Run, when a later Run finds the same words again (#1654)', async () => {
+  it('names every Run whose findings cover the whole batch, newest first by Run ordinal, whichever finished first (#1654)', async () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '再审同一批公开样书');
     const target = replaceFirst(book, '按纳 合成异称 公开留意词。');
     const options: LocalCheckOptions = { ...OPTIONS, punctuation: 'off', tables: { characters: false, variantWords: true, houseWordList: null,
       bookTerms: [{ kind: 'person', preferred: '合成正名', variants: ['合成异称'] }] } };
-    const runOnce = async (): Promise<string> => {
-      const prepared = prepare(book, policy, options);
-      authorize(book, prepared);
-      const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(prepared.run.reviewRunId); await driver.dispose();
-      return prepared.run.reviewRunId;
+    const drive = async (reviewRunId: string): Promise<void> => {
+      const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(reviewRunId); await driver.dispose();
     };
     const mechanical = (reviewRunId: string) => store.inspectReviewWorkspace(book.bookId, reviewRunId).run!.findings
       .filter((finding) => finding.blockId === target && finding.output === 'change-suggestion' && finding.markId !== null);
-    const first = await runOnce();
-    const second = await runOnce();
-    expect(mechanical(second).map((finding) => finding.markId)).toEqual(mechanical(first).map((finding) => finding.markId));
+    // R1 and R2 over the whole book, prepared in that order; R2 finishes first. Both name the same two marks.
+    const r1 = prepare(book, policy, options); authorize(book, r1);
+    const r2 = prepare(book, policy, options); authorize(book, r2);
+    await drive(r2.run.reviewRunId);
+    await drive(r1.run.reviewRunId);
+    const batch = mechanical(r1.run.reviewRunId).map((finding) => finding.markId!);
+    expect(batch).toHaveLength(2);
+    expect(mechanical(r2.run.reviewRunId).map((finding) => finding.markId)).toEqual(batch);
+    // R3, the newest Run, over the same paragraph, holds only one of the two marks: a table plan's findings of another scope
+    // are other records, so its one shared finding is written here as a Run that found part of the batch would hold it.
+    const r3 = prepare(book, policy, options, { kind: 'selection', fromChapterBlockId: target, toChapterBlockId: target }); authorize(book, r3);
+    await drive(r3.run.reviewRunId);
+    store.markCleanShutdown(); store.close();
+    const db = database();
+    db.prepare(`INSERT INTO review_findings(review_run_id, finding_id, category_id, ordinal, kind_ref, severity, output, risk_point, block_id, from_grapheme,
+        to_grapheme, quote, note, replacement, clause_ref, state_line, mark_id, anchor, canonical_json, sha256)
+      SELECT ?, 'rvf_' || substr(hex(randomblob(12)), 1, 24), category_id, 9999, kind_ref, severity, output, risk_point, block_id, from_grapheme,
+        to_grapheme, quote, note, replacement, clause_ref, state_line, mark_id, anchor, canonical_json, sha256
+      FROM review_findings WHERE review_run_id = ? AND mark_id = ?`).run(r3.run.reviewRunId, r1.run.reviewRunId, batch[0]!);
+    db.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: target });
     store.applyChangeSuggestionBatch({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
-      markIds: mechanical(second).map((finding) => finding.markId!), clientEffectId: randomUUID() });
-    expect(store.inspectEditorHistory(book.manuscriptId, book.branchId).undo?.batch?.reviewRunId).toBe(second);
+      markIds: batch, clientEffectId: randomUUID() });
+    // R3 is not listed (its page offers no 撤销本批应用); R2 before R1 by Run ordinal, though R1's findings were written last.
+    expect(store.inspectEditorHistory(book.manuscriptId, book.branchId).undo?.batch)
+      .toEqual({ reviewRunIds: [r2.run.reviewRunId, r1.run.reviewRunId], categoryId: mechanical(r1.run.reviewRunId)[0]!.categoryId });
   });
   it('reads each finding at its mark’s paragraph and offsets after 分段 moved the mark (Issue #1654, loss 5)', async () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

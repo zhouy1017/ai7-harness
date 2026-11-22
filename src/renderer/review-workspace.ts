@@ -2976,7 +2976,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     await act(REVIEW_STATUS_LINES.applying, REVIEW_BATCH_UNDO_FAILED, async () => {
       const scope = { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId };
       const history = await api.inspectEditorHistory(scope);
-      const step = history.undo !== null && history.undo.batch?.reviewRunId === run.reviewRunId && history.undo.batch.categoryId === last.categoryId ? history.undo : null;
+      const step = history.undo !== null && history.undo.batch?.reviewRunIds.includes(run.reviewRunId) === true && history.undo.batch.categoryId === last.categoryId ? history.undo : null;
       const window = await api.getManuscriptWindowAt({ ...scope, target: { kind: 'start' } });
       const undone = await api.undoManuscript({ ...scope, expectedWorkingDigest: window.workingDigest, ...(step === null ? { expectedStepId: BATCH_STEP_GONE } : { expectedStepId: step.stepId }) });
       ui.applied = null;
@@ -2998,7 +2998,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     void api.inspectEditorHistory({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId }).then((history) => {
       if (destroyed || ui.batch !== null || ui.applied != null || projection?.run?.reviewRunId !== run.reviewRunId) return;
       const step = history.undo;
-      if (step === null || step.kind !== 'accept-batch' || step.batch?.reviewRunId !== run.reviewRunId) return;
+      if (step === null || step.kind !== 'accept-batch' || step.batch?.reviewRunIds.includes(run.reviewRunId) !== true) return;
       ui.applied = { categoryId: step.batch.categoryId, count: step.changeCount, skipped: 0 };
       if (projection !== null) renderCard(projection);
     }).catch(() => {});

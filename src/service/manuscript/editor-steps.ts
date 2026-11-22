@@ -454,18 +454,28 @@ function skippedSentence(action: 'undo' | 'redo', step: StepRow): string {
     : `「${step.label}」已在卡片上处理过，这次没有改动文字。再按重做会重做后面的一步。`;
 }
 
+/** The most Runs a batch step names (each a Run that found its marks); a book holds far fewer Runs of one check. */
+const BATCH_RUNS = 64;
+
 export function editorStepSummary(db: DatabaseSync, branchId: string, action: 'undo' | 'redo'): EditorStepSummary | null {
   const step = nextStep(db, branchId, action);
   if (step === null) return null;
-  const batch = step.kind !== 'accept-batch' ? undefined : db.prepare(`SELECT f.review_run_id, f.category_id FROM editor_step_parts p
+  // A later Run that finds the same words again names the same marks (one record family): the batch is the batch of every Run
+  // whose findings in one category cover each of its marks — a Run that holds only part of it is not its owner — so the page of
+  // whichever Run applied it, the newest or an older one, takes the step as its own. Newest first by Run ordinal, as the
+  // workspace orders Runs.
+  const runs = step.kind !== 'accept-batch' ? [] : db.prepare(`WITH marks AS (SELECT DISTINCT i.mark_id FROM editor_step_parts p
       JOIN editor_step_effects e ON e.step_id = p.slot_step_id AND e.slot = p.slot AND e.generation = 1
       JOIN manuscript_effect_targets t ON t.effect_id = e.effect_id JOIN proposal_change_items i ON i.item_id = t.item_id
-      JOIN review_findings f ON f.mark_id = i.mark_id
-    -- A later Run that finds the same words again names the same mark (one record family): the newest Run is the batch's.
-    WHERE p.step_id = ? ORDER BY f.rowid DESC LIMIT 1`).get(step.stepId) as SqlRow | undefined;
+      WHERE p.step_id = ?)
+    SELECT f.review_run_id, f.category_id FROM review_findings f JOIN marks m ON m.mark_id = f.mark_id
+      JOIN review_runs r ON r.review_run_id = f.review_run_id
+    GROUP BY f.review_run_id, f.category_id HAVING count(DISTINCT f.mark_id) = (SELECT count(*) FROM marks)
+    ORDER BY max(r.ordinal) DESC LIMIT ?`).all(step.stepId, BATCH_RUNS) as SqlRow[];
+  const categoryId = runs.length === 0 ? null : asString(runs[0]!.category_id);
   return {
     stepId: step.stepId, kind: step.kind, label: step.label, changeCount: step.changes, paragraph: placeOf(db, branchId, step).paragraph,
-    batch: batch === undefined ? null : { reviewRunId: asString(batch.review_run_id), categoryId: asString(batch.category_id) },
+    batch: categoryId === null ? null : { reviewRunIds: runs.filter((row) => row.category_id === categoryId).map((row) => asString(row.review_run_id)), categoryId },
   };
 }
 
