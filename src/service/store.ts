@@ -20,7 +20,8 @@ import { launchedTaskPlan } from './task-plan-creation.js';
 import { RUN_SYNTHESIS_ENTRY } from './review/run-synthesis-kind.js';
 import { launchedRunModelLabels } from './editorial-mark-source.js';
 import { transact as transactLaunch } from './analysis/run-state.js';
-import { TaskLaunchPreview } from './task-plan-creation.js';
+import { previewTaskLaunch } from './task-launch-preview.js';
+import { reviewCategoryEdits, requireReviewRetryChoice } from './review/review-launch-options.js';
 import { launchFromSnapshot, TaskLaunchError } from './task-launch-snapshots.js';
 import { WalCheckpointMaintenance, type CheckpointWorkerFactory } from './wal-checkpoint-maintenance.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
@@ -2813,7 +2814,7 @@ export class EditorialStore {
       prepareTaskMaterials: this.#prepareTaskMaterials.bind(this),
       resultBinding: this.#resultBinding.bind(this),
       launchChoice: this.#launchChoice.bind(this),
-      requireRelaunchSource: (bookId, source) => requireTaskRelaunchSource(this.#taskRelaunchHost(), bookId, source, 'review-run'),
+      requireRelaunchSource: (bookId, source, preview) => requireTaskRelaunchSource(this.#taskRelaunchHost(), bookId, source, 'review-run', preview),
       executionLedgerForRun: (runRecordId) => this.executionLedgerForRun(runRecordId),
       materializeFactualVerification: (reviewRunId) => this.materializeFactualVerification(reviewRunId),
       inspectTaskPlanWithConnection: (input, credentialReadiness, connectivity, progress) => this.inspectTaskPlanWithConnection(input, credentialReadiness, connectivity, progress),
@@ -3203,31 +3204,13 @@ export class EditorialStore {
     }, startWhen, preview);
   }
 
-  previewTaskLaunch(input: import('../shared/protocol.js').TaskLaunchPreviewInput, policy: LaunchPolicyProjection): import('../shared/runtime-execution-config.js').TaskLaunchPreviewProjection {
-    const preview: NonNullable<import('./task-plan-creation.js').TaskLaunchContext['preview']> = (ledger, task, describe) => {
-      return ledger.previewLaunch(task, input.launch.input.planEdits, (projection, blocks) => {
-        const bookTitle = this.#evaluationBookTitle(input.bookId);
-        const plan = describe === undefined ? baselineAnalysisPlan({ projection: projection as BaselineAnalysisProjection, bookTitle, blocks })
-          : describe(projection, blocks, bookTitle);
-        const controlled = withLedgerRunControls(plan, projection as BaselineAnalysisProjection, blocks);
-        throw new TaskLaunchPreview({ steps: controlled.steps.map(step => `${step.label}${step.removed ? '（本次不做）' : ''}`),
-          scope: controlled.scope.process, units: projection.coverageManifest!.units.length, reference: controlled.scope.reference,
-          send: `${controlled.scope.send}；${controlled.service.send}`, usage: controlled.service.usage,
-          adaptations: controlled.boundary.adaptable.map(entry => `${entry.label}：${entry.removed ? '不允许' : entry.askFirst ? '先问我' : '允许'}`) });
-      }, input.launch.input.relaunchOf?.cancelsFirst === true);
-    };
-    const launch = input.launch;
-    try {
-      switch (launch.operation) {
-        case 'launchBaselineAnalysis': this.launchBaselineAnalysis({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchCustomAnalysis': this.launchCustomAnalysis({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchWritingTask': this.launchWritingTask({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchInitialEvaluation': this.launchInitialEvaluation({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchReadersReport': this.launchReadersReport({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-        case 'launchEvaluationRewrite': this.launchEvaluationRewrite({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
-      }
-    } catch (result) { if (result instanceof TaskLaunchPreview) return result.projection; throw result; }
-    throw new StoreError('TASK_PREVIEW_FAILED', '这次计划暂时无法读取。');
+  previewTaskLaunch(input: import('../shared/protocol.js').TaskLaunchPreviewInput, policy: LaunchPolicyProjection) {
+    return previewTaskLaunch(this, input, policy, bookId => this.#evaluationBookTitle(bookId),
+      request => reviewOperations.previewReviewRun(this.#reviewOperationsHost, request, policy, this.#evaluationBookTitle(input.bookId)));
+  }
+
+  scopedAiEditLaunchChoice(input: import('../shared/protocol/scoped-edit.js').StartScopedAiEditInput) {
+    return this.#launchChoice('fast-interaction', input.executionConfig ?? {}, input.rememberedChoice);
   }
 
   launchReviewRun(input: import('../shared/protocol.js').ServiceOperationMap['launchReviewRun']['input'], launchPolicy: LaunchPolicyProjection,
@@ -3385,6 +3368,7 @@ export class EditorialStore {
           const originalState = plan.state;
           plan = withLedgerRunControls(plan, projection, [], stopped ?? undefined, controlling.ledger.launch.operationalScope === 'developer-live',
             this.#liveCancellationRanges(projection, controlling.ledger));
+          plan = { ...plan, boundary: found.plan.boundary };
           if (active === undefined && projection.run?.state !== 'cancelled') plan = { ...plan, state: originalState, runControl: null };
           plan = { ...plan, edit: { ...plan.edit, planEnvelopeDigest: plan.edit.editable
             ? canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest : null } };
@@ -3846,6 +3830,7 @@ export class EditorialStore {
 
   editTaskPlan(input: EditTaskPlanInput, progress?: ProgressReader): TaskPlanProjection {
     if (input.kind === 'review-run') {
+      requireReviewRetryChoice(input);
       const tasks = this.#reviewCall(() => this.#reviewRuns.controlTasks(input.bookId, input.ref));
       const digest = canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest;
       requireStore(digest === input.planEnvelopeDigest && tasks.length > 0, 'ANALYSIS_PLAN_EDIT_STALE', '计划已经变了；请重新查看计划后再修改。');
@@ -3859,15 +3844,13 @@ export class EditorialStore {
       this.#transaction(this.#authority, () => {
         let changed = 0;
         for (const task of tasks) {
-          const factual = task.categoryId === 'factual-review';
           try {
-            const summaryCeiling = task.categoryId === 'run-synthesis' && shared.runBudgetCeiling != null
-              ? { runBudgetCeiling: { ...shared.runBudgetCeiling, maxTotalTokens: shared.runBudgetCeiling.maxTotalTokens * budgetMembers } } : {};
-            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...shared, ...summaryCeiling, ...(factual && evidenceAssuranceLevel !== undefined ? { evidenceAssuranceLevel } : {}),
+            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...reviewCategoryEdits({ ...shared,
+              ...(evidenceAssuranceLevel === undefined ? {} : { evidenceAssuranceLevel }) }, task.categoryId, budgetMembers, task.ledger.definition.assurance !== null),
               taskIntentId: task.taskIntentId, planEnvelopeDigest: task.planEnvelopeDigest }));
             changed += 1;
           } catch (error) {
-            if (evidenceAssuranceLevel !== undefined && error instanceof StoreError && error.code === 'ANALYSIS_PLAN_EDIT_UNCHANGED') continue;
+            if (error instanceof StoreError && error.code === 'ANALYSIS_PLAN_EDIT_UNCHANGED') continue;
             throw error;
           }
         }

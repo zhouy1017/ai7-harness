@@ -3122,7 +3122,7 @@ export class BaselineAnalysisStore {
 
   /** Build the same frozen components in memory, then let the kind's editorial plan owner describe them. */
   previewLaunch(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, edits: PlanEditsProjection | undefined,
-    describe: (projection: AnalysisProjection, blocks: ReadonlyArray<ManifestBlockInput>) => never, afterCancellation = false): never {
+    describe: (projection: AnalysisProjection, blocks: ReadonlyArray<ManifestBlockInput>, components: Readonly<Record<string, unknown>>) => never, afterCancellation = false): never {
     this.#requireDeniedPolicy(input.launchPolicy);
     requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
     const inspected = this.inspect(input.bookId), existing = afterCancellation && inspected.run !== null ? { ...inspected, run: { ...inspected.run, state: 'cancelled' as const } } : inspected;
@@ -3148,7 +3148,7 @@ export class BaselineAnalysisStore {
       branchId: head.branchId, revisionId: head.currentRevisionId, revisionLabel: head.currentRevisionLabel,
       revisionDigest: head.currentWorkingDigest, journalSequence: head.currentJournalSequence, createdForDirtyJournal: false },
       checkpointDigest: canonicalRecord(record).digest, ordinal: 1, selectedRange, planRevisionId: null, instant, edits: canonical,
-      preview: { blocks, consume: projection => describe(projection, blocks) } });
+      preview: { blocks, consume: (projection, components) => describe(projection, blocks, components) } });
     throw new AnalysisError('ANALYSIS_PREVIEW_INVALID', '这次计划暂时无法读取。');
   }
 
@@ -3604,7 +3604,7 @@ export class BaselineAnalysisStore {
      * material input, so an edit leaves the provider component as it froze. Absent, the connection is read now.
      */
     credentialReadiness?: ModelCredentialOperationState;
-    preview?: { blocks: ReadonlyArray<ManifestBlockInput>; consume: (projection: AnalysisProjection) => never };
+    preview?: { blocks: ReadonlyArray<ManifestBlockInput>; consume: (projection: AnalysisProjection, components: Readonly<Record<string, unknown>>) => never };
   }): { planVersionId: string; planEnvelopeDigest: string } {
     const { intent, checkpoint, ordinal, instant } = input;
     if (this.#definition.structuredOnly !== true && this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(intent.mode === 'review-first' &&
@@ -3923,7 +3923,7 @@ export class BaselineAnalysisStore {
         planVersion: { ...version, materialInputs: materialPlanInputsOfComponents(components, intent.record) }, planVersions: [version],
         update: this.#carriesPlan(intent.mode) ? this.#updateProjection(intent, reusePlan, records['reuse-plan']?.digest ?? null,
           this.inspect(checkpoint.bookId).resultSetRevision as BaselineAnalysisResultSetRevisionProjection | null) : null,
-        actions: { canPrepare: false, canAuthorize: dispatchAllowed, canReconfirmPlan: false } }));
+        actions: { canPrepare: false, canAuthorize: dispatchAllowed, canReconfirmPlan: false } }), components);
     }
     const insert = this.#db.prepare(
       'INSERT INTO analysis_plan_records(task_intent_id, plan_version, component, canonical_json, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?)',
