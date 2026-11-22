@@ -143,9 +143,10 @@ export const MEMORY_SOURCE_PROJECTION_SQL = {
   PRIMARY KEY (effect_id)
 ) STRICT`,
   manuscript_effect_approvals: `CREATE TABLE manuscript_effect_approvals (
-  effect_id TEXT NOT NULL,
+  approval_id TEXT NOT NULL,
+  effect_id TEXT NOT NULL UNIQUE,
   interaction TEXT NOT NULL,
-  PRIMARY KEY (effect_id)
+  PRIMARY KEY (approval_id)
 ) STRICT`,
   manuscript_effect_receipts: `CREATE TABLE manuscript_effect_receipts (
   receipt_id TEXT NOT NULL,

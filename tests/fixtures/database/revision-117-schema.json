@@ -15,6 +15,12 @@
   },
   {
    "type": "index",
+   "name": "edit_journal_entries_command_group",
+   "tbl_name": "edit_journal_entries",
+   "sql": "CREATE INDEX edit_journal_entries_command_group ON edit_journal_entries(command_group_id) WHERE command_group_id IS NOT NULL"
+  },
+  {
+   "type": "index",
    "name": "editorial_marks_pending_walk",
    "tbl_name": "editorial_marks",
    "sql": "CREATE INDEX editorial_marks_pending_walk ON editorial_marks(branch_id, block_id, from_grapheme, mark_id) WHERE status = 'open'"

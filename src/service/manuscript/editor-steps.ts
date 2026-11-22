@@ -114,6 +114,15 @@ export function stepQuote(text: string): string {
   return parts.length <= 12 ? text : `${parts.slice(0, 12).join('')}…`;
 }
 
+/**
+ * A step's identity, from its branch and its ordinal (never reused in a branch; branch identities are unique): UUID-shaped
+ * for the wire, and drawing no random identity, so the identities every other record draws are the ones they drew before.
+ */
+function stepIdentity(branchId: string, ordinal: number): string {
+  const hex = sha256(canonicalJson({ kind: 'editor-step', branchId, ordinal }));
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
 /** The ordinal of the newest applied step of `branchId` (0 when none): every undone step stands above it. */
 function topApplied(db: DatabaseSync, branchId: string): number {
   const row = db.prepare("SELECT ordinal FROM editor_steps WHERE branch_id = ? AND status = 'applied' ORDER BY ordinal DESC LIMIT 1").get(branchId) as SqlRow | undefined;
@@ -129,7 +138,7 @@ function openStep(db: DatabaseSync, branchId: string, kind: EditorStepKind, labe
   db.prepare("UPDATE manuscript_command_groups SET status = 'superseded' WHERE branch_id = ? AND status = 'undone'").run(branchId);
   db.prepare("UPDATE editor_steps SET status = 'superseded' WHERE branch_id = ? AND ordinal > ? AND status = 'undone'").run(branchId, topApplied(db, branchId));
   const ordinal = asNumber((db.prepare('SELECT coalesce(max(ordinal), 0) + 1 n FROM editor_steps WHERE branch_id = ?').get(branchId) as SqlRow).n);
-  const stepId = randomUUID();
+  const stepId = stepIdentity(branchId, ordinal);
   db.prepare(`INSERT INTO editor_steps(step_id, branch_id, ordinal, kind, status, label, anchor_block_id, change_count, created_at, command_group_id)
     VALUES (?, ?, ?, ?, 'applied', ?, ?, ?, ?, ?)`).run(stepId, branchId, ordinal, kind, label, anchorBlockId, changes, new Date().toISOString(), commandGroupId);
   return stepId;

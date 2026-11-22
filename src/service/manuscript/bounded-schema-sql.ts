@@ -716,6 +716,8 @@ export const CORE_INDEX_SQL = {
   import_attempts_recovery_order: `CREATE INDEX import_attempts_recovery_order
         ON import_commit_attempts(state, completion_acknowledged_at, prepared_at)`,
   journal_branch_order: `CREATE INDEX journal_branch_order ON edit_journal_entries(branch_id, sequence)`,
+  // The journal entries of one command group (Issue #1654): a manual edit's learning source reads them on every capture.
+  edit_journal_entries_command_group: `CREATE INDEX edit_journal_entries_command_group ON edit_journal_entries(command_group_id) WHERE command_group_id IS NOT NULL`,
   lifetime_outcome_order: `CREATE INDEX lifetime_outcome_order ON service_lifetimes(outcome, started_at)`,
   recovery_attention_startup: `CREATE INDEX recovery_attention_startup ON recovery_attention(status, created_at, attention_id)`,
   recovery_snapshot_branch: `CREATE INDEX recovery_snapshot_branch ON recovery_snapshots(branch_id, revision_id, created_at DESC, snapshot_id DESC)`,

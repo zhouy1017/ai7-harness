@@ -184,7 +184,7 @@ async function measureSize(size: number, blocks: readonly ParsedDocxBlock[]): Pr
 
     // ---- measuring -----------------------------------------------------------------------------------------------------
     const rows = new Map<string, { operation: string; position: string } & Timing & { crossOk: boolean }>();
-    /** Each operation's discarded warm-up round: the first on this store, before any round of it left history behind. */
+    /** Each operation's discarded warm-up round: its first invocation on this one shared bench store (earlier rows' rounds came first). */
     const firsts = new Map<string, number>();
     const clearWal = (): void => {
       for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -434,7 +434,7 @@ function report(result: SizeResult): void {
   console.log(`\n### ${result.size} blocks — ${Object.entries(result.counts).map(([kind, n]) => `${kind} ${n}`).join(', ')}; ` +
     `${result.graphemes.total} graphemes, mean ${fmt(result.graphemes.meanPerBlock)} per block / ${fmt(result.graphemes.meanPerBody)} per body paragraph; ` +
     `${result.marks} marks; lineage plan ${JSON.stringify(result.lineagePlan)}; import ${fmt(result.importSeconds)} s; page ${result.pageBytes} B`);
-  console.log('| operation | position | reps | time median ms | min | max | first round ms (fresh store) | WAL median MiB | min | max | WAL frames median | frame check |');
+  console.log('| operation | position | reps | time median ms | min | max | first invocation ms | WAL median MiB | min | max | WAL frames median | frame check |');
   console.log('| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |');
   for (const row of result.rows) {
     console.log(`| ${row.operation} | ${row.position} | ${row.ms.length} | ${fmt(median(row.ms), 2)} | ${fmt(Math.min(...row.ms), 2)} | ${fmt(Math.max(...row.ms), 2)} | ${row.first === null ? '-' : fmt(row.first, 2)} | ` +

@@ -222,6 +222,8 @@ export function neighbours(db: DatabaseSync, branchId: string, key: number): { p
 /**
  * A block's outline row and search row, written again. A search row's rowid is its working block's rowid (Issue #1654): the
  * trigram table indexes only its text, so a row is found and deleted by rowid, never by scanning the table for its block.
+ * The pairing holds because nothing renumbers rowids: the store is copied page by page (online backup), never vacuumed —
+ * VACUUM may renumber the implicit rowids of working_blocks; `tests/unit/store-never-vacuumed.test.ts` keeps it out.
  */
 function refreshDerived(db: DatabaseSync, branchId: string, blockId: string, rowid: number, key: number, content: BlockContent | null): void {
   db.prepare('DELETE FROM manuscript_outline WHERE branch_id = ? AND block_id = ?').run(branchId, blockId);

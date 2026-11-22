@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, backup } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
@@ -392,6 +392,24 @@ describe('undo by editor step (ADR 0105 §1)', () => {
     expect(markAt(revision).status).toBe('applied');
   });
 
+  it('records the reject side of an in-place revision decision inside its own decision step, and Ctrl+Z puts the revision back', () => {
+    const target = paragraphs()[0]!;
+    const now = window();
+    store.flushJournalEdit({
+      clientEditId: randomUUID(), ...book, baseRevisionId: now.revisionId, blockId: target.blockId, windowStartBlockId: now.blocks[0]!.blockId,
+      baseBlockDigest: target.digest, expectedJournalSequence: now.journalSequence, fromGrapheme: 10, toGrapheme: 12, insertText: '〔甲〕',
+      editorRevision: { sessionId: randomUUID(), autoApply: false },
+    });
+    const revised = textOf(target.blockId);
+    const revision = window().marks.find((mark) => mark.inlineRevision)!.markId;
+    store.updateEditorialMark({ ...binding(), markId: revision, action: 'revert-inline-revision', body: null, highlightColor: null, status: null, targetKind: null, proposedText: null, rationale: null });
+    expect(textOf(target.blockId)).toBe(target.text);
+    // The words written back are a part of the decision step, not a typing step of their own.
+    expect(steps().at(-1)).toEqual({ kind: 'inline-decision', status: 'applied' });
+    expect(undo().stepLabel).toBe('处理编辑修订');
+    expect(textOf(target.blockId)).toBe(revised);
+  });
+
   it('keeps the batch step after a restart, and 撤销本批应用 undoes exactly it', async () => {
     const original = texts();
     const [a, b] = paragraphs() as [ManuscriptWindowProjection['blocks'][number], ManuscriptWindowProjection['blocks'][number]];
@@ -435,7 +453,7 @@ describe('undo by editor step (ADR 0105 §1)', () => {
     expect(texts()).toEqual(original);
   });
 
-  it('keeps each search row under its working block\'s rowid through typing, a split, a join, undo and redo (#1654)', () => {
+  it('keeps each search row under its working block\'s rowid through typing, a split, a join, undo and redo, and in a copy of the store (#1654)', async () => {
     const [a, b] = paragraphs() as [ManuscriptWindowProjection['blocks'][number], ManuscriptWindowProjection['blocks'][number]];
     const created = `blk_${randomBytes(12).toString('hex')}`;
     journal(a.blockId, 1, '〔甲〕');
@@ -450,6 +468,15 @@ describe('undo by editor step (ADR 0105 §1)', () => {
         (SELECT count(*) FROM working_block_search s WHERE NOT EXISTS(SELECT 1 FROM working_blocks w WHERE w.rowid = s.rowid AND w.block_id = s.block_id)) stray`)
       .get(book.branchId) as { missing: number; stray: number });
     expect(mismatched).toEqual({ missing: 0, stray: 0 });
+    // The store's copy (an export, a database replacement) is an online backup, page by page: the pairing travels with it.
+    const copy = join(roots.dataRoot, 'search-pairing-copy.sqlite');
+    const source = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try { await backup(source, copy); } finally { source.close(); }
+    const copied = new DatabaseSync(copy, { readOnly: true });
+    try {
+      expect(copied.prepare(`SELECT count(*) n FROM working_blocks w WHERE w.branch_id = ? AND NOT EXISTS(SELECT 1 FROM working_block_search s
+        WHERE s.rowid = w.rowid AND s.block_id = w.block_id AND s.text = w.text)`).get(book.branchId)).toEqual({ n: 0 });
+    } finally { copied.close(); }
   });
 
   it('undo and redo of a split keep the new block\'s identity', () => {

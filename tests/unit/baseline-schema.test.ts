@@ -69,6 +69,8 @@ const INTENDED_DELTA: ReadonlyArray<{ readonly object: string; readonly change: 
   // The write-lock plan (#1654 profile): the Effect ledger's reversal and item lookups.
   { object: 'index:manuscript_effect_intents_reversal', change: 'added', slice: 'R5-3+R5-4' },
   { object: 'index:manuscript_effect_targets_item', change: 'added', slice: 'R5-3+R5-4' },
+  // A manual edit's learning source reads its command group's journal entries (#1654 typing at a long history).
+  { object: 'index:edit_journal_entries_command_group', change: 'added', slice: 'R5-3+R5-4' },
 ];
 
 const reference = JSON.parse(readFileSync('tests/fixtures/database/revision-116-schema.json', 'utf8')) as { userVersion: number; rows: DumpRow[] };
