@@ -520,7 +520,8 @@ describe('comments command parity and refresh continuity', () => {
   });
   it('keeps the focused tall card in place when a preceding card grows by a fractional pixel (#1661)', async () => {
     const next = { ...suggestion, markId: 'next', fromGrapheme: 3, toGrapheme: 5 };
-    const ui = mount(suggestion, [next]); await paint();
+    const last = { ...suggestion, markId: 'last', fromGrapheme: 6, toGrapheme: 7 };
+    const ui = mount(suggestion, [next, last]); await paint();
     ui.pane.querySelector<HTMLElement>('[data-comment-card="next"]')!.click(); await paint();
     const { pane, node } = measuredPane(ui, 'next', () => 400);
     const upper = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
@@ -532,10 +533,12 @@ describe('comments command parity and refresh continuity', () => {
     button.focus(); (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true });
     pane.scrollTop += 78; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
     const before = node.getBoundingClientRect().top;
-    height += 0.09375; ui.refresh(); await paint();
+    height += 41.09375; ui.refresh(); await paint();
     for (let turn = 0; turn < 6; turn++) {
       ui.refresh(); await paint();
       expect(node.getBoundingClientRect().top).toBe(before);
+      const lower = ui.pane.querySelector<HTMLElement>('[data-comment-card="last"]')!;
+      expect(Number.parseFloat(lower.style.top)).toBe(Number.parseFloat(node.style.top) + 410);
       expect(button.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
       expect(Number.parseFloat(upper.style.top)).toBeGreaterThanOrEqual(8);
       expect(Number.parseFloat(upper.style.top) + height + 10).toBeLessThanOrEqual(Number.parseFloat(node.style.top));

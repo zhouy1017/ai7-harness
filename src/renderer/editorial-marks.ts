@@ -1226,7 +1226,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           // focused card at the position the reader chose and make room around it instead.
           held[pivot]!.top = Number.parseFloat(selectedNode!.style.top);
           for (let index = pivot - 1; index >= 0; index--) held[index]!.top = Math.min(held[index]!.top, held[index + 1]!.top - held[index]!.measuredHeight - 10);
-          for (let index = pivot + 1; index < held.length; index++) held[index]!.top = Math.max(held[index]!.top, held[index - 1]!.top + held[index - 1]!.measuredHeight + 10);
+          for (let index = pivot + 1; index < held.length; index++) held[index]!.top = held[index - 1]!.top + held[index - 1]!.measuredHeight + 10;
         }
       }
       return held;
