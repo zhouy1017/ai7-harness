@@ -49,13 +49,7 @@ export async function reachImportControl(renderer, waitFor, selector, name) {
     await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0});
     await renderer.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
   }
-  try {
-    await waitFor(renderer, inside(selector), `${name}-inside`);
-  } catch (error) {
-    const state=await renderer.evaluate(`(() => {const node=document.querySelector(${JSON.stringify(selector)});const box=n=>{const r=n.getBoundingClientRect();return [r.left,r.top,r.width,r.height]};const chain=[];for(let n=node;n&&chain.length<10;n=n.parentElement){const css=getComputedStyle(n);chain.push({tag:n.tagName,rect:box(n),open:n instanceof HTMLDetailsElement?n.open:null,hidden:n.hidden,overflow:css.overflowY,scroll:n.scrollTop,max:Math.max(0,n.scrollHeight-n.clientHeight),display:css.display,visibility:css.visibility});}const r=node?.getBoundingClientRect();const hit=r?document.elementFromPoint(r.left+r.width/2,r.top+r.height/2):null;return {visible:document.visibilityState==='visible',focused:document.hasFocus(),exists:!!node,viewport:[innerWidth,innerHeight],hit:hit?.tagName??null,contains:!!node&&node.contains(hit),chain};})()`).catch(()=>({unavailable:true}));
-    console.error('IMPORT_REACH_FAILURE/'+JSON.stringify(state));
-    throw error;
-  }
+  await waitFor(renderer, inside(selector), `${name}-inside`);
 }
 
 export async function pressImportControl(renderer, waitFor, selector, name) {

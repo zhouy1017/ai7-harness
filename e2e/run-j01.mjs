@@ -1783,8 +1783,13 @@ async function runJourney(
     ),
   );
   if (!editAfterCommit) return;
-  await clickExactButton(renderer, '稿件导入记录', 'record-open');
   at('fidelity-one-sentence');
+  // Recovery returns to the overview with 导入记录 folded; open the actual route before its record.
+  if (await renderer.evaluate(`document.querySelector('.book-overview-history')?.open===false`)) {
+    await pressImportControl(renderer, waitFor, '.book-overview-history > summary', 'record-history-expand');
+  }
+  await assertRenderer(renderer, `!document.querySelector('.book-overview-history') || document.querySelector('.book-overview-history').open===true`, 'record-history-open');
+  await pressImportControl(renderer, waitFor, '.record-navigation button[data-record-kind="import-record"]', 'record-open');
   await assertRenderer(renderer, `!document.querySelector('#screen').textContent.includes('后续提供') && document.querySelector('.record-detail').textContent.includes('导出 DOCX 时从原文件恢复')`, 'record-current-export');
   await pressImportControl(renderer, waitFor, '.record-detail details.degradation-disclosure > summary', 'record-fidelity-expand');
   await assertRenderer(renderer, `!document.querySelector('.record-detail').textContent.includes('后续提供') && document.querySelector('.record-detail details.degradation-disclosure').open`, 'record-current-export-expanded');
