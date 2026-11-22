@@ -1,4 +1,4 @@
-import { readBookFindings } from './book-findings.js';
+import { readBookFindingsInRoute } from './book-findings.js';
 import { registerImportEditingHandlers } from './import-editing-handlers.js';
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../shared/runtime-execution-config.js';
 import type { DispatchTaskKind, RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
@@ -2213,11 +2213,11 @@ export function registerRendererHandlers(
       const owned = requireSender(event);
       requireAuthority();
       const route = requireCurrentBookRoute(owned);
-      const generation = owned.routeGeneration, sequence = owned.routeRequestSequence;
-      const result = await readBookFindings(input, (request) => service.call('inspectBookFindings', { ...request, bookId: route.bookId }));
-      requireCurrentRouteReadEpoch(owned, generation, sequence);
-      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '发现不属于当前图书。');
-      return result;
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      return readBookFindingsInRoute(input, route.bookId,
+        (request) => service.call('inspectBookFindings', { ...request, bookId: route.bookId }),
+        () => requireCurrentRouteReadEpoch(owned, generation, sequence));
     }),
   );
   ipcMain.handle(IPC_CHANNELS.inspectParagraphAnalysis, (event, input: Omit<ServiceOperationMap['inspectParagraphAnalysis']['input'], 'bookId'>) =>

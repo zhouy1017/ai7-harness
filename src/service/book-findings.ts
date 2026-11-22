@@ -1,14 +1,18 @@
+import type { EvaluationRiskLevel } from '../shared/evaluation-scoring.js';
 import type { DatabaseSync } from 'node:sqlite';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { requireStore } from './store-records.js';
 import type { BookFindingsFilters, InspectBookFindingsInput, BookFindingsReadProjection, EvaluationWorkspaceProjection } from '../shared/protocol.js';
-import { BOOK_FINDINGS_PAGE_SIZE, type BookFindingProjection, type BookFindingsProjection, type BaselineAnalysisResultSetRevisionProjection, type ParagraphAnalysisProjection } from '../shared/protocol.js';
+import { REVIEW_FINDING_SEVERITY_LABELS, REVIEW_FINDING_STATUS_LABELS, BOOK_FINDINGS_PAGE_SIZE, type BookFindingProjection, type BookFindingsProjection, type BaselineAnalysisResultSetRevisionProjection, type ParagraphAnalysisProjection } from '../shared/protocol.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, LOCAL_REVIEW_CATEGORY } from './review/category-configuration.js';
 import { bookFindingsBatchSentence, BOOK_FINDINGS_VERSION_CHANGED } from '../shared/report-wording.js';
 
 const CATEGORIES = new Set(['analysis-gaps', 'evaluation-risks', ...BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map((category) => `review:${category.categoryId}`), `review:${LOCAL_REVIEW_CATEGORY.categoryId}`]);
-const SEVERITIES = new Set(['必须处理', '建议处理', '提示', '高', '中', '低', '未评级']);
-const STATUSES = new Set(['待处理', '未覆盖']);
+const RISK_SEVERITY_LABELS: Record<EvaluationRiskLevel, string> = { high: '高', medium: '中', low: '低' };
+const UNRATED_RISK_SEVERITY = '未评级';
+const GAP_STATUS = '未覆盖';
+const SEVERITIES = new Set([...Object.values(REVIEW_FINDING_SEVERITY_LABELS), ...Object.values(RISK_SEVERITY_LABELS), UNRATED_RISK_SEVERITY]);
+const STATUSES = new Set([REVIEW_FINDING_STATUS_LABELS.pending, GAP_STATUS]);
 
 /** These are the three existing page filters, not a way to send an action to a source owner. */
 export function validBookFindingsFilters(value: unknown): value is BookFindingsFilters {
@@ -83,7 +87,7 @@ function composeBookFindings(host: BookFindingsHost, bookId: string): BookFindin
   function* findings(): Generator<BookFindingProjection> {
     const revision = store.latestAnalysisRevision(bookId);
     if (revision !== null) for (const gap of revision.gaps) {
-      yield { id: `gap:${revision.revisionId}:${gap.unitOrdinal}`, category: 'analysis-gaps', categoryLabel: '分析未完成的部分', severity: '提示', status: '未覆盖', summary: gap.reason,
+      yield { id: `gap:${revision.revisionId}:${gap.unitOrdinal}`, category: 'analysis-gaps', categoryLabel: '分析未完成的部分', severity: '提示', status: GAP_STATUS, summary: gap.reason,
         target: { kind: 'gap', revisionId: revision.revisionId, unitOrdinal: gap.unitOrdinal, blockId: gap.blockIds[0] ?? null } };
     }
     yield* store.reviewFindings(bookId);
@@ -91,7 +95,7 @@ function composeBookFindings(host: BookFindingsHost, bookId: string): BookFindin
     const record = store.inspectEvaluation(bookId, null).record;
     if (record !== null) {
       for (const risk of record.content.risks) if (!risk.reviewed && (risk.level !== null || risk.statement !== null)) {
-        yield { id: `risk:${record.recordId}:${risk.riskId}`, category: 'evaluation-risks', categoryLabel: '评估风险', severity: risk.level === 'high' ? '高' : risk.level === 'medium' ? '中' : risk.level === 'low' ? '低' : '未评级', status: '待处理',
+        yield { id: `risk:${record.recordId}:${risk.riskId}`, category: 'evaluation-risks', categoryLabel: '评估风险', severity: risk.level === null ? UNRATED_RISK_SEVERITY : RISK_SEVERITY_LABELS[risk.level], status: REVIEW_FINDING_STATUS_LABELS.pending,
           summary: risk.statement ?? record.profile.risks.find((item) => item.riskId === risk.riskId)?.label ?? '评估风险',
           target: { kind: 'risk', recordId: record.recordId, riskId: risk.riskId, revisionId: record.revisionId } };
       }
@@ -101,7 +105,7 @@ function composeBookFindings(host: BookFindingsHost, bookId: string): BookFindin
 }
 
 type CachedView = { version: string; digest: string; metadata: Omit<BookFindingsReadProjection, 'items'> };
-type CachedBook = { generation: string; items: BookFindingProjection[]; groups: BookFindingsProjection['groups']; views: Map<string, CachedView>; snapshot?: { key: string; answer: BookFindingsReadProjection } };
+type CachedBook = { generation: string; items: BookFindingProjection[]; groups: BookFindingsProjection['groups']; views: Map<string, CachedView> };
 const readers = new WeakMap<DatabaseSync, BookFindingsReader>();
 
 /** Import replacement releases the old list immediately; a normal write is detected by generation on the next read. */
@@ -110,16 +114,22 @@ export function forgetBookFindings(db: DatabaseSync, bookId: string): void { rea
 const digestOf = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 /**
- * Disposable LRU: eight Books, one composed list/snapshot per Book, eight small filter/page digests (never old rows).
- * A 1,024-row sample1 composition is about 1.4 MB serialized; filtered snapshots share the list's row objects.
+ * Eight current Book lists and eight small view digests per Book; a separate LRU holds eight snapshots in total.
+ * Snapshots survive recomposition and other filters: at 1,024 rows, at most ~22 MB serialized plus JS overhead
+ * for eight current lists and eight older snapshots; current/filtered snapshots share their row objects.
  */
 export class BookFindingsReader {
-  readonly #nonce = randomUUID();
+  // Independent entropy: a disposable read token must not consume the store record UUID sequence.
+  readonly #nonce = randomBytes(16).toString('hex');
   readonly #books = new Map<string, CachedBook>();
+  readonly #snapshots = new Map<string, BookFindingsReadProjection>();
   constructor(readonly host: BookFindingsHost) {}
 
-  forget(bookId: string): void { this.#books.delete(bookId); }
-  clear(): void { this.#books.clear(); readers.delete(this.host.authority); }
+  forget(bookId: string): void {
+    this.#books.delete(bookId);
+    for (const [key, snapshot] of this.#snapshots) if (snapshot.bookId === bookId) this.#snapshots.delete(key);
+  }
+  clear(): void { this.#books.clear(); this.#snapshots.clear(); readers.delete(this.host.authority); }
 
   inspect(bookId: string, options: number | InspectBookFindingsInput = 0): BookFindingsReadProjection {
     const input = typeof options === 'number' ? { offset: options } : options;
@@ -131,14 +141,14 @@ export class BookFindingsReader {
     const whole = input.whole === true;
     const viewKey = JSON.stringify([filters.category || '', filters.severity || '', filters.status || '', whole, whole ? 0 : offset]);
     if (whole && offset > 0) {
-      const cached = this.#books.get(bookId);
-      const snapshot = cached?.snapshot;
-      requireStore(snapshot !== undefined && snapshot.key === viewKey && snapshot.answer.version === input.since,
-        'FINDINGS_VERSION_CHANGED', BOOK_FINDINGS_VERSION_CHANGED);
-      requireStore(offset < snapshot.answer.total, 'FINDINGS_PAGE_INVALID', '发现分页无效。');
-      this.#books.delete(bookId); this.#books.set(bookId, cached!);
-      // A running review writes often. Transport follows this one composition, not the live database generation.
-      return { ...snapshot.answer, offset, items: snapshot.answer.items.slice(offset) };
+      const key = JSON.stringify([bookId, viewKey, input.since]);
+      const snapshot = this.#snapshots.get(key);
+      requireStore(snapshot !== undefined, 'FINDINGS_VERSION_CHANGED', BOOK_FINDINGS_VERSION_CHANGED);
+      requireStore(offset < snapshot.total, 'FINDINGS_PAGE_INVALID', '发现分页无效。');
+      this.#snapshots.delete(key);
+      this.#snapshots.set(key, snapshot);
+      // A collector follows its snapshot, even while another window filters or recomposes this Book.
+      return { ...snapshot, offset, items: snapshot.items.slice(offset) };
     }
     this.host.evaluationBookTitle(bookId);
     const db = this.host.authority;
@@ -171,7 +181,12 @@ export class BookFindingsReader {
     book.views.delete(viewKey);
     const { items: _items, ...metadata } = answer;
     book.views.set(viewKey, { version, digest, metadata });
-    if (whole && !unchanged) book.snapshot = { key: viewKey, answer };
+    if (whole && !unchanged) {
+      const key = JSON.stringify([bookId, viewKey, version]);
+      this.#snapshots.delete(key);
+      this.#snapshots.set(key, answer);
+      if (this.#snapshots.size > 8) this.#snapshots.delete(this.#snapshots.keys().next().value!);
+    }
     if (book.views.size > 8) book.views.delete(book.views.keys().next().value!);
     return unchanged ? { ...answer, unchanged: true, items: [] } : answer;
   }

@@ -123,13 +123,14 @@ it('collects bounded snapshot chunks across a write, then catches that write on 
     if (++chunks === 2) {
       vi.mocked(host.reviewFindings).mockReturnValue([...rows, item('next')]);
       other.prepare('UPDATE readings SET value = 2').run();
+      expect(frame({ whole: true }).total).toBe(1025); // The other window also reads after writing.
     }
     return frame(input);
   });
   expect(chunks).toBeGreaterThan(1);
   expect(answer.items.map((row) => row.id)).toEqual(rows.map((row) => row.id));
   expect(answer).toMatchObject({ next: null, offset: 0, total: 1024 });
-  expect(host.reviewFindings).toHaveBeenCalledTimes(1);
+  expect(host.reviewFindings).toHaveBeenCalledTimes(2);
   const next = await readBookFindings({ whole: true, since: answer.version }, async (input) => frame(input));
   expect(next).toMatchObject({ unchanged: false, total: 1025 });
   expect(next.version).not.toBe(answer.version);
@@ -150,7 +151,7 @@ it('restarts an evicted snapshot once and returns the complete list', async () =
   expect(answer.next).toBeNull();
 });
 
-it('returns the snapshot refusal after the one restart, and refuses a superseded filter snapshot', async () => {
+it('returns the snapshot refusal after one restart and evicts snapshots at the global bound', async () => {
   vi.mocked(host.reviewFindings).mockReturnValue(Array.from({ length: 1024 }, (_, index) => ({ ...item(String(index)), summary: '合成'.repeat(250) })));
   const read = vi.fn(async (input: InspectBookFindingsInput) => {
     if ((input.offset ?? 0) > 0) reader.forget('book');
@@ -160,5 +161,42 @@ it('returns the snapshot refusal after the one restart, and refuses a superseded
   expect(read).toHaveBeenCalledTimes(4);
   const first = frame({ whole: true });
   reader.inspect('book', { whole: true, filters: { severity: '高' } });
+  expect(frame({ whole: true, since: first.version, offset: first.next! }).items.length).toBeGreaterThan(0);
+  for (let index = 0; index < 8; index++) reader.inspect(`other-${index}`, { whole: true });
   expect(() => frame({ whole: true, since: first.version, offset: first.next! })).toThrow('待办汇总已变化，请重新读取。');
+});
+
+it('compares a closing decision beyond the first page even when ids and counts are identical', () => {
+  const rows = Array.from({ length: 83 }, (_, index) => item(String(index)));
+  vi.mocked(host.reviewFindings).mockReturnValue(rows);
+  const held = reader.inspect('book', { whole: true });
+  vi.mocked(host.reviewFindings).mockReturnValue(rows.map((row, index) => index !== 60 ? row : { ...row, decision: {
+    kind: 'ignore', input: { bookId: 'book', reviewRunId: 'run', findingId: row.id, disposition: 'ignored', reason: '编辑决定忽略' },
+  } }));
+  db.prepare('UPDATE readings SET value = 2').run();
+  const changed = reader.inspect('book', { whole: true, since: held.version });
+  expect(changed.unchanged).toBe(false);
+  expect(changed.total).toBe(held.total);
+  expect(changed.groups).toEqual(held.groups);
+  expect(changed.items.map((row) => row.id)).toEqual(held.items.map((row) => row.id));
+  expect(changed.items.slice(0, 40)).toEqual(held.items.slice(0, 40));
+  expect(changed.items[60]!.decision?.kind).toBe('ignore');
+});
+
+it('collects two windows with different filters over 1,024 findings without restarting either', async () => {
+  const rows = Array.from({ length: 1024 }, (_, index) => ({ ...item(String(index), index % 2 ? 'review:style-and-format' : 'review:typos-and-usage'), summary: '合成'.repeat(250) }));
+  vi.mocked(host.reviewFindings).mockReturnValue(rows);
+  const starts = new Map<string, number>();
+  const read = async (input: InspectBookFindingsInput): Promise<BookFindingsReadProjection> => {
+    const key = input.filters?.category ?? '';
+    if (input.offset === 0) starts.set(key, (starts.get(key) ?? 0) + 1);
+    return frame(input);
+  };
+  const [all, filtered] = await Promise.all([
+    readBookFindings({ whole: true }, read),
+    readBookFindings({ whole: true, filters: { category: 'review:style-and-format' } }, read),
+  ]);
+  expect(all.items.map((row) => row.id)).toEqual(rows.map((row) => row.id));
+  expect(filtered.items.map((row) => row.id)).toEqual(rows.filter((row) => row.category === 'review:style-and-format').map((row) => row.id));
+  expect([...starts.values()]).toEqual([1, 1]);
 });

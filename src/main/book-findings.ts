@@ -1,3 +1,4 @@
+import { ServiceCallError } from './service-client.js';
 import type { BookFindingsReadProjection, InspectBookFindingsInput } from '../shared/protocol/review.js';
 
 /** The renderer polls once; main collects private snapshot chunks and retries an evicted snapshot once. */
@@ -20,4 +21,12 @@ export async function readBookFindings(input: InspectBookFindingsInput | undefin
     if (error instanceof Error && 'code' in error && error.code === 'FINDINGS_VERSION_CHANGED') return collect();
     throw error;
   }
+}
+/** Keep the complete collection under the route epoch captured by its caller, including its Book binding. */
+export async function readBookFindingsInRoute(input: InspectBookFindingsInput | undefined, bookId: string,
+  read: (request: InspectBookFindingsInput) => Promise<BookFindingsReadProjection>, assertCurrent: () => void): Promise<BookFindingsReadProjection> {
+  const result = await readBookFindings(input, read);
+  assertCurrent();
+  if (result.bookId !== bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '发现不属于当前图书。');
+  return result;
 }

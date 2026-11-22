@@ -62,6 +62,7 @@ import {
   type ReviewRunProjection,
   type ReviewRunScopeRequest,
   type ReviewWorkspaceProjection,
+  type BookFindingsReadProjection,
   type ServiceJobProjection,
 } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
@@ -379,6 +380,69 @@ function storeMessage(operation: () => unknown): string { return storeError(oper
 
 function binding(session: Session, book: Book): { manuscriptId: string; branchId: string; windowStartBlockId: string } {
   return { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: session.store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks[0]!.blockId };
+}
+
+/** Real writer paths in one lifecycle; only the old version and public rows are used as the oracle. */
+function findingsVersionWrites(current: () => Session, book: Book): Array<{ name: string; changed?: false; write: () => unknown | Promise<unknown> }> {
+  const read = () => current().store.inspectBookFindings(book.bookId, { whole: true });
+  const bind = () => binding(current(), book);
+  let batchMarkId = '';
+  return [
+    { name: 'analysis revision with gaps', write: () => runBaseline(current(), book) },
+    { name: 'review materialization', write: () => authorizeAndDrive(current(), book, prepare(current(), book, [TYPOS, STYLE], WHOLE)) },
+    { name: 'batch apply', write: () => {
+      const marks = read().items.flatMap((row) => row.suggestion?.batchAllowed ? [row.suggestion.markId] : []);
+      expect(marks.length).toBeGreaterThan(1); batchMarkId = marks[0]!;
+      return current().store.applyChangeSuggestionBatch({ ...bind(), markIds: marks, clientEffectId: randomUUID() });
+    } },
+    { name: 'batch undo', write: () => current().store.reverseAppliedChangeSuggestion({ ...bind(), markId: batchMarkId, clientEffectId: randomUUID() }) },
+    { name: 'single apply', write: () => {
+      const markId = read().items.find((row) => row.suggestion !== undefined)!.suggestion!.markId;
+      return current().store.applyChangeSuggestion({ ...bind(), markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+    } },
+    { name: 'mark handled', write: () => {
+      const markId = read().items.find((row) => row.decision?.kind === 'ignore' && row.place?.markId !== null)!.place!.markId!;
+      return current().store.updateEditorialMark({ ...bind(), markId, action: 'set-status', body: null, highlightColor: null, status: 'resolved', targetKind: null, proposedText: null, rationale: null });
+    } },
+    { name: 'row reject', write: () => {
+      const decision = read().items.find((row) => row.decision?.kind === 'reject')!.decision!;
+      if (decision.kind !== 'reject') throw new Error('missing reject fixture');
+      return current().store.recordChangeSuggestionDecision({ ...decision.input, clientDecisionId: randomUUID() });
+    } },
+    { name: 'row ignore', write: () => {
+      const decision = read().items.find((row) => row.decision?.kind === 'ignore')!.decision!;
+      if (decision.kind !== 'ignore') throw new Error('missing ignore fixture');
+      const input = decision.input;
+      return current().store.recordReviewFindingDisposition(input.bookId, input.reviewRunId, input.findingId, input.reason);
+    } },
+    { name: 'journal edit on suggestion words', write: () => {
+      const row = read().items.find((item) => item.suggestion !== undefined)!;
+      const card = current().store.getEditorialMarkCard(book.manuscriptId, book.branchId, row.suggestion!.markId);
+      const window = current().store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: card.blockId });
+      const block = window.blocks.find((item) => item.blockId === card.blockId)!;
+      return current().store.flushJournalEdit({ ...bind(), clientEditId: randomUUID(), baseRevisionId: window.revisionId, blockId: card.blockId,
+        baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence, fromGrapheme: card.fromGrapheme + 1, toGrapheme: card.fromGrapheme + 1, insertText: '〔改〕' });
+    } },
+    { name: 'new evaluation risk', write: () => {
+      const record = current().store.startEvaluation(book.bookId).record!;
+      return current().store.saveEvaluation({ bookId: book.bookId, recordId: record.recordId, expectedEntries: record.entries, finalize: false,
+        content: { ...record.content, risks: record.content.risks.map((risk, index) => index === 0 ? { ...risk, level: 'high', statement: '合成风险', reviewed: false } : risk) } });
+    } },
+    { name: 'reviewed evaluation risk', write: () => {
+      const record = current().store.inspectEvaluation(book.bookId, null).record!;
+      return current().store.saveEvaluation({ bookId: book.bookId, recordId: record.recordId, expectedEntries: record.entries, finalize: false,
+        content: { ...record.content, risks: record.content.risks.map((risk) => ({ ...risk, reviewed: true })) } });
+    } },
+    { name: 'another Book import', changed: false, write: () => importSample1Book(current().store, roots.codeRoot, '另一份公开样书') },
+  ];
+}
+
+function expectFindingsPoll(held: BookFindingsReadProjection, read: (since?: string) => BookFindingsReadProjection, name: string, changed = true): BookFindingsReadProjection {
+  const polled = read(held.version), fresh = read();
+  expect(polled.unchanged, name).toBe(!changed);
+  expect(polled.version, name).not.toBe(held.version);
+  expect(changed ? JSON.stringify(polled.items) === JSON.stringify(fresh.items) : polled.items.length === 0, name).toBe(true);
+  return fresh;
 }
 
 function workingText(session: Session, book: Book): Map<string, string> {
@@ -1280,6 +1344,31 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(current.findings.find((finding) => finding.findingId === applied.findingId))
         .toMatchObject({ status: 'handled', statusDetail: '已接受并应用', markStatus: 'applied' });
     });
+  }, 300_000);
+
+  it('never hides real-store writes from a held version, another window, or a reopened store (#1669 B1)', async () => {
+    let session: Session | null = await open('sample1-review-cross-chapter-authored', undefined, undefined, true);
+    try {
+      const book = await importBook(session);
+      const current = (): Session => session!;
+      const read = (since?: string): BookFindingsReadProjection => current().store.inspectBookFindings(book.bookId, { whole: true, ...(since === undefined ? {} : { since }) });
+      let held = read();
+      for (const step of findingsVersionWrites(current, book)) {
+        await step.write();
+        held = expectFindingsPoll(held, read, step.name, step.changed !== false);
+        if (step.name === 'analysis revision with gaps') expect(held.items.some((row) => row.target.kind === 'gap')).toBe(true);
+      }
+      const otherWindow = read();
+      const decision = held.items.find((row) => row.decision?.kind === 'ignore')!.decision!;
+      if (decision.kind !== 'ignore') throw new Error('missing other-window fixture');
+      const input = decision.input;
+      current().store.recordReviewFindingDisposition(input.bookId, input.reviewRunId, input.findingId, input.reason);
+      held = expectFindingsPoll(otherWindow, read, 'other window ignore');
+      expect(held.items.some((row) => row.id === input.findingId)).toBe(false);
+      await close(session); session = null;
+      session = await open('sample1-review-cross-chapter-authored');
+      expectFindingsPoll(held, read, 'reopened store');
+    } finally { if (session !== null) await close(session); }
   }, 300_000);
 
   it('merges repeated suggestions newest first and closes their shared mark with one decision (#1669)', async () => {
