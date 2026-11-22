@@ -483,6 +483,8 @@ describe('review categories reference exact library versions over ordinary captu
       // A prepared Run has no findings; the Book reader also avoids composing a review workspace (#1669).
       expect(store.inspectBookFindings(bookId)).toMatchObject({ total: 0, items: [] });
       expect(workspace).not.toHaveBeenCalled();
+      store.inspectReviewWorkspace(bookId, null);
+      expect(workspace).toHaveBeenCalled();
     } finally { workspace.mockRestore(); }
   });
 });
