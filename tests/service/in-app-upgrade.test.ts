@@ -643,6 +643,16 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   const independent = join(root,'shell','upgrade-'+id,'current-database');
   const commitment = await readFile(join(independent,'rollback-ready.json'));
   await writeFile(join(independent,'rollback-ready.json'),'{');
+  await writeFile(phase,stale);
+  const parkedWal = join(saved,'ai7.sqlite-wal');
+  const copyWal = join(independent,'ai7.sqlite-wal');
+  await rename(parkedWal,parkedWal+'.held');
+  await rename(copyWal,copyWal+'.held');
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+  expect(await readFile(phase)).toEqual(stale);
+  expect(storeRevisionOnDisk(sql)).toBe(116);
+  await rename(parkedWal+'.held',parkedWal);
+  await rename(copyWal+'.held',copyWal);
   const inventory: TestInventory = JSON.parse(await readFile(join(independent,'files.json'),'utf8'));
   const allFiles = inventory.members;
   const shortened = allFiles.filter(file => file.path !== unreferenced);
@@ -680,14 +690,13 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   expect(existsSync(join(savedPayload,unchanged))).toBe(false);
   expect(storeRevisionOnDisk(sql)).toBe(116);
   await rm(sealed);
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
   expect(await readFile(phase)).toEqual(stale);
   expect(await readFile(remembered,'utf8')).toBe(shortJson);
   await writeFile(sealed,JSON.stringify(inventory));
-  // The old published root also has a deliberately deleted member. Negative evidence alone cannot authorize deleting it.
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
-  expect(await readFile(phase)).toEqual(stale);
-  await writeFile(join(independent,'rollback-ready.json'),commitment);
+  // This complete list and committed WAL jointly prove that 117 deliberately removed an old member.
+  await expect(resumeUpgrade(root,'0.8.0',stage => { if (stage === 'return-new') throw Error('verified'); })).rejects.toThrow('verified');
+  expect(JSON.parse(await readFile(phase,'utf8')).currentManifestDigest).toBe(JSON.parse(commitment.toString('utf8')).currentManifestDigest);
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
   await verifyLibraryFiles(root,117);
   expect(hasDraft(sql)).toBe(true);
@@ -927,9 +936,10 @@ it.each(['old-payloads','incoming','archive','unavailable','short-sealed','share
   } finally { opened.markCleanShutdown(); opened.close(); }
 },180_000);
 
-it.each([['historical','removed'],['historical','added'],['current','removed'],['current','added']] as const)(
-  'recovers the %s rollback when its identical SQLite is held by a previous attempt and a member was %s',async (format,change) => {
-  const area = join(roots.inputRoot,'two-rollback-attempts-'+format+'-'+change);
+it.each([['historical','removed','receipt'],['historical','added','receipt'],['current','removed','saved'],['current','added','saved'],
+  ['current','removed','live'],['current','added','live']] as const)(
+  'recovers the %s rollback when its identical SQLite is held by a previous attempt and a member was %s (%s)',async (format,change,source) => {
+  const area = join(roots.inputRoot,'two-rollback-attempts-'+format+'-'+change+'-'+source);
   await mkdir(area);
   const root = join(area,'library');
   await cp(roots.dataRoot,root,{recursive:true});
@@ -987,6 +997,8 @@ it.each([['historical','removed'],['historical','added'],['current','removed'],[
   await rm(join(parked,receipt));
   await writeFile(join(note,receipt),first);
   await writeFile(join(note,'current-files.json'),firstManifest);
+  const parkedMember = join(parked,'payloads',member);
+  if (format === 'current' && change === 'removed') await writeFile(parkedMember,contents);
   await writeFile(phase,stale);
   await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
   expect(await readFile(phase)).toEqual(stale);
@@ -994,20 +1006,38 @@ it.each([['historical','removed'],['historical','added'],['current','removed'],[
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
   await rm(join(independent,receipt));
   await rm(join(note,receipt));
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:format === 'current' ? 'UPGRADE_MISMATCH' : 'UPGRADE_FILES_INVALID'});
   expect(await readFile(phase)).toEqual(stale);
   expect(existsSync(join(root,member))).toBe(change === 'removed');
   if (change === 'added') expect(await readFile(join(preparedFiles,member))).toEqual(contents);
   await writeFile(join(independent,receipt),first);
   await writeFile(join(note,receipt),first);
+  if (format === 'current') {
+    // Only the parked directory now carries the matching complete pair. All inventory records still belong to A.
+    if (change === 'added') await rename(join(preparedFiles,member),parkedMember);
+    else await rm(parkedMember);
+    await expect(resumeUpgrade(root,'0.8.0',stage => { if (stage === 'return-new') throw Error('verified'); })).rejects.toThrow('verified');
+    expect(JSON.parse(await readFile(phase,'utf8')).currentManifestDigest).toBe(second.currentManifestDigest);
+    await writeFile(phase,stale);
+    await writeFile(join(note,'current-files.json'),firstManifest);
+    if (change === 'added') await rename(parkedMember,join(preparedFiles,member));
+    else await writeFile(parkedMember,contents);
+  }
   await rename(copyB,prepared);
   await rm(join(prepared,'ai7.sqlite'));
+  let shuffled = secondManifest;
+  if (format === 'current') {
+    const record: TestInventory = JSON.parse(secondManifest.toString('utf8'));
+    shuffled = Buffer.from(withMembers(record,[...record.members].reverse()));
+    await rm(join(prepared,receipt));
+    await writeFile(join(prepared,'files.json'),shuffled);
+  }
   await expect(resumeUpgrade(root,'0.8.0',stage => { if (stage === 'return-new') throw Error('interrupted'); })).rejects.toThrow('interrupted');
   const boundJournal = await readFile(phase);
   const bound = JSON.parse(boundJournal.toString('utf8'));
   expect(bound.currentDigest).toBe(second.currentDigest);
   expect(bound.currentManifestDigest).toBe(second.currentManifestDigest);
-  await rm(join(prepared,receipt));
+  await rm(join(prepared,receipt),{force:true});
   if (change === 'added') {
     // B's only complete inventory is published at current-files before its adjacent A receipt is replaced.
     const only = join(note,'current-files.json');
@@ -1020,7 +1050,7 @@ it.each([['historical','removed'],['historical','added'],['current','removed'],[
     await writeFile(only,secondManifest);
     const unbound = {...bound};
     delete unbound.currentManifestDigest;
-    for (const incomplete of [unbound,{...bound,currentManifestDigest:'0'.repeat(64)}]) {
+    for (const incomplete of [...(format === 'historical' ? [unbound] : []),{...bound,currentManifestDigest:'0'.repeat(64)}]) {
       const unchanged = JSON.stringify(incomplete);
       await writeFile(phase,unchanged);
       await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
@@ -1062,9 +1092,15 @@ it.each([['historical','removed'],['historical','added'],['current','removed'],[
   }
   // Historical writers need their receipt. A current writer can prove the exact pair without one.
   if (format === 'current') {
-    if (change === 'added') await rename(isolatedMember,savedMember);
-    else await rm(savedMember);
-    await writeFile(join(prepared,'files.json'),secondManifest);
+    if (source === 'live') {
+      // The online export root alone matches consent, but the 117 startup marker did not survive.
+      if (change === 'added') await rename(isolatedMember,join(root,member));
+      else await rm(join(root,member));
+    } else {
+      if (change === 'added') await rename(isolatedMember,savedMember);
+      else await rm(savedMember);
+      await writeFile(join(prepared,'files.json'),shuffled);
+    }
     expect(await readFile(phase)).toEqual(stale);
   } else {
     await writeFile(phase,change === 'added' ? missingCommitment : stale);
@@ -1075,6 +1111,12 @@ it.each([['historical','removed'],['historical','added'],['current','removed'],[
   await rm(marker);
   expect(existsSync(join(independent,'ai7-data-version.json'))).toBe(true);
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  if (source === 'live') {
+    // Earlier recoveries could finish installing B and leave a journal bound to its permuted on-disk spelling.
+    await writeFile(phase,JSON.stringify({...bound,currentManifestDigest:JSON.parse(shuffled.toString('utf8')).sha256}));
+    expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+    expect(existsSync(phase)).toBe(false);
+  }
   expect((await readDataVersionMarker(root))?.dataVersion).toBe(2);
   expect(existsSync(join(root,member))).toBe(change === 'added');
   await verifyLibraryFiles(root,117);

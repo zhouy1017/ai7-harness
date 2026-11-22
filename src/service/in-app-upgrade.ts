@@ -76,6 +76,14 @@ function inventoryText(state: UpgradeState,files: DatabasePackageMember[],digest
   return JSON.stringify({upgradeId:state.id,rollbackAttempt:state.rollbackAttempt,sha256:digest,members:files});
 }
 
+// Match the export walk's component-by-component order and the member layout written by readMembers.
+// A stored array can have a different order while still describing exactly the same exported files.
+function packageInventoryJson(files: DatabasePackageMember[]): string {
+  const entries = files.map(({path,bytes,sha256}) => ({key:path.replaceAll('/','\0'),member:{path,bytes,sha256}}));
+  entries.sort((a,b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+  return JSON.stringify(entries.map(entry => entry.member));
+}
+
 async function readInventory(path: string) {
   const text = await readSmallFile(path,MAX_MANIFEST_BYTES + 512);
   if (text === null) return null;
@@ -97,7 +105,12 @@ async function attemptManifest(directory: string,name: string,state: UpgradeStat
   const inventory = await readInventory(join(directory,name));
   if (!inventory) return null;
   const {record,json,digest,legacy} = inventory;
-  if (bound) return digest === bound ? json : null;
+  if (bound) {
+    if (digest === bound) return json;
+    if (!inventory.members.every(isDatabasePackageMember)) return null;
+    const ordered = packageInventoryJson(inventory.members);
+    return createHash('sha256').update(ordered).digest('hex') === bound ? ordered : null;
+  }
   if (legacy || record.upgradeId !== state.id || record.rollbackAttempt !== state.rollbackAttempt) return undefined;
   return digest === record.sha256 && (!receipt?.currentManifestDigest || receipt.currentManifestDigest === digest) ? json : null;
 }
@@ -324,7 +337,12 @@ async function rollbackStartFingerprint(root: string): Promise<string> {
 }
 
 async function canPrepareRollback(root: string,state: UpgradeState): Promise<boolean> {
-  if (state.rollbackStartFingerprint) return await rollbackStartFingerprint(root).catch(() => null) === state.rollbackStartFingerprint;
+  if (state.rollbackStartFingerprint) {
+    try {
+      await verifyCurrentIdentity(root,join(root,'store'),state);
+      return await rollbackStartFingerprint(root) === state.rollbackStartFingerprint;
+    } catch { return false; }
+  }
   const note = join(root,'shell','upgrade-'+state.id);
   const retained = [join(root,'store','payloads'),join(root,'store','rollback-ready.json'),join(note,'rollback-ready.json'),
     join(note,'current-files.json'),join(note,'previous-payloads'),
@@ -351,7 +369,11 @@ async function liveCurrentIsComplete(root: string,state: UpgradeState): Promise<
   try {
     const dir = join(root,'store');
     const files = await readMembers(root);
-    if (createHash('sha256').update(JSON.stringify(files)).digest('hex') !== state.currentManifestDigest) return false;
+    // Older recoveries could bind a differently ordered spelling of this same inventory.
+    // The joint commitment proves every live byte directly, including the SQLite/WAL identity checked below.
+    if (state.rollbackStartFingerprint) {
+      if (rollbackInventoryFingerprint(state.currentDigest,files) !== state.rollbackStartFingerprint) return false;
+    } else if (createHash('sha256').update(JSON.stringify(files)).digest('hex') !== state.currentManifestDigest) return false;
     if (await sourceFingerprint(root,dir) !== state.currentDigest) return false;
     await verifyCurrentLibrary(root,dir,state,files);
     return true;
@@ -383,26 +405,28 @@ async function bindRollbackStart(root: string,store: string,note: string,state: 
     const digest = await sourceFingerprint(root,dir).catch(() => null);
     if (digest && (!state.currentDigest || state.currentDigest === digest)) databases.add(digest);
   }
-  const inventories: Array<() => Promise<{members:unknown[];digest:string} | null>> =
+  const inventories: Array<() => Promise<{members:unknown[]} | null>> =
     [join(note,'current-files.json'),...copies.map(dir => join(dir,'files.json'))].map(path => () => readInventory(path));
-  inventories.push(async () => {
-    const members = await readMembers(join(store,'payloads'));
-    const json = JSON.stringify(members);
-    return {members,digest:createHash('sha256').update(json).digest('hex')};
-  });
+  for (const dir of [join(store,'payloads'),root]) inventories.push(async () => ({members:await readMembers(dir)}));
+  let unreadable: unknown;
   for (const read of inventories) {
-    const candidate = await read().catch(() => null);
-    if (!candidate || !candidate.members.every(isDatabasePackageMember) ||
-        (state.currentManifestDigest && state.currentManifestDigest !== candidate.digest)) continue;
+    const candidate = await read().catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') unreadable = error;
+      return null;
+    });
+    if (!candidate || !candidate.members.every(isDatabasePackageMember)) continue;
+    const manifestDigest = createHash('sha256').update(packageInventoryJson(candidate.members)).digest('hex');
+    if (state.currentManifestDigest && state.currentManifestDigest !== manifestDigest) continue;
     for (const digest of databases) {
       if (rollbackInventoryFingerprint(digest,candidate.members) !== state.rollbackStartFingerprint) continue;
       // This pair matches consent even if the independent renames left either half beside an old receipt.
       // The caller still verifies the database identity, references and every physical member before publishing.
       state.currentDigest = digest;
-      state.currentManifestDigest = candidate.digest;
+      state.currentManifestDigest = manifestDigest;
       return;
     }
   }
+  if (unreadable) throw unreadable;
   requireStore(false,'UPGRADE_MISMATCH','保存的数据库与完整文件清单无法共同核对回退开始时的书库。');
 }
 
@@ -555,6 +579,10 @@ async function currentMembers(root: string,note: string,state: UpgradeState,snap
     if (!selected || files.length > selected.files.length) selected = {json,digest,files};
   }
   requireStore(selected && (bound || (verifiedInventory && selected.files.length === agreed.size)),'UPGRADE_FILES_INVALID','回退前的完整文件清单核对失败。');
+  if (state.currentDigest && state.rollbackStartFingerprint) {
+    requireStore(rollbackInventoryFingerprint(state.currentDigest,selected.files) === state.rollbackStartFingerprint,
+      'UPGRADE_MISMATCH','数据库与完整文件清单和回退开始时的记录不一致。');
+  }
   if (!bound) {
     const parked = existsSync(snapshot) ? await readMembers(snapshot) : [];
     const current = new Map(parked.map(file => [file.path,file.sha256]));
@@ -778,7 +806,7 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
       (state.stage === 'return-new' && (!state.currentDigest || !state.currentManifestDigest))) {
     // The 117 directory may already be back on line while the exported files still belong to 116.
     const currentStore = existsSync(newer) ? newer : store;
-    if (state.stage === 'return-new') {
+    if (state.stage === 'return-new' || state.rollbackStartFingerprint) {
       let unreadable: unknown;
       for (const dir of [currentStore,note,...independentDirectories(note)]) {
         let ready;
@@ -796,9 +824,9 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         }
         break;
       }
-      if (unreadable && (!state.currentDigest || !state.currentManifestDigest)) throw unreadable;
+      if (unreadable && !state.rollbackStartFingerprint && (!state.currentDigest || !state.currentManifestDigest)) throw unreadable;
     }
-    if (!existsSync(newer) && state.rollbackStartFingerprint && (!state.currentDigest || !state.currentManifestDigest)) {
+    if (state.rollbackStartFingerprint && (!state.currentDigest || !state.currentManifestDigest)) {
       await bindRollbackStart(root,currentStore,note,state);
     }
     const liveDigest = await sourceFingerprint(root,currentStore).catch(() => null);
