@@ -915,8 +915,20 @@ it.each(['old-payloads','incoming','archive','unavailable','short-sealed','share
   }
   if (source === 'unavailable') {
     await writeFile(join(note,'current-database','files.json'),shortened);
+    const foreign = join(roots.inputRoot,'foreign117');
+    await cp(roots.dataRoot,foreign,{recursive:true});
+    await beginUpgrade(foreign);
+    await resumeUpgrade(foreign,'0.8.0');
+    const copies = [join(parked,'ai7.sqlite'),join(note,'current-database','ai7.sqlite')];
+    for (const path of copies) {
+      await rename(path,path+'.held');
+      await cp(join(foreign,'store','ai7.sqlite'),path);
+    }
+    await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+    expect(await readFile(phase)).toEqual(stale);
+    for (const path of copies) await rename(path+'.held',path);
     await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
-    expect(existsSync(phase)).toBe(true);
+    expect(await readFile(phase)).toEqual(stale);
     await writeFile(join(root,member),contents);
   }
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});

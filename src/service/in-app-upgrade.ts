@@ -806,9 +806,10 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
   }
   // Earlier interrupted recoveries hashed the array in the order it happened to be read.
   // Rebind only from the exact database and members committed together at rollback consent.
-  const earlierEncoding = state.rollbackStartFingerprint && !state.currentManifestEncoding;
+  const needsCommitment = () => !state.currentDigest || !state.currentManifestDigest ||
+    (state.rollbackStartFingerprint && state.currentManifestEncoding !== 'export-order');
   if ((state.stage === 'restore' && (existsSync(newer) || ambiguousRestore)) ||
-      (state.stage === 'return-new' && (!state.currentDigest || !state.currentManifestDigest || earlierEncoding))) {
+      (state.stage === 'return-new' && needsCommitment())) {
     // The 117 directory may already be back on line while the exported files still belong to 116.
     const currentStore = existsSync(newer) ? newer : store;
     if ((state.stage === 'return-new' || state.rollbackStartFingerprint) && (!state.currentDigest || !state.currentManifestDigest)) {
@@ -823,6 +824,7 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
           'UPGRADE_MISMATCH','回退前的书库回执不一致。');
         state.currentDigest ??= ready.currentDigest;
         state.currentManifestDigest ??= ready.currentManifestDigest;
+        if (ready.currentManifestEncoding === 'export-order') state.currentManifestEncoding = ready.currentManifestEncoding;
         if (!state.rollbackDigest && ready.rollbackDigest) {
           state.rollbackDigest = ready.rollbackDigest;
           state.fallback = ready.fallback;
@@ -831,7 +833,7 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
       }
       if (unreadable && !state.rollbackStartFingerprint && (!state.currentDigest || !state.currentManifestDigest)) throw unreadable;
     }
-    if (state.rollbackStartFingerprint && (!state.currentDigest || !state.currentManifestDigest || earlierEncoding)) {
+    if (state.rollbackStartFingerprint && needsCommitment()) {
       await bindRollbackStart(root,currentStore,note,state);
     }
     const liveDigest = await sourceFingerprint(root,currentStore).catch(() => null);
