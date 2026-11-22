@@ -927,13 +927,15 @@ it.each(['old-payloads','incoming','archive','unavailable','short-sealed','share
   } finally { opened.markCleanShutdown(); opened.close(); }
 },180_000);
 
-it.each(['historical','current'] as const)('recovers the second %s rollback inventory when SQLite is identical but the export members differ',async format => {
-  const area = join(roots.inputRoot,'two-rollback-attempts-'+format);
+it.each([['historical','removed'],['historical','added'],['current','removed'],['current','added']] as const)(
+  'recovers the %s rollback when its identical SQLite is held by a previous attempt and a member was %s',async (format,change) => {
+  const area = join(roots.inputRoot,'two-rollback-attempts-'+format+'-'+change);
   await mkdir(area);
   const root = join(area,'library');
   await cp(roots.dataRoot,root,{recursive:true});
-  const member = 'first-attempt-only.bin';
-  await writeFile(join(root,member),Buffer.from([1,7]));
+  const member = 'between-attempts.bin';
+  const contents = Buffer.from([1,7]);
+  if (change === 'removed') await writeFile(join(root,member),contents);
   await beginUpgrade(root);
   await resumeUpgrade(root,'0.8.0');
   const {id} = JSON.parse(await readFile(join(root,'store','upgrade-origin.json'),'utf8'));
@@ -960,7 +962,8 @@ it.each(['historical','current'] as const)('recovers the second %s rollback inve
   await expect(writer.resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
   expect(existsSync(phase)).toBe(false);
   await rename(away,old);
-  await rm(join(root,member));
+  if (change === 'removed') await rm(join(root,member));
+  else await writeFile(join(root,member),contents);
 
   await writer.beginUpgradeRollback(root);
   const stale = await readFile(phase);
@@ -970,7 +973,12 @@ it.each(['historical','current'] as const)('recovers the second %s rollback inve
   expect(second.currentDigest).toBe(earlier.currentDigest);
   expect(second.rollbackAttempt).not.toBe(earlier.rollbackAttempt);
   expect(second.currentManifestDigest).not.toBe(earlier.currentManifestDigest);
-  expect(existsSync(join(root,member))).toBe(true);
+  expect(existsSync(join(root,member))).toBe(change === 'removed');
+  const preparedFiles = join(note,'prepared-payloads');
+  if (change === 'added') {
+    await mkdir(preparedFiles,{recursive:true});
+    await rename(join(parked,'payloads',member),join(preparedFiles,member));
+  }
   // The old publication survived, but the journal and the independent directory renames did not all persist.
   const copyB = join(area,'attempt-b');
   await rename(independent,copyB);
@@ -984,12 +992,23 @@ it.each(['historical','current'] as const)('recovers the second %s rollback inve
   expect(await readFile(join(note,'current-files.json'))).toEqual(firstManifest);
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
   await rm(join(independent,receipt));
+  await rm(join(note,receipt));
   await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
   expect(await readFile(phase)).toEqual(stale);
-  expect(existsSync(join(root,member))).toBe(true);
+  expect(existsSync(join(root,member))).toBe(change === 'removed');
+  if (change === 'added') expect(await readFile(join(preparedFiles,member))).toEqual(contents);
+  await writeFile(join(independent,receipt),first);
+  await writeFile(join(note,receipt),first);
   await rename(copyB,prepared);
+  await rm(join(prepared,'ai7.sqlite'));
+  await expect(resumeUpgrade(root,'0.8.0',stage => { if (stage === 'return-new') throw Error('interrupted'); })).rejects.toThrow('interrupted');
+  const bound = JSON.parse(await readFile(phase,'utf8'));
+  expect(bound.currentDigest).toBe(second.currentDigest);
+  expect(bound.currentManifestDigest).toBe(second.currentManifestDigest);
+  await rm(join(parked,'ai7.sqlite'));
+  await rm(join(prepared,receipt));
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
-  expect(existsSync(join(root,member))).toBe(false);
+  expect(existsSync(join(root,member))).toBe(change === 'added');
   await verifyLibraryFiles(root,117);
   const reopened = await EditorialStore.open(root,roots.codeRoot);
   const exported = join(area,'attempt-b.ai7db');
@@ -999,7 +1018,9 @@ it.each(['historical','current'] as const)('recovers the second %s rollback inve
     await reopened.approveDatabaseExport(prep.preparationId,true);
   } finally { reopened.markCleanShutdown(); reopened.close(); }
   const pkg = await verifyDatabasePackage(exported,{dataRoot:root});
-  expect(pkg.manifest.members.some(file => file.path === member)).toBe(false);
+  const kept = pkg.manifest.members.find(file => file.path === member);
+  if (change === 'added') expect(kept).toEqual({path:member,bytes:contents.length,sha256:createHash('sha256').update(contents).digest('hex')});
+  else expect(kept).toBeUndefined();
 },180_000);
 
 it.each(['original','extracted'] as const)('reuses extracted offline payloads with the %s database and budgets simultaneous copies',async source => {

@@ -321,41 +321,52 @@ async function copyCurrentDatabase(root: string,from: string,to: string): Promis
   await syncDirectory(to);
 }
 
-async function independentDatabase(root: string,note: string,state: UpgradeState,parkedDigest: string | null) {
-  const candidates: {dir:string;proof:UpgradeState | null}[] = [];
-  let unreadable: unknown;
-  for (const name of ['current-database','prepared-database']) {
-    const dir = join(note,name);
-    let proof;
-    try { proof = await recoveryReceipt(join(dir,'rollback-ready.json')); }
-    catch (error) { unreadable = error; continue; }
-    if (proof && !sameRollbackAttempt(proof,state)) continue;
-    candidates.push({dir,proof});
-  }
-  const matching = candidates.find(candidate => candidate.proof)?.proof ?? null;
-  if (unreadable && !matching && !(state.currentDigest && state.currentManifestDigest)) throw unreadable;
-  const expected = state.currentDigest ?? matching?.currentDigest ?? parkedDigest;
-  requireStore(expected && candidates.every(({proof}) => !proof || (proof.currentDigest === expected &&
-    proof.currentManifestDigest === matching?.currentManifestDigest && proof.rollbackDigest === matching?.rollbackDigest)),
-    'UPGRADE_MISMATCH','本次回退的数据库回执不一致。');
-  for (const {dir} of candidates) {
+function independentDirectories(note: string): string[] {
+  return [join(note,'current-database'),join(note,'prepared-database')];
+}
+
+async function databaseCopyAtDigest(root: string,state: UpgradeState,expected: string,locations: string[]): Promise<string> {
+  for (const dir of locations) {
     try {
-      const digest = await sourceFingerprint(root,dir);
-      if (digest !== expected) continue;
+      if (await sourceFingerprint(root,dir) !== expected) continue;
       await verifyCurrentIdentity(root,dir,state);
-      return {dir,digest,proof:matching};
+      return dir;
     } catch { /* The other physical spelling may contain the verified copy. */ }
   }
   requireStore(false,'UPGRADE_MISMATCH','无法核对本次回退保留的新版数据库副本。');
 }
 
+async function independentDatabase(root: string,note: string,state: UpgradeState,parkedDigest: string | null) {
+  const locations = independentDirectories(note);
+  const eligible: string[] = [];
+  const proofs: UpgradeState[] = [];
+  let unreadable: unknown;
+  for (const dir of locations) {
+    let proof;
+    try { proof = await recoveryReceipt(join(dir,'rollback-ready.json')); }
+    catch (error) { unreadable = error; continue; }
+    if (proof && !sameRollbackAttempt(proof,state)) continue;
+    eligible.push(dir);
+    if (proof) proofs.push(proof);
+  }
+  const matching = proofs[0] ?? null;
+  const boundDigest = state.currentDigest ?? matching?.currentDigest;
+  if (unreadable && !boundDigest) throw unreadable;
+  const expected = boundDigest ?? parkedDigest;
+  requireStore(expected && proofs.every(proof => proof.currentDigest === expected &&
+    proof.currentManifestDigest === matching?.currentManifestDigest && proof.rollbackDigest === matching?.rollbackDigest),
+    'UPGRADE_MISMATCH','本次回退的数据库回执不一致。');
+  // A prior attempt's database bytes can match this commitment exactly without its file inventory belonging to this attempt.
+  const dir = await databaseCopyAtDigest(root,state,expected,boundDigest ? locations : eligible);
+  return {dir,digest:expected,proof:matching};
+}
+
 async function recoverCurrentDatabase(root: string,dir: string,note: string,state: UpgradeState): Promise<void> {
   const intact = await sourceFingerprint(root,dir).catch(() => null) === state.currentDigest;
   if (intact && await verifyCurrentIdentity(root,dir,state).then(() => true,() => false)) return;
-  const {dir:spare} = await independentDatabase(root,note,state,null);
   requireStore(typeof state.currentDigest === 'string' &&
     (intact || (await readState(join(dir,originFile)))?.id === state.id),'UPGRADE_MISMATCH','无法核对保留的新版数据库。');
-  await verifyCurrentIdentity(root,spare,state);
+  const spare = await databaseCopyAtDigest(root,state,state.currentDigest,independentDirectories(note));
   const damaged = await ensureCanonicalDataDirectory(note,'damaged-sqlite-'+randomUUID());
   if (!intact) {
     for (const suffix of ['','-wal','-shm','-journal']) {
@@ -414,19 +425,18 @@ async function verifyExtractedBackup(root: string,state: UpgradeState,incoming: 
 async function currentMembers(root: string,note: string,state: UpgradeState,snapshot: string,recovery?: {database: string; verify: (files: DatabasePackageMember[]) => Promise<void>}): Promise<DatabasePackageMember[]> {
   const path = join(note,'current-files.json');
   const bound = state.currentManifestDigest;
+  requireStore(bound || (state.inventoryFormat === 1 && recovery),'UPGRADE_FILES_INVALID','缺少证明旧格式文件清单属于本次回退的摘要。');
   const recorded = await attemptManifest(note,'current-files.json',state).catch(error => {
     if (!bound) throw error;
     return undefined;
   });
-  const databases = !bound && recovery && state.inventoryFormat !== 1 ? [recovery.database] : [join(note,'current-database'),join(note,'prepared-database')];
-  const sealed = databases.map(dir => () => attemptManifest(dir,'files.json',state));
+  const sealed = independentDirectories(note).map(dir => () => attemptManifest(dir,'files.json',state));
   const remembered = async () => recorded;
   const manifests = [remembered,...sealed];
   const candidates = [...manifests,...(bound ? [snapshot,root] : [snapshot]).map(dir => async () => JSON.stringify(await readMembers(dir)))];
   const agreed = new Map<string,string>();
-  let rememberedVerified = false;
-  const sealedFiles = new Map<string,string>();
-  let sealedVerified = false;
+  const identifiedFiles = new Map<string,string>();
+  let verifiedInventory = false;
   let selected: {json: string; digest: string; files: DatabasePackageMember[]} | undefined;
   for (const read of candidates) {
     const json = await read().catch(error => {
@@ -457,19 +467,18 @@ async function currentMembers(root: string,note: string,state: UpgradeState,snap
       }
     }
     if (bound) { selected = {json,digest,files}; break; }
-    if (read === remembered) rememberedVerified = true;
-    if (sealed.includes(read)) {
-      sealedVerified = true;
-      if (state.inventoryFormat === 1) for (const file of files) sealedFiles.set(file.path,file.sha256);
+    if (manifests.includes(read)) {
+      verifiedInventory = true;
+      for (const file of files) identifiedFiles.set(file.path,file.sha256);
     }
     if (!selected || files.length > selected.files.length) selected = {json,digest,files};
   }
-  requireStore(selected && (bound || ((rememberedVerified || sealedVerified) && selected.files.length === agreed.size)),'UPGRADE_FILES_INVALID','回退前的完整文件清单核对失败。');
+  requireStore(selected && (bound || (verifiedInventory && selected.files.length === agreed.size)),'UPGRADE_FILES_INVALID','回退前的完整文件清单核对失败。');
   if (!bound) {
     const parked = existsSync(snapshot) ? await readMembers(snapshot) : [];
     const current = new Map(parked.map(file => [file.path,file.sha256]));
-    // The inventory kept with the independently identified 117 SQLite also establishes ownership of unreferenced files.
-    for (const [path,digest] of sealedFiles) current.set(path,digest);
+    // Both written inventories identify their rollback attempt in the same record as their members.
+    for (const [path,digest] of identifiedFiles) current.set(path,digest);
     await verifyCopiedPayloads(database(recovery!.database),parked,117,undefined,undefined,(path,digest) => {
       current.set(path,digest); return true;
     });
