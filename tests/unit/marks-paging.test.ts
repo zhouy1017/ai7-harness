@@ -127,7 +127,7 @@ it('retains the shown count and full failure sentence after a refused page, and 
   const line = paging.row.querySelector('span')!;
   const button = paging.row.querySelector('button')!;
   expect(line.textContent).toBe('已显示 400 · 本段共 1234 条');
-  expect(line.title).toBe('已显示 400 条 · 这一段共 1234 条');
+  expect(line.title).toBe('已显示 400 条 · 这一段共 1234 条'); expect(line.getAttribute('aria-label')).toBe(line.title); expect(line.getAttribute('role')).toBe('note');
   expect(await paging.more()).toBe(false);
   const failed = paging.row.querySelector<HTMLElement>('.review-page-failed')!;
   expect(failed.hidden).toBe(false);

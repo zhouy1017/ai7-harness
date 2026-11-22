@@ -916,7 +916,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const problem = el('p', 'manuscript-comments-problem');
     problem.setAttribute('role', 'alert');
     const cancel = el('button', 'quiet', '取消'); cancel.type = 'button'; cancel.dataset['markAction'] = 'cancel-reply';
-    cancel.addEventListener('click', () => { markDrafts.discard(scope, place); input.value = ''; form.remove(); scheduleCommentsLayout(); });
+    cancel.addEventListener('click', () => { markDrafts.discard(scope, place); input.value = ''; form.remove(); entry.node.focus({ preventScroll: true }); scheduleCommentsLayout(); });
     form.append(input, send, cancel, problem);
     let generation = 0;
     let composing = false;
@@ -1011,7 +1011,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const book = options.bookPending?.read();
     const text = book === undefined ? '' : bookPendingLabel(book.places.length, book.truncated);
     if (bookPending.textContent !== text) bookPending.textContent = text;
-    bookPending.title = book === undefined ? COMMENTS_TRIAGE_WORDS.bookPendingTitle : `全书还有 ${book.places.length}${book.truncated ? '余' : ''} 条修改建议、批注和备注待处理`;
+    bookPending.title = book === undefined ? COMMENTS_TRIAGE_WORDS.bookPendingTitle : `全书${book.truncated ? '至少' : ''}还有 ${book.places.length} 条修改建议、批注和备注待处理`;
+    bookPending.setAttribute('role', 'note');
     bookPending.setAttribute('aria-label', bookPending.title);
   }
   function layoutComments(): void {
@@ -1642,13 +1643,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     options.host.querySelector<HTMLElement>(`[data-block-id="${blockId}"]`);
 
   /** Below the paragraph and aligned to the text column (V2-UX-MARK-003). */
-  const placeBelowBlock = (node: HTMLElement, blockId: string): void => {
+  const placeBelowBlock = (node: HTMLElement, blockId: string, offset = 0): void => {
     const block = blockElement(blockId);
     const base = options.scroll.getBoundingClientRect();
     const rect = (block ?? options.host).getBoundingClientRect();
-    node.style.top = `${rect.bottom - base.top + options.scroll.scrollTop + 6}px`;
-    node.style.left = `${rect.left - base.left + options.scroll.scrollLeft}px`;
-    node.style.width = `${rect.width}px`;
+    const styles = { top: `${rect.bottom - base.top + options.scroll.scrollTop + 6 + offset}px`, left: `${rect.left - base.left + options.scroll.scrollLeft}px`, width: `${rect.width}px` };
+    for (const key of ['top', 'left', 'width'] as const) if (node.style[key] !== styles[key]) node.style[key] = styles[key];
   };
 
   const closeMenu = (): void => {
@@ -1656,21 +1656,21 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     menu = undefined;
   };
 
+  const guardClosedScroll = (): void => {
+    const mark = { top: options.scroll.scrollTop };
+    closedAt = mark;
+    requestAnimationFrame(() => requestAnimationFrame(() => { if (closedAt === mark) closedAt = undefined; }));
+  };
   const closeFloating = (): void => {
-    draftComposers?.fold();
+    const wasFloating = floating !== undefined;
+    const folded = draftComposers?.fold() ?? false;
     floatingRefresh = undefined;
     if (floating !== undefined) {
       const details = floating.querySelector<HTMLDetailsElement>('.editorial-mark-more');
       if (details && floating.dataset['markCard']) moreOpen.set(floating.dataset['markCard'], details.open);
       floating.remove();
-      // Where the pane rests once the card's height is gone. The mark lapses two frames on, past the
-      // frame that dispatches the `scroll` event of that adjustment, exactly as the editor's own does.
-      const mark = { top: options.scroll.scrollTop };
-      closedAt = mark;
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (closedAt === mark) closedAt = undefined;
-      }));
     }
+    if (wasFloating && !folded) guardClosedScroll();
     floating = undefined;
     floatingBlockId = undefined;
     promptFor = null;
@@ -1830,7 +1830,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     form.append(problem, row);
     // Ctrl/Cmd+Enter submits from any field (Issue #1411: 修改此处 applies with it); Enter alone stays a line break.
     form.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter' || event.isComposing || (!(event.ctrlKey || event.metaKey) && !(config.id === 'reply' && !event.shiftKey))) return;
+      if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229 || (!(event.ctrlKey || event.metaKey) && !(config.id === 'reply' && !event.shiftKey))) return;
       event.preventDefault();
       form.requestSubmit();
     });
@@ -1862,6 +1862,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     close();
     const composer = el('section', 'editorial-mark-composer');
     composer.setAttribute('role', 'dialog');
+    composer.tabIndex = -1;
     composer.setAttribute('aria-label', config.title);
     composer.dataset['markComposer'] = config.id;
     composer.append(buildForm(config));
@@ -1896,7 +1897,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       ...content,
     });
     applyCommand(result);
-    options.setStatus(done, 'success');
+    if (!destroyed) options.setStatus(done, 'success');
   }, '标记未能添加。');
 
   /** The words selected now, settled first — one block's range, or a span across paragraphs (Issue #1176); `null` once the reason was said. */
@@ -3708,7 +3709,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   draftComposers = createDraftComposers({
     scope: () => editor.currentWindow(), block: blockElement, layer, scroll: options.scroll, place: placeBelowBlock,
     expand: place => void composeNewMark(place.kind, { kind: 'range', ...place.range }),
-    closed: () => { floating = undefined; floatingBlockId = undefined; },
+    closed: () => { guardClosedScroll(); floating = undefined; floatingBlockId = undefined; },
   });
   const stopDrafts = markDrafts.subscribe(() => {
     for (const input of commentsCanvas.querySelectorAll<HTMLTextAreaElement>('[data-comment-reply]')) {

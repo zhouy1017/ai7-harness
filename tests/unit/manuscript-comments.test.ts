@@ -1,3 +1,4 @@
+import * as toastModule from '../../src/renderer/components/toast.js';
 import { markDrafts } from '../../src/renderer/mark-drafts.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialCardCache, mountEditorialMarks, editorialCommentStartFromFragments, editorialCommentStart, stackEditorialComments, pickEditorialComment } from '../../src/renderer/editorial-marks.js';
@@ -235,13 +236,194 @@ describe('comments command parity and refresh continuity', () => {
         inspectProposalWorkspace: async () => ({ items: [], offerWorkspace: false }), recordLearningReasonAsk: async () => null },
       busy: () => false, writeManuscript: write, setStatus: status, errorMessage: (_error: unknown, fallback: string) => fallback, ...extra,
     } as unknown as Parameters<typeof mountEditorialMarks>[0];
+    const apiSpies = Object.keys(options.api).map(name => ({ name, spy: vi.spyOn(options.api, name as keyof typeof options.api) }));
     mounted = mountEditorialMarks(options);
-    return { host, pane, block, scroll, get, create, update, decide, apply, write, status, active, linked, outcome, receipt, pageAt, find, held: () => page.marks.map((mark) => mark.markId),
+    return { host, pane, block, scroll, get, create, update, apiSpies, decide, apply, write, status, active, linked, outcome, receipt, pageAt, find, held: () => page.marks.map((mark) => mark.markId),
       setRange: (next: string) => { rangeKind = next; }, setCaret: (next: number) => { caret = nativeCaret = next; }, setNativeCaret: (next: number) => { nativeCaret = next; }, open: () => mounted!.openMark(value.markId), refresh: () => mounted!.refreshComments(),
       setEnabled: (next: boolean) => { enabled = next; mounted!.refreshComments(); },
       setPage: (next: Partial<ManuscriptWindowProjection>) => { page = { ...page, ...next }; mounted!.refreshComments(); },
     };
   }
+  async function draftComposer(ui: ReturnType<typeof mount>, body = '公开合成撰写草稿', kind = 'annotation') {
+    ui.setRange('range'); ui.pane.querySelector<HTMLButtonElement>(`[data-comments-add="${kind}"]`)!.click(); await paint();
+    const node = ui.scroll.querySelector<HTMLElement>('[data-mark-composer]')!;
+    const input = node.querySelector<HTMLTextAreaElement>('textarea')!;
+    input.value = body; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    return { node, input };
+  }
+  function openSelectionMenu(ui: ReturnType<typeof mount>) {
+    vi.stubGlobal('Element', MiniElement); vi.stubGlobal('Node', MiniElement); ui.setRange('range');
+    (ui.block as unknown as MiniElement).dispatchEvent({ type: 'contextmenu', bubbles: true });
+    return document.querySelector<HTMLElement>('[data-mark-menu="selection"]')!;
+  }
+  function metadataOf(node: MiniElement): unknown[] {
+    return [node.title, Object.fromEntries(node.attributes), { ...node.dataset }, ...node.children.flatMap(metadataOf)];
+  }
+  it('settles a folded row without writing editor nodes or replacing unrelated adopted sheets (#1689 R1)', async () => {
+    const before = new CSSStyleSheet(); document.adoptedStyleSheets.push(before);
+    const ui = mount(); await paint(); const replace = vi.spyOn(CSSStyleSheet.prototype, 'replaceSync');
+    const { node } = await draftComposer(ui);
+    Object.defineProperty(ui.block, 'style', { value: new Proxy(ui.block.style, { set() { throw new Error('editor-owned DOM write'); } }) });
+    miniDocument.activeElement = miniDocument.body; (node as unknown as MiniElement).dispatchEvent({ type: 'focusout' }); await paint();
+    const row = ui.scroll.querySelector<HTMLElement>('[data-mark-draft-row]')!; const writes = vi.fn();
+    Object.defineProperty(row, 'style', { value: new Proxy(row.style, { set(target, key, value) { writes(); Reflect.set(target, key, value); return true; } }) });
+    const count = replace.mock.calls.length; mounted!.reanchor(); await paint(); mounted!.reanchor(); await paint();
+    expect(writes).not.toHaveBeenCalled(); expect(replace).toHaveBeenCalledTimes(count);
+    expect(ui.block.getAttribute('style')).toBeNull(); expect(ui.block.className).toBe('');
+    const later = new CSSStyleSheet(); document.adoptedStyleSheets.push(later); mounted!.destroy();
+    expect(document.adoptedStyleSheets).toEqual([before, later]); expect(document.adoptedStyleSheets[0]).toBe(before); expect(document.adoptedStyleSheets[1]).toBe(later);
+  });
+  it('retains the closing scroll guard on Cancel and focus-loss folding, then releases it (#1689 R2)', async () => {
+    const ui = mount(); await paint(); await draftComposer(ui);
+    ui.scroll.querySelector<HTMLButtonElement>('[data-mark-action="cancel"]')!.click();
+    expect(mounted!.ownsScroll()).toBe(true); await paint(); expect(mounted!.ownsScroll()).toBe(false);
+    const { node } = await draftComposer(ui); miniDocument.activeElement = miniDocument.body;
+    (node as unknown as MiniElement).dispatchEvent({ type: 'focusout' }); await Promise.resolve();
+    expect(mounted!.ownsScroll()).toBe(true); await paint(); expect(mounted!.ownsScroll()).toBe(false);
+  });
+  it.each(['', '公开合成撰写草稿'])('keeps an internal composer focus and press, including an empty field (%s, #1689 R3)', async body => {
+    vi.stubGlobal('Node', MiniElement); vi.stubGlobal('Element', MiniElement);
+    const ui = mount(); await paint(); const { node } = await draftComposer(ui, body);
+    expect(node.tabIndex).toBe(-1); node.focus();
+    (node as unknown as MiniElement).dispatchEvent({ type: 'mousedown', bubbles: true });
+    (node as unknown as MiniElement).dispatchEvent({ type: 'focusout', bubbles: true }); await paint();
+    expect(ui.scroll.querySelector('[data-mark-composer]')).toBe(node);
+  });
+  it('separates the same reply place in two Books and restores a floating draft without focusing its field (#1689 R6)', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('textarea')!; input.value = '公开合成图书甲回复';
+    (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    ui.setPage({ bookId: 'other-book' }); await paint(); expect(ui.pane.querySelector('[data-comment-reply]')).toBeNull();
+    ui.setPage(windowOf()); await paint(); ui.setEnabled(false); await ui.open(); await paint();
+    const restored = ui.scroll.querySelector<HTMLTextAreaElement>('[data-mark-form="reply"] textarea')!;
+    expect(restored.value).toBe('公开合成图书甲回复'); expect(document.activeElement).not.toBe(restored);
+  });
+  it('folds and restores composers on Book changes and when a floating card opens (#1689 R6)', async () => {
+    const ui = mount(); await paint(); await draftComposer(ui);
+    ui.setPage({ bookId: 'other-book' }); await paint(); expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull();
+    expect(ui.scroll.querySelector('[data-mark-draft-row]')).toBeNull(); ui.setPage(windowOf()); await paint();
+    ui.scroll.querySelector<HTMLButtonElement>('[data-mark-draft-row]')!.click(); await paint();
+    ui.setEnabled(false); await ui.open(); await paint();
+    expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull(); expect(ui.scroll.querySelector('[data-mark-draft-row]')).not.toBeNull();
+  });
+  it('holds a focused composer, and excludes an unfocused standing one from both guards (#1689 R6)', async () => {
+    const ui = mount(); await paint(); const { input } = await draftComposer(ui);
+    input.focus(); expect(mounted!.holdsFloating()).toBe(true); expect(mounted!.ownsScroll()).toBe(true);
+    miniDocument.activeElement = miniDocument.body;
+    expect(mounted!.holdsFloating()).toBe(false); expect(mounted!.ownsScroll()).toBe(false);
+  });
+  it('uses the draft when the floating Reply button is pressed and brings edits back to the pane (#1689 R6)', async () => {
+    const ui = mount(); await paint(); markDrafts.write(windowOf(), { kind: 'reply', markId: card.markId }, '公开合成原回复');
+    ui.setEnabled(false); await ui.open(); await paint();
+    ui.scroll.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click(); await paint();
+    const input = ui.scroll.querySelector<HTMLTextAreaElement>('[data-mark-form="reply"] textarea')!;
+    expect(input.value).toBe('公开合成原回复'); input.value = '公开合成浮卡回复'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    ui.setEnabled(true); await paint(); expect(ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')?.value).toBe('公开合成浮卡回复');
+  });
+  it('keeps each swatch named in one row and moves left and right within it (#1689 R6)', async () => {
+    const ui = mount(); await paint(); const menu = openSelectionMenu(ui);
+    const colors = [1, 2, 3].map(color => menu.querySelector<HTMLButtonElement>(`[data-mark-action="add-highlight-${color}"]`)!);
+    expect(new Set(colors.map(node => node.parentElement)).size).toBe(1); expect(colors[0]!.parentElement!.classList.contains('editorial-mark-swatch-row')).toBe(true);
+    expect(colors.map(node => [node.getAttribute('aria-label'), node.title])).toEqual([['加高亮 · 黄','加高亮 · 黄'],['加高亮 · 橙','加高亮 · 橙'],['加高亮 · 绿','加高亮 · 绿']]);
+    colors[0]!.focus(); (menu as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'ArrowRight' }); expect(document.activeElement).toBe(colors[1]);
+    (menu as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'ArrowLeft' }); expect(document.activeElement).toBe(colors[0]);
+  });
+  it('pins the unchanged AI menu group for the same selection and no house procedures (#1689 R6)', async () => {
+    const ui = mount(card, [], { scopedAiEdit: { host: {}, sectionOf: () => undefined } }); await paint(); const menu = openSelectionMenu(ui);
+    const items = Array.from(menu.querySelectorAll<HTMLElement>('[aria-label="AI7 任务"] [role="menuitem"]'));
+    expect(items.map(node => [node.dataset['markAction'], node.querySelector('.menu-caption')?.textContent, (node as HTMLButtonElement).disabled])).toEqual([
+      ['task-on-selection','就这段发起任务…',true],['ask-on-selection','就这段提问…对话，不改稿件',true],['preset-polish','润色这段常用工序 · 生成修改建议',true],
+      ['scoped-ai-edit','就选中部分让 AI 修改…',false],['ai-lock-selection','🔒 锁定所选范围（AI 不修改）',false],
+    ]);
+  });
+  it.each(['annotation','editor-note'])('says the header reason with no selection (%s, #1689 R6)', async kind => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>(`[data-comments-add="${kind}"]`)!.click();
+    expect(ui.status).toHaveBeenCalledWith(kind === 'annotation' ? '先选中一段文字，再添加批注。' : '先选中一段文字，再添加备注。', 'error');
+    expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull();
+  });
+  it('clears a reply on conversion or pane Cancel and keeps keyboard focus on the card (#1689 R6)', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('textarea')!; input.value = '公开合成取消回复'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="cancel-reply"]')!.click(); await paint();
+    expect(markDrafts.read(windowOf(), { kind: 'reply', markId: card.markId })).toBe(''); expect(document.activeElement).toBe(ui.pane.querySelector('[data-comment-card]'));
+    markDrafts.write(windowOf(), { kind: 'reply', markId: card.markId }, '公开合成待转换回复');
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="convert-change-suggestion"]')!.click(); await paint();
+    const form = ui.scroll.querySelector('[data-mark-form]')! as unknown as MiniElement;
+    form.dispatchEvent({ type: 'submit' }); await paint(); expect(ui.update.mock.calls.at(-1)?.[0]).toMatchObject({ action: 'convert' });
+    expect(markDrafts.read(windowOf(), { kind: 'reply', markId: card.markId })).toBe('');
+  });
+  it('does not paint a late reply answer onto another Book or close another composer after a send (#1689 R6)', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('textarea')!; input.value = '公开合成迟到回复'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    const answer = deferred<never>(); ui.update.mockReturnValueOnce(answer.promise);
+    (ui.pane.querySelector('form') as unknown as MiniElement).dispatchEvent({ type: 'submit' }); ui.setPage({ bookId: 'other-book' }); await paint(); ui.status.mockClear();
+    answer.resolve({ markId: card.markId, card, marks: [anchor()], marksTruncated: false } as never); await paint();
+    expect(ui.status).not.toHaveBeenCalled(); expect(ui.pane.querySelector('[data-mark-region="replies"]')?.textContent ?? '').not.toContain('公开合成迟到回复');
+    ui.setPage(windowOf()); await paint(); await draftComposer(ui, '公开合成第一次批注');
+    const created = deferred<never>(); ui.create.mockReturnValueOnce(created.promise);
+    (ui.scroll.querySelector('[data-mark-form]') as unknown as MiniElement).dispatchEvent({ type: 'submit' }); await paint();
+    ui.setEnabled(false); await ui.open(); await paint(); const opened = ui.scroll.querySelector('[data-mark-card]'); created.resolve({ markId: 'new', card: null, marks: [anchor()], marksTruncated: false } as never); await paint();
+    expect(ui.scroll.querySelector('[data-mark-card]')).toBe(opened);
+  });
+  it('never leaks mounted draft words across type, fold, restore and send (#1689 R7)', async () => {
+    const secret = '公开合成草稿边界哨兵'; const ui = mount(); await paint(); const surfaces = [ui]; let sendsAllowed = 0;
+    class MemoryStorage { setItem(_key: string, _value: string) {} }
+    vi.stubGlobal('Storage', MemoryStorage); vi.stubGlobal('localStorage', new MemoryStorage()); vi.stubGlobal('sessionStorage', new MemoryStorage());
+    const storage = vi.spyOn(MemoryStorage.prototype, 'setItem');
+    const consoleSpies = (['log','warn','error','info','debug','trace'] as const).map(name => vi.spyOn(console, name).mockImplementation(() => undefined));
+    const toast = vi.spyOn(toastModule, 'showToast').mockImplementation(() => undefined);
+    const assertSealed = () => {
+      for (const spy of [storage, toast, ...surfaces.map(surface => surface.status), ...consoleSpies]) expect(JSON.stringify(spy.mock.calls)).not.toContain(secret);
+      expect(JSON.stringify(metadataOf(miniDocument.body))).not.toContain(secret);
+      const escaped = surfaces.flatMap(surface => surface.apiSpies).flatMap(({ name, spy }) => spy.mock.calls.filter(args => JSON.stringify(args).includes(secret)).map(args => ({ name, args })));
+      expect(escaped).toHaveLength(sendsAllowed); expect(escaped.every(call => call.name === 'createEditorialMark' || call.name === 'updateEditorialMark' && (call.args[0] as { action: string }).action === 'reply')).toBe(true);
+    };
+    await draftComposer(ui, secret); mounted!.close(); await paint(); assertSealed();
+    mounted!.destroy(); const next = mount(); surfaces.push(next); await paint(); assertSealed();
+    next.scroll.querySelector<HTMLButtonElement>('[data-mark-draft-row]')!.click(); await paint();
+    sendsAllowed++; (next.scroll.querySelector('[data-mark-form]') as unknown as MiniElement).dispatchEvent({ type: 'submit' }); await paint();
+    expect(next.create.mock.calls[0]?.[0]).toMatchObject({ body: secret });
+    next.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click(); const input = next.pane.querySelector<HTMLTextAreaElement>('textarea')!;
+    input.value = secret; (input as unknown as MiniElement).dispatchEvent({ type: 'input' }); assertSealed();
+    sendsAllowed++; (next.pane.querySelector('.manuscript-comments-reply') as unknown as MiniElement).dispatchEvent({ type: 'submit' }); await paint();
+    for (const spy of [storage, toast, next.status, ...consoleSpies]) expect(JSON.stringify(spy.mock.calls)).not.toContain(secret);
+    expect(next.update.mock.calls[0]?.[0]).toMatchObject({ action: 'reply', body: secret }); assertSealed();
+    expect(JSON.stringify(metadataOf(miniDocument.body))).not.toContain(secret);
+  });
+  it('preserves the text scroll when adopting a folded-row rule triggers browser anchoring (#1689 R6)', async () => {
+    const ui = mount(); await paint(); const { node } = await draftComposer(ui); ui.scroll.scrollTop = 42;
+    const original = CSSStyleSheet.prototype.replaceSync;
+    vi.spyOn(CSSStyleSheet.prototype, 'replaceSync').mockImplementation(function (this: CSSStyleSheet, text: string) { original.call(this, text); ui.scroll.scrollTop += 40; });
+    miniDocument.activeElement = miniDocument.body; (node as unknown as MiniElement).dispatchEvent({ type: 'focusout' }); await paint();
+    expect(ui.scroll.scrollTop).toBe(42);
+  });
+  it.each(['composer', 'pane', 'floating'])('sends once and clears the exact captured draft after repeated submission (%s, #1689 R6)', async surface => {
+    const ui = mount(); await paint(); const answer = deferred<never>(); let form: MiniElement;
+    if (surface === 'composer') { await draftComposer(ui, '公开合成重复发送'); ui.create.mockReturnValueOnce(answer.promise); form = ui.scroll.querySelector('[data-mark-form]')! as unknown as MiniElement; }
+    else {
+      if (surface === 'floating') { ui.setEnabled(false); await ui.open(); await paint(); ui.scroll.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click(); await paint(); }
+      else ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+      const root = surface === 'pane' ? ui.pane : ui.scroll; const input = root.querySelector<HTMLTextAreaElement>('textarea')!;
+      input.value = '公开合成重复发送'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+      ui.update.mockReturnValueOnce(answer.promise); form = root.querySelector('form')! as unknown as MiniElement;
+    }
+    form.dispatchEvent({ type: 'submit' }); form.dispatchEvent({ type: 'submit' }); await paint();
+    expect(ui.create.mock.calls.length + ui.update.mock.calls.length).toBe(1);
+    expect(form.querySelector('button')!.disabled).toBe(true);
+    answer.resolve({ markId: card.markId, card, marks: [anchor()], marksTruncated: false } as never); await paint();
+    expect(markDrafts.list(windowOf())).toEqual([]);
+  });
+  it('pins the full accessible Book count independently of its compact text (#1689 R6)', async () => {
+    const ui = mount(card, [], { bookPending: { read: () => ({ places: [1,2,3], truncated: false }) } }); await paint();
+    const count = ui.pane.querySelector('[data-comments-book-pending]')!;
+    expect(count.textContent).toBe('全书待处理 3'); expect(count.getAttribute('aria-label')).toBe('全书还有 3 条修改建议、批注和备注待处理');
+  });
+  it('names a long truncated Book count truthfully without requiring its text to fit the heading (#1689)', async () => {
+    const ui = mount(card, [], { bookPending: { read: () => ({ places: Array.from({ length: 12345 }), truncated: true }) } }); await paint();
+    const count = ui.pane.querySelector('[data-comments-book-pending]')!;
+    expect(count.textContent).toBe('全书待处理 12345+'); expect(count.getAttribute('role')).toBe('note');
+    expect(count.getAttribute('aria-label')).toBe('全书至少还有 12345 条修改建议、批注和备注待处理');
+  });
   it('restores a reply after paging, a derivative switch and a complete surface remount without taking focus (#1678)', async () => {
     const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
     const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!;
@@ -277,7 +459,7 @@ describe('comments command parity and refresh continuity', () => {
     (ui.block as unknown as MiniElement).dispatchEvent({ type: 'mousedown', bubbles: true }); await paint();
     expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull();
     expect(ui.scroll.querySelector('[data-mark-draft-row]')?.textContent).toBe('未发送的批注 · 展开');
-    expect(ui.block.style.marginBottom).toBe('40px'); expect(ui.scroll.scrollTop).toBe(42);
+    expect(ui.block.style.marginBottom).toBeUndefined(); expect(miniDocument.adoptedStyleSheets.flatMap(sheet => sheet.cssRules).map(rule => rule.cssText).join('')).toContain('margin-bottom: 40px'); expect(ui.scroll.scrollTop).toBe(42);
     ui.scroll.querySelector<HTMLButtonElement>('[data-mark-draft-row]')!.click(); await paint();
     expect(ui.scroll.querySelector<HTMLTextAreaElement>('[data-mark-field="body"]')?.value).toBe('公开合成未发送批注');
     ui.scroll.querySelector<HTMLButtonElement>('[data-mark-action="cancel"]')!.click(); await paint();
@@ -320,7 +502,7 @@ describe('comments command parity and refresh continuity', () => {
     expect(mounted!.holdsFloating()).toBe(false); expect(mounted!.ownsScroll()).toBe(false);
     const block = document.createElement('p'); block.dataset['blockId'] = 'block'; ui.host.replaceChildren(block);
     mounted!.reanchor(); await paint();
-    expect(block.style.marginBottom).toBe('80px');
+    expect(block.style.marginBottom).toBeUndefined(); expect(miniDocument.adoptedStyleSheets.flatMap(sheet => sheet.cssRules).map(rule => rule.cssText).join('')).toContain('margin-bottom: 80px');
     mounted!.destroy(); expect(block.style.marginBottom ?? '').toBe(''); miniDocument.activeElement = null;
     const next = mount(); await paint();
     expect(next.scroll.querySelectorAll('[data-mark-draft-row]').length).toBe(2);

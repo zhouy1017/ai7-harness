@@ -202,6 +202,7 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
     const text = marksShownLine(window.marks.length, page.total);
     if (line.textContent !== text) line.textContent = text;
     line.title = marksShownFullLine(window.marks.length, page.total);
+    line.setAttribute('role', 'note');
     line.setAttribute('aria-label', line.title);
     button.setAttribute('aria-disabled', String(reading !== null));
     row.setAttribute('aria-busy', String(reading !== null));

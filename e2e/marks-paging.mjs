@@ -197,11 +197,12 @@ const COMMENTS_TOP_GEOMETRY = `(() => {
     const oneLine=!visible?r.height===0:r.height<=Math.max(line,b?.height??0)+padding+1&&controls.every(node=>getComputedStyle(node).whiteSpace==='nowrap');
     return {commonCountFits:!visible||failed||innerWidth!==1008||!/^已显示 [0-9]{3} · 本段共 [0-9]{3} 条$/.test(count?.textContent??'')||count.scrollWidth<=count.clientWidth,kind:row.classList.contains('marks-paging')?'paging':'disclosure',box:box(row),visible,failed,whole,oneLine,inside:!visible||(r.left>=p.left&&r.right<=p.right&&r.top>=p.top&&r.bottom<=v.top+1&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight),button:!visible||!b||(b.left>=r.left&&b.right<=r.right&&b.top>=r.top&&b.bottom<=r.bottom),buttonOnTop:!visible||!b||button.contains(hit),coveredByFilter:!!b&&visible&&popoverOpen&&filterPopover.contains(hit)};
   });
+  const pendingBox=pane.querySelector('[data-comments-book-pending]'),countUsable=!pendingBox.textContent||pendingBox.getBoundingClientRect().width>=24;
   const summary=pane.querySelector('.editorial-mark-filter-summary'),summaryStyle=getComputedStyle(summary),summaryVisible=!summary.hidden,summaryOneLine=summary.hidden||summary.getBoundingClientRect().height<=parseFloat(summaryStyle.lineHeight)+parseFloat(summaryStyle.paddingTop)+parseFloat(summaryStyle.paddingBottom)+1,filterRowFits=summaryVisible?Math.abs(filters.getBoundingClientRect().height-24)<=1:filters.getBoundingClientRect().height===0;
   const pending=pane.querySelector('[data-comments-book-pending]'),pagingCount=pane.querySelector('.marks-paging > span:first-child'),disclosure=pane.querySelector('.editorial-mark-disclosure');
-  const pendingCount=/全书待处理 ([0-9]+)/.exec(pending.textContent),shown=/已显示 ([0-9]+) · 本段共 ([0-9]+) 条/.exec(pagingCount.textContent);
-  const fullTitles=(!pendingCount||pending.title==='全书还有 '+pendingCount[1]+' 条修改建议、批注和备注待处理')&&(!shown||pagingCount.title==='已显示 '+shown[1]+' 条 · 这一段共 '+shown[2]+' 条')&&(!summary.textContent||summary.title===summary.textContent)&&(!disclosure.textContent||disclosure.title.includes(disclosure.textContent));
-  return {viewport:[innerWidth,innerHeight],popoverOpen,rows,notices,summaryVisible,summaryOneLine,filterRowFits,fullTitles,heading:rows[0].box[3],filters:rows[1].box[3],topArea:v.top-p.top,paged:!pane.querySelector('.marks-paging').hidden};
+  const pendingCount=/全书待处理 ([0-9]+)([+]?)/.exec(pending.textContent),shown=/已显示 ([0-9]+) · 本段共 ([0-9]+) 条/.exec(pagingCount.textContent);
+  const fullTitles=(!pendingCount||pending.title==='全书'+(pendingCount[2]?'至少':'')+'还有 '+pendingCount[1]+' 条修改建议、批注和备注待处理')&&(!shown||pagingCount.title==='已显示 '+shown[1]+' 条 · 这一段共 '+shown[2]+' 条')&&(!summary.textContent||summary.title===summary.textContent)&&(!disclosure.textContent||disclosure.title.includes(disclosure.textContent));
+  return {countUsable,viewport:[innerWidth,innerHeight],popoverOpen,rows,notices,summaryVisible,summaryOneLine,filterRowFits,fullTitles,heading:rows[0].box[3],filters:rows[1].box[3],topArea:v.top-p.top,paged:!pane.querySelector('.marks-paging').hidden};
 })()`;
 const headerBeforePaging = new Map();
 
@@ -225,7 +226,7 @@ export async function assertCommentsHeader(renderer,check,waitFor,name,{remember
     const facts=await renderer.evaluate(COMMENTS_TOP_GEOMETRY),key=facts.viewport.join('x'),before=headerBeforePaging.get(key);
     const unchanged=before===undefined||(Math.abs(facts.heading-before.heading)<=1&&(facts.summaryVisible!==before.summaryVisible||Math.abs(facts.filters-before.filters)<=1));
     const visibleNoticeRows=facts.notices.filter(row=>row.visible).map(row=>row.kind),failureShown=facts.notices.some(row=>row.visible&&row.kind==='paging'&&row.failed),topAreaLimit=84+28*visibleNoticeRows.length+(failureShown?56:0);
-    const valid=facts.topArea<=topAreaLimit&&facts.heading+facts.filters<=84&&facts.heading<=35&&facts.filters<=25&&facts.summaryOneLine&&facts.filterRowFits&&facts.fullTitles&&facts.rows.every(row=>row.aligned&&row.inside)&&facts.notices.every(row=>(row.failed?row.whole:row.oneLine)&&row.commonCountFits!==false&&row.inside&&row.button&&(row.buttonOnTop||(!row.failed&&row.coveredByFilter)))&&unchanged;
+    const valid=facts.topArea<=topAreaLimit&&facts.heading+facts.filters<=84&&facts.heading<=35&&facts.filters<=25&&facts.summaryOneLine&&facts.filterRowFits&&facts.fullTitles&&facts.countUsable!==false&&facts.rows.every(row=>row.aligned&&row.inside)&&facts.notices.every(row=>(row.failed?row.whole:row.oneLine)&&row.commonCountFits!==false&&row.inside&&row.button&&(row.buttonOnTop||(!row.failed&&row.coveredByFilter)))&&unchanged;
     console.log('COMMENTS_TOP/'+JSON.stringify({...facts,visibleNoticeRows,failureShown,topAreaLimit,before:before??null}));
     check(valid,name,{...facts,visibleNoticeRows,failureShown,topAreaLimit,before:before??null});
     if(remember)headerBeforePaging.set(key,{heading:facts.heading,filters:facts.filters,summaryVisible:facts.summaryVisible});
@@ -264,6 +265,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   await waitFor(renderer, `(async () => { try { globalThis.__marksFacts=await (${READ_WINDOW}); return true; } catch { return false; } })()`, 'marks-paging-window-read', 60_000);
   const facts = await renderer.evaluate('globalThis.__marksFacts');
   check(facts.total > 400 && facts.shown === 400, 'marks-paging-dense-window', { shown: facts.shown, total: facts.total });
+  await waitFor(renderer,`(() => {const count=document.querySelector('[data-comments-book-pending]'),heading=document.querySelector('.manuscript-comments-heading'),c=count.getBoundingClientRect(),h=heading.getBoundingClientRect();return /[0-9]{3,}/.test(count.textContent)&&c.width>=24&&c.left>=h.left&&c.right<=h.right&&c.top>=h.top&&c.bottom<=h.bottom;})()`,'marks-paging-long-book-count');
   const sentence = `已显示 400 · 本段共 ${facts.total} 条`;
   await waitFor(renderer, `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(sentence)}`, 'marks-paging-sentence');
   // Wait for the pane to rest, then measure: the sentence and 显示更多 are inside the pane and the window, and 显示更多 is topmost.

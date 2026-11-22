@@ -148,7 +148,7 @@ export async function commentsPaneForms(renderer, check, waitFor, at, action) {
       await waitFor(renderer,`innerWidth===${size.width} && innerHeight===${size.height} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position===(${commentsCanDock}?'static':'absolute')`, 'comments-'+form+'-viewport');
       await commentsGeometryAndScroll(renderer,check,waitFor);
       if(action==='apply')await commentsApplyAndReject(renderer,check,waitFor);
-      else await commentsReplyAndResolve(renderer,check,waitFor,at);
+      else await commentsReplyAndResolve(renderer,check,waitFor,at,'comments-inline-reply-'+form);
       if(form==='overlay') {
         at('comments-connector-'+action+'-overlay');
         const originalSize=await renderer.evaluate(`parseFloat(getComputedStyle(document.querySelector('.ProseMirror')).fontSize)`);
@@ -158,7 +158,7 @@ export async function commentsPaneForms(renderer, check, waitFor, at, action) {
           await waitFor(renderer, `!${commentsCanDock} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position==='absolute' && ${commentsRailBeside}`, 'comments-reading-overlay-measure');
           await commentsGeometryAndScroll(renderer,check,waitFor);
           if(action==='apply')await commentsApplyAndReject(renderer,check,waitFor);
-          else await commentsReplyAndResolve(renderer,check,waitFor,at);
+          else await commentsReplyAndResolve(renderer,check,waitFor,at,'comments-connector-reply-overlay');
           await commentsSeedConnectorCases(renderer,check,waitFor);
         } finally { await commentsReadingSize(renderer,check,waitFor,originalSize); }
       }
@@ -621,7 +621,7 @@ export async function commentsApplyAndReject(renderer, check, waitFor) {
 }
 
 
-export async function commentsReplyAndResolve(renderer, check, waitFor, at) {
+export async function commentsReplyAndResolve(renderer, check, waitFor, at, callerStage) {
   // A wheel scroll can remove preceding cards while a reply remains in the text's 200px buffer.
   // Reordering that live card must preserve the browser's focused editing state.
   check(await renderer.evaluate(`(() => {const node=document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]');node.focus({preventScroll:true});return true;})()`), 'comments-buffer-reply-select');
@@ -652,6 +652,7 @@ export async function commentsReplyAndResolve(renderer, check, waitFor, at) {
   await waitFor(renderer, `document.querySelector('.editorial-mark-layer [data-mark-card="'+__comments.ids[2]+'"] [data-mark-region="replies"]')?.textContent.includes('公开合成待发回复')`, 'comments-existing-full-card');
   check(await renderer.evaluate(`(() => { document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click(); return true; })()`), 'comments-full-card-close');
   await replyDraftKept(renderer, check, waitFor, at);
+  at(callerStage);
   await commentsHandledFilter(renderer, check, waitFor, [2]);
 }
 

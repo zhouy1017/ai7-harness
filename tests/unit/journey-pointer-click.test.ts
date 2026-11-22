@@ -219,3 +219,28 @@ it('samples a draft control on two consecutive animation frames after its reply 
   await draftClick(renderer, (condition: boolean, name: string) => { if (!condition) throw new Error(name); }, wait, 'button', 'late-reply');
   expect(presses).toEqual([4]);
 });
+
+
+it('lets Tab-driven card layout settle before accepting an already focused reply control (#1689)', async () => {
+  const { draftTabTo } = await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  let frame = 0; const node = { closest: () => ({ dataset: { selected: 'true' } }), getBoundingClientRect: () => ({ width: 80, height: frame >= 2 ? 28 : 0 }) };
+  const document = { activeElement: node, querySelector: () => node };
+  const renderer = { evaluate: async (expression: string) => Function('document','requestAnimationFrame',`return (${expression})`)(document,(callback: () => void) => queueMicrotask(() => { frame++; callback(); })), send: vi.fn() };
+  await draftTabTo(renderer, 'button', (condition: boolean) => { expect(condition).toBe(true); }, 'reply-focus');
+  expect(frame).toBeGreaterThanOrEqual(2); expect(renderer.send).not.toHaveBeenCalled();
+});
+
+
+it('does not Tab past a reply before the focused card has expanded (#1689)', async () => {
+  const { draftTabTo } = await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  let expanded = false, pending = false; const before = {}, card = {}, after = {};
+  const reply = { closest: () => ({ dataset: { selected: 'true' } }), getBoundingClientRect: () => ({ width: 80, height: expanded ? 28 : 0 }) };
+  const document = { activeElement: before as unknown, querySelector: () => reply };
+  const renderer = { evaluate: async (expression: string) => Function('document','requestAnimationFrame',`return (${expression})`)(document,(callback: () => void) => queueMicrotask(() => { if (pending) { expanded = true; pending = false; } callback(); })),
+    send: async (_method: string, event: { type: string; key?: string }) => {
+      if (event.type !== 'keyDown' || event.key !== 'Tab') return;
+      document.activeElement = document.activeElement === before ? (pending = true, card) : document.activeElement === card ? expanded ? reply : after : before;
+    } };
+  await draftTabTo(renderer, 'reply', (condition: boolean) => { expect(condition).toBe(true); }, 'reply-focus');
+  expect(document.activeElement).toBe(reply); expect(expanded).toBe(true);
+});

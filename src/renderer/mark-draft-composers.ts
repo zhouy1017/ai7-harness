@@ -7,28 +7,33 @@ export function createDraftComposers(host: {
   block(id: string): HTMLElement | null;
   layer: HTMLElement;
   scroll: HTMLElement;
-  place(node: HTMLElement, blockId: string): void;
+  place(node: HTMLElement, blockId: string, offset?: number): void;
   expand(place: ComposerPlace): void;
   closed(): void;
 }) {
   let open: { place: ComposerPlace; node: HTMLElement; } | undefined;
   let dead = false;
   const rows = new Map<string, HTMLButtonElement>();
-  const margins = new Map<HTMLElement, string>();
+  const sheet = new CSSStyleSheet();
+  document.adoptedStyleSheets.push(sheet);
+  const surfaceId = crypto.randomUUID();
+  host.layer.dataset['markDraftSurface'] = surfaceId;
+  let appliedRules = '';
+  const setRules = (rules: string): void => {
+    if (rules !== appliedRules) { sheet.replaceSync(rules); appliedRules = rules; }
+  };
   const clearRows = (): void => {
     for (const row of rows.values()) row.remove();
     rows.clear();
-    for (const [block, margin] of margins) block.style.marginBottom = margin;
-    margins.clear();
+    setRules('');
   };
   const samePlace = (a: ComposerPlace, b: ComposerPlace): boolean => JSON.stringify(a) === JSON.stringify(b);
   const restore = (): void => {
     if (dead) return;
     const top = host.scroll.scrollTop;
-    for (const [block, margin] of margins) block.style.marginBottom = margin;
-    margins.clear();
     const shown = new Set<string>();
     const used = new Map<HTMLElement, number>();
+    const positions: Array<{ row: HTMLButtonElement; blockId: string; offset: number }> = [];
     for (const draft of markDrafts.list(host.scope())) {
       if (draft.place.kind === 'reply' || (open && samePlace(open.place, draft.place))) continue;
       const place = draft.place, block = host.block(place.range.blockId);
@@ -46,15 +51,16 @@ export function createDraftComposers(host: {
       host.layer.append(row);
       rows.set(key, row);
       }
-      host.place(row, place.range.blockId);
       const count = used.get(block) ?? 0;
-      row.style.top = `${Number.parseFloat(row.style.top) + count * 40}px`;
+      positions.push({ row, blockId: place.range.blockId, offset: count * 40 });
       used.set(block, count + 1);
-      if (!margins.has(block)) margins.set(block, block.style.marginBottom);
-      block.style.marginBottom = `${40 * (count + 1)}px`;
+
     }
+    setRules([...used].map(([block, count]) =>
+      `:has(> [data-mark-draft-surface="${CSS.escape(surfaceId)}"]) [data-block-id="${CSS.escape(block.dataset['blockId']!)}"] { margin-bottom: ${40 * count}px; }`).join('\n'));
+    for (const position of positions) host.place(position.row, position.blockId, position.offset);
     for (const [key, row] of rows) if (!shown.has(key)) { row.remove(); rows.delete(key); }
-    host.scroll.scrollTop = top;
+    if (host.scroll.scrollTop !== top) host.scroll.scrollTop = top;
   };
   const fold = (): boolean => {
     if (!open) return false;
@@ -76,6 +82,11 @@ export function createDraftComposers(host: {
         if (!dead && open?.node === node && !node.contains(document.activeElement)) fold();
       }));
     },
-    destroy(): void { dead = true; open = undefined; clearRows(); },
+    destroy(): void {
+      dead = true; open = undefined; clearRows();
+      const index = document.adoptedStyleSheets.indexOf(sheet);
+      if (index >= 0) document.adoptedStyleSheets.splice(index, 1);
+      delete host.layer.dataset['markDraftSurface'];
+    },
   };
 }

@@ -634,9 +634,11 @@ async function main() {
     await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},${RANGES.highlight[0]},${RANGES.highlight[1]})`);
     await draftClick(renderer,requireJourney,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${first}"]`,'swatches-real-menu','right');
     await waitFor(renderer,`window.__j05.menu()?.dataset.markMenu==='selection'`,'swatches-real-open');
-    await draftGeometry(renderer, '[data-mark-action="add-highlight-2"]', () => assertRenderer(renderer, `(() => {const items=[1,2,3].map(color=>window.__j05.item('add-highlight-'+color)),rects=items.map(node=>node.getBoundingClientRect()),menu=window.__j05.menu().getBoundingClientRect();return rects.every(r=>Math.abs(r.top-rects[0].top)<=1&&r.left>=menu.left&&r.right<=menu.right&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth)&&Array.from(window.__j05.menu().querySelector('[aria-label="AI7 任务"]').querySelectorAll('[role="menuitem"]')).map(node=>node.dataset.markAction).join('|')==='task-on-selection|ask-on-selection|preset-polish|scoped-ai-edit|ai-lock-selection';})()`, 'selection-swatches-row'), {waitFor,name:'selection-swatches-row'});
+    // The existing menu has a 320px scroll cap. Reach its row by real keys before measuring it.
     await draftKey(renderer,'Home',36);
-    for(let step=0;step<7;step++) await draftKey(renderer,'ArrowDown',40);
+    for(let step=0;step<8;step++) await draftKey(renderer,'ArrowDown',40);
+    await draftKey(renderer,'ArrowUp',38);
+    await draftGeometry(renderer, '[data-mark-action="add-highlight-2"]', () => assertRenderer(renderer, `(() => {const items=[1,2,3].map(color=>window.__j05.item('add-highlight-'+color)),rects=items.map(node=>node.getBoundingClientRect()),menu=window.__j05.menu().getBoundingClientRect();return rects.every(r=>Math.abs(r.top-rects[0].top)<=1&&r.left>=menu.left&&r.right<=menu.right&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth)&&Array.from(window.__j05.menu().querySelector('[aria-label="AI7 任务"]').querySelectorAll('[role="menuitem"]')).map(node=>node.dataset.markAction).join('|')==='task-on-selection|ask-on-selection|preset-polish|scoped-ai-edit|ai-lock-selection';})()`, 'selection-swatches-row'), {waitFor,name:'selection-swatches-row'});
     await assertRenderer(renderer, `document.activeElement===window.__j05.item('add-editor-note')`, 'swatches-before-yellow');
     for(const color of [1,2,3]) { await draftKey(renderer,'ArrowDown',40); await assertRenderer(renderer, `document.activeElement===window.__j05.item('add-highlight-${color}')`, 'swatches-down-order'); }
     await draftKey(renderer,'ArrowLeft',37);
@@ -656,17 +658,38 @@ async function main() {
     at('comments-header-add');
     await draftClick(renderer,requireJourney,waitFor,'[data-edge-entry="comments"]','header-pane-open');
     await waitFor(renderer, `!document.querySelector('.manuscript-comments-pane').hidden`, 'header-pane-ready');
-    await draftGeometry(renderer, '.manuscript-comments-heading', () => assertRenderer(renderer, `(() => {const row=document.querySelector('.manuscript-comments-heading'),r=row.getBoundingClientRect(),controls=Array.from(row.querySelectorAll('button')),boxes=controls.map(node=>node.getBoundingClientRect());return row.offsetHeight<=35&&boxes.every((b,i)=>b.top>=r.top&&b.bottom<=r.bottom&&b.left>=r.left&&b.right<=r.right&&b.left>=0&&b.right<=innerWidth&&boxes.every((other,j)=>j===i||b.right<=other.left||b.left>=other.right));})()`, 'header-add-one-line'), {waitFor,name:'header-add-one-line'});
+    await draftGeometry(renderer, '.manuscript-comments-heading', () => assertRenderer(renderer, `(() => {const row=document.querySelector('.manuscript-comments-heading'),r=row.getBoundingClientRect(),controls=Array.from(row.children),boxes=controls.map(node=>node.getBoundingClientRect()),count=row.querySelector('[data-comments-book-pending]');return count.getBoundingClientRect().width>=24&&row.offsetHeight<=35&&boxes.every((b,i)=>b.top>=r.top&&b.bottom<=r.bottom&&b.left>=r.left&&b.right<=r.right&&b.left>=0&&b.right<=innerWidth&&boxes.every((other,j)=>j===i||b.right<=other.left||b.left>=other.right));})()`, 'header-add-one-line'), {waitFor,name:'header-add-one-line'});
     await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},0,0)`);
     await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="editor-note"]','header-no-selection');
     await waitFor(renderer, `window.__j05.notice().includes('先选中一段文字，再添加备注。')&&!window.__j05.composer()`, 'header-no-selection-reason');
     await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},${RANGES.note[0]},${RANGES.note[1]})`);
     await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="editor-note"]','header-note-open');
     await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-composer="create-editor-note"] textarea')`, 'header-note-focused');
+    await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] [data-mark-quote]','header-empty-note-inside');
+    await assertRenderer(renderer,`window.__j05.composer()?.dataset.markComposer==='create-editor-note'&&document.querySelector('[data-mark-composer] textarea').value===''`,'header-empty-note-kept');
     await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] [data-mark-action="cancel"]','header-note-cancel');
-    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},${RANGES.annotation[0]},${RANGES.annotation[1]})`);
-    await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="annotation"]','annotation-choose');
+    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},34,35)`);
+    await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="annotation"]','header-annotation-choose');
+    await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-composer="create-annotation"] textarea')`, 'header-annotation-focused');
+    await renderer.send('Input.insertText',{text:'公开合成栏头批注'});
+    await draftKey(renderer,'Enter',13,2); await draftKey(renderer,'Enter',13,2);
+    await waitFor(renderer, `(() => {const nodes=window.__j05.mark('annotation',${JSON.stringify(first)}),ids=[...new Set(nodes.map(node=>node.dataset.markId))];if(ids.length!==1)return false;globalThis.__headerAnnotationId=ids[0];return !window.__j05.composer();})()`, 'header-annotation-exactly-one');
+    await assertRenderer(renderer, `(async()=>{const work=(await window.ai7.listPriorWork()).find(item=>item.bookId===document.querySelector('.editor-shell').dataset.bookId),page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(first)}}});return page.marks.filter(mark=>mark.kind==='annotation'&&mark.blockId===${JSON.stringify(first)}&&mark.fromGrapheme===34&&mark.toGrapheme===35).length===1;})()`, 'header-annotation-service-once');
+    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},0,0)`);
+    const headerMark=await renderer.evaluate('globalThis.__headerAnnotationId');
+    await draftClick(renderer,requireJourney,waitFor,`.editor-window [data-mark-id="${headerMark}"]`,'header-annotation-menu','right');
+    await draftClick(renderer,requireJourney,waitFor,'[data-mark-menu="mark"] [data-mark-action="remove"]','header-annotation-remove');
+    await waitFor(renderer,`window.__j05.mark('annotation',${JSON.stringify(first)}).length===0`,'header-annotation-removed');
+    await draftClick(renderer,requireJourney,waitFor,'.manuscript-comments-heading [aria-label="关闭批注栏"]','header-pane-reset');
     at('mark-annotation');
+    await renderer.evaluate(`(() => {globalThis.__annotationMenuPressed=false;const pressed=event=>{if(event.isTrusted&&event.target.closest?.('[data-mark-menu] [data-mark-action="add-annotation"]')){globalThis.__annotationMenuPressed=true;document.removeEventListener('click',pressed,true);}};document.addEventListener('click',pressed,true);return true;})()`);
+    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},${RANGES.annotation[0]},${RANGES.annotation[1]})`);
+    await draftClick(renderer,requireJourney,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${first}"]`,'annotation-menu','right');
+    await waitFor(renderer,`window.__j05.menu()?.dataset.markMenu==='selection'`,'annotation-menu-ready');
+    // Reach the kept menu action with real keys, never scripted menu scrolling.
+    await draftKey(renderer,'Home',36); for(let step=0;step<6;step++)await draftKey(renderer,'ArrowDown',40);
+    await draftClick(renderer,requireJourney,waitFor,'[data-mark-menu] [data-mark-action="add-annotation"]','annotation-choose');
+    await assertRenderer(renderer,`globalThis.__annotationMenuPressed===true`,'annotation-menu-real-press');
     await waitFor(renderer, `window.__j05.composer()?.dataset.markComposer === 'create-annotation' && document.activeElement?.dataset.markField === 'body'`, 'annotation-composer');
     await assertRenderer(renderer, `window.__j05.composer().querySelector('[data-mark-quote]')?.textContent === window.__j05Original.first.slice(${RANGES.annotation[0]}, ${RANGES.annotation[1]}) && window.__j05.composer().textContent.includes('批注随稿件导出')`, 'annotation-composer-quotes-selection');
     await assertRenderer(renderer, `window.__j05.act('submit')`, 'annotation-empty-submit');
@@ -676,7 +699,6 @@ async function main() {
     await draftKey(renderer,'Enter',13,2);
     await waitFor(renderer, `window.__j05.composer() === null && window.__j05.mark('annotation', ${JSON.stringify(first)}).length > 0`, 'annotation-drawn');
     await assertRenderer(renderer, `window.__j05.block(${JSON.stringify(first)}).dataset.markLine === 'annotation' && window.__j05.markText('annotation', ${JSON.stringify(first)}) === window.__j05Original.first.slice(${RANGES.annotation[0]}, ${RANGES.annotation[1]})`, 'annotation-line-outranks-highlight');
-    await draftClick(renderer,requireJourney,waitFor,'.manuscript-comments-heading [aria-label="关闭批注栏"]','header-pane-reset');
     await openMarkCard(renderer, 'annotation', first, 'annotation-open');
     await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.getAttribute('role') === 'dialog' && card.querySelector('[data-mark-source]')?.dataset.markSource === 'editor' && card.querySelector('[data-mark-source]').textContent.startsWith('你 · ') && card.querySelector('[data-mark-body]')?.textContent === ${JSON.stringify(ANNOTATION_BODY)} && card.querySelector('[data-mark-state]')?.textContent === '待处理' && card.textContent.includes('批注随稿件导出') && !card.querySelector('details.technical-details')?.textContent && window.__j05.mark('annotation', ${JSON.stringify(first)})[0].classList.contains('editorial-mark-active'); })()`, 'annotation-card-decision-layer');
     // The card sits below its paragraph and keeps to the text column.

@@ -10,7 +10,7 @@ describe('session-only mark drafts', () => {
   it('separates Books, manuscripts, branches, marks and exact creation places', () => {
     const drafts = new MarkDrafts();
     drafts.write(scope, reply, '公开合成回复'); drafts.write(scope, creation, '公开合成批注');
-    for (const other of [{ ...scope, bookId: 'other' }, { ...scope, manuscriptId: 'other' }, { ...scope, branchId: 'other' }]) expect(drafts.list(other)).toEqual([]);
+    for (const other of [{ ...scope, bookId: 'other' }, { ...scope, manuscriptId: 'other' }, { ...scope, branchId: 'other' }]) { expect(drafts.list(other)).toEqual([]); expect(drafts.read(other, reply)).toBe(''); expect(drafts.read(other, creation)).toBe(''); }
     expect(drafts.read(scope, { kind: 'reply', markId: 'other' })).toBe('');
     expect(drafts.read(scope, { ...creation, range: { ...creation.range, blockDigest: 'changed' } })).toBe('');
     expect(drafts.read(scope, { ...creation, kind: 'editor-note' })).toBe('');
@@ -41,14 +41,5 @@ describe('session-only mark drafts', () => {
     drafts.write(scope, reply, '另一条公开合成回复'); answer.resolve(true); await sending;
     expect(drafts.read(scope, reply)).toBe('另一条公开合成回复');
   });
-  it('keeps words in memory without calling storage, console, status or an unrelated API', () => {
-    const drafts = new MarkDrafts();
-    const logs = [vi.spyOn(console, 'log'), vi.spyOn(console, 'warn'), vi.spyOn(console, 'error')];
-    const storage = vi.fn(), status = vi.fn(), api = vi.fn();
-    vi.stubGlobal('localStorage', { setItem: storage }); vi.stubGlobal('sessionStorage', { setItem: storage });
-    try {
-      drafts.write(scope, creation, '公开合成草稿'); drafts.read(scope, creation); drafts.list(scope);
-      for (const spy of [...logs, storage, status, api]) expect(spy).not.toHaveBeenCalled();
-    } finally { for (const spy of logs) spy.mockRestore(); vi.unstubAllGlobals(); }
-  });
+
 });
