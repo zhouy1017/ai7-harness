@@ -335,6 +335,8 @@ export interface TaskPlanDriftEntryProjection {
  * drawer's authorization bar offers, and only the bar's own activation records anything (Issue #420).
  */
 export interface TaskPlanProjection {
+  /** Reuses the existing launch operation with a new command and the editor's execution choices. */
+  relaunch?: TaskPlanRelaunchProjection | null;
   /** Transport-only composed fragments: source/editor text is always a string, metadata is explicitly marked. */
   wording?: {
     goal?: ReadonlyArray<string | { technical: string }>;
@@ -509,6 +511,22 @@ export interface TaskPlanRedoProjection {
   prepare: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; redoOf: string }
     | { kind: StartWhenOnlineTaskKind; ref: string; redoOf: string };
 }
+
+export type TaskRelaunchOperation = 'launchBaselineAnalysis' | 'launchCustomAnalysis' | 'launchInitialEvaluation' | 'launchReadersReport' | 'launchEvaluationRewrite' | 'launchWritingTask' | 'launchReviewRun';
+export type TaskRelaunchCancellation =
+  | { operation: 'cancelReviewRun'; input: { bookId: string; reviewRunId: string } }
+  | { operation: 'cancelBaselineAnalysisRun'; input: { bookId: string; taskIntentId: string } }
+  | { operation: 'cancelWaitingBaselineAnalysis'; input: { bookId: string; taskIntentId: string } }
+  | { operation: 'cancelWaitingTask'; input: import('../protocol.js').CancelWaitingTaskInput }
+  | { operation: 'controlTaskRun'; input: ControlTaskRunInput };
+export type TaskPlanRelaunchProjection = {
+  [Operation in TaskRelaunchOperation]: {
+    operation: Operation;
+    input: Omit<import('../protocol.js').ServiceOperationMap[Operation]['input'], 'clientCommandId' | 'executionConfig'>;
+    summary: ReadonlyArray<string>;
+    cancelsFirst: TaskRelaunchCancellation | null;
+  }
+}[TaskRelaunchOperation];
 
 /**
  * 默认执行规则 (Issue #421, plan slice S75; V2-UX-TASK-017, TASK-019, TASK-020, TASK-028, AUTH-009): the task

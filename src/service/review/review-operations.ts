@@ -58,6 +58,7 @@ export interface ReviewOperationsHost extends ReviewEvidenceReader {
   prepareTaskMaterials(bookId: string, materialIds: ReadonlyArray<string>): ReadonlyArray<TaskMaterialSource>;
   resultBinding(bookId: string, resultId: string): { reader: ManuscriptReader };
   launchChoice(role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig, remembered?: boolean): LaunchChoice;
+  requireRelaunchSource(bookId: string, source: import('../../shared/runtime-execution-config.js').TaskRelaunchSource | undefined): void;
   executionLedgerForRun(runRecordId: string): BaselineAnalysisStore;
   materializeFactualVerification(reviewRunId: string): void;
   inspectTaskPlanWithConnection(input: InspectTaskPlanInput, credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>, connectivity: TaskPlanConnectivity, progress?: ProgressReader): Promise<TaskPlanProjection>;
@@ -338,6 +339,7 @@ export function launchReviewRun(host: ReviewOperationsHost, input: import('../..
     const { clientCommandId, executionConfig = {}, ...request } = input;
     const launched = launchFromSnapshot(host.authority, { clientCommandId, bookId: input.bookId, kind: 'review-run', input: { ...request, executionConfig } },
       () => !host.reviewRuns.requiresModel(input.bookId, input.categoryIds) ? { executionConfig: {}, binding: null } : host.launchChoice('main-editorial', executionConfig, input.rememberedChoice), (choice, snapshotId) => {
+        host.requireRelaunchSource(input.bookId, input.relaunchOf);
         const policy = choice.binding !== null && host.baselineAnalysis.launch.operationalScope === 'ordinary-production'
           ? resolveSourceCheckoutLaunchPolicySync(host.codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
         const planned = reviewRunRequest(host, input.bookId, input.categoryIds, input.scope, policy,

@@ -1,3 +1,4 @@
+import { repeatTaskRequest, redoTaskRequest, withTaskRelaunch, requireTaskRelaunchSource, type TaskRelaunchHost } from './task-relaunch.js';
 import * as importEditingOperations from './import-editing-operations.js';
 import { inspectManuscriptExportReceipt as inspectExportReceipt } from './manuscript-export.js';
 import * as importRetentionOperations from './import-retention.js';
@@ -2812,6 +2813,7 @@ export class EditorialStore {
       prepareTaskMaterials: this.#prepareTaskMaterials.bind(this),
       resultBinding: this.#resultBinding.bind(this),
       launchChoice: this.#launchChoice.bind(this),
+      requireRelaunchSource: (bookId, source) => requireTaskRelaunchSource(this.#taskRelaunchHost(), bookId, source, 'review-run'),
       executionLedgerForRun: (runRecordId) => this.executionLedgerForRun(runRecordId),
       materializeFactualVerification: (reviewRunId) => this.materializeFactualVerification(reviewRunId),
       inspectTaskPlanWithConnection: (input, credentialReadiness, connectivity, progress) => this.inspectTaskPlanWithConnection(input, credentialReadiness, connectivity, progress),
@@ -3124,10 +3126,11 @@ export class EditorialStore {
     create: (context: import('./task-plan-creation.js').TaskLaunchContext, policy: LaunchPolicyProjection) => ReturnType<BaselineAnalysisStore['launchTask']>,
     startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     if (preview !== undefined) {
+      requireTaskRelaunchSource(this.#taskRelaunchHost(), input.bookId, input.relaunchOf, kind, true);
       const choice = this.#launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice);
       const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
         ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
-      this.#analysisCall(() => create({ snapshotId: randomUUID(), execution: this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch, preview,
+      this.#analysisCall(() => create({ snapshotId: randomUUID(), execution: this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch, preview, previewAfterCancellation: input.relaunchOf?.cancelsFirst === true,
         ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }) }, policy));
       throw new StoreError('TASK_PREVIEW_FAILED', '这次计划暂时无法读取。');
     }
@@ -3136,6 +3139,7 @@ export class EditorialStore {
     try {
       const launched = launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind, input: request },
         () => this.#launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice), (choice, snapshotId) => {
+          requireTaskRelaunchSource(this.#taskRelaunchHost(), input.bookId, input.relaunchOf, kind);
           const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
             ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
           execution = this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch;
@@ -3172,12 +3176,12 @@ export class EditorialStore {
 
   launchWritingTask(input: import('../shared/protocol.js').ServiceOperationMap['launchWritingTask']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('writing', input, policy, (context, launchPolicy) => writingTaskOperations.launchWritingTask(
-      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, null, null, context), startWhen, preview);
+      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, input.redoOf ?? null, null, context), startWhen, preview);
   }
 
   launchInitialEvaluation(input: import('../shared/protocol.js').ServiceOperationMap['launchInitialEvaluation']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('initial-evaluation', input, policy, (context, launchPolicy) => initialEvaluationOperations.launchInitialEvaluationTask(
-      this.#launchInitialHost(context.execution), input.bookId, launchPolicy, input.materialIds ?? [], null, input.seriesId ?? null, context), startWhen, preview);
+      this.#launchInitialHost(context.execution), input.bookId, launchPolicy, input.materialIds ?? [], input.redoOf ?? null, input.seriesId ?? null, context), startWhen, preview);
   }
 
   launchReadersReport(input: import('../shared/protocol.js').ServiceOperationMap['launchReadersReport']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
@@ -3186,7 +3190,7 @@ export class EditorialStore {
       return readersReportOperations.launchReadersReportTask({ ...this.#readersReportHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind),
         requireEvaluationMaterialScope: (has, kind) => initialEvaluationOperations.internalRequireEvaluationMaterialScope(evaluation, has, kind) },
-        input.bookId, input.template, launchPolicy, input.materialIds ?? [], null, context);
+        input.bookId, input.template, launchPolicy, input.materialIds ?? [], input.redoOf ?? null, context);
     }, startWhen, preview);
   }
 
@@ -3195,7 +3199,7 @@ export class EditorialStore {
       const evaluation = this.#launchInitialHost(context.execution);
       return evaluationRewriteOperations.launchEvaluationRewriteTask({ ...this.#evaluationRewriteHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind) },
-        input.bookId, input.recordId, launchPolicy, null, context);
+        input.bookId, input.recordId, launchPolicy, input.redoOf ?? null, context);
     }, startWhen, preview);
   }
 
@@ -3210,7 +3214,7 @@ export class EditorialStore {
           scope: controlled.scope.process, units: projection.coverageManifest!.units.length, reference: controlled.scope.reference,
           send: `${controlled.scope.send}；${controlled.service.send}`, usage: controlled.service.usage,
           adaptations: controlled.boundary.adaptable.map(entry => `${entry.label}：${entry.removed ? '不允许' : entry.askFirst ? '先问我' : '允许'}`) });
-      });
+      }, input.launch.input.relaunchOf?.cancelsFirst === true);
     };
     const launch = input.launch;
     try {
@@ -3416,7 +3420,7 @@ export class EditorialStore {
       plan = { ...plan, goal: { ...plan.goal, draft: { draftId: promoted.draftId, sentence: promoted.latest.goal } } };
       if (promoted.latest.target === 'ranges') plan = draftRangesPlan(plan, promoted.latest.ranges);
     }
-    return { ...found, plan: { ...plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) } };
+    return { ...found, plan: withTaskRelaunch(this.#taskRelaunchHost(), { ...plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) }) };
   }
 
   #taskPlanOfKind(
@@ -3794,39 +3798,21 @@ export class EditorialStore {
   }
 
   /** Redo prepares the same kind and request through its ordinary, cancellable preparation owner. */
+  #taskRelaunchHost(): TaskRelaunchHost {
+    return { authority: this.#authority, analysisLedger: this.#analysisLedgerOfTask.bind(this), ledger: this.taskRunLedger.bind(this),
+      reviewRepeat: (bookId, ref) => this.#reviewCall(() => this.#reviewRuns.repeatRequest(bookId, ref)),
+      reviewRedo: (bookId, ref) => this.#reviewCall(() => this.#reviewRuns.redoRequest(bookId, ref)),
+      materialIds: ref => this.#evaluationMaterialPlan(ref)?.boundary.references.map(entry => entry.materialId) ?? [],
+      readersTask: ref => this.#readersReportCall(() => this.#readersReports.task(ref)),
+      rewriteTask: ref => this.#evaluationRewriteCall(() => this.#evaluationRewrites.task(ref)),
+      writingTask: ref => this.#writingCall(() => this.#writingTasks.task(ref)),
+      latestReaders: bookId => readersReportOperations.latestReadersReport(this.#readersReportHost, bookId),
+      latestRewrite: bookId => evaluationRewriteOperations.latestEvaluationRewrite(this.#evaluationRewriteHost, bookId),
+      latestWriting: bookId => this.#latestWriting(bookId), taskPlan: input => this.inspectTaskPlan(input), reviewFacts: (bookId, ref) => this.#reviewCall(() => this.#reviewRuns.planFacts(bookId, ref)) };
+  }
+
   repeatTaskRequest(bookId: string, source: NonNullable<import('../shared/protocol.js').StartQuickTasksInput['tasks'][number]['repeat']>) {
-    if (source.kind === 'review-run') return { kind: source.kind, ...this.#reviewCall(() => this.#reviewRuns.repeatRequest(bookId, source.ref)) };
-    const row = this.#authority.prepare(`SELECT r.run_record_id, t.kind FROM analysis_run_records r
-      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
-      WHERE t.book_id = ? AND t.task_intent_id = ? ORDER BY r.rowid DESC LIMIT 1`).get(bookId, source.ref) as SqlRow | undefined;
-    requireStore(row !== undefined, 'TASK_REPEAT_UNAVAILABLE', '原任务的运行记录不存在。');
-    const expected = source.kind === 'baseline-analysis' ? BASELINE_ANALYSIS_KIND : source.kind === 'writing' ? WRITING_KIND
-      : source.kind === 'initial-evaluation' ? INITIAL_EVALUATION_KIND : source.kind === 'readers-report' ? READERS_REPORT_KIND : EVALUATION_REWRITE_KIND;
-    requireStore(asString(row.kind) === expected || source.kind === 'baseline-analysis' && isCustomAnalysisKindId(row.kind), 'TASK_REPEAT_UNAVAILABLE', '原任务类型不一致。');
-    if (source.kind === 'baseline-analysis') {
-      const ledger = this.#analysisLedgerOfTask(bookId, source.ref);
-      const facts = ledger.loadExecutionPlan(asString(row.run_record_id));
-      const mode = facts.update?.mode;
-      const update = mode === 'sync-current' || mode === 'reanalyze-range' || mode === 'reanalyze-book' ? { mode, selectedRange: facts.update!.selectedRange }
-        : ledger.inspect(bookId).resultSetRevision === null ? null : { mode: 'reanalyze-book' as const, selectedRange: null };
-      return { kind: source.kind, update, customRef: isCustomAnalysisKindId(row.kind) ? source.ref : null };
-    }
-    const materialIds = this.#evaluationMaterialPlan(source.ref)?.boundary.references.map((entry) => entry.materialId) ?? [];
-    if (source.kind === 'initial-evaluation') return { kind: source.kind, materialIds };
-    if (source.kind === 'readers-report') {
-      const task = this.#readersReportCall(() => this.#readersReports.task(source.ref));
-      requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原审稿意见任务不存在。');
-      return { kind: source.kind, template: task.template, materialIds };
-    }
-    if (source.kind === 'evaluation-rewrite') {
-      const task = this.#evaluationRewriteCall(() => this.#evaluationRewrites.task(source.ref));
-      requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原评估重写任务不存在。');
-      return { kind: source.kind, recordId: task.recordId };
-    }
-    const task = this.#writingCall(() => this.#writingTasks.task(source.ref));
-    requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原写作任务不存在。');
-    return { kind: source.kind, request: { typeId: task.typeId, audience: task.input.audience, channel: task.input.channel,
-      requirements: task.input.requirements, materialIds: task.materials.map((material) => material.source.materialId) } };
+    return this.#analysisCall(() => repeatTaskRequest(this.#taskRelaunchHost(), bookId, source));
   }
 
   quickTaskRule(bookId: string, ruleId: string) {
@@ -3844,24 +3830,7 @@ export class EditorialStore {
   }
 
   redoTaskRequest(input: Pick<ControlTaskRunInput, 'bookId' | 'kind' | 'ref'>) {
-    if (input.kind === 'review-run') return { kind: input.kind, ...this.#reviewCall(() => this.#reviewRuns.redoRequest(input.bookId, input.ref)) };
-    const ledger = this.taskRunLedger(input);
-    const projection = this.#analysisCall(() => ledger.inspect(input.bookId));
-    requireStore(projection.taskIntent?.taskIntentId === input.ref && projection.run !== null &&
-      (projection.run.state === 'cancelled' || (projection.run.state === 'interrupted' && projection.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached')) &&
-      projection.run.transitions.some((entry) => entry.state === 'executing'), 'ANALYSIS_REDO_STALE', '只有开始后取消的运行可以改计划重做。');
-    const redoOf = projection.run.runRecordId;
-    const materialIds = ledger.definition.materialReferences?.sources.map((source) => source.materialId) ?? [];
-    switch (input.kind) {
-      case 'initial-evaluation': return { kind: input.kind, redoOf, materialIds };
-      case 'readers-report': return { kind: input.kind, redoOf, materialIds, template: readersReportOperations.latestReadersReport(this.#readersReportHost, input.bookId)!.task.template };
-      case 'evaluation-rewrite': return { kind: input.kind, redoOf, recordId: evaluationRewriteOperations.latestEvaluationRewrite(this.#evaluationRewriteHost, input.bookId)!.task.recordId };
-      case 'writing': {
-        const task = this.#latestWriting(input.bookId)!.task;
-        return { kind: input.kind, redoOf, request: { typeId: task.typeId, audience: task.input.audience,
-          channel: task.input.channel, requirements: task.input.requirements, materialIds: task.materials.map((material) => material.source.materialId) } };
-      }
-    }
+    return this.#analysisCall(() => redoTaskRequest(this.#taskRelaunchHost(), input));
   }
 
   requestTaskRunControl(input: ControlTaskRunInput): { runRecordId: string | null; ledger: BaselineAnalysisStore } {

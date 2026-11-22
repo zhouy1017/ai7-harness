@@ -163,6 +163,26 @@ function resolutionRows(): Array<{ book_id: string; canonical_json: string }> {
 }
 
 describe('结果待确认 a completed Run left (Issue #757)', () => {
+  it('offers an accepted fresh relaunch when an ended evaluation left an earlier result unconfirmed (#1656)', async () => {
+    const authored = await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-authored');
+    const store = await open(authored); let execution: BaselineAnalysisExecutionOwner | undefined;
+    try {
+      const bookId = await book(store, 'L2 sample1 重新开始');
+      let progress = store.createInitialEvaluationPreparationWork(bookId, launchPolicy);
+      while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
+      const prepared = progress.projection!;
+      execution = ownerOf(store, answerPartialEvaluation(store, prepared, dropping(authored, entry => entry.unitOrdinal === 3)));
+      execution.admitOrQueue(store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!, store.initialEvaluationLedger);
+      await execution.whenIdle();
+      const plan = store.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: null });
+      expect(plan.unconfirmed?.ranges).toHaveLength(1); expect(plan.relaunch?.operation).toBe('launchInitialEvaluation');
+      if (plan.relaunch?.operation !== 'launchInitialEvaluation') throw new Error('expected evaluation relaunch');
+      expect(plan.relaunch.input).not.toHaveProperty('redoOf');
+      const launched = store.launchInitialEvaluation({ ...plan.relaunch.input, clientCommandId: randomUUID() }, launchPolicy);
+      expect(launched.taskIntentId).not.toBe(prepared.taskIntent!.taskIntentId);
+      expect(store.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: launched.taskIntentId }).unconfirmed?.ranges).toHaveLength(1);
+    } finally { await execution?.dispose(); store.close(); }
+  });
   it('lists unresolved pairs after more than 500 resolved pairs through the real walk, derives once per relevant write, and rebuilds on restart (#765, #773)', async () => {
     const fixture = dropping(await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-authored'), (entry) => entry.unitOrdinal === 3);
     let store = await open(fixture);

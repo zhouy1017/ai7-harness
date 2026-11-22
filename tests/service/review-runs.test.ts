@@ -1537,6 +1537,8 @@ describe('a Review Run over the real store on exact sample1', () => {
       const failed = await authorizeAndDrive(session, book, chosen);
       expect(failed.state).toBe('failed');
       expect(failed.categories[0]!.state).toBe('failed');
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: failed.reviewRunId }).relaunch)
+        .toMatchObject({ operation: 'launchReviewRun', cancelsFirst: null, summary: ['重新开始一项新任务，已完成的内容不会带入。'] });
       const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       expect(projection.run!.transitions.some((entry) => entry.detail?.includes('确定性夹具没有该单元与请求摘要对应的响应'))).toBe(true);
       expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 1, changedBlocks: 0 });
@@ -2642,6 +2644,38 @@ describe('house preference review consumption (#911)', () => {
 
 
 describe('one-step review launch (#1455)', () => {
+  it('explains a review cancellation refusal without naming only a series stop (#1656)', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const run = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!;
+      await session.driver.drive(run.reviewRunId);
+      expect(() => session.store.cancelReviewRun(book.bookId, run.reviewRunId)).toThrowError(expect.objectContaining({ code: 'REVIEW_RUN_NOT_CANCELLABLE', message: '这次审阅不能在这里取消；如有正在运行或已暂停的任务，请从任务计划中取消。' }));
+    });
+  });
+  it.each([false, true])('relaunches a finished review through its original request, remembered=%s (#1656)', async remembered => {
+    await withCapturedReviewBook(async (session, book) => {
+      const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE };
+      const first = session.store.launchReviewRun(input, launchPolicy).projection.run!;
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch).toBeNull();
+      await session.driver.drive(first.reviewRunId);
+      const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
+      const before = session.store.inspectReviewCategory(book.bookId, definition);
+      const recipe = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch!;
+      expect(recipe.operation).toBe('launchReviewRun');
+      if (recipe.operation !== 'launchReviewRun') throw new Error('expected review launch');
+      expect(recipe.input).toMatchObject({ categoryIds: input.categoryIds, scope: input.scope });
+      const request = { ...recipe.input, clientCommandId: randomUUID(), rememberedChoice: remembered,
+        executionConfig: remembered ? { modelConnectionId: randomUUID(), modelId: 'removed-review-model' } : { modelId: 'account-future-model', reasoningEffort: 'low' } };
+      const launched = session.store.launchReviewRun(request, launchPolicy).projection;
+      const next = launched.run!;
+      const after = session.store.inspectReviewCategory(book.bookId, definition);
+      expect(after.providerResolutionPlan!.executionRoute).toMatchObject(remembered ? { model: session.store.getConfiguredModelRoleBinding('main-editorial')!.model } : { model: 'account-future-model', reasoningEffort: 'low' });
+      if (remembered) expect(launched.launchNotice).toBe('上次选择的模型已不可用，本次已使用角色默认模型。');
+      expect(after.planEnvelope!.promptContractDigest).toBe(before.planEnvelope!.promptContractDigest);
+      expect(session.store.launchReviewRun(request, launchPolicy).projection.run!.reviewRunId).toBe(next.reviewRunId);
+      expect(() => session.store.launchReviewRun({ ...request, clientCommandId: randomUUID() }, launchPolicy)).toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      await session.driver.drive(next.reviewRunId);
+    });
+  });
   it('omits an unsent effort from the request, card, report and task row while keeping the role default', async () => {
     await withCapturedReviewBook(async (session, book) => {
       const binding = session.store.getConfiguredModelRoleBinding('main-editorial')!;
@@ -2766,6 +2800,53 @@ async function openLaunchedLifecycle(scope: 'development-ci' | 'ordinary-product
 }
 
 describe.each(['development-ci', 'ordinary-production'] as const)('%s launched review lifecycle regressions (#1455)', scope => {
+  it('cancels a review stopped between categories before relaunch (#1656)', async () => {
+    const session = await openLaunchedLifecycle(scope, undefined, true);
+    try {
+      const book = await importBook(session);
+      const first = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+      const steps = session.store.reviewRunDriveSteps;
+      const firstCategory = new ReviewRunDriver({ ...steps, begin: id => steps.begin(id).slice(0, 1) }, session.owner);
+      try { await firstCategory.drive(first.reviewRunId); } finally { await firstCategory.dispose(); }
+      expect(workspace(session, book, first.reviewRunId).run).toMatchObject({ state: 'partial', canContinue: true });
+      const recipe = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch!;
+      expect(recipe.cancelsFirst).toEqual({ operation: 'cancelReviewRun', input: { bookId: book.bookId, reviewRunId: first.reviewRunId } });
+      expect(recipe.summary).toEqual(['先取消这项未完成的任务，再重新开始。', '重新开始一项新任务，已完成的内容不会带入。']);
+      if (recipe.operation !== 'launchReviewRun') throw new Error('expected review launch');
+      const request = { ...recipe.input, clientCommandId: randomUUID() };
+      expect(() => session.store.launchReviewRun(request, launchPolicy)).toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      session.store.cancelReviewRun(book.bookId, first.reviewRunId);
+      expect(workspace(session, book, first.reviewRunId).run).toMatchObject({ state: 'cancelled', canContinue: false });
+      const next = session.store.launchReviewRun(request, launchPolicy).projection.run!;
+      await session.driver.drive(next.reviewRunId);
+    } finally { await close(session); }
+  });
+
+  it('relaunches a paused review only after its own cancellation settles (#1656)', async () => {
+    let gated: GatedOwner | null = null;
+    const session = await openLaunchedLifecycle(scope, inner => (gated = new GatedOwner(inner, 2)), true);
+    try {
+      const book = await importBook(session);
+      const first = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+      const loop = session.driver.drive(first.reviewRunId); await gated!.reached;
+      const paused = session.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId, action: 'pause' });
+      session.owner.pauseRun(paused.runRecordId!, paused.ledger); gated!.release(); await loop;
+      const recipe = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).relaunch!;
+      expect(recipe.cancelsFirst?.operation).toBe('controlTaskRun');
+      if (recipe.operation !== 'launchReviewRun') throw new Error('expected review launch');
+      const request = { ...recipe.input, clientCommandId: randomUUID() };
+      expect(() => session.store.launchReviewRun(request, launchPolicy)).toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      const cancelled = session.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId, action: 'cancel' });
+      session.owner.cancelRun(cancelled.runRecordId!, cancelled.ledger); await session.owner.whenIdle();
+      session.store.finishCancelledReviewRun(cancelled.runRecordId!);
+      expect(() => session.store.launchReviewRun({ ...request, relaunchOf: { ...request.relaunchOf!, revision: `0:0:0:${'a'.repeat(64)}` } }, launchPolicy))
+        .toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+      const next = session.store.launchReviewRun(request, launchPolicy).projection.run!;
+      expect(next.reviewRunId).not.toBe(first.reviewRunId);
+      await session.driver.drive(next.reviewRunId);
+    } finally { (gated as GatedOwner | null)?.release(); await close(session); }
+  });
+
   it.each(['cancel', 'pause'] as const)('keeps undispatched categories free when the first category is %s', async (action) => {
     let gated: GatedOwner | null = null;
     const session = await openLaunchedLifecycle(scope, inner => (gated = new GatedOwner(inner, 2)), true);
@@ -2779,6 +2860,8 @@ describe.each(['development-ci', 'ordinary-production'] as const)('%s launched r
       if (action === 'cancel') session.owner.cancelRun(stopped.runRecordId!, stopped.ledger);
       else session.owner.pauseRun(stopped.runRecordId!, stopped.ledger);
       gated!.release(); await loop;
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }).relaunch)
+        .toMatchObject({ operation: 'launchReviewRun' });
       const beforeReplay = categoryEventTrail(run.reviewRunId), sent = session.capture?.wireRequests.length;
       await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
       expect(categoryEventTrail(run.reviewRunId)).toEqual(beforeReplay);
