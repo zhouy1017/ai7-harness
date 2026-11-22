@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
-import { createUpgradeSample1, legacySampleService, upgradeWithEarlierOrigin } from '../support/upgrade-sample1.js';
+import { createUpgradeSample1, historicalUpgradeService, legacySampleService, upgradeWithEarlierOrigin } from '../support/upgrade-sample1.js';
 import { reimportVersion } from '../support/reimport-version.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { readDataVersionMarker, storeRevisionOnDisk } from '../../src/service/data-version.js';
@@ -15,7 +15,7 @@ import { extractReplacement, replacementStagingFor } from '../../src/service/dat
 import * as replacement from '../../src/service/database-replacement.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { backupLocationFor } from '../../src/service/scheduled-backups.js';
-import { databasePackageSources, verifyCopiedPayloads } from '../../src/service/database-exports.js';
+import { databasePackageSources, verifyCopiedPayloads, type DatabasePackageMember } from '../../src/service/database-exports.js';
 import * as packageWriter from '../../src/service/database-exports.js';
 import { fileDigest } from '../../src/service/manuscript-export.js';
 import { verifyDatabasePackage } from '../../src/service/database-package-reader.js';
@@ -52,6 +52,12 @@ async function verifyLibraryFiles(root: string, revision: number): Promise<void>
     path:file.member,...(await fileDigest(file.path))!
   })));
   await verifyCopiedPayloads(join(root,'store','ai7.sqlite'),files,revision);
+}
+
+interface TestInventory {upgradeId:string;rollbackAttempt:string;sha256:string;members:DatabasePackageMember[]}
+
+function withMembers(record: TestInventory,members: DatabasePackageMember[]): string {
+  return JSON.stringify({...record,sha256:createHash('sha256').update(JSON.stringify(members)).digest('hex'),members});
 }
 
 it('resumes each phase, imports the older package and recovers missing old files from its backup', async () => {
@@ -637,11 +643,12 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   const independent = join(root,'shell','upgrade-'+id,'current-database');
   const commitment = await readFile(join(independent,'rollback-ready.json'));
   await writeFile(join(independent,'rollback-ready.json'),'{');
-  const allFiles = JSON.parse(await readFile(join(independent,'files.json'),'utf8')) as Array<{path:string}>;
+  const inventory: TestInventory = JSON.parse(await readFile(join(independent,'files.json'),'utf8'));
+  const allFiles = inventory.members;
   const shortened = allFiles.filter(file => file.path !== unreferenced);
   expect(shortened.length).toBeGreaterThan(0);
   expect(shortened.length).toBe(allFiles.length-1);
-  await writeFile(join(independent,'files.json'),JSON.stringify(shortened));
+  await writeFile(join(independent,'files.json'),withMembers(inventory,shortened));
   await writeFile(phase,stale);
   expect(await readFile(join(root,changed))).toEqual(oldBytes);
   expect(existsSync(join(root,deleted))).toBe(true);
@@ -657,10 +664,10 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   // 116 and 117 both exported this unreferenced file. Only the independent 117 inventory now proves that 117 kept it.
   await rm(join(savedPayload,unchanged));
   const remembered = join(root,'shell','upgrade-'+id,'current-files.json');
-  const shortJson = JSON.stringify(allFiles.filter(file => ![unchanged,changed,unreferenced].includes(file.path)));
+  const shortJson = withMembers(inventory,allFiles.filter(file => ![unchanged,changed,unreferenced].includes(file.path)));
   await writeFile(remembered,shortJson);
   const sealed = join(independent,'files.json');
-  await writeFile(sealed,JSON.stringify(allFiles));
+  await writeFile(sealed,JSON.stringify(inventory));
   const read = replacement.readSmallFile;
   const unavailable = vi.spyOn(replacement,'readSmallFile').mockImplementation(async (path,maxBytes) => {
     if (path === sealed) throw Object.assign(Error('busy'),{code:'EBUSY'});
@@ -676,7 +683,7 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
   expect(await readFile(phase)).toEqual(stale);
   expect(await readFile(remembered,'utf8')).toBe(shortJson);
-  await writeFile(sealed,JSON.stringify(allFiles));
+  await writeFile(sealed,JSON.stringify(inventory));
   // The old published root also has a deliberately deleted member. Negative evidence alone cannot authorize deleting it.
   await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
   expect(await readFile(phase)).toEqual(stale);
@@ -869,8 +876,8 @@ it.each(['old-payloads','incoming','archive','unavailable','short-sealed','share
   await rm(join(parked,'rollback-ready.json'));
   await rm(join(note,'rollback-ready.json'));
   const manifest = join(note,'current-files.json');
-  const complete = JSON.parse(await readFile(manifest,'utf8')) as Array<{path:string}>;
-  const shortened = JSON.stringify(complete.filter(file => file.path !== member));
+  const complete: TestInventory = JSON.parse(await readFile(manifest,'utf8'));
+  const shortened = withMembers(complete,complete.members.filter(file => file.path !== member));
   if (source === 'short-sealed') {
     await writeFile(join(note,'current-database','rollback-ready.json'),'{');
     await writeFile(join(note,'current-database','files.json'),shortened);
@@ -918,6 +925,81 @@ it.each(['old-payloads','incoming','archive','unavailable','short-sealed','share
       expect(pkg.manifest.members.find(file => file.path === member)?.sha256).toBe(createHash('sha256').update(contents).digest('hex'));
     }
   } finally { opened.markCleanShutdown(); opened.close(); }
+},180_000);
+
+it.each(['historical','current'] as const)('recovers the second %s rollback inventory when SQLite is identical but the export members differ',async format => {
+  const area = join(roots.inputRoot,'two-rollback-attempts-'+format);
+  await mkdir(area);
+  const root = join(area,'library');
+  await cp(roots.dataRoot,root,{recursive:true});
+  const member = 'first-attempt-only.bin';
+  await writeFile(join(root,member),Buffer.from([1,7]));
+  await beginUpgrade(root);
+  await resumeUpgrade(root,'0.8.0');
+  const {id} = JSON.parse(await readFile(join(root,'store','upgrade-origin.json'),'utf8'));
+  const phase = join(root,'shell','storage-upgrade.json');
+  const note = join(root,'shell','upgrade-'+id);
+  const old = join(root,'store-before-0.8.0-'+id);
+  const parked = join(root,'shell','store-after-0.8.0-'+id);
+  const independent = join(note,'current-database');
+  const prepared = join(note,'prepared-database');
+  const receipt = 'rollback-ready.json';
+  const writer = format === 'historical' ? await historicalUpgradeService(root,roots.codeRoot,'2a49562074529baf25f5073a22d561d6eaecf132') : {beginUpgradeRollback,resumeUpgrade};
+  const pause = (point: string,moved = false) => writer.resumeUpgrade(root,'0.8.0',(stage,afterRename) => {
+    if (point === stage && Boolean(afterRename) === moved) throw Error('interrupted');
+  });
+
+  await writer.beginUpgradeRollback(root);
+  await expect(pause('save-new')).rejects.toThrow('interrupted');
+  const first = await readFile(join(independent,receipt));
+  const firstManifest = await readFile(join(independent,'files.json'));
+  const copyA = join(area,'attempt-a');
+  await cp(independent,copyA,{recursive:true});
+  const away = join(area,'first-old-away');
+  await rename(old,away);
+  await expect(writer.resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+  expect(existsSync(phase)).toBe(false);
+  await rename(away,old);
+  await rm(join(root,member));
+
+  await writer.beginUpgradeRollback(root);
+  const stale = await readFile(phase);
+  await expect(pause('publish-old',true)).rejects.toThrow('interrupted');
+  const second = JSON.parse(await readFile(join(independent,receipt),'utf8'));
+  const earlier = JSON.parse(first.toString('utf8'));
+  expect(second.currentDigest).toBe(earlier.currentDigest);
+  expect(second.rollbackAttempt).not.toBe(earlier.rollbackAttempt);
+  expect(second.currentManifestDigest).not.toBe(earlier.currentManifestDigest);
+  expect(existsSync(join(root,member))).toBe(true);
+  // The old publication survived, but the journal and the independent directory renames did not all persist.
+  const copyB = join(area,'attempt-b');
+  await rename(independent,copyB);
+  await rename(copyA,independent);
+  await rm(join(parked,receipt));
+  await writeFile(join(note,receipt),first);
+  await writeFile(join(note,'current-files.json'),firstManifest);
+  await writeFile(phase,stale);
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+  expect(await readFile(phase)).toEqual(stale);
+  expect(await readFile(join(note,'current-files.json'))).toEqual(firstManifest);
+  expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
+  await rm(join(independent,receipt));
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  expect(await readFile(phase)).toEqual(stale);
+  expect(existsSync(join(root,member))).toBe(true);
+  await rename(copyB,prepared);
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  expect(existsSync(join(root,member))).toBe(false);
+  await verifyLibraryFiles(root,117);
+  const reopened = await EditorialStore.open(root,roots.codeRoot);
+  const exported = join(area,'attempt-b.ai7db');
+  try {
+    expect(reopened.listBooks(null).items).toHaveLength(2);
+    const prep = await reopened.prepareDatabaseExport(exported,true);
+    await reopened.approveDatabaseExport(prep.preparationId,true);
+  } finally { reopened.markCleanShutdown(); reopened.close(); }
+  const pkg = await verifyDatabasePackage(exported,{dataRoot:root});
+  expect(pkg.manifest.members.some(file => file.path === member)).toBe(false);
 },180_000);
 
 it.each(['original','extracted'] as const)('reuses extracted offline payloads with the %s database and budgets simultaneous copies',async source => {
