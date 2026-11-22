@@ -1118,6 +1118,9 @@ async function main() {
     async function openCompletedTask(item, name) {
       const { itemId, revisionId } = item;
       requireJourney(typeof revisionId === 'string', `${name}-revision-ref`);
+      // The global attention route releases the current Book. A different Book opened from a bound workbench belongs in a separate window.
+      await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('attention'), `${name}-attention`);
+      await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && window.ai7.getBookWorkbenchRoute().then(route => route === null)`, `${name}-global-route`);
       await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), `${name}-page`);
       const selector = `[data-task-group="recent"] [data-task-item=${JSON.stringify(itemId)}] [data-task-action="result"]`;
       await pressReachable(renderer, waitFor, requireJourney, selector, `${name}-result`);
