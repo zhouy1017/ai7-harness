@@ -461,7 +461,8 @@ export function editorStepSummary(db: DatabaseSync, branchId: string, action: 'u
       JOIN editor_step_effects e ON e.step_id = p.slot_step_id AND e.slot = p.slot AND e.generation = 1
       JOIN manuscript_effect_targets t ON t.effect_id = e.effect_id JOIN proposal_change_items i ON i.item_id = t.item_id
       JOIN review_findings f ON f.mark_id = i.mark_id
-    WHERE p.step_id = ? LIMIT 1`).get(step.stepId) as SqlRow | undefined;
+    -- A later Run that finds the same words again names the same mark (one record family): the newest Run is the batch's.
+    WHERE p.step_id = ? ORDER BY f.rowid DESC LIMIT 1`).get(step.stepId) as SqlRow | undefined;
   return {
     stepId: step.stepId, kind: step.kind, label: step.label, changeCount: step.changes, paragraph: placeOf(db, branchId, step).paragraph,
     batch: batch === undefined ? null : { reviewRunId: asString(batch.review_run_id), categoryId: asString(batch.category_id) },

@@ -94,6 +94,28 @@ describe('provider-free local ReviewRun', () => {
     expect(store.reverseAppliedChangeSuggestion(reverseInput).application.effectId).toBe(reversed.application.effectId);
     expect(store.inspectHouseWordList({ versionId: house.pin.versionId, entryOffset: 0, historyOffset: 0 }).selected!.enabledCount).toBe(1);
   });
+  it('names the newest Run that found a batch’s marks as the batch step’s Run, when a later Run finds the same words again (#1654)', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '再审同一批公开样书');
+    const target = replaceFirst(book, '按纳 合成异称 公开留意词。');
+    const options: LocalCheckOptions = { ...OPTIONS, punctuation: 'off', tables: { characters: false, variantWords: true, houseWordList: null,
+      bookTerms: [{ kind: 'person', preferred: '合成正名', variants: ['合成异称'] }] } };
+    const runOnce = async (): Promise<string> => {
+      const prepared = prepare(book, policy, options);
+      authorize(book, prepared);
+      const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(prepared.run.reviewRunId); await driver.dispose();
+      return prepared.run.reviewRunId;
+    };
+    const mechanical = (reviewRunId: string) => store.inspectReviewWorkspace(book.bookId, reviewRunId).run!.findings
+      .filter((finding) => finding.blockId === target && finding.output === 'change-suggestion' && finding.markId !== null);
+    const first = await runOnce();
+    const second = await runOnce();
+    expect(mechanical(second).map((finding) => finding.markId)).toEqual(mechanical(first).map((finding) => finding.markId));
+    const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: target });
+    store.applyChangeSuggestionBatch({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+      markIds: mechanical(second).map((finding) => finding.markId!), clientEffectId: randomUUID() });
+    expect(store.inspectEditorHistory(book.manuscriptId, book.branchId).undo?.batch?.reviewRunId).toBe(second);
+  });
   it('reads each finding at its mark’s paragraph and offsets after 分段 moved the mark (Issue #1654, loss 5)', async () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '段落移动公开样书');
