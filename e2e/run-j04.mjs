@@ -593,6 +593,49 @@ async function pressEnter(renderer) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...enter });
 }
 
+/** One key as a keyboard sends it (J-14). */
+async function pressKey(renderer, key, windowsVirtualKeyCode) {
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode });
+}
+
+/**
+ * Where the control already is, before any press: the shared `pointerClick` scrolls its target into view by script (Issue #1662), so
+ * a press through it proves nothing about what the editor sees. Without any scripted scroll the control's rectangle must lie
+ * inside the window and inside its scroller's visible box, and the point at its centre must be the control itself.
+ */
+async function assertReachableBeforePress(renderer, selector, name, scroller = '.sheet-body') {
+  requireJourney(await renderer.evaluate(`(() => {
+    const node=document.querySelector(${JSON.stringify(selector)}); if(!node)return false;
+    const r=node.getBoundingClientRect(), box=document.querySelector(${JSON.stringify(scroller)})?.getBoundingClientRect();
+    if(!(r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight))return false;
+    if(box&&!(r.top>=box.top-0.5&&r.bottom<=box.bottom+0.5&&r.left>=box.left-0.5&&r.right<=box.right+0.5))return false;
+    return node.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));
+  })()`), name);
+}
+
+/**
+ * 新建审阅's body at the window's own size (Issue #1679): each category is one line high (at most one line of its text plus its own
+ * padding and border), and the switch, 事实核查 and 开始审阅 are on screen with the body unscrolled. Run in the page.
+ */
+function reviewFormGeometry() {
+  const sheet = document.querySelector('dialog.review-sheet'), body = sheet.querySelector('.sheet-body'), view = body.getBoundingClientRect();
+  const rect = (node) => node?.getBoundingClientRect() ?? null;
+  const inBody = (node) => { const r = rect(node); return r !== null && r.width > 0 && r.height > 0 && r.top >= view.top - 0.5 && r.bottom <= view.bottom + 0.5 && r.left >= view.left - 0.5 && r.right <= view.right + 0.5; };
+  const inWindow = (node) => { const r = rect(node); return r !== null && r.width > 0 && r.height > 0 && r.top >= 0 && r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; };
+  const lineOf = (node) => { const style = getComputedStyle(node), size = parseFloat(style.fontSize); return style.lineHeight === 'normal' ? size * 1.3 : parseFloat(style.lineHeight); };
+  const rows = Array.from(sheet.querySelectorAll('[data-review-category-option]')).filter((row) => row.getClientRects().length > 0).map((row) => {
+    const style = getComputedStyle(row), extra = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((sum, key) => sum + parseFloat(style[key]), 0);
+    const lines = [row, ...Array.from(row.querySelectorAll('strong, span, a')).filter((node) => node.getClientRects().length > 0 && node.closest('.review-category-basis-detail') === null)].map(lineOf);
+    return { id: row.dataset.reviewCategoryOption, height: row.getBoundingClientRect().height, limit: Math.max(...lines) + extra };
+  });
+  const switchBox = sheet.querySelector('input[name="review-category"][value="local-text-check"]');
+  return { width: innerWidth, height: innerHeight, scrollTop: body.scrollTop, scrollHeight: body.scrollHeight, clientHeight: body.clientHeight, rows: rows.length,
+    oneLine: rows.every((row) => row.height <= row.limit + 1), tall: rows.filter((row) => row.height > row.limit + 1), switchIn: inBody(switchBox) && inBody(switchBox?.closest('label')),
+    factualIn: inBody(sheet.querySelector('[data-review-category-option="factual-review"]')), startIn: inWindow(sheet.querySelector('[data-review-action="start"]')),
+    wholeIn: inBody(sheet.querySelector('[data-review-scope-option="whole"]')) };
+}
+
 
 /** Wait for the drawer to show one Task's plan in one state, then read it. */
 /**
@@ -2797,11 +2840,47 @@ async function main() {
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].review-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot') && !document.querySelector('.review-filters select'); })()`, 'review-shared-nonmodal-sheet');
     // Nine model review categories plus the reversible local-only choice, remembered defaults and four pill scopes (#1374).
     // In ordinary mode the consequences are what it reads, sends and costs; 不会做 is the technical layer's (Issue #1413 cluster 4).
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===10 && boxes.filter(box=>box.checked).map(box=>box.value).join(',')==='typos-and-usage' && boxes.some(box=>box.value==='local-text-check'&&!box.checked&&!box.disabled) && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && JSON.stringify(Array.from(sheet.querySelectorAll('dl.review-consequences dt'),(dt)=>dt.textContent))==='["会读取","会发送","费用"]' && sheet.querySelector('[data-consequence="not-do"]')===null && sheet.querySelector('[data-consequence="cost"]')?.textContent.match(/约 [0-9]+ 次模型调用/u) && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('.task-launch-estimate > summary')?.textContent==='先看计划' && sheet.querySelector('.task-launch-estimate [data-review-action="prepare"]')?.textContent==='更新计划'; })()`, 'review-sheet-contract');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===10 && boxes.filter(box=>box.checked).map(box=>box.value).join(',')==='typos-and-usage' && boxes.some(box=>box.value==='local-text-check'&&!box.checked&&!box.disabled) && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && JSON.stringify(Array.from(sheet.querySelectorAll('dl.review-consequences dt'),(dt)=>dt.textContent))==='["会读取","会发送","费用"]' && sheet.querySelector('[data-consequence="not-do"]')===null && sheet.querySelector('[data-consequence="cost"]')?.textContent.match(/约 [0-9]+ 次模型调用/u) && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('.task-launch-estimate > summary')?.textContent==='先看计划' && sheet.querySelector('.task-launch-estimate [data-review-action="prepare"]')?.textContent==='更新计划' && sheet.querySelector('.sheet-body input, .sheet-body select, .sheet-body button')===boxes.find(box=>box.value==='local-text-check') && boxes.find(box=>box.value==='local-text-check').getAttribute('role')==='switch' && boxes.find(box=>box.value==='local-text-check').closest('fieldset.review-category-options')===null && sheet.querySelectorAll('fieldset.review-category-options input[name="review-category"]').length===9; })()`, 'review-sheet-contract');
+    at('review-sheet-form');
+    // 0.7.4 (I-2): 本地文字检查 is a switch above the categories, the nine categories take one line each, and 核查力度 sits under
+    // 事实核查. Everything below is measured at the window's own size (no emulation), once the sheet has stopped loading.
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); return sheet?.open===true && sheet.querySelector('.review-preparation-progress')?.hidden===true && sheet.querySelector('[data-review-action="start"]')?.disabled===false; })()`, 'review-form-settled');
+    const formGeometry = await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve((${reviewFormGeometry.toString()})()))))`);
+    process.stderr.write(`REVIEW_FORM_GEOMETRY/${JSON.stringify(formGeometry)}\n`);
+    requireJourney(formGeometry.scrollTop === 0 && formGeometry.rows === 9 && formGeometry.oneLine && formGeometry.switchIn && formGeometry.factualIn && formGeometry.startIn, 'review-form-geometry', formGeometry);
+    // At the larger window the whole of 审阅范围's first choice is on screen with the body unscrolled; the smaller one scrolls for it.
+    requireJourney(formGeometry.width < 1100 || formGeometry.wholeIn, 'review-form-whole-in-body', formGeometry);
+    const SWITCH = 'dialog.review-sheet input[name="review-category"][value="local-text-check"]';
+    const FACTUAL = 'dialog.review-sheet input[name="review-category"][value="factual-review"]';
+    const LEVEL_TRIGGER = 'dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"] + .ui-select-trigger';
+    const formRows = (hidden) => `(() => { const sheet=document.querySelector('dialog.review-sheet'); const rows=Array.from(sheet.querySelectorAll('[data-review-category-option]')); return rows.length===9 && rows.every((row)=>(row.getClientRects().length===0)===${hidden}); })()`;
+    await assertReachableBeforePress(renderer, SWITCH, 'review-form-switch-reachable');
+    await pointerClick(renderer, waitFor, SWITCH, 'review-form-switch-on');
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const line=sheet.querySelector('.review-local-only-line'); const box=sheet.querySelector('input[name="review-category"][value="local-text-check"]'); return box.checked && line.getClientRects().length>0 && line.textContent==='本次只做本地文字检查；关闭后恢复已选的审阅类别。' && ${formRows(true)} && Array.from(sheet.querySelectorAll('[data-review-category-option] input')).every((input)=>input.disabled && !input.checked) && sheet.querySelector('[data-local-check-options]')?.hidden===false; })()`, 'review-form-switch-on-state');
+    await assertReachableBeforePress(renderer, SWITCH, 'review-form-switch-off-reachable');
+    await pointerClick(renderer, waitFor, SWITCH, 'review-form-switch-off');
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const checked=Array.from(sheet.querySelectorAll('[data-review-category-option] input:checked'), (input)=>input.value).join(','); return !sheet.querySelector('input[name="review-category"][value="local-text-check"]').checked && sheet.querySelector('.review-local-only-line').getClientRects().length===0 && ${formRows(false)} && checked==='typos-and-usage' && sheet.querySelector('[data-local-check-options]')?.hidden===true; })()`, 'review-form-switch-off-state');
+    await assertReachableBeforePress(renderer, FACTUAL, 'review-form-factual-reachable');
+    await pointerClick(renderer, waitFor, FACTUAL, 'review-form-factual-tick');
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const row=sheet.querySelector('[data-review-category-option="factual-review"]'); const level=sheet.querySelector('.review-evidence-assurance'); if(!row||!level||level.hidden||level.getClientRects().length===0)return false; const a=row.getBoundingClientRect(), b=level.getBoundingClientRect(), after=row.nextElementSibling===level && level.nextElementSibling?.getBoundingClientRect().top>=b.bottom-0.5; return after && b.top>=a.bottom-0.5 && b.left>a.left+8 && level.querySelector('select[data-review-field="evidenceAssuranceLevel"]')?.value==='standard'; })()`, 'review-form-level-under-factual');
+    // The level is chosen on the control the select is enhanced into, with the keys of a list: Down to 严格核查, Up to 标准核查 and to 快速整理.
+    // The form is left at 快速整理 for the 取消 check below.
+    for (const [key, code, value] of [['ArrowDown', 40, 'strict'], ['ArrowUp', 38, 'standard'], ['ArrowUp', 38, 'quick']]) {
+      await assertReachableBeforePress(renderer, LEVEL_TRIGGER, `review-form-level-reachable-${value}`);
+      await pointerClick(renderer, waitFor, LEVEL_TRIGGER, `review-form-level-open-${value}`);
+      await pressKey(renderer, key, code);
+      await pressKey(renderer, 'Enter', 13);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]')?.value===${JSON.stringify(value)} && document.activeElement?.matches('.ui-select-trigger') && !!document.querySelector('.review-evidence-assurance .field-note')?.textContent`, `review-form-level-${value}`);
+    }
+    await assertReachableBeforePress(renderer, FACTUAL, 'review-form-factual-untick-reachable');
+    await pointerClick(renderer, waitFor, FACTUAL, 'review-form-factual-untick');
+    await waitFor(renderer, `(() => { const level=document.querySelector('dialog.review-sheet .review-evidence-assurance'); return level?.hidden===true && level.getClientRects().length===0; })()`, 'review-form-level-hidden-without-factual');
 
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const before=sheet.querySelector('[data-consequence="cost"]').textContent; sheet.querySelector('input[value="style-and-format"]').click(); const after=sheet.querySelector('[data-consequence="cost"]').textContent; sheet.querySelector('input[value="style-and-format"]').click(); return before!==after && sheet.querySelector('.sheet-foot .review-sheet-procedure') && !sheet.querySelector('.review-materials') && !sheet.querySelector('.similar-materials') && [...sheet.querySelectorAll('.review-category-basis')].every(node=>!/第\s*[0-9]+\s*版|\bv[0-9]+|version/iu.test(node.textContent)); })()`, 'review-reactive-consequences');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=(id)=>sheet.querySelector('input[name="review-category"][value="'+id+'"]'); box('style-and-format').click(); const before=sheet.querySelector('[data-consequence="cost"]').textContent; const scope=(kind)=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]').click(); scope('changed'); if(!box('style-and-format').disabled||box('style-and-format').checked||sheet.querySelector('[data-consequence="cost"]').textContent===before)return false; scope('whole'); if(!box('typos-and-usage').checked||!box('style-and-format').checked)return false; box('local-text-check').click(); if(!box('style-and-format').disabled||box('style-and-format').checked)return false; box('local-text-check').click(); const kept=box('typos-and-usage').checked&&box('style-and-format').checked; box('style-and-format').click(); return kept; })()`, 'review-category-selection-round-trip');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const page=document.querySelector('#screen'); const scroll=document.querySelector('.content') ?? page; const before=scroll?.scrollTop; if(scroll)scroll.scrollTop=scroll.scrollHeight; const scrollable=!scroll || scroll.scrollHeight<=scroll.clientHeight || scroll.scrollTop!==before || before>0; sheet.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); return !sheet.open && scrollable && !page?.inert; })()`, 'review-sheet-escape-and-page');
+    // 取消 keeps no level: the form was left at 快速整理, and nothing was started or planned with 事实核查 (Issue #1679).
+    requireJourney(await renderer.evaluate(`window.ai7.getPreferences().then((preferences)=>preferences.values['review.evidenceAssuranceLevel']==='standard')`), 'review-form-level-not-kept-on-cancel');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-memory-development-restored-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'review-memory-development-restored-settings-ready');
     await click(renderer, '帮助', 'review-memory-development-restored-help');
@@ -3386,6 +3465,8 @@ async function main() {
     try {
       for (const [width,height] of [[1280,800],[1008,681]]) {
         await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        // The level is remembered from the last 先看计划 or 开始审阅 with 事实核查 (Issue #1679). No factual start or plan precedes this sheet
+        // in this profile, so it opens at 标准核查; the loop below ends there too, so the second size opens at it as well.
         await assertRenderer(renderer, `(() => {const select=document.querySelector('dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]');if(!select||select.disabled||select.value!=='standard')return false;select.scrollIntoView({block:'nearest'});const focus=select.nextElementSibling?.matches('.ui-select-trigger')?select.nextElementSibling:select;focus.focus();return document.activeElement===focus && Array.from(select.options).map(option=>option.value).join('|')==='quick|standard|strict';})()`, `factual-selector-${width}`);
         for(const level of ['strict','quick','standard']) {
           await assertRenderer(renderer, `(() => {const select=document.querySelector('dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]');select.value=${JSON.stringify(level)};select.dispatchEvent(new Event('change',{bubbles:true}));return select.value===${JSON.stringify(level)} && !!document.querySelector('.review-evidence-assurance .field-note')?.textContent;})()`, `factual-level-${level}-${width}`);
@@ -3396,7 +3477,7 @@ async function main() {
     // Strict and quick choices enter the first frozen plan, without executing a different fixture contract.
     // Their full ordinary-production execution is covered by the real-store captured-transport tests.
     await writeFile(connectivityPath,'offline');
-    const reopenFactualSheet = async (name) => {
+    const reopenFactualSheet = async (name, rememberedLevel) => {
       await closeOwnedBrowser(); await launchForCleanup();
       await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
       await renderer.evaluate(`document.querySelector('button[data-book-id="${factualBook.bookId}"]').click()`);
@@ -3405,8 +3486,11 @@ async function main() {
       await reviewAction(renderer,'[data-review-action="new-review"]',`${name}-new`);
       await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, `${name}-sheet`);
       await assertRenderer(renderer, `(() => {const sheet=document.querySelector('dialog.review-sheet');for(const box of sheet.querySelectorAll('input[name="review-category"]'))if(box.checked!==(box.value==='factual-review')&&!box.disabled)box.click();sheet.querySelector('input[name="review-scope"][value="whole"]').click();return true;})()`, `${name}-category`);
+      // After a restart the sheet opens at the level the editor last planned or started with, never at the default (Issue #1679).
+      await assertRenderer(renderer, `document.querySelector('dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]')?.value===${JSON.stringify(rememberedLevel)}`, `${name}-remembered-level`);
     };
-    await reopenFactualSheet('factual-level-offline');
+    // 先看计划 at 标准核查 was the last press before this restart.
+    await reopenFactualSheet('factual-level-offline', 'standard');
     for(const level of ['strict','quick']) {
       await assertRenderer(renderer, `(() => {const select=document.querySelector('dialog.review-sheet [data-review-field="evidenceAssuranceLevel"]');select.value=${JSON.stringify(level)};select.dispatchEvent(new Event('change',{bubbles:true}));return select.value===${JSON.stringify(level)};})()`, `factual-freeze-${level}`);
       const queuedId=await launchReviewFromSheet(renderer,waitFor);
@@ -3421,7 +3505,10 @@ async function main() {
       await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, `factual-next-sheet-${level}`);
     }
     await writeFile(connectivityPath,'online');
-    await reopenFactualSheet('factual-standard-start');
+    // The last start before this restart was at 快速整理, and the sheet shows it; the editor then chooses 标准核查 with the pointer, so this plan
+    // is the standard one and the recorded factual answer it consumes is unchanged.
+    await reopenFactualSheet('factual-standard-start', 'quick');
+    await chooseLaunchOption(renderer, waitFor, 'dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]', 'standard', 'factual-standard-start-level');
     await launchReviewFromSheet(renderer, waitFor);
     const factualPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'factual-settled', 180_000);
