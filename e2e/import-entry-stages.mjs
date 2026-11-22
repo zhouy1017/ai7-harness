@@ -1,4 +1,3 @@
-import { layoutProbe } from './layout-probe.mjs';
 function target(selector, words) {
   return words === undefined ? `document.querySelector(${JSON.stringify(selector)})` : `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(node => node.textContent.trim() === ${JSON.stringify(words)})`;
 }
@@ -23,8 +22,7 @@ function hitPoint(selector, words) {
 export function reachable(selector, words) { return `(${hitPoint(selector, words)} !== null)`; }
 
 export async function pressReachable(io, selector, name, words) {
-  try { await io.waitFor(io.renderer, reachable(selector, words), `${name}-in-window`); }
-  catch(error) { process.stderr.write(`IMPORT_ENTRY_GEOMETRY/${JSON.stringify(await layoutProbe(io.renderer,selector,words))}\n`); throw error; }
+  await io.waitFor(io.renderer, reachable(selector, words), `${name}-in-window`);
   const point = await io.renderer.evaluate(hitPoint(selector, words));
   if (!point) throw new Error(`${name}-target-moved`);
   await io.renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', buttons: 1, clickCount: 1 });
@@ -35,8 +33,7 @@ export async function tabTo(io, selector, name, words, reverse = false) {
   const focused = `document.activeElement === (${target(selector, words)})`;
   for (let step = 0; step < 60; step++) {
     if (await io.renderer.evaluate(focused)) {
-      try { await io.assertRenderer(io.renderer, reachable(selector, words), `${name}-in-window`); }
-      catch(error) { process.stderr.write(`IMPORT_ENTRY_GEOMETRY/${JSON.stringify(await layoutProbe(io.renderer,selector,words))}\n`); throw error; }
+      await io.assertRenderer(io.renderer, reachable(selector, words), `${name}-in-window`);
       return;
     }
     for (const type of ['rawKeyDown', 'keyUp']) await io.renderer.send('Input.dispatchKeyEvent', {

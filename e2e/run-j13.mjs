@@ -1,4 +1,3 @@
-import { startPlanTrace } from './layout-probe.mjs';
 import { chooseImportTarget } from './import-page.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
@@ -212,7 +211,7 @@ async function waitForRenderer(manager, name) {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     const renderers = await manager.list();
-    if (renderers.length === 1) { await startPlanTrace(renderers[0]); return renderers[0]; }
+    if (renderers.length === 1) return renderers[0];
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-13', name);

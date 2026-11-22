@@ -3747,6 +3747,20 @@ async function main() {
     renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticCPath, launchScenario: 'new-version-overview-entry' });
     await openEntryBook('new-version-overview-entry', 'overview');
     await pressReachable(entryButtonIo(), '[data-screen="book-overview"] [data-import-new-version="overview"]', 'new-version-overview-entry-press');
+    await waitFor(renderer, `document.querySelector('[data-prepare-manuscript-reimport]')`, 'new-version-technical-page');
+    if (await renderer.evaluate(`document.documentElement.dataset.technicalLayerVisible==='true'`)) {
+      const disclosure = 'body > [data-technical-collection] > summary';
+      await waitFor(renderer, `document.querySelector('[data-technical-collection]')?.open===false`, 'new-version-technical-initially-closed');
+      for (const [open, label] of [[true, 'expanded'], [false, 'collapsed']]) {
+        await tabTo(entryButtonIo(), disclosure, `new-version-technical-${label}-focus`);
+        await pressReachable(entryButtonIo(), disclosure, `new-version-technical-${label}-press`);
+        await waitFor(renderer, `document.querySelector('[data-technical-collection]')?.open===${open}`, `new-version-technical-${label}-state`);
+        await tabTo(entryButtonIo(), '#screen button', `new-version-technical-${label}-cancel`, '取消导入');
+        await assertRenderer(renderer, reachable('#screen button', '取消导入'), `new-version-technical-${label}-cancel-hit`);
+      }
+    } else {
+      await assertRenderer(renderer, `!document.querySelector('[data-technical-collection], [data-technical-layer="true"]')`, 'new-version-ordinary-no-technical-disclosure');
+    }
     await cancelImportPage(entryButtonIo(), 'update', reimportBookId, 'new-version-overview-entry');
     await closeProduct();
 
