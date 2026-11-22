@@ -4,19 +4,16 @@ const inside = (selector) => `(() => { const node=document.querySelector(${JSON.
 
 /** Real pointer/key selection, with reachability checked before each press (#1681). */
 export async function chooseImportTarget(renderer, waitFor, value, name) {
+  // J-12 returns here from another Book window; real pointer input needs this visible window.
+  await renderer.send('Page.bringToFront');
+  await waitFor(renderer, `document.visibilityState==='visible' && document.hasFocus()`, `${name}-window-visible`);
   if (value === 'new-book') value = await renderer.evaluate(`Array.from(document.querySelector('#import-book').options).find(option=>option.dataset.importTargetChoice==='new-book')?.value`);
   const index = await renderer.evaluate(`Array.from(document.querySelector('#import-book').options).findIndex(option=>option.value===${JSON.stringify(value)})`);
   await waitFor(renderer, `${index}>=0`, `${name}-option`);
   const custom=await renderer.evaluate(`document.querySelector('#import-book + .ui-select-trigger')!==null`);
   const selector=custom?'#import-book + .ui-select-trigger':'#import-book';
   await reachImportControl(renderer, waitFor, selector, `${name}-visible`);
-  try {
-    await pointerClick(renderer, waitFor, selector, `${name}-open`);
-  } catch (error) {
-    const state = await renderer.evaluate(`(() => { const node=document.querySelector(${JSON.stringify(selector)}),r=node?.getBoundingClientRect();return {visible:document.visibilityState==='visible',focused:document.hasFocus(),exists:!!node,rect:r?[r.left,r.top,r.width,r.height]:null,viewport:[innerWidth,innerHeight]};})()`).catch(()=>({unavailable:true}));
-    console.error('IMPORT_TARGET_FAILURE/'+JSON.stringify(state));
-    throw error;
-  }
+  await pointerClick(renderer, waitFor, selector, `${name}-open`);
   if (custom) {
     const option=`#import-book ~ .ui-select-popover .ui-select-option[data-index="${index}"]`;
     for (let attempt=0;attempt<30 && !(await renderer.evaluate(inside(option)));attempt++) {

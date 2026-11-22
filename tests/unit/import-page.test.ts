@@ -18,9 +18,10 @@ let bookId: string;
 let root: HTMLElement;
 let view: ReturnType<typeof createImportReview>;
 const status = vi.fn();
-const record = vi.fn(async (_request: unknown) => { throw new Error('recorded'); });
+const record = vi.fn(async (_request: unknown): Promise<unknown> => { throw new Error('recorded'); });
 const listBooks = vi.fn();
 const lineagePage = vi.fn();
+const serviceWait = vi.fn();
 const settle = async () => { for (let i=0;i<4;i++) await new Promise(resolve=>setTimeout(resolve,0)); };
 const control = (selector: string) => root.querySelector(selector) as unknown as MiniElement;
 const change = (selector: string) => control(selector).dispatchEvent({ type: 'change' });
@@ -30,7 +31,7 @@ const draw = (relationship: 'source-only' | 'reimport' = 'source-only', projecti
   view.renderTargetChoice(projection, `existing-book:${bookId}`, undefined, undefined, relationship);
 
 beforeEach(async () => {
-  restore = installMiniDom(); setTechnicalLayerVisible(false); record.mockClear(); status.mockClear(); listBooks.mockReset(); lineagePage.mockReset();
+  restore = installMiniDom(); setTechnicalLayerVisible(false); record.mockClear(); status.mockClear(); listBooks.mockReset(); lineagePage.mockReset(); serviceWait.mockReset();
   vi.stubGlobal('Event', class { constructor(public type: string) {} });
   vi.stubGlobal('window', { ai7: { prepareSourceImportReview: record, prepareManuscriptReimport: record,
     listBooks, getReimportLineageSourceVersionPage: lineagePage }, setTimeout, clearTimeout });
@@ -42,7 +43,7 @@ beforeEach(async () => {
   view = createImportReview({ appendRecoveryReturnAction: vi.fn(), technicalDetails: (_class, ...rows) => {
     const details=document.createElement('details'); details.className='technical-details'; details.append(...rows); return technicalDisclosure(details);
   }, replaceScreen: (_state, content) => root.replaceChildren(content), rendererErrorMessage: (_error, fallback) => fallback,
-    abandonAndContinue: vi.fn(), awaitServiceJob: vi.fn(), hasErrorCode: () => false,
+    abandonAndContinue: vi.fn(), awaitServiceJob: serviceWait, hasErrorCode: () => false,
     identityFindingDisclosure: () => document.createElement('div'), initializeStartup: vi.fn(), instantValue: () => document.createElement('span'),
     renderError: vi.fn(), renderImported: vi.fn(), setStatus: status, sourceCard: () => document.createElement('div') });
 });
@@ -219,4 +220,26 @@ it('keeps compact actions and the current update status words', async () => {
   expect(root.querySelector('.import-page-actions .compact-actions')).not.toBeNull();
   expect(status.mock.calls.at(-1)![0]).toContain('更新稿件的选择已确认');
   expect(status.mock.calls.at(-1)![0]).not.toContain('逐块比较');
+});
+
+it('keeps the same lineage and source value when preparation is cancelled and retried', async () => {
+  let finish: (result: unknown) => void = () => { throw new Error('preparation not started'); };
+  serviceWait.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  record.mockResolvedValueOnce({ jobId: randomUUID(), progress: { label: '正在准备比较', completed: 1, total: 10 } });
+  vi.stubGlobal('window', { setTimeout, clearTimeout, ai7: { prepareManuscriptReimport: record,
+    cancelServiceJob: vi.fn(async () => { const cancelled = { state: 'cancelled', progress: { label: '准备已取消' } }; finish(cancelled); return cancelled; }) } });
+  draw('reimport');
+  const choice=target(); if(choice.kind!=='existing-book') throw new Error('missing book');
+  const lineageId=choice.reimportLineageSourceVersionIds[0]!.sourceVersionId;
+  const sourceId=staged.identityFindings[0]!.sourceVersionId;
+  control('[data-prepare-manuscript-reimport]').click(); await settle();
+  expect(control('[data-cancel-reimport-preparation]').hidden).toBe(false);
+  control('[data-cancel-reimport-preparation]').click(); await settle();
+  expect(control('[data-prepare-manuscript-reimport]').disabled).toBe(false);
+  expect(control(`[data-source-version-id="${lineageId}"]`).checked).toBe(true);
+  expect(control('[data-reimport-source-version-choices]').dataset['reuseSourceVersionId']).toBe(sourceId);
+  expect(root.querySelector('[data-reimport-source-version-choices] input')).toBeNull();
+  control('[data-prepare-manuscript-reimport]').click(); await settle();
+  expect(record).toHaveBeenCalledTimes(2);
+  expect(record.mock.calls[1]![0]).toEqual(record.mock.calls[0]![0]);
 });
