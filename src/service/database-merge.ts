@@ -93,6 +93,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   editor_step_parts: 'owned',
   editor_step_effects: 'owned',
   editor_step_mark_anchors: 'owned',
+  editor_step_restore_revisions: 'owned',
   edit_journal_entries: 'owned',
   milestone_versions: 'owned',
   milestone_signoff_records: 'owned',

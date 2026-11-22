@@ -1,4 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+import { reimportVersion } from '../support/reimport-version.js';
 import { join } from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
@@ -149,5 +151,3 @@ it('keeps a source image visible when its body paragraph is merged and undone', 
     checkOwner(into!.blockId);
   } finally { db.close(); }
 });
-import { reimportVersion } from '../support/reimport-version.js';
-import { DatabaseSync } from 'node:sqlite';

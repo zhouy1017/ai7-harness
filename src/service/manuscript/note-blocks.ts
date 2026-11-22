@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { ManuscriptBlockProjection } from '../../shared/protocol.js';
 import type { ParsedDocxBlock } from '../docx.js';
 import type { ParsedNoteSource } from '../docx-notes.js';
-import { asNumber, asString, type SqlRow } from './bounded-kernel.js';
+import { asNumber, asString, REVISION_IMPORT_LINEAGE, type SqlRow } from './bounded-kernel.js';
 import { paragraphAtKey } from './working-positions.js';
 import type { StagedParagraphPiece } from './import-structure.js';
 
@@ -59,19 +59,23 @@ export function commitNoteSources(db: DatabaseSync, input: { revisionId: string;
 }
 
 /** The window's note blocks with what they say about themselves: part, number and the paragraph that refers to them. */
-export function withNoteReferences(db: DatabaseSync, branchId: string, blocks: ManuscriptBlockProjection[]): ManuscriptBlockProjection[] {
+export function withNoteReferences(db: DatabaseSync, branchId: string, revisionId: string, blocks: ManuscriptBlockProjection[]): ManuscriptBlockProjection[] {
   if (db.prepare('SELECT 1 FROM manuscript_note_sources LIMIT 1').get() === undefined) return blocks;
+  const origin = db.prepare(`WITH RECURSIVE ${REVISION_IMPORT_LINEAGE} SELECT revision_id FROM lineage child
+    WHERE NOT EXISTS (SELECT 1 FROM lineage parent WHERE parent.revision_id = child.parent_revision_id)`).get(revisionId, branchId);
+  if (!origin) return blocks;
+  const sourceRevision = asString(origin.revision_id);
   const links = db.prepare(`WITH RECURSIVE refs(block_id, depth) AS (SELECT ?, 0 UNION ALL
     SELECT l.block_id, r.depth + 1 FROM refs r JOIN manuscript_block_lineage l ON l.related_block_id = r.block_id
     JOIN manuscript_command_groups g ON g.command_group_id = l.command_group_id
     WHERE l.relation = 'merged-into' AND g.branch_id = ? AND g.status = 'applied' AND r.depth < 100000)
     SELECT ns.block_id, ns.note_part, ns.note_ordinal FROM manuscript_note_sources ns
     JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = ns.block_id WHERE ns.reference_block_id IN (SELECT block_id FROM refs)
-    AND ns.rowid = (SELECT max(latest.rowid) FROM manuscript_note_sources latest WHERE latest.block_id = ns.block_id)
+    AND ns.revision_id = ?
     ORDER BY ns.note_ordinal`);
   const source = db.prepare(`SELECT ns.note_part, ns.note_ordinal, ns.reference_block_id, wb.order_key reference_key
     FROM manuscript_note_sources ns LEFT JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = ns.reference_block_id
-    WHERE ns.block_id = ? ORDER BY ns.rowid DESC LIMIT 1`);
+    WHERE ns.block_id = ? AND ns.revision_id = ?`);
   const mergedReference = db.prepare(`WITH RECURSIVE refs(block_id, depth) AS (SELECT ?, 0 UNION ALL
     SELECT l.related_block_id, r.depth + 1 FROM refs r JOIN manuscript_block_lineage l ON l.block_id = r.block_id
     JOIN manuscript_command_groups g ON g.command_group_id = l.command_group_id
@@ -79,11 +83,11 @@ export function withNoteReferences(db: DatabaseSync, branchId: string, blocks: M
     SELECT wb.block_id, wb.order_key FROM refs r JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = r.block_id ORDER BY r.depth DESC LIMIT 1`);
   return blocks.map((block) => {
     if (block.kind !== 'note') {
-      const notes = links.all(block.blockId, branchId, branchId) as SqlRow[];
+      const notes = links.all(block.blockId, branchId, branchId, sourceRevision) as SqlRow[];
       return notes.length === 0 ? block : { ...block, noteLinks: notes.map((note) => ({ blockId: asString(note.block_id),
         part: note.note_part === 'endnote' ? 'endnote' as const : 'footnote' as const, ordinal: asNumber(note.note_ordinal) })) };
     }
-    const row = source.get(branchId, block.blockId) as SqlRow | undefined;
+    const row = source.get(branchId, block.blockId, sourceRevision) as SqlRow | undefined;
     if (row === undefined) return block;
     const merged = row.reference_block_id !== null && row.reference_key === null
       ? mergedReference.get(asString(row.reference_block_id), branchId, branchId) as SqlRow | undefined : undefined;

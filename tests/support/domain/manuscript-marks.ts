@@ -63,7 +63,7 @@ const MANUSCRIPT_RELATIONS: ReadonlyArray<string> = [
   'milestone_versions', 'milestone_signoff_records', 'service_lifetimes', 'service_lifetime_branch_writes', 'recovery_snapshots',
   'recovery_attention', 'recovery_restore_stages', 'recovery_restore_stage_blocks', 'recovery_decisions', 'recovery_restorations',
   'manuscript_recovery_review_status', 'manuscript_command_groups', 'manuscript_command_edits', 'manuscript_block_lineage',
-  'manuscript_note_sources', 'editor_steps', 'editor_step_parts', 'editor_step_effects', 'editor_step_mark_anchors',
+  'manuscript_note_sources', 'editor_steps', 'editor_step_parts', 'editor_step_effects', 'editor_step_mark_anchors', 'editor_step_restore_revisions',
 ];
 
 /** The tables of the helper that are labelled stubs; every other table is a production definition. */

@@ -90,7 +90,7 @@ The version list in 工作概览 holds milestones, saved revisions and publicati
 
 **Ctrl+Z after a restore** puts back the auto-saved text and the mark positions, but only after checking that the whole post-restore state still stands. If a later change still stands, it is refused like any blocked step. It restores anchors only, never a mark's status, so a decision made after the restore stays.
 
-Sealing the earlier editor steps does not erase the paragraph merges that still explain where a footnote or source image belongs. Restore and replay use the journal prefix captured by each revision on the selected source's ancestry to reinstate its effective merges; this does not reopen those steps for undo.
+Sealing the earlier editor steps does not erase the paragraph merges that still explain where a footnote or source image belongs. Restore and replay use the journal prefix captured by each revision since the selected version's last changed import to reinstate its effective merges; this does not reopen those steps for undo. A changed reimport starts new source mappings even when it reuses the same source file. Footnotes use the mappings from that import, not the latest import of the book.
 
 ### 4 · One baseline: revision 117, Data Version 2
 

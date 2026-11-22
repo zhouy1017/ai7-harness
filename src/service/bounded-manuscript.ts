@@ -3303,7 +3303,7 @@ export class BoundedManuscriptStore {
     const startPosition = Math.min(Math.max(1, targetPosition - (focusBlockId ? Math.floor(MAX_WINDOW_BLOCKS / 2) : 0)), Math.max(1, totalBlocks - MAX_WINDOW_BLOCKS + 1));
     const rows = rowsFrom(this.#db, branchId, startPosition, MAX_WINDOW_BLOCKS + 1);
     const visible = rows.slice(0, MAX_WINDOW_BLOCKS);
-    let blocks = withNoteReferences(this.#db, branchId, visible.map((row) => ({
+    let blocks = withNoteReferences(this.#db, branchId, binding.revisionId, visible.map((row) => ({
       blockId: row.blockId, position: row.position, kind: row.kind, level: row.level, text: row.text, digest: row.digest,
     })));
     blocks = this.sourceObjects?.project(binding.revisionId, blocks, branchId) ?? blocks;
