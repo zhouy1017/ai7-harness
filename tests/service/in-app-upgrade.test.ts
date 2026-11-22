@@ -45,6 +45,13 @@ beforeAll(async () => {
 });
 afterAll(async () => { await roots.dispose(); });
 
+async function verifyLibraryFiles(root: string, revision: number): Promise<void> {
+  const files = await Promise.all((await databasePackageSources(root)).map(async file => ({
+    path:file.member,...(await fileDigest(file.path))!
+  })));
+  await verifyCopiedPayloads(join(root,'store','ai7.sqlite'),files,revision);
+}
+
 it('resumes each phase, imports the older package and recovers missing old files from its backup', async () => {
   const root = join(roots.inputRoot, 'library');
   await cp(roots.dataRoot, root, { recursive: true });
@@ -182,6 +189,17 @@ it('resumes each phase, imports the older package and recovers missing old files
   await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
   expect((await fileDigest(join(root,newKey)))?.sha256).toBe(newObject);
   expect(existsSync(phase)).toBe(false);
+  // This retry must use the previous snapshot to recover an object created only in revision 117.
+  await rm(join(root,newKey));
+  await beginUpgradeRollback(root);
+  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'save-new') throw Error('power loss'); })).rejects.toThrow('power loss');
+  expect((await fileDigest(join(root,newKey)))?.sha256).toBe(newObject);
+  await verifyLibraryFiles(root,117);
+  // A damaged snapshot must not prevent opening the intact, independently verifiable live library.
+  await writeFile(join(root,'store','payloads',newKey),Buffer.alloc(0));
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  expect(existsSync(phase)).toBe(false);
+  await verifyLibraryFiles(root,117);
   await beginUpgradeRollback(root);
   await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'save-new') throw Error('power loss'); })).rejects.toThrow('power loss');
   await rename(join(root,kept),away);
@@ -202,6 +220,18 @@ it('resumes each phase, imports the older package and recovers missing old files
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
   expect((await fileDigest(join(root,newKey)))?.sha256).toBe(newObject);
   await rename(away,join(root,kept));
+  await beginUpgradeRollback(root);
+  const staleRestore = await readFile(phase);
+  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'publish-old') throw Error('power loss'); })).rejects.toThrow('power loss');
+  const {id} = JSON.parse(staleRestore.toString('utf8'));
+  await rm(join(root,'shell','store-after-0.8.0-'+id,'rollback-ready.json'));
+  await rm(join(root,'shell','upgrade-'+id,'rollback-ready.json'));
+  await writeFile(phase,staleRestore);
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  await verifyLibraryFiles(root,117);
+  const reopenedCurrent = await EditorialStore.open(root,roots.codeRoot);
+  try { expect(reopenedCurrent.listBooks(null).items).toHaveLength(2); }
+  finally { reopenedCurrent.markCleanShutdown(); reopenedCurrent.close(); }
   await beginUpgradeRollback(root);
   expect(await resumeUpgrade(root, '0.8.0')).toMatchObject({ restored: true });
   const saved = (await readdir(join(root,'shell'))).filter(name => name.startsWith('store-after-0.8.0-'));
@@ -326,9 +356,17 @@ it('rebuilds the original manifest from the backup across both sides of the old 
   const stale = JSON.parse(await readFile(phase,'utf8'));
   const manifest = join(root,'shell','upgrade-'+stale.id,'payloads.json');
   const original = await fileDigest(manifest);
+  const ownScratch = join(root,'shell','upgrade-'+stale.id,'archive-verification','export-staging');
+  const unrelated = join(root,'export-staging','other-export.tmp');
+  await mkdir(ownScratch,{recursive:true});
+  await mkdir(join(root,'export-staging'),{recursive:true});
+  await writeFile(join(ownScratch,'interrupted.store'),Buffer.alloc(16));
+  await writeFile(unrelated,Buffer.alloc(16));
   await rm(manifest);
   await expect(stop('publish')).rejects.toThrow('interrupted');
   expect(await fileDigest(manifest)).toEqual(original);
+  expect(existsSync(ownScratch)).toBe(false);
+  expect(existsSync(unrelated)).toBe(true);
   expect(existsSync(join(root,'store'))).toBe(false);
   await rm(manifest);
   await writeFile(phase,JSON.stringify(stale));
@@ -450,3 +488,32 @@ it('reserves the peak on the writing volume during backup fallback',() => {
   expect(rollbackDataPeak(100,{archive:900,store:400,files:300})-rollbackDataPeak(0)).toBe(2000);
   expect(rollbackDataPeak(2000,{archive:50,store:100,files:300})-rollbackDataPeak(0)).toBe(3000);
 });
+
+it.each(['removed','changed'] as const)('retains an openable revision 117 library when its saved SQLite is %s',async defect => {
+  const root = join(roots.inputRoot,'retained-sqlite-'+defect);
+  await cp(roots.dataRoot,root,{recursive:true});
+  await beginUpgrade(root);
+  await resumeUpgrade(root,'0.8.0');
+  await beginUpgradeRollback(root);
+  await expect(resumeUpgrade(root,'0.8.0',stage => { if (stage === 'publish-old') throw Error('interrupted'); })).rejects.toThrow('interrupted');
+  const {id} = JSON.parse(await readFile(join(root,'shell','storage-upgrade.json'),'utf8'));
+  const saved = join(root,'shell','store-after-0.8.0-'+id);
+  const path = join(saved,'ai7.sqlite');
+  const expected = await fileDigest(path);
+  if (defect === 'removed') await rm(path);
+  else {
+    const altered = new DatabaseSync(path);
+    try { altered.exec('CREATE TABLE unexpected_change(id INTEGER)'); } finally { altered.close(); }
+  }
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  expect(await fileDigest(path)).toEqual(expected);
+  await verifyLibraryFiles(root,116);
+  const old = await legacy.openLegacy(root);
+  try { expect(old.listBooks(null).items).toHaveLength(2); } finally { old.markCleanShutdown(); old.close(); }
+  const recovered = join(roots.inputRoot,'open-retained-'+defect);
+  await cp(join(saved,'payloads'),recovered,{recursive:true});
+  await cp(saved,join(recovered,'store'),{recursive:true,filter:entry => entry !== join(saved,'payloads')});
+  await verifyLibraryFiles(recovered,117);
+  const current = await EditorialStore.open(recovered,roots.codeRoot);
+  try { expect(current.listBooks(null).items).toHaveLength(2); } finally { current.markCleanShutdown(); current.close(); }
+},180_000);
