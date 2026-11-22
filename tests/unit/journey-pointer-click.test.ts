@@ -399,18 +399,20 @@ it('reaches Reply backwards from its appended textarea without tabbing out and h
   expect(document.activeElement).toBe(reply);expect(leftCard).toBe(false);expect(modifiers).toEqual([8,8]);
 });
 
-it.each([{top:3562,covered:false,moving:false},{top:300,covered:false,moving:false},{top:3562,covered:true,moving:false},{top:3562,covered:false,moving:true}])('returns to the loaded anchor at $top through an uncovered wheel target: $covered; pending scroll: $moving', async ({top,covered,moving}) => {
+it.each([{top:94.953125,covered:false,moving:false},{top:3562,covered:false,moving:false},{top:300,covered:false,moving:false},{top:3562,covered:true,moving:false},{top:3562,covered:false,moving:true}])('returns to the loaded anchor at $top through an uncovered wheel target: $covered; pending scroll: $moving', async ({top,covered,moving}) => {
   const { draftWheelToAnchor }=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
   let offset=0,frames=0;const events:Array<{type:string;deltaY?:number}>=[];
   const editor={},anchor={getBoundingClientRect:()=>({left:253,right:288,top:top-offset,bottom:top-offset+27,width:35,height:27}),focus(){throw Error('must not focus the draft');}};
   const scroll={dataset:{scrolling:moving?'true':undefined},clientLeft:0,clientTop:0,clientWidth:525,clientHeight:510,get scrollTop(){return offset;},set scrollTop(_value:number){throw Error('must not scroll by script');},getBoundingClientRect:()=>({left:80,top:150,right:605,bottom:660,width:525,height:510}),contains:(node:unknown)=>node===editor};
-  const document={activeElement:editor,querySelector:(selector:string)=>selector==='.editor-window'?scroll:anchor,elementFromPoint:()=>covered?{}:editor};
+  const focused=top<150?{kind:'composer-field'}:editor;
+  const document={activeElement:focused,querySelector:(selector:string)=>selector==='.editor-window'?scroll:anchor,elementFromPoint:()=>covered?{}:editor};
   const renderer={evaluate:async(expression:string)=>expression.includes('const describe=')?null:Function('document','requestAnimationFrame','innerWidth','innerHeight',`return (${expression})`)(document,(callback:()=>void)=>queueMicrotask(()=>{if(++frames>=4)scroll.dataset.scrolling=undefined;callback();}),1008,681),send:async(_method:string,event:{type:string;deltaY?:number})=>{events.push(event);if(event.type==='mouseMoved'&&moving&&scroll.dataset.scrolling==='true')offset+=20;if(event.type==='mouseWheel'){if(scroll.dataset.scrolling==='true')throw Error('wheel-before-scroll-idle');offset+=event.deltaY!;if(moving){frames=0;scroll.dataset.scrolling='true';}};}};
-  const wait=j08WaitBoundary();
+  const j05Source=top<150?readFileSync(new URL('../../e2e/run-j05.mjs',import.meta.url),'utf8').match(/async function waitFor\(renderer,[\s\S]*?\n\}/u)?.[0]:null;
+  const wait=j05Source?Function('journeyCheckFailure',`return (${j05Source})`)((_journey:string,name:string)=>Error(name)):j08WaitBoundary();
   const result=draftWheelToAnchor(renderer,(ok:boolean,name:string)=>{if(!ok)throw Error(name);},wait,'.anchor','return-place');
   if(covered){await expect(result).rejects.toThrow('return-place-wheel-hit');expect(events).toEqual([]);}
   else {await expect(result).resolves.toBeUndefined();const r=anchor.getBoundingClientRect();expect(r.top).toBeGreaterThanOrEqual(150);expect(r.bottom).toBeLessThanOrEqual(660);expect(events.every(event=>event.type==='mouseMoved'||event.type==='mouseWheel')).toBe(true);if(top===300)expect(events).toEqual([]);else expect(events.some(event=>event.type==='mouseWheel')).toBe(true);}
-  expect(document.activeElement).toBe(editor);
+  expect(document.activeElement).toBe(focused);
 });
 
 it('records a surviving card when a restored draft field is absent, preserving the primary failure and redacting values', async () => {

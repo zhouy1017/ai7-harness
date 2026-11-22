@@ -289,6 +289,9 @@ export async function markDraftKept(renderer,check,waitFor,at,blockId) {
   await waitFor(renderer,kept,'draft-text-kept');
   await verifyComposerWords(renderer,check,waitFor,row,field,'draft-text-kept',blockId);
   await draftClick(renderer,check,waitFor,row,'draft-mark-expand');
+  // Bringing the open form into view can leave the paragraph's first marked line above the text viewport.
+  await draftWheelToAnchor(renderer,check,waitFor,`.editor-window [data-block-id="${blockId}"] [data-mark-kind="personal-highlight"]`,'draft-other-mark-place');
+  check(await renderer.evaluate(`document.querySelector(${JSON.stringify(field)})?.value==='公开合成未发送批注'&&document.activeElement===document.querySelector(${JSON.stringify(field)})`)===true,'draft-other-mark-still-editing');
   await draftClick(renderer,check,waitFor,`.editor-window [data-block-id="${blockId}"] [data-mark-kind="personal-highlight"]`,'draft-other-mark');
   await waitFor(renderer,kept,'draft-mark-kept');
   await verifyComposerWords(renderer,check,waitFor,row,field,'draft-mark-kept',blockId);
