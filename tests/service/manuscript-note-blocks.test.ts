@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { StatementSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptWindowProjection } from '../../src/shared/protocol.js';
@@ -29,14 +30,14 @@ afterEach(async () => {
   await roots.dispose();
 });
 
-async function importNotes(retention: ComposedRetentionContent = NOTES): Promise<{ original: Uint8Array; source: ParsedDocxBlock[]; path: string;
+async function importNotes(retention: ComposedRetentionContent = NOTES, title = '注释组稿'): Promise<{ original: Uint8Array; source: ParsedDocxBlock[]; path: string;
   book: { bookId: string; manuscriptId: string; branchId: string }; view: () => ManuscriptWindowProjection }> {
   const path = join(roots.inputRoot, `${randomUUID()}.docx`);
-  const original = await composeManuscriptDocx(path, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '注释组稿', retention });
+  const original = await composeManuscriptDocx(path, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title, retention });
   const source: ParsedDocxBlock[] = [];
   await parseDocx(admittedSourcePath(ADMITTED_BASELINE_DOCX), 'sample1.docx', (block) => source.push(block));
   const staged = await store.stageSelectedManuscript(randomUUID(), path);
-  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '注释组稿' }, false);
+  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: 'new-book', confirmedTitle: title }, false);
   expect(review.reviewDigest).not.toBeNull();
   const commitId = randomUUID();
   const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
@@ -52,6 +53,38 @@ function editNote(book: { manuscriptId: string; branchId: string }, view: Manusc
 }
 
 describe('the note block (#1204)', () => {
+  it('does not walk version history for edits and window reads in another book without notes, or each child of a known note import', async () => {
+    const noted = await importNotes();
+    const plain = await importNotes({}, '无脚注组稿');
+    const checkpoint = async (item: typeof plain, ordinal: number) => {
+      const page = item.view();
+      const block = page.blocks.find(row => row.kind === 'paragraph')!;
+      store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: page.manuscriptId, branchId: page.branchId, baseRevisionId: page.revisionId,
+        blockId: block.blockId, windowStartBlockId: page.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: page.journalSequence,
+        fromGrapheme: 0, toGrapheme: 0, insertText: '甲' });
+      await store.saveMilestone(page.manuscriptId, page.branchId, '阶段 ' + ordinal, 'stage-archive', null, '');
+      expect(item.view().revisionId === page.revisionId).toBe(false);
+    };
+    for (let ordinal = 1; ordinal <= 12; ordinal++) await checkpoint(plain, ordinal);
+    noted.view();
+    const reads = vi.spyOn(StatementSync.prototype, 'get');
+    const walks = () => reads.mock.contexts.filter(statement => statement instanceof StatementSync &&
+      statement.sourceSQL.includes('WITH RECURSIVE lineage AS') && statement.sourceSQL.includes('manuscript_note_sources')).length;
+    try {
+      for (let ordinal = 13; ordinal <= 15; ordinal++) {
+        await checkpoint(plain, ordinal);
+        expect(plain.view().blocks.some(row => row.note || row.noteLinks)).toBe(false);
+      }
+      expect(walks()).toBe(0);
+      noted.view();
+      const initialWalks = walks();
+      for (let ordinal = 1; ordinal <= 3; ordinal++) {
+        await checkpoint(noted, ordinal);
+        expect(noted.view().blocks.some(row => row.noteLinks?.length)).toBe(true);
+      }
+      expect(walks()).toBe(initialWalks);
+    } finally { reads.mockRestore(); }
+  });
   it('keeps both note links on the absorbing paragraph through a merge and undo', async () => {
     const { book, view } = await importNotes();
     const before = view();

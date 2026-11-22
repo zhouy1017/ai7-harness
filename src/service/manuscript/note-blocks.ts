@@ -58,13 +58,36 @@ export function commitNoteSources(db: DatabaseSync, input: { revisionId: string;
     WHERE n.draft_id = ? ORDER BY n.position`).run(blocks.id, input.revisionId, input.sourceVersionId, input.createdAt, input.draftId).changes);
 }
 
+interface NoteOrigin { revisionId: string; branchId: string; sourceId: string; notesAt: string | null }
+const lastCommittedOrigin = new WeakMap<DatabaseSync, NoteOrigin>();
+
+function notesAtRevision(db: DatabaseSync, branchId: string, revisionId: string): string | null {
+  const prior = lastCommittedOrigin.get(db);
+  if (prior?.branchId === branchId && prior.revisionId === revisionId) return prior.notesAt;
+  const current = db.prepare(`SELECT source_version_id, parent_revision_id, EXISTS(
+    SELECT 1 FROM manuscript_reimport_records WHERE resulting_revision_id = r.revision_id AND branch_id = r.branch_id) reimported
+    FROM manuscript_revisions r WHERE r.revision_id = ? AND r.branch_id = ?`).get(revisionId, branchId);
+  if (!current) return null;
+  const sourceId = asString(current.source_version_id);
+  let notesAt: string | null = null;
+  if (current.parent_revision_id === null || current.reimported === 1) {
+    if (db.prepare('SELECT 1 FROM manuscript_note_sources WHERE revision_id = ? LIMIT 1').get(revisionId)) notesAt = revisionId;
+  } else if (prior?.branchId === branchId && prior.revisionId === current.parent_revision_id && prior.sourceId === sourceId) {
+    notesAt = prior.notesAt;
+  } else if (db.prepare('SELECT 1 FROM manuscript_note_sources WHERE source_version_id = ? LIMIT 1').get(sourceId)) {
+    const origin = db.prepare(`WITH RECURSIVE ${REVISION_IMPORT_LINEAGE} SELECT revision_id FROM lineage child
+      WHERE NOT EXISTS (SELECT 1 FROM lineage parent WHERE parent.revision_id = child.parent_revision_id)
+      AND EXISTS (SELECT 1 FROM manuscript_note_sources WHERE revision_id = child.revision_id)`).get(revisionId, branchId);
+    if (origin) notesAt = asString(origin.revision_id);
+  }
+  if (!db.isTransaction) lastCommittedOrigin.set(db, { revisionId, branchId, sourceId, notesAt });
+  return notesAt;
+}
+
 /** The window's note blocks with what they say about themselves: part, number and the paragraph that refers to them. */
 export function withNoteReferences(db: DatabaseSync, branchId: string, revisionId: string, blocks: ManuscriptBlockProjection[]): ManuscriptBlockProjection[] {
-  if (db.prepare('SELECT 1 FROM manuscript_note_sources LIMIT 1').get() === undefined) return blocks;
-  const origin = db.prepare(`WITH RECURSIVE ${REVISION_IMPORT_LINEAGE} SELECT revision_id FROM lineage child
-    WHERE NOT EXISTS (SELECT 1 FROM lineage parent WHERE parent.revision_id = child.parent_revision_id)`).get(revisionId, branchId);
-  if (!origin) return blocks;
-  const sourceRevision = asString(origin.revision_id);
+  const sourceRevision = notesAtRevision(db, branchId, revisionId);
+  if (sourceRevision === null) return blocks;
   const links = db.prepare(`WITH RECURSIVE refs(block_id, depth) AS (SELECT ?, 0 UNION ALL
     SELECT l.block_id, r.depth + 1 FROM refs r JOIN manuscript_block_lineage l ON l.related_block_id = r.block_id
     JOIN manuscript_command_groups g ON g.command_group_id = l.command_group_id
