@@ -1,4 +1,4 @@
-import { draftClick, draftKey, draftGeometry, draftSelect, markDraftKept, draftReviewRunIds, draftReviewRunsUnchanged } from './mark-drafts.mjs';
+import { draftClick, draftKey, draftGeometry, draftSelect, draftWheelToAnchor, markDraftKept, draftReviewRunIds, draftReviewRunsUnchanged } from './mark-drafts.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { commentsPaneForms, commentsSelectMark, commentsTriageForms } from './comments-pane.mjs';
 import { commentsMarksPaging, railJump } from './marks-paging.mjs';
@@ -717,6 +717,8 @@ async function main() {
     await assertRenderer(renderer, `window.__j05.act('submit')`, 'annotation-empty-submit');
     await waitFor(renderer, `window.__j05.composer()?.querySelector('[role="alert"]')?.hidden === false && window.__j05.mark('annotation', ${JSON.stringify(first)}).length === 0`, 'annotation-empty-refused');
     await renderer.send('Input.insertText',{text:ANNOTATION_BODY});
+    await draftWheelToAnchor(renderer,requireJourney,waitFor,'[data-mark-composer] [data-mark-action="submit"]','annotation-submit-place');
+    await assertRenderer(renderer,`document.querySelector('[data-mark-composer] textarea')?.value===${JSON.stringify(ANNOTATION_BODY)}&&document.activeElement===document.querySelector('[data-mark-composer] textarea')`,'annotation-submit-words-focus');
     await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] [data-mark-action="submit"]','annotation-pointer-submit');
     await waitFor(renderer, `window.__j05.composer() === null && window.__j05.mark('annotation', ${JSON.stringify(first)}).length > 0`, 'annotation-drawn');
     await waitFor(renderer,`document.activeElement===document.querySelector('[data-testid="manuscript-editor"]')`,'annotation-focus-returned');
