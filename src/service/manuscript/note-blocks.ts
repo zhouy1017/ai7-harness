@@ -64,17 +64,18 @@ const lastCommittedOrigin = new WeakMap<DatabaseSync, NoteOrigin>();
 function notesAtRevision(db: DatabaseSync, branchId: string, revisionId: string): string | null {
   const prior = lastCommittedOrigin.get(db);
   if (prior?.branchId === branchId && prior.revisionId === revisionId) return prior.notesAt;
-  const current = db.prepare(`SELECT source_version_id, parent_revision_id, EXISTS(
-    SELECT 1 FROM manuscript_reimport_records WHERE resulting_revision_id = r.revision_id AND branch_id = r.branch_id) reimported
+  const current = db.prepare(`SELECT source_version_id, parent_revision_id, (
+    EXISTS(SELECT 1 FROM manuscript_block_sources WHERE revision_id = r.revision_id) OR
+    EXISTS(SELECT 1 FROM manuscript_note_sources WHERE revision_id = r.revision_id)) imported
     FROM manuscript_revisions r WHERE r.revision_id = ? AND r.branch_id = ?`).get(revisionId, branchId);
   if (!current) return null;
   const sourceId = asString(current.source_version_id);
   let notesAt: string | null = null;
-  if (current.parent_revision_id === null || current.reimported === 1) {
+  if (current.parent_revision_id === null || current.imported === 1) {
     if (db.prepare('SELECT 1 FROM manuscript_note_sources WHERE revision_id = ? LIMIT 1').get(revisionId)) notesAt = revisionId;
   } else if (prior?.branchId === branchId && prior.revisionId === current.parent_revision_id && prior.sourceId === sourceId) {
     notesAt = prior.notesAt;
-  } else if (db.prepare('SELECT 1 FROM manuscript_note_sources WHERE source_version_id = ? LIMIT 1').get(sourceId)) {
+  } else if (db.prepare("SELECT 1 FROM manuscript_block_versions WHERE revision_id = ? AND kind = 'note' LIMIT 1").get(revisionId)) {
     const origin = db.prepare(`WITH RECURSIVE ${REVISION_IMPORT_LINEAGE} SELECT revision_id FROM lineage child
       WHERE NOT EXISTS (SELECT 1 FROM lineage parent WHERE parent.revision_id = child.parent_revision_id)
       AND EXISTS (SELECT 1 FROM manuscript_note_sources WHERE revision_id = child.revision_id)`).get(revisionId, branchId);

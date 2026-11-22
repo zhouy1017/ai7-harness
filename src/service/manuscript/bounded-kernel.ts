@@ -13,7 +13,8 @@ export const REVISION_IMPORT_LINEAGE = `lineage AS (
   SELECT revision_id, parent_revision_id, source_version_id, revision_digest, branch_id FROM manuscript_revisions WHERE revision_id = ? AND branch_id = ?
   UNION SELECT p.revision_id, p.parent_revision_id, p.source_version_id, p.revision_digest, p.branch_id FROM manuscript_revisions p
     JOIN lineage child ON p.revision_id = child.parent_revision_id AND p.source_version_id = child.source_version_id AND p.branch_id = child.branch_id
-    WHERE NOT EXISTS (SELECT 1 FROM manuscript_reimport_records r WHERE r.resulting_revision_id = child.revision_id AND r.branch_id = child.branch_id)
+    WHERE NOT EXISTS (SELECT 1 FROM manuscript_block_sources b WHERE b.revision_id = child.revision_id)
+      AND NOT EXISTS (SELECT 1 FROM manuscript_note_sources n WHERE n.revision_id = child.revision_id)
 )`;
 
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
