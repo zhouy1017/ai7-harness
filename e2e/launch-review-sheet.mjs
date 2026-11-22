@@ -1,3 +1,4 @@
+import { layoutProbe } from './layout-probe.mjs';
 import { capturePointerFailure, pointerClick } from './dispatch-chooser.mjs';
 import { popoverShownInside } from './launch-task-bar.mjs';
 
@@ -55,7 +56,9 @@ export async function launchReviewFromSheet(renderer, waitFor, viewport) {
       await pressReviewControl(renderer, waitFor, 'dialog.review-sheet .task-launch-estimate > summary', `review-plan-${width}`, '.sheet-foot');
       // The estimate is shown once computed; a local-only review has no model call to estimate, so its line may be empty.
       await waitFor(renderer, `document.querySelector('dialog.review-sheet .review-estimate')?.hidden===false`, `review-estimate-${width}`);
+      try {
       await waitFor(renderer, `!!document.querySelector('dialog.review-sheet .task-launch-estimate .review-consequences') && ${popoverShownInside(`document.querySelector('dialog.review-sheet .task-launch-estimate .task-launch-popover')`)}`, `review-plan-reachable-${width}`);
+      } catch(error) { process.stderr.write(`REVIEW_PLAN_GEOMETRY/${JSON.stringify({summary:await layoutProbe(renderer,'dialog.review-sheet .task-launch-estimate > summary'),panel:await layoutProbe(renderer,'dialog.review-sheet .task-launch-estimate .task-launch-popover')})}\n`); throw error; }
       await pressReviewControl(renderer, waitFor, 'dialog.review-sheet .task-launch-estimate > summary', `review-plan-close-${width}`, '.sheet-foot');
     }
   } finally {
