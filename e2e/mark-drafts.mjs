@@ -195,6 +195,10 @@ export async function assertDraftPlace(renderer,check,selector,blockId,from,to,n
 }
 
 async function verifyComposerWords(renderer,check,waitFor,row,field,name,blockId) {
+  // A restored row is drawn at its paragraph; returning to the Book's start need not reveal that later paragraph.
+  await renderer.evaluate(`(() => {__draftProof.restoreFocus=document.activeElement;return true;})()`);
+  await draftWheelToAnchor(renderer,check,waitFor,row,name+'-place');
+  check(await renderer.evaluate(`document.activeElement===__draftProof.restoreFocus&&!document.querySelector('[data-mark-composer]')`)===true,name+'-quiet-navigation');
   await assertDraftPlace(renderer,check,row,blockId,0,1,name+'-row-place');
   await draftClick(renderer,check,waitFor,row,name+'-expand');
   await assertDraftPlace(renderer,check,'[data-mark-composer="create-annotation"]',blockId,0,1,name+'-range',true);
