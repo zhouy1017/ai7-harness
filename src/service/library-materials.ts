@@ -311,7 +311,10 @@ type StoredDecision =
     readonly choice: LearningEligibilityChoice;
     readonly bookId: string | null;
     readonly reason: string | null;
-    readonly attributionOrdinal: number;
+    /** The attribution it was decided under; `null` for 暂不使用 recorded while the item has none. */
+    readonly attributionOrdinal: number | null;
+    /** 暂不使用 (0.7.4): a `deferred` record that also says nobody uses the item. A reader that does not know it reads 稍后决定. */
+    readonly notUsed: boolean;
   };
 
 /** Where an item stands now, from its chain: the attribution in force and the eligibility decided under it. */
@@ -319,6 +322,8 @@ interface Standing {
   readonly attribution: Extract<StoredDecision, { kind: 'attribution' }> | null;
   readonly eligibility: Extract<StoredDecision, { kind: 'eligibility' }> | null;
   readonly eligibilityReset: boolean;
+  /** The 暂不使用 record that stands: set by it, set aside by any later attribution or eligibility. */
+  readonly notUsed: Extract<StoredDecision, { kind: 'eligibility' }> | null;
 }
 
 /** One 资料库 item that waits for the editor's decision (ATTN-009), as 待我处理 reads it. */
@@ -347,6 +352,7 @@ function integer(value: SQLOutputValue | undefined): number {
 function standing(decisions: Iterable<StoredDecision>): Standing & { count: number; last: StoredDecision | null; recent: StoredDecision[] } {
   let attribution: Standing['attribution'] = null;
   let eligibility: Standing['eligibility'] = null;
+  let notUsed: Standing['notUsed'] = null;
   let hadEligibility = false;
   let count = 0;
   let last: StoredDecision | null = null;
@@ -356,16 +362,21 @@ function standing(decisions: Iterable<StoredDecision>): Standing & { count: numb
     last = decision;
     recent.push(decision);
     if (recent.length > MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN) recent.shift();
-    if (decision.kind === 'eligibility') hadEligibility = true;
+    if (decision.kind === 'eligibility' && !decision.notUsed) hadEligibility = true;
     if (decision.kind === 'attribution') {
       attribution = decision;
       eligibility = null;
+      notUsed = null;
+    } else if (decision.notUsed && decision.attributionOrdinal === (attribution?.ordinal ?? null)) {
+      notUsed = decision;
+      if (attribution !== null) eligibility = decision;
     } else if (attribution !== null && decision.attributionOrdinal === attribution.ordinal) {
       eligibility = decision;
+      notUsed = null;
     }
   }
   const eligibilityReset = attribution !== null && eligibility === null && hadEligibility;
-  return { attribution, eligibility, eligibilityReset, count, last, recent };
+  return { attribution, eligibility, eligibilityReset, notUsed, count, last, recent };
 }
 
 /** What the Material Index reads of one kept original (Issue #428, S80a): where it is and what its arrival recorded. */
@@ -503,7 +514,8 @@ export class LibraryMaterialLedger {
       }
       requireLibrary(record.kind === 'eligibility' && ELIGIBILITY_CHOICES.has(record.choice as LearningEligibilityChoice) &&
         record.basis === LEARNING_ELIGIBILITY_BASIS && record.attributionOrdinal === attributionOrdinal &&
-        (record.choice === 'book') === (typeof record.bookId === 'string') && (record.reason === null || typeof record.reason === 'string'),
+        (record.choice === 'book') === (typeof record.bookId === 'string') && (record.reason === null || typeof record.reason === 'string') &&
+        (record.notUsed === undefined || (record.notUsed === true && record.choice === 'deferred' && record.reason === null)),
       'LIBRARY_MATERIAL_DECISION_INVALID', '资料库的决定记录已损坏。');
       yield {
         ...base,
@@ -511,7 +523,8 @@ export class LibraryMaterialLedger {
         choice: record.choice as LearningEligibilityChoice,
         bookId: typeof record.bookId === 'string' ? record.bookId : null,
         reason: record.reason as string | null,
-        attributionOrdinal: attributionOrdinal!,
+        attributionOrdinal,
+        notUsed: record.notUsed === true,
       };
     }
   }
@@ -684,10 +697,13 @@ export class LibraryMaterialLedger {
         this.#bookTitle(decision.attribution.bookId);
         bookId = decision.attribution.bookId;
       }
-      const same = current.attribution !== null && current.attribution.scope === decision.attribution.scope &&
+      const same = current.attribution !== null && current.notUsed === null && current.attribution.scope === decision.attribution.scope &&
         (current.attribution.scope === 'house' || current.attribution.bookId === bookId);
       requireLibrary(!same, 'LIBRARY_ATTRIBUTION_UNCHANGED', '归属没有变化。');
       Object.assign(fields, { scope: decision.attribution.scope }, bookId === null ? {} : { bookId });
+    } else if (decision.kind === 'not-used') {
+      requireLibrary(current.notUsed === null, 'LIBRARY_MATERIAL_NOT_USED_UNCHANGED', '这份资料已经是「暂不使用」。');
+      Object.assign(fields, { choice: 'deferred', reason: null, basis: LEARNING_ELIGIBILITY_BASIS, attributionOrdinal: current.attribution?.ordinal ?? null, notUsed: true });
     } else {
       requireLibrary(ELIGIBILITY_CHOICES.has(decision.choice), 'LEARNING_ELIGIBILITY_INVALID', '学习准入的选项无效。');
       requireLibrary(current.attribution !== null, 'LIBRARY_ATTRIBUTION_REQUIRED', '先定归属，再定学习准入。');
@@ -695,7 +711,7 @@ export class LibraryMaterialLedger {
         '这份资料归属社级，没有可以只纳入的那本书。');
       const reason = learningEligibilityReason(decision.reason);
       if (decision.choice === 'book' && current.attribution.scope === 'book') bookId = current.attribution.bookId;
-      const same = current.eligibility !== null && current.eligibility.choice === decision.choice && current.eligibility.reason === reason;
+      const same = current.eligibility !== null && !current.eligibility.notUsed && current.eligibility.choice === decision.choice && current.eligibility.reason === reason;
       requireLibrary(!same, 'LEARNING_ELIGIBILITY_UNCHANGED', '学习准入没有变化。');
       Object.assign(fields, {
         choice: decision.choice,
@@ -714,7 +730,7 @@ export class LibraryMaterialLedger {
       materialId,
       materialSha256: material.sha256,
       ordinal,
-      kind: decision.kind,
+      kind: decision.kind === 'attribution' ? 'attribution' : 'eligibility',
       ...fields,
       actor: LIBRARY_ACTOR,
       previousSha256,
@@ -723,7 +739,7 @@ export class LibraryMaterialLedger {
     this.#db.prepare(
       `INSERT INTO library_material_decisions(decision_id, material_id, ordinal, kind, book_id, previous_sha256, recorded_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(decisionId, materialId, ordinal, decision.kind, bookId, previousSha256, recordedAt, record.json, record.digest);
+    ).run(decisionId, materialId, ordinal, decision.kind === 'attribution' ? 'attribution' : 'eligibility', bookId, previousSha256, recordedAt, record.json, record.digest);
   }
 
   /**
@@ -813,6 +829,7 @@ export class LibraryMaterialLedger {
       attribution,
       eligibility,
       eligibilityReset: now.eligibilityReset,
+      ...(now.notUsed === null ? {} : { notUsed: { decidedAt: now.notUsed.recordedAt } }),
       reference,
       decisionCount: now.count,
       index: this.#indexOf(this.#original(material)),
@@ -826,14 +843,14 @@ export class LibraryMaterialLedger {
             : { kind: 'attribution', scope: 'house' }
           : { kind: 'eligibility', choice: entry.choice, bookTitle: entry.bookId === null ? null : title(entry.bookId),
             reason: entry.reason === null ? null : reasonFragment(entry.reason, 0, REASON_PREVIEW_UNITS),
-            reasonHasMore: (entry.reason?.length ?? 0) > REASON_PREVIEW_UNITS },
+            reasonHasMore: (entry.reason?.length ?? 0) > REASON_PREVIEW_UNITS, ...(entry.notUsed ? { notUsed: true as const } : {}) },
       })),
     };
   }
 
   /**
    * The items 待我处理 lists in 等待你的决定 (ATTN-009): each one without an attribution, without a Learning Eligibility
-   * decided under the attribution it has, or whose eligibility was left for later — at most `limit`, oldest wait first.
+   * decided under the attribution it has, or whose eligibility was left for later — never one the editor marked 暂不使用 — at most `limit`, oldest wait first.
    */
   attentionReadings(limit: number): LibraryMaterialAttentionReading[] {
     requireLibrary(Number.isSafeInteger(limit) && limit >= 0, 'LIBRARY_MATERIAL_CURSOR_INVALID', '资料库列表数量无效。');
@@ -843,6 +860,7 @@ export class LibraryMaterialLedger {
       const now = standing(this.#decisions(material));
       const scope = now.attribution === null ? 'none' as const : now.attribution.scope;
       const book = now.attribution?.scope === 'book' ? { bookId: now.attribution.bookId, title: this.#bookTitle(now.attribution.bookId) } : null;
+      if (now.notUsed !== null) continue;
       const base = { materialId: material.materialId, title: material.title, kind: material.kind, scope, book, objectSha256: material.source.sha256 };
       if (now.attribution === null) readings.push({ ...base, state: 'library-attribution-pending', at: material.recordedAt });
       else if (now.eligibility === null) readings.push({ ...base, state: 'learning-eligibility-pending', at: now.attribution.recordedAt });
