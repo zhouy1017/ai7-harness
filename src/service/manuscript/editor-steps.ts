@@ -496,8 +496,11 @@ function placeOf(db: DatabaseSync, branchId: string, step: StepRow): { blockId: 
 }
 
 /** The answer for a step set aside: why (its words changed, or its suggestion was handled another way), and what the next press does. */
-function blockedSentence(action: 'undo' | 'redo', step: StepRow, paragraph: number | null, cause: 'text' | 'mark'): string {
-  if (step.kind === 'restore') return `${paragraph === null ? '稿件来源有变化' : `第 ${paragraph.toLocaleString('zh-CN')} 段的位置或内容已变化`}，不能${action === 'undo' ? '撤销' : '重做'}这次恢复。原工作稿仍可在工作概览的版本列表中找到。`;
+function blockedSentence(action: 'undo' | 'redo', step: StepRow, paragraph: number | null, cause: 'text' | 'mark', missing = false): string {
+  if (step.kind === 'restore') {
+    const changed = paragraph === null ? '稿件来源有变化' : missing ? `原第 ${paragraph.toLocaleString('zh-CN')} 段已不存在` : `第 ${paragraph.toLocaleString('zh-CN')} 段的位置或内容已变化`;
+    return `${changed}，不能${action === 'undo' ? '撤销' : '重做'}这次恢复。原工作稿仍可在工作概览的版本列表中找到。`;
+  }
   const place = paragraph === null ? '这一处' : `第 ${paragraph.toLocaleString('zh-CN')} 段`;
   const next = action === 'undo' ? '再按 Ctrl+Z 撤销更早的一步。' : '再按重做会重做后面的一步。';
   if (cause === 'mark') return `${place}的修改建议${action === 'undo' ? '在接受后' : '在撤销后'}已另作处理，「${step.label}」不能${action === 'undo' ? '撤销' : '重做'}。${next}`;
@@ -583,7 +586,7 @@ export function replayEditorStep(host: EditorStepHost, action: 'undo' | 'redo', 
     return {
       action, branchId: after.branchId, revisionId: after.revisionId, revisionLabel: after.revisionLabel,
       journalSequence: after.journalSequence, workingDigest: after.workingDigest, commandGroupId: lastGroup,
-      completionLabel: cause !== null ? blockedSentence(action, step, place.paragraph, cause) : wrote ? done : skippedSentence(action, step),
+      completionLabel: cause !== null ? blockedSentence(action, step, place.paragraph, cause, restoreConflict?.blockId === null) : wrote ? done : skippedSentence(action, step),
       canUndo: nextStep(db, after.branchId, 'undo') !== null, canRedo: nextStep(db, after.branchId, 'redo') !== null,
       stepLabel: step.label, anchorBlockId: place.blockId, paragraph: place.paragraph, blocked,
     };

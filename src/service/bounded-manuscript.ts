@@ -4514,7 +4514,7 @@ export class BoundedManuscriptStore {
         const current = this.#versionRow(binding, binding.revisionId);
         const mismatch = this.#db.prepare(`WITH working AS (SELECT row_number() OVER (ORDER BY order_key) position, block_id, kind, level, text, digest FROM working_blocks WHERE branch_id = ?),
           saved AS (SELECT position, block_id, kind, level, text, digest FROM manuscript_block_versions WHERE revision_id = ?)
-          SELECT coalesce(saved.position,working.position) position, working.block_id
+          SELECT coalesce(working.position,saved.position) position, working.block_id
           FROM saved FULL JOIN working USING (block_id)
           WHERE (saved.position,saved.kind,saved.level,saved.text,saved.digest) IS NOT (working.position,working.kind,working.level,working.text,working.digest)
           ORDER BY position, working.block_id LIMIT 1`).get(branchId, expected);

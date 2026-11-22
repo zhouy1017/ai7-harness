@@ -2847,6 +2847,15 @@ async function main() {
     };
     await versionKey(false);
     await waitFor(renderer, `${editorWords}?.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-ctrl-z');
+    await acknowledgedEdit(renderer, '〔撤销后输入〕', 'version-list-type-after-undo');
+    await versionKey(false);
+    await waitFor(renderer, `!${editorWords}.textContent.includes('〔撤销后输入〕')`, 'version-list-type-after-undo-cleared');
+    await showVersions('version-list-repeat');
+    await clickSelector(renderer, `${versionRow} .button-row > button:last-child`, 'version-list-repeat-restore');
+    await clickSelector(renderer, '.version-selection button.primary', 'version-list-repeat-confirm');
+    await waitFor(renderer, `${editorWords}?.querySelector('p[data-block-id]') && !${editorWords}.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-repeat-restored');
+    await versionKey(false);
+    await waitFor(renderer, `${editorWords}?.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-repeat-undone');
     await versionKey(true);
     await waitFor(renderer, `${editorWords}?.querySelector('p[data-block-id]') && !${editorWords}.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-redo');
     const versionBinding = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(bookId)},historyCursor:null}).then(({manuscriptAnchor}) => ({manuscriptId:manuscriptAnchor.manuscriptId,branchId:manuscriptAnchor.branchId}))`);
