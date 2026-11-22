@@ -1,4 +1,4 @@
-import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import type { DatabaseSync, StatementSync } from 'node:sqlite';
 
 /**
  * Prepared statements kept per connection (Issue #1654, the design's 2 s lock plan): every owner prepares its SQL where it
@@ -6,8 +6,8 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
  * that `run`, `get` or `all` uses finishes before the call returns, so one prepared copy serves every caller; `iterate` keeps
  * its statement open while the caller walks it, so each iteration gets a statement of its own. A connection keeps at most
  * `LIMIT` statements and starts again when it reaches them (SQL built with a varying number of placeholders is the reason).
- * While `DatabaseSync.prototype.prepare` is replaced (a test counting the statements a read prepares and runs), every call goes
- * through it uncached, so it sees each one.
+ * The proxy looks `run`, `get` and `all` up on the statement at each call, so a spy on `StatementSync.prototype` sees every
+ * execution, cached or not.
  */
 const LIMIT = 2048;
 const cached = new WeakSet<DatabaseSync>();
@@ -15,11 +15,9 @@ const cached = new WeakSet<DatabaseSync>();
 export function cacheStatements(db: DatabaseSync): void {
   if (cached.has(db)) return;
   cached.add(db);
-  const native = DatabaseSync.prototype.prepare;
   const prepare = db.prepare.bind(db);
   let statements = new Map<string, StatementSync>();
   db.prepare = (sql: string): StatementSync => {
-    if (DatabaseSync.prototype.prepare !== native) return DatabaseSync.prototype.prepare.call(db, sql);
     let statement = statements.get(sql);
     if (statement === undefined) {
       if (statements.size >= LIMIT) statements = new Map();

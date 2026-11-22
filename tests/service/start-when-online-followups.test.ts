@@ -6,7 +6,7 @@ import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/ass
 import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
 import { parseWritingUnitMessageHeader, parseWritingSynthesisMessageHeader } from '../../src/service/writing/writing-contract.js';
 import { join, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, StatementSync, type SQLInputValue } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -270,24 +270,22 @@ describe('a leads-first Review Run keeps its place in the order (Issue #764 revi
 function approvalStatements<T>(read: () => T): { result: T; ran: number; sql: Set<string> } {
   let ran = 0;
   const sql = new Set<string>();
-  const prepare = DatabaseSync.prototype.prepare;
-  const spy = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, statementSql: string) {
-    const statement = prepare.call(this, statementSql);
-    if (!statementSql.includes('review_run_authorizations')) return statement;
-    return new Proxy(statement, {
-      get: (target, property) => property === 'all' || property === 'get'
-        ? (...parameters: unknown[]) => {
-            ran += 1;
-            sql.add(statementSql);
-            return (Reflect.get(target, property, target) as (...values: unknown[]) => unknown).apply(target, parameters);
-          }
-        : Reflect.get(target, property, target) as unknown,
-    });
-  });
+  // Executions, counted where they run: the store keeps its prepared statements, so a statement is counted each time it runs.
+  const count = (method: 'all' | 'get') => {
+    const original = StatementSync.prototype[method];
+    return vi.spyOn(StatementSync.prototype, method).mockImplementation(function (this: StatementSync, ...parameters: SQLInputValue[]) {
+      if (this.sourceSQL.includes('review_run_authorizations')) {
+        ran += 1;
+        sql.add(this.sourceSQL);
+      }
+      return (original as (...values: SQLInputValue[]) => unknown).apply(this, parameters);
+    } as never);
+  };
+  const spies = [count('all'), count('get')];
   try {
     return { result: read(), ran, sql };
   } finally {
-    spy.mockRestore();
+    for (const spy of spies) spy.mockRestore();
   }
 }
 
