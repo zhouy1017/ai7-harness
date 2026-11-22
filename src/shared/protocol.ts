@@ -793,6 +793,9 @@ export const IPC_CHANNELS = {
   startReplacementCommit: 'ai7:j02:start-replacement-commit',
   commitReplacement: 'ai7:j02:commit-replacement',
   saveMilestone: 'ai7:j02:save-milestone',
+  listBookVersions: 'ai7:j02:list-book-versions',
+  viewBookVersion: 'ai7:j02:view-book-version',
+  restoreBookVersion: 'ai7:j02:restore-book-version',
   inspectDeliverables: 'ai7:j07:inspect-deliverables',
   designatePublicationVersion: 'ai7:j07:designate-publication-version',
   inspectProductionDocuments: 'ai7:j07:inspect-production-documents',
@@ -1119,6 +1122,9 @@ export interface BookManuscriptAnchorProjection {
     state: 'exact' | 'nearest-anchor';
   };
 }
+
+export interface BookVersionScope { bookId: string; manuscriptId: string; branchId: string }
+export interface BookVersionRow { kind: 'revision' | 'milestone' | 'publication'; label: string; revisionId: string; createdAt: string }
 
 export interface BookWorkOverviewProjection {
   book: {
@@ -4785,6 +4791,9 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: SaveMilestoneInput;
     output: MilestoneProjection;
   };
+  listBookVersions: { input: BookVersionScope & { offset: number }; output: { rows: BookVersionRow[]; more: boolean; workingDigest: string; baseRevisionId: string } };
+  viewBookVersion: { input: BookVersionScope & { revisionId: string; cursor: string | null }; output: HistoricalRevisionProjection };
+  restoreBookVersion: { input: BookVersionScope & { revisionId: string; expectedDigest: string; expectedBase: string }; output: { stepId: string; revisionId: string } };
   /**
    * ⑥ 交付物 · 发稿 (Issue #414, plan slice S65), Book-scoped. The read lists the Manuscript's milestones and
    * designations; 设为发稿版本 is one deterministic local command that answers with the 交付物 as they stand.
@@ -5366,6 +5375,9 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   startReplacementCommit(input: ServiceOperationMap['startReplacementCommit']['input']): Promise<ServiceWireOutput<ServiceJobProjection>>;
   commitReplacement(input: ServiceOperationMap['commitReplacement']['input']): Promise<ReplacementCommitProjection>;
   saveMilestone(input: ServiceOperationMap['saveMilestone']['input']): Promise<MilestoneProjection>;
+  listBookVersions(input: ServiceOperationMap['listBookVersions']['input']): Promise<ServiceOperationMap['listBookVersions']['output']>;
+  viewBookVersion(input: ServiceOperationMap['viewBookVersion']['input']): Promise<ServiceOperationMap['viewBookVersion']['output']>;
+  restoreBookVersion(input: ServiceOperationMap['restoreBookVersion']['input']): Promise<ServiceOperationMap['restoreBookVersion']['output']>;
   /** 交付物 of the Book the window is showing (Issue #414): its Manuscript's milestones and Publication Versions. */
   inspectDeliverables(): Promise<DeliverablesProjection>;
   /** 设为发稿版本 over one exact milestone of that Book; an identical repeat of the current one is no change. */

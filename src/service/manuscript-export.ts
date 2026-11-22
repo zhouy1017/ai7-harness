@@ -486,7 +486,7 @@ export interface PackageManifest {
 
 /** One exact version to export, resolved against the Book's primary Manuscript. */
 interface ResolvedTarget {
-  kind: 'current' | 'milestone' | 'report' | 'document' | 'manifest';
+  kind: 'current' | 'revision' | 'milestone' | 'report' | 'document' | 'manifest';
   targetKind: 'manuscript-revision' | 'milestone-version' | 'report' | 'production-document-version' | 'book-delivery-package-version';
   targetId: string;
   milestoneId: string | null;
@@ -592,6 +592,7 @@ function requireFormat(value: unknown): ManuscriptExportFormat {
 function requireTarget(value: unknown): ManuscriptExportTargetInput {
   requireExport(
     isRecord(value) && ((value.kind === 'current' && Object.keys(value).length === 1) ||
+      (value.kind === 'revision' && Object.keys(value).length === 2 && typeof value.revisionId === 'string' && UUID_PATTERN.test(value.revisionId)) ||
       (value.kind === 'milestone' && Object.keys(value).length === 2 && typeof value.milestoneId === 'string' && UUID_PATTERN.test(value.milestoneId)) ||
       (value.kind === 'report' && Object.keys(value).length === 2 && typeof value.reportId === 'string' && UUID_PATTERN.test(value.reportId)) ||
       (value.kind === 'document' && Object.keys(value).length === 3 && typeof value.documentId === 'string' && UUID_PATTERN.test(value.documentId) &&
@@ -600,6 +601,7 @@ function requireTarget(value: unknown): ManuscriptExportTargetInput {
     '导出对象无效。',
   );
   if (value.kind === 'current') return { kind: 'current' };
+  if (value.kind === 'revision') return { kind: 'revision', revisionId: value.revisionId as string };
   if (value.kind === 'document') return { kind: 'document', documentId: value.documentId as string, revisionId: value.revisionId as string };
   return value.kind === 'milestone' ? { kind: 'milestone', milestoneId: value.milestoneId as string } : { kind: 'report', reportId: value.reportId as string };
 }
@@ -1171,6 +1173,7 @@ export class ManuscriptExportStore {
       revisionDigest: resolved.report === null && resolved.document === null && resolved.manifest === null ? resolved.revisionDigest : null,
       revisionLabel: resolved.revisionLabel,
       milestoneLabel: resolved.milestoneLabel,
+      ...(resolved.kind === 'revision' ? { selectedRevision: true } : {}),
       ...(resolved.report === null ? {} : { reportDigest: resolved.report.digest }),
       ...(resolved.document === null ? {} : { documentId: resolved.document.documentId, documentVersionDigest: resolved.revisionDigest }),
       ...(resolved.manifest === null ? {} : {
@@ -1493,6 +1496,12 @@ export class ManuscriptExportStore {
     if (target.kind === 'report') return this.#reportTarget(bookId, target.reportId);
     if (target.kind === 'document') return this.#documentTarget(bookId, target.documentId, target.revisionId);
     let head = this.#head(bookId);
+    if (target.kind === 'revision') {
+      const revision = this.#revision(target.revisionId);
+      requireExport(revision.manuscriptId === head.manuscriptId && revision.branchId === head.branchId, 'EXPORT_TARGET_NOT_FOUND', '所选版本不属于本书主稿。');
+      return { ...revision, kind: 'revision', revisionId: target.revisionId, targetKind: 'manuscript-revision', targetId: target.revisionId,
+        milestoneId: null, milestoneLabel: null, bookTitle: head.bookTitle, savedForExport: false, report: null, document: null, manifest: null };
+    }
     if (target.kind === 'milestone') {
       const row = this.#db.prepare(
         `SELECT mv.milestone_id, mv.label, mv.revision_id FROM milestone_versions mv
@@ -1647,14 +1656,15 @@ export class ManuscriptExportStore {
     const head = this.#head(bookId);
     const revisionId = text(row.revision_id);
     const revision = this.#revision(revisionId);
-    requireExport(revision.revisionDigest === text(row.revision_digest) && revision.manuscriptId === head.manuscriptId,
+    requireExport(revision.revisionDigest === text(row.revision_digest) && revision.manuscriptId === head.manuscriptId && revision.branchId === head.branchId,
       'EXPORT_RECORD_INVALID', '导出准备不再对应其精确修订版。');
     const milestone = text(row.target_kind) === 'milestone-version';
+    const stored = parseCanonicalJson(text(row.canonical_json));
     const label = milestone
       ? (this.#db.prepare('SELECT label FROM milestone_versions WHERE milestone_id = ?').get(text(row.target_id)) as SqlRow | undefined)
       : undefined;
     return {
-      kind: milestone ? 'milestone' : 'current',
+      kind: milestone ? 'milestone' : isRecord(stored) && stored.selectedRevision === true ? 'revision' : 'current',
       targetKind: milestone ? 'milestone-version' : 'manuscript-revision',
       targetId: text(row.target_id),
       milestoneId: milestone ? text(row.target_id) : null,
@@ -2084,6 +2094,9 @@ export class ManuscriptExportStore {
       : null;
     const disposition = text(row.disposition) as ManuscriptExportDisposition;
     const stored = parseCanonicalJson(text(row.canonical_json));
+    const selectedRevision = isRecord(stored) && stored.selectedRevision !== undefined;
+    if (selectedRevision) requireExport(stored.selectedRevision === true && targetKind === 'manuscript-revision' && row.target_id === revisionId,
+      'EXPORT_RECORD_INVALID', '导出记录没有绑定所选修订。');
     if (isRecord(stored) && (stored.wordSource !== undefined || stored.writer === WORD_DOCX_EXPORT_WRITER_IDENTITY)) {
       validateWordExportBinding(stored.wordSource);
       requireExport(typeof stored.wordInputDigest === 'string' && DIGEST_PATTERN.test(stored.wordInputDigest) &&
@@ -2141,7 +2154,7 @@ export class ManuscriptExportStore {
         document: null,
         packageVersion: { packageVersionId: manifest.packageVersionId, versionLabel: manifest.versionLabel },
       } : report !== null ? this.#targetProjection(report) : {
-        kind: targetKind === 'milestone-version' ? 'milestone' : 'current',
+        kind: targetKind === 'milestone-version' ? 'milestone' : selectedRevision ? 'revision' : 'current',
         milestoneId: targetKind === 'milestone-version' ? text(row.target_id) : null,
         milestoneLabel,
         revisionId,

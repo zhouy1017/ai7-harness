@@ -92,6 +92,8 @@ The version list in 工作概览 holds milestones, saved revisions and publicati
 
 ### 4 · One baseline: revision 117, Data Version 2
 
+R5-5 keeps the two immutable revision references for a restore in `editor_step_restore_revisions`; both sides of its marks use `editor_step_mark_anchors`, including detached anchors. The R5-6 conversion must retain existing revision, milestone and publication identities and create this baseline shape without inventing restore steps or anchors for old history.
+
 **The baseline.**
 - One creation path, `createBaselineSchema`, builds the store from the final-shape definitions at **revision 117**. Every predecessor shape and initializer is deleted.
 - Revision 117 is classed `breaking`, so the store becomes **Data Version 2** (Owner item 10, under ADR 0079 §1.1). An older AI7 refuses to open it.

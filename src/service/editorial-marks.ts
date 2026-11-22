@@ -508,7 +508,7 @@ export function workingBlockDigests(db: DatabaseSync, branchId: string): Readonl
  * block whose text the rewrite changed covers the whole block instead (Issue #533): its index was
  * counted in other text, so a new version written there would guess where the editor should place it.
  */
-export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: string, before: ReadonlyMap<string, string>): void {
+export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: string, before: ReadonlyMap<string, string>, keepUnchanged = false): void {
   if (!marksRelationExists(db)) return;
   const state = db.prepare('SELECT journal_sequence FROM branch_working_state WHERE branch_id = ?').get(branchId) as SqlRow | undefined;
   requireMark(state !== undefined, 'MANUSCRIPT_NOT_FOUND', '稿件工作状态不存在。');
@@ -534,6 +534,7 @@ export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: strin
       continue;
     }
     const blockText = text(row.block_text);
+    if (keepUnchanged && before.get(text(row.block_id)) === text(row.block_digest)) continue;
     let parts = segmented.get(blockText);
     if (parts === undefined) {
       parts = graphemesOf(blockText);

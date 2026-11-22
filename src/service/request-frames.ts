@@ -391,6 +391,7 @@ function validExportFormat(value: unknown): boolean {
 function validExportTarget(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (value.kind === 'current') return hasExactKeys(value, ['kind']);
+  if (value.kind === 'revision') return hasExactKeys(value, ['kind', 'revisionId']) && validUuid(value.revisionId);
   // One recorded version of a 审阅报告 (Issue #500, S64b part 2).
   if (value.kind === 'report') return hasExactKeys(value, ['kind', 'reportId']) && validUuid(value.reportId);
   // One saved version of a Production Document (Issue #415, S66b).
@@ -2810,6 +2811,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectDeliverables': {
       const input = requireInput(value.input, ['bookId'], tentativeId);
       if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'listBookVersions':
+    case 'viewBookVersion':
+    case 'restoreBookVersion': {
+      const keys = op === 'restoreBookVersion' ? ['revisionId', 'expectedBase', 'expectedDigest'] : op === 'viewBookVersion' ? ['revisionId', 'cursor'] : ['offset'];
+      const input = requireInput(value.input, ['bookId', 'manuscriptId', 'branchId', ...keys], tentativeId);
+      if (![input.bookId, input.manuscriptId, input.branchId].every(validUuid) || (op !== 'listBookVersions' && !validUuid(input.revisionId)) ||
+        (op === 'restoreBookVersion' && (!validUuid(input.expectedBase) || typeof input.expectedDigest !== 'string' || !HEX_DIGEST_PATTERN.test(input.expectedDigest))) ||
+        (op === 'listBookVersions' && !isSafeInteger(input.offset)) || (op === 'viewBookVersion' && !(input.cursor === null || isBoundedString(input.cursor, 1024)))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'designatePublicationVersion': {

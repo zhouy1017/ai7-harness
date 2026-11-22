@@ -1119,6 +1119,12 @@
   },
   {
    "type": "index",
+   "name": "sqlite_autoindex_editor_step_restore_revisions_1",
+   "tbl_name": "editor_step_restore_revisions",
+   "sql": null
+  },
+  {
+   "type": "index",
    "name": "sqlite_autoindex_editor_steps_1",
    "tbl_name": "editor_steps",
    "sql": null
@@ -4223,13 +4229,19 @@
    "type": "table",
    "name": "editor_step_mark_anchors",
    "tbl_name": "editor_step_mark_anchors",
-   "sql": "CREATE TABLE editor_step_mark_anchors (\n    step_id TEXT NOT NULL REFERENCES editor_steps(step_id),\n    side TEXT NOT NULL CHECK(side IN ('pre', 'post')),\n    mark_id TEXT NOT NULL REFERENCES editorial_marks(mark_id),\n    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),\n    from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),\n    to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),\n    anchor_state TEXT NOT NULL CHECK(anchor_state IN ('exact', 'drifted')),\n    PRIMARY KEY(step_id, side, mark_id)\n  ) STRICT"
+   "sql": "CREATE TABLE editor_step_mark_anchors (\n    step_id TEXT NOT NULL REFERENCES editor_steps(step_id),\n    side TEXT NOT NULL CHECK(side IN ('pre', 'post')),\n    mark_id TEXT NOT NULL REFERENCES editorial_marks(mark_id),\n    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),\n    from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),\n    to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),\n    anchor_state TEXT NOT NULL CHECK(anchor_state IN ('exact', 'drifted', 'detached')),\n    PRIMARY KEY(step_id, side, mark_id)\n  ) STRICT"
   },
   {
    "type": "table",
    "name": "editor_step_parts",
    "tbl_name": "editor_step_parts",
    "sql": "CREATE TABLE editor_step_parts (\n    step_id TEXT NOT NULL REFERENCES editor_steps(step_id),\n    seq INTEGER NOT NULL CHECK(seq > 0),\n    command_group_id TEXT REFERENCES manuscript_command_groups(command_group_id),\n    slot_step_id TEXT REFERENCES editor_steps(step_id),\n    slot INTEGER CHECK(slot > 0),\n    inline_mark_id TEXT REFERENCES editorial_marks(mark_id),\n    CHECK((command_group_id IS NOT NULL) + (slot IS NOT NULL) + (inline_mark_id IS NOT NULL) = 1),\n    CHECK((slot IS NULL) = (slot_step_id IS NULL)),\n    PRIMARY KEY(step_id, seq)\n  ) STRICT"
+  },
+  {
+   "type": "table",
+   "name": "editor_step_restore_revisions",
+   "tbl_name": "editor_step_restore_revisions",
+   "sql": "CREATE TABLE editor_step_restore_revisions (\n    step_id TEXT PRIMARY KEY REFERENCES editor_steps(step_id),\n    pre_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),\n    post_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id)\n  ) STRICT"
   },
   {
    "type": "table",

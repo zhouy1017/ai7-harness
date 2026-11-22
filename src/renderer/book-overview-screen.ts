@@ -19,6 +19,7 @@ import { SAMPLE_GUIDANCE_LABELS } from './onboarding-labels.js';
 import { type AnalysisTabId } from './baseline-analysis-card.js';
 import { type RecoveryReturnContext } from './import-review.js';
 import type { RendererApi } from '../shared/protocol.js';
+import { mountBookVersions } from './book-versions.js';
 
 interface Options {
   panel: () => HTMLElement;
@@ -328,6 +329,8 @@ function renderBookOverview(
     for (const host of [reviewHost, evaluationHost, analysisHost, deliverablesHost]) host.classList.add('book-overview-tile');
     grid.append(reviewHost, evaluationHost, analysisHost, deliverablesHost);
     content.append(grid);
+    if (anchor !== null) content.append(mountBookVersions({ bookId: overview.book.bookId, manuscriptId: anchor.manuscriptId, branchId: anchor.branchId },
+      { api, element, button, setStatus, errorMessage: rendererErrorMessage, open: () => renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: overview.book.bookId, bookTitle: overview.book.title }, recoveryReturn) }));
     const sources = element('section', 'overview-line book-sources-summary');
     sources.append(element('h3', undefined, '来源与证据'),
       button('查看来源与证据', 'quiet', () => renderBookSources(overview.book.bookId, overview.book.title)));

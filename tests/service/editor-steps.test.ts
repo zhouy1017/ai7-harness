@@ -88,6 +88,85 @@ const interactions = (): string[] => ledger((db) => (db.prepare(`SELECT a.intera
 const steps = (): Array<{ kind: string; status: string }> => ledger((db) => db.prepare('SELECT kind, status FROM editor_steps WHERE branch_id = ? ORDER BY ordinal').all(book.branchId) as Array<{ kind: string; status: string }>);
 
 describe('undo by editor step (ADR 0105 §1)', () => {
+  const scope = () => ({ ...book, bookId: window().bookId });
+  const versions = () => store.listBookVersions({ ...scope(), offset: 0 });
+  const restore = (revisionId: string) => store.restoreBookVersion({ ...scope(), revisionId, expectedBase: window().revisionId, expectedDigest: window().workingDigest });
+
+  it('keeps the pre-restore revision, anchor positions and later decisions across restart, undo and redo', async () => {
+    const original = window().revisionId;
+    const [target, other] = paragraphs();
+    const stable = suggestion(other!.blockId, 1, 4);
+    const stableAnchor = markAt(stable);
+    const addedBlock = randomUUID();
+    journal(target!.blockId, 18, '', 18, { kind: 'split', newBlockId: addedBlock });
+    const removed = suggestion(addedBlock, 1, 3);
+    const removedAnchor = markAt(removed);
+    journal(target!.blockId, 0, '〔恢复测试〕');
+    const changed = suggestion(target!.blockId, 0, 6);
+    const before = texts();
+    const result = restore(original);
+    const autosave = versions().rows.find(row => row.label.startsWith('恢复前自动保存'))!;
+    expect(store.viewBookVersion({ ...scope(), revisionId: autosave.revisionId, cursor: null }).blocks.every((block, index) => block.text === before[index])).toBe(true);
+    expect(markAt(stable)).toEqual(stableAnchor);
+    expect(markAt(removed).anchorState).toBe('detached');
+    expect(markAt(changed).anchorState).toBe('drifted');
+    store.recordChangeSuggestionDecision({ ...binding(), markId: stable, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: null });
+    const decision = markAt(stable).status;
+    store.markCleanShutdown(); store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(undo(result.stepId)).toMatchObject({ blocked: false, canUndo: false });
+    expect(JSON.stringify(texts()) === JSON.stringify(before)).toBe(true);
+    expect(markAt(removed)).toEqual(removedAnchor);
+    expect(markAt(changed).anchorState).toBe('exact');
+    expect(markAt(stable).status).toBe(decision);
+    expect(redo().blocked).toBe(false);
+    expect(markAt(removed).anchorState).toBe('detached');
+    expect(markAt(stable).status).toBe(decision);
+    expect(versions().rows.some(row => row.revisionId === autosave.revisionId)).toBe(true);
+  });
+
+  it('refuses a whole-version undo while a later accepted change still stands', () => {
+    const target = paragraphs()[0]!;
+    const revision = window().revisionId;
+    journal(target.blockId, 0, '〔旧稿〕');
+    restore(revision);
+    const deletion = suggestion(target.blockId, 4, 8, '');
+    accept(deletion);
+    journal(target.blockId, 3, '〔跨〕', 5);
+    undo();
+    expect(undo().blocked).toBe(true);
+    const before = window();
+    const count = versions().rows.length;
+    expect(undo()).toMatchObject({ blocked: true, stepLabel: '恢复稿件版本' });
+    expect(window().workingDigest).toBe(before.workingDigest);
+    expect(window().revisionId).toBe(before.revisionId);
+    expect(versions().rows).toHaveLength(count);
+  });
+
+  it('rejects stale or foreign selections and rolls back the autosave, history, anchors and working state together', () => {
+    const revision = window().revisionId;
+    const target = paragraphs()[0]!;
+    const mark = suggestion(target.blockId, 4, 8);
+    const stale = versions();
+    journal(target.blockId, 0, '〔旧稿〕');
+    const before = window();
+    const list = versions();
+    const history = steps();
+    const anchor = markAt(mark);
+    expect(code(() => store.restoreBookVersion({ ...scope(), revisionId: revision, expectedBase: stale.baseRevisionId, expectedDigest: stale.workingDigest }))).toBe('VERSION_STALE');
+    expect(code(() => store.listBookVersions({ ...scope(), bookId: randomUUID(), offset: 0 }))).toBe('VERSION_SCOPE_INVALID');
+    expect(code(() => store.viewBookVersion({ ...scope(), revisionId: randomUUID(), cursor: null }))).toBe('VERSION_NOT_FOUND');
+    expect(code(() => restore(randomUUID()))).toBe('VERSION_NOT_FOUND');
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      db.exec("CREATE TRIGGER stop_restore BEFORE INSERT ON editor_step_mark_anchors WHEN NEW.side='post' BEGIN SELECT RAISE(ABORT,'restore stopped'); END");
+      expect(() => restore(revision)).toThrow();
+    } finally { db.close(); }
+    expect(versions()).toEqual(list);
+    expect(window().workingDigest).toBe(before.workingDigest);
+    expect(markAt(mark)).toEqual(anchor);
+    expect(steps()).toEqual(history);
+  });
   it('accept X, type B, Ctrl+Z, Ctrl+Z, redo, redo: B stays undone until its own redo, and the text equals the state after B', () => {
     const [x, b] = paragraphs() as [ManuscriptWindowProjection['blocks'][number], ManuscriptWindowProjection['blocks'][number]];
     const original = texts();

@@ -1,0 +1,71 @@
+import type { BookVersionRow, BookVersionScope, RendererApi } from '../shared/protocol.js';
+import { mountManuscriptExport } from './manuscript-export.js';
+
+export function mountBookVersions(scope: BookVersionScope, options: {
+  api: RendererApi;
+  element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K];
+  button(label: string, className: 'primary' | 'secondary' | 'quiet', action: () => void): HTMLButtonElement;
+  setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
+  errorMessage(error: unknown, fallback: string): string;
+  open(): Promise<void>;
+}): HTMLElement {
+  const { api, element, button, setStatus } = options;
+  const root = element('details', 'review-section book-versions');
+  const list = element('ol');
+  const selection = element('div', 'version-selection');
+  const pages = element('div', 'button-row');
+  const exportSlot = element('div');
+  root.append(element('summary', undefined, '版本列表'), list, pages, selection, exportSlot);
+  let request = 0;
+  let pending = false;
+  const exports = mountManuscriptExport({ root: exportSlot, bookId: scope.bookId, api, setStatus, errorMessage: options.errorMessage,
+    onChanged: () => {}, openerOf: () => null });
+  const fail = (error: unknown) => { if (root.isConnected) setStatus(options.errorMessage(error, '版本操作未完成，请刷新后再试。'), 'error'); };
+  async function load(offset: number): Promise<void> {
+    const current = ++request;
+    selection.replaceChildren();
+    try {
+      const page = await api.listBookVersions({ ...scope, offset });
+      if (!root.isConnected || current !== request) return;
+      list.replaceChildren(); pages.replaceChildren();
+      for (const row of page.rows) {
+        const item = element('li'); item.dataset['kind'] = row.kind; item.dataset['revisionId'] = row.revisionId;
+        const actions = element('div', 'button-row');
+        actions.append(button('查看', 'quiet', () => void view(row, null)), exports.menu({ kind: 'revision', revisionId: row.revisionId }, row.label),
+          button('恢复到此版本', 'secondary', () => {
+            ++request;
+            const confirm = button('确认恢复', 'primary', async () => {
+              if (pending) return;
+              pending = true; confirm.disabled = true;
+              try {
+                await api.restoreBookVersion({ ...scope, revisionId: row.revisionId, expectedDigest: page.workingDigest, expectedBase: page.baseRevisionId });
+                if (!root.isConnected) return;
+                setStatus(`已恢复：${row.label}。原工作稿已自动保存。`, 'success');
+                await options.open();
+              } catch (error) { fail(error); await load(offset); } finally { pending = false; }
+            });
+            selection.replaceChildren(element('p', undefined, `恢复「${row.label}」？当前工作稿会存为「恢复前自动保存」。恢复后可按 Ctrl+Z 撤销。`),
+              confirm, button('取消', 'quiet', () => selection.replaceChildren()));
+            confirm.focus();
+          }));
+        item.append(element('strong', undefined, row.label), element('time', undefined, new Date(row.createdAt).toLocaleString('zh-CN')), actions); list.append(item);
+      }
+      if (offset > 0) pages.append(button('上一页版本', 'quiet', () => void load(Math.max(0, offset - 30))));
+      if (page.more) pages.append(button('下一页版本', 'quiet', () => void load(offset + page.rows.length)));
+    } catch (error) { if (current === request) fail(error); }
+  }
+  async function view(row: BookVersionRow, cursor: string | null): Promise<void> {
+    const current = ++request;
+    try {
+      const page = await api.viewBookVersion({ ...scope, revisionId: row.revisionId, cursor });
+      if (current !== request || !root.isConnected) return;
+      selection.replaceChildren(element('h4', undefined, `${row.label}（只读）`), element('p', undefined, page.position.label),
+        ...page.blocks.map(block => element('p', 'version-paragraph', block.text)));
+      if (page.previousCursor) selection.append(button('上一页正文', 'quiet', () => void view(row, page.previousCursor)));
+      if (page.nextCursor) selection.append(button('下一页正文', 'quiet', () => void view(row, page.nextCursor)));
+      selection.scrollIntoView({ block: 'nearest' });
+    } catch (error) { if (current === request) fail(error); }
+  }
+  root.addEventListener('toggle', () => { if (root.open) void load(0); else ++request; });
+  return root;
+}

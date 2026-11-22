@@ -71,8 +71,13 @@ export const EDITOR_STEP_SCHEMA_SQL = {
     block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
     from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
     to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),
-    anchor_state TEXT NOT NULL CHECK(anchor_state IN ('exact', 'drifted')),
+    anchor_state TEXT NOT NULL CHECK(anchor_state IN ('exact', 'drifted', 'detached')),
     PRIMARY KEY(step_id, side, mark_id)
+  ) STRICT`,
+  editor_step_restore_revisions: `CREATE TABLE editor_step_restore_revisions (
+    step_id TEXT PRIMARY KEY REFERENCES editor_steps(step_id),
+    pre_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    post_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id)
   ) STRICT`,
 } as const;
 
@@ -239,6 +244,14 @@ export function supersedeAllSteps(db: DatabaseSync, branchId: string): void {
   db.prepare("UPDATE editor_steps SET status = 'superseded' WHERE branch_id = ? AND status <> 'superseded'").run(branchId);
 }
 
+export function openRestoreStep(db: DatabaseSync, branchId: string, pre: string, post: string): string {
+  supersedeAllSteps(db, branchId);
+  db.prepare("UPDATE manuscript_command_groups SET status = 'superseded' WHERE branch_id = ? AND status IN ('applied','undone')").run(branchId);
+  const stepId = openStep(db, branchId, 'restore', '恢复稿件版本', null, 1);
+  db.prepare('INSERT INTO editor_step_restore_revisions VALUES (?, ?, ?)').run(stepId, pre, post);
+  return stepId;
+}
+
 // ---- mark anchors of a split or merge step ----------------------------------------------------------------------------
 
 /** The anchors of `markIds` as they stand now, recorded as one side of `stepId`. */
@@ -246,7 +259,7 @@ export function recordStepAnchors(db: DatabaseSync, stepId: string | null, side:
   if (stepId === null || markIds.length === 0) return;
   db.prepare(`INSERT INTO editor_step_mark_anchors(step_id, side, mark_id, block_id, from_grapheme, to_grapheme, anchor_state)
     SELECT ?, ?, mark_id, block_id, from_grapheme, to_grapheme, anchor_state FROM editorial_marks
-    WHERE mark_id IN (SELECT value FROM json_each(?)) AND anchor_state IN ('exact', 'drifted')`).run(stepId, side, JSON.stringify(markIds));
+    WHERE mark_id IN (SELECT value FROM json_each(?))`).run(stepId, side, JSON.stringify(markIds));
 }
 
 /** The recorded marks of `stepId` that stand now exactly on its `side` anchor, read before a replay moves them. */
@@ -279,6 +292,7 @@ export interface EditorStepHost {
   readonly db: DatabaseSync;
   /** The branch as it stands now (read afresh after every write), refusing a branch under recovery. */
   binding(): EditorStepBinding;
+  replaceFromRevision(revisionId: string, expectedRevisionId: string): void;
   /** The service lifetime's high-water mark, against the binding read before the write. */
   recordLifetimeWrite(before: EditorStepBinding, sequence: number, workingDigest: string, durableAt: string): void;
   readonly lifetimeId: string;
@@ -389,6 +403,15 @@ function slotState(db: DatabaseSync, stepId: string, slot: number): { effectId: 
 /** Every part of `step`, newest first for an undo, oldest first for a redo, written through its owner. */
 function replayStep(host: EditorStepHost, step: StepRow, action: 'undo' | 'redo'): string | null {
   const db = host.db;
+  if (step.kind === 'restore') {
+    const pair = one(db.prepare('SELECT * FROM editor_step_restore_revisions WHERE step_id = ?').all(step.stepId) as SqlRow[], 'HISTORY_CORRUPT', '恢复步骤缺少版本记录。');
+    const undo = action === 'undo';
+    const marks = marksStandingOn(db, step.stepId, undo ? 'post' : 'pre');
+    host.replaceFromRevision(asString(undo ? pair.pre_revision_id : pair.post_revision_id), asString(undo ? pair.post_revision_id : pair.pre_revision_id));
+    putStepAnchors(db, step.stepId, undo ? 'pre' : 'post', marks, host.binding().journalSequence);
+    contextOf(db).replay!.wrote = true;
+    return null;
+  }
   const parts = step.commandGroupId !== null
     ? [{ command_group_id: step.commandGroupId, slot_step_id: null, slot: null, inline_mark_id: null }] as SqlRow[]
     : db.prepare(`SELECT * FROM editor_step_parts WHERE step_id = ? ORDER BY seq ${action === 'undo' ? 'DESC' : 'ASC'}`).all(step.stepId) as SqlRow[];
@@ -468,6 +491,7 @@ function placeOf(db: DatabaseSync, branchId: string, step: StepRow): { blockId: 
 
 /** The answer for a step set aside: why (its words changed, or its suggestion was handled another way), and what the next press does. */
 function blockedSentence(action: 'undo' | 'redo', step: StepRow, paragraph: number | null, cause: 'text' | 'mark'): string {
+  if (step.kind === 'restore') return `稿件还有生效的修改，不能${action === 'undo' ? '撤销' : '重做'}这次恢复。原工作稿仍可在工作概览的版本列表中找到。`;
   const place = paragraph === null ? '这一处' : `第 ${paragraph.toLocaleString('zh-CN')} 段`;
   const next = action === 'undo' ? '再按 Ctrl+Z 撤销更早的一步。' : '再按重做会重做后面的一步。';
   if (cause === 'mark') return `${place}的修改建议${action === 'undo' ? '在接受后' : '在撤销后'}已另作处理，「${step.label}」不能${action === 'undo' ? '撤销' : '重做'}。${next}`;
@@ -520,7 +544,7 @@ export function replayEditorStep(host: EditorStepHost, action: 'undo' | 'redo', 
     requireBounded(before.workingDigest === expectedWorkingDigest, 'HISTORY_STALE', '稿件已变化，请刷新历史状态。');
     const step = nextStep(db, before.branchId, action);
     if (step === null) throw new BoundedStoreError(action === 'undo' ? 'NOTHING_TO_UNDO' : 'NOTHING_TO_REDO', action === 'undo' ? '没有可撤销的修改。' : '没有可重做的修改。');
-    requireBounded(expectedStepId === undefined || expectedStepId === step.stepId, 'HISTORY_STEP_CHANGED', '这一批之后又有新的修改；请先按 Ctrl+Z 撤销后来的修改，或在这一批的任一张卡片上撤销本次修改。');
+    requireBounded(expectedStepId === undefined || expectedStepId === step.stepId, 'HISTORY_STEP_CHANGED', '此步骤之后又有新的修改；请先撤销后来的修改。');
     const context = contextOf(db);
     requireBounded(context.replay === null, 'HISTORY_CORRUPT', '撤销不能嵌套。');
     let lastGroup: string | null = null;

@@ -116,6 +116,7 @@ const BOOK_OWNERSHIP_CALLS = new Set<keyof RendererApi>([
   'getAnalysisRevisionOverview', 'getAnalysisRevisionUnits', 'getAnalysisRunReportRows', 'getBaselineAnalysisPage',
   'getBaselineAnalysisRangePlan', 'getBookOverview', 'getBookWorkbenchRoute', 'getCoverageManifestUnits',
   'getEditorialMarkCard', 'getHistoricalRevision', 'getImportStartup', 'getManuscriptApplyOutcome',
+  'listBookVersions', 'viewBookVersion', 'restoreBookVersion',
   'getManuscriptRail', 'getManuscriptWindow', 'getManuscriptWindowAt', 'getOutline',
   'getReimportLineageSourceVersionPage', 'getReimportMappingPage', 'getSearchResults', 'getStartup',
   'getTaskPlanPage', 'holdBackgroundAnalysisEnrollment', 'inspectAgentWorkspace', 'inspectAiEditLocks',
