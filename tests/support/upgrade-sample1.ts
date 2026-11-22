@@ -30,8 +30,8 @@ export async function legacySampleService(root: string, codeRoot: string, revisi
   return (dataRoot: string) => service.EditorialStore.open(dataRoot, checkout);
 }
 
-export async function upgradeWithEarlierOrigin(root: string,codeRoot: string): Promise<void> {
-  const {entry} = await historicalModule(root,codeRoot,'416adb15a9dcf76b2f49e202775597645286c18e','in-app-upgrade.ts');
+export async function upgradeWithEarlierOrigin(root: string,codeRoot: string,revision: string): Promise<void> {
+  const {entry} = await historicalModule(root,codeRoot,revision,'in-app-upgrade.ts');
   const earlier = createRequire(import.meta.url)(entry) as typeof import('../../src/service/in-app-upgrade.js');
   await earlier.beginUpgrade(root);
   await earlier.resumeUpgrade(root,'0.8.0');

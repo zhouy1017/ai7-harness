@@ -117,18 +117,15 @@ export function rollbackDataPeak(currentBytes: number, backup?: { archive: numbe
   return Math.max(extractionPeak,publicationPeak) + MAX_MANIFEST_BYTES;
 }
 
-async function requireRollbackSpace(root: string, state: UpgradeState, fallback: boolean, files: DatabasePackageMember[], repairBytes: number, oldOnlyBytes = 0): Promise<void> {
+async function requireRollbackSpace(root: string, state: UpgradeState, fallback: boolean, files: DatabasePackageMember[], repairBytes: number, oldOnlyBytes: number, freeDataBytes?: number): Promise<void> {
   const db = await checkedStore(root,join(root,'store'));
   const sqlBytes = (await lstat(db)).size + (existsSync(db+'-wal') ? (await lstat(db+'-wal')).size : 0);
   const currentBytes = files.reduce((n,member) => n + member.bytes,sqlBytes + 2 * repairBytes + oldOnlyBytes);
   const volume = await statfs(root);
-  if (fallback && ![state.backupStoreBytes,state.backupPayloadBytes].every(bytes => typeof bytes === 'number' && Number.isSafeInteger(bytes) && bytes >= 0)) {
-    await backupMembers(root,state,false);
-  }
   const peak = rollbackDataPeak(currentBytes,fallback ? {
     archive: state.backup!.backup.byteLength, store: state.backupStoreBytes!, files: state.backupPayloadBytes!
   } : undefined);
-  const missing = peak - volume.bavail * volume.bsize;
+  const missing = peak - (freeDataBytes ?? volume.bavail * volume.bsize);
   requireStore(missing <= 0,'UPGRADE_SPACE',`回退的临时文件空间不足，还差 ${Math.ceil(missing / 1048576)} MB。`);
 }
 
@@ -373,6 +370,9 @@ async function currentMembers(root: string,note: string,state: UpgradeState,snap
     ...(authenticate && !state.currentManifestDigest ? [...sealed,remembered] : [remembered,...sealed]),
     ...[snapshot,root].map(dir => async () => JSON.stringify(await readMembers(dir)))
   ];
+  const observed = new Set<string>();
+  const agreed = new Map<string,string>();
+  let selected: {json: string; digest: string; files: DatabasePackageMember[]} | undefined;
   for (const read of candidates) {
     const json = await read().catch(() => null);
     if (json === null) continue;
@@ -382,6 +382,7 @@ async function currentMembers(root: string,note: string,state: UpgradeState,snap
     try { files = JSON.parse(json); } catch { continue; }
     if (!Array.isArray(files) || !files.every(isDatabasePackageMember) ||
       files.some(file => file.path === DATABASE_PACKAGE_STORE_MEMBER) || new Set(files.map(file => file.path.toLowerCase())).size !== files.length) continue;
+    for (const file of files) observed.add(file.path);
     if (authenticate) {
       try { await authenticate(files); }
       catch (error) {
@@ -389,12 +390,21 @@ async function currentMembers(root: string,note: string,state: UpgradeState,snap
         continue;
       }
     }
-    requireStore(Boolean(state.currentManifestDigest || authenticate),'UPGRADE_FILES_INVALID','缺少可核对的文件清单。');
-    if (json !== recorded) await writeAtomic(path,json);
-    state.currentManifestDigest = digest;
-    return files;
+    if (state.currentManifestDigest) { selected = {json,digest,files}; break; }
+    requireStore(authenticate,'UPGRADE_FILES_INVALID','缺少可核对的文件清单。');
+    // Without a surviving commitment, an inventory that satisfies SQLite can still omit exported files.
+    // Compare every source before selecting a complete candidate. Conflicting valid versions need a receipt.
+    for (const file of files) {
+      const earlier = agreed.get(file.path);
+      requireStore(earlier === undefined || earlier === file.sha256,'UPGRADE_FILES_INVALID','各份清单记载的文件内容不一致。');
+      agreed.set(file.path,file.sha256);
+    }
+    if (!selected || files.length > selected.files.length) selected = {json,digest,files};
   }
-  requireStore(false,'UPGRADE_FILES_INVALID','回退前的文件清单核对失败。');
+  requireStore(selected && (state.currentManifestDigest || selected.files.length === observed.size),'UPGRADE_FILES_INVALID','回退前的完整文件清单核对失败。');
+  if (selected.json !== recorded) await writeAtomic(path,selected.json);
+  state.currentManifestDigest = selected.digest;
+  return selected.files;
 }
 
 async function installMembers(root: string, sources: string[], expected: DatabasePackageMember[], note: string, preserved: DatabasePackageMember[]): Promise<void> {
@@ -772,26 +782,31 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
           }
         });
         const missingOld = original.filter(file => live.get(file.path) !== file.sha256);
+        const oldBytes = missingOld.reduce((total,file) => total + file.bytes,0);
         let ready = old;
         try {
           await verifyOld(root, state);
         } catch (error) {
           if (isStorageFullError(error)) throw error;
           if (archive) {
-            await requireRollbackSpace(root,state,true,current,repairBytes);
+            if (!state.backupStoreDigest || ![state.backupStoreBytes,state.backupPayloadBytes].every(bytes => typeof bytes === 'number' && Number.isSafeInteger(bytes) && bytes >= 0)) {
+              await backupMembers(root,state,false);
+            }
+            await requireRollbackSpace(root,state,true,current,repairBytes,0,freeDataBytes);
+            // A subsequent restart may have only the completed extraction and this journal.
+            await writePhase(root,state);
             await ensureCanonicalDataDirectory(root, 'shell', basename(note), 'restore');
             await extractReplacement(archiveRoot, archive, backup.backup.sha256);
           } else {
             requireStore(existsSync(join(incoming,'store')),'UPGRADE_BACKUP_FAILED','升级前备份缺失或已变化。');
-            await requireRollbackSpace(root,state,false,current,repairBytes);
+            await requireRollbackSpace(root,state,false,current,repairBytes,oldBytes,freeDataBytes);
           }
           await verifyExtractedBackup(root,state,incoming);
           ready = join(incoming, 'store');
           state.fallback = true;
         }
         if (!state.fallback) {
-          const oldBytes = missingOld.reduce((total,file) => total + file.bytes,0);
-          await requireRollbackSpace(root,state,false,current,repairBytes,oldBytes);
+          await requireRollbackSpace(root,state,false,current,repairBytes,oldBytes,freeDataBytes);
           if (missingOld.length) {
             await ensureCanonicalDataDirectory(note,'old-payloads');
             await collectMembers(missingOld,[legacyFiles,saved,previous,prepared,incoming],{root:legacyFiles,note});
