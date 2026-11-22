@@ -1033,6 +1033,22 @@ it.each([['historical','removed'],['historical','added'],['current','removed'],[
     expect(await readFile(join(note,receipt))).toEqual(first);
   }
   await rm(join(parked,'ai7.sqlite'));
+  await expect(resumeUpgrade(root,'0.8.0',(stage,renamed) => {
+    if (stage === 'return-new' && renamed) throw Error('interrupted');
+  })).rejects.toThrow('interrupted');
+  expect(existsSync(parked)).toBe(false);
+  expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
+  expect(existsSync(join(root,member))).toBe(change === 'removed');
+  const incomplete = {...bound};
+  delete incomplete.currentManifestDigest;
+  const missingCommitment = JSON.stringify(incomplete);
+  await writeFile(phase,missingCommitment);
+  await writeFile(join(prepared,receipt),first);
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  expect(await readFile(phase,'utf8')).toBe(missingCommitment);
+  expect(existsSync(join(root,member))).toBe(change === 'removed');
+  expect(existsSync(join(root,'store','payloads',member))).toBe(change === 'added');
+  await writeFile(join(root,'store',receipt),JSON.stringify(second));
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
   expect(existsSync(join(root,member))).toBe(change === 'added');
   await verifyLibraryFiles(root,117);

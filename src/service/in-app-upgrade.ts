@@ -300,11 +300,12 @@ async function verifyCurrentLibrary(root: string,dir: string,state: UpgradeState
 }
 
 async function liveCurrentIsComplete(root: string,state: UpgradeState): Promise<boolean> {
+  if (!state.currentDigest || !state.currentManifestDigest) return false;
   try {
     const dir = join(root,'store');
     const files = await readMembers(root);
-    if (state.currentManifestDigest && createHash('sha256').update(JSON.stringify(files)).digest('hex') !== state.currentManifestDigest) return false;
-    if (state.currentDigest && await sourceFingerprint(root,dir) !== state.currentDigest) return false;
+    if (createHash('sha256').update(JSON.stringify(files)).digest('hex') !== state.currentManifestDigest) return false;
+    if (await sourceFingerprint(root,dir) !== state.currentDigest) return false;
     await verifyCurrentLibrary(root,dir,state,files);
     return true;
   } catch { return false; }
@@ -688,24 +689,48 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
       await advance(existsSync(newer) ? 'publish-old' : 'save-new');
       break;
     }
-    if (state.stage === 'restore' && existsSync(newer)) {
-      // Both receipt renames can be lost. An independent physical copy of SQLite and the actual payloads
-      // identify a complete current library without assuming an old publication finished.
-      const spare = await independentDatabase(root,note,state,await sourceFingerprint(root,newer).catch(() => null));
-      state.currentDigest = spare.digest;
-      if (!state.currentManifestDigest && spare.proof?.currentManifestDigest) state.currentManifestDigest = spare.proof.currentManifestDigest;
-      if (spare.proof?.rollbackDigest) {
-        state.rollbackDigest = spare.proof.rollbackDigest;
-        state.fallback = spare.proof.fallback;
+  }
+  if ((state.stage === 'restore' && existsSync(newer)) ||
+      (state.stage === 'return-new' && (!state.currentDigest || !state.currentManifestDigest))) {
+    // The 117 directory may already be back on line while the exported files still belong to 116.
+    const currentStore = existsSync(newer) ? newer : store;
+    if (state.stage === 'return-new') {
+      let unreadable: unknown;
+      for (const dir of [currentStore,note,...independentDirectories(note)]) {
+        let ready;
+        try { ready = await recoveryReceipt(join(dir,'rollback-ready.json')); }
+        catch (error) { unreadable = error; continue; }
+        if (!ready || !sameRollbackAttempt(ready,state) || !ready.currentDigest || !ready.currentManifestDigest) continue;
+        requireStore((!state.currentDigest || ready.currentDigest === state.currentDigest) &&
+          (!state.currentManifestDigest || ready.currentManifestDigest === state.currentManifestDigest),
+          'UPGRADE_MISMATCH','回退前的书库回执不一致。');
+        state.currentDigest ??= ready.currentDigest;
+        state.currentManifestDigest ??= ready.currentManifestDigest;
+        if (!state.rollbackDigest && ready.rollbackDigest) {
+          state.rollbackDigest = ready.rollbackDigest;
+          state.fallback = ready.fallback;
+        }
+        break;
       }
-      const authenticate = async (expected: DatabasePackageMember[]) => {
-        await verifyCurrentLibrary(root,spare.dir,state,expected);
-        await withRecoverySources(root,join(newer,'payloads'),note,state,sources => collectMembers(expected,sources));
-      };
-      await currentMembers(root,note,state,join(newer,'payloads'),{database:spare.dir,verify:authenticate});
-      // Commit the independently established identity before attempting any filesystem repair.
-      await advance('return-new');
+      if (unreadable && (!state.currentDigest || !state.currentManifestDigest)) throw unreadable;
     }
+    const liveDigest = await sourceFingerprint(root,currentStore).catch(() => null);
+    const spare = state.currentDigest && liveDigest === state.currentDigest && (state.stage === 'return-new' || state.currentManifestDigest)
+      ? {dir:currentStore,digest:liveDigest,proof:null}
+      : await independentDatabase(root,note,state,liveDigest);
+    state.currentDigest = spare.digest;
+    if (!state.currentManifestDigest && spare.proof?.currentManifestDigest) state.currentManifestDigest = spare.proof.currentManifestDigest;
+    if (spare.proof?.rollbackDigest) {
+      state.rollbackDigest = spare.proof.rollbackDigest;
+      state.fallback = spare.proof.fallback;
+    }
+    const authenticate = async (expected: DatabasePackageMember[]) => {
+      await verifyCurrentLibrary(root,spare.dir,state,expected);
+      await withRecoverySources(root,join(currentStore,'payloads'),note,state,sources => collectMembers(expected,sources));
+    };
+    await currentMembers(root,note,state,join(currentStore,'payloads'),{database:spare.dir,verify:authenticate});
+    // Commit the independently established identity before attempting any filesystem repair.
+    await advance('return-new');
   }
   if (['backup','convert','verify'].includes(state.stage) && existsSync(old)) {
     // A stale pre-switch journal can survive either forward rename. The conversion carries its own verified record.
@@ -1047,8 +1072,9 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
           requireStore((await readState(join(dir,originFile)))?.id === state.id && await sourceFingerprint(root,dir) === state.currentDigest,
             'UPGRADE_MISMATCH','当前书库核对失败。');
         });
+        before?.('return-new',true);
         await installMembers(root,[join(store,'payloads')],current,note,current);
-        await verifyFiles(root,database(store));
+        requireStore(await liveCurrentIsComplete(root,state),'UPGRADE_FILES_INVALID','恢复后的书库与回退前的完整记录不符。');
         await rm(journal(root));
         return {restored:false,message:'回退未完成，已恢复升级后的书库。'};
       }
