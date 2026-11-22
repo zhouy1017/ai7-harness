@@ -140,9 +140,9 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
       panel.setAttribute('popover', 'auto');
       // A native close toggle can arrive after a later opening of the disclosure (#1711).
       let opening = 0, closingOpening = 0;
-      if (typeof MutationObserver === 'function') new MutationObserver(() => {
-        if (details.open) opening += 1;
-      }).observe(details, { attributes: true, attributeFilter: ['open'] });
+      if (typeof MutationObserver === 'function') new MutationObserver(records => {
+        if (details.open && records.some(record => record.oldValue === null)) opening += 1;
+      }).observe(details, { attributes: true, attributeFilter: ['open'], attributeOldValue: true });
       panel.addEventListener('beforetoggle', event => {
         if (event.newState === 'closed') closingOpening = opening;
       });

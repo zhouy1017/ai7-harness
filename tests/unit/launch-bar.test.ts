@@ -436,18 +436,19 @@ it('lets go of the page once a launch popover is removed while it is open (#1526
 
 
 it.each(['button', 'programmatic'] as const)('keeps a later %s opening when the previous native panel close arrives late (#1711)', opening => {
-  let flushOpenAttribute = () => {};
+  let flushOpenAttribute = (_wasOpen: boolean) => {};
   vi.stubGlobal('MutationObserver', class {
-    constructor(changed: () => void) { flushOpenAttribute = changed; }
+    constructor(changed: (records: Array<{ oldValue: string | null }>) => void) { flushOpenAttribute = wasOpen => changed([{ oldValue: wasOpen ? '' : null }]); }
     observe(): void {}
     disconnect(): void {}
   });
   const { plan, panel, restore } = popoverBar(382);
   const button = plan.querySelector<HTMLButtonElement>('summary button')!;
   const setOpen = (value: boolean): void => {
+    const wasOpen = plan.open;
     if (opening === 'button') button.click(); else plan.open = value;
     // Native attribute mutation delivery precedes the queued toggle task, as in the captured browser sequence.
-    flushOpenAttribute();
+    flushOpenAttribute(wasOpen);
   };
   const panelClosing = (): void => {
     panel.dispatchEvent({ type: 'beforetoggle', oldState: 'open', newState: 'closed' } as never);
@@ -470,6 +471,10 @@ it.each(['button', 'programmatic'] as const)('keeps a later %s opening when the 
     // A new external close after an opening remains authoritative.
     setOpen(true); plan.dispatchEvent({ type: 'toggle' } as never);
     panelClosing(); closedEvent();
+    expect(plan.open).toBe(false);
+    // Another automatic popover closes this panel in the same task, before a redundant open write is delivered.
+    setOpen(true); plan.dispatchEvent({ type: 'toggle' } as never);
+    plan.open = true; panelClosing(); flushOpenAttribute(true); closedEvent();
     expect(plan.open).toBe(false);
   } finally { restore(); }
 });
