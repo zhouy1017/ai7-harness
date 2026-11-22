@@ -1,3 +1,4 @@
+import { bookFindingsChunk } from './book-findings-wire.js';
 import { driveLaunchedLedgerRun } from './analysis/execution.js';
 import { prepareQuickTask } from './quick-tasks.js';
 import { controlOverviewTasks } from './task-overview.js';
@@ -474,7 +475,7 @@ async function dispatch(
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress, request.input.revisionId),
       };
     case 'inspectBookFindings':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectBookFindings(request.input.bookId, request.input.offset) };
+      return { id: request.id, ok: true, op: request.op, result: bookFindingsChunk(store.inspectBookFindings(request.input.bookId, request.input), request.input.whole === true) };
     case 'inspectParagraphAnalysis':
       return { id: request.id, ok: true, op: request.op, result: store.inspectParagraphAnalysis(request.input.bookId, request.input.manuscriptId, request.input.blockId, request.input.radius) };
     case 'previewTaskLaunch':

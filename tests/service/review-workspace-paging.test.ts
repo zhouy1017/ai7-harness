@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { readBookFindings } from '../../src/main/book-findings.js';
+import { bookFindingsChunk } from '../../src/service/book-findings-wire.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
@@ -92,6 +94,18 @@ it('reads a settled Run of 1,024 findings and its report within the reply budget
   const whole = store.inspectReviewWorkspace(book.bookId, runId);
   expect(whole.run!.state).toBe('settled');
   expect(whole.run!.findingsTotal).toBe(1024);
+  const directFindings = store.inspectBookFindings(book.bookId, { whole: true });
+  let findingChunks = 0;
+  const mergedFindings = await readBookFindings({ whole: true }, async (input) => {
+    const result = bookFindingsChunk(store.inspectBookFindings(book.bookId, input), true);
+    const frame = encodeServiceResponse({ id: ID, ok: true, op: 'inspectBookFindings', result });
+    expect(frame.length).toBeLessThan(MAX_FRAME_BYTES + 4);
+    const decoded = JSON.parse(frame.subarray(4).toString('utf8'));
+    expect(decoded.ok).toBe(true); findingChunks++;
+    return decoded.result;
+  });
+  expect(findingChunks).toBeGreaterThan(1);
+  expect(mergedFindings).toEqual(directFindings);
   expect(whole.run!.report).not.toBeNull();
   expect(serializedBytes(whole)).toBeGreaterThan(REPLY_BUDGET);
 

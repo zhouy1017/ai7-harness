@@ -1,8 +1,21 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { asString, requireStore } from './store-records.js';
-import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
-import type { ReviewWorkspaceProjection, ReviewFindingPageRequest, EvaluationWorkspaceProjection } from '../shared/protocol.js';
+import { createHash, randomUUID } from 'node:crypto';
+import { requireStore } from './store-records.js';
+import type { BookFindingsFilters, InspectBookFindingsInput, BookFindingsReadProjection, EvaluationWorkspaceProjection } from '../shared/protocol.js';
 import { BOOK_FINDINGS_PAGE_SIZE, type BookFindingProjection, type BookFindingsProjection, type BaselineAnalysisResultSetRevisionProjection, type ParagraphAnalysisProjection } from '../shared/protocol.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, LOCAL_REVIEW_CATEGORY } from './review/category-configuration.js';
+import { bookFindingsBatchSentence, BOOK_FINDINGS_VERSION_CHANGED } from '../shared/report-wording.js';
+
+const CATEGORIES = new Set(['analysis-gaps', 'evaluation-risks', ...BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map((category) => `review:${category.categoryId}`), `review:${LOCAL_REVIEW_CATEGORY.categoryId}`]);
+const SEVERITIES = new Set(['必须处理', '建议处理', '提示', '高', '中', '低', '未评级']);
+const STATUSES = new Set(['待处理', '未覆盖']);
+
+/** These are the three existing page filters, not a way to send an action to a source owner. */
+export function validBookFindingsFilters(value: unknown): value is BookFindingsFilters {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && Object.entries(value).every(([key, entry]) =>
+    typeof entry === 'string' && (key === 'category' ? entry === '' || CATEGORIES.has(entry)
+      : key === 'severity' ? entry === '' || SEVERITIES.has(entry) : key === 'status' && (entry === '' || STATUSES.has(entry))));
+}
 
 /** A disposable page over the owning records. No dispositions or other records live here. */
 export function bookFindingsPage(bookId: string, findings: Iterable<BookFindingProjection>, offset: number): BookFindingsProjection {
@@ -60,14 +73,12 @@ export interface BookFindingsHost {
   readonly authority: DatabaseSync;
   evaluationBookTitle(bookId: string): string;
   latestAnalysisRevision(bookId: string): BaselineAnalysisResultSetRevisionProjection | null;
-  inspectReviewWorkspace(bookId: string, reviewRunId: string | null, progress?: undefined, page?: ReviewFindingPageRequest): ReviewWorkspaceProjection;
+  reviewFindings(bookId: string): ReadonlyArray<BookFindingProjection>;
   inspectEvaluation(bookId: string, recordId: string | null): EvaluationWorkspaceProjection;
 }
 
 /** Read-only aggregation: the source owners derive dispositions on every read. */
-export function inspectBookFindings(host: BookFindingsHost, bookId: string, offset = 0): BookFindingsProjection {
-  requireStore(Number.isSafeInteger(offset) && offset >= 0, 'FINDINGS_PAGE_INVALID', '发现分页无效。');
-  host.evaluationBookTitle(bookId);
+function composeBookFindings(host: BookFindingsHost, bookId: string): BookFindingProjection[] {
   const store = host;
   function* findings(): Generator<BookFindingProjection> {
     const revision = store.latestAnalysisRevision(bookId);
@@ -75,26 +86,7 @@ export function inspectBookFindings(host: BookFindingsHost, bookId: string, offs
       yield { id: `gap:${revision.revisionId}:${gap.unitOrdinal}`, category: 'analysis-gaps', categoryLabel: '分析未完成的部分', severity: '提示', status: '未覆盖', summary: gap.reason,
         target: { kind: 'gap', revisionId: revision.revisionId, unitOrdinal: gap.unitOrdinal, blockId: gap.blockIds[0] ?? null } };
     }
-    // The workspace's history is bounded; enumerate identities from its ledger, then page each Run through its owner.
-    const runs = store.authority.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').iterate(bookId);
-    for (const row of runs) {
-      const reviewRunId = asString(row.review_run_id);
-      let after: number | null = null;
-      for (;;) {
-        const run: NonNullable<ReviewWorkspaceProjection['run']> = store.inspectReviewWorkspace(bookId, reviewRunId, undefined,
-          { findingsAfterOrdinal: after, categoryId: null, severity: null, status: null, chapterBlockId: null }).run!;
-        for (const finding of run.findings) if (finding.status === 'pending') {
-          yield { id: finding.findingId, category: `review:${finding.categoryId}`, categoryLabel: finding.categoryLabel, severity: finding.severityLabel, status: finding.statusLabel, summary: finding.note,
-            ...(finding.output === 'change-suggestion' && finding.markId !== null && finding.markStatus === 'open' && finding.anchorState === 'exact' && finding.replacement !== null ? {
-              suggestion: { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, markId: finding.markId, blockId: finding.blockId,
-                batchAllowed: !reviewFindingHasGuessedAnchor(finding.note) && run.categories.some((category) => category.categoryId === finding.categoryId && category.batchApply), quote: finding.quote, replacement: finding.replacement },
-            } : {}),
-            target: { kind: 'review', reviewRunId, findingId: finding.findingId, blockId: finding.blockId } };
-        }
-        if (!run.findingsTruncated || run.findings.length === 0) break;
-        after = run.findings[run.findings.length - 1]!.ordinal;
-      }
-    }
+    yield* store.reviewFindings(bookId);
     // Only the version on show is current: an earlier version is immutable history, its risks carried or settled by the next.
     const record = store.inspectEvaluation(bookId, null).record;
     if (record !== null) {
@@ -105,5 +97,82 @@ export function inspectBookFindings(host: BookFindingsHost, bookId: string, offs
       }
     }
   }
-  return bookFindingsPage(bookId, findings(), offset);
+  return [...findings()].map((finding) => ({ ...finding, summary: finding.summary.slice(0, 500) }));
+}
+
+type CachedView = { version: string; digest: string; metadata: Omit<BookFindingsReadProjection, 'items'> };
+type CachedBook = { generation: string; items: BookFindingProjection[]; groups: BookFindingsProjection['groups']; views: Map<string, CachedView>; snapshot?: { key: string; answer: BookFindingsReadProjection } };
+const readers = new WeakMap<DatabaseSync, BookFindingsReader>();
+
+/** Import replacement releases the old list immediately; a normal write is detected by generation on the next read. */
+export function forgetBookFindings(db: DatabaseSync, bookId: string): void { readers.get(db)?.forget(bookId); }
+
+const digestOf = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+/**
+ * Disposable LRU: eight Books, one composed list/snapshot per Book, eight small filter/page digests (never old rows).
+ * A 1,024-row sample1 composition is about 1.4 MB serialized; filtered snapshots share the list's row objects.
+ */
+export class BookFindingsReader {
+  readonly #nonce = randomUUID();
+  readonly #books = new Map<string, CachedBook>();
+  constructor(readonly host: BookFindingsHost) {}
+
+  forget(bookId: string): void { this.#books.delete(bookId); }
+  clear(): void { this.#books.clear(); readers.delete(this.host.authority); }
+
+  inspect(bookId: string, options: number | InspectBookFindingsInput = 0): BookFindingsReadProjection {
+    const input = typeof options === 'number' ? { offset: options } : options;
+    const offset = input.offset ?? 0;
+    requireStore(Number.isSafeInteger(offset) && offset >= 0, 'FINDINGS_PAGE_INVALID', '发现分页无效。');
+    requireStore(input.since === undefined || typeof input.since === 'string' && /^[a-f0-9]{64}$/u.test(input.since), 'FINDINGS_VERSION_INVALID', '待办汇总的读取标识无效。');
+    requireStore((input.whole === undefined || typeof input.whole === 'boolean') && (input.filters === undefined || validBookFindingsFilters(input.filters)), 'FINDINGS_FILTER_INVALID', '待办汇总的筛选条件无效。');
+    const filters = input.filters ?? {};
+    const whole = input.whole === true;
+    const viewKey = JSON.stringify([filters.category || '', filters.severity || '', filters.status || '', whole, whole ? 0 : offset]);
+    if (whole && offset > 0) {
+      const cached = this.#books.get(bookId);
+      const snapshot = cached?.snapshot;
+      requireStore(snapshot !== undefined && snapshot.key === viewKey && snapshot.answer.version === input.since,
+        'FINDINGS_VERSION_CHANGED', BOOK_FINDINGS_VERSION_CHANGED);
+      requireStore(offset < snapshot.answer.total, 'FINDINGS_PAGE_INVALID', '发现分页无效。');
+      this.#books.delete(bookId); this.#books.set(bookId, cached!);
+      // A running review writes often. Transport follows this one composition, not the live database generation.
+      return { ...snapshot.answer, offset, items: snapshot.answer.items.slice(offset) };
+    }
+    this.host.evaluationBookTitle(bookId);
+    const db = this.host.authority;
+    readers.set(db, this);
+    // Authority writes include prepare().run() outside transact; journal and ingest commits use other connections.
+    // Capture before composing: a commit during the read leaves an old token, forcing another composition next time.
+    const generation = JSON.stringify([db.prepare('PRAGMA data_version').get(), db.prepare('SELECT total_changes() changes').get(), db.prepare('PRAGMA schema_version').get()]);
+    let book = this.#books.get(bookId);
+    if (book === undefined || book.generation !== generation) {
+      const items = composeBookFindings(this.host, bookId);
+      book = { generation, items, groups: bookFindingsPage(bookId, items, 0).groups, views: book?.views ?? new Map() };
+    }
+    this.#books.delete(bookId);
+    this.#books.set(bookId, book);
+    if (this.#books.size > 8) this.#books.delete(this.#books.keys().next().value!);
+    const previous = book.views.get(viewKey);
+    const version = digestOf([this.#nonce, generation, bookId, viewKey]);
+    if (previous?.version === version && input.since === version) return { ...previous.metadata, unchanged: true, items: [] };
+    const matching = book.items.filter((item) => (!filters.category || item.category === filters.category) && (!filters.severity || item.severity === filters.severity) && (!filters.status || item.status === filters.status));
+    const count = matching.filter((item) => item.suggestion?.batchAllowed).length;
+    const answer: BookFindingsReadProjection = {
+      bookId, version, unchanged: false, total: matching.length, offset: whole ? 0 : offset,
+      next: whole || offset + BOOK_FINDINGS_PAGE_SIZE >= matching.length ? null : offset + BOOK_FINDINGS_PAGE_SIZE,
+      pageSize: BOOK_FINDINGS_PAGE_SIZE, groups: book.groups, items: whole ? matching : matching.slice(offset, offset + BOOK_FINDINGS_PAGE_SIZE),
+      batch: { count, sentence: bookFindingsBatchSentence(count, Boolean(filters.category || filters.severity || filters.status)) },
+    };
+    // Compare all of the displayed list, never just its first forty rows or the database-wide token.
+    const digest = digestOf([matching, answer.groups, answer.total, answer.batch]);
+    const unchanged = input.since !== undefined && previous?.version === input.since && previous.digest === digest;
+    book.views.delete(viewKey);
+    const { items: _items, ...metadata } = answer;
+    book.views.set(viewKey, { version, digest, metadata });
+    if (whole && !unchanged) book.snapshot = { key: viewKey, answer };
+    if (book.views.size > 8) book.views.delete(book.views.keys().next().value!);
+    return unchanged ? { ...answer, unchanged: true, items: [] } : answer;
+  }
 }

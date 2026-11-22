@@ -6,7 +6,7 @@ import { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_
 export { MAX_REIMPORT_RECORD_ITEMS, type ReimportGroupVerb, REIMPORT_GROUP_VERB_LABELS, type ReimportRecordGroupProjection, type ReimportUnfollowedMarkProjection, type ReimportMappingProjection, type ReviewBeforeManuscriptReimportProjection, type ReimportGroupProjection, type ReimportResolutionProjection, type ReimportGroupSideProjection, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_EXCERPT_GRAPHEMES, type ReimportMappingPageProjection, type ReimportLineageSourceVersionPageProjection } from './protocol/import-structure.js';
 import { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
 export { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type ManuscriptExportTargetInput, type ExportFidelityKey, type ExportFidelityStatus, EXPORT_FIDELITY_STATUS_LABELS, type ExportFidelityStatusLabel, MAX_EXPORT_FIDELITY_POSITIONS, type ExportFidelityRowProjection, type ExportRetentionProjection, type ExportRetentionDisclosure, type ManuscriptExportTargetProjection, type ManuscriptExportFormatProjection, type ManuscriptExportReviewProjection, type ManuscriptExportDisposition, type ManuscriptExportPreparationProjection, type ManuscriptExportReceiptProjection, MAX_EXPORT_RECORDS_LISTED, MAX_EXPORT_DESTINATION_CODE_UNITS, type ReviewManuscriptExportInput, type PrepareManuscriptExportInput, type StageManuscriptExportInput, type ManuscriptExportStageProjection, type ApproveManuscriptExportInput, type InspectManuscriptExportReceiptInput, type ChooseManuscriptExportDestinationInput, type ManuscriptExportDestinationResult } from './protocol/manuscript-export.js';
-import type { BookFindingsProjection } from './protocol/review.js';
+import type { BookFindingsReadProjection, InspectBookFindingsInput, InspectBookFindingsServiceInput } from './protocol/review.js';
 import type { TransportSettings } from './protocol/transport-settings.js';
 export type { TransportSettings } from './protocol/transport-settings.js';
 import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, LedgerTaskLaunchOperation } from './runtime-execution-config.js';
@@ -408,7 +408,7 @@ export * from './protocol/scoped-edit.js';
 export const SERVICE_PROTOCOL_VERSION = 205 as const;
 
 export { BOOK_FINDINGS_PAGE_SIZE } from './protocol/review.js';
-export type { BookFindingProjection, BookFindingsProjection } from './protocol/review.js';
+export type { BookFindingProjection, BookFindingsProjection, BookFindingsReadProjection, InspectBookFindingsInput, InspectBookFindingsServiceInput, BookFindingsFilters, BookFindingPlace, BookFindingDecision } from './protocol/review.js';
 
 export interface ParagraphAnalysisProjection {
   bookId: string;
@@ -4057,7 +4057,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: { bookId: string; revisionId: string | null };
     output: BaselineAnalysisProjection;
   };
-  inspectBookFindings: { input: { bookId: string; offset: number }; output: BookFindingsProjection };
+  inspectBookFindings: { input: InspectBookFindingsServiceInput; output: BookFindingsReadProjection };
   inspectParagraphAnalysis: { input: { bookId: string; manuscriptId: string; blockId: string; radius: number }; output: ParagraphAnalysisProjection };
   launchBaselineAnalysis: { input: Omit<ServiceOperationMap['prepareBaselineAnalysis']['input'], 'reconfirm'> & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   previewTaskLaunch: { input: TaskLaunchPreviewInput; output: TaskLaunchPreviewProjection };
@@ -5045,7 +5045,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi, R
   getAnalysisRunReportRows(input: Omit<ServiceOperationMap['getAnalysisRunReportRows']['input'], 'bookId'>): Promise<ServiceOperationMap['getAnalysisRunReportRows']['output']>;
   getBaselineAnalysisRangePlan(input: Omit<ServiceOperationMap['getBaselineAnalysisRangePlan']['input'], 'bookId'>): Promise<ServiceOperationMap['getBaselineAnalysisRangePlan']['output']>;
   inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisWireProjection>;
-  inspectBookFindings(input?: { offset: number }): Promise<BookFindingsProjection>;
+  inspectBookFindings(input?: InspectBookFindingsInput): Promise<BookFindingsReadProjection>;
   inspectParagraphAnalysis(input: { manuscriptId: string; blockId: string; radius: number }): Promise<ParagraphAnalysisProjection>;
   launchBaselineAnalysis(input: Omit<ServiceOperationMap['launchBaselineAnalysis']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
   previewTaskLaunch(input: Omit<TaskLaunchPreviewInput, 'bookId'>): Promise<TaskLaunchPreviewProjection>;

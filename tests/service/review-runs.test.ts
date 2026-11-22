@@ -21,7 +21,7 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { REPORT_EXPORT_FORMATS, REPORT_FORMAT_LINES } from '../../src/service/manuscript-export.js';
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
@@ -260,6 +260,14 @@ function binding(session: Session, book: Book): { manuscriptId: string; branchId
 
 function workingText(session: Session, book: Book): Map<string, string> {
   return new Map(session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).map((block) => [block.blockId, block.text] as const));
+}
+
+function replaceBlockPrefix(session: Session, book: Book, blockId: string, insertText: string, remove = 256): void {
+  const window = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId });
+  const block = window.blocks.find((entry) => entry.blockId === blockId)!;
+  session.store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+    blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
+    fromGrapheme: 0, toGrapheme: Math.min(remove, graphemeCount(block.text)), insertText });
 }
 
 /** Words written at the end of the paragraph at `position`, as the editor's journal writes them. */
@@ -1131,6 +1139,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(aggregateBefore.groups.some((group) => group.category === `review:${TYPOS}`)).toBe(true);
       expect(aggregateBefore.groups.some((group) => group.category === `review:${STYLE}`)).toBe(true);
       const aggregateAgain = session.store.inspectBookFindings(book.bookId, 1);
+      const whole = session.store.inspectBookFindings(book.bookId, { whole: true });
+      expect(session.store.inspectBookFindings(book.bookId, { whole: true, since: whole.version })).toMatchObject({ unchanged: true, items: [] });
+      expect(whole.items).toEqual(aggregateBefore.items);
       aggregateAgain.items.filter((item) => item.category === `review:${TYPOS}`);
       expect(readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite')).equals(databaseBytes)).toBe(true);
       expect(readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite-wal')).equals(walBytes)).toBe(true);
@@ -1145,6 +1156,161 @@ describe('a Review Run over the real store on exact sample1', () => {
         .toMatchObject({ status: 'handled', statusLabel: '已处理', statusDetail: '已标记为已处理', markStatus: 'resolved' });
       expect(current.findings.find((finding) => finding.findingId === applied.findingId))
         .toMatchObject({ status: 'handled', statusDetail: '已接受并应用', markStatus: 'applied' });
+    });
+  }, 300_000);
+
+  it('merges repeated suggestions newest first and closes their shared mark with one decision (#1669)', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, first) => {
+      const second = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
+      const third = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
+      const merged = session.store.inspectBookFindings(book.bookId, { whole: true });
+      const pending = third.findings.filter((finding) => finding.status === 'pending');
+      expect(merged.total).toBe(pending.length);
+      expect(merged.items.every((item) => item.place?.reviewRunId === third.reviewRunId)).toBe(true);
+      expect(merged.groups.reduce((sum, group) => sum + group.count, 0)).toBe(merged.total);
+      const ignored = merged.items.find((item) => item.decision?.kind === 'ignore')!;
+      const input = ignored.decision!.input;
+      if (!('findingId' in input)) throw new Error('missing ignore input');
+      session.store.recordReviewFindingDisposition(input.bookId, input.reviewRunId, input.findingId, input.reason);
+      const after = session.store.inspectBookFindings(book.bookId, { whole: true, since: merged.version });
+      expect(after).toMatchObject({ unchanged: false, total: merged.total - 1 });
+      expect(after.items.some((item) => item.id === ignored.id)).toBe(false);
+      for (const run of [first, second, third]) expect(workspace(session, book, run.reviewRunId).run!.findings.find((finding) => finding.markId === ignored.place!.markId)?.status).toBe('ignored');
+      expect(session.store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals.filter((signal) => signal.kind === 'review-finding-ignored')).toHaveLength(1);
+      const repeated = storeError(() => session.store.recordReviewFindingDisposition(input.bookId, input.reviewRunId, input.findingId, input.reason));
+      expect(repeated).toMatchObject({ code: 'REVIEW_FINDING_NOT_PENDING', message: '这条发现已经忽略过。' });
+    });
+  }, 300_000);
+
+  it('carries the review card place, existing reject input and filtered batch sentences (#1669)', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
+      const read = (filters = {}) => session.store.inspectBookFindings(book.bookId, { whole: true, filters });
+      const whole = read();
+      for (const row of whole.items) {
+        const finding = run.findings.find((entry) => entry.findingId === row.id)!;
+        expect(row.place).toEqual({ manuscriptId: book.manuscriptId, branchId: book.branchId, reviewRunId: run.reviewRunId,
+          ordinal: finding.ordinal, blockId: finding.blockId, markId: finding.markId, blockExists: finding.blockPosition !== null });
+      }
+      const count = whole.items.filter((item) => item.suggestion?.batchAllowed).length;
+      expect(whole.batch).toEqual({ count, sentence: `将把所列 ${count} 条修改建议写入稿件。` });
+      for (const filters of [{ category: `review:${TYPOS}` }, { severity: '必须处理' }]) {
+        const filtered = read(filters);
+        expect(filtered.groups).toEqual(whole.groups);
+        expect(filtered.batch.count).toBe(filtered.items.filter((item) => item.suggestion?.batchAllowed).length);
+        expect(filtered.batch.sentence).toBe(filtered.batch.count ? `将把当前筛选下的 ${filtered.batch.count} 条修改建议写入稿件。` : null);
+      }
+      expect(read({ category: `review:${STYLE}` }).batch).toEqual({ count: 0, sentence: null });
+      const reject = whole.items.find((item) => item.decision?.kind === 'reject')!.decision!;
+      if (reject.kind !== 'reject') throw new Error('missing reject input');
+      session.store.recordChangeSuggestionDecision({ ...reject.input, clientDecisionId: randomUUID() });
+      expect(read().total).toBe(whole.total - 1);
+    });
+  }, 300_000);
+
+  it('does one finding-view read per Run instead of every workspace on every aggregate page (#1669)', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, first) => {
+      const second = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
+      const third = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
+      const workspaceSpy = vi.spyOn(session.store, 'inspectReviewWorkspace');
+      const querySpy = vi.spyOn(DatabaseSync.prototype, 'prepare');
+      try {
+        const oldRead = () => [third, second, first].flatMap((identity) => {
+          const findings = [];
+          let after: number | null = null;
+          for (;;) {
+            const run: ReviewRunProjection = session.store.inspectReviewWorkspace(book.bookId, identity.reviewRunId, undefined,
+              { findingsAfterOrdinal: after, categoryId: null, severity: null, status: null, chapterBlockId: null }).run!;
+            findings.push(...run.findings.filter((finding) => finding.status === 'pending'));
+            if (!run.findingsTruncated || run.findings.length === 0) return findings;
+            after = run.findings.at(-1)!.ordinal;
+          }
+        });
+        let offset = 0, total = 0;
+        do { total = oldRead().length; offset += 40; } while (offset < total);
+        const oldCalls = workspaceSpy.mock.calls.length;
+        querySpy.mockClear(); workspaceSpy.mockClear();
+        const merged = session.store.inspectBookFindings(book.bookId, { whole: true });
+        const findingReads = () => querySpy.mock.calls.filter(([sql]) => sql.includes('FROM review_findings f')).length;
+        expect(findingReads()).toBe(3);
+        expect(workspaceSpy).not.toHaveBeenCalled();
+        console.info(`FINDINGS_COST/${JSON.stringify({ legacyWorkspaceReads: oldCalls, mergedFindingReads: findingReads() })}`);
+        expect(oldCalls).toBeGreaterThanOrEqual(findingReads());
+        querySpy.mockClear();
+        expect(session.store.inspectBookFindings(book.bookId, { whole: true, since: merged.version })).toMatchObject({ unchanged: true, items: [] });
+        expect(findingReads()).toBe(0);
+      } finally { querySpy.mockRestore(); workspaceSpy.mockRestore(); }
+    });
+  }, 300_000);
+
+  it('keeps no-mark findings distinct across Runs as in the report (#1669)', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const original = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).filter((block) => block.kind === 'paragraph');
+      const steps = session.store.reviewRunDriveSteps;
+      const driver = new ReviewRunDriver({ ...steps, write: (runId, categoryId) => {
+        if (categoryId === TYPOS) for (const block of original) replaceBlockPrefix(session, book, block.blockId, '〔编辑改稿〕');
+        steps.write(runId, categoryId);
+      } }, session.owner);
+      const runs: ReviewRunProjection[] = [];
+      try {
+        for (let index = 0; index < 2; index++) {
+          const prepared = prepare(session, book, [TYPOS], WHOLE);
+          session.store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
+          await driver.drive(prepared.reviewRunId);
+          runs.push(workspace(session, book, prepared.reviewRunId).run!);
+          for (const block of original) replaceBlockPrefix(session, book, block.blockId, sliceGraphemes(block.text, 0, 256), graphemeCount('〔编辑改稿〕'));
+        }
+      } finally { await driver.dispose(); }
+      const finding = runs[0]!.findings.find((entry) => entry.markId === null)!;
+      expect(finding).toBeDefined();
+      const other = runs[1]!.findings.find((entry) => entry.categoryId === finding.categoryId && entry.blockId === finding.blockId && entry.quote === finding.quote && entry.replacement === finding.replacement)!;
+      expect(other.markId).toBeNull();
+      expect(other.findingId).not.toBe(finding.findingId);
+      const before = session.store.inspectBookFindings(book.bookId, { whole: true });
+      expect(before.items.filter((row) => row.id === finding.findingId || row.id === other.findingId)).toHaveLength(2);
+      const reviewed = await session.store.reviewManuscriptExport({ bookId: book.bookId, target: { kind: 'book-review-report' }, options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, format: 'docx' }, true);
+      await mkdir(roots.inputRoot, { recursive: true });
+      await session.store.prepareManuscriptExport({ bookId: book.bookId, revisionId: reviewed.target.revisionId, target: { kind: 'report', reportId: reviewed.target.report!.reportId },
+        options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, reviewDigest: reviewed.reviewDigest, destination: join(roots.inputRoot, 'no-mark-report.docx'), format: 'docx' }, true);
+      expect(workspace(session, book, runs[1]!.reviewRunId).run!.report!.record.totals!.pending).toBe(before.total);
+      const row = before.items.find((entry) => entry.id === finding.findingId)!;
+      expect(row.place).toMatchObject({ markId: null, blockExists: true });
+      expect(row.decision?.kind).toBe('ignore');
+      session.store.recordReviewFindingDisposition(book.bookId, runs[0]!.reviewRunId, finding.findingId, '编辑决定忽略');
+      expect(session.store.inspectBookFindings(book.bookId, { whole: true, since: before.version }).items.some((entry) => entry.id === finding.findingId)).toBe(false);
+      expect(workspace(session, book, runs[0]!.reviewRunId).run!.findings.find((entry) => entry.findingId === finding.findingId)!.status).toBe('ignored');
+      expect(workspace(session, book, runs[1]!.reviewRunId).run!.findings.find((entry) => entry.findingId === other.findingId)!.status).toBe('pending');
+      expect(session.store.inspectBookFindings(book.bookId, { whole: true }).items.some((entry) => entry.id === other.findingId)).toBe(true);
+      expect(session.store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals.filter((signal) => signal.kind === 'review-finding-ignored')).toHaveLength(1);
+    });
+  }, 300_000);
+
+  it('carries the review card place when its original block was merged away (#1669)', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
+      const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+      const finding = run.findings.find((entry) => {
+        const index = blocks.findIndex((block) => block.blockId === entry.blockId);
+        return entry.output === 'change-suggestion' && index > 0 && blocks[index]!.kind === 'paragraph' && blocks[index - 1]!.kind === 'paragraph';
+      })!;
+      expect(finding).toBeDefined();
+      const previous = blocks[blocks.findIndex((block) => block.blockId === finding.blockId) - 1]!;
+      const window = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: previous.blockId });
+      const removed = window.blocks.find((block) => block.blockId === finding.blockId)!;
+      session.store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+        blockId: previous.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: previous.digest, expectedJournalSequence: window.journalSequence,
+        fromGrapheme: previous.graphemes, toGrapheme: previous.graphemes, insertText: '',
+        structure: { kind: 'merge', mergedBlockId: finding.blockId, mergedBlockDigest: removed.digest } });
+      const card = workspace(session, book, run.reviewRunId).run!.findings.find((entry) => entry.findingId === finding.findingId)!;
+      expect(card.blockPosition).toBeNull();
+      const row = session.store.inspectBookFindings(book.bookId, { whole: true }).items.find((entry) => entry.id === finding.findingId)!;
+      expect(row.place).toMatchObject({ blockId: card.blockId, blockExists: false, ordinal: card.ordinal });
+      expect(row.decision?.kind).toBe('reject');
+      const decision = row.decision;
+      if (decision?.kind !== 'reject') throw new Error('missing current-block reject input');
+      expect(decision.input.windowStartBlockId).toBe(previous.blockId);
+      const clientDecisionId = randomUUID();
+      expect(() => session.store.recordChangeSuggestionDecision({ ...decision.input, clientDecisionId })).not.toThrow();
+      expect(storeError(() => session.store.recordChangeSuggestionDecision({ ...decision.input, windowStartBlockId: card.blockId, clientDecisionId })))
+        .toMatchObject({ code: 'MARK_BINDING_CHANGED', message: '稿件窗口已变化，请刷新后再试。' });
     });
   }, 300_000);
 

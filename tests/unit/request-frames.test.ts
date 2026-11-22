@@ -153,9 +153,13 @@ describe('Book findings and paragraph analysis read boundaries (#952)', () => {
       { id: randomUUID(), op: 'inspectBookFindings', input: { bookId, offset: 40 } },
       { id: randomUUID(), op: 'inspectParagraphAnalysis', input },
     ]) expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
-    for (const invalid of [{ offset: -1 }, { offset: 0.5 }, { offset: 0, dispose: true }, { offset: 0, bookId: 'invalid' }]) {
+    for (const invalid of [{ offset: -1 }, { offset: 0.5 }, { offset: 0, dispose: true }, { offset: 0, bookId: 'invalid' },
+      { since: '' }, { since: 'z'.repeat(64) }, { since: null }, { whole: 1 }, { filters: null },
+      { filters: { category: 'review:unknown' } }, { filters: { severity: 'unknown' } }, { filters: { status: 'unknown' } }, { filters: { extra: '' } }]) {
       expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), op: 'inspectBookFindings', input: { bookId, ...invalid } })))).toThrow(ProtocolError);
     }
+    const merged = { id: randomUUID(), op: 'inspectBookFindings', input: { bookId, whole: true, since: 'a'.repeat(64), filters: { category: 'review:typos-and-usage', severity: '必须处理', status: '待处理' } } };
+    expect(decodeRequest(encoder.encode(JSON.stringify(merged)))).toEqual(merged);
     for (const invalid of [{ radius: 5 }, { radius: -1 }, { radius: 1.5 }, { blockId: '' }, { manuscriptId: 'invalid' }, { write: true }]) {
       expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), op: 'inspectParagraphAnalysis', input: { ...input, ...invalid } })))).toThrow(ProtocolError);
     }

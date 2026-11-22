@@ -1,3 +1,4 @@
+import { readBookFindings } from './book-findings.js';
 import { registerImportEditingHandlers } from './import-editing-handlers.js';
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../shared/runtime-execution-config.js';
 import type { DispatchTaskKind, RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
@@ -2207,14 +2208,13 @@ export function registerRendererHandlers(
         });
       }),
   );
-  ipcMain.handle(IPC_CHANNELS.inspectBookFindings, (event, input?: { offset: number }) =>
+  ipcMain.handle(IPC_CHANNELS.inspectBookFindings, (event, input?: Parameters<RendererApi['inspectBookFindings']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);
       requireAuthority();
       const route = requireCurrentBookRoute(owned);
-      const generation = owned.routeGeneration;
-      const sequence = owned.routeRequestSequence;
-      const result = await service.call('inspectBookFindings', { bookId: route.bookId, offset: input?.offset ?? 0 });
+      const generation = owned.routeGeneration, sequence = owned.routeRequestSequence;
+      const result = await readBookFindings(input, (request) => service.call('inspectBookFindings', { ...request, bookId: route.bookId }));
       requireCurrentRouteReadEpoch(owned, generation, sequence);
       if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '发现不属于当前图书。');
       return result;

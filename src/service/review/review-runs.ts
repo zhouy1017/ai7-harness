@@ -1,6 +1,8 @@
 import { reviewSynthesisOmissionLabel, reviewSynthesisOrdinalRanges } from '../../shared/review-synthesis-wording.js';
 import { readClosedBaselineSynopses, reviewSynthesisRequestBytes } from '../analysis/baseline-synopsis.js';
 import { REVIEW_UNCHECKED_DISCLOSURE } from '../../shared/review-basis.js';
+import { reviewFindingHasGuessedAnchor } from '../../shared/review-basis.js';
+import type { BookFindingProjection } from '../../shared/protocol/review.js';
 import { RUN_SYNTHESIS_CATEGORY, RUN_SYNTHESIS_ENTRY } from './run-synthesis-kind.js';
 import { buildSynthesisInput, parseSynthesisSummary, type SynthesisInput } from './run-synthesis-contract.js';
 import { modelProfileFor } from '../provider/model-profile.js';
@@ -5309,6 +5311,48 @@ export class ReviewRunStore {
        ORDER BY ${lastEvent} DESC, r.review_run_id LIMIT ?`,
     ).all(since, scope?.bookId ?? null, scope?.bookId ?? null, limit) as SqlRow[]).map(read).filter((reading) => reading.state === 'settled');
     return { latest, completed };
+  }
+
+  /** A Book's pending suggestions, once each as the report reads them, without composing N paged workspaces. */
+  bookFindings(bookId: string): BookFindingProjection[] {
+    const all = (this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').all(bookId) as SqlRow[])
+      .flatMap((row) => {
+        const snapshot = this.#snapshotOf(row);
+        return this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null).map((finding) => ({ snapshot, finding }));
+      });
+    // The public rvf finding id includes its Run: a no-mark finding is distinct in every Run, as in the report.
+    const markBlock = this.#db.prepare(`SELECT em.block_id FROM editorial_marks em
+      JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id WHERE em.mark_id = ?`);
+    const seen = new Set<string>();
+    const items: BookFindingProjection[] = [];
+    for (const { snapshot, finding } of all) {
+      const identity = finding.markId ?? finding.findingId;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      if (finding.status !== 'pending') continue;
+      const { manuscriptId, branchId } = snapshot.manuscript;
+      const reviewRunId = snapshot.reviewRunId;
+      const category = snapshot.categories.find((entry) => entry.categoryId === finding.categoryId);
+      const standing = finding.markId !== null && finding.markStatus === 'open';
+      const currentBlock = standing && finding.output === 'change-suggestion' ? markBlock.get(finding.markId!) : undefined;
+      const canIgnore = finding.markId === finding.originMarkId && (finding.output === 'annotation' || finding.markId === null);
+      items.push({
+        id: finding.findingId, category: `review:${finding.categoryId}`, categoryLabel: category?.entry.label ?? finding.categoryId,
+        severity: REVIEW_FINDING_SEVERITY_LABELS[finding.severity], status: REVIEW_FINDING_STATUS_LABELS[finding.status], summary: finding.note,
+        place: { manuscriptId, branchId, reviewRunId, ordinal: finding.ordinal, blockId: finding.blockId,
+          markId: finding.markId !== null && (finding.markStatus === 'open' || finding.markStatus === 'resolved' || finding.markStatus === 'applied') ? finding.markId : null,
+          blockExists: finding.blockPosition !== null },
+        decision: currentBlock !== undefined
+          ? { kind: 'reject', input: { manuscriptId, branchId, windowStartBlockId: text(currentBlock.block_id), markId: finding.markId!, disposition: 'rejected', editedText: null, reason: null } }
+          : canIgnore ? { kind: 'ignore', input: { bookId, reviewRunId, findingId: finding.findingId, disposition: 'ignored', reason: '编辑决定忽略' } } : null,
+        ...(standing && finding.output === 'change-suggestion' && finding.anchorState === 'exact' && finding.replacement !== null ? {
+          suggestion: { manuscriptId, branchId, markId: finding.markId!, blockId: finding.blockId, batchAllowed: !reviewFindingHasGuessedAnchor(finding.note) && category?.entry.batchApply === true,
+            quote: finding.quote, replacement: finding.replacement },
+        } : {}),
+        target: { kind: 'review', reviewRunId, findingId: finding.findingId, blockId: finding.blockId },
+      });
+    }
+    return items;
   }
 
   /**

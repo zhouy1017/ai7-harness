@@ -386,7 +386,7 @@ import {
   type ReviewFindingPageRequest,
   type ReviewRunScopeRequest,
   type ReviewWorkspaceProjection,
-  type BookFindingsProjection,
+  type BookFindingsReadProjection, type InspectBookFindingsInput,
   type ParagraphAnalysisProjection,
   MAX_WRITING_REQUIREMENTS_GRAPHEMES,
   MAX_WRITING_MATERIALS,
@@ -627,7 +627,7 @@ import {
   sha256,
   type SqlRow,
 } from './store-records.js';
-import { inspectBookFindings, paragraphAnalysis, type BookFindingsHost } from './book-findings.js';
+import { BookFindingsReader, paragraphAnalysis } from './book-findings.js';
 import { initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
 import { liveMaterialRule } from './analysis/live-kind-admission.js';
 import { producedUnverified } from './evaluation/unverified-disclosure.js';
@@ -2689,22 +2689,20 @@ export class EditorialStore {
     return this.#analysisCall(() => this.#baselineAnalysis.rangePlan(input.bookId, input.unitOrdinal));
   }
 
-  /** Read-only aggregation: the source owners derive dispositions on every read. */
-  readonly #bookFindingsHost: BookFindingsHost = this.#bookFindingsHostOf();
-
-  #bookFindingsHostOf(): BookFindingsHost {
+  readonly #bookFindings = this.#bookFindingsReader();
+  #bookFindingsReader(): BookFindingsReader {
     const store = this;
-    return {
+    return new BookFindingsReader({
       get authority() { return store.#authority; },
       evaluationBookTitle: this.#evaluationBookTitle.bind(this),
       latestAnalysisRevision: this.#latestAnalysisRevision.bind(this),
-      inspectReviewWorkspace: (bookId, reviewRunId, progress, page) => this.inspectReviewWorkspace(bookId, reviewRunId, progress, page),
+      reviewFindings: (bookId) => this.#reviewCall(() => this.#reviewRuns.bookFindings(bookId)),
       inspectEvaluation: (bookId, recordId) => this.inspectEvaluation(bookId, recordId),
-    };
+    });
   }
 
-  inspectBookFindings(bookId: string, offset = 0): BookFindingsProjection {
-    return inspectBookFindings(this.#bookFindingsHost, bookId, offset);
+  inspectBookFindings(bookId: string, options: number | InspectBookFindingsInput = 0): BookFindingsReadProjection {
+    return this.#bookFindings.inspect(bookId, options);
   }
 
   inspectParagraphAnalysis(bookId: string, manuscriptId: string, blockId: string, radius: number): ParagraphAnalysisProjection {
@@ -5079,6 +5077,7 @@ export class EditorialStore {
   }
 
   close(): void {
+    this.#bookFindings.clear();
     this.#checkpointWorker?.abort();
     // An index build under way stops at its next step and records nothing; the next open builds it again (Issue #428, S80a).
     this.#indexStopped = true;

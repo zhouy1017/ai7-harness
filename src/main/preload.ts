@@ -262,7 +262,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   getBaselineAnalysisRangePlan: (input: Omit<ServiceOperationMap['getBaselineAnalysisRangePlan']['input'], 'bookId'>) => invoke<ServiceOperationMap['getBaselineAnalysisRangePlan']['output']>(IPC_CHANNELS.getBaselineAnalysisRangePlan, input),
   inspectBaselineAnalysis: (input?: Omit<ServiceOperationMap['inspectBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectBaselineAnalysis']['output']>(IPC_CHANNELS.inspectBaselineAnalysis, input ?? { revisionId: null }),
-  inspectBookFindings: (input?: { offset: number }) =>
+  inspectBookFindings: (input?: Parameters<RendererApi['inspectBookFindings']>[0]) =>
     invoke<ServiceOperationMap['inspectBookFindings']['output']>(IPC_CHANNELS.inspectBookFindings, input ?? { offset: 0 }),
   inspectParagraphAnalysis: (input: Omit<ServiceOperationMap['inspectParagraphAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectParagraphAnalysis']['output']>(IPC_CHANNELS.inspectParagraphAnalysis, input),
