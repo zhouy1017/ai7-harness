@@ -361,47 +361,68 @@ async function verifyExtractedBackup(root: string,state: UpgradeState,incoming: 
   await verifyCopiedPayloads(database(dir),files,116);
 }
 
-async function currentMembers(root: string,note: string,state: UpgradeState,snapshot: string,authenticate?: (files: DatabasePackageMember[]) => Promise<void>): Promise<DatabasePackageMember[]> {
+async function currentMembers(root: string,note: string,state: UpgradeState,snapshot: string,recovery?: {database: string; verify: (files: DatabasePackageMember[]) => Promise<void>}): Promise<DatabasePackageMember[]> {
   const path = join(note,'current-files.json');
   const recorded = await readSmallFile(path,MAX_MANIFEST_BYTES).catch(() => null);
-  const sealed = ['current-database','prepared-database'].map(dir => () => readSmallFile(join(note,dir,'files.json'),MAX_MANIFEST_BYTES));
+  const bound = state.currentManifestDigest;
+  const databases = !bound && recovery ? [recovery.database] : [join(note,'current-database'),join(note,'prepared-database')];
+  const sealed = databases.map(dir => () => readSmallFile(join(dir,'files.json'),MAX_MANIFEST_BYTES));
   const remembered = async () => recorded;
-  const candidates = [
-    ...(authenticate && !state.currentManifestDigest ? [...sealed,remembered] : [remembered,...sealed]),
-    ...[snapshot,root].map(dir => async () => JSON.stringify(await readMembers(dir)))
-  ];
-  const observed = new Set<string>();
+  const manifests = [remembered,...sealed];
+  const candidates = [...manifests,...(bound ? [snapshot,root] : [snapshot]).map(dir => async () => JSON.stringify(await readMembers(dir)))];
   const agreed = new Map<string,string>();
+  let hasManifest = false;
   let selected: {json: string; digest: string; files: DatabasePackageMember[]} | undefined;
   for (const read of candidates) {
     const json = await read().catch(() => null);
     if (json === null) continue;
     const digest = createHash('sha256').update(json).digest('hex');
-    if (state.currentManifestDigest && digest !== state.currentManifestDigest) continue;
+    if (bound && digest !== bound) continue;
     let files: unknown;
     try { files = JSON.parse(json); } catch { continue; }
     if (!Array.isArray(files) || !files.every(isDatabasePackageMember) ||
       files.some(file => file.path === DATABASE_PACKAGE_STORE_MEMBER) || new Set(files.map(file => file.path.toLowerCase())).size !== files.length) continue;
-    for (const file of files) observed.add(file.path);
-    if (authenticate) {
-      try { await authenticate(files); }
+    if (!bound) {
+      requireStore(recovery,'UPGRADE_FILES_INVALID','缺少可核对的文件清单。');
+      if (manifests.includes(read)) hasManifest = true;
+      // Every surviving member of the parked 117 copy is evidence, even when that copy is incomplete.
+      for (const file of files) {
+        const earlier = agreed.get(file.path);
+        requireStore(earlier === undefined || earlier === file.sha256,'UPGRADE_FILES_INVALID','各份新版清单记载的文件内容不一致。');
+        agreed.set(file.path,file.sha256);
+      }
+    }
+    if (recovery) {
+      try { await recovery.verify(files); }
       catch (error) {
         if (isStorageFullError(error)) throw error;
         continue;
       }
     }
-    if (state.currentManifestDigest) { selected = {json,digest,files}; break; }
-    requireStore(authenticate,'UPGRADE_FILES_INVALID','缺少可核对的文件清单。');
-    // Without a surviving commitment, an inventory that satisfies SQLite can still omit exported files.
-    // Compare every source before selecting a complete candidate. Conflicting valid versions need a receipt.
-    for (const file of files) {
-      const earlier = agreed.get(file.path);
-      requireStore(earlier === undefined || earlier === file.sha256,'UPGRADE_FILES_INVALID','各份清单记载的文件内容不一致。');
-      agreed.set(file.path,file.sha256);
-    }
+    if (bound) { selected = {json,digest,files}; break; }
     if (!selected || files.length > selected.files.length) selected = {json,digest,files};
   }
-  requireStore(selected && (state.currentManifestDigest || selected.files.length === observed.size),'UPGRADE_FILES_INVALID','回退前的完整文件清单核对失败。');
+  requireStore(selected && (bound || (hasManifest && selected.files.length === agreed.size)),'UPGRADE_FILES_INVALID','回退前的完整文件清单核对失败。');
+  if (!bound) {
+    const parked = existsSync(snapshot) ? await readMembers(snapshot) : [];
+    const current = new Map(parked.map(file => [file.path,file.sha256]));
+    // A member missing from the parked inventory needs positive ownership from the independently verified 117 database.
+    // Older bytes that remain readable in the published 116 root only prove that the file can be copied.
+    await verifyCopiedPayloads(database(recovery!.database),parked,117,undefined,undefined,(path,digest) => {
+      current.set(path,digest); return true;
+    });
+    requireStore(selected.files.every(file => current.get(file.path) === file.sha256),'UPGRADE_FILES_INVALID','无法确认所有文件属于回退前的新版书库。');
+    // Once 116 is published, its files cannot define what 117 kept. Explain any other live bytes
+    // using the verified original inventory, or stop before touching either library.
+    const liveOnly = (await readMembers(root)).filter(file => agreed.get(file.path) !== file.sha256);
+    if (liveOnly.length) {
+      const active = await sourceFingerprint(root,join(root,'store')).catch(() => null);
+      requireStore(active && [state.sourceDigest,state.backupStoreDigest,state.rollbackDigest].includes(active),
+        'UPGRADE_FILES_INVALID','无法确认在线文件属于已发布的旧书库。');
+      const old = new Map((await originalMembers(root,state)).map(file => [file.path,file.sha256]));
+      requireStore(liveOnly.every(file => old.get(file.path) === file.sha256),'UPGRADE_FILES_INVALID','在线文件与旧书库的记录不符。');
+    }
+  }
   if (selected.json !== recorded) await writeAtomic(path,selected.json);
   state.currentManifestDigest = selected.digest;
   return selected.files;
@@ -604,7 +625,7 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         await verifyCurrentLibrary(root,spare.dir,state,expected);
         await withRecoverySources(root,join(newer,'payloads'),note,state,sources => collectMembers(expected,sources));
       };
-      await currentMembers(root,note,state,join(newer,'payloads'),authenticate);
+      await currentMembers(root,note,state,join(newer,'payloads'),{database:spare.dir,verify:authenticate});
       // Commit the independently established identity before attempting any filesystem repair.
       await advance('return-new');
     }
@@ -789,8 +810,13 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         } catch (error) {
           if (isStorageFullError(error)) throw error;
           if (archive) {
-            if (!state.backupStoreDigest || ![state.backupStoreBytes,state.backupPayloadBytes].every(bytes => typeof bytes === 'number' && Number.isSafeInteger(bytes) && bytes >= 0)) {
+            const originPath = join(store,originFile);
+            const origin = await readState(originPath);
+            requireStore(origin?.id === state.id && canonicalJson(origin.backup) === canonicalJson(backup),'UPGRADE_MISMATCH','当前书库的备份记录不一致。');
+            if (!origin.backupStoreDigest || !state.backupStoreDigest || ![state.backupStoreBytes,state.backupPayloadBytes].every(bytes => typeof bytes === 'number' && Number.isSafeInteger(bytes) && bytes >= 0)) {
               await backupMembers(root,state,false);
+              // Releasing a failed rollback clears its journal. A later attempt still needs the verified backup identity.
+              await writeAtomic(originPath,JSON.stringify({...origin,backupStoreDigest:state.backupStoreDigest,backupStoreBytes:state.backupStoreBytes,backupPayloadBytes:state.backupPayloadBytes}));
             }
             await requireRollbackSpace(root,state,true,current,repairBytes,0,freeDataBytes);
             // A subsequent restart may have only the completed extraction and this journal.
@@ -806,7 +832,9 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
           state.fallback = true;
         }
         if (!state.fallback) {
-          await requireRollbackSpace(root,state,false,current,repairBytes,oldBytes,freeDataBytes);
+          const alreadySaved = new Map(existsSync(legacyFiles) ? (await readMembers(legacyFiles)).map(file => [file.path,file.sha256]) : []);
+          const copyBytes = missingOld.reduce((total,file) => total + (alreadySaved.get(file.path) === file.sha256 ? 0 : file.bytes),0);
+          await requireRollbackSpace(root,state,false,current,repairBytes,oldBytes+copyBytes,freeDataBytes);
           if (missingOld.length) {
             await ensureCanonicalDataDirectory(note,'old-payloads');
             await collectMembers(missingOld,[legacyFiles,saved,previous,prepared,incoming],{root:legacyFiles,note});

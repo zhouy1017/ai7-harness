@@ -576,8 +576,16 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   const seed = join(roots.inputRoot,'wal-seed');
   const root = join(roots.inputRoot,'wal-library');
   await cp(roots.dataRoot,seed,{recursive:true});
+  const deleted = 'removed-after-upgrade.bin';
+  const changed = 'changed-after-upgrade.bin';
+  const oldBytes = Buffer.from([1,116]);
+  const newBytes = Buffer.from([2,117,8]);
+  await writeFile(join(seed,deleted),oldBytes);
+  await writeFile(join(seed,changed),oldBytes);
   await beginUpgrade(seed);
   await resumeUpgrade(seed,'0.8.0');
+  await rm(join(seed,deleted));
+  await writeFile(join(seed,changed),newBytes);
   const unreferenced = 'wal-library-extra.bin';
   await writeFile(join(seed,unreferenced),Buffer.from([2,117]));
   const extraDigest = await fileDigest(join(seed,unreferenced));
@@ -606,6 +614,10 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   expect(hasDraft(mainOnly)).toBe(false);
   expect(hasDraft(sql)).toBe(true);
   expect(existsSync(backupLocationFor(root))).toBe(false);
+  const origin = JSON.parse(await readFile(join(root,'store','upgrade-origin.json'),'utf8'));
+  const extractedFromSeed = join(root,'shell','upgrade-'+origin.id,'restore');
+  await mkdir(extractedFromSeed,{recursive:true});
+  await extractReplacement(extractedFromSeed,join(backupLocationFor(seed),origin.backup.backup.fileName),origin.backup.backup.sha256);
   await beginUpgradeRollback(root);
   const phase = join(root,'shell','storage-upgrade.json');
   const stale = await readFile(phase);
@@ -628,10 +640,23 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   expect(shortened.length).toBe(allFiles.length-1);
   await writeFile(join(independent,'files.json'),JSON.stringify(shortened));
   await writeFile(phase,stale);
+  expect(await readFile(join(root,changed))).toEqual(oldBytes);
+  expect(existsSync(join(root,deleted))).toBe(true);
+  const savedPayload = join(saved,'payloads');
+  const held = join(roots.inputRoot,'held-wal-object.docx');
+  await rename(join(savedPayload,key),held);
+  await writeFile(join(savedPayload,changed),oldBytes);
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  expect(await readFile(phase)).toEqual(stale);
+  expect(storeRevisionOnDisk(sql)).toBe(116);
+  await rename(held,join(savedPayload,key));
+  await writeFile(join(savedPayload,changed),newBytes);
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
   await verifyLibraryFiles(root,117);
   expect(hasDraft(sql)).toBe(true);
   expect(await fileDigest(join(root,unreferenced))).toEqual(extraDigest);
+  expect(existsSync(join(root,deleted))).toBe(false);
+  expect(await readFile(join(root,changed))).toEqual(newBytes);
   const reopened = await EditorialStore.open(root,roots.codeRoot);
   const exported = join(roots.inputRoot,'recovered-wal.ai7db');
   try {
@@ -641,6 +666,8 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   } finally { reopened.markCleanShutdown(); reopened.close(); }
   const pkg = await verifyDatabasePackage(exported,{dataRoot:root});
   expect(pkg.manifest.members.find(file => file.path === unreferenced)).toEqual({path:unreferenced,...extraDigest});
+  expect(pkg.manifest.members.some(file => file.path === deleted)).toBe(false);
+  expect(pkg.manifest.members.find(file => file.path === changed)?.sha256).toBe(createHash('sha256').update(newBytes).digest('hex'));
   await beginUpgradeRollback(root);
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
   await verifyLibraryFiles(root,116);
@@ -740,11 +767,25 @@ it.each(['416adb15a9dcf76b2f49e202775597645286c18e','19d26391cab7393251fea4b8dfe
     expect(origin.backupStoreBytes).toBeGreaterThan(0);
     expect(origin.backupPayloadBytes).toBeGreaterThan(0);
   }
-  const archive = await verifyDatabasePackage(join(backupLocationFor(root),origin.backup.backup.fileName),{dataRoot:root});
+  const archivePath = join(backupLocationFor(root),origin.backup.backup.fileName);
+  const archive = await verifyDatabasePackage(archivePath,{dataRoot:root});
   const snapshot = archive.manifest.members.find(file => file.path === 'store/ai7.sqlite')!;
   expect(createHash('sha256').update(snapshot.sha256).digest('hex')).not.toBe(origin.sourceDigest);
   await rm(join(root,'store-before-0.8.0-'+origin.id),{recursive:true});
   await beginUpgradeRollback(root);
+  if (revision.startsWith('19d26391')) {
+    const marker = join(replacementStagingFor(join(root,'shell','upgrade-'+origin.id,'restore')),'incoming','store','ai7-data-version.json');
+    const write = replacement.writeAtomic;
+    const lock = vi.spyOn(replacement,'writeAtomic').mockImplementation(async (path,text) => {
+      if (path === marker) throw Object.assign(Error('busy'),{code:'EBUSY'});
+      await write(path,text);
+    });
+    try { await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'EBUSY'}); } finally { lock.mockRestore(); }
+    expect(existsSync(join(root,'shell','storage-upgrade.json'))).toBe(false);
+    await verifyLibraryFiles(root,117);
+    await rm(archivePath);
+    await beginUpgradeRollback(root);
+  }
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
   expect((await readDataVersionMarker(root))?.dataVersion).toBe(1);
   await verifyLibraryFiles(root,116);
@@ -822,8 +863,8 @@ it.each(['old-payloads','incoming','archive','unavailable'] as const)('preserves
   try { expect(opened.listBooks(null).items).toHaveLength(2); } finally { opened.markCleanShutdown(); opened.close(); }
 },180_000);
 
-it('reuses a verified extraction after the backup volume goes offline and reclaims space before caching its inventory',async () => {
-  const root = join(roots.inputRoot,'offline-extraction');
+it.each(['original','extracted'] as const)('reuses extracted offline payloads with the %s database and budgets simultaneous copies',async source => {
+  const root = join(roots.inputRoot,'offline-extraction-'+source);
   await cp(roots.dataRoot,root,{recursive:true});
   const oldOnly = join(root,'old-only.bin');
   await writeFile(oldOnly,Buffer.alloc(64*1024*1024,117));
@@ -838,7 +879,7 @@ it('reuses a verified extraction after the backup volume goes offline and reclai
   await mkdir(area,{recursive:true});
   await extractReplacement(area,archive,backup.backup.sha256);
   await rm(archive);
-  await rm(join(root,'store-before-0.8.0-'+id),{recursive:true});
+  if (source === 'extracted') await rm(join(root,'store-before-0.8.0-'+id),{recursive:true});
   const manifest = join(note,'payloads.json');
   await rm(manifest);
   const prepared = join(note,'prepared-payloads');
@@ -858,12 +899,14 @@ it('reuses a verified extraction after the backup volume goes offline and reclai
     const sql = join(root,'store','ai7.sqlite');
     const sqlBytes = (await fileDigest(sql))!.bytes + ((await fileDigest(sql+'-wal'))?.bytes ?? 0);
     const currentBytes = (await databasePackageSources(root)).reduce((bytes,file) => bytes + file.bytes,sqlBytes);
-    const free = rollbackDataPeak(currentBytes);
-    expect(originalFile.bytes).toBeGreaterThan(free);
+    const base = rollbackDataPeak(currentBytes);
+    const free = source === 'original' ? base + Math.floor(originalFile.bytes*1.5) : base;
+    if (source === 'extracted') expect(originalFile.bytes).toBeGreaterThan(free);
     await expect(resumeUpgrade(root,'0.8.0',undefined,free)).rejects.toMatchObject({code:'UPGRADE_SPACE'});
     expect(storeRevisionOnDisk(sql)).toBe(117);
     expect(JSON.parse(await readFile(join(root,'shell','storage-upgrade.json'),'utf8')).stage).toBe('restore');
     expect(existsSync(oldOnly)).toBe(false);
+    expect(existsSync(join(note,'old-payloads','old-only.bin'))).toBe(false);
     expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
   } finally { disk.mockRestore(); }
   expect(reclaimed).toBe(true);
