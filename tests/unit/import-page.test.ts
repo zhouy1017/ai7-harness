@@ -2,13 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { createImportReview } from '../../src/renderer/import-review.js';
+import { configureImportEntry, installImportDrop } from '../../src/renderer/import-entry.js';
+import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
 import { importFileLabel } from '../../src/renderer/import-review-labels.js';
 import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 import { setTechnicalLayerVisible, technicalDisclosure } from '../../src/renderer/technical-layer.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, sample1Path } from '../support/sample1-baseline.js';
-import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
-import type { StagedImportProjection } from '../../src/shared/protocol.js';
+import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
+import type { RendererApi, StagedImportProjection } from '../../src/shared/protocol.js';
 
 let restore: () => void;
 let roots: Awaited<ReturnType<typeof createServiceTestRoots>>;
@@ -47,7 +49,7 @@ beforeEach(async () => {
     identityFindingDisclosure: () => document.createElement('div'), initializeStartup: vi.fn(), instantValue: () => document.createElement('span'),
     renderError: vi.fn(), renderImported: vi.fn(), setStatus: status, sourceCard: () => document.createElement('div') });
 });
-afterEach(async () => { store.close(); await roots.dispose(); setTechnicalLayerVisible(true); restore(); vi.unstubAllGlobals(); });
+afterEach(async () => { store.close(); await roots.dispose(); setTechnicalLayerVisible(true); restore(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it('keeps the distinct-work label first, selected target and changing target notes', () => {
   draw();
@@ -188,11 +190,18 @@ it('keeps Word mode and structure choices across loading more and valid target c
   expect(control('[data-long-paragraph-choice="blocks"]').checked).toBe(true);
 });
 
-it('uses first-manuscript defaults when leaving a populated Book for a new or empty Book', () => {
+it.each([false, true])('uses first-manuscript defaults when leaving a populated Book for a new or empty Book (remembered: %s)', async (remembered) => {
+  // MiniDom has no child combinator; this screen lookup has no competing nested Book root.
+  const query = miniDocument.querySelector.bind(miniDocument);
+  vi.spyOn(miniDocument, 'querySelector').mockImplementation(selector => query(selector.replace('#screen > ', '#screen ')));
+  if (remembered) vi.stubGlobal('window', { setTimeout, clearTimeout, ai7: {
+    getPreferences: async () => ({ values: { 'actions.defaults': { ...DEFAULT_QUICK_ACTIONS, importBookId: bookId, importRelationship: 'source-only' } } }),
+  } });
   const emptyId=randomUUID(); const existing=target(); if(existing.kind!=='existing-book') throw new Error('missing book');
   const projection={...staged,targetChoices:[...staged.targetChoices,{...existing,id:`existing-book:${emptyId}`,bookId:emptyId,manuscriptState:'empty' as const}]};
   for(const id of [newBook().id,`existing-book:${emptyId}`]) {
-    view.renderTargetChoice(projection,`existing-book:${bookId}`);
+    view.renderTargetChoice(projection, remembered ? null : `existing-book:${bookId}`);
+    await settle();
     expect(control('[data-import-relationship="source-only"]').checked).toBe(true);
     control('[id="import-book"]').value=id; change('[id="import-book"]');
     expect(control('[data-import-relationship="first-manuscript"]').checked).toBe(true);
@@ -242,4 +251,45 @@ it('keeps the same lineage and source value when preparation is cancelled and re
   control('[data-prepare-manuscript-reimport]').click(); await settle();
   expect(record).toHaveBeenCalledTimes(2);
   expect(record.mock.calls[1]![0]).toEqual(record.mock.calls[0]![0]);
+});
+
+it.each(['new', 'empty'] as const)('keeps the dropped-file source choice through a change to the %s Book and commits only source material', async (destination) => {
+  // Source-only import makes a real empty Book without creating a manuscript.
+  const seed = store.prepareSourceImportReview(staged.draftId, staged.draftVersion,
+    { kind: 'new-book', choiceId: newBook().id, confirmedTitle: '公开来源样书', relationship: 'source-only' });
+  const empty = await store.commitSourceImport({ draftId: seed.draftId, expectedDraftVersion: seed.draftVersion,
+    reviewDigest: seed.reviewDigest, commitId: randomUUID() });
+  staged = await store.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
+  const prepare = vi.fn(async (request: Parameters<RendererApi['prepareSourceImportReview']>[0]) =>
+    ({ ...store.prepareSourceImportReview(request.draftId, request.expectedDraftVersion, request.target), commitAttemptId: randomUUID() }));
+  const commit = vi.fn(async (request: Parameters<RendererApi['commitSourceImport']>[0]) => {
+    if (request.commitAttemptId === null) throw new Error('missing reviewed commit attempt');
+    return store.commitSourceImport({ ...request, commitId: request.commitAttemptId });
+  });
+  vi.stubGlobal('window', { setTimeout, clearTimeout, ai7: { prepareSourceImportReview: prepare, commitSourceImport: commit,
+    getPreferences: async () => ({ values: { 'actions.defaults': DEFAULT_QUICK_ACTIONS } }), savePreference: vi.fn() } });
+  const stageDropped = vi.fn(async () => ({ status: 'staged' as const, staged }));
+  configureImportEntry({ api: { stageDroppedManuscript: stageDropped, selectAndStageManuscript: vi.fn(),
+    getReimportLineageSourceVersionPage: vi.fn(), abandonImportDraft: vi.fn() },
+    bookFor: () => undefined, occupied: () => false, route: () => ({ isCurrent: () => true }), inBook: () => true,
+    renderTargetChoice: view.renderTargetChoice, setStatus: status, rendererErrorMessage: (_error, fallback) => fallback,
+    settleScreen: async () => true });
+  root.dataset['screen'] = 'book-overview';
+  const overview = document.createElement('section'); overview.dataset['bookId'] = bookId; overview.dataset['manuscriptState'] = 'populated';
+  root.append(overview); installImportDrop(root);
+  (root as unknown as MiniElement).dispatchEvent({ type: 'drop', dataTransfer: { files: [{ name: 'sample1.docx' }], types: ['Files'] } } as never);
+  (document.querySelector('[data-import-answer="source"]') as unknown as MiniElement).click();
+  await settle();
+  expect(stageDropped).toHaveBeenCalledTimes(1);
+  const destinationId = destination === 'new' ? newBook().id : `existing-book:${empty.bookId}`;
+  control('[id="import-book"]').value = destinationId; change('[id="import-book"]');
+  expect(control('[data-import-relationship="source-only"]').checked).toBe(true);
+  expect(control('[data-import-relationship="first-manuscript"]').checked).toBe(false);
+  Array.from(root.querySelectorAll<HTMLButtonElement>('.primary')).find(button => button.textContent?.startsWith('导入'))!.click();
+  await vi.waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
+  const result = await commit.mock.results[0]!.value;
+  expect(prepare.mock.calls[0]![0].target).toMatchObject(destination === 'new'
+    ? { kind: 'new-book', choiceId: destinationId, relationship: 'source-only' }
+    : { kind: 'existing-book', bookId: empty.bookId, relationship: 'source-only' });
+  expect(store.listBooks(null).items.find(book => book.bookId === result.bookId)?.manuscriptState).toBe('empty');
 });

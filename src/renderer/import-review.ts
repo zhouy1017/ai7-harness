@@ -185,7 +185,7 @@ export function createImportReview(options: ImportReviewOptions) {
       }));
       const fold = currentForm.content.querySelector<HTMLDetailsElement>('.fidelity-details');
       if (fold) savedForm.fidelityOpen = fold.open;
-    } else { savedForm = { controls: [] }; chosenRelationship = null; }
+    } else { savedForm = { controls: [] }; chosenRelationship = relationshipSelection; }
     if (selectedChoiceId === null) {
       const currentBookId = document.querySelector<HTMLElement>('#screen > [data-book-id]')?.dataset['bookId'];
       const origin = document.querySelector('#screen')?.firstElementChild;
@@ -205,6 +205,8 @@ export function createImportReview(options: ImportReviewOptions) {
           ?? offered.targetChoices.find((choice) => choice.kind === 'new-book') ?? offered.targetChoices[0];
         if (target) renderTargetChoice(offered, target.id, recoveryNotice, recoveryReturn,
           !staged.editableImport.available || target.kind === 'existing-book' && target.manuscriptState === 'populated' ? 'source-only' : defaults.importRelationship);
+        // Remembered defaults are not the editor's explicit choice from an import entry or this form.
+        chosenRelationship = null;
       }).catch((error: unknown) => renderError(error, () => void initializeStartup()));
       return;
     }
