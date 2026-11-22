@@ -1382,10 +1382,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     target: Parameters<typeof api.getManuscriptWindowAt>[0]['target'],
     continuity: EditorContinuity,
     expected?: AuthoritativeResult,
-  ): Promise<void> {
+    reopenLatest = false,
+  ): Promise<boolean> {
     if (!editor) throw new Error('稿件编辑器不可用。');
     const binding = editor.currentWindow();
-    const next = await api.getManuscriptWindowAt({
+    const read = () => api.getManuscriptWindowAt({
       manuscriptId: binding.manuscriptId,
       branchId: binding.branchId,
       target,
@@ -1393,11 +1394,22 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       if (!expected || target.kind !== 'window-start' || rendererErrorCode(error) !== 'WINDOW_NOT_FOUND') throw error;
       return api.getManuscriptWindowAt({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, target: { kind: 'start' } });
     });
-    if (!editor) throw new Error('稿件编辑器不可用。');
-    if (expected && (
+    const owned = (page: ManuscriptWindowProjection) => editor !== undefined && !options.interrupted() &&
+      page.bookId === binding.bookId && page.manuscriptId === binding.manuscriptId && page.branchId === binding.branchId;
+    let next = await read();
+    if (!owned(next)) throw new Error('当前稿件已改变，请重新打开。');
+    const moved = expected !== undefined && (
       next.revisionId !== expected.revisionId || next.journalSequence !== expected.journalSequence ||
       next.workingDigest !== expected.workingDigest
-    )) throw new Error('保存的结果与刷新后的稿件不一致，请重新打开稿件。');
+    );
+    if (moved) {
+      if (!reopenLatest || next.journalSequence < expected.journalSequence) throw new Error('保存的结果与刷新后的稿件不一致，请重新打开稿件。');
+      const confirmed = await read();
+      if (!owned(confirmed) || confirmed.revisionId !== next.revisionId || confirmed.journalSequence !== next.journalSequence ||
+        confirmed.workingDigest !== next.workingDigest) throw new Error('稿件仍在变化，请再次重新打开。');
+      next = confirmed;
+    }
+    if (!editor || options.interrupted()) throw new Error('稿件编辑器不可用。');
     windowLoadCause = 'authoritative';
     try {
       if (!editor.loadWindow(next, continuity)) throw new Error('权威窗口已返回，但编辑器未能安全装载。');
@@ -1407,6 +1419,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     }
     currentWindow = next;
     updateWindowChrome();
+    return moved;
   }
 
   async function runAuthoritativeMutation<T extends AuthoritativeResult>(
@@ -1481,12 +1494,15 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (!recovery || !authoritativeMutation) return;
     retryAuthoritativeRefreshButton.disabled = true;
     try {
-      await refreshAuthoritativeEditor(recovery.target, recovery.continuity, recovery.expected);
-      if (recovery.expected && recovery.reconcile) await recovery.reconcile(recovery.expected);
+      const moved = await refreshAuthoritativeEditor(recovery.target, recovery.continuity, recovery.expected, true);
+      if (moved) {
+        await invalidateSearchIfStale('稿件已有后续修改，已打开最新稿件。');
+        await loadOutline(true);
+      } else if (recovery.expected && recovery.reconcile) await recovery.reconcile(recovery.expected);
       clearAuthoritativeRecovery();
       setAuthoritativeMutation(false);
       setStatus(
-        recovery.expected
+        moved ? '原操作已保存；稿件后来又有修改，已重新打开最新稿件。' : recovery.expected
           ? technicalWords(`${recovery.expected.completionLabel}；权威窗口刷新已恢复。`, `${recovery.expected.completionLabel}；稿件已重新打开。`)
           : technicalWords('权威操作失败后已恢复到当前持久窗口。', '操作未完成；稿件已恢复到最近保存的状态。'),
         recovery.expected ? 'success' : 'error',

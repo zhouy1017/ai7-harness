@@ -55,6 +55,7 @@ export function mountBookVersions(scope: BookVersionScope, options: {
       if (offset > 0) pages.append(button('上一页版本', 'quiet', () => void load(Math.max(0, offset - 30))));
       if (page.more) pages.append(button('下一页版本', 'quiet', () => void load(offset + page.rows.length)));
       root.dataset['versionState'] = 'ready';
+      root.dataset['versionOffset'] = String(offset);
     } catch (error) {
       if (current !== request || !root.isConnected) return;
       root.dataset['versionState'] = 'failed';

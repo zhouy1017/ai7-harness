@@ -2799,17 +2799,29 @@ async function main() {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), `${name}-overview`);
       await waitFor(renderer, `document.querySelector('.book-versions > summary')`, `${name}-entry`);
       await clickSelector(renderer, '.book-versions > summary', `${name}-open`);
-      try { await waitFor(renderer, `document.querySelector('.book-versions li[data-kind="revision"]')`, `${name}-rows`); }
-      catch {
-        const facts = await renderer.evaluate(`(async()=>{const list=document.querySelector('.book-versions');const result=['open-'+Boolean(list?.open),'rows-'+(list?.querySelectorAll('li').length??0)];try{const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookId)},historyCursor:null});const anchor=overview.manuscriptAnchor;const page=await window.ai7.listBookVersions({bookId:overview.book.bookId,manuscriptId:anchor.manuscriptId,branchId:anchor.branchId,offset:0});result.push('saved-'+page.rows.filter(row=>row.kind==='revision').length);}catch(error){result.push(typeof error?.code==='string' && /^[A-Z0-9_]{1,72}$/.test(error.code)?error.code:'unclassified');}return result;})()`);
-        throw journeyCheckFailure('J-07', `${name}-rows-${facts.join('-').toLowerCase().replaceAll('_','-')}`);
+      await waitFor(renderer, `document.querySelector('.book-versions[open][data-version-state="ready"] li')`, `${name}-rows`);
+    };
+    const findVersion = async (kind, label, name) => {
+      let restart = true;
+      for (;;) {
+        const page = await renderer.evaluate(`(() => {
+          const root=document.querySelector('.book-versions');
+          const offset=Number(root.dataset.versionOffset);
+          const row=Array.from(root.querySelectorAll('li[data-kind="${kind}"]')).find(item=>item.querySelector('strong').textContent===${JSON.stringify(label)});
+          if(row)return {id:row.dataset.revisionId,index:Array.from(row.parentElement.children).indexOf(row)+1,offset};
+          const buttons=Array.from(root.querySelectorAll(':scope > .button-row button'));
+          const button=buttons.find(item=>item.textContent===(${restart} && offset>0?'上一页版本':'下一页版本'));
+          if(button)button.click();return {offset,moved:Boolean(button)};
+        })()`);
+        if (typeof page.id === 'string') return `.book-versions li[data-kind="${kind}"][data-revision-id="${page.id}"]` + (kind === 'revision' ? '' : `:nth-child(${page.index})`);
+        requireJourney(page.moved, name);
+        await waitFor(renderer, `document.querySelector('.book-versions[data-version-state="ready"]:not([data-version-offset="${page.offset}"])')`, name);
+        if (page.offset === 0) restart = false;
       }
     };
     await showVersions('version-list');
-    const revisionId = await renderer.evaluate(`Array.from(document.querySelectorAll('.book-versions li[data-kind="revision"]')).find(row => row.querySelector('strong').textContent === '已保存修订 · r1')?.dataset.revisionId`);
-    requireJourney(typeof revisionId === 'string', 'version-list-original');
-    const versionRow = `.book-versions li[data-kind="revision"][data-revision-id="${revisionId}"]`;
-    await assertRenderer(renderer, `['publication', 'milestone'].every(kind => document.querySelector('.book-versions li[data-kind="'+kind+'"]'))`, 'version-list-existing-kinds');
+    const versionRow = await findVersion('revision', '已保存修订 · r1', 'version-list-original');
+    const revisionId = await renderer.evaluate(`document.querySelector(${JSON.stringify(versionRow)}).dataset.revisionId`);
     await clickSelector(renderer, `${versionRow} .button-row > button:first-child`, 'version-list-view');
     await waitFor(renderer, `document.querySelector('.version-selection h4')?.textContent.includes('r1') && document.querySelector('.version-paragraph') && !document.querySelector('.version-selection').textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-readonly');
     await clickSelector(renderer, `${versionRow} [data-export-menu] > summary`, 'version-list-export-menu');
@@ -2818,23 +2830,24 @@ async function main() {
     const selectedDocx = await readExportedDocx(versionPath);
     requireJourney(selectedDocx.paragraphs.length === excerpt.length && selectedDocx.paragraphs.every((para, index) => para.digest === digestOf(excerpt[index])), 'version-list-selected-docx-content');
     await assertRenderer(renderer, `window.ai7.inspectDeliverables().then(result => result.exports.some(record => record.target.kind === 'revision' && record.target.revisionId === ${JSON.stringify(revisionId)} && record.outcome === 'created'))`, 'version-list-selected-receipt');
-    for (const [kind, label, edit] of [['milestone', '里程碑 · ' + SECOND.label, FIRST_EDIT], ['publication', '发稿版本 · 第 2 次', '']]) {
+    for (const kind of ['milestone', 'publication']) {
+      const label = kind === 'milestone' ? '里程碑 · ' + SECOND.label : '发稿版本 · 第 2 次';
+      const edit = kind === 'milestone' ? FIRST_EDIT : '';
       await close();
       const destination = resolve(exportsRoot, kind + '.docx');
       renderer = await launch({ save: destination });
-      await reopenDeliverables(renderer, 'version-' + kind);
-      await showVersions('version-' + kind);
-      const selected = await renderer.evaluate(`Array.from(document.querySelectorAll('.book-versions li[data-kind="${kind}"]')).find(row => row.querySelector('strong').textContent === ${JSON.stringify(label)})?.dataset.revisionId`);
-      requireJourney(typeof selected === 'string', 'version-' + kind + '-binding');
-      const row = `.book-versions li[data-kind="${kind}"][data-revision-id="${selected}"]`;
-      await clickSelector(renderer, row + ' .button-row > button:first-child', 'version-' + kind + '-select');
-      await waitFor(renderer, `document.activeElement?.matches('.version-selection h4') && document.activeElement.textContent.includes(${JSON.stringify(label)})`, 'version-' + kind + '-preview');
-      await clickSelector(renderer, row + ' [data-export-menu] > summary', 'version-' + kind + '-menu');
-      await clickSelector(renderer, row + ' [data-export-clean]', 'version-' + kind + '-docx');
-      await waitFor(renderer, `document.querySelector('.book-versions .export-receipt')?.dataset.exportOutcome === 'created'`, 'version-' + kind + '-receipt');
+      await reopenDeliverables(renderer, `version-${kind}`);
+      await showVersions(`version-${kind}`);
+      const row = await findVersion(kind, label, 'version-selection-binding');
+      await clickSelector(renderer, row + ' .button-row > button:first-child', `version-${kind}-select`);
+      await waitFor(renderer, `document.activeElement?.matches('.version-selection h4') && document.activeElement.textContent.includes(${JSON.stringify(label)})`, `version-${kind}-preview`);
+      await clickSelector(renderer, row + ' [data-export-menu] > summary', `version-${kind}-menu`);
+      await clickSelector(renderer, row + ' [data-export-clean]', `version-${kind}-docx`);
+      await waitFor(renderer, `document.querySelector('.book-versions .export-receipt')?.dataset.exportOutcome === 'created'`, `version-${kind}-receipt`);
       const output = await readExportedDocx(destination);
-      requireJourney(output.paragraphs.length === excerpt.length && output.paragraphs.every((para, index) => para.digest === digestOf(index === 0 ? excerpt[0] + edit : excerpt[index])), 'version-' + kind + '-contents');
+      requireJourney(output.paragraphs.length === excerpt.length && output.paragraphs.every((para, index) => para.digest === digestOf(index === 0 ? excerpt[0] + edit : excerpt[index])), `version-${kind}-contents`);
     }
+    await findVersion('revision', '已保存修订 · r1', 'version-list-original-again');
     await clickSelector(renderer, `${versionRow} .button-row > button:last-child`, 'version-list-restore');
     await clickSelector(renderer, '.version-selection button.primary', 'version-list-confirm');
     const editorWords = `document.querySelector('[data-testid="manuscript-editor"]')`;
@@ -2851,6 +2864,7 @@ async function main() {
     await versionKey(false);
     await waitFor(renderer, `!${editorWords}.textContent.includes('〔撤销后输入〕')`, 'version-list-type-after-undo-cleared');
     await showVersions('version-list-repeat');
+    await findVersion('revision', '已保存修订 · r1', 'version-list-repeat-original');
     await clickSelector(renderer, `${versionRow} .button-row > button:last-child`, 'version-list-repeat-restore');
     await clickSelector(renderer, '.version-selection button.primary', 'version-list-repeat-confirm');
     await waitFor(renderer, `${editorWords}?.querySelector('p[data-block-id]') && !${editorWords}.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-repeat-restored');
