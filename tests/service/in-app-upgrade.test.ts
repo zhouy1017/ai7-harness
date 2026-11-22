@@ -936,10 +936,24 @@ it.each(['old-payloads','incoming','archive','unavailable','short-sealed','share
   } finally { opened.markCleanShutdown(); opened.close(); }
 },180_000);
 
+async function verifyRollbackExport(root: string,exported: string,expected: DatabasePackageMember[]): Promise<void> {
+  await verifyLibraryFiles(root,117);
+  const reopened = await EditorialStore.open(root,roots.codeRoot);
+  try {
+    expect(reopened.listBooks(null).items).toHaveLength(2);
+    const prep = await reopened.prepareDatabaseExport(exported,true);
+    await reopened.approveDatabaseExport(prep.preparationId,true);
+  } finally { reopened.markCleanShutdown(); reopened.close(); }
+  const pkg = await verifyDatabasePackage(exported,{dataRoot:root});
+  const byPath = (files: DatabasePackageMember[]) => new Map(files.map(file => [file.path,file]));
+  expect(byPath(pkg.manifest.members.filter(file => file.path !== 'store/ai7.sqlite'))).toEqual(byPath(expected));
+}
+
 it.each([['historical','removed','receipt'],['historical','added','receipt'],['current','removed','saved'],['current','added','saved'],
   ['current','removed','live'],['current','added','live']] as const)(
   'recovers the %s rollback when its identical SQLite is held by a previous attempt and a member was %s (%s)',async (format,change,source) => {
-  const area = join(roots.inputRoot,'two-rollback-attempts-'+format+'-'+change+'-'+source);
+  // The real backup verifier appends its own scratch directories. Leave room under the default Windows path limit.
+  const area = join(roots.inputRoot,[format,change,source].map(value => value.charAt(0)).join(''));
   await mkdir(area);
   const root = join(area,'library');
   await cp(roots.dataRoot,root,{recursive:true});
@@ -980,6 +994,8 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
   await expect(pause('publish-old',true)).rejects.toThrow('interrupted');
   const second = JSON.parse(await readFile(join(independent,receipt),'utf8'));
   const secondManifest = await readFile(join(independent,'files.json'));
+  const inventory = JSON.parse(secondManifest.toString('utf8'));
+  const expected: DatabasePackageMember[] = Array.isArray(inventory) ? inventory : inventory.members;
   const earlier = JSON.parse(first.toString('utf8'));
   expect(second.currentDigest).toBe(earlier.currentDigest);
   expect(second.rollbackAttempt).not.toBe(earlier.rollbackAttempt);
@@ -1092,6 +1108,41 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
   }
   // Historical writers need their receipt. A current writer can prove the exact pair without one.
   if (format === 'current') {
+    // Replay a real pre-normalization journal when only the equal, originally ordered inventory survives.
+    const priorRoot = join(area,'p');
+    await cp(root,priorRoot,{recursive:true});
+    const priorStore = join(priorRoot,'store');
+    const priorSaved = join(priorStore,'payloads',member);
+    const priorNote = join(priorRoot,'shell','upgrade-'+id);
+    const priorPhase = join(priorRoot,'shell','storage-upgrade.json');
+    const priorInventory = join(priorNote,'prepared-database','files.json');
+    await writeFile(priorInventory,shuffled);
+    if (change === 'added') await cp(isolatedMember,priorSaved);
+    else await rm(priorSaved);
+    const priorWriter = await historicalUpgradeService(priorRoot,roots.codeRoot,'75b616b3d9979cacebc419c573fa264d73782457');
+    await expect(priorWriter.resumeUpgrade(priorRoot,'0.8.0',stage => { if (stage === 'return-new') throw Error('verified'); })).rejects.toThrow('verified');
+    const earlierJournal = await readFile(priorPhase);
+    const previousState = JSON.parse(earlierJournal.toString('utf8'));
+    expect(previousState.currentManifestDigest).toBe(JSON.parse(shuffled.toString('utf8')).sha256);
+    expect(previousState.currentManifestDigest).not.toBe(second.currentManifestDigest);
+    let priorSnapshot = priorStore;
+    if (source === 'saved') {
+      priorSnapshot = join(priorRoot,'shell','store-after-0.8.0-'+id);
+      await rename(priorStore,priorSnapshot);
+      await rename(join(priorRoot,'store-before-0.8.0-'+id),priorStore);
+    }
+    const priorMember = join(priorSnapshot,'payloads',member);
+    await writeFile(join(priorNote,'current-files.json'),firstManifest);
+    await writeFile(priorInventory,firstManifest);
+    if (change === 'added') await rm(priorMember);
+    else await writeFile(priorMember,contents);
+    await expect(resumeUpgrade(priorRoot,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+    expect(await readFile(priorPhase)).toEqual(earlierJournal);
+    if (change === 'added') await cp(isolatedMember,priorMember);
+    else await rm(priorMember);
+    await writeFile(priorInventory,secondManifest);
+    expect(await resumeUpgrade(priorRoot,'0.8.0')).toMatchObject({restored:false});
+    await verifyRollbackExport(priorRoot,join(area,'p.ai7db'),expected);
     if (source === 'live') {
       // The online export root alone matches consent, but the 117 startup marker did not survive.
       if (change === 'added') await rename(isolatedMember,join(root,member));
@@ -1119,20 +1170,8 @@ it.each([['historical','removed','receipt'],['historical','added','receipt'],['c
   }
   expect((await readDataVersionMarker(root))?.dataVersion).toBe(2);
   expect(existsSync(join(root,member))).toBe(change === 'added');
-  await verifyLibraryFiles(root,117);
-  const reopened = await EditorialStore.open(root,roots.codeRoot);
-  const exported = join(area,'attempt-b.ai7db');
-  try {
-    expect(reopened.listBooks(null).items).toHaveLength(2);
-    const prep = await reopened.prepareDatabaseExport(exported,true);
-    await reopened.approveDatabaseExport(prep.preparationId,true);
-  } finally { reopened.markCleanShutdown(); reopened.close(); }
-  const pkg = await verifyDatabasePackage(exported,{dataRoot:root});
-  const inventory = JSON.parse(secondManifest.toString('utf8'));
-  const expected: DatabasePackageMember[] = Array.isArray(inventory) ? inventory : inventory.members;
-  const byPath = (files: DatabasePackageMember[]) => new Map(files.map(file => [file.path,file]));
-  expect(byPath(pkg.manifest.members.filter(file => file.path !== 'store/ai7.sqlite'))).toEqual(byPath(expected));
-  const kept = pkg.manifest.members.find(file => file.path === member);
+  await verifyRollbackExport(root,join(area,'b.ai7db'),expected);
+  const kept = expected.find(file => file.path === member);
   if (change === 'added') expect(kept).toEqual({path:member,bytes:contents.length,sha256:createHash('sha256').update(contents).digest('hex')});
   else expect(kept).toBeUndefined();
 },180_000);

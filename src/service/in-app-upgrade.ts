@@ -33,6 +33,7 @@ interface UpgradeState {
   rollbackDigest?: string;
   currentDigest?: string;
   currentManifestDigest?: string;
+  currentManifestEncoding?: 'export-order';
   rollbackAttempt?: string;
   inventoryFormat?: 1;
   rollbackStartFingerprint?: string;
@@ -416,13 +417,14 @@ async function bindRollbackStart(root: string,store: string,note: string,state: 
     });
     if (!candidate || !candidate.members.every(isDatabasePackageMember)) continue;
     const manifestDigest = createHash('sha256').update(packageInventoryJson(candidate.members)).digest('hex');
-    if (state.currentManifestDigest && state.currentManifestDigest !== manifestDigest) continue;
+    if (state.currentManifestEncoding && state.currentManifestDigest && state.currentManifestDigest !== manifestDigest) continue;
     for (const digest of databases) {
       if (rollbackInventoryFingerprint(digest,candidate.members) !== state.rollbackStartFingerprint) continue;
       // This pair matches consent even if the independent renames left either half beside an old receipt.
       // The caller still verifies the database identity, references and every physical member before publishing.
       state.currentDigest = digest;
       state.currentManifestDigest = manifestDigest;
+      state.currentManifestEncoding = 'export-order';
       return;
     }
   }
@@ -802,11 +804,14 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
     await rm(journal(root));
     requireStore(false,'UPGRADE_MISMATCH','当前书库与本次回退记录不一致。');
   }
+  // Earlier interrupted recoveries hashed the array in the order it happened to be read.
+  // Rebind only from the exact database and members committed together at rollback consent.
+  const earlierEncoding = state.rollbackStartFingerprint && !state.currentManifestEncoding;
   if ((state.stage === 'restore' && (existsSync(newer) || ambiguousRestore)) ||
-      (state.stage === 'return-new' && (!state.currentDigest || !state.currentManifestDigest))) {
+      (state.stage === 'return-new' && (!state.currentDigest || !state.currentManifestDigest || earlierEncoding))) {
     // The 117 directory may already be back on line while the exported files still belong to 116.
     const currentStore = existsSync(newer) ? newer : store;
-    if (state.stage === 'return-new' || state.rollbackStartFingerprint) {
+    if ((state.stage === 'return-new' || state.rollbackStartFingerprint) && (!state.currentDigest || !state.currentManifestDigest)) {
       let unreadable: unknown;
       for (const dir of [currentStore,note,...independentDirectories(note)]) {
         let ready;
@@ -826,7 +831,7 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
       }
       if (unreadable && !state.rollbackStartFingerprint && (!state.currentDigest || !state.currentManifestDigest)) throw unreadable;
     }
-    if (state.rollbackStartFingerprint && (!state.currentDigest || !state.currentManifestDigest)) {
+    if (state.rollbackStartFingerprint && (!state.currentDigest || !state.currentManifestDigest || earlierEncoding)) {
       await bindRollbackStart(root,currentStore,note,state);
     }
     const liveDigest = await sourceFingerprint(root,currentStore).catch(() => null);
@@ -1088,6 +1093,7 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         await rename(prepared,saved);
         const json = JSON.stringify(current);
         state.currentManifestDigest = createHash('sha256').update(json).digest('hex');
+        state.currentManifestEncoding = 'export-order';
         const inventory = inventoryText(state,current,state.currentManifestDigest);
         await writeAtomic(join(note,'current-files.json'),inventory);
         state.currentDigest = await sourceFingerprint(root,store);
