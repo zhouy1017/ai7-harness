@@ -3020,16 +3020,23 @@ export class ReviewRunStore {
       ...(procedure === null ? {} : { document: resolveProcedureForKind(this.#db, procedure, kind).document }) } };
   }
 
+  /**
+   * The Task Intents a Review Run's work is read from (Issues #1506, #1670): its categories', and every synthesis request's — the
+   * stage's own and each 生成统合总结's — so the page's request count and the 任务 rows' 用时 read the same set.
+   */
+  workTaskIntents(reviewRunId: string, snapshot: RunSnapshot = this.#frozenRun(reviewRunId)): Array<{ taskIntentId: string; synthesis: boolean }> {
+    const tasks = new Map(snapshot.categories.flatMap((entry) => entry.task === null ? [] : [[entry.task.taskIntentId, entry.categoryId === RUN_SYNTHESIS_CATEGORY] as const]));
+    if (this.#synthesisAttempt(reviewRunId) !== null) {
+      for (const entry of this.#frozenRun(reviewRunId).categories) if (entry.categoryId === RUN_SYNTHESIS_CATEGORY && entry.task !== null) tasks.set(entry.task.taskIntentId, true);
+      for (const row of this.#db.prepare(`SELECT DISTINCT json_extract(canonical_json, '$.synthesisAttempt') task FROM review_run_category_events
+        WHERE review_run_id = ? AND category_id = ? AND json_extract(canonical_json, '$.synthesisAttempt') IS NOT NULL`).all(reviewRunId, RUN_SYNTHESIS_CATEGORY)) tasks.set(text(row.task), true);
+    }
+    return [...tasks].map(([taskIntentId, synthesis]) => ({ taskIntentId, synthesis }));
+  }
+
   #runUsage(snapshot: RunSnapshot): { requests: number; inputTokens: number; outputTokens: number } {
     const total = { requests: 0, inputTokens: 0, outputTokens: 0 };
-    // Every synthesis request the Run made counts (Issue #1506): the stage's own, and each 生成统合总结's, not only the latest.
-    const tasks = new Set(snapshot.categories.flatMap((entry) => entry.task === null ? [] : [entry.task.taskIntentId]));
-    if (this.#synthesisAttempt(snapshot.reviewRunId) !== null) {
-      for (const entry of this.#frozenRun(snapshot.reviewRunId).categories) if (entry.categoryId === RUN_SYNTHESIS_CATEGORY && entry.task !== null) tasks.add(entry.task.taskIntentId);
-      for (const row of this.#db.prepare(`SELECT DISTINCT json_extract(canonical_json, '$.synthesisAttempt') task FROM review_run_category_events
-        WHERE review_run_id = ? AND category_id = ? AND json_extract(canonical_json, '$.synthesisAttempt') IS NOT NULL`).all(snapshot.reviewRunId, RUN_SYNTHESIS_CATEGORY)) tasks.add(text(row.task));
-    }
-    for (const taskIntentId of tasks) {
+    for (const { taskIntentId } of this.workTaskIntents(snapshot.reviewRunId, snapshot)) {
       const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_task_outcomes WHERE task_intent_id = ?').get(taskIntentId);
       if (row === undefined) continue;
       const outcome = recordOf(text(row.canonical_json), text(row.sha256));
@@ -5473,6 +5480,11 @@ export class ReviewRunStore {
        ORDER BY c.created_at LIMIT 1`,
     ).get(markId) as SqlRow | undefined;
     return row === undefined ? null : this.#versionView(row);
+  }
+
+  /** The Run's model label as its 任务 row reads it (Issue #1670). */
+  modelLabelOf(reviewRunId: string): string | null {
+    return this.#modelAttribution(this.#frozenRun(reviewRunId)).modelLabel ?? null;
   }
 
   /** Run attribution reads its launch choice, or the legacy frozen plan; never the current role selection. */

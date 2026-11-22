@@ -319,6 +319,8 @@ describe('就这段提问… over the real store and harness', () => {
       expect(running.items.map((entry) => [entry.item.state, entry.item.object, entry.result])).toEqual([
         ['dialogue-answering', { kind: 'dialogue', question: QUESTION }, null],
       ]);
+      // 用时 (#1670): the attempt under way is the open stretch.
+      expect(running.items[0]!.work).toEqual({ workedMs: 0, workingSince: held.attempts[0]!.startedAt, finished: null });
 
       // 停止回答: only complete fragments are kept, labelled incomplete; nothing is retried (DIALOG-012, 014).
       expect(refusal(() => store.convertDialogueToChangeSuggestion(book.bookId, { dialogueId: turn.dialogueId, attemptId: turn.attemptId, proposedText: '改', rationale: '' })))
@@ -352,6 +354,10 @@ describe('就这段提问… over the real store and harness', () => {
       expect(panelDone.running).toBe(false);
       expect(panelDone.groups.find((group) => group.key === 'recent')!.items.map((entry) => [entry.item.state, entry.result]))
         .toEqual([['dialogue-answered', { kind: 'dialogue', dialogueId: turn.dialogueId }]]);
+      // Once answered: the attempts' summed time, one request each, and the row's model (#1670).
+      const doneRow = panelDone.groups.find((group) => group.key === 'recent')!.items[0]!;
+      expect(doneRow.work).toEqual({ workedMs: answered.attempts.reduce((sum, attempt) => sum + Date.parse(attempt.settledAt!) - Date.parse(attempt.startedAt), 0),
+        workingSince: null, finished: { requests: 2, modelLabel: doneRow.item.modelLabel ?? null } });
 
       // A restart: the history is joined again from the records to the Harness Session Ledger.
       await dialogues.dispose();

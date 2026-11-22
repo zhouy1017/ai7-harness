@@ -52,6 +52,8 @@ function prepare(book: Book, policy: LaunchPolicyProjection, options = OPTIONS) 
   const run = work.projection!.run!;
   const plan = store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
   expect(plan.start.needsModelConnection).toBe(false);
+  // A local-only review makes no request and has no Run (#1670): no 用时, and its estimate says so.
+  expect([plan.work, plan.estimate?.sentence]).toEqual([null, '只在本机检查，不调用模型。']);
   expect(plan.start.categoryDigests).toEqual([{ categoryId: 'local-text-check', planEnvelopeDigest: run.localCheck!.planDigest }]);
   return { run, plan };
 }
@@ -130,6 +132,7 @@ describe('provider-free local ReviewRun', () => {
         await steps.local!(prepared.run.reviewRunId, () => { const db = database(); try { return db.prepare('SELECT state FROM review_local_stage_artifacts ORDER BY sequence DESC LIMIT 1').get()?.state === 'completed'; } finally { db.close(); } });
         steps.end(prepared.run.reviewRunId);
         expect(store.inspectReviewWorkspace(book.bookId, prepared.run.reviewRunId).run!.localCheck!.state).toBe('completed');
+        expect(store.inspectBookTasks(book.bookId, () => null).groups.flatMap((group) => group.items).map((entry) => entry.work)).toEqual([null]);
         expect(rules).toHaveBeenCalledTimes(1); expect(acquire).not.toHaveBeenCalled(); expect(register).not.toHaveBeenCalled();
         await execution.dispose(); await release(); store.markCleanShutdown(); store.close();
         store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); store.baselineAnalysisLedger.bindLaunch(launch);
