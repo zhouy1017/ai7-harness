@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { createMarksPaging, type MarksPagingHost } from '../../src/renderer/marks-paging.js';
 import type { EditorialMarkAnchorProjection, ManuscriptMarksPage, ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import { installMiniDom } from '../support/mini-dom.js';
@@ -137,4 +138,19 @@ it('retains the shown count and full failure sentence after a refused page, and 
   expect(current().marks).toHaveLength(800);
   expect(failed.hidden).toBe(true);
   expect(line.title).toBe('已显示 800 / 1234 条。');
+});
+
+
+it('wraps a failed paging row without ellipsis on either sentence', () => {
+  const css = readFileSync(new URL('../../src/renderer/styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//gu, '');
+  const count = css.match(/\.marks-paging\s*>\s*span:not\(\.review-page-failed\)\s*\{([^}]*)\}/u)?.[1] ?? '';
+  expect(count).toMatch(/text-overflow:\s*ellipsis/u);
+  expect(css).not.toMatch(/\.marks-paging\s*>\s*span\s*\{[^}]*(?:text-overflow:\s*ellipsis|white-space:\s*nowrap)/u);
+  const failedRow = css.match(/\.marks-paging:has\(>\s*\.review-page-failed:not\(\[hidden\]\)\)\s*\{([^}]*)\}/u)?.[1] ?? '';
+  expect(failedRow).toMatch(/flex-wrap:\s*wrap/u);
+  const failedCount = css.match(/\.marks-paging:has\(>\s*\.review-page-failed:not\(\[hidden\]\)\)\s*>\s*span:first-child\s*\{([^}]*)\}/u)?.[1] ?? '';
+  expect(failedCount).toMatch(/flex:\s*initial/u);
+  expect(failedCount).toMatch(/overflow:\s*visible/u);
+  expect(failedCount).toMatch(/text-overflow:\s*clip/u);
+  expect(failedCount).toMatch(/white-space:\s*normal/u);
 });
