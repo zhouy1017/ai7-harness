@@ -2,6 +2,8 @@ import type { RendererApi, StagedImportProjection } from '../shared/protocol.js'
 import { createSheet, sheetContent } from './components/sheet.js';
 import { IMPORT_ENTRY_WORDS } from './import-entry-labels.js';
 import { reportResult } from './notifications.js';
+import type { ImportBook } from './import-window.js';
+import type { NavigationCheckpoint } from './navigation-generation.js';
 import type { RecoveryReturnContext } from './import-review.js';
 
 /**
@@ -15,7 +17,11 @@ type Relationship = 'reimport' | 'source-only';
 type Choice = StagedImportProjection['targetChoices'][number];
 
 export interface ImportEntryHost {
-  api: Pick<RendererApi, 'selectAndStageManuscript' | 'stageDroppedManuscript' | 'getReimportLineageSourceVersionPage' | 'getBookOverview'>;
+  api: Pick<RendererApi, 'selectAndStageManuscript' | 'stageDroppedManuscript' | 'getReimportLineageSourceVersionPage' | 'abandonImportDraft'>;
+  bookFor(id: string): ImportBook | undefined;
+  occupied(): boolean;
+  route(): NavigationCheckpoint;
+  inBook(): boolean;
   renderTargetChoice(staged: StagedImportProjection, selectedChoiceId: Choice['id'] | null, recoveryNotice?: string,
     recoveryReturn?: RecoveryReturnContext, relationshipSelection?: Relationship | null): void;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
@@ -52,22 +58,21 @@ export function registerDerivativeImportForm(open: (file: File) => boolean): () 
 }
 
 /** The import page with this Book chosen, adding the Book's choice when the staged first page of Books does not list it. */
-async function openImportPage(staged: StagedImportProjection, bookId: string, wanted: Relationship, recoveryReturn?: RecoveryReturnContext): Promise<void> {
+async function openImportPage(staged: StagedImportProjection, bookId: string, wanted: Relationship, origin: NavigationCheckpoint, recoveryReturn?: RecoveryReturnContext): Promise<boolean> {
   const { api, renderTargetChoice } = hosted();
-  let choice = staged.targetChoices.find((item) => item.kind === 'existing-book' && item.bookId === bookId);
+  let choice = staged.targetChoices.find((item): item is Extract<Choice, { kind: 'existing-book' }> => item.kind === 'existing-book' && item.bookId === bookId);
   if (choice === undefined) {
-    const [lineage, overview] = await Promise.all([
-      api.getReimportLineageSourceVersionPage({ bookId, after: null }),
-      api.getBookOverview({ bookId, historyCursor: null }),
-    ]);
-    const { title, internalNumber } = overview.book;
+    const book = hosted().bookFor(bookId);
+    if (!book || staged.nextBookCursor === null) throw new Error(IMPORT_ENTRY_WORDS.bookUnavailable);
+    const lineage = await api.getReimportLineageSourceVersionPage({ bookId, after: null });
+    const { title, internalNumber, manuscriptState } = book;
     choice = {
       kind: 'existing-book',
       id: `existing-book:${bookId}`,
       bookId,
       label: `${title} · ${internalNumber === null ? '' : `内部编号 ${internalNumber} · `}图书 ID ${bookId}`,
       internalNumber,
-      manuscriptState: 'populated',
+      manuscriptState,
       reimportLineageSourceVersionIds: lineage.items,
       reimportLineagePageAfter: lineage.after,
       reimportLineagePreviousCursor: lineage.previousCursor,
@@ -77,25 +82,14 @@ async function openImportPage(staged: StagedImportProjection, bookId: string, wa
     staged = { ...staged, targetChoices: [...staged.targetChoices, choice] };
   }
   // A file that cannot become an editable manuscript is offered as source material, with the page's own reason.
-  renderTargetChoice(staged, choice.id, undefined, recoveryReturn, wanted === 'reimport' && staged.editableImport.available ? 'reimport' : 'source-only');
+  if (!origin.isCurrent()) return false;
+  renderTargetChoice(staged, choice.id, undefined, recoveryReturn, wanted === 'reimport' && choice.manuscriptState === 'populated' && staged.editableImport.available ? 'reimport' : 'source-only');
+  return true;
 }
 
 /** 导入新版本…: settle the typing, ask the system for a file, then the import page with this Book and 更新稿件. */
 export async function startNewVersionImport(bookId: string, recoveryReturn?: RecoveryReturnContext): Promise<void> {
-  const h = hosted();
-  if (busy) return;
-  busy = true;
-  try {
-    if (!await h.settleScreen()) return;
-    h.setStatus(IMPORT_ENTRY_WORDS.parsing, 'busy');
-    const picked = await h.api.selectAndStageManuscript();
-    if (picked.status === 'cancelled') { reportResult(h.setStatus, IMPORT_ENTRY_WORDS.pickerCancelled); return; }
-    await openImportPage(picked.staged, bookId, 'reimport', recoveryReturn);
-  } catch (error) {
-    h.setStatus(h.rendererErrorMessage(error, IMPORT_ENTRY_WORDS.startFailed), 'error');
-  } finally {
-    busy = false;
-  }
+  await stageFile(null, (staged, origin) => openImportPage(staged, bookId, 'reimport', origin, recoveryReturn));
 }
 
 const DROP_SCREENS = ['landing', 'editor', 'book-overview', 'book-derivatives'];
@@ -117,17 +111,31 @@ function dropPage(screen: HTMLElement): DropPage {
 }
 
 /** Stage the dropped file once, then hand it to `open`; a refusal stands in the status line. */
-async function stageDropped(file: File, open: (staged: StagedImportProjection) => void | Promise<void>): Promise<void> {
+async function stageFile(file: File | null, open: (staged: StagedImportProjection, origin: NavigationCheckpoint) => boolean | Promise<boolean>): Promise<void> {
   const h = hosted();
+  if (busy || question !== null) return;
+  if (h.occupied()) { h.setStatus(IMPORT_ENTRY_WORDS.pending, 'error'); return; }
+  const origin = h.route();
   busy = true;
+  let owned: StagedImportProjection | undefined;
   try {
-    if (!await h.settleScreen()) return;
-    const result = await h.api.stageDroppedManuscript(file);
-    if (result.status === 'staged') await open(result.staged);
+    if (!await h.settleScreen() || !origin.isCurrent()) return;
+    if (!file) h.setStatus(IMPORT_ENTRY_WORDS.parsing, 'busy');
+    const result = file ? await h.api.stageDroppedManuscript(file) : await h.api.selectAndStageManuscript();
+    if (result.status !== 'staged') {
+      if (!file && origin.isCurrent()) reportResult(h.setStatus, IMPORT_ENTRY_WORDS.pickerCancelled);
+      return;
+    }
+    owned = result.staged;
+    if (origin.isCurrent() && await open(owned, origin)) owned = undefined;
   } catch (error) {
-    h.setStatus(h.rendererErrorMessage(error, IMPORT_ENTRY_WORDS.dropFailed), 'error');
+    if (origin.isCurrent()) h.setStatus(h.rendererErrorMessage(error, file ? IMPORT_ENTRY_WORDS.dropFailed : IMPORT_ENTRY_WORDS.startFailed), 'error');
   } finally {
-    busy = false;
+    try {
+      if (owned) await h.api.abandonImportDraft({ draftId: owned.draftId, expectedDraftVersion: owned.draftVersion, ...(h.inBook() ? { preserveBookRoute: true } : {}) });
+    } catch (error) {
+      if (origin.isCurrent()) h.setStatus(h.rendererErrorMessage(error, IMPORT_ENTRY_WORDS.pending), 'error');
+    } finally { busy = false; }
   }
 }
 
@@ -135,6 +143,7 @@ async function stageDropped(file: File, open: (staged: StagedImportProjection) =
 function ask(screen: HTMLElement, file: File, page: Exclude<DropPage, { kind: 'plain' }>): void {
   const words = IMPORT_ENTRY_WORDS;
   const origin = screen.firstElementChild;
+  const route = hosted().route();
   const sheet = createSheet('import-entry-sheet');
   sheet.dataset['importQuestion'] = page.kind;
   const heading = document.createElement('h3');
@@ -162,13 +171,17 @@ function ask(screen: HTMLElement, file: File, page: Exclude<DropPage, { kind: 'p
     control.className = `btn ${className}`;
     control.textContent = label;
     control.dataset['importAnswer'] = key;
-    control.addEventListener('click', () => { if (finished) return; finish(); run(); });
+    control.addEventListener('click', () => {
+      if (finished) return;
+      finish();
+      if (route.isCurrent() && screen.firstElementChild === origin) run();
+    });
     foot.append(control);
   };
   const { bookId } = page;
-  answer('update', words.update, 'primary', () => void stageDropped(file, (staged) => openImportPage(staged, bookId, 'reimport')));
+  answer('update', words.update, 'primary', () => void stageFile(file, (staged, origin) => openImportPage(staged, bookId, 'reimport', origin)));
   if (page.kind === 'manuscript') {
-    answer('source', words.asSource, 'secondary', () => void stageDropped(file, (staged) => openImportPage(staged, bookId, 'source-only')));
+    answer('source', words.asSource, 'secondary', () => void stageFile(file, (staged, origin) => openImportPage(staged, bookId, 'source-only', origin)));
   } else {
     answer('derivative', words.asDerivative, 'secondary', () => {
       if (openDerivativeForm === null || !openDerivativeForm(file)) hosted().setStatus(words.derivativeFormUnavailable, 'error');
@@ -194,12 +207,14 @@ export function installImportDrop(screen: HTMLElement): void {
     event.preventDefault();
     if (busy || question !== null) return;
     if (!/\.docx$/iu.test(file.name)) { hosted().setStatus(IMPORT_ENTRY_WORDS.notDocx, 'error'); return; }
+    if (hosted().occupied()) { hosted().setStatus(IMPORT_ENTRY_WORDS.pending, 'error'); return; }
     const page = dropPage(screen);
     if (page.kind !== 'plain') { ask(screen, file, page); return; }
     // As today: the import page, with this Book chosen when the page is a Book's own.
-    void stageDropped(file, (staged) => {
+    void stageFile(file, (staged) => {
       const choice = staged.targetChoices.find((item) => item.kind === 'existing-book' && item.bookId === page.bookId);
       hosted().renderTargetChoice(staged, choice?.id ?? null);
+      return true;
     });
   });
 }

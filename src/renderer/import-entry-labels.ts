@@ -14,5 +14,7 @@ export const IMPORT_ENTRY_WORDS = {
   parsing: '正在本地解析 DOCX…',
   startFailed: '无法开始导入新版本。',
   dropFailed: '无法导入拖入的 DOCX。',
+  pending: '已有文件正在导入。请先完成或取消上次导入。',
+  bookUnavailable: '无法确认当前图书，请重新打开图书后导入。',
   derivativeFormUnavailable: '现在不能新建衍生稿件，请稍后再试。',
 } as const;

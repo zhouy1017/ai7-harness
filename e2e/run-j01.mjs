@@ -3578,6 +3578,8 @@ async function main() {
       'reimport-initial-edit',
       () => createDurableJournalEdit(renderer),
     );
+    const savedWorkingDigest = await renderer.evaluate(`${CAPTURE_JOURNAL_EDIT}.then(saved => saved?.workingDigest)`);
+    requireJourney(/^[a-f0-9]{64}$/.test(savedWorkingDigest ?? ''), 'reimport-dirty-saved-digest');
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticCPath, launchScenario: 'reimport-verified-changed' });
@@ -3590,6 +3592,7 @@ async function main() {
       dirtyCheckpoint: true,
       scenario: 'reimport-verified-changed',
     });
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('[data-import-review-kind="reimport"] dt')).find(label => label.textContent === '当前固定点修订版摘要')?.nextElementSibling?.textContent === ${JSON.stringify(savedWorkingDigest)}`, 'reimport-compares-durably-saved-edit');
     await closeProduct();
     renderer = await launchProduct({ dataRoot: reimportRoot, launchScenario: 'reimport-reviewed-restart' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-reviewed-restart');
@@ -3717,14 +3720,14 @@ async function main() {
     // above made. The file is the composed `reimport-changed.docx`. A launch's scripted picker answers once, so each entry that
     // opens it has a launch of its own; every stage ends with 取消导入, and the startup read then shows no draft. The stages read
     // only the import page's two prepare buttons, never its target choice.
-    const entryButtonIo = () => ({ renderer, waitFor, assertRenderer, click: (label) => clickExactButton(renderer, label, 'import-entry-click') });
+    const entryButtonIo = () => ({ renderer, waitFor, assertRenderer });
     const openEntryBook = async (name, section) => {
       const book = `[data-screen="landing"] [data-book-id=${JSON.stringify(reimportBookId)}]`;
       await waitFor(renderer, `document.querySelector(${JSON.stringify(book)})`, `${name}-landing`);
-      await assertRenderer(renderer, `(() => { const open = document.querySelector(${JSON.stringify(book)}); if (!open) return false; open.click(); return true; })()`, `${name}-open`);
+      await pressReachable(entryButtonIo(), book, `${name}-open`);
       await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(reimportBookId)}]')`, `${name}-manuscript`);
       if (section !== 'overview') return;
-      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), `${name}-to-overview`);
+      await pressReachable(entryButtonIo(), SIDEBAR.section('overview'), `${name}-to-overview`);
       await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(reimportBookId)}]')`, `${name}-overview`);
     };
     at('new-version-overview-entry');

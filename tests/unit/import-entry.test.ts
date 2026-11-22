@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureImportEntry, installImportDrop, registerDerivativeImportForm, startNewVersionImport } from '../../src/renderer/import-entry.js';
 import { IMPORT_ENTRY_WORDS } from '../../src/renderer/import-entry-labels.js';
+import { createImportWindow } from '../../src/renderer/import-window.js';
 import { SAVE_MENU_WORDS } from '../../src/renderer/save-menu-labels.js';
 import { createDerivative, droppedFileFormState } from '../../src/renderer/components/derivative-create.js';
 import type { StagedImportProjection } from '../../src/shared/protocol.js';
@@ -25,7 +26,7 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); restore(); });
 
 function staged(bookIds: string[], editable = true): StagedImportProjection {
-  return { draftId: 'draft', draftVersion: 1, editableImport: { available: editable }, nextBookCursor: null,
+  return { draftId: 'draft', draftVersion: 1, editableImport: { available: editable }, nextBookCursor: { title: 'next', bookId: 'other' },
     targetChoices: bookIds.map((bookId) => ({ kind: 'existing-book', id: `existing-book:${bookId}`, bookId, label: bookId, internalNumber: null,
       manuscriptState: 'populated', reimportLineageSourceVersionIds: [], reimportLineagePageAfter: null,
       reimportLineagePreviousCursor: null, reimportLineageNextCursor: null, selected: false })) } as unknown as StagedImportProjection;
@@ -37,11 +38,13 @@ function setup(stagedFor: StagedImportProjection = staged(['book'])) {
     stageDroppedManuscript: vi.fn(async () => ({ status: 'staged', staged: stagedFor })),
     getReimportLineageSourceVersionPage: vi.fn(async () => ({ bookId: 'book', after: null, previousCursor: null, nextCursor: 'next',
       items: [{ sourceVersionId: 'source-1', displayName: '旧稿', importedAt: '2026-11-01T00:00:00Z' }] })),
-    getBookOverview: vi.fn(async () => ({ book: { title: '合成图书', internalNumber: null } })),
+    abandonImportDraft: vi.fn(),
   };
   const renderTargetChoice = vi.fn(), setStatus = vi.fn(), settleScreen = vi.fn(async () => true);
-  configureImportEntry({ api: api as never, renderTargetChoice, setStatus, rendererErrorMessage: (_error, fallback) => fallback, settleScreen });
-  return { api, renderTargetChoice, setStatus, settleScreen };
+  const route = { isCurrent: vi.fn(() => true) }, occupied = vi.fn(() => false);
+  const bookFor = vi.fn(() => ({ bookId: 'book', title: '合成图书', internalNumber: '42', manuscriptState: 'populated' as 'empty' | 'populated' }));
+  configureImportEntry({ bookFor, occupied, route: () => route, inBook: () => true, api: api as never, renderTargetChoice, setStatus, rendererErrorMessage: (_error, fallback) => fallback, settleScreen });
+  return { api, bookFor, route, occupied, renderTargetChoice, setStatus, settleScreen };
 }
 
 describe('the 导入新版本… entry', () => {
@@ -66,9 +69,9 @@ describe('the 导入新版本… entry', () => {
     expect(api.getReimportLineageSourceVersionPage).toHaveBeenCalledWith({ bookId: 'book', after: null });
     const [offered, id] = renderTargetChoice.mock.calls[0] as [StagedImportProjection, string];
     expect(id).toBe('existing-book:book');
-    expect(offered.targetChoices.at(-1)).toMatchObject({ kind: 'existing-book', bookId: 'book', manuscriptState: 'populated',
+    expect(offered.targetChoices.at(-1)).toEqual({ kind: 'existing-book', id: 'existing-book:book', bookId: 'book', label: '合成图书 · 内部编号 42 · 图书 ID book', internalNumber: '42', selected: false, manuscriptState: 'populated',
       reimportLineageSourceVersionIds: [{ sourceVersionId: 'source-1', displayName: '旧稿', importedAt: '2026-11-01T00:00:00Z' }],
-      reimportLineagePageAfter: null, reimportLineageNextCursor: 'next' });
+      reimportLineagePageAfter: null, reimportLineagePreviousCursor: null, reimportLineageNextCursor: 'next' });
   });
 
   it('says 已取消文件选择 and calls nothing when the picker is closed', async () => {
@@ -209,12 +212,85 @@ describe('the question a dropped file asks', () => {
   });
 });
 
+it('keeps a staged window draft across page changes until cancelled or completed', async () => {
+  const stagedResult = { status: 'staged', staged: staged(['book']) };
+  const raw = { selectAndStageManuscript: vi.fn(async () => stagedResult), stageDroppedManuscript: vi.fn(async () => stagedResult),
+    abandonImportDraft: vi.fn(async () => ({ state: 'none' })), acknowledgeImportCompletion: vi.fn(), getImportStartup: vi.fn() };
+  const window = createImportWindow(raw as unknown as import('../../src/shared/protocol.js').RendererApi), file = { name: '稿.docx' } as File;
+  await window.api.selectAndStageManuscript();
+  await expect(window.api.stageDroppedManuscript(file)).rejects.toThrow(IMPORT_ENTRY_WORDS.pending);
+  expect(raw.stageDroppedManuscript).not.toHaveBeenCalled();
+  await window.api.abandonImportDraft({ draftId: 'draft', expectedDraftVersion: 1 });
+  await window.api.stageDroppedManuscript(file);
+  await expect(window.api.selectAndStageManuscript()).rejects.toThrow(IMPORT_ENTRY_WORDS.pending);
+  await window.api.acknowledgeImportCompletion({ commitId: 'done' });
+  expect(window.occupied()).toBe(false);
+  expect(raw.getImportStartup).not.toHaveBeenCalled();
+});
+
+describe.each(['picker', 'drop'] as const)('%s handoff', (entry) => {
+  const run = () => {
+    if (entry === 'picker') return startNewVersionImport('book');
+    drop(screenOf('overview'), '新稿.docx');
+    press('update');
+    return Promise.resolve();
+  };
+  const method = entry === 'picker' ? 'selectAndStageManuscript' : 'stageDroppedManuscript';
+  it.each([true, false])('waits for the pending edit and respects the settle result %s', async (saved) => {
+    const { api, settleScreen, renderTargetChoice } = setup();
+    const save = Promise.withResolvers<boolean>();
+    settleScreen.mockReturnValueOnce(save.promise);
+    const action = run();
+    expect(api[method]).not.toHaveBeenCalled();
+    save.resolve(saved);
+    await action;
+    if (saved) await vi.waitFor(() => expect(renderTargetChoice).toHaveBeenCalledTimes(1));
+    expect(api[method]).toHaveBeenCalledTimes(Number(saved));
+  });
+  it('abandons a late stage rather than taking over the newer route', async () => {
+    const { api, route, renderTargetChoice } = setup();
+    const stage = Promise.withResolvers<Awaited<ReturnType<typeof api.selectAndStageManuscript>>>();
+    api[method].mockReturnValueOnce(stage.promise);
+    const action = run();
+    await vi.waitFor(() => expect(api[method]).toHaveBeenCalledTimes(1));
+    route.isCurrent.mockReturnValue(false);
+    stage.resolve({ status: 'staged', staged: staged(['book']) });
+    await action;
+    await vi.waitFor(() => expect(api.abandonImportDraft).toHaveBeenCalledExactlyOnceWith({ draftId: 'draft', expectedDraftVersion: 1, preserveBookRoute: true }));
+    expect(renderTargetChoice).not.toHaveBeenCalled();
+  });
+  it('refuses a new file when there is already a window draft', async () => {
+    const { api, occupied, setStatus } = setup();
+    occupied.mockReturnValue(true);
+    if (entry === 'drop') drop(screenOf('derivatives'), '新稿.docx'); else await run();
+    expect(question()).toBeNull();
+    expect(api[method]).not.toHaveBeenCalled();
+    expect(setStatus).toHaveBeenCalledWith(IMPORT_ENTRY_WORDS.pending, 'error');
+  });
+});
+
+it.each(['lookup', 'paint'])('abandons an unaccepted draft on %s failure', async (failure) => {
+  const { api, renderTargetChoice } = setup(staged([]));
+  if (failure === 'lookup') api.getReimportLineageSourceVersionPage.mockRejectedValueOnce(new Error());
+  else renderTargetChoice.mockImplementationOnce(() => { throw new Error(); });
+  await startNewVersionImport('book');
+  expect(api.abandonImportDraft).toHaveBeenCalledExactlyOnceWith({ draftId: 'draft', expectedDraftVersion: 1, preserveBookRoute: true });
+});
+
+it.each([true, false])('opens an empty Book safely on a derivative update (listed: %s)', async (listed) => {
+  const empty = staged(listed ? ['book'] : []);
+  const { renderTargetChoice, bookFor } = setup({ ...empty, targetChoices: empty.targetChoices.map(choice => ({ ...choice, manuscriptState: 'empty' })) });
+  bookFor.mockReturnValue({ bookId: 'book', title: '合成图书', internalNumber: '42', manuscriptState: 'empty' });
+  drop(screenOf('derivatives'), '新稿.docx'); press('update');
+  await vi.waitFor(() => expect(renderTargetChoice).toHaveBeenCalledWith(expect.anything(), 'existing-book:book', undefined, undefined, 'source-only'));
+});
+
 describe('a file dropped on 衍生稿件 reaches the create form', () => {
   it('stages the dropped file, never opens the picker, then makes the same calls as the picker path', async () => {
     const file = { name: '新闻稿初稿.docx' } as File;
     const api = {
       selectAndStageManuscript: vi.fn(), abandonImportDraft: vi.fn(),
-      stageDroppedManuscript: vi.fn(async () => ({ status: 'staged', staged: { draftId: 'd', draftVersion: 3, source: { format: 'DOCX', displayName: '新闻稿初稿.docx' } } })),
+      stageDroppedManuscript: vi.fn(async () => ({ status: 'staged', staged: { draftId: 'd', draftVersion: 3, identityFindings: [{ bookId: 'book', identityClass: { kind: 'immutable-original' }, sourceVersionId: 'source-9' }], source: { format: 'DOCX', displayName: '新闻稿初稿.docx' } } })),
       prepareSourceImportReview: vi.fn(async () => ({ draftId: 'd', draftVersion: 4, reviewDigest: 'r', commitAttemptId: 'c' })),
       commitSourceImport: vi.fn(async () => ({ commitId: 'commit', sourceVersionId: 'source-9' })),
       acknowledgeImportCompletion: vi.fn(), decideProductionDocumentType: vi.fn(),
@@ -228,11 +304,25 @@ describe('a file dropped on 衍生稿件 reaches the create form', () => {
     expect(api.stageDroppedManuscript).toHaveBeenCalledWith(file);
     expect(api.selectAndStageManuscript).not.toHaveBeenCalled();
     expect(api.prepareSourceImportReview).toHaveBeenCalledWith({ draftId: 'd', expectedDraftVersion: 3,
-      target: { kind: 'existing-book', bookId: 'book', relationship: 'source-only', reuseSourceVersionId: null } });
+      target: { kind: 'existing-book', bookId: 'book', relationship: 'source-only', reuseSourceVersionId: 'source-9' } });
     expect(api.commitSourceImport).toHaveBeenCalledWith({ draftId: 'd', expectedDraftVersion: 4, reviewDigest: 'r', commitAttemptId: 'c' });
     expect(api.acknowledgeImportCompletion).toHaveBeenCalledWith({ commitId: 'commit' });
     expect(api.createProductionDocument).toHaveBeenCalledWith({ typeId: 'news', sourceVersionId: 'source-9', title: '新闻稿初稿' });
   });
+});
+
+it.each(['prepare', 'commit'])('cleans a failed derivative %s using its latest version', async (failure) => {
+  const file = { name: '样稿.docx' } as File;
+  const api = {
+    stageDroppedManuscript: async () => ({ status: 'staged', staged: { draftId: 'd', draftVersion: 3, identityFindings: [], source: { format: 'DOCX' } } }),
+    prepareSourceImportReview: async () => { if (failure === 'prepare') throw Error('prepare'); return { draftId: 'd', draftVersion: 4 }; },
+    commitSourceImport: async () => { throw Error('commit'); }, abandonImportDraft: vi.fn(), createProductionDocument: vi.fn(),
+  };
+  await expect(createDerivative({ api: api as never, state: { ...droppedFileFormState(file, 'news'), mode: 'import' },
+    bookId: 'book', types: [{ typeId: 'news' }] as never })).rejects.toThrow(failure);
+  expect(api.abandonImportDraft).toHaveBeenCalledExactlyOnceWith({ draftId: 'd', expectedDraftVersion: failure === 'prepare' ? 3 : 4,
+    ...(failure === 'prepare' ? { preserveBookRoute: true } : {}) });
+  expect(api.createProductionDocument).not.toHaveBeenCalled();
 });
 
 describe('the words of the import entries', () => {

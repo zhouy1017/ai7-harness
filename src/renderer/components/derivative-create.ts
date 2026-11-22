@@ -244,14 +244,22 @@ export async function createDerivative(request: DerivativeCreateRequest): Promis
     const picked = state.file === undefined ? await api.selectAndStageManuscript() : await api.stageDroppedManuscript(state.file);
     if (picked.status === 'cancelled') return { kind: 'cancelled' };
     const staged = picked.staged;
-    if (!['DOCX', 'MD', 'TXT'].includes(staged.source.format)) {
-      await api.abandonImportDraft({ draftId: staged.draftId, expectedDraftVersion: staged.draftVersion, preserveBookRoute: true });
-      throw new Error('请选择 DOCX、Markdown 或 TXT 文件。');
+    let version = staged.draftVersion;
+    let reviewed = false;
+    let imported: Awaited<ReturnType<typeof api.commitSourceImport>>;
+    try {
+      if (!['DOCX', 'MD', 'TXT'].includes(staged.source.format)) throw new Error('请选择 DOCX、Markdown 或 TXT 文件。');
+      const match = staged.identityFindings.find((finding) => finding.bookId === bookId && finding.identityClass.kind === 'immutable-original');
+      const review = await api.prepareSourceImportReview({ draftId: staged.draftId, expectedDraftVersion: version,
+        target: { kind: 'existing-book', bookId, relationship: 'source-only', reuseSourceVersionId: match?.sourceVersionId ?? null } });
+      version = review.draftVersion;
+      reviewed = true;
+      imported = await api.commitSourceImport({ draftId: review.draftId, expectedDraftVersion: version,
+        reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
+    } catch (error) {
+      await api.abandonImportDraft({ draftId: staged.draftId, expectedDraftVersion: version, ...(!reviewed ? { preserveBookRoute: true } : {}) });
+      throw error;
     }
-    const review = await api.prepareSourceImportReview({ draftId: staged.draftId, expectedDraftVersion: staged.draftVersion,
-      target: { kind: 'existing-book', bookId, relationship: 'source-only', reuseSourceVersionId: null } });
-    const imported = await api.commitSourceImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
-      reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
     await api.acknowledgeImportCompletion({ commitId: imported.commitId });
     sourceVersionId = imported.sourceVersionId;
     // An imported file is named after itself unless the editor wrote a title of their own.

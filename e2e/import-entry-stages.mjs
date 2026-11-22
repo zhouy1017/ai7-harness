@@ -1,32 +1,62 @@
-import { pointerClick } from './dispatch-chooser.mjs';
+function target(selector, words) {
+  return words === undefined ? `document.querySelector(${JSON.stringify(selector)})` : `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(node => node.textContent.trim() === ${JSON.stringify(words)})`;
+}
 
-/**
- * The stages of Issue #1682 that J-01 and J-07 share: the 「导入新版本…」 entries and the question a dropped file asks. Each
- * Journey passes its own `io` — `renderer`, its `waitFor(renderer, expression, name)` and its `assertRenderer(renderer,
- * expression, name)` — so a failure names the stage in that Journey's own words. Every press is a real pointer or key event;
- * a control a stage names is first read inside the window, without any scripted scroll, as the topmost thing at its centre.
- */
-
-/** True when the control stands whole inside the window and is what a pointer at its centre would hit. */
-export function reachable(selector) {
+function hitPoint(selector, words) {
   return `(() => {
-    const node = document.querySelector(${JSON.stringify(selector)});
-    if (!(node instanceof HTMLElement) || node.hidden || node.matches(':disabled')) return false;
+    const node = ${target(selector, words)};
+    if (!(node instanceof HTMLElement) || node.matches(':disabled')) return null;
     const box = node.getBoundingClientRect();
-    return box.width > 0 && box.height > 0 && box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight
-      && node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+    if (!box.width || !box.height || box.left < 0 || box.top < 0 || box.right > innerWidth || box.bottom > innerHeight) return null;
+    for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent), rect = parent.getBoundingClientRect();
+      const left = rect.left + parent.clientLeft, top = rect.top + parent.clientTop;
+      if (['scroll', 'auto'].includes(style.overflowY) && (box.top < top - 1 || box.bottom > top + parent.clientHeight + 1)) return null;
+      if (['scroll', 'auto'].includes(style.overflowX) && (box.left < left - 1 || box.right > left + parent.clientWidth + 1)) return null;
+    }
+    const x = box.left + box.width / 2, y = box.top + box.height / 2;
+    return node.contains(document.elementFromPoint(x, y)) ? { x, y } : null;
   })()`;
 }
 
-/** Press a control that is in the window, with the pointer. */
-export async function pressReachable(io, selector, name) {
-  await io.assertRenderer(io.renderer, reachable(selector), `${name}-in-window`);
-  await pointerClick(io.renderer, io.waitFor, selector, name);
+export function reachable(selector, words) { return `(${hitPoint(selector, words)} !== null)`; }
+
+export async function pressReachable(io, selector, name, words) {
+  await io.waitFor(io.renderer, reachable(selector, words), `${name}-in-window`);
+  const point = await io.renderer.evaluate(hitPoint(selector, words));
+  if (!point) throw new Error(`${name}-target-moved`);
+  await io.renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', buttons: 1, clickCount: 1 });
+  await io.renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', buttons: 0, clickCount: 1 });
+}
+
+export async function tabTo(io, selector, name, words, reverse = false) {
+  const focused = `document.activeElement === (${target(selector, words)})`;
+  for (let step = 0; step < 60; step++) {
+    if (await io.renderer.evaluate(focused)) {
+      await io.assertRenderer(io.renderer, reachable(selector, words), `${name}-in-window`);
+      return;
+    }
+    for (const type of ['rawKeyDown', 'keyUp']) await io.renderer.send('Input.dispatchKeyEvent', {
+      type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9, modifiers: reverse ? 8 : 0,
+    });
+  }
+  throw new Error(`${name}-keyboard-focus`);
 }
 
 /** A real file drag onto the page: enter, over and drop at a point inside the page's own box, as J-01's empty-Book drop does. */
 export async function dropFile(io, filePath, pageSelector, name) {
-  const point = await io.renderer.evaluate(`(() => { const box = document.querySelector(${JSON.stringify(pageSelector)})?.getBoundingClientRect(); return box ? { x: Math.min(innerWidth - 20, box.left + box.width / 2), y: Math.min(innerHeight - 20, box.top + 50) } : null; })()`);
+  const point = await io.renderer.evaluate(`(() => {
+    const page = document.querySelector(${JSON.stringify(pageSelector)});
+    if (!page) return null;
+    const box = page.getBoundingClientRect(), left = Math.max(0, box.left), right = Math.min(innerWidth, box.right);
+    const top = Math.max(0, box.top), bottom = Math.min(innerHeight, box.bottom);
+    if (right <= left || bottom <= top) return null;
+    for (const row of [0.5, 0.25, 0.75]) for (const column of [0.5, 0.25, 0.75]) {
+      const x = left + (right - left) * column, y = top + (bottom - top) * row;
+      if (page.contains(document.elementFromPoint(x, y))) return { x, y };
+    }
+    return null;
+  })()`);
   if (point === null) throw new Error(`${name}-drop-page`);
   for (const type of ['dragEnter', 'dragOver', 'drop']) {
     await io.renderer.send('Input.dispatchDragEvent', { type, ...point, data: { items: [], files: [filePath], dragOperationsMask: 1 } });
@@ -64,12 +94,13 @@ export function importPageButton(kind, bookId) {
 /** 取消导入 on the import page the entry reached, then the startup read: the staged file was never kept. */
 export async function cancelImportPage(io, kind, bookId, name) {
   await io.waitFor(io.renderer, `document.querySelector(${JSON.stringify(importPageButton(kind, bookId))})`, `${name}-page`);
-  await io.click('取消导入', `${name}-cancel`);
+  if (!await io.renderer.evaluate(reachable('#screen button', '取消导入'))) await tabTo(io, '#screen button', `${name}-cancel`, '取消导入');
+  await pressReachable(io, '#screen button', `${name}-cancel`, '取消导入');
   await io.waitFor(io.renderer, `!document.querySelector(${JSON.stringify(importPageButton(kind, bookId))})`, `${name}-left-page`);
   await noImportDraft(io, name);
 }
 
-const KEY_CODES = Object.freeze({ ArrowDown: 40, ArrowUp: 38, Enter: 13 });
+const KEY_CODES = Object.freeze({ ArrowDown: 40, ArrowUp: 38, Home: 36, End: 35, Enter: 13 });
 
 /** One real key press: down and up, as the keyboard sends it. */
 export async function pressKey(renderer, key) {
@@ -96,7 +127,8 @@ export function saveMenuActionsInOrder() {
 export async function newVersionFromSaveMenu(io, how, bookId, name) {
   if (how === 'pointer') await pressReachable(io, SAVE_MENU.summary, `${name}-menu`);
   else {
-    await io.assertRenderer(io.renderer, `(() => { const summary = document.querySelector(${JSON.stringify(SAVE_MENU.summary)}); if (!(summary instanceof HTMLElement)) return false; summary.focus(); return document.activeElement === summary; })()`, `${name}-menu-focus`);
+    await io.assertRenderer(io.renderer, reachable(SAVE_MENU.summary), `${name}-summary-in-window`);
+    await io.assertRenderer(io.renderer, `(() => { const summary = document.querySelector(${JSON.stringify(SAVE_MENU.summary)}); if (!(summary instanceof HTMLElement)) return false; summary.focus({ preventScroll: true }); return document.activeElement === summary; })()`, `${name}-menu-focus`);
     await pressKey(io.renderer, 'Enter');
   }
   await io.waitFor(io.renderer, `document.querySelector(${JSON.stringify(SAVE_MENU.menu)})?.open === true`, `${name}-menu-open`);

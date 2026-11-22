@@ -18,6 +18,8 @@ import { configureImportEntry, installImportDrop } from './import-entry.js';
 import type { RendererApi } from '../shared/protocol.js';
 
 interface Options {
+  importWindow: Pick<ReturnType<typeof import('./import-window.js').createImportWindow>, 'occupied' | 'bookFor'>;
+
   element: <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => HTMLElementTagNameMap[K];
   button: (label: string, className: "primary" | "secondary" | "quiet", action: () => void | Promise<void>) => HTMLButtonElement;
   setStatus: (message: string, tone?: "busy" | "success" | "error") => void;
@@ -377,7 +379,7 @@ async function renderLanding(
 }
 
 function installDropHandlers(): void {
-  configureImportEntry({ api, renderTargetChoice, setStatus, rendererErrorMessage, settleScreen });
+  configureImportEntry({ ...state.importWindow, api, renderTargetChoice, setStatus, rendererErrorMessage, settleScreen, route: () => navigation.route(), inBook: () => navigation.bookId !== null });
   installImportDrop(screen);
 }
 
