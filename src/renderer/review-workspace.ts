@@ -498,6 +498,7 @@ function focusKeyOf(node: HTMLElement): string {
   return [
     node.tagName,
     node.dataset['reviewAction'] ?? '',
+    node.dataset['evidenceFocus'] ?? '',
     node.closest<HTMLElement>('[data-review-filter]')?.dataset['reviewFilter'] ?? '',
     node.dataset['filterValue'] ?? '',
     node.dataset['reviewField'] ?? '',
@@ -1965,6 +1966,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const detail = serviceWords(finding.statusDetail);
       return [el('p', 'review-finding-note', houseAnnotationWords(finding.note)), ...[findingReferencedRules(finding)].filter((node): node is HTMLDetailsElement => node !== null),
         ...(finding.clauseRefs.length === 0 ? [el('p', 'review-finding-basis', reviewBasisWords(category.basis))] : finding.clauseRefs.map((clause) => el('p', 'review-finding-basis', reviewClauseLine(clause)))),
+        ...(finding.stateLine !== null && finding.stateLine !== '未外部复核' ? [el('p', 'review-finding-state', finding.stateLine)] : []),
         ...(finding.anchorState === 'anchor-changed' ? [el('p', 'review-finding-state', REVIEW_ANCHOR_CHANGED)] : []),
         ...(finding.status !== 'pending' && detail !== serviceWords(finding.statusLabel) ? [el('p', 'review-finding-status-detail', detail)] : []),
         ...(finding.ignoreReason === null ? [] : [el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason))]),

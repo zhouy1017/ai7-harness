@@ -1343,13 +1343,74 @@ describe('the fact card decision row (#1683)', () => {
     ['不采纳结论', 'recordVerificationReviewDecision', { ...reviewed, disposition: 'decline' }],
     ['维持未决', 'recordVerificationReviewDecision', { ...reviewed, disposition: 'keep-pending' }],
     ['准备修改建议', 'prepareCorrectionProposal', { bookId: BOOK, resultId: RESULT }],
-    ['标记为已处理', 'updateEditorialMark', expect.objectContaining({ markId: RESULT, action: 'set-status', status: 'resolved' })],
+    ['标记为已处理', 'updateEditorialMark', { manuscriptId: MANUSCRIPT.manuscriptId, branchId: MANUSCRIPT.branchId, windowStartBlockId: finding().blockId,
+      markId: RESULT, action: 'set-status', status: 'resolved', body: null, highlightColor: null, targetKind: null, proposedText: null, rationale: null }],
     ['忽略', 'recordReviewFindingDisposition', { reviewRunId: RUN, findingId: finding().findingId, disposition: 'ignored', reason: REVIEW_IGNORE_DEFAULT_REASON }],
     ['转为修改建议', 'getEditorialMarkCard', { manuscriptId: MANUSCRIPT.manuscriptId, branchId: MANUSCRIPT.branchId, markId: RESULT }],
   ] as const)('「%s」 sends %s and nothing else', async (label, sent, input) => {
     const view = await expanded();
+    if (sent !== 'recordVerificationReviewDecision') {
+      const reason = view.root.querySelector('[data-decision-field="reason"]')!;
+      reason.value = '核查理由'; reason.dispatchEvent({ type: 'input' });
+    }
     await view.press(label);
     for (const [name, call] of Object.entries(view.calls)) expect(call.mock.calls, name).toEqual(name === sent ? [[input]] : []);
+  });
+
+  it('retains the finding verdict in the expanded conclusion', async () => {
+    const view = await expanded();
+    const conclusion = () => view.root.querySelector('[data-fact-section="conclusion"]')!;
+    expect(conclusion().textContent).not.toContain('未外部复核');
+    const next = workspace(RUN, 'settled');
+    next.run!.findings[0]!.stateLine = '存疑';
+    view.inspectReviewWorkspace.mockResolvedValue(next);
+    view.surface.refresh(); await flush();
+    expect(conclusion().querySelector('.review-finding-state')?.textContent).toBe('存疑');
+  });
+
+  it('offers browser controls on the expanded web row and opens its result/card identity', async () => {
+    const view = mount('settled');
+    const page = decidable(result());
+    page.sources[0]!.evidenceId = 'retained-a';
+    page.sources[1]!.sourceKind = 'in-book';
+    page.sources[1]!.sourceRef = 'retrieval:1';
+    const openSourceInBrowser = vi.fn().mockResolvedValue({ host: 'example.org' });
+    Object.assign(view.api, { openSourceInBrowser });
+    view.inspectEvidenceWorkspace.mockResolvedValue(page);
+    await flush();
+    view.root.querySelector('[data-fact-action="fact-workspace"]')!.click(); await flush();
+    const [web, inBook] = view.root.querySelectorAll('.evidence-card');
+    expect(inBook!.querySelector('.source-link')).toBeNull();
+    expect(web!.querySelector('.source-link-domain')?.textContent).toBe('example.org');
+    expect(web!.querySelector('[data-source-action="copy-link"]')).not.toBeNull();
+    web!.querySelector('[data-source-action="open-in-browser"]')!.click(); await flush();
+    expect(openSourceInBrowser.mock.calls).toEqual([[{ bookId: BOOK, resultId: RESULT, cardId: 'src_a' }]]);
+  });
+
+  it('keeps focus on the expanded card when recording removes the focused decision', async () => {
+    const view = await expanded();
+    view.calls.recordVerificationReviewDecision.mockResolvedValue({ workspace: decidable({ ...result(), pendingReview: false }), supplementary: null });
+    const accept = view.root.querySelector('[data-decision-choice="accept"]')!;
+    accept.focus(); accept.click(); await flush();
+    expect(view.root.querySelector('[data-decision-choice="accept"]')).toBeNull();
+    expect(miniDocument.activeElement?.isConnected).toBe(true);
+    expect(miniDocument.activeElement?.closest('.fact-lens-row')?.dataset['factResultId']).toBe(RESULT);
+  });
+
+  it('confirms conversion with its own proposal and rationale', async () => {
+    const view = await expanded();
+    const reason = view.root.querySelector('[data-decision-field="reason"]')!;
+    reason.value = '核查理由'; reason.dispatchEvent({ type: 'input' });
+    await view.press('转为修改建议');
+    for (const [field, value] of [['convert-to', '修改'], ['convert-rationale', '批注理由']] as const) {
+      const input = view.root.querySelector(`[data-review-field="${field}"]`)!;
+      input.value = value; input.dispatchEvent({ type: 'input' });
+    }
+    view.root.querySelector('[data-review-action="convert-confirm"]')!.click(); await flush();
+    expect(view.calls.updateEditorialMark.mock.calls).toEqual([[{ manuscriptId: MANUSCRIPT.manuscriptId, branchId: MANUSCRIPT.branchId,
+      windowStartBlockId: finding().blockId, markId: RESULT, action: 'convert', status: null, body: null, highlightColor: null,
+      targetKind: 'change-suggestion', proposedText: '修改', rationale: '批注理由' }]]);
+    expect(view.calls.recordVerificationReviewDecision).not.toHaveBeenCalled();
   });
 
   it('writes the editor’s own conclusion before recording it, and opens 忽略并备注… without sending anything', async () => {

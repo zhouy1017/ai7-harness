@@ -200,7 +200,10 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   };
   const restoreFocus = (key: string | null): void => {
     if (key === null) return;
-    element.querySelector<HTMLElement>(`[data-evidence-focus="${CSS.escape(key)}"]`)?.focus();
+    const control = element.querySelector<HTMLElement>(`[data-evidence-focus="${CSS.escape(key)}"]`);
+    const target = control === null || (control instanceof HTMLButtonElement && control.disabled)
+      ? element.querySelector<HTMLElement>('[data-fact-section="decision"]') : control;
+    target?.focus({ preventScroll: true });
   };
 
   // ---- reading --------------------------------------------------------------------------------------------------------
@@ -483,6 +486,8 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
 
   function renderDecision(current: EvidenceWorkspaceProjection): HTMLElement {
     const node = section('decision', 'evidence-decision', DECISION_HEADING);
+    node.tabIndex = -1;
+    node.dataset['evidenceFocus'] = 'decision';
     const card = current.decisionCard;
     const offered = current.result.pendingReview && card.drift === null && card.choices.length > 0;
     const offers = (disposition: VerificationReviewDisposition): boolean => offered && card.choices.some((choice) => choice.disposition === disposition);

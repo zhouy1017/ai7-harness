@@ -504,9 +504,20 @@ async function reviewAction(renderer, selector, name) {
  * Issue #1683: a control a stage names is brought into view by real wheel input only, then required inside the window and topmost
  * at its centre — read before the press, with no scripted scroll — and pressed by a real pointer. Each read waits two frames.
  */
-const controlInWindow = (selector) => `new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>{const node=document.querySelector(${JSON.stringify(selector)});if(!node)return resolve(null);
-  const r=node.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;resolve({x,y,top:r.top,left:r.left,width:innerWidth,height:innerHeight,
-  inside:r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&node.contains(document.elementFromPoint(x,y))});})))`;
+function measureControl(node) {
+  if (!node) return null;
+  const r = node.getBoundingClientRect();
+  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  let inside = r.width > 0 && r.height > 0 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+  for (let parent = node.parentElement; inside && parent && parent !== document.scrollingElement; parent = parent.parentElement) {
+    const style = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
+    const left = bounds.left + parent.clientLeft, top = bounds.top + parent.clientTop;
+    if (style.overflowX !== 'visible') inside &&= r.left >= left && r.right <= left + parent.clientWidth;
+    if (style.overflowY !== 'visible') inside &&= r.top >= top && r.bottom <= top + parent.clientHeight;
+  }
+  return { x, y, top: r.top, left: r.left, width: innerWidth, height: innerHeight, inside: inside && node.contains(document.elementFromPoint(x, y)) };
+}
+const controlInWindow = (selector) => `new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve((${measureControl})(document.querySelector(${JSON.stringify(selector)}))))))`;
 async function wheelIntoWindow(renderer, selector, name) {
   for (let move = 0; move < 16; move += 1) {
     const state = await renderer.evaluate(controlInWindow(selector));
@@ -518,15 +529,18 @@ async function wheelIntoWindow(renderer, selector, name) {
   requireJourney(false, `${name}-in-window`);
 }
 async function pressInWindow(renderer, selector, name) {
-  await wheelIntoWindow(renderer, selector, name);
-  requireJourney((await renderer.evaluate(controlInWindow(selector)))?.inside === true, `${name}-in-window`);
-  await pointerClick(renderer, waitFor, selector, name);
+  const { x, y } = await wheelIntoWindow(renderer, selector, name);
+  const point = { x, y, button: 'left', clickCount: 1 };
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, buttons: 1 });
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, buttons: 0 });
 }
 /** Between a source row and its category, the one element that draws a border or its own background (Issue #1683 item 7). */
-const SOURCE_ROW_FRAMES = `((row) => {const frames=[];for(let node=row.parentElement;node&&!node.matches('section.review-group');node=node.parentElement){const s=getComputedStyle(node);
+const SOURCE_ROW_FRAMES = `((row) => {const framed=(node)=>{const s=getComputedStyle(node);
   const transparent=(color)=>color==='transparent'||color.startsWith('rgba(')&&parseFloat(color.slice(color.lastIndexOf(',')+1))===0;
   const border=['Top','Right','Bottom','Left'].some(side=>parseFloat(s['border'+side+'Width'])>0&&s['border'+side+'Style']!=='none'&&!transparent(s['border'+side+'Color']));
-  if(border||!transparent(s.backgroundColor)||s.backgroundImage!=='none')frames.push(node.className);}return frames;})`;
+  return border||!transparent(s.backgroundColor)||s.backgroundImage!=='none';};
+  const ancestors=[];for(let node=row.parentElement;node&&!node.matches('section.review-group');node=node.parentElement)if(framed(node))ancestors.push(node.className);
+  return {row:framed(row),ancestors};})`;
 
 async function openMarkMore(renderer, markId, name) {
   await waitFor(renderer, `document.querySelector('[data-mark-card="'+CSS.escape(${JSON.stringify(markId)})+'"] .editorial-mark-more')`, `${name}-ready`, 30_000);
@@ -3507,20 +3521,17 @@ async function main() {
     // Issue #1683 item 12.2, in ordinary mode and before any decision: the collapsed card is one badge with its place, the wording in
     // two lines at most, one sentence and its row of controls, all in the window; 展开 shows 结论 → 来源 → 你的决定, and exactly one
     // element frames a source row — the card. Every rectangle is read from this window's own innerWidth / innerHeight.
-    await setDeveloperMode(renderer, waitFor, false, 'factual-card-ordinary-mode');
-    await pointerClick(renderer, waitFor, SIDEBAR.section('review'), 'factual-card-ordinary-review');
+    await setDeveloperMode(renderer, waitFor, false, 'factual-card-ordinary-mode', pressInWindow);
+    await pressInWindow(renderer, SIDEBAR.section('review'), 'factual-card-ordinary-review');
     const factRow = `.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]`;
     const factToggle = `${factRow} [data-fact-action="fact-workspace"]`;
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${factRow} article.fact-card`)})?.dataset.factCard==='collapsed'`, 'factual-card-ordinary-lens', 60_000);
     await wheelIntoWindow(renderer, `${factRow} article.fact-card`, 'factual-card-ordinary-card');
-    for (const [part, selector] of [['badge', '.fact-card-head .fact-card-badge'], ['sentence', '.fact-card-sentence'], ['expand', '[data-fact-action="fact-workspace"]'], ['go-to-text', '.fact-card-actions [data-review-action="go-to-text"]']]) {
-      await wheelIntoWindow(renderer, `${factRow} ${selector}`, `factual-card-ordinary-${part}`);
-    }
     const collapsed = await renderer.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>{const card=document.querySelector(${JSON.stringify(`${factRow} article.fact-card`)});
       const box=(node)=>node.getBoundingClientRect(),style=getComputedStyle(card),px=(value)=>parseFloat(value)||0,line=(node)=>{const s=getComputedStyle(node);return px(s.lineHeight)||px(s.fontSize)*1.5;};
       const quote=card.querySelector(':scope > .review-finding-quote'),q=getComputedStyle(quote),sentence=card.querySelector('.fact-card-sentence');
-      const parts=['.fact-card-head .fact-card-badge','.fact-card-sentence','[data-fact-action="fact-workspace"]','.fact-card-actions [data-review-action="go-to-text"]'].map((selector)=>{const node=card.querySelector(selector),r=box(node),x=r.left+r.width/2,y=r.top+r.height/2;
-        return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&node.contains(document.elementFromPoint(x,y));});
+      const parts=['.fact-card-head .fact-card-badge',':scope > .review-finding-quote','.fact-card-sentence','[data-fact-action="fact-workspace"]',
+        '.fact-card-actions [data-review-action="go-to-text"]','.fact-card-actions [data-review-action="ignore-now"]'].map(selector=>(${measureControl})(card.querySelector(selector))?.inside);
       const vertical=(s)=>px(s.paddingTop)+px(s.paddingBottom)+px(s.borderTopWidth)+px(s.borderBottomWidth);
       const bound=vertical(style)+box(card.querySelector('.fact-card-head')).height+2*line(quote)+vertical(q)+px(q.marginTop)+px(q.marginBottom)+line(sentence)+box(card.querySelector('.fact-card-actions')).height+3*px(style.rowGap)+2;
       resolve({width:innerWidth,height:innerHeight,parts,card:box(card).height,bound,quote:box(quote).height,quoteBound:2*line(quote)+vertical(q)+1,
@@ -3546,7 +3557,8 @@ async function main() {
       return {order:sections.map((node)=>node.dataset.factSection),headings:sections.map((node)=>node.querySelector('.fact-section-heading')?.textContent??''),tops:sections.map((node)=>node.getBoundingClientRect().top),
         frames:Array.from(card.querySelectorAll('.evidence-card'),${SOURCE_ROW_FRAMES}),address:${JSON.stringify(attached.sources.map((source) => source.sourceRef))}.some((ref)=>card.textContent.includes(ref))};})()`);
     requireJourney(JSON.stringify(expanded.order) === JSON.stringify(['conclusion', 'sources', 'decision']) && JSON.stringify(expanded.headings) === JSON.stringify(['结论', '为这句核对的来源', '你的决定']) &&
-      expanded.tops[0] < expanded.tops[1] && expanded.tops[1] < expanded.tops[2] && expanded.frames.length === 3 && expanded.frames.every((frames) => frames.length === 1 && frames[0].split(/\s+/u).includes('fact-card')) &&
+      expanded.tops[0] < expanded.tops[1] && expanded.tops[1] < expanded.tops[2] && expanded.frames.length === 3 &&
+      expanded.frames.every(({ row, ancestors }) => !row && ancestors.length === 1 && ancestors[0].split(/\s+/u).includes('fact-card')) &&
       !expanded.address, 'factual-card-ordinary-expanded-order', expanded);
     cancellation.throwIfRequested();
 
@@ -3564,7 +3576,7 @@ async function main() {
     const twiceBefore = await browserRecord();
     const twice = await wheelIntoWindow(renderer, openControl, 'factual-card-source-open-twice');
     requireJourney(twice.inside === true, 'factual-card-source-open-twice-in-window');
-    const point = { x: Math.round(twice.x), y: Math.round(twice.y), button: 'left' };
+    const point = { x: twice.x, y: twice.y, button: 'left' };
     await Promise.all([
       renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, buttons: 1, clickCount: 1 }),
       renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, buttons: 0, clickCount: 1 }),
@@ -3579,8 +3591,8 @@ async function main() {
       await waitFor(renderer, `document.querySelector(${JSON.stringify(`${webRow} .source-link-status`)})?.textContent==='已复制链接。'`, 'factual-card-source-copied');
       requireJourney(JSON.stringify(await renderer.evaluate(`window.__j04Copied`)) === JSON.stringify([webCard.sourceRef]), 'factual-card-source-copy-text');
     } finally { await renderer.evaluate(`document.removeEventListener('copy',window.__j04CopyListener,true)`); }
-    await setDeveloperMode(renderer, waitFor, true, 'factual-card-developer-mode');
-    await pointerClick(renderer, waitFor, SIDEBAR.section('review'), 'factual-card-developer-review');
+    await setDeveloperMode(renderer, waitFor, true, 'factual-card-developer-mode', pressInWindow);
+    await pressInWindow(renderer, SIDEBAR.section('review'), 'factual-card-developer-review');
     await waitFor(renderer, `document.querySelectorAll('section.review-group[data-review-category="factual-review"] .fact-lens .fact-lens-row').length > 0`, 'factual-card-developer-lens', 60_000);
     cancellation.throwIfRequested();
     at('factual-evidence-workspace');
