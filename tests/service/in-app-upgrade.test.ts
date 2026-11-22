@@ -10,7 +10,7 @@ import { createUpgradeSample1, legacySampleService } from '../support/upgrade-sa
 import { reimportVersion } from '../support/reimport-version.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { readDataVersionMarker, storeRevisionOnDisk } from '../../src/service/data-version.js';
-import { beginUpgrade, beginUpgradeRollback, resumeUpgrade, rollbackDataPeak, upgradePreflight } from '../../src/service/in-app-upgrade.js';
+import { beginUpgrade, beginUpgradeRollback, resumeUpgrade, rollbackDataPeak, upgradePreflight, upgradeSpaceShortfall } from '../../src/service/in-app-upgrade.js';
 import { replacementStagingFor } from '../../src/service/database-replacement.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { backupLocationFor } from '../../src/service/scheduled-backups.js';
@@ -263,14 +263,16 @@ it('accepts only the unlink order authorized by an abandoned old import', async 
   expect(existsSync(join(root,'objects',source.key))).toBe(false);
 }, 180_000);
 
-it.each(['save-old','publish','record'] as const)('catches lost payloads at %s and preserves the old library and verified backup', async stage => {
+it.each(['convert','verify','save-old','publish','record'] as const)('catches missing or damaged payloads at %s and restores a usable old library', async stage => {
   const root = join(roots.inputRoot,'lost-payload-'+stage);
   await cp(roots.dataRoot,root,{recursive:true});
   await beginUpgrade(root);
   await expect(resumeUpgrade(root,'0.8.0',phase => { if(phase === stage) throw Error('power loss'); })).rejects.toThrow('power loss');
   const missing = (await databasePackageSources(root)).find(member => member.member.startsWith('objects/'))!;
-  await rm(missing.path);
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  if (stage === 'verify' || stage === 'record') await writeFile(missing.path,Buffer.alloc(0));
+  else await rm(missing.path);
+  const firstError = stage === 'convert' || stage === 'verify' ? 'DATABASE_PACKAGE_INCOMPLETE' : 'UPGRADE_FILES_INVALID';
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:firstError});
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
   expect(existsSync(join(root,'shell','storage-upgrade.json'))).toBe(false);
   const location = backupLocationFor(root);
@@ -299,6 +301,9 @@ it.runIf(process.platform === 'win32')('recovers from a locked fallback director
   await beginUpgrade(root);
   await resumeUpgrade(root,'0.8.0');
   const phase = join(root,'shell','storage-upgrade.json');
+  const location = backupLocationFor(root);
+  const originalPackage = join(location,(await readdir(location)).find(name => name.endsWith('.ai7db'))!);
+  const originalMembers = (await verifyDatabasePackage(originalPackage,{dataRoot:root})).manifest.members;
   const kept = (await readdir(root)).find(name => name.startsWith('store-before-0.8.0-'))!;
   const away = join(roots.inputRoot,'locked-fallback-original');
   await rename(join(root,kept),away);
@@ -306,11 +311,18 @@ it.runIf(process.platform === 'win32')('recovers from a locked fallback director
   const digest = await fileDigest(missing.path);
   await rm(missing.path);
   await beginUpgradeRollback(root);
+  const start = JSON.parse(await readFile(phase,'utf8'));
+  const retryArea = join(root,'shell','upgrade-'+start.id,'restore');
+  const priorExtraction = replacementStagingFor(retryArea);
+  await mkdir(priorExtraction,{recursive:true});
+  await writeFile(join(priorExtraction,'interrupted.partial'),Buffer.alloc(4096));
   const stop = (point: string, after = false) => resumeUpgrade(root,'0.8.0',(stage,renamed) => {
     if (stage === point && Boolean(renamed) === after) throw Error('interrupted');
   });
   await expect(stop('publish-old')).rejects.toThrow('interrupted');
+  expect(existsSync(join(priorExtraction,'interrupted.partial'))).toBe(false);
   const {id} = JSON.parse(await readFile(phase,'utf8'));
+  await rm(join(root,'shell','upgrade-'+id,'current-files.json'));
   const incoming = join(replacementStagingFor(join(root,'shell','upgrade-'+id,'restore')),'incoming','store');
   // A Windows process holds its working directory against rename until it exits.
   const lock = spawn(process.execPath,['-e',"process.stdout.write('ready');process.stdin.resume()"],{cwd:incoming,windowsHide:true,stdio:['pipe','pipe','ignore']});
@@ -340,6 +352,13 @@ it.runIf(process.platform === 'win32')('recovers from a locked fallback director
   // Simulate a stale journal deletion after temporary extraction files disappeared.
   await writeFile(phase,savedJournal);
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  await writeFile(phase,savedJournal);
+  await writeFile(missing.path,Buffer.alloc(0));
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+  expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
+  expect(await fileDigest(missing.path)).toEqual(digest);
+  await beginUpgradeRollback(root);
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
   const openPrevious = await legacySampleService(root,roots.codeRoot,'da44971a048719e18cbaa7f59436f3ea477d8309');
   const previous = await openPrevious(root);
   const archive = join(roots.inputRoot,'rollback-integration-074.ai7db');
@@ -348,12 +367,41 @@ it.runIf(process.platform === 'win32')('recovers from a locked fallback director
     await previous.approveDatabaseExport(prep.preparationId,true);
   } finally { previous.markCleanShutdown(); previous.close(); }
   const members = (await verifyDatabasePackage(archive,{dataRoot:root})).manifest.members;
-  expect(members.filter(member => member.path.endsWith('ai7.sqlite')).map(member => member.path)).toEqual(['store/ai7.sqlite']);
+  expect(members.map(member => member.path)).toEqual(originalMembers.map(member => member.path));
+  expect(members.filter(member => member.path !== 'store/ai7.sqlite')).toEqual(originalMembers.filter(member => member.path !== 'store/ai7.sqlite'));
+  await beginUpgrade(root);
+  await expect(stop('publish')).rejects.toThrow('interrupted');
+  const forward = JSON.parse(await readFile(phase,'utf8'));
+  const candidate = join(root,'shell','upgrade-'+forward.id,'converted');
+  const forwardLock = spawn(process.execPath,['-e',"process.stdout.write('ready');process.stdin.resume()"],{cwd:candidate,windowsHide:true,stdio:['pipe','pipe','ignore']});
+  try {
+    await once(forwardLock.stdout,'data');
+    await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+    expect(existsSync(phase)).toBe(false);
+    expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
+    const old = await openPrevious(root);
+    const lockedExport = join(roots.inputRoot,'locked-forward.ai7db');
+    try {
+      const prep = await old.prepareDatabaseExport(lockedExport,true);
+      await old.approveDatabaseExport(prep.preparationId,true);
+    } finally { old.markCleanShutdown(); old.close(); }
+    const verified = (await verifyDatabasePackage(lockedExport,{dataRoot:root})).manifest.members;
+    expect(verified.map(member => member.path)).toEqual(originalMembers.map(member => member.path));
+    expect(verified.filter(member => member.path !== 'store/ai7.sqlite')).toEqual(originalMembers.filter(member => member.path !== 'store/ai7.sqlite'));
+  } finally {
+    const ended = once(forwardLock,'exit');
+    forwardLock.stdin.end();
+    await ended;
+  }
   await beginUpgrade(root);
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
 },180_000);
 
 it('reserves the peak on the writing volume during backup fallback',() => {
+  expect(upgradeSpaceShortfall(400,900,500,1300,1300,true)).toBe(900);
+  expect(upgradeSpaceShortfall(400,900,500,1300,1300,false)).toBe(0);
+  expect(upgradeSpaceShortfall(400,900,500,1300,1100,false)).toBe(200);
+  expect(upgradeSpaceShortfall(400,900,500,1100,1300,false)).toBe(200);
   expect(rollbackDataPeak(100,{archive:900,store:400,files:300})-rollbackDataPeak(0)).toBe(2000);
   expect(rollbackDataPeak(2000,{archive:50,store:100,files:300})-rollbackDataPeak(0)).toBe(3000);
 });

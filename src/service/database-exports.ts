@@ -307,7 +307,7 @@ export async function verifyCopiedPayloads(
   schemaRevision: number,
   signal?: AbortSignal,
   live?: DatabaseSync,
-  recoverMissing?: (path: string, sha256: string, bytes: number) => boolean,
+  canRecover?: (path: string, sha256: string, bytes: number) => boolean,
 ): Promise<void> {
   const incomplete = (): never => { throw new DatabaseExportError('DATABASE_PACKAGE_INCOMPLETE', '数据文件在打包期间发生变化或已损坏；没有生成完整备份，请重试。'); };
   const copy = openPackageStore(path);
@@ -325,7 +325,7 @@ export async function verifyCopiedPayloads(
     const member = packed.get(key);
     if (typeof digest !== 'string' || !DIGEST_PATTERN.test(digest) || typeof bytes !== 'number' || !Number.isSafeInteger(bytes) || bytes <= 0) incomplete();
     if (member === undefined || member.sha256 !== digest || member.bytes !== bytes) {
-      if (!member && typeof digest === 'string' && typeof bytes === 'number' && recoverMissing?.(key, digest, bytes)) return;
+      if (typeof digest === 'string' && typeof bytes === 'number' && canRecover?.(key, digest, bytes)) return;
       if (!stillHeld()) incomplete();
       damaged[kind] += 1;
     }

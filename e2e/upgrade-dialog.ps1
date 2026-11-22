@@ -10,8 +10,29 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class UpgradeDialogMouse {
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr hwnd, EnumProc proc, IntPtr param);
+  delegate bool EnumProc(IntPtr hwnd, IntPtr param);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd,StringBuilder text,int max);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd,StringBuilder text,int max);
+  [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr hwnd);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hwnd,uint msg,IntPtr wParam,IntPtr lParam);
+  public static bool ClickNamedButton(IntPtr dialog,string name) {
+    bool clicked = false;
+    EnumChildWindows(dialog,delegate(IntPtr hwnd,IntPtr unused) {
+      var text = new StringBuilder(256);
+      GetClassName(hwnd,text,text.Capacity);
+      if (!String.Equals(text.ToString(),"Button",StringComparison.OrdinalIgnoreCase) || !IsWindowVisible(hwnd) || !IsWindowEnabled(hwnd)) return true;
+      GetWindowText(hwnd,text,text.Capacity);
+      if (text.ToString().Replace("&","").Trim() != name) return true;
+      clicked = PostMessage(hwnd,0x00f5,IntPtr.Zero,IntPtr.Zero);
+      return !clicked;
+    },IntPtr.Zero);
+    return clicked;
+  }
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
@@ -33,28 +54,29 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $matchedDialogs++
     $hwnd = [IntPtr]$window.Current.NativeWindowHandle
     [void][UpgradeDialogMouse]::SetForegroundWindow($hwnd)
+    if ([UpgradeDialogMouse]::ClickNamedButton($hwnd,$Button)) { exit 0 }
     foreach ($control in $window.FindAll($descendants, $buttonName)) {
       $matchedControls++
       if (!$control.Current.IsEnabled -or $control.Current.IsOffscreen) { continue }
+      # Task Dialog may expose the visible caption as a Text child of a push button.
+      $rect = $control.Current.BoundingRectangle
+      if ($rect.IsEmpty -or $rect.Width -le 0 -or $rect.Height -le 0) { continue }
+      $point = [System.Windows.Point]::new($rect.Left + $rect.Width / 2, $rect.Top + $rect.Height / 2)
+      # Only click the named element in the dialog's client area. The title bar can have a "Close" control too.
+      $coordinates = [IntPtr](([int]$point.Y -shl 16) -bor ([int]$point.X -band 65535))
+      if ([UpgradeDialogMouse]::SendMessage($hwnd,0x0084,[IntPtr]::Zero,$coordinates).ToInt32() -ne 1) { continue }
+      $hit = [System.Windows.Automation.AutomationElement]::FromPoint($point)
+      if ($hit.Current.ProcessId -ne $window.Current.ProcessId) { continue }
       $action = $null
       if ($control.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$action)) {
         $action.Invoke()
         exit 0
       }
-      # Task Dialog may expose the visible caption as a Text child of a push button.
-      $rect = $control.Current.BoundingRectangle
-      if ($rect.IsEmpty -or $rect.Width -le 0 -or $rect.Height -le 0) { continue }
-      $point = [System.Windows.Point]::new($rect.Left + $rect.Width / 2, $rect.Top + $rect.Height / 2)
-      $hit = [System.Windows.Automation.AutomationElement]::FromPoint($point)
-      if ($hit.Current.ProcessId -ne $window.Current.ProcessId) { continue }
       if ([UpgradeDialogMouse]::SetCursorPos([int]$point.X,[int]$point.Y)) {
         [UpgradeDialogMouse]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
         [UpgradeDialogMouse]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
         exit 0
       }
-    }
-    if ($Button -eq ([string][char]0x5173 + [char]0x95ed) -and $hwnd -ne [IntPtr]::Zero) {
-      if ([UpgradeDialogMouse]::PostMessage($hwnd,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)) { exit 0 }
     }
   }
   Start-Sleep -Milliseconds 150
