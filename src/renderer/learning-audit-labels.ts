@@ -414,3 +414,5 @@ export const LEARNING_AUDIT_STATUS = {
 export function learningRemediationRereadFailed(outcome: string): string {
   return `${outcome}但学习回溯没能重新读取，列表可能还是之前的状态；请稍后重新打开。`;
 }
+
+export const LEARNING_AUDIT_ORDINARY_BATCH_MISMATCH = '所选材料须来自同一本书、同一类型，且用于学习的范围相同（仅本书或本社），才能一起停止今后使用。';

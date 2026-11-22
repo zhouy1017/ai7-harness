@@ -51,14 +51,17 @@ function mounted(rows: LearningAuditMaterialProjection[], decide: (input: Parame
 }
 
 it('drops a selected material whose standing changed during a decision re-read', async () => {
-  const setup = mounted([material('a', 'pending'), material('b', 'house')], vi.fn());
+  const setup = mounted([material('a', 'pending'), material('b', 'house'), material('c', 'book')], vi.fn());
   await setup.view.load(); await settle();
   const box = setup.root.querySelector<HTMLInputElement>('[data-material-key="b"] .learning-audit-select')!;
   box.checked = true; (box as unknown as MiniElement).dispatchEvent({ type: 'change' }); await settle();
-  setup.setRows([material('a', 'pending'), material('b', 'excluded')]);
+  const retained = setup.root.querySelector<HTMLInputElement>('[data-material-key="c"] .learning-audit-select')!;
+  retained.checked = true; (retained as unknown as MiniElement).dispatchEvent({ type: 'change' });
+  setup.setRows([material('a', 'pending'), material('b', 'excluded'), material('c', 'book')]);
   setup.rows()[0]!.querySelector<HTMLElement>('[data-learning-audit-action="decide-book"]')!.click(); await settle();
   expect(setup.root.querySelector('[data-material-key="b"] .learning-audit-select')).toBeNull();
-  expect(setup.root.querySelector('.learning-audit-selected')?.textContent ?? '').not.toContain('已选 1 条');
+  expect(setup.rows()).toHaveLength(3);
+  expect(setup.root.querySelector('.learning-audit-selected')!.textContent).toBe('已选 1 条');
 });
 
 it('records an ordinary re-inclusion through 确定', async () => {
@@ -69,7 +72,37 @@ it('records an ordinary re-inclusion through 确定', async () => {
   choice.checked = true; (choice as unknown as MiniElement).dispatchEvent({ type: 'change' });
   const confirm = root.querySelector<HTMLButtonElement>('[data-learning-audit-action="reinclude-record"]')!;
   expect(confirm.textContent).toBe('确定'); confirm.click(); await settle();
-  expect(api.decideLearningMaterial).toHaveBeenCalledWith(expect.objectContaining({ materialKey: 'a', choice: 'book' }));
+  expect(api.decideLearningMaterial).toHaveBeenCalledOnce();
+  expect(api.decideLearningMaterial).toHaveBeenCalledWith({ bookId: BOOK, materialKey: 'a', materialDigest: 'digest-a', expectedDecisions: 1, choice: 'book', note: null });
+  expect(api.inspectLearningLineage).toHaveBeenCalledTimes(2);
+});
+
+it('drops a tick when a pending Word material stops being used by default', async () => {
+  const setup = mounted([material('a', 'pending'), material('b', 'pending', { kind: 'word-tracked-edit', automaticAdmission: { choice: 'house', sourceKeys: [] } }), material('c', 'book')], vi.fn());
+  await setup.view.load(); await settle();
+  const tick = setup.root.querySelector<HTMLInputElement>('[data-material-key="b"] .learning-audit-select')!;
+  tick.checked = true; (tick as unknown as MiniElement).dispatchEvent({ type: 'change' });
+  const retained = setup.root.querySelector<HTMLInputElement>('[data-material-key="c"] .learning-audit-select')!;
+  retained.checked = true; (retained as unknown as MiniElement).dispatchEvent({ type: 'change' });
+  setup.setRows([material('a', 'pending'), material('b', 'pending', { kind: 'word-tracked-edit' }), material('c', 'book')]);
+  setup.rows()[0]!.querySelector<HTMLElement>('[data-learning-audit-action="decide-book"]')!.click(); await settle();
+  expect(setup.root.querySelector('[data-material-key="b"] .learning-audit-select')).toBeNull();
+  expect(setup.rows()).toHaveLength(3);
+  expect(setup.root.querySelector('.learning-audit-selected')!.textContent).toBe('已选 1 条');
+});
+
+it.each([false, true])('shows the mode-specific mismatch sentence in the batch bar (developer=%s)', async (developer) => {
+  setTechnicalLayerVisible(developer);
+  const { root, view } = mounted([material('a', 'house'), material('b', 'book')], vi.fn());
+  await view.load(); await settle();
+  for (const key of ['a', 'b']) {
+    const tick = root.querySelector<HTMLInputElement>(`[data-material-key="${key}"] .learning-audit-select`)!;
+    tick.checked = true; (tick as unknown as MiniElement).dispatchEvent({ type: 'change' });
+  }
+  await settle();
+  expect(root.querySelector('.learning-audit-mismatch')!.textContent).toBe(developer
+    ? '所选材料须来自同一本书、同一类型、同一纳入范围，才能一起停止今后使用。'
+    : '所选材料须来自同一本书、同一类型，且用于学习的范围相同（仅本书或本社），才能一起停止今后使用。');
 });
 
 it('reads in an editor\'s words: no empty value, version label, time string or 审计详情, filters as dropdowns', async () => {

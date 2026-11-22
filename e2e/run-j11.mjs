@@ -3395,6 +3395,9 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-learning-audit-action="reinclude-record"]')?.textContent==='确定'`, 'ordinary-reinclude-confirm-word');
     await reincludePress('[data-learning-audit-action="reinclude-record"]', 'ordinary-reinclude-confirm');
     await readAudit(renderer, (page) => page.lineage?.key === ordinaryKey && page.lineage.standing === 'book', 'ordinary-reinclude-recorded');
+    await reincludePress('.learning-lineage [data-learning-audit-action="back"]', 'ordinary-reinclude-back');
+    const reincludedRow = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 1 && page.rows[0][1] === 'book', 'ordinary-reinclude-row');
+    requireJourney(reincludedRow.rows[0][2] === '用于学习 · 仅本书', 'ordinary-reinclude-row-words');
     await auditMode(true, 'learning-audit-ordinary-restore');
 
     // ---- 从第 M 版重新评估 past a damaged latest version (Issue #726), and the house calibration offset (Issue #429, EVAL-011a) ----
@@ -3736,14 +3739,16 @@ async function main() {
       await waitFor(renderer, `document.querySelector('[data-memory-item="${itemId}"]')?.textContent.includes('已启用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-active`);
       if (name === 'memory-governance-first') {
         await assertRenderer(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]'); const stop=Array.from(row?.querySelectorAll('button')??[]).find(button=>button.textContent==='停用'); if(!stop||stop.disabled)return false;stop.click();return true; })()`, 'ordinary-preference-stop-after-memory');
-        await waitFor(renderer, `document.querySelector('[data-review-preference="${ordinaryPreference}"]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.disabled===false`, 'ordinary-preference-stopped-after-memory');
+        await waitFor(renderer, `document.querySelector('[data-disabled-preferences] h4')?.textContent==='已停用的审阅偏好' && document.querySelector('[data-disabled-preferences] [data-review-preference="${ordinaryPreference}"]')!==null && document.querySelector('[data-learning-enabled]')?.disabled===false`, 'ordinary-preference-stopped-after-memory');
         await clickSelector(renderer, '#quality-tab-feedback', 'ordinary-history-open');
         await waitFor(renderer, `document.querySelectorAll('[data-feedback-filter]').length===2 && document.querySelectorAll('[data-entry-id]').length>0`, 'ordinary-history-populated');
         await assertRenderer(renderer, `(async () => { const page=await window.ai7.inspectFeedbackHistory(); const rows=Array.from(document.querySelectorAll('[data-entry-id]')); return JSON.stringify(rows.map(row=>row.dataset.entryId))===JSON.stringify(page.entries.map(entry=>entry.entryId)) && rows.every(row=>row.querySelectorAll(':scope > p').length===2 && row.querySelector('.feedback-entry-book') && (row.querySelector('[data-feedback-action="open"]')?.textContent==='查看原处' || row.querySelector('.feedback-entry-detached'))) && !document.querySelector('#feedback-filter-signal, #feedback-filter-author, #feedback-filter-editor, #feedback-filter-dimension, #feedback-filter-from, #feedback-filter-to, #feedback-group-by'); })()`, 'ordinary-history-newest-two-lines');
         await choose(renderer, '#feedback-filter-origin', 'analysis-feedback', 'ordinary-history-filter-source');
         await waitFor(renderer, `document.querySelector('#feedback-filter-origin')?.disabled===false && Array.from(document.querySelectorAll('[data-entry-id]')).every(row=>row.dataset.feedbackOrigin==='analysis-feedback')`, 'ordinary-history-filtered');
         await clickSelector(renderer, '#quality-tab-preferences', 'ordinary-preference-remount');
-        await waitFor(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]');const history=row?.querySelector('details');return row?.textContent.includes('已停用') && history?.textContent.includes('来自《') && /[0-9]+ 月 [0-9]+ 日 [0-9]{2}:[0-9]{2}/u.test(history.textContent) && !/[0-9]{4}-[0-9]{2}-[0-9]{2}T/u.test(history.textContent); })()`, 'ordinary-preference-retained-source-history');
+        await waitFor(renderer, `document.querySelector('[data-disabled-preferences] [data-review-preference="${ordinaryPreference}"] details summary')!==null`, 'ordinary-preference-history-ready');
+        await inWindowPress(renderer, waitFor)(`[data-review-preference="${ordinaryPreference}"] details summary`, 'ordinary-preference-history-expand');
+        await waitFor(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]');const history=row?.querySelector('details');return row?.closest('[data-disabled-preferences]')?.querySelector('h4')?.textContent==='已停用的审阅偏好' && history?.open && Array.from(history.querySelectorAll('p')).some(line=>line.textContent.includes('已停用')&&/[0-9]+ 月 [0-9]+ 日 [0-9]{2}:[0-9]{2}/u.test(line.textContent)) && history?.textContent.includes('来自《') && /[0-9]+ 月 [0-9]+ 日 [0-9]{2}:[0-9]{2}/u.test(history.textContent) && !/[0-9]{4}-[0-9]{2}-[0-9]{2}T/u.test(history.textContent); })()`, 'ordinary-preference-retained-source-history');
         await qualityMode(true, 'ordinary-memory-restore'); await openMemory('ordinary-memory-developer');
       }
       return itemId;
@@ -3779,12 +3784,12 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-memory-stop-quality');
     await waitFor(renderer, `document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')`, 'ordinary-memory-stop-ready');
     await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${deactivatedMemoryId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='停用');if(!button||button.disabled)return false;button.click();return true;})()`, 'memory-governance-deactivate');
-    await waitFor(renderer, `document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'memory-governance-inactive');
+    await waitFor(renderer, `document.querySelector('[data-disabled-preferences] h4')?.textContent==='已停用的审阅偏好' && document.querySelector('[data-disabled-preferences] [data-memory-item="${deactivatedMemoryId}"]')!==null && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'memory-governance-inactive');
     await qualityMode(true, 'ordinary-memory-stop-restore');
     // returnToLibrary finishes with initializeStartup: only its landing list proves the leave before the page is reopened.
     await backToLibrary(renderer, 'memory-governance-leave');
     await openMemory('memory-governance-reopen');
-    await waitFor(renderer, `document.querySelector('[data-memory-item="${mergedMemoryId}"]')?.textContent.includes('已冻结') && document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')?.textContent.includes('已停用')`, 'memory-governance-reopened-state');
+    await waitFor(renderer, `document.querySelector('[data-memory-item="${mergedMemoryId}"]')?.textContent.includes('已冻结') && document.querySelector('[data-disabled-preferences] h4')?.textContent==='已停用的审阅偏好' && document.querySelector('[data-disabled-preferences] [data-memory-item="${deactivatedMemoryId}"]')!==null`, 'memory-governance-reopened-state');
     await close(); await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'memory-governance-restart');
     await openMemory('memory-governance-restarted');

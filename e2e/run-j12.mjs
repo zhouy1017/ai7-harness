@@ -1342,7 +1342,7 @@ async function main() {
     at('review-preference-lifecycle');
     const initialStop = `[data-review-preference="${createdRule.itemId}"] .preference-actions > button`;
     await inWindowPress(primary, waitFor)(initialStop, 'lifecycle-initial-stop');
-    await waitFor(primary, `document.querySelector('[data-disabled-preferences] [data-review-preference="${createdRule.itemId}"]')!==null`, 'ordinary-preference-stopped-row');
+    await waitFor(primary, `(() => { const row=document.querySelector('[data-disabled-preferences] [data-review-preference="${createdRule.itemId}"]'); return Boolean(row)&&!Array.from(row.querySelectorAll('button')).some(button=>button.textContent==='停用'||button.textContent==='编辑偏好'); })()`, 'ordinary-preference-stopped-row');
     const stoppedPreference = await primary.evaluate(preferenceState(editedPreferenceText));
     requireJourney(stoppedPreference.items.every((item) => item.state !== 'active') && stoppedPreference.directives === directivesBeforePreference + 3, 'ordinary-preference-stopped');
     await reviewPreferenceLifecycle(primary, waitFor, requireJourney, createdRule.itemId);

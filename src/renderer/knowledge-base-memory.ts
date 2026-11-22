@@ -1,5 +1,5 @@
 import { renderReviewPreferenceGroups, type PreferenceLifecycleState } from './review-preference-groups.js';
-import { rendererErrorMessage } from './error-words.js';
+import { rendererErrorCode, rendererErrorMessage } from './error-words.js';
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import type { EditorialLearningProjection, HouseReviewPreferenceProjection, LearningSignal, RendererApi } from '../shared/protocol.js';
@@ -58,40 +58,46 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
   let busy = false; let refreshFailed = false;
   const selected = new Map<string, EditorialLearningProjection['signals'][number]>();
   const status = el('p', ''); status.setAttribute('role', 'status');
-  const lifecycleState: PreferenceLifecycleState = { confirmId: null, confirmSentence: '', confirmError: '', focusId: null, focusLabel: '' };
-  const run = (operation: () => Promise<EditorialLearningProjection>, message = '学习记录已更新。'): void => {
+  const lifecycleState: PreferenceLifecycleState = { confirmId: null, confirmSentence: '', confirmError: '', focusId: null, focusLabel: '', refusalLabel: '' };
+  const run = (operation: () => Promise<EditorialLearningProjection>, message = '学习记录已更新。', deleteItemId?: string): void => {
     if (busy || refreshFailed || !section.isConnected) return;
     busy = true; paint();
-    let changed = false;
+    let changed = false; let completed = false;
     void operation().then(async (next) => {
       if (!section.isConnected) return;
       changed = true; page = next;
       [global, house] = await Promise.all([api.inspectGlobalAgent(), api.inspectHouseReviewPreference()]);
       if (!section.isConnected) return;
       lifecycleState.confirmId = null; lifecycleState.confirmError = '';
-      selected.clear(); signalOffset = 0; itemOffset = 0; exclusionOffset = 0; status.textContent = message;
+      selected.clear(); signalOffset = 0; itemOffset = 0; exclusionOffset = 0; status.textContent = message; completed = true;
     })
       .catch(async (error: unknown) => {
         if (!section.isConnected) return;
-        status.textContent = rendererErrorMessage(error, '无法更新学习记录，请重新查看。');
-        lifecycleState.confirmError = status.textContent;
+        status.textContent = changed ? '记录已更新，请重新打开此页以读取最新状态。'
+          : !technicalLayerVisible && rendererErrorCode(error) === 'LEARNING_SUPERVISION_INVALID'
+            ? '无法更新学习记录，请重新查看。' : rendererErrorMessage(error, '无法更新学习记录，请重新查看。');
+        if (!changed && deleteItemId === lifecycleState.confirmId) lifecycleState.confirmError = status.textContent;
         try {
           const next = await Promise.all([api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }), api.inspectGlobalAgent(), api.inspectHouseReviewPreference()]);
-          if (section.isConnected) [page, global, house] = next;
-        } catch { refreshFailed = changed; }
+          if (section.isConnected) { [page, global, house] = next; signalOffset = 0; itemOffset = 0; exclusionOffset = 0; }
+        } catch { refreshFailed = changed && !technicalLayerVisible; }
       })
       .finally(() => { busy = false; if (section.isConnected) {
         paint();
         if (lifecycleState.focusId) {
           const row = Array.from(section.querySelectorAll<HTMLElement>('article')).find((node) => node.dataset['memoryItem'] === lifecycleState.focusId || node.dataset['reviewPreference'] === lifecycleState.focusId);
           const buttons = Array.from(row?.querySelectorAll('button') ?? []);
-          (buttons.find((button) => button.textContent === lifecycleState.focusLabel) ?? buttons.find((button) => button.textContent === '删除…') ?? buttons[0] ?? section.querySelector<HTMLElement>('[data-disabled-preferences] h4') ?? section.querySelector<HTMLElement>('[data-memory-preferences] h4'))?.focus();
+          const label = completed ? lifecycleState.focusLabel : lifecycleState.refusalLabel;
+          const target = !completed && deleteItemId ? section.querySelector<HTMLButtonElement>('[data-delete-cancel]')
+            : label === '' ? buttons[0] : buttons.find((button) => button.textContent === label) ?? buttons.find((button) => button.textContent === '删除…');
+          (target ?? section.querySelector<HTMLElement>('[data-disabled-preferences] h4') ?? section.querySelector<HTMLElement>('[data-memory-preferences] h4'))?.focus();
           lifecycleState.focusId = null;
         }
       } });
   };
   const action = (label: string, operation: () => void): HTMLButtonElement => {
     const button = el('button', label); button.type = 'button'; button.className = 'btn ' + ('secondary'); button.disabled = busy || refreshFailed;
+    button.addEventListener('keydown', (event) => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); });
     button.addEventListener('click', operation); return button;
   };
   const paint = (): void => {
@@ -117,8 +123,15 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       renderReviewPreferenceGroups({ section, page, global, house, api, lifecycleState, paint, run, action, savePreference,
         read: (input, fallback) => {
           void api.inspectEditorialLearning({ signalOffset, itemOffset, exclusionOffset, ...input }).then((next) => {
-            if (section.isConnected) { page = next; if (input.itemOffset !== undefined) itemOffset = input.itemOffset; paint(); }
-          }).catch((error: unknown) => { if (section.isConnected) status.textContent = rendererErrorMessage(error, fallback); });
+            if (section.isConnected) { lifecycleState.confirmId = null; lifecycleState.confirmError = ''; page = next; if (input.itemOffset !== undefined) itemOffset = input.itemOffset; paint(); }
+          }).catch(async (error: unknown) => {
+            if (!section.isConnected) return;
+            status.textContent = rendererErrorMessage(error, fallback);
+            if (rendererErrorCode(error) === 'REVIEW_PREFERENCE_DELETED') {
+              const next = await Promise.all([api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }), api.inspectGlobalAgent(), api.inspectHouseReviewPreference()]).catch(() => null);
+              if (section.isConnected && next) { [page, global, house] = next; itemOffset = 0; lifecycleState.confirmId = null; paint(); }
+            }
+          });
         } });
       return;
     }

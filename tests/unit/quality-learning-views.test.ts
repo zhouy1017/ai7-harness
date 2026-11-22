@@ -53,12 +53,15 @@ it('moves the same entry through stop, re-enable and stop with one request and r
   const root = host(); const { api, renderer } = learning(); await mountEditorialMemory(root, renderer, vi.fn());
   const row = () => root.querySelector('[data-memory-item="active"]')!;
   click(row(), '停用'); await settle();
+  expect(root.querySelector('[role="status"]')!.textContent).toBe('已停用这条审阅偏好。');
   expect(root.querySelector('[data-disabled-preferences]')!.textContent).toContain('统一术语');
   const reenable = Array.from(row().querySelectorAll('button')).find((button) => button.textContent === '重新启用')!;
   reenable.click(); reenable.click(); await settle();
   expect(api.reenableReviewPreference).toHaveBeenCalledOnce();
   expect(api.reenableReviewPreference).toHaveBeenCalledWith({ itemId: 'active', expectedRevisionId: 'active-version', actionId: expect.any(String) });
   expect(document.activeElement?.textContent).toBe('停用');
+  expect(root.querySelector('[role="status"]')!.textContent).toBe('已重新启用这条审阅偏好。');
+  expect((document.activeElement as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'Enter', repeat: true })).toBe(false);
   click(row(), '停用'); await settle();
   expect(document.activeElement?.textContent).toBe('重新启用');
 });
@@ -80,6 +83,8 @@ it('confirms deletion inside the row, cancels without sending and submits a repe
   const confirm = Array.from(row().querySelectorAll('button')).find((button) => button.textContent === '确认删除')!;
   confirm.click(); confirm.click(); await settle();
   expect(api.deleteReviewPreference).toHaveBeenCalledOnce(); expect(row()).toBeNull();
+  expect(api.deleteReviewPreference).toHaveBeenCalledWith({ itemId: 'active', expectedRevisionId: 'active-version', actionId: expect.any(String) });
+  expect(root.querySelector('[role="status"]')!.textContent).toBe('已删除这条审阅偏好。');
   expect(nativeConfirm).not.toHaveBeenCalled();
 });
 
@@ -96,6 +101,7 @@ it.each([
   api.deleteReviewPreference.mockRejectedValueOnce({ code, message });
   click(root.querySelector('[data-memory-item="active"]')!, '删除…'); click(root, '确认删除'); await settle();
   expect(root.querySelector('.review-preference-confirm')!.textContent).toContain(message);
+  expect(document.activeElement?.textContent).toBe('取消');
   expect(api.inspectGlobalAgent.mock.calls.length).toBe(before + 1);
   expect(api.inspectEditorialLearning).toHaveBeenCalledTimes(2);
 });
@@ -123,11 +129,103 @@ it('leaves a detached page and its status untouched when an action finishes', as
   finish(getPage()); await settle(); expect(section.textContent).toBe(text);
 });
 
+it.each([1, 2, 3])('focuses the next first action or remaining group heading after delete (%s stopped rows)', async (count) => {
+  const setup = learning(); const root = host(); const page = setup.getPage(); const base = page.items[0]!;
+  setup.setPage({ ...page, items: Array.from({ length: count }, (_, index) => ({ ...base,
+    current: { ...base.current, itemId: `row-${index}` }, row: { ...base.row, group: 'disabled',
+      reenable: index === 2 ? null : { standing: 'allowed', sentence: '可以重新启用。' } } })) });
+  await mountEditorialMemory(root, setup.renderer, vi.fn());
+  const remove = async (id: string) => { click(root.querySelector(`[data-memory-item="${id}"]`)!, '删除…'); click(root, '确认删除'); await settle(); };
+  await remove('row-0');
+  expect(document.activeElement?.textContent).toBe(count === 1 ? '已启用的审阅偏好' : '重新启用');
+  if (count === 3) { await remove('row-2'); expect(document.activeElement?.textContent).toBe('已停用的审阅偏好'); }
+});
+
+it('keeps another action refusal out of an open delete strip and retains re-enable focus', async () => {
+  const root = host(); const setup = learning(); await mountEditorialMemory(root, setup.renderer, vi.fn());
+  click(root.querySelector('[data-memory-item="active"]')!, '停用'); await settle();
+  click(root.querySelector('[data-review-preference="legacy"]')!, '停用'); await settle();
+  click(root.querySelector('[data-review-preference="legacy"]')!, '删除…');
+  setup.api.reenableReviewPreference.mockRejectedValueOnce({ code: 'REVIEW_PREFERENCE_MERGED', message: '这条审阅偏好已并入另一条，不能单独重新启用。' });
+  click(root.querySelector('[data-memory-item="active"]')!, '重新启用'); await settle();
+  expect(root.querySelector('.review-preference-confirm')!.textContent).not.toContain('已并入');
+  expect(root.querySelector('[role="status"]')!.textContent).toContain('已并入');
+  expect(document.activeElement?.textContent).toBe('重新启用');
+});
+
+it.each([false, true])('says an action succeeded when its projection refresh failed (developer=%s)', async (developer) => {
+  setTechnicalLayerVisible(developer); const root = host(); const { api, renderer } = learning();
+  await mountEditorialMemory(root, renderer, vi.fn());
+  api.inspectGlobalAgent.mockRejectedValue(new Error('read failed'));
+  click(root.querySelector('[data-memory-item="active"]')!, '停用'); await settle();
+  expect(root.querySelector('[role="status"]')!.textContent).toBe('记录已更新，请重新打开此页以读取最新状态。');
+  expect(root.querySelector<HTMLInputElement>('[data-learning-enabled]')!.disabled).toBe(!developer);
+  expect(root.querySelector('.review-preference-confirm')).toBeNull();
+});
+
+it.each(['memory', 'preference'])('omits a %s without lifecycle metadata and leaves the page usable', async (kind) => {
+  const setup = learning(); const root = host();
+  if (kind === 'memory') setup.setPage({ ...setup.getPage(), items: [{ ...setup.getPage().items[0]!, row: undefined }] } as unknown as EditorialLearningProjection);
+  else setup.api.inspectGlobalAgent.mockImplementation(async () => ({ categories: [], books: [], directives: [], items: [{ kind: 'preference', itemId: 'missing', text: '缺少信息' }] }) as never);
+  await mountEditorialMemory(root, setup.renderer, vi.fn());
+  expect(root.textContent).toContain('无法读取更多审阅偏好。');
+  expect(root.querySelector(`[data-${kind === 'memory' ? 'memory-item="active"' : 'review-preference="missing"'}]`)).toBeNull();
+  expect(root.querySelector<HTMLInputElement>('[data-learning-enabled]')!.disabled).toBe(false);
+  expect(root.querySelector('[data-preference-editor="new"]')).not.toBeNull();
+});
+
+it('applies the refusal refresh and issues a fresh action id for each distinct press', async () => {
+  const setup = learning(); const root = host(); await mountEditorialMemory(root, setup.renderer, vi.fn());
+  const row = () => root.querySelector('[data-memory-item="active"]')!;
+  click(row(), '停用'); await settle(); click(row(), '重新启用'); await settle();
+  click(row(), '停用'); await settle(); click(row(), '重新启用'); await settle();
+  expect(setup.api.reenableReviewPreference.mock.calls[0]![0].actionId).not.toBe(setup.api.reenableReviewPreference.mock.calls[1]![0].actionId);
+  setup.api.deactivateEditorialMemory.mockImplementationOnce(async () => { setup.setPage({ ...setup.getPage(), items: [] }); throw { code: 'REVIEW_PREFERENCE_DELETED', message: '这条审阅偏好已经删除了。' }; });
+  click(row(), '停用'); await settle(); expect(row()).toBeNull();
+  expect(root.querySelector('[data-disabled-preferences]')).toBeNull();
+});
+
+it('ignores a late refusal after leaving the preference page', async () => {
+  const setup = learning(); const root = host(); let reject!: (error: unknown) => void;
+  setup.api.deactivateEditorialMemory.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+  await mountEditorialMemory(root, setup.renderer, vi.fn()); click(root.querySelector('[data-memory-item="active"]')!, '停用');
+  const section = root.querySelector('section')!; const text = section.textContent; root.replaceChildren();
+  reject({ code: 'REVIEW_PREFERENCE_DELETED', message: '这条审阅偏好已经删除了。' }); await settle();
+  expect(section.textContent).toBe(text); expect(setup.api.inspectGlobalAgent).toHaveBeenCalledOnce();
+});
+
+it.each([
+  ['reenable', 'GLOBAL_AGENT_MEMORY_LIMIT', '本社审阅偏好最多 64 条，合计最多 6,000 字；请先合并或停用已有条目。'],
+  ['stop', 'LEARNING_SUPERVISION_STALE', '这条审阅偏好刚在别处改过，请重新查看后再操作。'],
+])('shows a %s refusal and reads both owners', async (operation, code, message) => {
+  const setup = learning(); const root = host(); await mountEditorialMemory(root, setup.renderer, vi.fn());
+  const row = () => root.querySelector('[data-memory-item="active"]')!;
+  if (operation === 'reenable') { click(row(), '停用'); await settle(); setup.api.reenableReviewPreference.mockRejectedValueOnce({ code, message }); }
+  else setup.api.deactivateEditorialMemory.mockRejectedValueOnce({ code, message });
+  const reads = setup.api.inspectGlobalAgent.mock.calls.length;
+  click(row(), operation === 'reenable' ? '重新启用' : '停用'); await settle();
+  expect(root.querySelector('[role="status"]')!.textContent).toBe(message);
+  expect(setup.api.inspectGlobalAgent.mock.calls.length).toBe(reads + 1);
+  expect(setup.api.inspectEditorialLearning).toHaveBeenCalledTimes(2);
+});
+
+it('offers ordinary preference pagination and names a developer reactivation history step', async () => {
+  const setup = learning(); const root = host(); setup.setPage({ ...setup.getPage(), nextItemOffset: 2 });
+  await mountEditorialMemory(root, setup.renderer, vi.fn()); click(root, '更多审阅偏好'); await settle();
+  expect(setup.api.inspectEditorialLearning).toHaveBeenLastCalledWith(expect.objectContaining({ itemOffset: 2 }));
+  setTechnicalLayerVisible(true); const developer = host(); const page = setup.getPage();
+  setup.setPage({ ...page, items: [{ ...page.items[0]!, history: [{ ...memory('active', 'active'), action: 'reactivate' as const }] }] });
+  await mountEditorialMemory(developer, setup.renderer, vi.fn());
+  expect(developer.querySelector('[data-memory-item="active"] details')!.textContent).toContain('重新启用');
+});
+
 it('puts candidates first, accepts and excludes them, disables memory and keeps ordinary metadata private', async () => {
   const root = host(); const { api, renderer } = learning();
   await mountEditorialMemory(root, renderer, vi.fn());
   expect(Array.from(root.querySelectorAll<HTMLElement>('[data-memory-item]'), (item) => item.dataset['memoryItem'])).toEqual(['candidate', 'active']);
   expect(root.textContent).toContain('错别字与规范用语');
+  expect(root.querySelector('[data-memory-candidates] h4')!.textContent).toBe('待你确认的审阅偏好');
+  expect(root.querySelector('[data-disabled-preferences]')).toBeNull();
   expect(root.querySelector('[data-preference-editor="new"]') !== null).toBe(true);
   expect(root.querySelector('[data-memory-candidate-form]')).toBeNull();
   expect(root.textContent).not.toMatch(/token|1–10|SHA|日志|candidate-version|active-version/iu);
@@ -142,6 +240,7 @@ it('puts candidates first, accepts and excludes them, disables memory and keeps 
   const candidate = document.body.querySelectorAll<HTMLElement>('[data-memory-item="candidate"]')[1]!;
   click(candidate, '排除'); await settle();
   expect(second.api.deactivateEditorialMemory).toHaveBeenCalledWith(expect.objectContaining({ itemId: 'candidate' }));
+  expect(document.body.querySelectorAll('[role="status"]')[1]!.textContent).toBe('已排除这条待确认的审阅偏好。');
 });
 
 it('keeps the local switch and legacy preference disable connected to their existing owners', async () => {
