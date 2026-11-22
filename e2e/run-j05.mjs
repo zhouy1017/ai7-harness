@@ -664,6 +664,8 @@ async function main() {
     await draftGeometry(renderer, '#persistence-status', async () => {
     await waitFor(renderer, `(() => {const status=document.querySelector('#persistence-status'),line=status?.querySelector('.status-line');if(!status||status.hidden||status.dataset.tone!=='error'||!line||line.textContent!=='先选中一段文字，再添加备注。'||window.__j05.composer())return false;const style=getComputedStyle(status),r=line.getBoundingClientRect();return style.visibility==='visible'&&Number(style.opacity)>0&&r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;})()`, 'header-no-selection-reason');
     });
+    await draftClick(renderer,requireJourney,waitFor,'#persistence-status .status-dismiss','header-no-selection-dismiss');
+    await waitFor(renderer,`document.querySelector('#persistence-status').hidden`,'header-no-selection-dismissed');
     await draftSelect(renderer,requireJourney,waitFor,first,RANGES.note[0],RANGES.note[1],'header-note-selection');
     await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="editor-note"]','header-note-open');
     await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-composer="create-editor-note"] textarea')`, 'header-note-focused');
