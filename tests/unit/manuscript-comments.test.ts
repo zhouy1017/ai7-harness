@@ -238,7 +238,7 @@ describe('comments command parity and refresh continuity', () => {
     } as unknown as Parameters<typeof mountEditorialMarks>[0];
     const apiSpies = Object.keys(options.api).map(name => ({ name, spy: vi.spyOn(options.api, name as keyof typeof options.api) }));
     mounted = mountEditorialMarks(options);
-    return { host, pane, block, scroll, get, create, update, apiSpies, decide, apply, write, status, active, linked, outcome, receipt, pageAt, find, held: () => page.marks.map((mark) => mark.markId),
+    return { host, pane, block, scroll, focus: options.editor.focus, get, create, update, apiSpies, decide, apply, write, status, active, linked, outcome, receipt, pageAt, find, held: () => page.marks.map((mark) => mark.markId),
       setRange: (next: string) => { rangeKind = next; }, setCaret: (next: number) => { caret = nativeCaret = next; }, setNativeCaret: (next: number) => { nativeCaret = next; }, open: () => mounted!.openMark(value.markId), refresh: () => mounted!.refreshComments(),
       setEnabled: (next: boolean) => { enabled = next; mounted!.refreshComments(); },
       setPage: (next: Partial<ManuscriptWindowProjection>) => { page = { ...page, ...next }; mounted!.refreshComments(); },
@@ -302,6 +302,21 @@ describe('comments command parity and refresh continuity', () => {
     miniDocument.activeElement = miniDocument.body;
     (node as unknown as MiniElement).dispatchEvent({ type: 'focusout', relatedTarget: null }); await paint();
     expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull(); expect(ui.scroll.querySelector('[data-mark-draft-row]')).not.toBeNull();
+  });
+  it.each(['success','failure','navigation'])('keeps a disabled Submit focus loss in flight and handles %s without stealing focus (#1689)', async outcome => {
+    const ui = mount(); await paint(); const { node } = await draftComposer(ui); const answer = deferred<never>(); ui.create.mockReturnValueOnce(answer.promise);
+    const submit = node.querySelector<HTMLButtonElement>('[data-mark-action="submit"]')!; submit.focus();
+    (node.querySelector('form') as unknown as MiniElement).dispatchEvent({ type: 'submit' });
+    miniDocument.activeElement = miniDocument.body;
+    (node as unknown as MiniElement).dispatchEvent({ type: 'focusout', target: submit as unknown as MiniElement, relatedTarget: null }); await paint();
+    expect.soft(ui.create).toHaveBeenCalledTimes(1); expect.soft(submit.disabled).toBe(true); expect.soft(ui.scroll.querySelector('[data-mark-composer]') === node).toBe(true);
+    const elsewhere = document.createElement('button'); miniDocument.body.append(elsewhere as unknown as MiniElement);
+    if (outcome === 'navigation') elsewhere.focus();
+    if (outcome === 'failure') answer.reject(new Error('synthetic unavailable'));
+    else answer.resolve({ markId:'new',card:null,marks:[anchor()],marksTruncated:false } as never);
+    await paint(); expect(ui.create).toHaveBeenCalledTimes(1);
+    if (outcome === 'failure') { expect(ui.scroll.querySelector('[data-mark-composer]') === node).toBe(true); expect(markDrafts.list(windowOf())[0]?.body).toBe('公开合成撰写草稿'); expect(submit.disabled).toBe(false); expect(ui.focus).not.toHaveBeenCalled(); }
+    else { expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull(); expect(markDrafts.list(windowOf())).toEqual([]); if(outcome==='success')expect(ui.focus).toHaveBeenCalledTimes(1); else { expect(ui.focus).not.toHaveBeenCalled(); expect(document.activeElement).toBe(elsewhere); } }
   });
   it('separates the same reply place in two Books and restores a floating draft without focusing its field (#1689 R6)', async () => {
     const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();

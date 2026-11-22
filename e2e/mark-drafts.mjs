@@ -141,8 +141,10 @@ export async function withDraftDirectEdit(renderer,check,waitFor,edit) {
     await draftClick(renderer,check,waitFor,`[data-edit-method="${method}"]`,name+'-choose');
     await waitFor(renderer,`document.querySelector('[data-edit-method="${method}"]').getAttribute('aria-checked')==='true'`,name+'-ready');
   };
+  let failed=false;
   try { if(original!=='direct')await choose('direct','draft-direct-mode'); await edit(); }
-  finally { if(original!=='direct')await choose(original,'draft-edit-mode-restore'); }
+  catch(error) { failed=true; throw error; }
+  finally { if(original!=='direct')try { await choose(original,'draft-edit-mode-restore'); } catch(error) { if(!failed)throw error; } }
 }
 
 export async function markDraftKept(renderer,check,waitFor,at,blockId) {

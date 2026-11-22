@@ -2027,8 +2027,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           suggestion ? '已提出修改建议；稿件本身未改动。' : kind === 'annotation' ? '已添加批注。' : '已添加备注。',
         );
         if (made && !destroyed && (suggestion || draftComposers?.isOpen({ kind, range }))) {
+          const returnFocus = floating?.contains(document.activeElement) || document.activeElement === document.body;
           closeFloating();
-          editor.focus();
+          if (returnFocus) editor.focus();
         }
         return made;
       },

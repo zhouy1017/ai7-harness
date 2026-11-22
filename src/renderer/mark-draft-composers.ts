@@ -81,8 +81,10 @@ export function createDraftComposers(host: {
       node.addEventListener('focusout', (event) => {
         // Chromium briefly reports BODY while focus moves between descendants. The destination is authoritative.
         if (event.relatedTarget instanceof HTMLElement && node.contains(event.relatedTarget)) return;
+        const disabledSubmit = event.target instanceof HTMLButtonElement && event.target.type === 'submit' && event.target.disabled;
         const settle = (): void => {
-          if (!dead && open?.node === node && !node.contains(document.activeElement)) fold();
+          const submittingBlur = disabledSubmit && markDrafts.sending(host.scope(), place) && document.activeElement === document.body;
+          if (!dead && open?.node === node && !node.contains(document.activeElement) && !submittingBlur) fold();
         };
         if (event.relatedTarget === null || event.relatedTarget === undefined) requestAnimationFrame(settle);
         else queueMicrotask(settle);

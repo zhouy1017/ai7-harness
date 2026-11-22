@@ -265,17 +265,30 @@ it.each([
   else {await expect(press).rejects.toThrow('clipped');expect(renderer.send).not.toHaveBeenCalled();}
 });
 
-it.each(['auto','confirm','direct'])('restores the exact %s edit choice when the draft responsiveness probe throws', async original => {
+it.each(['auto','confirm','direct'].flatMap(original=>[false,true].map(blockRestore=>({original,blockRestore}))))('restores $original and preserves the edit failure if restore is blocked: $blockRestore', async ({original,blockRestore}) => {
   const { withDraftDirectEdit }=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
   let current=original; const chosen:string[]=[];
   const buttons=['menu','direct','auto','confirm'].map((method,index)=>({method,parentElement:null,matches:()=>false,
     dataset:{editMethod:method},getAttribute:()=>String(current===method),getBoundingClientRect:()=>({left:index*100,top:10,right:index*100+80,bottom:40,width:80,height:30}),contains:(hit:unknown)=>hit===buttons[index]}));
-  const document={createRange:()=>({selectNodeContents(){}}),querySelector:(selector:string)=>selector.includes('[aria-checked="true"]')?buttons.find(node=>node.method===current):selector.includes('input-mode-toggle')?buttons[0]:buttons.find(node=>selector.includes(`"${node.method}"`)),elementFromPoint:(x:number)=>buttons[Math.floor(x/100)]};
+  const document={createRange:()=>({selectNodeContents(){}}),querySelector:(selector:string)=>selector.includes('[aria-checked="true"]')?buttons.find(node=>node.method===current):selector.includes('input-mode-toggle')?buttons[0]:buttons.find(node=>selector.includes(`"${node.method}"`)&&!(blockRestore&&chosen.length===3&&node.method===original)),elementFromPoint:(x:number)=>buttons[Math.floor(x/100)]};
   const renderer={evaluate:async(expression:string)=>Function('document','requestAnimationFrame','innerWidth','innerHeight','setTimeout',`return (${expression})`)(document,(callback:()=>void)=>queueMicrotask(callback),1008,681,(callback:()=>void)=>callback()),
     send:async(_method:string,event:{type:string;x:number})=>{if(event.type==='mouseReleased'){const method=buttons[Math.floor(event.x/100)]!.method;chosen.push(method);if(method!=='menu')current=method;}}};
   const failure=new Error('readback');const edit=vi.fn(async()=>{expect(current).toBe('direct');throw failure;});
   const wait=async(_renderer:unknown,expression:string)=>{expect(await renderer.evaluate(expression)).toBe(true);};
   await expect(withDraftDirectEdit(renderer,(ok:boolean)=>{expect(ok).toBe(true);},wait,edit)).rejects.toBe(failure);
-  expect(edit).toHaveBeenCalledTimes(1); expect(current).toBe(original);
-  if(original!=='direct')expect(chosen).toEqual(['menu','direct','menu',original]);else expect(chosen).toEqual([]);
+  expect(edit).toHaveBeenCalledTimes(1); expect(current).toBe(blockRestore&&original!=='direct'?'direct':original);
+  if(original!=='direct')expect(chosen).toEqual(blockRestore?['menu','direct','menu']:['menu','direct','menu',original]);else expect(chosen).toEqual([]);
+});
+
+it.each([0,7])('selects with native Home and shift arrows, rejecting a clipped first line at grapheme %s', async home => {
+  const { draftSelect }=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  let anchor=15,head=15; const keys:Array<[string,number]>=[];
+  const block={parentElement:null,matches:()=>true,contains:(hit:unknown)=>hit===block};
+  const editor={dataset:{get selectionSnapshot(){return JSON.stringify({anchor:{blockId:'block',grapheme:anchor},head:{blockId:'block',grapheme:head}});}}};
+  const document={querySelector:(selector:string)=>selector.includes('[data-block-id=')?block:editor,createRange:()=>({selectNodeContents(){},getClientRects:()=>[{left:10,top:10,right:210,bottom:30,width:200,height:20}]}),elementFromPoint:()=>block};
+  const renderer={evaluate:async(expression:string)=>expression.includes('const describe=')?null:Function('document','requestAnimationFrame','innerWidth','innerHeight','setTimeout',`return (${expression})`)(document,(callback:()=>void)=>queueMicrotask(callback),1008,681,(callback:()=>void)=>callback()),send:async(_method:string,event:{type:string;key:string;modifiers:number})=>{if(event.type!=='keyDown')return;keys.push([event.key,event.modifiers]);if(event.key==='Home')anchor=head=home;else if(event.key==='ArrowRight'){head++;if(event.modifiers!==8)anchor=head;}}};
+  const wait=async(_renderer:unknown,expression:string,name:string)=>{if(!await renderer.evaluate(expression))throw Error(name);};
+  const result=draftSelect(renderer,(ok:boolean)=>{expect(ok).toBe(true);},wait,'block',2,5,'range');
+  if(home===0){await expect(result).resolves.toBeUndefined();expect([anchor,head]).toEqual([2,5]);expect(keys).toEqual([['Home',0],['ArrowRight',0],['ArrowRight',0],['ArrowRight',8],['ArrowRight',8],['ArrowRight',8]]);}
+  else {await expect(result).rejects.toThrow('range-start');expect(keys).toEqual([['Home',0]]);}
 });
