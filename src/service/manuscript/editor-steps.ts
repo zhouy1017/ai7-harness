@@ -412,6 +412,19 @@ function partPlace(db: DatabaseSync, part: SqlRow): string | null {
   return row === undefined ? null : asString(row.block_id);
 }
 
+/**
+ * Inside a refused slot, the target that refused: the first, in the Effect's order, whose mark no longer stands as the replay
+ * needs it — applied and exact to be taken back, open and exact to be put back. A batch is one Effect over many paragraphs.
+ */
+function refusedTarget(db: DatabaseSync, target: { stepId: string; slot: number }): string | null {
+  const row = db.prepare(`SELECT m.block_id FROM editor_step_effects e JOIN manuscript_effect_targets t ON t.effect_id = e.effect_id
+      JOIN proposal_change_items i ON i.item_id = t.item_id JOIN editorial_marks m ON m.mark_id = i.mark_id
+    WHERE e.step_id = ? AND e.slot = ? AND e.generation = (SELECT max(generation) FROM editor_step_effects WHERE step_id = e.step_id AND slot = e.slot)
+      AND NOT (m.anchor_state = 'exact' AND m.status = CASE e.polarity WHEN 'apply' THEN 'applied' ELSE 'open' END)
+    ORDER BY t.ordinal LIMIT 1`).get(target.stepId, target.slot) as SqlRow | undefined;
+  return row === undefined ? null : asString(row.block_id);
+}
+
 /** Where a step stands now, for the answer: its first Apply's mark, or its anchor block; the paragraph number when it stands. */
 function placeOf(db: DatabaseSync, branchId: string, step: StepRow): { blockId: string | null; paragraph: number | null } {
   const mark = db.prepare(`SELECT m.block_id FROM editor_step_parts p
@@ -481,7 +494,7 @@ export function replayEditorStep(host: EditorStepHost, action: 'undo' | 'redo', 
     } catch (error) {
       cause = refusal(error);
       if (cause === null) throw error;
-      blockedAt = context.replay.partBlockId;
+      blockedAt = (context.replay.target === null ? null : refusedTarget(db, context.replay.target)) ?? context.replay.partBlockId;
     } finally {
       context.replay = null;
     }

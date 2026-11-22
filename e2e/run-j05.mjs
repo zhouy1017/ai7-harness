@@ -237,6 +237,11 @@ async function pressChord(renderer, key, code, virtualKey, modifiers) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...chord });
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...chord });
 }
+/** The caret brought into view by the editor's own keys, as an editor would at a small window: one step right and back. */
+async function caretIntoView(renderer) {
+  await pressChord(renderer, 'ArrowRight', 'ArrowRight', 39, 0);
+  await pressChord(renderer, 'ArrowLeft', 'ArrowLeft', 37, 0);
+}
 /**
  * A paragraph in the engine's own geometry (wave rule, Issue #1662): its first line inside the window and inside the editor's
  * visible box, and the element under that line's middle is the paragraph — no scripted scroll in between.
@@ -750,6 +755,7 @@ async function main() {
     const firstParagraph = await paragraphOf(renderer, first);
     requireJourney(Number.isSafeInteger(firstParagraph), 'apply-undo-paragraph-known');
     await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, 0, 0)`, 'apply-undo-caret');
+    await caretIntoView(renderer);
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
     await waitFor(renderer, paragraphInView(JSON.stringify(first)), 'apply-undo-paragraph-in-view-before-ctrl-z', 10_000);
     await pressChord(renderer, 'z', 'KeyZ', 90, CTRL);
@@ -761,6 +767,8 @@ async function main() {
     await pressChord(renderer, 'z', 'KeyZ', 90, CTRL | SHIFT);
     await waitFor(renderer, `(window.__j05.status() + window.__j05.notice()).includes(${JSON.stringify(`已重做：接受修改建议${firstPlace}`)}) && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first && window.__j05.mark('change-suggestion', ${JSON.stringify(first)})[0]?.dataset.markStatus === 'applied' && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'apply-is-redone-by-history', 15_000);
     await settled(renderer, 'apply-redo-settled');
+    // The undo and the redo are one journal entry each (each its own governed Effect); the stages after count from here.
+    await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); const wrote = page.journalSequence === window.__j05Journal + 2; window.__j05Journal = page.journalSequence; return wrote; })()`, 'apply-undo-and-redo-wrote-twice');
     await openMarkCard(renderer, 'change-suggestion', first, 'applied-card-again');
     // Preserve the developer disclosure checks without assuming the whole Journey runs in that mode.
     await markTechnicalMode(renderer, true, 'mark-developer-roundtrip');
@@ -1096,6 +1104,7 @@ async function main() {
     const appliedParagraph = await renderer.evaluate(`(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'block', blockId: ${JSON.stringify(appliedBlock)} } }); return page.blocks.find((block) => block.blockId === ${JSON.stringify(appliedBlock)})?.position ?? null; })()`);
     requireJourney(Number.isSafeInteger(appliedParagraph), 'undo-apply-paragraph-known');
     await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(appliedBlock)}, 0, 0)`, 'undo-apply-caret');
+    await caretIntoView(renderer);
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
     await waitFor(renderer, paragraphInView(JSON.stringify(appliedBlock)), 'undo-apply-paragraph-in-view-before-ctrl-z', 10_000);
     await pressChord(renderer, 'z', 'KeyZ', 90, CTRL);

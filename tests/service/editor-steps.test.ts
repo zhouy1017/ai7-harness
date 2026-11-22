@@ -167,6 +167,31 @@ describe('undo by editor step (ADR 0105 §1)', () => {
     expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).suggestion?.decision).toBeNull();
   });
 
+  it('keeps the editor\'s reason on redo of an accept-with-edit, on the card and on the one standing signal', () => {
+    const x = paragraphs()[0]!;
+    const markId = suggestion(x.blockId, 4, 8);
+    store.applyChangeSuggestion({ ...binding(), markId, clientEffectId: randomUUID(), interaction: 'accept-edited-and-apply', editedText: '〔编辑改定〕', reason: '术语统一' });
+    undo();
+    redo();
+    const decision = store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).suggestion!.decision!;
+    expect(decision).toMatchObject({ disposition: 'accepted-with-edit', reason: '术语统一', reasonState: 'given' });
+    const standing = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals
+      .filter((signal) => 'markId' in signal.source && signal.source.markId === markId && signal.currentEligibility !== 'superseded');
+    expect(standing).toHaveLength(1);
+    expect(standing[0]!.eligibility.decisionId ?? (standing[0]!.source as { decisionId?: string }).decisionId).toBe(decision.decisionId);
+  });
+
+  it('says a redo meets a suggestion the editor rejected since as handled another way, not as changed words', () => {
+    const x = paragraphs()[0]!;
+    const markId = suggestion(x.blockId, 4, 8);
+    accept(markId);
+    undo();
+    store.recordChangeSuggestionDecision({ ...binding(), markId, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: null });
+    const blocked = redo();
+    expect(blocked.blocked).toBe(true);
+    expect(blocked.completionLabel).toMatch(/^第 [\d,]+ 段的修改建议在撤销后已另作处理，「接受修改建议」不能重做。/);
+  });
+
   it('sets aside a step whose point mark drifted (the point-mark case), says where, and the next Ctrl+Z moves to the step before', () => {
     const [p, d] = paragraphs() as [ManuscriptWindowProjection['blocks'][number], ManuscriptWindowProjection['blocks'][number]];
     journal(p.blockId, 0, '〔先改〕');
@@ -298,6 +323,23 @@ describe('undo by editor step (ADR 0105 §1)', () => {
     const blocked = undo();
     const later = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: b.blockId }).blocks.find((block) => block.blockId === b.blockId)!.position;
     expect(blocked.blocked).toBe(true);
+    expect(blocked.paragraph).toBe(later);
+    expect(blocked.completionLabel.startsWith(`第 ${later.toLocaleString('zh-CN')} 段`)).toBe(true);
+  });
+
+  it('names the paragraph of the target that refused inside one batch Effect', () => {
+    const all = paragraphs();
+    const [a, d] = [all[0]!, all[3]!];
+    const deletion = suggestion(d.blockId, 4, 8, '');
+    store.applyChangeSuggestionBatch({ ...binding(), markIds: [suggestion(a.blockId, 4, 8), deletion], clientEffectId: randomUUID() });
+    // Typing across the later paragraph's point drifts its mark; undoing the typing brings the text back, not the anchor.
+    journal(d.blockId, 3, '〔跨〕', 5);
+    undo();
+    expect(markAt(deletion).anchorState).toBe('drifted');
+    const blocked = undo();
+    const later = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: d.blockId }).blocks.find((block) => block.blockId === d.blockId)!.position;
+    expect(blocked.blocked).toBe(true);
+    expect(blocked.anchorBlockId).toBe(d.blockId);
     expect(blocked.paragraph).toBe(later);
     expect(blocked.completionLabel.startsWith(`第 ${later.toLocaleString('zh-CN')} 段`)).toBe(true);
   });

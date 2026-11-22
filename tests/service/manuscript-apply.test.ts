@@ -148,7 +148,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
     } finally { store.markCleanShutdown(); store.close(); }
   }, 120_000);
 
-  it('counts an Apply that Ctrl+Z took back and redo put back as one applied target (#1654)', async () => {
+  it('counts an Apply taken back and put back by editor steps (redo, or Ctrl+Z of a card reversal) as one applied target (#1654)', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const book = await importBook(store);
@@ -167,6 +167,28 @@ describe('AI7 Apply on a Change Suggestion', () => {
         store.redoManuscript(book.manuscriptId, book.branchId, digest());
         expect(signals()).toEqual({ applied: 1, surviving: 1 });
       }
+      // The card's 撤销本次修改, then Ctrl+Z of it, puts the same accepted change back: still one applied target, twice over.
+      for (let round = 0; round < 2; round += 1) {
+        store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId: suggestion.markId, clientEffectId: randomUUID() });
+        expect(signals()).toEqual({ applied: 1, surviving: 0 });
+        store.undoManuscript(book.manuscriptId, book.branchId, digest());
+        expect(signals()).toEqual({ applied: 1, surviving: 1 });
+      }
+      // Two accepted changes: each Apply's re-applied generations are counted once, through the card and the history alike.
+      const other = suggest(store, book, paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[1]!.blockId, 4, 7, '甲');
+      store.applyChangeSuggestion({ ...binding(store, book), markId: other.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+      expect(signals()).toEqual({ applied: 2, surviving: 2 });
+      store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId: suggestion.markId, clientEffectId: randomUUID() });
+      expect(signals()).toEqual({ applied: 2, surviving: 1 });
+      store.undoManuscript(book.manuscriptId, book.branchId, digest());
+      expect(signals()).toEqual({ applied: 2, surviving: 2 });
+      store.redoManuscript(book.manuscriptId, book.branchId, digest());
+      expect(signals()).toEqual({ applied: 2, surviving: 1 });
+      store.undoManuscript(book.manuscriptId, book.branchId, digest());
+      store.undoManuscript(book.manuscriptId, book.branchId, digest());
+      expect(signals()).toEqual({ applied: 2, surviving: 1 });
+      store.redoManuscript(book.manuscriptId, book.branchId, digest());
+      expect(signals()).toEqual({ applied: 2, surviving: 2 });
     } finally { store.markCleanShutdown(); store.close(); }
   }, 120_000);
 

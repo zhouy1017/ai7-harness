@@ -1582,6 +1582,7 @@ export class EditorialMarkStore {
     editedText: string | null,
     reason: string | null,
     now: string,
+    reasonSource: 'reason-field' | 'suggested' | 'free-text' = 'reason-field',
   ): string {
     const current = this.#db.prepare(
       'SELECT decision_id, ordinal FROM proposal_item_decisions WHERE item_id = ? ORDER BY ordinal DESC LIMIT 1',
@@ -1601,8 +1602,8 @@ export class EditorialMarkStore {
     );
     if (reason !== null) {
       this.#db.prepare(
-        "INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, 'reason-field', ?)",
-      ).run(decisionId, this.#body(reason), now);
+        'INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, ?, ?)',
+      ).run(decisionId, this.#body(reason), reasonSource, now);
     }
     new EditorialMemoryFacade(this.#db).captureDecision(decisionId);
     return decisionId;
