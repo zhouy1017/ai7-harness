@@ -1,3 +1,4 @@
+import { reviewPreferenceLifecycle, inWindowPress } from './review-preferences.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { pressKey, pressReachable, reachable, saveMenuActionsInOrder, tabTo } from './import-entry-stages.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
@@ -1345,11 +1346,15 @@ async function main() {
     requireJourney(editedPreference.items.length === 1 && editedPreference.items[0].itemId === createdRule.itemId && editedPreference.items[0].state === 'active' &&
       editedPreference.items[0].bookId === null && editedPreference.items[0].categoryId === 'style-and-format' &&
       replacedPreference.items.every((item) => item.state !== 'active') && editedPreference.directives === directivesBeforePreference + 2, 'ordinary-preference-edited-same-rule');
-    await assertRenderer(primary, `(() => { const stop=Array.from(${preferenceRow(createdRule.itemId)}.querySelectorAll('.preference-actions > button')).find(node=>node.textContent==='停用'); if(!stop||stop.disabled)return false; stop.click(); return true; })()`, 'ordinary-preference-stop');
-    await waitFor(primary, `(() => { const row=${preferenceRow(createdRule.itemId)}; return !row||(row.querySelectorAll('p')[1]?.textContent.endsWith('已停用')&&!Array.from(row.querySelectorAll('.preference-actions > button')).some(node=>node.textContent==='停用'||node.textContent==='编辑偏好')); })()`, 'ordinary-preference-stopped-row');
+    // Lifecycle stage proves the existing stop with real input as well.
+    at('review-preference-lifecycle');
+    const initialStop = `[data-review-preference="${createdRule.itemId}"] .preference-actions > button`;
+    await inWindowPress(primary, waitFor)(initialStop, 'lifecycle-initial-stop');
+    await waitFor(primary, `(() => { const row=document.querySelector('[data-disabled-preferences] [data-review-preference="${createdRule.itemId}"]'); return Boolean(row)&&!Array.from(row.querySelectorAll('button')).some(button=>button.textContent==='停用'||button.textContent==='编辑偏好'); })()`, 'ordinary-preference-stopped-row');
     const stoppedPreference = await primary.evaluate(preferenceState(editedPreferenceText));
     requireJourney(stoppedPreference.items.every((item) => item.state !== 'active') && stoppedPreference.directives === directivesBeforePreference + 3, 'ordinary-preference-stopped');
-    const directivesAfterPreference = stoppedPreference.directives;
+    await reviewPreferenceLifecycle(primary, waitFor, requireJourney, createdRule.itemId);
+    const directivesAfterPreference = (await primary.evaluate(preferenceState(editedPreferenceText))).directives;
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');

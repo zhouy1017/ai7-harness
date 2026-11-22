@@ -1,4 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { LEARNING_AUDIT_BATCH_MISMATCH, LEARNING_AUDIT_ORDINARY_BATCH_MISMATCH, learningAuditStandingLabel } from '../../src/renderer/learning-audit-labels.js';
+
+it('keeps mismatch wording specific to each mode and explains automatic admission to developers', () => {
+  expect(LEARNING_AUDIT_ORDINARY_BATCH_MISMATCH).toBe('所选材料须来自同一本书、同一类型，且用于学习的范围相同（仅本书或本社），才能一起停止今后使用。');
+  expect(LEARNING_AUDIT_ORDINARY_BATCH_MISMATCH).not.toMatch(/纳入范围|准入/u);
+  expect(LEARNING_AUDIT_BATCH_MISMATCH).toBe('所选材料须来自同一本书、同一类型、同一纳入范围，才能一起停止今后使用。');
+  expect(learningAuditStandingLabel({ standing: 'pending', automaticAdmission: { choice: 'house' } }, false)).toBe('待定 · 默认用于学习');
+});
 import {
   LEARNING_AUDIT_FILTERS,
   LEARNING_AUDIT_FILTERS_LATER,
