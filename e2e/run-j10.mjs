@@ -1980,6 +1980,21 @@ async function main() {
     await writeFile(holdPath, 'release', 'utf8');
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'review-interrupted-ready');
+    // The earlier removal case left the connection missing. Restore the synthetic fixture only after recording the source review.
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.settings, 'review-model-settings');
+    await pressReachable(renderer, waitFor, requireJourney, '[data-model-channel="deepseek-open-platform"] input', 'review-model-channel');
+    await pressReachable(renderer, waitFor, requireJourney, '#main-editorial-credential', 'review-model-credential');
+    await renderer.send('Input.insertText', { text: syntheticSecret });
+    credentialRemoved = false;
+    await pressReachable(renderer, waitFor, requireJourney, '[data-action="save-channel-credential"]:not(:disabled)', 'review-model-enroll');
+    await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => settings.roles.find(role => role.roleId === 'main-editorial')?.connection?.credentialOperationState === 'ready')`, 'review-model-ready');
+    const alternateReviewModel = 'j10-review-alternate';
+    await pressReachable(renderer, waitFor, requireJourney, '[data-custom-flash-model-id]:not(:disabled)', 'review-model-custom');
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2 });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2 });
+    await renderer.send('Input.insertText', { text: alternateReviewModel });
+    await pressReachable(renderer, waitFor, requireJourney, '[data-action="select-fast-role-model"]:not(:disabled)', 'review-model-add');
+    await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => settings.roles.find(role => role.roleId === 'fast-interaction')?.binding?.modelId === ${JSON.stringify(alternateReviewModel)})`, 'review-model-catalogue-ready');
     await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'review-interrupted-tasks');
     const interruptedCard = `[data-screen="task-overview"] .task-overview-card[data-task-item*=${JSON.stringify(secondReviewRef)}]`;
     await waitFor(renderer, `document.querySelector(${JSON.stringify(interruptedCard)})`, 'review-interrupted-source-card');
@@ -1995,10 +2010,10 @@ async function main() {
     await wheelIntoView(renderer, waitFor, '#task-drawer .dispatch-chooser > summary', 'review-interrupted-chooser');
     await assertReachable(renderer, waitFor, requireJourney, '#task-drawer .dispatch-chooser > summary', 'review-interrupted-chooser');
     const chosenReviewModel = (await chooseDispatch(renderer, waitFor, '#task-drawer .dispatch-chooser', 'review-interrupted-model', {
-      excludeModel: sourceModel.split('@')[0],
+      model: alternateReviewModel, excludeModel: sourceModel.split('@')[0],
       press: (surface, wait, selector, name) => pressReachable(surface, wait, requireJourney, selector, name),
     })).replace(/^模型 /u, '').replace(/ ▾$/u, '');
-    requireJourney(chosenReviewModel.split('@')[0] !== sourceModel.split('@')[0], 'review-interrupted-changed-model');
+    requireJourney(chosenReviewModel.split('@')[0] === alternateReviewModel && chosenReviewModel.split('@')[0] !== sourceModel.split('@')[0], 'review-interrupted-changed-model');
     await pressReachable(renderer, waitFor, requireJourney, '#task-drawer [data-task-drawer-control="launch"]', 'review-interrupted-start');
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanKind==='review-run' && drawer.dataset.taskPlanStart==='started' && !!drawer.dataset.taskPlanRef && drawer.dataset.taskPlanRef!==${JSON.stringify(secondReviewRef)}; })()`, 'review-interrupted-started', 60_000);
     const thirdReviewRef = await renderer.evaluate(`document.querySelector('#task-drawer').dataset.taskPlanRef`);
@@ -2007,6 +2022,7 @@ async function main() {
     await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'review-interrupted-model-tasks');
     await waitFor(renderer, `Array.from(document.querySelectorAll('.task-overview-card')).some(card=>card.dataset.taskItem?.includes(${JSON.stringify(thirdReviewRef)})&&card.querySelector('.task-overview-model')?.textContent===${JSON.stringify(chosenReviewModel)})`, 'review-interrupted-model-frozen', 60_000);
 
+    await removeCredentialThroughProduct();
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
 
