@@ -2853,6 +2853,7 @@ async function main() {
     const editorWords = `document.querySelector('[data-testid="manuscript-editor"]')`;
     await waitFor(renderer, `${editorWords}?.querySelector('p[data-block-id]') && !${editorWords}.textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-restored');
     const versionKey = async (redo) => {
+      await waitFor(renderer, `document.querySelector('.editor-history-undo:not(:disabled)') && ${editorWords}?.getAttribute('contenteditable') === 'true'`, 'version-history-ready-for-key');
       await renderer.evaluate(`${editorWords}.focus()`);
       const key = { key: redo ? 'Z' : 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, modifiers: (process.platform === 'darwin' ? 4 : 2) | (redo ? 8 : 0) };
       await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key });
@@ -2897,6 +2898,7 @@ async function main() {
     await openManuscript(renderer, 'version-conflict');
     await versionKey(false);
     await waitFor(renderer, `window.ai7.inspectEditorHistory(${JSON.stringify(versionBinding)}).then(history=>history.undo?.kind==='accept')`, 'version-conflict-edit-undone');
+    await assertRenderer(renderer, `window.ai7.getEditorialMarkCard({...${JSON.stringify(versionBinding)},markId:${JSON.stringify(conflict.markId)}}).then(card=>card.anchorState==='drifted' && card.status==='applied')`, 'version-conflict-drifted-point');
     await versionKey(false);
     await waitFor(renderer, `window.ai7.inspectEditorHistory(${JSON.stringify(versionBinding)}).then(history=>history.undo?.kind==='restore')`, 'version-conflict-accept-kept');
     const conflictDigest = await renderer.evaluate(`window.ai7.getManuscriptWindow({...${JSON.stringify(versionBinding)},cursor:null}).then(page=>page.workingDigest)`);
