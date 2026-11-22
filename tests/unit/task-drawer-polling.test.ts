@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import { createSourceFile, forEachChild, isCallExpression, isFunctionDeclaration, ModuleKind, ScriptTarget, transpileModule, type Node } from 'typescript';
 import { expect, it, vi } from 'vitest';
+import { betweenReviewCategories } from '../../src/renderer/task-drawer-labels.js';
 import { onPollControlEnd, pollControlEngaged, retainPollInteraction } from '../../src/renderer/poll-interaction.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
@@ -20,7 +21,7 @@ function harness() {
   const root = miniDocument.createElement('section'); miniDocument.body.append(root);
   const make = () => miniDocument.createElement('div'); const body = make(), bar = make(), footer = make(), title = make(), pill = make(); root.append(body, bar, footer, title, pill);
   const projection = (state: string) => ({ ref: 'task', kind: 'baseline-analysis', bookId: 'book', planVersion: 1, state: { key: state, label: state }, start: { readiness: 'ready' }, runControl: null, runOutcome: null, redo: null, unconfirmed: null, defaultRule: { startedBy: null }, clarifications: [], drift: null, resend: null, edit: { editable: false }, listPages: {} });
-  const state = { root, body, bar, footer, title, pill, plan: projection('running'), deferredPlan: null, painted: '', view: 'plan', mode: 'compact', cancelConfirmShown: true, focusTitle: false, focusBar: false, cancelOnOpen: false, redoOnOpen: false, interrupted: false, editOnOpen: null, redoPending: null, working: false, pendingNote: null, refusal: null, unconfirmedShown: false, redoConfirmShown: false, diffShown: false, unconfirmedRecordShown: false, ruleConfirmShown: false,
+  const state = { root, body, bar, footer, title, pill, plan: projection('running'), deferredPlan: null, painted: '', view: 'plan', mode: 'compact', cancelConfirmShown: true, focusTitle: false, focusBar: false, betweenReviewCategories, unconfirmedOnOpen: false, cancelOnOpen: false, redoOnOpen: false, interrupted: false, editOnOpen: null, redoPending: null, working: false, pendingNote: null, refusal: null, unconfirmedShown: false, redoConfirmShown: false, diffShown: false, unconfirmedRecordShown: false, ruleConfirmShown: false,
     taskPlanWording: (next: unknown) => next, retainPollInteraction, pollControlEngaged, onPollControlEnd, document, HTMLElement: MiniElement, HTMLButtonElement: MiniElement, queueMicrotask,
     TASK_PLAN_STATE_PILLS: { running: { tone: 'busy', shape: 'circle' }, settled: { tone: 'good', shape: 'circle' } }, TASK_DRAWER_FOOTER: '', CANCEL_IMPACT_ID: 'cancel-impact',
     technicalLayerVisible: true, serviceWords: (words: string) => words, statusViewOf: () => false, adoptHandedRow: vi.fn(), tickActivity: vi.fn(), schedulePoll: vi.fn(), paintQuestions: vi.fn(), replaceBody: (...nodes: MiniElement[]) => body.replaceChildren(...nodes), goalBlock: make, compactBlock: make,

@@ -3200,6 +3200,8 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 
 /* One compact launch bar in page sections and sheet feet (#1526). */
 .task-launch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; min-width: 0; position: relative; }
+/* Keep the relaunch options anchor on its row when its label gains the edited indicator. */
+#task-drawer[data-task-relaunch] .task-launch-options { min-inline-size: min(13em, 100%); }
 .task-launch-bar > details { min-width: 0; }
 .task-launch-bar > details > summary { cursor: pointer; padding: .4rem .5rem; border-radius: .3rem; }
 .task-launch-popover { position: fixed; inset: auto; box-sizing: border-box; width: min(520px, calc(100vw - 1rem)); max-height: min(540px, calc(100vh - 2rem)); overflow: auto; padding: 1rem; margin: 0; border: 1px solid var(--boundary); border-radius: .5rem; background: var(--surface); color: var(--text); box-shadow: 0 8px 30px var(--shadow); }

@@ -27,13 +27,13 @@ let uninstall = (): void => undefined;
 beforeEach(() => { uninstall = installMiniDom(); setTechnicalLayerVisible(false); vi.stubGlobal('window', { setTimeout, clearTimeout }); });
 afterEach(() => { setTechnicalLayerVisible(true); vi.unstubAllGlobals(); uninstall(); });
 
-function mount(relaunch: NonNullable<TaskPlanProjection['relaunch']>, api: Partial<Record<keyof RelaunchApi, unknown>>) {
+function mount(relaunch: NonNullable<TaskPlanProjection['relaunch']>, api: Partial<Record<keyof RelaunchApi, unknown>>, settle = async () => true) {
   const full = { getModelServiceSettings: async () => { throw new Error('none'); }, getPreferences: async () => ({ values: preferenceDefaults() }),
     previewTaskLaunch: vi.fn(async () => ({ steps: ['读稿'], scope: '全书', units: 1, reference: [], send: '稿件', usage: '用量', adaptations: [] })),
     controlTaskRun: vi.fn(async () => ({})), inspectTaskPlan: vi.fn(async () => ({ state: { key: 'cancelled-after-start' }, runControl: null })), ...api } as unknown as RelaunchApi;
   const calls = { openRun: vi.fn(), onStale: vi.fn(), onRecorded: vi.fn(), setStatus: vi.fn() };
   const plan = { ...taskPlanFixture({ kind: relaunch.operation === 'launchReviewRun' ? 'review-run' : 'writing' }), bookId: BOOK, ref: SOURCE.ref, relaunch };
-  const mounted = mountRelaunch({ api: full, plan, relaunch, title: '重新开始…', interrupted: false, settle: async () => true,
+  const mounted = mountRelaunch({ api: full, plan, relaunch, title: '重新开始…', interrupted: false, settle,
     errorMessage: (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback,
     errorCode: (error: unknown) => (error as { code?: string }).code ?? null, ...calls });
   const host = document.createElement('div'); host.append(...mounted.lead, ...mounted.bar.body, ...mounted.bar.bar); miniDocument.body.append(host as never);
@@ -73,6 +73,69 @@ describe('重新开始… (Issue #1680)', () => {
     await vi.waitFor(() => expect(calls.openRun).toHaveBeenCalledOnce());
     expect(inspectTaskPlan).toHaveBeenCalledTimes(2);
     expect(inspectTaskPlan.mock.invocationCallOrder[1]!).toBeLessThan(launchWritingTask.mock.invocationCallOrder[0]!);
+  });
+
+  it.each(['read failure', 'timeout'])('retries observation after %s without sending a second accepted cancellation', async failure => {
+    let terminal = false;
+    vi.stubGlobal('window', { setTimeout: (callback: () => void) => queueMicrotask(callback), clearTimeout });
+    const inspectTaskPlan = vi.fn(async () => {
+      if (terminal) return { state: { key: 'cancelled-after-start' }, runControl: null };
+      if (failure === 'read failure') throw new Error('读取失败');
+      return { state: { key: 'cancelling' }, runControl: { cancelling: true } };
+    });
+    const launchWritingTask = vi.fn(async () => ({ taskIntentId: 'new' }));
+    const { api, host } = mount(WRITING, { inspectTaskPlan, launchWritingTask });
+    await vi.waitFor(() => expect(start().disabled).toBe(false));
+    start().click();
+    await vi.waitFor(() => expect(host.textContent).toContain(failure === 'timeout' ? '请稍后重试' : '读取失败'));
+    expect(launchWritingTask).not.toHaveBeenCalled();
+    expect(inspectTaskPlan).toHaveBeenCalledTimes(failure === 'timeout' ? 120 : 1);
+    terminal = true;
+    start().click();
+    await vi.waitFor(() => expect(launchWritingTask).toHaveBeenCalledOnce());
+    expect(api.controlTaskRun).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces a cancellation refusal and rereads the source without dispatching a launch', async () => {
+    const refusal = coded('TASK_RELAUNCH_STALE', '这项任务已在另一处改变。');
+    const controlTaskRun = vi.fn().mockRejectedValue(refusal);
+    const launchWritingTask = vi.fn();
+    const { calls, host } = mount(WRITING, { controlTaskRun, launchWritingTask });
+    await vi.waitFor(() => expect(start().disabled).toBe(false));
+    start().click();
+    await vi.waitFor(() => expect(calls.onStale).toHaveBeenCalledWith(refusal.message));
+    expect(host.textContent).toContain(refusal.message);
+    expect(launchWritingTask).not.toHaveBeenCalled();
+  });
+
+  it('locks the confirmed review settings at the press while manuscript edits settle', async () => {
+    let settle!: (ready: boolean) => void;
+    const launchReviewRun = vi.fn(async (_input: unknown) => ({ run: { reviewRunId: 'new' } }));
+    const { host, calls } = mount(REVIEW, { launchReviewRun }, () => new Promise(resolve => { settle = resolve; }));
+    await vi.waitFor(() => expect(start().disabled).toBe(false));
+    start().click(); start().click();
+    const timing = host.querySelector<HTMLSelectElement>('[data-task-start-when]')!;
+    expect(timing.disabled).toBe(true);
+    timing.value = 'when-online';
+    settle(true);
+    await vi.waitFor(() => expect(calls.openRun).toHaveBeenCalledOnce());
+    expect(launchReviewRun).toHaveBeenCalledOnce();
+    expect(launchReviewRun.mock.calls[0]![0]).not.toHaveProperty('startWhen');
+  });
+
+  it('never reopens a disposed review when its preview later reports a stale source', async () => {
+    let reject!: (error: Error) => void;
+    const previewTaskLaunch = vi.fn(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const settle = vi.fn(async () => true);
+    const { mounted, calls } = mount(REVIEW, { previewTaskLaunch }, settle);
+    const pending = mounted.bar.openPlan();
+    await vi.waitFor(() => expect(previewTaskLaunch).toHaveBeenCalledOnce());
+    expect(settle).toHaveBeenCalledOnce();
+    mounted.bar.dispose();
+    reject(coded('TASK_RELAUNCH_STALE', '原任务发生变化。'));
+    await pending;
+    expect(calls.onStale).not.toHaveBeenCalled();
+    expect(calls.openRun).not.toHaveBeenCalled();
   });
 
   it('offers the cancellation first when a preview needs it, then shows the preview', async () => {

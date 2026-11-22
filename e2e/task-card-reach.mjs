@@ -1,5 +1,3 @@
-import { pointerClick } from './dispatch-chooser.mjs';
-
 /**
  * Issue #1680: a control a stage names is asserted reachable at engine level BEFORE it is pressed, without a scripted scroll —
  * its rectangle inside the window and inside its scroller's visible box, and `document.elementFromPoint` at its centre the
@@ -50,6 +48,8 @@ export async function wheelIntoView(renderer, waitFor, selector, name) {
 export async function pressReachable(renderer, waitFor, check, selector, name) {
   await waitFor(renderer, `document.querySelector(${JSON.stringify(selector)}) !== null`, `${name}-present`);
   await wheelIntoView(renderer, waitFor, selector, name);
-  await assertReachable(renderer, waitFor, check, selector, name);
-  await pointerClick(renderer, waitFor, selector, name);
+  const { rect } = await assertReachable(renderer, waitFor, check, selector, name);
+  const point = { x: (rect[0] + rect[2]) / 2, y: (rect[1] + rect[3]) / 2, button: 'left', clickCount: 1 };
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, buttons: 1 });
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, buttons: 0 });
 }

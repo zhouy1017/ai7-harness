@@ -113,7 +113,7 @@ describe('task overview', () => {
     const startQuickTasks = vi.fn(async () => ({}));
     const root = document.createElement('section');
     const openTarget = vi.fn();
-    const surface = mountTaskOverview({ root, api: { inspectTaskOverview: async () => projection, startQuickTasks } as unknown as RendererApi, setStatus: vi.fn(), openTarget, openBook: vi.fn(), openResult: vi.fn() });
+    const surface = mountTaskOverview({ root, api: { inspectTaskOverview: async () => projection, taskOverviewCall: async () => ({ bookId: original.book!.bookId, ...projection.groups[4]!.items[0]!.plan, relaunch: {} }), startQuickTasks } as unknown as RendererApi, setStatus: vi.fn(), openTarget, openBook: vi.fn(), openResult: vi.fn() });
     try {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(root.querySelector('.task-overview-context')?.parentElement).toBe(root.querySelector('.task-overview-heading-row'));
@@ -201,14 +201,14 @@ describe('task overview', () => {
     try {
       const cases = [
         ['active', 'analysis-running', ['pause', 'cancel']], ['active', 'analysis-waiting-capacity', ['up', 'top', 'cancel']],
-        ['decisions', 'analysis-clarification', ['answer', 'cancel']], ['active', 'analysis-paused', ['resume', 'redo', 'cancel']],
+        ['decisions', 'analysis-clarification', ['answer', 'redo', 'cancel']], ['active', 'analysis-paused', ['resume', 'redo', 'cancel']],
         ['recent', 'analysis-completed', ['result', 'redo']],
       ] as const;
       for (const [group, state, actions] of cases) {
         const item = task(group, state, 'b0000000-0000-4000-8000-000000000001');
         const attention: GlobalAttentionProjection = { groups: [{ key: group, items: [item], total: 1 }], actionableCount: 0, running: true, processing: { state: 'local' } };
         const projected = composeTaskOverview(attention, 2, () => state === 'analysis-waiting-capacity' ? 1 : null).groups.flatMap((group) => group.items)[0]!;
-        const act = vi.fn(); const card = taskOverviewCard(projected, act);
+        const act = vi.fn(); const card = taskOverviewCard(projected, act, false, projected.plan !== null);
         expect(Array.from(card.querySelectorAll<HTMLElement>('[data-task-action]')).filter((button) => !button.closest('details')).map((button) => button.dataset['taskAction'])).toEqual(actions);
         expect(card.querySelectorAll('.task-overview-card-line')).toHaveLength(1);
         expectNoTechnicalText(card);

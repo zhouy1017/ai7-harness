@@ -64,6 +64,8 @@ function previousCeiling(plan: TaskPlanProjection): number | null {
 
 export function mountRelaunch(options: MountRelaunchOptions): Relaunch {
   const { api, relaunch } = options;
+  let disposed = false;
+  let cancelAccepted = false;
   let cancelled = false;
   let cancelling: Promise<void> | null = null;
   /**
@@ -72,17 +74,31 @@ export function mountRelaunch(options: MountRelaunchOptions): Relaunch {
    */
   const settled = async (): Promise<void> => {
     for (let turn = 0; turn < 120; turn += 1) {
+      if (disposed) throw new Error('发起栏已关闭。');
       const current = await api.inspectTaskPlan({ kind: options.plan.kind, ref: options.plan.ref });
-      if (current.state.key !== 'cancelling' && current.runControl?.cancelling !== true) return;
+      if (current.state.key === 'cancelled' || current.state.key === 'cancelled-after-start' ||
+          current.kind === 'review-run' && current.state.key === 'stopped' && current.state.label === '已取消') return;
+      if (current.state.key !== 'cancelling' && !current.runControl?.cancelling) {
+        throw Object.assign(new Error('这项任务已经变化，请重新打开任务后再开始。'), { code: RELAUNCH_STALE });
+      }
       await new Promise((resolve) => window.setTimeout(resolve, 250));
     }
+    throw new Error('任务仍在取消，请稍后重试。');
   };
   const cancelFirst = (): Promise<void> => {
     if (relaunch.cancelsFirst === null || cancelled) return Promise.resolve();
-    cancelling ??= sendRelaunchCancellation(api, relaunch.cancelsFirst).then(settled).then(() => { cancelled = true; }).finally(() => { cancelling = null; });
+    const cancellation = relaunch.cancelsFirst;
+    cancelling ??= (async () => {
+      if (!cancelAccepted) {
+        await sendRelaunchCancellation(api, cancellation);
+        cancelAccepted = true;
+      }
+      await settled();
+      cancelled = true;
+    })().finally(() => { cancelling = null; });
     return cancelling;
   };
-  const stale = (error: unknown): void => { if (options.errorCode(error) === RELAUNCH_STALE) options.onStale(options.errorMessage(error, '这项任务已经变化，请重新打开任务后再开始。')); };
+  const stale = (error: unknown): void => { if (!disposed && options.errorCode(error) === RELAUNCH_STALE) options.onStale(options.errorMessage(error, '这项任务已经变化，请重新打开任务后再开始。')); };
 
   const kept = el('section', 'task-relaunch-summary');
   kept.dataset['taskRelaunchSummary'] = '';
@@ -100,7 +116,7 @@ export function mountRelaunch(options: MountRelaunchOptions): Relaunch {
 
   const preview = async (input: Omit<TaskLaunchPreviewInput, 'bookId'>): Promise<Awaited<ReturnType<RelaunchApi['previewTaskLaunch']>>> => {
     try { return await api.previewTaskLaunch(input); } catch (error) {
-      if (options.errorCode(error) === RELAUNCH_PREVIEW_CANCEL_REQUIRED && relaunch.cancelsFirst !== null && !cancelled) {
+      if (!disposed && options.errorCode(error) === RELAUNCH_PREVIEW_CANCEL_REQUIRED && relaunch.cancelsFirst !== null && !cancelled) {
         firstWhy.textContent = options.errorMessage(error, '先取消这项任务，才能查看重新开始后的计划。');
         first.hidden = false;
       }
@@ -115,8 +131,12 @@ export function mountRelaunch(options: MountRelaunchOptions): Relaunch {
       if (key === 'previewTaskLaunch') return preview;
       if (key !== launch) return Reflect.get(target, key);
       return async (input: unknown) => {
-        await cancelFirst();
-        try { return await (Reflect.get(target, key) as (value: unknown) => Promise<unknown>)(input); } catch (error) { stale(error); throw error; }
+        if (disposed) throw new Error('发起栏已关闭。');
+        try {
+          await cancelFirst();
+          if (disposed) throw new Error('发起栏已关闭。');
+          return await (Reflect.get(target, key) as (value: unknown) => Promise<unknown>)(input);
+        } catch (error) { stale(error); throw error; }
       };
     } });
     const { bookId: _book, ...input } = relaunch.input as typeof relaunch.input & { bookId: string };
@@ -127,16 +147,20 @@ export function mountRelaunch(options: MountRelaunchOptions): Relaunch {
   })();
 
   firstButton.addEventListener('click', () => {
-    if (firstButton.disabled) return;
+    if (disposed || firstButton.disabled) return;
     firstButton.disabled = true;
     void cancelFirst().then(() => {
+      if (disposed) return;
       first.hidden = true;
       options.setStatus(TASK_RELAUNCH_CANCELLED, 'success');
       options.onRecorded(options.plan.kind, options.plan.bookId, options.plan.ref);
       return bar.openPlan();
-    }, (error: unknown) => { firstWhy.textContent = options.errorMessage(error, '无法取消这项任务。'); stale(error); }).finally(() => { firstButton.disabled = false; });
+    }, (error: unknown) => { if (disposed) return; firstWhy.textContent = options.errorMessage(error, '无法取消这项任务。'); stale(error); }).finally(() => { firstButton.disabled = false; });
   });
-  return { lead: [kept, first], bar };
+  return { lead: [kept, first], bar: { ...bar,
+    dispose() { disposed = true; bar.dispose(); },
+    interrupt() { disposed = true; bar.interrupt(); },
+  } };
 }
 
 /** 审阅's relaunch: the same bar, composed from the shared presentation and chooser, for `launchReviewRun`. */
@@ -162,27 +186,40 @@ function mountReviewRelaunch(options: MountRelaunchOptions, relaunch: Extract<Ta
     return { ...rest, ...(timing.value === 'when-online' ? { startWhen: 'when-online' as const } : {}), clientCommandId: commandId, executionConfig, rememberedChoice };
   };
   const openPlan = async (): Promise<void> => {
-    if (stopped || refreshPreview.disabled) return;
+    if (stopped || launching || refreshPreview.disabled) return;
     estimate.open = true;
     const version = previewVersion;
     refreshPreview.disabled = true;
     try {
+      if (!await options.settle() || stopped || version !== previewVersion) return;
       const shown = await preview({ launch: { operation: 'launchReviewRun', input: input() } });
       if (stopped || version !== previewVersion) return;
       const steps = el('ol'); for (const step of shown.steps) steps.append(el('li', undefined, step));
       usage.replaceChildren(el('p', undefined, `处理范围：${shown.scope}`), steps, ...shown.reference.map(line => el('p', undefined, `允许参考：${line}`)),
         el('p', undefined, `会发送：${shown.send}`), el('p', undefined, shown.usage), ...shown.adaptations.map(line => el('p', undefined, line)));
     } catch (error) { if (!stopped && version === previewVersion) usage.textContent = options.errorMessage(error, '计划暂时无法读取；仍可直接开始任务。'); }
-    finally { refreshPreview.disabled = false; }
+    finally { refreshPreview.disabled = stopped || launching; }
   };
   refreshPreview.addEventListener('click', () => void openPlan());
   const begin = async (): Promise<void> => {
     if (stopped || start.disabled) return;
+    const request = input();
+    const controls = [timing, refreshPreview, ...chooser.element.querySelectorAll<HTMLSelectElement | HTMLButtonElement>('select,button,input')];
+    const disabled = controls.map(control => control.disabled);
+    for (const control of controls) control.disabled = true;
     launching = true; syncStart(); problem.textContent = '';
+    const restore = (): void => {
+      controls.forEach((control, index) => { control.disabled = disabled[index]!; });
+      refreshPreview.disabled = false;
+      launching = false; syncStart();
+    };
     try {
-      if (!(await options.settle())) { launching = false; syncStart(); return; }
+      if (!(await options.settle())) { if (!stopped) restore(); return; }
+      if (stopped) return;
       await cancelFirst();
-      const result = await api.launchReviewRun(input());
+      if (stopped) return;
+      const result = await api.launchReviewRun(request);
+      if (stopped) return;
       const reviewRunId = result.run?.reviewRunId;
       if (reviewRunId === undefined) throw new Error('无法开始任务。');
       options.onRecorded('review-run' as TaskPlanKind, options.plan.bookId, reviewRunId);
@@ -190,7 +227,7 @@ function mountReviewRelaunch(options: MountRelaunchOptions, relaunch: Extract<Ta
       if (!stopped) options.openRun(options.plan.bookId, 'review-run', reviewRunId, result.launchNotice);
     } catch (error) {
       stale(error);
-      if (!stopped) { launching = false; syncStart(); problem.textContent = options.errorMessage(error, '无法开始任务。'); }
+      if (!stopped) { restore(); problem.textContent = options.errorMessage(error, '无法开始任务。'); }
     }
   };
   start.addEventListener('click', () => void begin());

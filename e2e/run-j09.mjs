@@ -1,6 +1,6 @@
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
-import { assertReachable, wheelIntoView } from './task-card-reach.mjs';
+import { assertReachable, pressReachable, wheelIntoView } from './task-card-reach.mjs';
 import { attentionNoticeClearsMenu, attentionNoticeHolds, closeTaskDrawer, pressQuietResult, READ_CARET } from './attention-notice.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1658,9 +1658,9 @@ async function main() {
     at('idle-yield-card-words');
     // Issue #1680: on the 任务 page the yielded Run's card says what its record says — 让位给你的任务, never 「你 … 暂停」 — with
     // 继续 · 重新开始… · 取消任务, each inside the window.
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'idle-yield-tasks');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'idle-yield-tasks');
     const yieldedCard = '[data-screen="task-overview"] .task-overview-card[data-task-state="analysis-yielded"]';
-    await waitFor(renderer, `document.querySelector(${JSON.stringify(yieldedCard)})`, 'idle-yield-card', 30_000);
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(yieldedCard + ' [data-task-action="redo"]')})`, 'idle-yield-card', 30_000);
     const yieldedWords = await renderer.evaluate(`(() => { const card=document.querySelector(${JSON.stringify(yieldedCard)}); return { pill: card.querySelector('.task-overview-state')?.textContent ?? null, line: card.querySelector('.task-overview-card-line')?.textContent ?? null,
       actions: Array.from(card.querySelectorAll('[data-task-action]')).filter((button) => !button.closest('details')).map((button) => [button.dataset.taskAction, button.textContent]) }; })()`);
     requireJourney(yieldedWords.pill === '让位给你的任务' && yieldedWords.line?.startsWith('让位给你的任务') === true && !/你(在)? ?\d/u.test(yieldedWords.line) &&
@@ -1806,7 +1806,7 @@ async function main() {
     requireJourney(filterIndex > 0, 'overview-filter-lists-the-book', { filterIndex });
     // Chosen by key on confirmed state (Issue #1680): the list is open, and its active option follows each key before Enter.
     const filterActive = `(() => { const trigger=document.querySelector(${JSON.stringify(filterTrigger)}); if (trigger?.getAttribute('aria-expanded')!=='true') return null; const row=document.getElementById(trigger.getAttribute('aria-activedescendant') ?? ''); return row ? Number(row.dataset.index) : -1; })()`;
-    await pointerClick(renderer, waitFor, filterTrigger, 'overview-filter-open');
+    await pressReachable(renderer, waitFor, requireJourney, filterTrigger, 'overview-filter-open');
     await waitFor(renderer, `${filterActive} === 0`, 'overview-filter-popup-open');
     for (let step = 0; step < filterIndex; step += 1) { await press(renderer, 'ArrowDown'); await waitFor(renderer, `${filterActive} === ${step + 1}`, 'overview-filter-active-follows-key'); }
     await press(renderer, 'Enter');

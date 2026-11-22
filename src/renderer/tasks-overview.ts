@@ -8,7 +8,7 @@ import { menuPanel } from './components/controls.js';
 import type { TaskPlanProjection, ClarificationOptionId } from '../shared/protocol.js';
 import { attentionSentence, globalAttentionTimeLine } from './global-attention-labels.js';
 import { TASK_BAR_CANCELLED, TASK_BAR_CANCELLED_NOTE } from './task-drawer-labels.js';
-import { taskCardView, TASK_CARD_RUN_WAIT_CANCELLED, TASK_CARD_WAIT_CANCELLED, TASK_PAGE_GROUP_LABELS, TASK_PAGE_GROUPS, TASK_PANEL_GROUP_LABELS, TASK_PANEL_GROUPS, type TaskCardAction } from './task-card-view.js';
+import { taskCardView, TASK_PAGE_GROUP_LABELS, TASK_PAGE_GROUPS, TASK_PANEL_GROUP_LABELS, TASK_PANEL_GROUPS, type TaskCardAction } from './task-card-view.js';
 export type { TaskCardAction } from './task-card-view.js';
 const BOOK_FILTER_BUTTONS = 6;
 const PROCEDURES = [['baseline-analysis', '基线分析'], ['initial-evaluation', '评估']] as const;
@@ -17,23 +17,41 @@ export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: st
   if (tag === 'button') { node.classList.add('btn'); (node as HTMLButtonElement).type = 'button'; } return node;
 }
 /** Both the global page and the in-Book pane render this exact card; its words and actions are `taskCardView`'s (Issue #1680). */
-export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: TaskOverviewItemProjection, action: TaskCardAction) => void, inBook = false): HTMLElement {
-  const view = taskCardView(item);
+export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: TaskOverviewItemProjection, action: TaskCardAction) => void, inBook = false, relaunch: boolean | Promise<boolean> = false): HTMLElement {
+  const view = taskCardView(item, relaunch === true);
   const node = el('article', 'task-overview-card'); node.dataset['taskItem'] = item.itemId; node.dataset['taskItemId'] = item.itemId; node.dataset['taskState'] = item.attention.state; node.tabIndex = 0;
   const title = el('div', 'task-overview-card-title'); title.append(el('span', 'task-overview-book', item.bookTitle ?? '全局'), el('span', undefined, ' · '), el('strong', undefined, item.label), el('span', `state-term task-overview-state task-overview-state-${view.pageGroup}`, view.pill));
   node.dataset['taskKind'] = item.taskKind;
   const line = el('div', 'task-overview-card-line', attentionSentence(view.line)); line.title = line.textContent ?? '';
   const time = el('time', 'task-overview-card-time', globalAttentionTimeLine(item.attention.group, item.at, item.state)); time.dateTime = item.at;
   const body = el('div', 'task-overview-card-body'); body.append(el('div', 'task-overview-card-kind', item.taskKind), title, line, time);
+  if (item.usage !== null) {
+    body.append(el('span', 'task-overview-usage', `用时 ${Math.max(1, Math.round(item.usage.elapsed / 60000))} 分钟 · 约 ${item.usage.calls} 次调用`));
+  }
   if (item.attention.modelLabel) body.append(el('span', 'task-overview-model', item.attention.modelLabel));
   if (view.pageGroup === 'running' && item.progress !== null) { const bar = el('progress', 'task-overview-progress'); bar.max = Math.max(1, item.progress.total); bar.value = Math.min(item.progress.done, item.progress.total); body.append(bar); }
   const actions = el('div', 'task-overview-card-actions');
-  for (const entry of view.actions) { const button = el('button', 'quiet', entry.label); button.dataset['taskAction'] = entry.action; button.addEventListener('click', (event) => { event.stopPropagation(); act(item, entry.action); }); actions.append(button); }
+  function actionButton(entry: (typeof view.actions)[number]): HTMLButtonElement {
+    const button = el('button', 'quiet', entry.label);
+    button.dataset['taskAction'] = entry.action;
+    button.addEventListener('click', event => { event.stopPropagation(); act(item, entry.action); });
+    return button;
+  }
+  actions.append(...view.actions.map(actionButton));
   const more = el('details', 'task-overview-more'); more.append(el('summary', undefined, '更多'));
   const menu = menuPanel(); more.append(menu);
   // The Book panel is already the Book: 打开所在图书 is the 任务 page's alone (Issue #1680).
-  for (const [label, action] of [['查看计划', 'plan'], ['查看运行', 'run'], ...(inBook ? [] : [['打开所在图书', 'book']] as const)] as const) { const button = el('button', 'quiet', label); button.dataset['taskAction'] = action; button.addEventListener('click', (event) => { event.stopPropagation(); act(item, action); more.open = false; }); menu.append(button); }
+  for (const [label, action] of [['查看计划', 'plan'], ['查看运行', 'run'], ...(item.selection && !view.actions.some(entry => entry.action === 'jump') ? [['跳到所选文字', 'jump']] as const : []), ...(inBook ? [] : [['打开所在图书', 'book']] as const)] as const) { const button = el('button', 'quiet', label); button.dataset['taskAction'] = action; button.addEventListener('click', (event) => { event.stopPropagation(); act(item, action); more.open = false; }); menu.append(button); }
   more.addEventListener('click', (event) => event.stopPropagation()); actions.append(more); node.append(body, actions);
+  if (typeof relaunch !== 'boolean') void relaunch.then(available => {
+    if (!available) return;
+    const offered = taskCardView(item, true).actions;
+    for (const button of Array.from(actions.children)) {
+      if (button.tagName === 'BUTTON' && !offered.some(entry => entry.action === button.getAttribute('data-task-action'))) button.remove();
+    }
+    const index = offered.findIndex(entry => entry.action === 'redo');
+    if (index >= 0) actions.insertBefore(actionButton(offered[index]!), actions.children[index] ?? more);
+  });
   node.addEventListener('click', () => act(item, 'open')); return node;
 }
 export interface TaskOverviewOptions {
@@ -42,7 +60,7 @@ export interface TaskOverviewOptions {
   readonly root: HTMLElement; readonly api: Pick<RendererApi, 'inspectTaskOverview' | 'controlAllTasks' | 'startQuickTasks' | 'reorderQueuedRun' | 'taskOverviewCall' | 'pollServiceJob'>; readonly bookId?: string;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   /** `cancel` opens the plan with 取消任务's Cancellation Impact Summary open; `redo` with 重新开始… pressed (Issue #1680). */
-  readonly openTarget: (item: TaskOverviewItemProjection, view?: 'plan' | 'run' | 'redo' | 'cancel') => void;
+  readonly openTarget: (item: TaskOverviewItemProjection, view?: 'plan' | 'run' | 'redo' | 'cancel' | 'unconfirmed') => void;
   /** The record's own surface (继续 of a 审阅 a closed service left half-way: the 审阅 page, where it goes on). */
   readonly openRecord?: (item: TaskOverviewItemProjection) => void;
   /** 去设置 › 模型服务 › 网络代理 of a Run the proxy or the model service stopped. */
@@ -53,7 +71,10 @@ export interface TaskOverviewOptions {
 }
 export interface TaskOverviewSurface { refresh(): void; showStart(): void; focus(itemId: string): void; destroy(): void; }
 export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSurface {
+  let actionGeneration = 0;
   let destroyed = false, busy = false, inFlight = false; let projection: TaskOverviewProjection | null = null; let painted = ''; let selectedId: string | null = null; let pendingFocus: string | null = null;
+  const recipes = new Map<string, Promise<boolean>>();
+  let recipeSources = '';
   const key = `ai7.task-overview.filters.${options.bookId ?? 'all'}`;
   let selectedBook = options.bookId ?? 'all', selectedType = 'all', selectedTime = 'today';
   try { const saved = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, string>; selectedBook = options.bookId ?? saved['book'] ?? 'all'; selectedType = saved['type'] ?? 'all'; selectedTime = saved['time'] ?? 'today'; } catch { /* A missing view preference uses its default. */ }
@@ -122,9 +143,10 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   async function call(item: TaskOverviewItemProjection, operation: TaskOverviewCall['operation'], input: object): Promise<unknown> { if (!item.bookId) return; return options.api.taskOverviewCall({ operation, bookId: item.bookId, input } as TaskOverviewCall); }
   function act(item: TaskOverviewItemProjection, action: TaskCardAction): void {
     if (destroyed) return;
+    actionGeneration += 1;
     selectedId = item.itemId;
     if (action === 'answer' && item.nextAction === 'answer-clarification' && item.plan) { void answerOnCard(item); return; }
-    if (action === 'open' || action === 'answer' || action === 'plan' || action === 'run' || action === 'next' || action === 'unconfirmed') { options.openTarget(item, action === 'plan' ? 'plan' : 'run'); return; }
+    if (action === 'open' || action === 'answer' || action === 'plan' || action === 'run' || action === 'next' || action === 'unconfirmed') { options.openTarget(item, action === 'plan' || action === 'unconfirmed' ? action : 'run'); return; }
     if (action === 'jump') { options.jumpToSelection?.(item); return; }
     if (action === 'book') { if (item.bookId) options.openBook(item.bookId); return; }
     if (action === 'result') { options.openResult(item); return; }
@@ -149,8 +171,10 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   async function answerOnCard(item: TaskOverviewItemProjection): Promise<void> {
     const node = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === item.itemId);
     if (!node || node.querySelector('[data-card-answer]') || !item.plan) return;
+    const generation = actionGeneration;
     try {
       const plan = await call(item, 'inspectTaskPlan', item.plan) as TaskPlanProjection;
+      if (destroyed || generation !== actionGeneration || !host.contains(node) || selectedId !== item.itemId) return;
       const question = plan.clarifications.find((card) => card.state === 'open');
       if (!question) { options.openTarget(item); return; }
       const form = el('form', 'task-card-answer'); form.dataset['cardAnswer'] = ''; form.addEventListener('click', (event) => event.stopPropagation());
@@ -168,7 +192,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
       }); });
       submit.type = 'submit'; const close = el('button', 'quiet', '收起'); close.addEventListener('click', () => form.remove());
       form.append(choices, text, submit, close); node.append(form); text.focus();
-    } catch (error) { options.setStatus(rendererErrorMessage(error, '无法读取问题。'), 'error'); }
+    } catch (error) { if (!destroyed && generation === actionGeneration && selectedId === item.itemId) options.setStatus(rendererErrorMessage(error, '无法读取问题。'), 'error'); }
   }
   async function dialogueAction(item: TaskOverviewItemProjection, operation: 'stopDialogueAnswer' | 'continueDialogueAnswer' | 'regenerateDialogueAnswer', cancel = false): Promise<void> {
     if (item.target.kind !== 'dialogue') return;
@@ -180,9 +204,8 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   async function cancel(item: TaskOverviewItemProjection): Promise<boolean> {
     if (item.target.kind === 'dialogue') { await dialogueAction(item, 'stopDialogueAnswer', true); return false; }
     if (!item.plan?.ref) return false;
-    if (item.attention.state === 'review-continuable') { await call(item, 'cancelReviewRun', { reviewRunId: item.plan.ref }); return false; }
-    if (TASK_CARD_WAIT_CANCELLED.has(item.attention.state) || item.state === 'queued' && !TASK_CARD_RUN_WAIT_CANCELLED.has(item.attention.state)) await call(item, item.plan.kind === 'baseline-analysis' ? 'cancelWaitingBaselineAnalysis' : 'cancelWaitingTask', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : item.plan);
-    else await call(item, item.plan.kind === 'baseline-analysis' ? 'cancelBaselineAnalysisRun' : 'controlTaskRun', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : { ...item.plan, action: 'cancel' });
+    await call(item, item.plan.kind === 'baseline-analysis' ? 'cancelWaitingBaselineAnalysis' : 'cancelWaitingTask',
+      item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : item.plan);
     return true;
   }
   function paint(): void {
@@ -202,12 +225,60 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
       : TASK_PAGE_GROUPS.map((key) => ({ key, heading: TASK_PAGE_GROUP_LABELS[key], items: placed.filter(({ view }) => view.pageGroup === key).map(({ item }) => item) }));
     const painting = options.bookId ? groups : groups.filter((group) => group.items.length > 0);
     if (!options.bookId && painting.length === 0) host.replaceChildren(el('p', 'task-overview-none', nothingToShow() ? '现在没有任务，可以用上面的「发起任务」开始一项。' : '没有符合所选筛选的任务。'));
-    else host.replaceChildren(...painting.map((group) => { const section = el('section', 'task-overview-group'); section.dataset['taskGroup'] = group.key; section.append(el('h3', 'task-overview-group-heading', group.heading)); const count = el('span', 'task-overview-count', String(group.items.length)); section.firstElementChild?.append(' · ', count); const list = el('div', 'task-overview-items'); list.append(...group.items.map((item) => taskOverviewCard(item, act, options.bookId !== undefined))); section.append(group.items.length ? list : el('p', 'task-overview-empty', '这里暂时没有任务。')); return section; }));
+    else host.replaceChildren(...painting.map(group => {
+      const section = el('section', 'task-overview-group');
+      section.dataset['taskGroup'] = group.key;
+      const heading = el('h3', 'task-overview-group-heading', group.heading);
+      heading.append(' · ', el('span', 'task-overview-count', String(group.items.length)));
+      section.append(heading);
+      if (group.items.length) {
+        const list = el('div', 'task-overview-items');
+        list.append(...group.items.map(renderCard));
+        section.append(list);
+      } else section.append(el('p', 'task-overview-empty', '这里暂时没有任务。'));
+      return section;
+    }));
     for (const { form, itemId } of answers) { const card = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === itemId); card?.append(form); }
     restoreInteraction();
     if (pendingFocus) { const target = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === pendingFocus); if (target) { target.focus(); pendingFocus = null; } }
   }
-  function refresh(): void { if (destroyed || inFlight) return; inFlight = true; void options.api.inspectTaskOverview().then((next) => { if (!destroyed) { projection = next; options.onProjection?.(next); if (!pollControlEngaged(options.root, false)) paint(); } }, (error: unknown) => { if (!destroyed) options.setStatus(rendererErrorMessage(error, '任务总览暂时无法读取。'), 'error'); }).finally(() => { inFlight = false; }); }
+  function renderCard(item: TaskOverviewItemProjection): HTMLElement {
+    const source = item.plan;
+    if (!item.bookId || !source?.ref || source.kind === 'fixed-task' || !taskCardView(item, true).actions.some(entry => entry.action === 'redo')) {
+      return taskOverviewCard(item, act, options.bookId !== undefined);
+    }
+    const id = JSON.stringify([item.bookId, source.kind, source.ref]);
+    let available = recipes.get(id);
+    if (!available) {
+      available = call(item, 'inspectTaskPlan', source).then(value => {
+        const plan = value as TaskPlanProjection | undefined;
+        return plan != null && plan.bookId === item.bookId && plan.kind === source.kind && plan.ref === source.ref && plan.relaunch != null;
+      }, () => {
+        if (recipes.get(id) === available) { recipes.delete(id); painted = ''; }
+        return false;
+      });
+      recipes.set(id, available);
+    }
+    const node: HTMLElement = taskOverviewCard(item, act, options.bookId !== undefined, available.then(offered => offered && !destroyed && host.contains(node)));
+    return node;
+  }
+  async function refresh(): Promise<void> {
+    if (destroyed || inFlight) return;
+    inFlight = true;
+    try {
+      const next = await options.api.inspectTaskOverview();
+      if (destroyed) return;
+      // A newer source of the same kind can supersede a completed plan without changing the older row.
+      const sources = JSON.stringify(next.groups.flatMap(group => group.items).filter(item => item.plan)
+        .map(item => [item.bookId, item.plan, item.at, item.attention.state, item.runRecordId, item.attention.facts.stopReason]));
+      if (sources !== recipeSources) { recipes.clear(); recipeSources = sources; }
+      projection = next;
+      options.onProjection?.(next);
+      if (!pollControlEngaged(options.root, false)) paint();
+    } catch (error) {
+      if (!destroyed) options.setStatus(rendererErrorMessage(error, '任务总览暂时无法读取。'), 'error');
+    } finally { inFlight = false; }
+  }
   function keydown(event: KeyboardEvent): void {
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return;
     const cards = [...host.querySelectorAll<HTMLElement>('[data-task-item]')]; const index = cards.findIndex((node) => node === document.activeElement || node.contains(document.activeElement));

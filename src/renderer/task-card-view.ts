@@ -36,9 +36,8 @@ export interface TaskCardView {
 const RUNNING: ReadonlySet<GlobalAttentionStateKey> = new Set(['analysis-running', 'review-running', 'dialogue-answering', 'analysis-cancelling']);
 const STOPPED: ReadonlySet<GlobalAttentionStateKey> = new Set(['analysis-paused', 'analysis-pausing', 'analysis-resumable', 'analysis-yielded', 'review-continuable']);
 /** Waits whose cancellation is the waiting-start cancellation: nothing has been sent. */
-export const TASK_CARD_WAIT_CANCELLED: ReadonlySet<GlobalAttentionStateKey> = new Set(['analysis-queued', 'analysis-waiting-capacity', 'analysis-waiting-slot', 'analysis-waiting-idle', 'analysis-blocked', 'analysis-plan-moved']);
-/** Waits of a recorded Run (Connectivity Wait, the start check): cancelled through the Run's own cancellation, still before anything is sent. */
-export const TASK_CARD_RUN_WAIT_CANCELLED: ReadonlySet<GlobalAttentionStateKey> = new Set(['analysis-waiting-network', 'analysis-waiting-connection', 'analysis-waiting-admission']);
+const WAIT_CANCELLED: ReadonlySet<GlobalAttentionStateKey> = new Set(['analysis-waiting-capacity', 'analysis-waiting-slot', 'analysis-waiting-idle',
+  'analysis-blocked', 'analysis-plan-moved', 'analysis-waiting-network', 'analysis-waiting-connection', 'analysis-waiting-admission']);
 /** A finished or ended task: no Run to cancel, a result or a record to read, and a new task to start. */
 const ENDED_AGAIN: ReadonlySet<GlobalAttentionStateKey> = new Set(['analysis-failed', 'analysis-interrupted', 'analysis-orphaned', 'review-failed', 'review-stopped', 'analysis-budget-reached']);
 
@@ -58,7 +57,6 @@ function clock(at: string): string {
 
 function line(item: TaskOverviewItemProjection, group: TaskPageGroup): string {
   const state = item.attention.state;
-  const usage = item.usage === null ? '' : ` · 用时 ${Math.max(1, Math.round(item.usage.elapsed / 60000))} 分钟 · 约 ${item.usage.calls} 次调用`;
   if (state === 'analysis-running' || state === 'review-running') {
     // Ordinary mode reads a share of the work, never the reading ranges counted (Issue #1431 item 106).
     return item.progress === null ? '正在处理稿件。' : `${technicalWords(`已完成 ${item.progress.done} / ${item.progress.total} 个阅读范围`, `已完成约 ${item.progress.total === 0 ? 0 : Math.floor((item.progress.done / item.progress.total) * 100)}%`)}${item.progress.elapsedMs === null ? '' : `，已用时 ${Math.floor(item.progress.elapsedMs / 60000)} 分钟`}${item.progress.modelWaiting ? '，等待模型回答' : ''}。`;
@@ -68,15 +66,12 @@ function line(item: TaskOverviewItemProjection, group: TaskPageGroup): string {
   // A 继续 the service refused says why first, in its own sentence.
   if (group === 'stopped' && item.attention.facts.resumeFailure !== undefined) return serviceWords(item.attention.facts.resumeFailure);
   if (state === 'analysis-paused' && item.attention.facts.stopReason === undefined) return `你在 ${clock(item.at)} 暂停；继续时接着处理。`;
-  if (item.state === 'completed') return `已有结果${usage}`;
-  if (item.state === 'cancelled') return `已取消 · ${item.result ? '保留已有结果' : '没有形成结果'}${usage}`;
+  if (item.state === 'cancelled') return `已取消 · ${item.result ? '保留已有结果' : '没有形成结果'}`;
   return globalAttentionReason(item.attention);
 }
 
-function actions(item: TaskOverviewItemProjection): TaskCardActionView[] {
+function actions(item: TaskOverviewItemProjection, relaunch: boolean): TaskCardActionView[] {
   const state = item.attention.state;
-  const dialogue = item.target.kind === 'dialogue';
-  const relaunch = !dialogue && item.plan !== null && item.plan.ref !== null && item.plan.kind !== 'fixed-task';
   const redo: TaskCardActionView[] = relaunch ? [{ action: 'redo', label: TASK_BAR_REDO }] : [];
   const cancel: TaskCardActionView = { action: 'cancel', label: TASK_BAR_CANCEL_RUN };
   const resume: TaskCardActionView = { action: 'resume', label: TASK_BAR_RESUME };
@@ -102,9 +97,9 @@ function actions(item: TaskOverviewItemProjection): TaskCardActionView[] {
     case 'analysis-outcome-unknown':
       return [unconfirmed, cancel];
     case 'analysis-outcome-unconfirmed':
-      return [unconfirmed];
+      return [unconfirmed, ...redo];
     case 'analysis-clarification':
-      return [{ action: 'answer', label: '回答' }, cancel];
+      return [{ action: 'answer', label: '回答' }, ...redo, cancel];
     case 'analysis-blocked': case 'analysis-plan-moved':
       return [...redo, cancel];
     case 'analysis-plan-revision': case 'analysis-prepared': case 'review-prepared':
@@ -118,13 +113,14 @@ function actions(item: TaskOverviewItemProjection): TaskCardActionView[] {
       return [result, { action: 'again', label: DIALOGUE_ACTIONS.regenerate }];
     default:
       if (item.state === 'queued') return [...(item.queuePosition !== null ? [{ action: 'up', label: '上移' } as const, { action: 'top', label: '置顶' } as const] : []), cancel];
-      if (ENDED_AGAIN.has(state)) return redo.length > 0 ? redo : [next];
+      if (state === 'analysis-queued') return [cancel];
+      if (ENDED_AGAIN.has(state)) return redo.length > 0 ? redo : [{ action: 'run', label: '查看运行' }];
       if (item.state === 'completed' || item.state === 'cancelled' || item.state === 'stopped') return [result, ...redo];
       return [next];
   }
 }
 
-export function taskCardView(item: TaskOverviewItemProjection): TaskCardView {
+export function taskCardView(item: TaskOverviewItemProjection, relaunch = false): TaskCardView {
   const group = pageGroup(item);
   const state = item.attention.state;
   return {
@@ -132,7 +128,7 @@ export function taskCardView(item: TaskOverviewItemProjection): TaskCardView {
     panelGroup: group === 'pending' ? 'pending' : group === 'recent' ? 'recent' : 'active',
     pill: globalAttentionStateLabel(item.attention),
     line: line(item, group),
-    actions: [...actions(item), ...(item.selection ? [{ action: 'jump', label: '跳到所选文字' } as const] : [])],
-    cancelInOnePress: TASK_CARD_WAIT_CANCELLED.has(state) || TASK_CARD_RUN_WAIT_CANCELLED.has(state) || item.state === 'queued' || item.target.kind === 'dialogue' || state === 'review-continuable',
+    actions: [...actions(item, relaunch), ...(item.selection && state !== 'analysis-cancelling' && state !== 'analysis-pausing' ? [{ action: 'jump', label: '跳到所选文字' } as const] : [])],
+    cancelInOnePress: WAIT_CANCELLED.has(state) || item.target.kind === 'dialogue',
   };
 }

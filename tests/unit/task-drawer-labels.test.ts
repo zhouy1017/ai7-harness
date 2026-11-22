@@ -601,7 +601,7 @@ describe('the authorization bar (S74a)', () => {
       redo: { summary: [], prepare: { goal: '同步到当前稿件', update: { mode: 'sync-current', selectedRange: null }, redoOf: 'run' } as never },
     }));
     expect(redoable.actions).toEqual([
-      { name: 'redo', label: '重新开始…', tone: 'secondary', disabledReason: null },
+      { name: 'redo', label: '调整原计划', tone: 'secondary', disabledReason: null },
       { name: 'run-link', label: '查看运行', tone: 'secondary', disabledReason: null },
     ]);
     // 正在暂停 (CTRL-001): its sentence until the Run reaches its boundary, and nothing more to press.
@@ -883,7 +883,7 @@ describe('the Run Budget Ceiling in the drawer (S16a)', () => {
     expect(view.status).toBe('已停止 · 预算已达上限');
     expect(view.note).toBe(taskBarBudgetStopNote(budgetStop));
     expect(view.actions.map((entry) => [entry.name, entry.label, entry.tone, entry.disabledReason])).toEqual([
-      ['redo', TASK_BAR_ADJUST_BUDGET_REDO, 'primary', null],
+      ['redo', '调整原计划', 'primary', null],
       ['run-link', TASK_BAR_VIEW_PARTIAL, 'secondary', null],
     ]);
     expect(TASK_BAR_ADJUST_BUDGET_REDO).toBe('重新开始…');
@@ -895,7 +895,7 @@ describe('the Run Budget Ceiling in the drawer (S16a)', () => {
     }));
     expect(live.note).toBe(`${taskBarBudgetStopNote(budgetStop)}。${TASK_BAR_BUDGET_LAUNCH_NOTE}`);
     expect(TASK_BAR_BUDGET_LAUNCH_NOTE).toBe('预算上限由开发者实时启动参数决定：以更高的 --run-budget-ceiling 重新启动后再重做，新任务才会用新的上限');
-    expect(live.actions.map((entry) => [entry.name, entry.label])).toEqual([['redo', TASK_BAR_REDO], ['run-link', TASK_BAR_VIEW_PARTIAL]]);
+    expect(live.actions.map((entry) => [entry.name, entry.label])).toEqual([['redo', '调整原计划'], ['run-link', TASK_BAR_VIEW_PARTIAL]]);
   });
 });
 
@@ -1060,14 +1060,15 @@ describe('the drawer\'s bar for a waiting Run whose plan moved', () => {
     }));
     expect(view.status).toBe('需要重新确认计划');
     expect(view.note).toBe(taskBarReprepareNote(reason));
-    expect(taskBarReprepareNote(reason)).toBe(`${reason}「重新开始…」按同样的目标和范围开始一项新任务。`);
+    expect(taskBarReprepareNote(reason)).toBe(`${reason}可以另做一份计划。`);
     expect(view.actions.map((entry) => [entry.name, entry.label, entry.tone, entry.disabledReason])).toEqual([
       ['reprepare', TASK_BAR_REPREPARE, 'primary', null],
+      ['cancel-wait', TASK_BAR_CANCEL_WAIT, 'secondary', null],
       ['run-link', '查看运行', 'secondary', null],
     ]);
-    expect(TASK_BAR_REPREPARE).toBe('重新开始…');
+    expect(TASK_BAR_REPREPARE).toBe('另做一份计划');
     // With the plan's relaunch (Issue #1680) the same place is 重新开始…'s launch bar.
-    expect(taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'plan-moved', label: '需要重新确认计划' }, reprepare, relaunch: RELAUNCH })).actions.map((entry) => entry.name)).toEqual(['redo', 'run-link']);
+    expect(taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'plan-moved', label: '需要重新确认计划' }, reprepare, relaunch: RELAUNCH })).actions.map((entry) => entry.name)).toEqual(['redo', 'cancel-wait', 'run-link']);
     // Its pill is the plan decision's, as 计划已变化's; a Run this launch cannot carry keeps 派发前已阻止's square and its link.
     expect(TASK_PLAN_STATE_PILLS['plan-moved']).toEqual(TASK_PLAN_STATE_PILLS.changed);
     const blocked = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'blocked', label: '没有开始' } }));

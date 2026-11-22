@@ -504,6 +504,7 @@ async function doublePress(renderer, selector, name) {
 }
 /** A card of the Run AI7 closed under (Issue #1680): the record's pill and line, and its three actions, each inside the window. */
 async function assertResumableCard(renderer, card, name) {
+  await waitFor(renderer, `document.querySelector(${JSON.stringify(card + ' [data-task-action="redo"]')})`, `${name}-recipe`);
   const words = await renderer.evaluate(`(() => { const card=document.querySelector(${JSON.stringify(card)}); return card && { pill: card.querySelector('.task-overview-state')?.textContent ?? null, line: card.querySelector('.task-overview-card-line')?.textContent ?? null,
     actions: Array.from(card.querySelectorAll('[data-task-action]')).filter((button) => !button.closest('details')).map((button) => [button.dataset.taskAction, button.textContent]) }; })()`);
   requireJourney(words?.pill === '任务已中断 · AI7 关闭时正在运行' && words.line?.startsWith('AI7 关闭时任务尚未完成') === true && !/你.*暂停/u.test(words.line) &&
@@ -1173,17 +1174,17 @@ async function main() {
     at('resumable-task-card');
     // Issue #1680: on the 任务 page and in the Book's 任务 panel the Run AI7 closed under says so — 任务已中断 · AI7 关闭时正在运行,
     // never 「你 … 暂停」 — with 继续 · 重新开始… · 取消任务, each inside the window.
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'resumable-tasks-page');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'resumable-tasks-page');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] .task-overview-card[data-task-state="analysis-resumable"]')`, 'resumable-tasks-card', 30_000);
     await assertResumableCard(renderer, '[data-screen="task-overview"] .task-overview-card[data-task-state="analysis-resumable"]', 'resumable-page');
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'resumable-manuscript');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.section('manuscript'), 'resumable-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(secondBookId)}] [data-edge-entry="tasks"]')`, 'resumable-manuscript-ready', 120_000);
     await pressReachable(renderer, waitFor, requireJourney, '[data-edge-entry="tasks"]', 'resumable-panel-entry');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-panel .task-overview-card[data-task-state="analysis-resumable"]')`, 'resumable-panel-card', 30_000);
     // Never measured while the docked drawer still moves (240 ms).
     await waitFor(renderer, `document.getAnimations().every((animation) => animation.playState !== 'running')`, 'resumable-panel-settled');
     await assertResumableCard(renderer, '#task-drawer .task-panel .task-overview-card[data-task-state="analysis-resumable"]', 'resumable-panel');
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), 'resumable-back-analysis');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.section('analysis'), 'resumable-back-analysis');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable'`, 'resumable-back-card', 30_000);
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'resumable-reopen-plan');
     await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可继续', status: '任务已中断 · AI7 关闭时正在运行', statement: SHUTDOWN_STATEMENT, note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar-again', 30_000);
@@ -1246,6 +1247,12 @@ async function main() {
       unrecordedRedo.run.transitions.length === thirdPaused.run.transitions.length, 'redo-summary-records-nothing');
 
     at('redo-keep-plan');
+    await pressReachable(renderer, waitFor, requireJourney, '#task-drawer [data-task-drawer-control="close"]', 'redo-keep-close');
+    const planButton = '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]';
+    await pressReachable(renderer, waitFor, requireJourney, planButton, 'redo-keep-reopen-plan');
+    await waitForBar(renderer, { state: 'paused', pill: '已暂停', status: '已暂停', note: THIRD_PAUSED_NOTE, actions: STOPPED_ACTIONS }, 'redo-keep-source');
+    await pressReachable(renderer, waitFor, requireJourney, '#task-drawer [data-task-drawer-control="redo"]', 'redo-keep-reopen-bar');
+    await waitFor(renderer, relaunchBarOpen('launchBaselineAnalysis'), 'redo-keep-reopened');
     // 先看计划 before the cancellation: the service refuses it in its own words, and the bar offers the cancellation first. Nothing is
     // recorded; the Run stays 已暂停.
     await pressReachable(renderer, waitFor, requireJourney, '#task-drawer .task-launch-estimate > summary', 'redo-preview-refused');
@@ -1961,23 +1968,31 @@ async function main() {
     await writeFile(holdPath, 'release', 'utf8');
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'review-interrupted-ready');
-    const interruptedPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(secondReviewRef)}})`);
-    requireJourney(interruptedPlan?.relaunch?.operation === 'launchReviewRun' && interruptedPlan.relaunch.cancelsFirst !== null, 'review-interrupted-recipe', { state: interruptedPlan?.state ?? null, relaunch: interruptedPlan?.relaunch ?? null });
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'review-interrupted-tasks');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'review-interrupted-tasks');
     const interruptedCard = `[data-screen="task-overview"] .task-overview-card[data-task-item*=${JSON.stringify(secondReviewRef)}]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(interruptedCard)})`, 'review-interrupted-source-card');
+    const inspectReviewSource = `window.ai7.taskOverviewCall({operation:'inspectTaskPlan',bookId:${JSON.stringify(cancelledReview.bookId)},input:{kind:'review-run',ref:${JSON.stringify(secondReviewRef)}}})`;
+    const interruptedPlan = await renderer.evaluate(inspectReviewSource);
+    requireJourney(interruptedPlan?.relaunch?.operation === 'launchReviewRun' && interruptedPlan.relaunch.cancelsFirst !== null, 'review-interrupted-recipe', { state: interruptedPlan?.state ?? null, relaunch: interruptedPlan?.relaunch ?? null });
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${interruptedCard} [data-task-action="redo"]`)})`, 'review-interrupted-card', 30_000);
+    const sourceModel = await renderer.evaluate(`document.querySelector(${JSON.stringify(interruptedCard + ' .task-overview-model')})?.textContent`);
+    requireJourney(typeof sourceModel === 'string' && sourceModel.length > 0, 'review-interrupted-source-model');
     await pressReachable(renderer, waitFor, requireJourney, `${interruptedCard} [data-task-action="redo"]`, 'review-interrupted-redo');
     await waitFor(renderer, relaunchBarOpen('launchReviewRun'), 'review-interrupted-bar', 30_000);
     await assertRenderer(renderer, `${RELAUNCH_SUMMARY}===${JSON.stringify(JSON.stringify(interruptedPlan.relaunch.summary))}`, 'review-interrupted-summary');
     await wheelIntoView(renderer, waitFor, '#task-drawer .dispatch-chooser > summary', 'review-interrupted-chooser');
     await assertReachable(renderer, waitFor, requireJourney, '#task-drawer .dispatch-chooser > summary', 'review-interrupted-chooser');
-    const chosenReviewModel = (await chooseDispatch(renderer, waitFor, '#task-drawer .dispatch-chooser', 'review-interrupted-model')).replace(/^模型 /u, '').replace(/ ▾$/u, '');
+    const chosenReviewModel = (await chooseDispatch(renderer, waitFor, '#task-drawer .dispatch-chooser', 'review-interrupted-model', {
+      excludeModel: sourceModel.split('@')[0],
+      press: (surface, wait, selector, name) => pressReachable(surface, wait, requireJourney, selector, name),
+    })).replace(/^模型 /u, '').replace(/ ▾$/u, '');
+    requireJourney(chosenReviewModel.split('@')[0] !== sourceModel.split('@')[0], 'review-interrupted-changed-model');
     await pressReachable(renderer, waitFor, requireJourney, '#task-drawer [data-task-drawer-control="launch"]', 'review-interrupted-start');
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanKind==='review-run' && drawer.dataset.taskPlanStart==='started' && !!drawer.dataset.taskPlanRef && drawer.dataset.taskPlanRef!==${JSON.stringify(secondReviewRef)}; })()`, 'review-interrupted-started', 60_000);
     const thirdReviewRef = await renderer.evaluate(`document.querySelector('#task-drawer').dataset.taskPlanRef`);
-    const endedSource = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(secondReviewRef)}})`);
+    const endedSource = await renderer.evaluate(inspectReviewSource);
     requireJourney(endedSource?.runControl === null && endedSource.relaunch === null, 'review-interrupted-source-ended', { state: endedSource?.state ?? null });
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'review-interrupted-model-tasks');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'review-interrupted-model-tasks');
     await waitFor(renderer, `Array.from(document.querySelectorAll('.task-overview-card')).some(card=>card.dataset.taskItem?.includes(${JSON.stringify(thirdReviewRef)})&&card.querySelector('.task-overview-model')?.textContent===${JSON.stringify(chosenReviewModel)})`, 'review-interrupted-model-frozen', 60_000);
 
     at('zero-loopback-requests');

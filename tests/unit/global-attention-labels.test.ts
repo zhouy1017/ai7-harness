@@ -321,7 +321,7 @@ describe('each item', () => {
       'open-network-proxy': '去设置 › 模型服务 › 网络代理',
       // 结果待确认's first step (Issue #51, S16c): which ranges are unconfirmed, never a repeat-shaped action.
       'view-unconfirmed': '查看未确认的部分',
-      reprepare: '重新开始…',
+      reprepare: '另做一份计划',
       redo: '重新开始…',
       // A prepared plan nobody started (Issue #423, S77a): the drawer's own entry to it.
       'view-plan': '查看计划并开始',

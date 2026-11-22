@@ -1,6 +1,6 @@
 import { styleInput } from './controls.js';
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation, type RuntimeExecutionConfig, type TaskExecutionLaunchResult } from '../../shared/runtime-execution-config.js';
-import type { ServiceOperationMap, TaskLaunchPreviewInput, TaskPlanKind, RendererApi } from '../../shared/protocol.js';
+import type { EvaluationReferencesProjection, ServiceOperationMap, TaskLaunchPreviewInput, TaskPlanKind, RendererApi } from '../../shared/protocol.js';
 import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
 import type { PreferencesRendererApi } from '../../shared/preferences.js';
 import { createDispatchChooser } from './dispatch-chooser.js';
@@ -41,6 +41,7 @@ export type LaunchBarApi = Pick<
 
 export interface MountLaunchBarOptions {
   readonly api: LaunchBarApi;
+  readonly readEvaluationReferences?: () => Promise<EvaluationReferencesProjection>;
   readonly request: TaskLaunchRequest;
   /** A failure's words (the drawer's `errorMessage`). */
   readonly errorMessage: (error: unknown, fallback: string) => string;
@@ -248,7 +249,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   const timingLabel = el('label', undefined, '开始时间'); timingLabel.append(timing, el('small', undefined, '只安排这一次任务的开始时间。')); runOptions.append(timingLabel);
 
   const references = el('div', 'task-launch-references');
-  const readReferences = request.operation !== 'launchInitialEvaluation' && request.operation !== 'launchReadersReport' ? Promise.resolve() : api.inspectEvaluation({ recordId: null }).then(page => {
+  const readReferences = request.operation !== 'launchInitialEvaluation' && request.operation !== 'launchReadersReport' ? Promise.resolve() : (options.readEvaluationReferences ? options.readEvaluationReferences() : api.inspectEvaluation({ recordId: null })).then(page => {
     if (stopped || page.bookId !== request.bookId) return;
     const selected = new Set('materialIds' in request.input ? request.input.materialIds ?? [] : []);
     const materials = el('div'); references.append(materials);
