@@ -163,3 +163,15 @@ it('explains the Word revision outcomes and the unsupported-file next step', () 
   expect(unsupportedWordImportText(3)).toBe('此文件含暂不支持的 Word 修订，不能作为首份稿件导入；定位到 3 处。请在 Word 中接受或拒绝全部修订后重新保存，再导入；也可以将此文件保留为来源材料。');
   expect(WORD_IMPORT_REASONS).toBe('查看原因');
 });
+
+it('displays current export wording while preserving the frozen v2 report (#1681)', () => {
+  const detail = roundTripCard(SAMPLE1_V2)!.detail;
+  expect(detail.startsWith('DOCX 导出将在后续提供。届时')).toBe(true);
+  expect(fidelityDetailText(detail)).toBe(detail.replace('DOCX 导出将在后续提供。届时', '导出 DOCX 时'));
+  expect(fidelityDetailText(detail)).not.toMatch(/后续提供|届时/);
+});
+it('summarizes one and two reduced-fidelity classes (#1681)', () => {
+  expect(fidelitySummaryLine(WITH_FIELD)).toBe('1 类内容无法完整保留：域（目录等） 2 项；其余完整保留。');
+  const two = WITH_FIELD.map((row) => row.key === 'text-boxes' ? { ...row, status: 'unsupported' as const, count: 3 } : row);
+  expect(fidelitySummaryLine(two)).toBe('2 类内容无法完整保留：文本框 3 项、域（目录等） 2 项；其余完整保留。');
+});

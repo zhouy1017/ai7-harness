@@ -1,5 +1,6 @@
 import { rendererApi, navigation as shellNavigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { focusImportStep, importSteps } from './components/import-steps.js';
+import { IMPORT_RELATIONSHIP_LABELS, importFileLabel } from './import-review-labels.js';
 import { windowStep } from './components/controls.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
@@ -25,7 +26,6 @@ import {
   WORD_IMPORT_MODE_NAMES,
   fidelityDetailText,
   fidelityReviewHeading,
-  fidelitySurfaceDetail,
   commitNote,
 } from './import-fidelity-labels.js';
 import type { ShellPlace } from './shell.js';
@@ -207,44 +207,29 @@ export function createImportReview(options: ImportReviewOptions) {
     );
     if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
     if (staged.identityFindings.length > 0) content.append(identityFindingDisclosure(staged.identityFindings));
-    const choices = element('fieldset');
-    choices.setAttribute('role', 'radiogroup');
-    choices.setAttribute('aria-label', '本地文件导入目标');
+    const choices = element('div', 'import-book-choice');
     choices.dataset['importTargetChoices'] = 'remembered-default';
-    choices.append(element('legend', undefined, '图书目标'));
-    for (const targetChoice of staged.targetChoices) {
-      const choice = element('label', 'choice');
-      const radio = element('input');
-      radio.type = 'radio';
-      radio.name = 'import-target';
-      radio.value = targetChoice.id;
-      radio.dataset['importTargetChoice'] = targetChoice.kind;
-      if (targetChoice.kind === 'existing-book') radio.dataset['bookId'] = targetChoice.bookId;
-      // The Book's identity is one disclosure away, beside the choice and outside its label, so opening it chooses nothing.
-      const words = targetChoice.kind === 'existing-book' ? bookChoiceWords(targetChoice.label, targetChoice.bookId) : targetChoice.label;
-      radio.setAttribute('aria-label', words);
-      radio.checked = selectedChoiceId === targetChoice.id;
-      const copy = element('span');
-      copy.append(element('strong', undefined, words));
-      if (targetChoice.kind === 'new-book') {
-        copy.append(element('small', undefined, '用文件名作为书名。'));
-      } else {
-        copy.append(element(
-          'small',
-          undefined,
-          `${targetChoice.internalNumber ? `内部编号 ${targetChoice.internalNumber} · ` : ''}${
-          targetChoice.manuscriptState === 'empty' ? '尚无稿件' : '已有主稿件；仍可导入来源材料'
-        }`,
-        ));
-      }
-      choice.append(radio, copy);
-      choices.append(choice, ...(targetChoice.kind === 'existing-book' ? [identityDisclosure('图书 ID', targetChoice.bookId)] : []));
-      radio.addEventListener('change', () =>
-        renderTargetChoice(staged, targetChoice.id, recoveryNotice, recoveryReturn));
+    const bookLabel = element('label', undefined, '图书');
+    bookLabel.htmlFor = 'import-book';
+    const bookSelect = element('select');
+    bookSelect.id = 'import-book';
+    bookSelect.name = 'import-target';
+    bookSelect.setAttribute('aria-label', '图书');
+    for (const target of [...staged.targetChoices].sort((a, b) => Number(b.kind === 'new-book') - Number(a.kind === 'new-book'))) {
+      const option = element('option', undefined, target.kind === 'new-book' ? '新建图书' :
+        `${bookChoiceWords(target.label, target.bookId)}${target.internalNumber ? ` · 内部编号 ${target.internalNumber}` : ''}`);
+      option.value = target.id;
+      option.selected = target.id === selectedChoiceId;
+      option.dataset['importTargetChoice'] = target.kind;
+      if (target.kind === 'existing-book') option.dataset['bookId'] = target.bookId;
+      bookSelect.append(option);
     }
+    bookSelect.addEventListener('change', () => renderTargetChoice(staged, bookSelect.value, recoveryNotice, recoveryReturn));
+    choices.append(bookLabel, bookSelect);
+    if (technicalLayerVisible && defaultTarget?.kind === 'existing-book') choices.append(identityDisclosure('图书 ID', defaultTarget.bookId));
     content.append(choices);
     if (staged.nextBookCursor) {
-      const moreTargets = button('加载更多图书目标', 'secondary', async () => {
+      const moreTargets = button('加载更多图书', 'secondary', async () => {
         moreTargets.disabled = true;
         setStatus('正在读取下一页图书目标…', 'busy');
         try {
@@ -255,7 +240,7 @@ export function createImportReview(options: ImportReviewOptions) {
             kind: 'existing-book' as const,
             id: `existing-book:${book.bookId}`,
             bookId: book.bookId,
-            label: `${book.title} · ${book.internalNumber === null ? '' : `内部编号 ${book.internalNumber} · `}图书 ID ${book.bookId}`,
+            label: book.title,
             internalNumber: book.internalNumber,
             manuscriptState: book.manuscriptState,
             reimportLineageSourceVersionIds: book.reimportLineageSourceVersionIds,
@@ -278,7 +263,7 @@ export function createImportReview(options: ImportReviewOptions) {
       });
       const moreTargetActions = element('div', 'button-row');
       moreTargetActions.append(moreTargets);
-      content.append(moreTargetActions);
+      choices.append(moreTargetActions);
     }
     const selectedChoice = selectedChoiceId === null
       ? undefined
@@ -305,7 +290,12 @@ export function createImportReview(options: ImportReviewOptions) {
         : selectedChoice.kind === 'existing-book' && selectedChoice.manuscriptState === 'populated'
           ? ['source-only', 'reimport']
           : ['first-manuscript', 'source-only'];
-      for (const relationshipKind of allowedRelationships) {
+      if (allowedRelationships.length === 1) {
+        const sentence = element('p', undefined, '这个文件只能存为来源材料。');
+        sentence.dataset['importRelationship'] = 'source-only';
+        relationship.append(sentence);
+      }
+      for (const relationshipKind of allowedRelationships.length === 1 ? [] : allowedRelationships) {
         const relationshipChoice = element('label', 'choice');
         const radio = element('input');
         radio.type = 'radio';
@@ -315,21 +305,21 @@ export function createImportReview(options: ImportReviewOptions) {
         radio.checked = relationshipSelection === relationshipKind;
         const copy = element('span');
         if (relationshipKind === 'first-manuscript') {
-          radio.setAttribute('aria-label', '作为首份稿件导入');
+          radio.setAttribute('aria-label', IMPORT_RELATIONSHIP_LABELS['first-manuscript']);
           copy.append(
             element('strong', undefined, '作为首份稿件导入'),
             element('small', undefined, '创建主稿件。'),
           );
         } else if (relationshipKind === 'source-only') {
-          radio.setAttribute('aria-label', '作为来源材料导入');
+          radio.setAttribute('aria-label', IMPORT_RELATIONSHIP_LABELS['source-only']);
           copy.append(
-            element('strong', undefined, '作为来源材料导入'),
+            element('strong', undefined, IMPORT_RELATIONSHIP_LABELS['source-only']),
             element('small', undefined, '保留为来源材料，不改变稿件。'),
           );
         } else {
-          radio.setAttribute('aria-label', '重新导入主稿件');
+          radio.setAttribute('aria-label', IMPORT_RELATIONSHIP_LABELS.reimport);
           copy.append(
-            element('strong', undefined, '重新导入主稿件'),
+            element('strong', undefined, IMPORT_RELATIONSHIP_LABELS.reimport),
             element('small', undefined, '比较新旧稿件，由你决定保留哪些改动。'),
           );
         }
@@ -455,7 +445,13 @@ export function createImportReview(options: ImportReviewOptions) {
         .map((finding) => finding.sourceVersionId))];
       // The same Book's exact source is reused to begin with (Issue #1410 item 32B); the editor may choose another.
       if (sameBookMatches.length > 0 && reuseSourceVersionId === undefined) reuseSourceVersionId = sameBookMatches[0]!;
-      if (sameBookMatches.length > 0) {
+      if (sameBookMatches.length === 1) {
+        const sentence = element('p', undefined, '这本书已导入过同一个文件，将沿用那一份。');
+        sentence.dataset['sourceVersionReuseChoices'] = 'single-answer';
+        sentence.dataset['reuseSourceVersionId'] = sameBookMatches[0]!;
+        content.append(sentence);
+      }
+      if (sameBookMatches.length > 1) {
         const reuseChoices = element('fieldset');
         reuseChoices.setAttribute('role', 'radiogroup');
         reuseChoices.setAttribute('aria-label', technicalWords('同图书精确来源版本复用', '使用已导入的文件'));
@@ -469,9 +465,9 @@ export function createImportReview(options: ImportReviewOptions) {
           radio.value = sourceVersionId;
           radio.dataset['reuseSourceVersionId'] = sourceVersionId;
           radio.checked = reuseSourceVersionId === sourceVersionId;
-          radio.setAttribute('aria-label', technicalWords('复用这个同图书精确来源版本', '使用已导入的文件'));
+          radio.setAttribute('aria-label', importFileLabel(staged.identityFindings.find((finding) => finding.sourceVersionId === sourceVersionId)!));
           const copy = element('span');
-          copy.append(element('strong', undefined, technicalWords('复用这个同图书精确来源版本', '使用已导入的文件')));
+          copy.append(element('strong', undefined, importFileLabel(staged.identityFindings.find((finding) => finding.sourceVersionId === sourceVersionId)!)));
           reuseChoice.append(radio, copy);
           reuseChoices.append(reuseChoice, identityDisclosure('来源版本', sourceVersionId));
           radio.addEventListener('change', () =>
@@ -546,10 +542,15 @@ export function createImportReview(options: ImportReviewOptions) {
             reuseSourceVersionId, value));
         if (reimportLineageChoice === undefined) revealedControl = radio;
       };
-      addLineageChoice('unconfirmed', technicalWords('来源关系未确认', '不确定是哪个原文件'), technicalWords('继续保守的两方比较；这不会被解释为来源确认或阻断导入。', '只对比这次导入与当前稿件。'));
-      verifiedLineageSources.forEach(({ sourceVersionId }, index) => addLineageChoice(sourceVersionId,
-        verifiedLineageSources.length === 1 ? technicalWords('确认这个来源版本', '确认此文件') : technicalWords(`确认来源版本（第 ${index + 1} 个）`, `确认第 ${index + 1} 个文件`),
-        technicalWords('使用该图书拥有且已关联主稿件结果修订版的精确来源，执行三方比较。', '按这份原文件对比变化，结果更准确。'), sourceVersionId));
+      if (verifiedLineageSources.length === 0) {
+        lineageChoices.removeAttribute('role');
+        lineageChoices.replaceChildren(element('p', undefined, '没有找到这本书的原文件，将对比这次导入与当前稿件。'));
+        lineageChoices.dataset['reimportLineage'] = 'unconfirmed';
+      } else {
+        addLineageChoice('unconfirmed', '不确定是哪个原文件', '只对比这次导入与当前稿件。');
+        verifiedLineageSources.forEach((item) => addLineageChoice(item.sourceVersionId, importFileLabel(item),
+          '按这份原文件对比变化，结果更准确。', item.sourceVersionId));
+      }
       const loadLineagePage = async (after: string | null, control: HTMLButtonElement): Promise<void> => {
         control.disabled = true;
         setStatus(technicalWords('正在读取来源关系版本页…', '正在读取更多文件…'), 'busy');
@@ -603,30 +604,12 @@ export function createImportReview(options: ImportReviewOptions) {
       sourceChoices.setAttribute('aria-label', technicalWords('稿件重新导入来源版本结果', '选择来源文件'));
       sourceChoices.dataset['reimportSourceVersionChoices'] = 'unselected-by-default';
       sourceChoices.append(element('legend', undefined, technicalWords('来源版本结果（必须另行明确选择）', '选择来源文件')));
-      const sourceChoice = element('label', 'choice');
-      const sourceRadio = element('input');
-      sourceRadio.type = 'radio';
-      sourceRadio.name = 'reimport-source-version';
       const exactSourceVersionId = exactSameBookSources.length === 1 ? exactSameBookSources[0]! : null;
-      if (exactSourceVersionId) {
-        sourceRadio.value = exactSourceVersionId;
-        sourceRadio.dataset['reuseSourceVersionId'] = exactSourceVersionId;
-        sourceRadio.checked = reuseSourceVersionId === exactSourceVersionId;
-        sourceRadio.setAttribute('aria-label', technicalWords(`复用来源版本 ${exactSourceVersionId}`, '使用已导入的文件'));
-      } else {
-        sourceRadio.value = 'create-new';
-        sourceRadio.dataset['createSourceVersion'] = 'true';
-        sourceRadio.checked = reuseSourceVersionId === null;
-        sourceRadio.setAttribute('aria-label', technicalWords('创建新的图书来源版本', '导入新文件'));
-      }
-      const sourceCopy = element('span');
-      sourceCopy.append(element('strong', undefined, exactSourceVersionId ? technicalWords('复用这个同图书精确来源版本', '使用已导入的文件') : technicalWords('创建新的图书来源版本', '导入新文件')));
-      sourceChoice.append(sourceRadio, sourceCopy);
-      sourceChoices.append(sourceChoice, exactSourceVersionId ? identityDisclosure('来源版本', exactSourceVersionId) : identityDisclosure('来源 SHA-256', staged.source.sourceSha256));
-      sourceRadio.addEventListener('change', () =>
-        renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, 'reimport',
-          exactSourceVersionId, reimportLineageChoice));
-      if (reuseSourceVersionId === undefined && reimportLineageChoice !== undefined) revealedControl = sourceRadio;
+      sourceChoices.removeAttribute('role');
+      sourceChoices.replaceChildren(element('p', undefined, exactSourceVersionId
+        ? '这个文件之前导入过，将沿用那一份。' : '这个文件将作为新的原文件保存。'));
+      if (exactSourceVersionId) sourceChoices.dataset['reuseSourceVersionId'] = exactSourceVersionId;
+      else sourceChoices.dataset['createSourceVersion'] = 'true';
       content.append(sourceChoices);
 
       const actions = element('div', 'button-row');
@@ -714,6 +697,11 @@ export function createImportReview(options: ImportReviewOptions) {
         if (target) focusImportStep(target);
       },
     }));
+    const actionBar = element('section', 'commit-bar import-page-actions');
+    for (const row of content.querySelectorAll<HTMLElement>('.button-row')) {
+      if (row.contains(cancelImport)) actionBar.append(row);
+    }
+    content.append(actionBar);
     content.addEventListener('focusin', (event) => {
       const target = event.target as HTMLElement;
       const current = target.closest('.fidelity-list, .import-structure') ? '3' : target.closest('[data-import-target-choices], [data-import-title-for-relationship]') ? '2' : null;
@@ -738,9 +726,9 @@ export function createImportReview(options: ImportReviewOptions) {
           relationshipSelection === 'first-manuscript'
             ? `已选择“作为首份稿件导入”；可以复核目标图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」。`
             : relationshipSelection === 'source-only'
-              ? `已选择“作为来源材料导入”；可以复核目标图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」。`
+              ? `已选择“存为来源材料”；可以复核目标图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」。`
               : reimportLineageChoice === undefined
-                ? '已选择“重新导入主稿件”；请明确来源关系。'
+                ? '已选择“更新稿件”；请明确来源关系。'
                 : reuseSourceVersionId === undefined
                   ? technicalWords('来源关系已选择；请另行明确来源版本结果。', '请选择来源文件。')
                   : `重新导入决定已明确；可以准备目标图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」的逐块比较。`,
@@ -1027,12 +1015,7 @@ export function createImportReview(options: ImportReviewOptions) {
 
     const fidelity = element('section', 'review-section');
     fidelity.append(element('h3', undefined, reimportFidelityHeading(review.fidelity)));
-    const fidelityList = element('ul', 'degradation-list');
-    for (const category of review.fidelity) {
-      fidelityList.append(element('li', undefined,
-        `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${fidelitySurfaceDetail(category)}`));
-    }
-    fidelity.append(fidelityList);
+    fidelity.append(...renderFidelityReview(review.fidelity, review.source.conversion, { kind: 'none' }).elements);
     if (review.degradationDecision.state === 'required-unselected') {
       // Accepting the listed degradations and committing are one step (Issue #1410 item 32C).
       fidelity.append(element('p', 'attention-note', '提交本次重新导入即接受上面列出的全部降级。'));

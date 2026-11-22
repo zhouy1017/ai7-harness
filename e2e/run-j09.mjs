@@ -1,3 +1,4 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
 import { attentionNoticeClearsMenu, attentionNoticeHolds, closeTaskDrawer, pressQuietResult, READ_CARET } from './attention-notice.mjs';
@@ -448,7 +449,7 @@ async function importSample1(renderer, title, distinct, name) {
   await click(renderer, '导入稿件', `${name}-start`);
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
   const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await chooseImportTarget(renderer, waitFor, 'new-book', `${name}-target-explicit`);
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);

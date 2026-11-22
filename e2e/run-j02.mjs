@@ -1,3 +1,4 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { commentsLayouts, commentsOrdinaryForEditor } from './comments-pane.mjs';
 import { createWriteStream, existsSync, statSync } from 'node:fs';
 import { lstat, mkdtemp, opendir, realpath, rm, stat, writeFile } from 'node:fs/promises';
@@ -917,7 +918,7 @@ async function importAndOpen(renderer, dataRoot) {
   await clickButton(renderer, '导入稿件', 'stage-click');
   await waitForStagedTarget(renderer, dataRoot);
   await assertRenderer(renderer, `document.querySelector('.import-file-card')?.textContent.includes('${BLOCK_COUNT} 个段落')`, 'exact-block-count');
-  await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`, 'target-select');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'target-select');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio) return false; radio.click(); return true; })()`, 'relationship-select');
   at('import-review');
   await waitFor(renderer, `document.querySelector('#book-title')`, 'title');

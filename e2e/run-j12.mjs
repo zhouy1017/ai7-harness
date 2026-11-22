@@ -1,3 +1,4 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -623,7 +624,7 @@ async function createEmptyBook(renderer, title) {
 async function importBook(renderer, title, bundled = false, distinct = false) {
   await click(renderer, bundled ? '导入示例书' : '导入稿件', 'import-open');
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)})??document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-new-book');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'import-new-book');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship');
   await fill(renderer, '#book-title', title, 'import-title');
   await click(renderer, '查看导入详情', 'import-review');
@@ -1929,7 +1930,7 @@ async function main() {
     const sourceRecordsBefore = await registeredBookA.evaluate(`(async()=>{ const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}); return overview.records.filter((record)=>record.kind==='source-import-record').length; })()`);
     await click(primary, '导入稿件', 'preflight-stage-source');
     await waitFor(primary, `document.querySelector('[data-import-target-choices]')`, 'preflight-source-target');
-    await assertRenderer(primary, `(() => { const target=document.querySelector('input[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookA)}]'); if(!(target instanceof HTMLInputElement))return false; target.click(); return target.checked; })()`, 'preflight-select-a');
+  await chooseImportTarget(primary, waitFor, `existing-book:${bookA}`, 'preflight-select-a');
     await assertRenderer(primary, `(() => { const source=document.querySelector('input[data-import-relationship="source-only"]'); if(!(source instanceof HTMLInputElement))return false; source.click(); return source.checked; })()`, 'preflight-source-only');
     await waitFor(primary, `document.querySelector('[data-source-version-reuse-choices]')`, 'preflight-reuse-required');
     // Issue #1410 item 32B: the same-Book match is chosen to begin with.

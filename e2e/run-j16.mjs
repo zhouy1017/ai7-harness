@@ -1,3 +1,4 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { rightColumnGeometry } from './comments-pane.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
@@ -290,7 +291,7 @@ async function importSample1(renderer, title, distinct, name) {
   await click(renderer, '导入稿件', `${name}-start`);
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
   const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await chooseImportTarget(renderer, waitFor, 'new-book', `${name}-target-explicit`);
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
@@ -1893,13 +1894,13 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'selection-task-gone-ready');
     await click(renderer, '导入稿件', 'selection-task-gone-import');
     await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'selection-task-gone-target');
-    await assertRenderer(renderer, `(() => { const target = document.querySelector('[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookId)}]'); if (!target) return false; target.click(); return true; })()`, 'selection-task-gone-target-book');
+  await chooseImportTarget(renderer, waitFor, `existing-book:${bookId}`, 'selection-task-gone-target-book');
     await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'selection-task-gone-relationship');
     await assertRenderer(renderer, `(() => { const reimport = document.querySelector('[data-import-relationship="reimport"]'); if (!reimport) return false; reimport.click(); return true; })()`, 'selection-task-gone-reimport');
     await waitFor(renderer, `document.querySelector('[data-reimport-lineage="unconfirmed"]')`, 'selection-task-gone-lineage-choices');
     await assertRenderer(renderer, `(() => { const lineage = document.querySelector('[data-reimport-lineage="unconfirmed"]'); if (!lineage) return false; lineage.click(); return true; })()`, 'selection-task-gone-lineage');
     await waitFor(renderer, `document.querySelector('[data-create-source-version="true"]')`, 'selection-task-gone-source-choice');
-    await assertRenderer(renderer, `(() => { const source = document.querySelector('[data-create-source-version="true"]'); if (!source) return false; source.click(); return true; })()`, 'selection-task-gone-source');
+    await assertRenderer(renderer, `(() => { const source = document.querySelector('[data-create-source-version="true"]'); return source?.textContent.includes('这个文件') && !source.querySelector('input[type=radio]'); })()`, 'selection-task-gone-source');
     await waitFor(renderer, `document.querySelector('[data-prepare-manuscript-reimport=${JSON.stringify(bookId)}]')`, 'selection-task-gone-prepare-ready');
     await click(renderer, '准备稿件重新导入比较', 'selection-task-gone-prepare');
     await waitFor(renderer, `document.querySelector('[data-screen="review"] [data-import-review-kind="reimport"]') || document.querySelector('#persistence-status')?.dataset.tone === 'error'`, 'selection-task-gone-review', 180_000);

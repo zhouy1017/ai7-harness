@@ -1,3 +1,4 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { setDeveloperMode } from './ordinary-pages.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
@@ -698,7 +699,7 @@ async function importAndOpen(renderer, title, distinct = false, start = 'landing
     await click(renderer, '导入稿件', 'import-start');
   }
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'import-target-select');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
   await fill(renderer, '#book-title', title, 'import-title');
   await click(renderer, '查看导入详情', 'import-review');
@@ -721,7 +722,7 @@ async function reviewHistoricalPublication(renderer, sourceDigest, sourceBytes) 
   await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'historical-publication-landing');
   await click(renderer, '导入稿件', 'historical-publication-stage');
   await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'historical-publication-target');
-  await clickImportControl(renderer, '[data-import-target-choice="new-book"]', true, 'historical-publication-new-book');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'historical-publication-new-book');
   await waitFor(renderer, `document.querySelector('[data-import-relationship="source-only"]')`, 'historical-publication-relationship');
   await clickImportControl(renderer, '[data-import-relationship="source-only"]', true, 'historical-publication-source-only');
   await waitFor(renderer, `document.querySelector('#book-title')`, 'historical-publication-title');
@@ -812,7 +813,7 @@ async function importDraftAsSource(renderer, bookId) {
   await assertRenderer(renderer, PAGE_HELPERS, 'draft-page-helpers');
   await click(renderer, '导入稿件', 'draft-import');
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'draft-target');
-  await assertRenderer(renderer, `(() => { const target = document.querySelector('[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookId)}]'); if (!(target instanceof HTMLInputElement)) return false; target.click(); return target.checked; })()`, 'draft-target-book');
+  await chooseImportTarget(renderer, waitFor, `existing-book:${bookId}`, 'draft-target-book');
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices] [data-import-relationship="source-only"]')`, 'draft-relationship');
   await assertRenderer(renderer, `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); if (!(source instanceof HTMLInputElement)) return false; source.click(); return source.checked; })()`, 'draft-source-only');
   await waitFor(renderer, `document.querySelector('[data-prepare-source-import-review=${JSON.stringify(bookId)}]')`, 'draft-review-action');
@@ -1127,7 +1128,7 @@ async function main() {
       await waitFor(native, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
       await click(native, '导入稿件', `${name}-picker`);
       await waitFor(native, `document.querySelector('[data-import-target-choice="new-book"]')`, `${name}-target`);
-      await clickImportControl(native, '[data-import-target-choice="new-book"]', true, `${name}-new-book`);
+      await chooseImportTarget(native, waitFor, 'new-book', `${name}-new-book`);
       await waitFor(native, `document.querySelector('[data-import-relationship="first-manuscript"]')`, `${name}-relationship`);
       await clickImportControl(native, '[data-import-relationship="first-manuscript"]', true, `${name}-first-manuscript`);
       await waitFor(native, `document.querySelector('[data-word-import-controls="ready"]')`, `${name}-controls-before-prepare`);

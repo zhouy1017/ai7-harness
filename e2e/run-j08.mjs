@@ -1,3 +1,4 @@
+import { chooseImportTarget } from './import-page.mjs';
 import { commentsRangeInside, commentsNativeClick, commentsPaneForms, commentsBookMemory } from './comments-pane.mjs';
 import { existsSync } from 'node:fs';
 import { appendFile, lstat, mkdir, mkdtemp, open as openFile, readdir, realpath, rename, rm, stat, truncate, writeFile } from 'node:fs/promises';
@@ -268,7 +269,7 @@ async function importBook(renderer, title, token, openEditor = false) {
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', `${token}-import`);
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${token}-target`);
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, `${token}-target-select`);
+  await chooseImportTarget(renderer, waitFor, 'new-book', `${token}-target-select`);
   await selectFirstManuscriptRelationship(renderer, `${token}-relationship-select`);
   await fill(renderer, '#book-title', title, `${token}-title`);
   await click(renderer, '查看导入详情', `${token}-review`);
@@ -481,7 +482,7 @@ async function main() {
     await click(renderer, '继续导入', 'continue-lower-import');
     await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'lower-import-target');
     await assertRenderer(renderer, `document.querySelector('[data-recovery-return]')`, 'return-route-target');
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'lower-import-target-select');
+  await chooseImportTarget(renderer, waitFor, 'new-book', 'lower-import-target-select');
     await selectFirstManuscriptRelationship(renderer, 'lower-import-relationship-select');
     await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'lower-import-title');
     await assertRenderer(renderer, `document.querySelector('[data-recovery-return]')`, 'return-route-title');

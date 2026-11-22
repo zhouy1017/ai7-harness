@@ -513,6 +513,7 @@ const J14_DARK_PASS_LOCATIONS = Object.freeze(['j14-dark-pass', 'j14-dark-pass-t
 
 export const JOURNEY_LOCATIONS = Object.freeze({
   'J-01': Object.freeze([
+    'import-page-primary-visible', 'fidelity-one-sentence', 'single-answer-sentences',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'cli',
