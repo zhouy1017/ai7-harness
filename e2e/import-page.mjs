@@ -10,7 +10,13 @@ export async function chooseImportTarget(renderer, waitFor, value, name) {
   const custom=await renderer.evaluate(`document.querySelector('#import-book + .ui-select-trigger')!==null`);
   const selector=custom?'#import-book + .ui-select-trigger':'#import-book';
   await reachImportControl(renderer, waitFor, selector, `${name}-visible`);
-  await pointerClick(renderer, waitFor, selector, `${name}-open`);
+  try {
+    await pointerClick(renderer, waitFor, selector, `${name}-open`);
+  } catch (error) {
+    const state = await renderer.evaluate(`(() => { const node=document.querySelector(${JSON.stringify(selector)}),r=node?.getBoundingClientRect();return {visible:document.visibilityState==='visible',focused:document.hasFocus(),exists:!!node,rect:r?[r.left,r.top,r.width,r.height]:null,viewport:[innerWidth,innerHeight]};})()`).catch(()=>({unavailable:true}));
+    console.error('IMPORT_TARGET_FAILURE/'+JSON.stringify(state));
+    throw error;
+  }
   if (custom) {
     const option=`#import-book ~ .ui-select-popover .ui-select-option[data-index="${index}"]`;
     for (let attempt=0;attempt<30 && !(await renderer.evaluate(inside(option)));attempt++) {

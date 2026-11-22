@@ -1005,7 +1005,7 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
     );
     await assertRenderer(
       renderer,
-      `document.querySelector(${JSON.stringify(lineageSelector)})?.checked && document.querySelector(${JSON.stringify(sourceSelector)})?.checked`,
+      `(() => { const lineage=document.querySelector(${JSON.stringify(lineageSelector)}); const source=document.querySelector(${JSON.stringify(sourceSelector)}); return (lineage instanceof HTMLInputElement ? lineage.checked : lineage?.dataset.reimportLineage==='unconfirmed') && source && !source.querySelector('input') && (${JSON.stringify(expectedReuseSourceVersionId)} === null ? source.dataset.createSourceVersion==='true' : source.dataset.reuseSourceVersionId===${JSON.stringify(expectedReuseSourceVersionId)}); })()`,
       `${scenario}-prepare-cancel-preserves-selection`,
     );
     await clickExactButton(renderer, '准备稿件重新导入比较', `${scenario}-prepare-retry`);
