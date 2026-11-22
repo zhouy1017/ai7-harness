@@ -426,11 +426,13 @@ describe('the Manuscript screen lifecycle', () => {
   it('saves the words just typed before Ctrl+Z reads the history, so they are the step it takes back; a step set aside answers in the error tone (#1654)', async () => {
     const calls: string[] = [];
     let flushed = false;
+    let readable: () => void = () => undefined;
+    const read = new Promise<void>((resolve) => { readable = resolve; });
     const typing = { stepId: 'step-1', kind: 'typing', label: '编辑文字', changeCount: 1, paragraph: 3, batch: null };
     const answers = [{ blocked: false, completionLabel: '已撤销：编辑文字（第 3 段）' }, { blocked: true, completionLabel: '第 3 段在「编辑文字」之后又改过，这一步不能撤销。再按 Ctrl+Z 撤销更早的一步。' }];
     const history = new Proxy({
       platform: 'win32', recordManuscriptEntryPosition: async () => undefined,
-      inspectEditorHistory: async () => { calls.push('inspect'); return { branchId: 'branch-main', undo: flushed ? typing : null, redo: null }; },
+      inspectEditorHistory: async () => { calls.push('inspect'); await read; return { branchId: 'branch-main', undo: flushed ? typing : null, redo: null }; },
       undoManuscript: async () => {
         calls.push('undo');
         return { action: 'undo', branchId: 'branch-main', revisionId: 'rev-2', revisionLabel: 'r2', journalSequence: 6, workingDigest: 'c'.repeat(64), commandGroupId: null,
@@ -450,6 +452,11 @@ describe('the Manuscript screen lifecycle', () => {
     const undoButton = app.screen.querySelector<HTMLButtonElement>('.editor-history-undo')!;
     const settle = async (): Promise<void> => { for (let index = 0; index < 50; index += 1) await Promise.resolve(); };
     undoButton.click();
+    await settle();
+    // From the press on the controls stand busy, while the edit is saved and the step is read too: no second press starts.
+    expect(calls).toEqual(['flush', 'inspect']);
+    expect(undoButton.disabled).toBe(true);
+    readable();
     await settle();
     expect(calls.slice(0, 3)).toEqual(['flush', 'inspect', 'undo']);
     expect(tones.at(-1)).toEqual(['已撤销：编辑文字（第 3 段）', 'success']);

@@ -2385,14 +2385,22 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
    * Ctrl+Z and redo take back or replay one editor step (Issue #1654), an accepted 修改建议 included. A large step says so while
    * it runs; the answer names the step and its paragraph, and the view goes there. A step whose words changed since is set
    * aside by the service, which says where and why, in the error tone; nothing to undo or redo is said plainly. Words typed
-   * just before are saved first, so they are the step Ctrl+Z takes back.
+   * just before are saved first, so they are the step Ctrl+Z takes back. The controls stand busy from the press on, the save
+   * and the read of the step included, so no second press or command starts in between.
    */
   async function runHistory(action: 'undo' | 'redo'): Promise<void> {
-    if (authoritativeMutationBusy() || !editor || !(await settleLocalEdit()) || !editor) return;
+    if (authoritativeMutationBusy() || !editor) return;
     const verb = action === 'undo' ? '撤销' : '重做';
-    const binding = editor.currentWindow();
-    const scope = { manuscriptId: binding.manuscriptId, branchId: binding.branchId };
-    const next = await Promise.resolve().then(() => api.inspectEditorHistory(scope)).catch(() => null);
+    publishAuthoritativeMutationStarting(true);
+    let next: Awaited<ReturnType<typeof api.inspectEditorHistory>> | null = null;
+    try {
+      if (!(await settleLocalEdit()) || !editor) return;
+      const binding = editor.currentWindow();
+      next = await Promise.resolve().then(() => api.inspectEditorHistory({ manuscriptId: binding.manuscriptId, branchId: binding.branchId })).catch(() => null);
+    } finally {
+      // runAuthoritativeMutation below marks them busy again in the same turn, before anything else can run.
+      publishAuthoritativeMutationStarting(false);
+    }
     const step = next === null ? undefined : action === 'undo' ? next.undo : next.redo;
     if (step === null) {
       setStatus(`没有可${verb}的修改。`, 'success');
