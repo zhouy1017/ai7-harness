@@ -1,4 +1,4 @@
-import { pointerClick } from './dispatch-chooser.mjs';
+import { capturePointerFailure, pointerClick } from './dispatch-chooser.mjs';
 import { popoverShownInside } from './launch-task-bar.mjs';
 
 function reviewControlGeometry(selector, containerSelector) {
@@ -14,20 +14,35 @@ function reviewControlGeometry(selector, containerSelector) {
   const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
   const ready = rect.width > 0 && rect.height > 0 && rect.left >= left - 0.5 && rect.right <= right + 0.5 &&
     rect.top >= top - 0.5 && rect.bottom <= bottom + 0.5 && node.contains(document.elementFromPoint(x, y));
-  return { ready, x: Math.min(right - 1, Math.max(left + 1, x)), y: (top + bottom) / 2, deltaY: y - (top + bottom) / 2 };
+  return { ready, x: Math.min(right - 1, Math.max(left + 1, x)), y, wheelY: (top + bottom) / 2 };
 }
 
 export async function pressReviewControl(renderer, waitFor, selector, name, container, { wheel = false, rest = false, reachable = `${name}-reachable` } = {}) {
   const geometry = `(${reviewControlGeometry.toString()})(${JSON.stringify(selector)},${JSON.stringify(container)})`;
   if (wheel) {
-    for (let attempt=0; attempt<8; attempt++) {
-      const point=await renderer.evaluate(geometry);
-      if (!point || point.ready || Math.abs(point.deltaY)<1) break;
-      await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:point.x,y:point.y,deltaX:0,deltaY:Math.round(point.deltaY)});
-      await renderer.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+    const deadline = Date.now() + 10_000;
+    const nextPaint = 'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))';
+    while (Date.now() < deadline) {
+      const point = await renderer.evaluate(geometry);
+      if (point?.ready) {
+        if (rest) await renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, button: 'none', buttons: 0 });
+        await renderer.evaluate(nextPaint);
+        const after = await renderer.evaluate(geometry);
+        if (after?.ready && after.x === point.x && after.y === point.y) break;
+      } else {
+        if (point && Math.abs(point.y - point.wheelY) >= 1) {
+          await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: point.x, y: point.wheelY, deltaX: 0, deltaY: Math.round(point.y - point.wheelY) });
+        }
+        await renderer.evaluate(nextPaint);
+      }
     }
   }
-  await waitFor(renderer, `${geometry}?.ready===true`, reachable);
+  try {
+    await waitFor(renderer, `${geometry}?.ready===true`, reachable);
+  } catch (error) {
+    if (error instanceof Error) Object.defineProperty(error, 'pointerFailure', { value: await capturePointerFailure(renderer, selector, { includeTargetAncestors: true }), configurable: true });
+    throw error;
+  }
   await pointerClick(renderer, waitFor, selector, name, {rest, scroll:false});
 }
 
