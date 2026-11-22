@@ -24,8 +24,12 @@ export async function draftClick(renderer, check, waitFor, selector, name, butto
   const point = `(() => {const node=document.querySelector(${JSON.stringify(selector)});if(!node)return null;
     let range=document.createRange();range.selectNodeContents(node);if(${button === 'right'}&&node.matches('[data-block-id]')&&getSelection()?.rangeCount&&!getSelection().isCollapsed)range=getSelection().getRangeAt(0);const rects=node.matches('[data-block-id]')?Array.from(range.getClientRects()):[node.getBoundingClientRect()];
     for(const r of rects){if(r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)continue;
-      let visible=true;for(let parent=node.parentElement;parent;parent=parent.parentElement){const style=getComputedStyle(parent),p=parent.getBoundingClientRect(),left=p.left+parent.clientLeft,top=p.top+parent.clientTop;
-        if((/auto|scroll|hidden|clip/.test(style.overflowX)&&(r.left<left||r.right>left+parent.clientWidth))||(/auto|scroll|hidden|clip/.test(style.overflowY)&&(r.top<top||r.bottom>top+parent.clientHeight))){visible=false;break;}}
+      let visible=true,escaped=!!node.parentElement&&getComputedStyle(node).position==='fixed';for(let parent=node.parentElement;parent;parent=parent.parentElement){const style=getComputedStyle(parent),p=parent.getBoundingClientRect(),left=p.left+parent.clientLeft,top=p.top+parent.clientTop;
+        // A fixed menu escapes intervening clips until an ancestor establishes its containing block.
+        const containsFixed=['transform','filter','perspective'].some(key=>style[key]&&style[key]!=='none')||/paint|layout|strict|content/.test(style.contain)||/transform|filter|perspective/.test(style.willChange);
+        if(escaped&&containsFixed)escaped=false;
+        if(!escaped&&((/auto|scroll|hidden|clip/.test(style.overflowX)&&(r.left<left||r.right>left+parent.clientWidth))||(/auto|scroll|hidden|clip/.test(style.overflowY)&&(r.top<top||r.bottom>top+parent.clientHeight)))){visible=false;break;}
+        if(style.position==='fixed')escaped=true;}
       const x=r.left+r.width/2,y=r.top+r.height/2;if(visible&&node.contains(document.elementFromPoint(x,y)))return {x,y};}return null;})()`;
   await waitFor(renderer, `new Promise(resolve=>requestAnimationFrame(()=>{const before=JSON.stringify(${point});requestAnimationFrame(()=>resolve(before!=='null'&&before===JSON.stringify(${point})));}))`, name+'-visible');
   const at = await renderer.evaluate(point); check(at!==null,name+'-hit');
@@ -76,9 +80,9 @@ export async function draftWheelToAnchor(renderer,check,waitFor,selector,name) {
   await draftGeometry(renderer,selector,async()=>{
     const facts=`(() => {const node=document.querySelector(${JSON.stringify(selector)}),scroll=document.querySelector('.editor-window');if(!node||!scroll)return null;
       const r=node.getBoundingClientRect(),p=scroll.getBoundingClientRect(),left=Math.max(0,p.left+scroll.clientLeft),right=Math.min(innerWidth,p.left+scroll.clientLeft+scroll.clientWidth),top=Math.max(0,p.top+scroll.clientTop),bottom=Math.min(innerHeight,p.top+scroll.clientTop+scroll.clientHeight),x=left+Math.min(16,(right-left)/2),y=(top+bottom)/2;
-      return {whole:r.width>0&&r.height>0&&r.left>=left&&r.right<=right&&r.top>=top&&r.bottom<=bottom,x,y,hit:right>left&&bottom>top&&scroll.contains(document.elementFromPoint(x,y)),scrollTop:scroll.scrollTop,delta:Math.max(-(bottom-top)*.6,Math.min((bottom-top)*.6,(r.top+r.bottom-top-bottom)/2)),rect:[r.left,r.top,r.width,r.height]};})()`;
+      return {idle:scroll.dataset.scrolling!=='true',whole:r.width>0&&r.height>0&&r.left>=left&&r.right<=right&&r.top>=top&&r.bottom<=bottom,x,y,hit:right>left&&bottom>top&&scroll.contains(document.elementFromPoint(x,y)),scrollTop:scroll.scrollTop,delta:Math.max(-(bottom-top)*.6,Math.min((bottom-top)*.6,(r.top+r.bottom-top-bottom)/2)),rect:[r.left,r.top,r.width,r.height]};})()`;
     for(let turn=0;turn<40;turn++) {
-      await waitFor(renderer,`new Promise(resolve=>requestAnimationFrame(()=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>resolve(before!=='null'&&before===JSON.stringify(${facts})));}))`,name+'-stable');
+      await waitFor(renderer,`new Promise(resolve=>requestAnimationFrame(()=>{const before=${facts};requestAnimationFrame(()=>resolve(before?.idle===true&&JSON.stringify(before)===JSON.stringify(${facts})));}))`,name+'-stable');
       const at=await renderer.evaluate(facts);
       if(at.whole)return;
       check(at.hit&&at.delta!==0,name+'-wheel-hit');

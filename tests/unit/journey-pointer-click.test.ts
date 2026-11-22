@@ -280,6 +280,20 @@ it.each(['auto','confirm','direct'].flatMap(original=>[false,true].map(blockRest
   if(original!=='direct')expect(chosen).toEqual(blockRestore?['menu','direct','menu']:['menu','direct','menu',original]);else expect(chosen).toEqual([]);
 });
 
+it.each(['viewport','transformed','ordinary'])('checks the actual clipping chain for a %s menu', async kind => {
+  const { draftClick }=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  const shell={parentElement:null,clientLeft:0,clientTop:0,clientWidth:500,clientHeight:600,getBoundingClientRect:()=>({left:80,top:60,right:580,bottom:660})};
+  const panel={parentElement:shell,clientLeft:1,clientTop:1,clientWidth:366,clientHeight:162,getBoundingClientRect:()=>({left:48,top:150,right:416,bottom:314})};
+  const button={parentElement:panel,matches:()=>false,contains:(node:unknown)=>node===button,getBoundingClientRect:()=>({left:54,top:257,right:410,bottom:307,width:356,height:50})};
+  const document={querySelector:()=>button,createRange:()=>({selectNodeContents(){}}),elementFromPoint:()=>button};
+  const style=(node:unknown)=>({position:node===panel&&kind!=='ordinary'?'fixed':'static',overflowX:node===shell?'hidden':'auto',overflowY:node===shell?'hidden':'auto',transform:node===shell&&kind==='transformed'?'matrix(1,0,0,1,0,0)':'none',filter:'none',perspective:'none',contain:'none',willChange:'auto'});
+  const renderer={evaluate:async(expression:string)=>expression.includes('const describe=')?null:Function('document','getComputedStyle','requestAnimationFrame','innerWidth','innerHeight','setTimeout',`return (${expression})`)(document,style,(callback:()=>void)=>queueMicrotask(callback),1164,781,(callback:()=>void)=>callback()),send:vi.fn()};
+  const wait=async(_renderer:unknown,expression:string,name:string)=>{if(!await renderer.evaluate(expression))throw Error(name);};
+  const result=draftClick(renderer,(ok:boolean,name:string)=>{if(!ok)throw Error(name);},wait,'button','fixed-menu');
+  if(kind==='viewport'){await expect(result).resolves.toBeUndefined();expect(renderer.send).toHaveBeenCalledTimes(3);}
+  else {await expect(result).rejects.toThrow('fixed-menu-visible');expect(renderer.send).not.toHaveBeenCalled();}
+});
+
 it.each([0,7])('selects with native Home and shift arrows, rejecting a clipped first line at grapheme %s', async home => {
   const { draftSelect }=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
   let anchor=15,head=15; const keys:Array<[string,number]>=[];
@@ -303,14 +317,14 @@ it('reaches Reply backwards from its appended textarea without tabbing out and h
   expect(document.activeElement).toBe(reply);expect(leftCard).toBe(false);expect(modifiers).toEqual([8,8]);
 });
 
-it.each([{top:3562,covered:false},{top:300,covered:false},{top:3562,covered:true}])('returns to the loaded anchor at $top through an uncovered wheel target: $covered', async ({top,covered}) => {
+it.each([{top:3562,covered:false,moving:false},{top:300,covered:false,moving:false},{top:3562,covered:true,moving:false},{top:3562,covered:false,moving:true}])('returns to the loaded anchor at $top through an uncovered wheel target: $covered; pending scroll: $moving', async ({top,covered,moving}) => {
   const { draftWheelToAnchor }=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
-  let offset=0;const events:Array<{type:string;deltaY?:number}>=[];
+  let offset=0,frames=0;const events:Array<{type:string;deltaY?:number}>=[];
   const editor={},anchor={getBoundingClientRect:()=>({left:253,right:288,top:top-offset,bottom:top-offset+27,width:35,height:27}),focus(){throw Error('must not focus the draft');}};
-  const scroll={clientLeft:0,clientTop:0,clientWidth:525,clientHeight:510,get scrollTop(){return offset;},set scrollTop(_value:number){throw Error('must not scroll by script');},getBoundingClientRect:()=>({left:80,top:150,right:605,bottom:660,width:525,height:510}),contains:(node:unknown)=>node===editor};
+  const scroll={dataset:{scrolling:moving?'true':undefined},clientLeft:0,clientTop:0,clientWidth:525,clientHeight:510,get scrollTop(){return offset;},set scrollTop(_value:number){throw Error('must not scroll by script');},getBoundingClientRect:()=>({left:80,top:150,right:605,bottom:660,width:525,height:510}),contains:(node:unknown)=>node===editor};
   const document={activeElement:editor,querySelector:(selector:string)=>selector==='.editor-window'?scroll:anchor,elementFromPoint:()=>covered?{}:editor};
-  const renderer={evaluate:async(expression:string)=>expression.includes('const describe=')?null:Function('document','requestAnimationFrame','innerWidth','innerHeight',`return (${expression})`)(document,(callback:()=>void)=>queueMicrotask(callback),1008,681),send:async(_method:string,event:{type:string;deltaY?:number})=>{events.push(event);if(event.type==='mouseWheel')offset+=event.deltaY!;}};
-  const wait=async(_renderer:unknown,expression:string,name:string)=>{if(!await renderer.evaluate(expression))throw Error(name);};
+  const renderer={evaluate:async(expression:string)=>expression.includes('const describe=')?null:Function('document','requestAnimationFrame','innerWidth','innerHeight',`return (${expression})`)(document,(callback:()=>void)=>queueMicrotask(()=>{if(++frames>=4)scroll.dataset.scrolling=undefined;callback();}),1008,681),send:async(_method:string,event:{type:string;deltaY?:number})=>{events.push(event);if(event.type==='mouseMoved'&&moving&&scroll.dataset.scrolling==='true')offset+=20;if(event.type==='mouseWheel'){if(scroll.dataset.scrolling==='true')throw Error('wheel-before-scroll-idle');offset+=event.deltaY!;if(moving){frames=0;scroll.dataset.scrolling='true';}};}};
+  const wait=async(_renderer:unknown,expression:string,name:string)=>{for(let attempt=0;attempt<12;attempt++)if(await renderer.evaluate(expression))return;throw Error(name);};
   const result=draftWheelToAnchor(renderer,(ok:boolean,name:string)=>{if(!ok)throw Error(name);},wait,'.anchor','return-place');
   if(covered){await expect(result).rejects.toThrow('return-place-wheel-hit');expect(events).toEqual([]);}
   else {await expect(result).resolves.toBeUndefined();const r=anchor.getBoundingClientRect();expect(r.top).toBeGreaterThanOrEqual(150);expect(r.bottom).toBeLessThanOrEqual(660);expect(events.every(event=>event.type==='mouseMoved'||event.type==='mouseWheel')).toBe(true);if(top===300)expect(events).toEqual([]);else expect(events.some(event=>event.type==='mouseWheel')).toBe(true);}
