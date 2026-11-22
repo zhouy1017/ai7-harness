@@ -1556,8 +1556,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     return null;
   }
   /** A reply being written, or a composer open over the text: a keyboard decision does not carry the editor off this page. */
-  const liveDraft = (): boolean => floating?.dataset['markComposer'] !== undefined
-    || Array.from(commentsCanvas.querySelectorAll<HTMLTextAreaElement>('[data-comment-reply]')).some((field) => field.value.length > 0);
+  const liveDraft = (): boolean => (floating?.dataset['markComposer'] !== undefined && floating.contains(document.activeElement))
+    || Array.from(commentsCanvas.querySelectorAll<HTMLTextAreaElement>('[data-comment-reply]')).some((field) => document.activeElement === field && field.value.length > 0);
   /**
    * After a decision on a pane card (Issue #1523): never away from a field being typed in. A keyboard decision walks on as
    * 下一条待处理 does, across pages, from where the decided card stood. A pointer decision stays on the page: the next pending card
@@ -2678,7 +2678,6 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     floating = panel;
     floatingBlockId = card.blockId;
     openCardId = card.markId;
-    panel.scrollIntoView({ block: 'nearest' });
     const previews = card.suggestion !== null && card.status !== 'applied' && card.anchorState === 'exact' && card.suggestion.decision?.disposition !== 'rejected';
     inlinePreviewId = undefined;
     editor.setActiveMark({
@@ -2692,6 +2691,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         submit: values => change(card.markId, 'reply', { body: values.body }, '已回复。'), cancel: () => showCard(card),
       }));
     }
+    // Fit the final card, including a retained reply: fitting before appending it leaves the field below the window.
+    panel.scrollIntoView({ block: 'nearest' });
     if (!form) {
       const restore = focusMore ? more.querySelector<HTMLElement>('summary') : focusAction ? panel.querySelector<HTMLElement>(`[data-mark-action="${CSS.escape(focusAction)}"]`) : null;
       (restore ?? dismiss).focus({ preventScroll: true });

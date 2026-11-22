@@ -204,7 +204,7 @@ it('attaches sanitized geometry when a draft control disappears after the stable
 it('samples a draft control on two consecutive animation frames after its reply layout changes (#1678)', async () => {
   const { draftClick } = await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
   let frame = 0; const presses: number[] = [];
-  const pane = { parentElement: null, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) };
+  const pane = { parentElement: null, clientLeft: 0, clientTop: 0, clientWidth: 300, clientHeight: 400, getBoundingClientRect: () => ({ left: 600, top: 100, bottom: 500 }) };
   const node = { parentElement: pane, matches: () => false,
     getBoundingClientRect: () => ({ left: frame === 1 ? 715 : 700, top: 300, right: frame === 1 ? 795 : 780, bottom: 328, width: 80, height: 28 }), contains: (hit: unknown) => hit === node,
     get scrollIntoView(): never { throw new Error('No scripted scroll is allowed'); } };
@@ -243,4 +243,39 @@ it('does not Tab past a reply before the focused card has expanded (#1689)', asy
     } };
   await draftTabTo(renderer, 'reply', (condition: boolean) => { expect(condition).toBe(true); }, 'reply-focus');
   expect(document.activeElement).toBe(reply); expect(expanded).toBe(true);
+});
+
+it.each([
+  { name:'horizontal overflow', box:[100,120,240,148], passes:false },
+  { name:'left border', box:[100,120,180,148], passes:false },
+  { name:'right border', box:[130,120,210,148], passes:false },
+  { name:'top border', box:[110,100,190,128], passes:false },
+  { name:'bottom border', box:[110,175,190,203], passes:false },
+  { name:'whole client box', box:[110,120,190,148], passes:true },
+])('requires both clipped axes of the client box before a draft press: $name', async ({box,passes}) => {
+  const { draftClick } = await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  const pane={parentElement:null,clientLeft:8,clientTop:6,clientWidth:100,clientHeight:90,getBoundingClientRect:()=>({left:100,top:100,right:216,bottom:202})};
+  const [left,top,right,bottom]=box as [number,number,number,number];
+  const node={parentElement:pane,matches:()=>false,contains:(hit:unknown)=>hit===node,getBoundingClientRect:()=>({left,top,right,bottom,width:right-left,height:bottom-top})};
+  const document={createRange:()=>({selectNodeContents(){}}),querySelector:()=>node,elementFromPoint:()=>node};
+  const renderer={evaluate:async(expression:string)=>expression.includes('const describe=')?null:Function('document','requestAnimationFrame','innerWidth','innerHeight','getComputedStyle','setTimeout',`return (${expression})`)(document,(callback:()=>void)=>queueMicrotask(callback),1008,681,()=>({overflowX:'hidden',overflowY:'auto'}),(callback:()=>void)=>callback()),send:vi.fn()};
+  const wait=async(_renderer:unknown,expression:string)=>{if(!await renderer.evaluate(expression))throw new Error('clipped');};
+  const press=draftClick(renderer,(value:boolean)=>{if(!value)throw new Error('hit');},wait,'button','draft');
+  if(passes){await expect(press).resolves.toBeUndefined();expect(renderer.send).toHaveBeenCalledTimes(3);}
+  else {await expect(press).rejects.toThrow('clipped');expect(renderer.send).not.toHaveBeenCalled();}
+});
+
+it.each(['auto','confirm','direct'])('restores the exact %s edit choice when the draft responsiveness probe throws', async original => {
+  const { withDraftDirectEdit }=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  let current=original; const chosen:string[]=[];
+  const buttons=['menu','direct','auto','confirm'].map((method,index)=>({method,parentElement:null,matches:()=>false,
+    dataset:{editMethod:method},getAttribute:()=>String(current===method),getBoundingClientRect:()=>({left:index*100,top:10,right:index*100+80,bottom:40,width:80,height:30}),contains:(hit:unknown)=>hit===buttons[index]}));
+  const document={createRange:()=>({selectNodeContents(){}}),querySelector:(selector:string)=>selector.includes('[aria-checked="true"]')?buttons.find(node=>node.method===current):selector.includes('input-mode-toggle')?buttons[0]:buttons.find(node=>selector.includes(`"${node.method}"`)),elementFromPoint:(x:number)=>buttons[Math.floor(x/100)]};
+  const renderer={evaluate:async(expression:string)=>Function('document','requestAnimationFrame','innerWidth','innerHeight','setTimeout',`return (${expression})`)(document,(callback:()=>void)=>queueMicrotask(callback),1008,681,(callback:()=>void)=>callback()),
+    send:async(_method:string,event:{type:string;x:number})=>{if(event.type==='mouseReleased'){const method=buttons[Math.floor(event.x/100)]!.method;chosen.push(method);if(method!=='menu')current=method;}}};
+  const failure=new Error('readback');const edit=vi.fn(async()=>{expect(current).toBe('direct');throw failure;});
+  const wait=async(_renderer:unknown,expression:string)=>{expect(await renderer.evaluate(expression)).toBe(true);};
+  await expect(withDraftDirectEdit(renderer,(ok:boolean)=>{expect(ok).toBe(true);},wait,edit)).rejects.toBe(failure);
+  expect(edit).toHaveBeenCalledTimes(1); expect(current).toBe(original);
+  if(original!=='direct')expect(chosen).toEqual(['menu','direct','menu',original]);else expect(chosen).toEqual([]);
 });

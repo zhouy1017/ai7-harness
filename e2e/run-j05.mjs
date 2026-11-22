@@ -1,4 +1,4 @@
-import { draftClick, draftKey, draftGeometry, markDraftKept } from './mark-drafts.mjs';
+import { draftClick, draftKey, draftGeometry, draftSelect, markDraftKept } from './mark-drafts.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { commentsPaneForms, commentsSelectMark, commentsTriageForms } from './comments-pane.mjs';
 import { commentsMarksPaging, railJump } from './marks-paging.mjs';
@@ -631,7 +631,7 @@ async function main() {
 
     at('selection-menu-swatches');
     await draftKey(renderer,'Escape',27);
-    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},${RANGES.highlight[0]},${RANGES.highlight[1]})`);
+    await draftSelect(renderer,requireJourney,waitFor,first,RANGES.highlight[0],RANGES.highlight[1],'swatches-selection');
     await draftClick(renderer,requireJourney,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${first}"]`,'swatches-real-menu','right');
     await waitFor(renderer,`window.__j05.menu()?.dataset.markMenu==='selection'`,'swatches-real-open');
     // The existing menu has a 320px scroll cap. Reach its row by real keys before measuring it.
@@ -659,23 +659,25 @@ async function main() {
     await draftClick(renderer,requireJourney,waitFor,'[data-edge-entry="comments"]','header-pane-open');
     await waitFor(renderer, `!document.querySelector('.manuscript-comments-pane').hidden`, 'header-pane-ready');
     await draftGeometry(renderer, '.manuscript-comments-heading', () => assertRenderer(renderer, `(() => {const row=document.querySelector('.manuscript-comments-heading'),r=row.getBoundingClientRect(),controls=Array.from(row.children),boxes=controls.map(node=>node.getBoundingClientRect()),count=row.querySelector('[data-comments-book-pending]');return count.getBoundingClientRect().width>=24&&row.offsetHeight<=35&&boxes.every((b,i)=>b.top>=r.top&&b.bottom<=r.bottom&&b.left>=r.left&&b.right<=r.right&&b.left>=0&&b.right<=innerWidth&&boxes.every((other,j)=>j===i||b.right<=other.left||b.left>=other.right));})()`, 'header-add-one-line'), {waitFor,name:'header-add-one-line'});
-    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},0,0)`);
+    await draftSelect(renderer,requireJourney,waitFor,first,0,0,'header-caret');
     await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="editor-note"]','header-no-selection');
     await waitFor(renderer, `window.__j05.notice().includes('先选中一段文字，再添加备注。')&&!window.__j05.composer()`, 'header-no-selection-reason');
-    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},${RANGES.note[0]},${RANGES.note[1]})`);
+    await draftSelect(renderer,requireJourney,waitFor,first,RANGES.note[0],RANGES.note[1],'header-note-selection');
     await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="editor-note"]','header-note-open');
     await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-composer="create-editor-note"] textarea')`, 'header-note-focused');
     await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] [data-mark-quote]','header-empty-note-inside');
     await assertRenderer(renderer,`window.__j05.composer()?.dataset.markComposer==='create-editor-note'&&document.querySelector('[data-mark-composer] textarea').value===''`,'header-empty-note-kept');
+    await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] textarea','header-note-field-focus');
     await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] [data-mark-action="cancel"]','header-note-cancel');
-    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},34,35)`);
+    await waitFor(renderer,`!window.__j05.composer()&&!document.querySelector('[data-mark-draft-row="editor-note"]')`,'header-note-cancelled');
+    await draftSelect(renderer,requireJourney,waitFor,first,34,35,'header-annotation-selection');
     await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="annotation"]','header-annotation-choose');
     await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-composer="create-annotation"] textarea')`, 'header-annotation-focused');
     await renderer.send('Input.insertText',{text:'公开合成栏头批注'});
-    await draftKey(renderer,'Enter',13,2); await draftKey(renderer,'Enter',13,2);
+    await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] [data-mark-action="submit"]','header-annotation-submit');
     await waitFor(renderer, `(() => {const nodes=window.__j05.mark('annotation',${JSON.stringify(first)}),ids=[...new Set(nodes.map(node=>node.dataset.markId))];if(ids.length!==1)return false;globalThis.__headerAnnotationId=ids[0];return !window.__j05.composer();})()`, 'header-annotation-exactly-one');
     await assertRenderer(renderer, `(async()=>{const work=(await window.ai7.listPriorWork()).find(item=>item.bookId===document.querySelector('.editor-shell').dataset.bookId),page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(first)}}});return page.marks.filter(mark=>mark.kind==='annotation'&&mark.blockId===${JSON.stringify(first)}&&mark.fromGrapheme===34&&mark.toGrapheme===35).length===1;})()`, 'header-annotation-service-once');
-    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},0,0)`);
+    await draftSelect(renderer,requireJourney,waitFor,first,0,0,'header-caret');
     const headerMark=await renderer.evaluate('globalThis.__headerAnnotationId');
     await draftClick(renderer,requireJourney,waitFor,`.editor-window [data-mark-id="${headerMark}"]`,'header-annotation-menu','right');
     await draftClick(renderer,requireJourney,waitFor,'[data-mark-menu="mark"] [data-mark-action="remove"]','header-annotation-remove');
@@ -683,7 +685,7 @@ async function main() {
     await draftClick(renderer,requireJourney,waitFor,'.manuscript-comments-heading [aria-label="关闭批注栏"]','header-pane-reset');
     at('mark-annotation');
     await renderer.evaluate(`(() => {globalThis.__annotationMenuPressed=false;const pressed=event=>{if(event.isTrusted&&event.target.closest?.('[data-mark-menu] [data-mark-action="add-annotation"]')){globalThis.__annotationMenuPressed=true;document.removeEventListener('click',pressed,true);}};document.addEventListener('click',pressed,true);return true;})()`);
-    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},${RANGES.annotation[0]},${RANGES.annotation[1]})`);
+    await draftSelect(renderer,requireJourney,waitFor,first,RANGES.annotation[0],RANGES.annotation[1],'annotation-menu-selection');
     await draftClick(renderer,requireJourney,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${first}"]`,'annotation-menu','right');
     await waitFor(renderer,`window.__j05.menu()?.dataset.markMenu==='selection'`,'annotation-menu-ready');
     // Reach the kept menu action with real keys, never scripted menu scrolling.

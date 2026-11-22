@@ -16,6 +16,7 @@ export interface MiniEvent {
   readonly metaKey?: boolean;
   readonly isComposing?: boolean;
   readonly keyCode?: number;
+  readonly relatedTarget?: EventTarget | MiniElement | null;
   target?: MiniElement;
   defaultPrevented?: boolean;
   preventDefault?(): void;

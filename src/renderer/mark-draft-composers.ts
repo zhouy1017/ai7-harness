@@ -78,9 +78,15 @@ export function createDraftComposers(host: {
     attach(node: HTMLElement, place: ComposerPlace): void {
       open = { node, place };
       restore();
-      node.addEventListener('focusout', () => queueMicrotask(() => {
-        if (!dead && open?.node === node && !node.contains(document.activeElement)) fold();
-      }));
+      node.addEventListener('focusout', (event) => {
+        // Chromium briefly reports BODY while focus moves between descendants. The destination is authoritative.
+        if (event.relatedTarget instanceof HTMLElement && node.contains(event.relatedTarget)) return;
+        const settle = (): void => {
+          if (!dead && open?.node === node && !node.contains(document.activeElement)) fold();
+        };
+        if (event.relatedTarget === null || event.relatedTarget === undefined) requestAnimationFrame(settle);
+        else queueMicrotask(settle);
+      });
     },
     destroy(): void {
       dead = true; open = undefined; clearRows();
