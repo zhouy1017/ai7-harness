@@ -316,13 +316,13 @@ describe('each item', () => {
       'await-local-check': '等待本地核对',
       'resolve-conflict': '解决冲突…',
       'answer-clarification': '回答问题',
-      'adjust-budget-redo': '调整预算并重做',
+      'adjust-budget-redo': '重新开始…',
       'resolve-model-service': '处理模型服务',
       'open-network-proxy': '去设置 › 模型服务 › 网络代理',
       // 结果待确认's first step (Issue #51, S16c): which ranges are unconfirmed, never a repeat-shaped action.
       'view-unconfirmed': '查看未确认的部分',
-      reprepare: '另做一份计划',
-      redo: '重新开始',
+      reprepare: '重新开始…',
+      redo: '重新开始…',
       // A prepared plan nobody started (Issue #423, S77a): the drawer's own entry to it.
       'view-plan': '查看计划并开始',
       'maintenance-link-proposal': '关联修改建议',
@@ -366,7 +366,7 @@ describe('each item', () => {
     // ceiling was the launch's and a relaunch raises it.
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS.redo).toBe(TASK_BAR_REDO);
     expect(globalAttentionReason(item('analysis-budget-reached', { nextStep: 'redo' })))
-      .toBe('已到本次启动的预算上限，保留结果后停下；提高启动预算后可重做。');
+      .toBe('已到本次启动的预算上限，保留结果后停下；提高启动预算后可以重新开始。');
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-plan-moved']).toEqual(TASK_PLAN_STATE_PILLS['plan-moved']);
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-plan-moved']).not.toEqual(GLOBAL_ATTENTION_STATE_PILLS['analysis-blocked']);
     // Pinned to the words the record's own surface uses there.

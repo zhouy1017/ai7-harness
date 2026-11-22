@@ -93,7 +93,9 @@ describe('task overview', () => {
       expect([...card.querySelector('.task-overview-card-line')!.textContent!].length).toBeLessThanOrEqual(60);
       expect(card.querySelector('[data-task-action="pause"]')).toBeNull();
       expect(card.querySelector('[data-task-action="up"]')).toBeNull();
-      expect(card.textContent).toContain(state === 'analysis-waiting-network' ? '等待联网' : state === 'analysis-waiting-connection' ? '等待模型连接' : state === 'analysis-waiting-admission' ? '等待开始前检查' : '排队中');
+      // The pill is 待我处理's word for the same record (Issue #1680).
+      expect(card.querySelector('.task-overview-card-title .state-term')!.textContent).toBe(state === 'analysis-waiting-network' ? '等待网络' : state === 'analysis-waiting-connection' ? '需要处理模型连接' : state === 'analysis-waiting-admission' ? '等待开始前检查' : '已联网 · 等待开始');
+      expect(card.querySelector('[data-task-action="cancel"]')!.textContent).toBe('取消任务');
     } finally { uninstall(); }
   });
   it('keeps a stopped dialogue available to continue in the paused group', () => {
@@ -103,20 +105,24 @@ describe('task overview', () => {
     try { expect(taskOverviewCard(projection.groups[3]!.items[0]!, vi.fn()).querySelector('[data-task-action="resume"]')).not.toBeNull(); }
     finally { uninstall(); }
   });
-  it('keeps context and controls in one header and repeats the selected original plan', async () => {
+  it('keeps context and controls in one header and opens 重新开始… of a finished plan in its drawer, sending nothing (Issue #1680)', async () => {
     const uninstall = installMiniDom(); vi.stubGlobal('window', { setInterval: () => 0, clearInterval: () => {} });
     vi.stubGlobal('localStorage', { getItem: () => JSON.stringify({ book: 'all', type: 'all', time: 'all' }) });
     const original = { ...task('recent', 'analysis-completed', 'older'), at: new Date().toISOString() };
     const projection = composeTaskOverview({ groups: [{ key: 'recent', items: [original], total: 1 }], actionableCount: 0, running: false, processing: { state: 'local' } }, 2, () => null);
     const startQuickTasks = vi.fn(async () => ({}));
     const root = document.createElement('section');
-    const surface = mountTaskOverview({ root, api: { inspectTaskOverview: async () => projection, startQuickTasks } as unknown as RendererApi, setStatus: vi.fn(), openTarget: vi.fn(), openBook: vi.fn(), openResult: vi.fn() });
+    const openTarget = vi.fn();
+    const surface = mountTaskOverview({ root, api: { inspectTaskOverview: async () => projection, startQuickTasks } as unknown as RendererApi, setStatus: vi.fn(), openTarget, openBook: vi.fn(), openResult: vi.fn() });
     try {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(root.querySelector('.task-overview-context')?.parentElement).toBe(root.querySelector('.task-overview-heading-row'));
-      root.querySelector<HTMLButtonElement>('[data-task-action="again"]')!.click();
+      const redo = root.querySelector<HTMLButtonElement>('[data-task-action="redo"]')!;
+      expect(redo.textContent).toBe('重新开始…');
+      redo.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(startQuickTasks).toHaveBeenCalledWith({ tasks: [{ bookId: 'book', procedureId: 'repeat', repeat: { kind: 'baseline-analysis', ref: 'older' } }] });
+      expect(openTarget).toHaveBeenCalledWith(projection.groups[4]!.items[0], 'redo');
+      expect(startQuickTasks).not.toHaveBeenCalled();
     } finally { surface.destroy(); vi.unstubAllGlobals(); uninstall(); }
   });
   it('opens the eleventh Book result from its card even when the legacy reading has only ten', async () => {
@@ -195,8 +201,8 @@ describe('task overview', () => {
     try {
       const cases = [
         ['active', 'analysis-running', ['pause', 'cancel']], ['active', 'analysis-waiting-capacity', ['up', 'top', 'cancel']],
-        ['decisions', 'analysis-clarification', ['answer']], ['active', 'analysis-paused', ['resume', 'redo']],
-        ['recent', 'analysis-completed', ['result', 'again']],
+        ['decisions', 'analysis-clarification', ['answer', 'cancel']], ['active', 'analysis-paused', ['resume', 'redo', 'cancel']],
+        ['recent', 'analysis-completed', ['result', 'redo']],
       ] as const;
       for (const [group, state, actions] of cases) {
         const item = task(group, state, 'b0000000-0000-4000-8000-000000000001');

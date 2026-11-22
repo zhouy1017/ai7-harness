@@ -158,6 +158,9 @@ import { taskPlanFixture } from '../support/task-plan-fixture.js';
 const plan = taskPlanFixture;
 
 /** The same plan with only its bar's facts moved. */
+/** A relaunch recipe (Issue #1680): the drawer offers 重新开始… wherever a plan carries one. */
+const RELAUNCH = { operation: 'launchBaselineAnalysis', input: {}, summary: ['重新开始一项新任务，已完成的内容不会带入。'], cancelsFirst: null } as unknown as NonNullable<TaskPlanProjection['relaunch']>;
+
 function barOf(start: Partial<TaskPlanStartProjection>, overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
   const base = plan(overrides);
   return { ...base, start: { ...base.start, ...start } };
@@ -460,7 +463,7 @@ describe('the authorization bar (S74a)', () => {
     expect(TASK_BAR_START_WHEN_ONLINE).toBe('联网后开始任务');
     expect(TASK_BAR_START_WHEN_ONLINE).not.toContain('授权');
     expect(TASK_BAR_SAVE_DRAFT_ONLY).toBe('仅保存任务草稿');
-    expect(TASK_BAR_CANCEL_WAIT).toBe('取消');
+    expect(TASK_BAR_CANCEL_WAIT).toBe('取消任务');
     expect(TASK_BAR_CANCELLED).toBe('已取消 · 未发送任何内容');
     expect(TASK_BAR_CANCEL_FAILED).toBe('无法取消这项任务。');
     expect(TASK_BAR_WAITING_FOR_CONNECTION).toBe('需要处理模型连接');
@@ -528,7 +531,7 @@ describe('the authorization bar (S74a)', () => {
     const network = taskBarView(barOf(started, { state: { key: 'waiting', label: '等待网络' } }));
     expect(network).toMatchObject({ readiness: 'started', statement: null, note: TASK_BAR_WAITING_NOTE, status: '等待网络' });
     expect(names(network)).toEqual(['cancel-wait', 'run-link']);
-    expect(action(network, 'cancel-wait')).toEqual({ name: 'cancel-wait', label: '取消', tone: 'secondary', disabledReason: null });
+    expect(action(network, 'cancel-wait')).toEqual({ name: 'cancel-wait', label: '取消任务', tone: 'secondary', disabledReason: null });
     const connection = taskBarView(barOf(started, { state: { key: 'waiting', label: TASK_BAR_WAITING_FOR_CONNECTION } }));
     expect(names(connection)).toEqual(['connect', 'cancel-wait', 'run-link']);
     expect(action(connection, 'connect')?.label).toBe('去设置连接');
@@ -550,15 +553,15 @@ describe('the authorization bar (S74a)', () => {
     expect(queued).toMatchObject({ readiness: 'started', statement: null, note: TASK_BAR_QUEUED_NOTE, status: '排队中' });
     expect(TASK_BAR_QUEUED_NOTE).toBe('排队中：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量');
     expect(names(queued)).toEqual(['cancel-wait', 'run-link']);
-    expect(action(queued, 'cancel-wait')).toEqual({ name: 'cancel-wait', label: '取消', tone: 'secondary', disabledReason: null });
+    expect(action(queued, 'cancel-wait')).toEqual({ name: 'cancel-wait', label: '取消任务', tone: 'secondary', disabledReason: null });
     // Never an estimate of how long: CONC-007 forbids one.
     expect(queued.note).not.toMatch(/分钟|秒|预计|第 \d+ 位/u);
     expect(TASK_PLAN_STATE_PILLS.queued).toEqual({ tone: 'progress', shape: 'ring' });
   });
 
   it('offers a Run under way 暂停, 取消任务 — which only opens its summary — and 改计划重做 with why it waits (Issue #422; AUTH-010, CTRL-001, CTRL-004)', () => {
-    expect([TASK_BAR_PAUSE, TASK_BAR_CANCEL_RUN, TASK_BAR_REDO]).toEqual(['暂停', '取消任务', '重新开始']);
-    expect([TASK_BAR_CANCEL_IMPACT_HEADING, TASK_BAR_CANCEL_CONFIRM, TASK_BAR_CANCEL_KEEP]).toEqual(['取消影响摘要', '确认取消任务', '继续运行']);
+    expect([TASK_BAR_PAUSE, TASK_BAR_CANCEL_RUN, TASK_BAR_REDO]).toEqual(['暂停', '取消任务', '重新开始…']);
+    expect([TASK_BAR_CANCEL_IMPACT_HEADING, TASK_BAR_CANCEL_CONFIRM, TASK_BAR_CANCEL_KEEP]).toEqual(['取消影响摘要', '确认取消任务', '不取消']);
     const runControl = {
       runRecordId: 'run',
       cancelling: false,
@@ -577,8 +580,8 @@ describe('the authorization bar (S74a)', () => {
     expect(running).toMatchObject({ readiness: 'started', statement: null, note: null, status: '运行中' });
     expect(running.actions).toEqual([
       { name: 'pause', label: '暂停', tone: 'secondary', disabledReason: null },
+      // A running Task offers 暂停 and 取消任务 only (Issue #1680): 重新开始… is offered once it has stopped.
       { name: 'cancel-run', label: '取消任务', tone: 'secondary', disabledReason: null },
-      { name: 'redo', label: '重新开始', tone: 'quiet', disabledReason: '先暂停，再重新开始' },
       { name: 'run-link', label: '查看运行', tone: 'secondary', disabledReason: null },
     ]);
     // Confirmed: 正在取消 and its sentence until the Run has stopped, and nothing more to press (CTRL-005).
@@ -598,7 +601,7 @@ describe('the authorization bar (S74a)', () => {
       redo: { summary: [], prepare: { goal: '同步到当前稿件', update: { mode: 'sync-current', selectedRange: null }, redoOf: 'run' } as never },
     }));
     expect(redoable.actions).toEqual([
-      { name: 'redo', label: '重新开始', tone: 'secondary', disabledReason: null },
+      { name: 'redo', label: '重新开始…', tone: 'secondary', disabledReason: null },
       { name: 'run-link', label: '查看运行', tone: 'secondary', disabledReason: null },
     ]);
     // 正在暂停 (CTRL-001): its sentence until the Run reaches its boundary, and nothing more to press.
@@ -623,13 +626,13 @@ describe('the authorization bar (S74a)', () => {
       accountLimit: null, outcomeUnknown: null,
     };
     expect(TASK_BAR_RESUME).toBe('继续');
-    const paused = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'paused', label: '已暂停' }, runControl: stoppedControl }));
+    const paused = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'paused', label: '已暂停' }, runControl: stoppedControl, relaunch: RELAUNCH }));
     expect(paused).toMatchObject({ status: '已暂停', note: '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分' });
     expect(paused.actions).toEqual([
       { name: 'resume', label: '继续', tone: 'primary', disabledReason: null },
       { name: 'cancel-run', label: '取消任务', tone: 'secondary', disabledReason: null },
-      // 暂停后出现 续行 与 改计划重做 (editor-surfaces §6; Issue #422, S76c).
-      { name: 'redo', label: '重新开始', tone: 'secondary', disabledReason: null },
+      // 暂停后出现 继续 与 重新开始… (editor-surfaces §6; Issue #1680: from the plan's relaunch).
+      { name: 'redo', label: '重新开始…', tone: 'secondary', disabledReason: null },
       { name: 'run-link', label: '查看运行', tone: 'secondary', disabledReason: null },
     ]);
     const blocked = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
@@ -840,7 +843,7 @@ describe('改计划重做 (S76c)', () => {
   it('names its summary, its confirmation and the way back, and what the bar says while the Run stops for it', () => {
     expect(TASK_BAR_REDO_HEADING).toBe('重新开始摘要');
     expect(TASK_BAR_REDO_CONFIRM).toBe('确认重新开始');
-    expect(TASK_BAR_REDO_KEEP).toBe('先不重做');
+    expect(TASK_BAR_REDO_KEEP).toBe('收起');
     expect(TASK_BAR_REDOING_NOTE).toBe('已记下重新开始：这次运行正在取消，取消完成后准备新任务');
   });
 });
@@ -883,7 +886,7 @@ describe('the Run Budget Ceiling in the drawer (S16a)', () => {
       ['redo', TASK_BAR_ADJUST_BUDGET_REDO, 'primary', null],
       ['run-link', TASK_BAR_VIEW_PARTIAL, 'secondary', null],
     ]);
-    expect(TASK_BAR_ADJUST_BUDGET_REDO).toBe('调整预算并重做');
+    expect(TASK_BAR_ADJUST_BUDGET_REDO).toBe('重新开始…');
     expect(TASK_BAR_VIEW_PARTIAL).toBe('查看部分结果');
     // Under developer-live the launch sets the ceiling: the plan cannot raise it, so the redo is 改计划重做's, and the note
     // says where a higher ceiling comes from.
@@ -914,13 +917,13 @@ describe('模型服务账户限额 in the drawer (S16b)', () => {
       continuation: { unitsSettled: 3, unitsTotal: 8, pendingAnswerUnits: [] }, update: null,
       accountLimit: { unitOrdinal: 4, condition }, outcomeUnknown: null,
     };
-    const limited = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'account-limit', label: '模型服务账户限额' }, runControl: control }));
+    const limited = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'account-limit', label: '模型服务账户限额' }, runControl: control, relaunch: RELAUNCH }));
     expect(limited).toMatchObject({ status: '模型服务账户限额', note: taskBarAccountLimitNote(4, 3, 8) });
     expect(limited.actions.map((entry) => [entry.name, entry.label, entry.tone, entry.disabledReason])).toEqual([
       ['connect', '处理模型服务', 'secondary', null],
       ['resume', '继续', 'primary', null],
       ['cancel-run', '取消任务', 'secondary', null],
-      ['redo', '重新开始', 'secondary', null],
+      ['redo', '重新开始…', 'secondary', null],
       ['run-link', '查看运行', 'secondary', null],
     ]);
     // 续行 still waits for what the service reads — the slot, the connection — and says so.
@@ -969,6 +972,7 @@ describe('结果待确认 in the drawer (S16c)', () => {
     const paused = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
       state: { key: 'paused', label: '已暂停' },
       runControl: { ...control, resume: { reason: null }, continuation: { unitsSettled: 4, unitsTotal: 8, pendingAnswerUnits: [] }, outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: false } },
+      relaunch: RELAUNCH,
     }));
     expect(paused.actions.map((entry) => [entry.name, entry.tone])).toEqual([
       ['resume', 'primary'], ['cancel-run', 'secondary'], ['redo', 'secondary'], ['view-unconfirmed', 'secondary'], ['run-link', 'secondary'],
@@ -1006,6 +1010,7 @@ describe('Clarification Requests in the drawer (S76d)', () => {
       start: { ...plan().start, readiness: 'started' },
       runControl: control as never,
       clarifications: [question],
+      relaunch: RELAUNCH,
     }));
     expect(waiting).toMatchObject({ status: '等你回答', note: '已读完 7 / 8 个阅读范围；1 个问题等你回答，回答后接着做' });
     expect(waiting.actions.map((action) => [action.name, action.disabledReason])).toEqual([['cancel-run', null], ['redo', null], ['run-link', null]]);
@@ -1055,16 +1060,19 @@ describe('the drawer\'s bar for a waiting Run whose plan moved', () => {
     }));
     expect(view.status).toBe('需要重新确认计划');
     expect(view.note).toBe(taskBarReprepareNote(reason));
-    expect(taskBarReprepareNote(reason)).toBe(`${reason}「另做一份计划」按同样的目标和范围做一份新计划；看过之后再开始任务。`);
+    expect(taskBarReprepareNote(reason)).toBe(`${reason}「重新开始…」按同样的目标和范围开始一项新任务。`);
     expect(view.actions.map((entry) => [entry.name, entry.label, entry.tone, entry.disabledReason])).toEqual([
       ['reprepare', TASK_BAR_REPREPARE, 'primary', null],
       ['run-link', '查看运行', 'secondary', null],
     ]);
-    expect(TASK_BAR_REPREPARE).toBe('另做一份计划');
+    expect(TASK_BAR_REPREPARE).toBe('重新开始…');
+    // With the plan's relaunch (Issue #1680) the same place is 重新开始…'s launch bar.
+    expect(taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'plan-moved', label: '需要重新确认计划' }, reprepare, relaunch: RELAUNCH })).actions.map((entry) => entry.name)).toEqual(['redo', 'run-link']);
     // Its pill is the plan decision's, as 计划已变化's; a Run this launch cannot carry keeps 派发前已阻止's square and its link.
     expect(TASK_PLAN_STATE_PILLS['plan-moved']).toEqual(TASK_PLAN_STATE_PILLS.changed);
     const blocked = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'blocked', label: '没有开始' } }));
-    expect([blocked.status, blocked.actions.map((entry) => entry.name)]).toEqual(['没有开始', ['run-link']]);
+    // A baseline that never started is cancelled in one press (Issue #1680), as a ledger kind's is.
+    expect([blocked.status, blocked.actions.map((entry) => entry.name)]).toEqual(['没有开始', ['cancel-wait', 'run-link']]);
   });
 });
 

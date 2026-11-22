@@ -1,55 +1,38 @@
-import { technicalWords } from './technical-layer.js';
 import { rendererErrorMessage } from './error-words.js';
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
-import type { RendererApi, TaskOverviewGroupProjection, TaskOverviewItemProjection, TaskOverviewProjection, TaskOverviewCall } from '../shared/protocol.js';
+import type { RendererApi, TaskOverviewItemProjection, TaskOverviewProjection, TaskOverviewCall } from '../shared/protocol.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { showToast } from './components/toast.js';
 import { menuPanel } from './components/controls.js';
 import type { TaskPlanProjection, ClarificationOptionId } from '../shared/protocol.js';
-import { attentionSentence, globalAttentionReason, globalAttentionTimeLine } from './global-attention-labels.js';
-const GROUP_LABELS: Record<TaskOverviewGroupProjection['key'], string> = { running: '正在运行', queued: '排队等待', waiting: '等你处理', paused: '已暂停', recent: '最近完成' };
-const STATE_LABELS: Record<TaskOverviewItemProjection['state'], string> = { running: '运行中', queued: '排队中', waiting: '等你处理', paused: '已暂停', completed: '已完成', cancelled: '已取消', stopped: '已停止' };
+import { attentionSentence, globalAttentionTimeLine } from './global-attention-labels.js';
+import { TASK_BAR_CANCELLED, TASK_BAR_CANCELLED_NOTE } from './task-drawer-labels.js';
+import { taskCardView, TASK_CARD_RUN_WAIT_CANCELLED, TASK_CARD_WAIT_CANCELLED, TASK_PAGE_GROUP_LABELS, TASK_PAGE_GROUPS, TASK_PANEL_GROUP_LABELS, TASK_PANEL_GROUPS, type TaskCardAction } from './task-card-view.js';
+export type { TaskCardAction } from './task-card-view.js';
 const BOOK_FILTER_BUTTONS = 6;
 const PROCEDURES = [['baseline-analysis', '基线分析'], ['initial-evaluation', '评估']] as const;
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text;
   if (tag === 'button') { node.classList.add('btn'); (node as HTMLButtonElement).type = 'button'; } return node;
 }
-function progressLine(item: TaskOverviewItemProjection): string {
-  const usage = item.usage === null ? '' : ` · 用时 ${Math.max(1, Math.round(item.usage.elapsed / 60000))} 分钟 · 约 ${item.usage.calls} 次调用`;
-  if (item.state === 'queued') return item.attention.state === 'analysis-waiting-network' ? '等待联网' : item.attention.state === 'analysis-waiting-connection' ? '等待模型连接' : item.attention.state === 'analysis-waiting-admission' ? '等待开始前检查' : item.queuePosition === null ? '排队中' : `第 ${item.queuePosition} 位 · 前面 ${item.queuePosition - 1} 项${item.eta === null ? '' : ` · 预计 ≈ ${Math.ceil(item.eta / 60000)} 分钟后开始`}`;
-  if (item.state === 'waiting' || item.state === 'paused' && item.attention.facts.stopReason === 'shutdown') return globalAttentionReason(item.attention);
-  if (item.state === 'paused') return item.attention.facts.resumeFailure ?? `你 ${new Date(item.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 暂停${item.progress ? technicalWords(` · 已完成 ${item.progress.done} / ${item.progress.total}`, ` · 已完成约 ${item.progress.total === 0 ? 0 : Math.floor((item.progress.done / item.progress.total) * 100)}%`) : ''} · 可继续`;
-  if (item.state === 'completed') return `已有结果${usage}`;
-  if (item.state === 'cancelled') return `已取消 · ${item.result ? '保留已有结果' : '没有形成结果'}${usage}`;
-  if (item.state === 'stopped') return `已停止 · 可查看运行${usage}`;
-  // Ordinary mode reads a share of the work, never the reading ranges counted (Issue #1431 item 106).
-  return item.progress === null ? '正在处理稿件。' : `${technicalWords(`已完成 ${item.progress.done} / ${item.progress.total} 个阅读范围`, `已完成约 ${item.progress.total === 0 ? 0 : Math.floor((item.progress.done / item.progress.total) * 100)}%`)}${item.progress.elapsedMs === null ? '' : `，已用时 ${Math.floor(item.progress.elapsedMs / 60000)} 分钟`}${item.progress.modelWaiting ? '，等待模型回答' : ''}。`;
-}
-export type TaskCardAction = 'open' | 'plan' | 'run' | 'book' | 'pause' | 'resume' | 'cancel' | 'up' | 'top' | 'answer' | 'redo' | 'result' | 'again' | 'jump';
-/** Both the global page and the in-Book pane render this exact card. */
-export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: TaskOverviewItemProjection, action: TaskCardAction) => void): HTMLElement {
+/** Both the global page and the in-Book pane render this exact card; its words and actions are `taskCardView`'s (Issue #1680). */
+export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: TaskOverviewItemProjection, action: TaskCardAction) => void, inBook = false): HTMLElement {
+  const view = taskCardView(item);
   const node = el('article', 'task-overview-card'); node.dataset['taskItem'] = item.itemId; node.dataset['taskItemId'] = item.itemId; node.dataset['taskState'] = item.attention.state; node.tabIndex = 0;
-  const title = el('div', 'task-overview-card-title'); title.append(el('span', 'task-overview-book', item.bookTitle ?? '全局'), el('span', undefined, ' · '), el('strong', undefined, item.label), el('span', `state-term task-overview-state task-overview-state-${item.state}`, item.attention.state === 'analysis-pausing' ? '正在暂停' : STATE_LABELS[item.state]));
+  const title = el('div', 'task-overview-card-title'); title.append(el('span', 'task-overview-book', item.bookTitle ?? '全局'), el('span', undefined, ' · '), el('strong', undefined, item.label), el('span', `state-term task-overview-state task-overview-state-${view.pageGroup}`, view.pill));
   node.dataset['taskKind'] = item.taskKind;
-  const line = el('div', 'task-overview-card-line', attentionSentence(progressLine(item))); line.title = line.textContent ?? '';
+  const line = el('div', 'task-overview-card-line', attentionSentence(view.line)); line.title = line.textContent ?? '';
   const time = el('time', 'task-overview-card-time', globalAttentionTimeLine(item.attention.group, item.at, item.state)); time.dateTime = item.at;
   const body = el('div', 'task-overview-card-body'); body.append(el('div', 'task-overview-card-kind', item.taskKind), title, line, time);
   if (item.attention.modelLabel) body.append(el('span', 'task-overview-model', item.attention.modelLabel));
-  if (item.state === 'running' && item.progress !== null) { const bar = el('progress', 'task-overview-progress'); bar.max = Math.max(1, item.progress.total); bar.value = Math.min(item.progress.done, item.progress.total); body.append(bar); }
+  if (view.pageGroup === 'running' && item.progress !== null) { const bar = el('progress', 'task-overview-progress'); bar.max = Math.max(1, item.progress.total); bar.value = Math.min(item.progress.done, item.progress.total); body.append(bar); }
   const actions = el('div', 'task-overview-card-actions');
-  const add = (label: string, action: TaskCardAction): void => { const button = el('button', 'quiet', label); button.dataset['taskAction'] = action; button.addEventListener('click', (event) => { event.stopPropagation(); act(item, action); }); actions.append(button); };
-  if (item.state === 'running') { add('暂停', 'pause'); add('取消', 'cancel'); }
-  else if (item.state === 'queued') { if (item.queuePosition !== null) { add('上移', 'up'); add('置顶', 'top'); } add('取消等待', 'cancel'); }
-  else if (item.attention.state === 'draft-unfinished') add('继续编辑草稿', 'answer');
-  else if (item.state === 'waiting') add(item.nextAction === 'answer-clarification' || item.taskKind === '对话' ? '回答' : '处理', 'answer');
-  else if (item.state === 'paused' && item.attention.state !== 'analysis-pausing') { add('继续', 'resume'); if (item.target.kind !== 'dialogue') add('重新开始', 'redo'); }
-  else if (item.state !== 'paused') { add('查看结果', 'result'); add('重新开始', 'again'); }
-  if (item.selection) add('跳到所选文字', 'jump');
+  for (const entry of view.actions) { const button = el('button', 'quiet', entry.label); button.dataset['taskAction'] = entry.action; button.addEventListener('click', (event) => { event.stopPropagation(); act(item, entry.action); }); actions.append(button); }
   const more = el('details', 'task-overview-more'); more.append(el('summary', undefined, '更多'));
   const menu = menuPanel(); more.append(menu);
-  for (const [label, action] of [['查看计划', 'plan'], ['查看运行', 'run'], ['打开所在图书', 'book']] as const) { const button = el('button', 'quiet', label); button.dataset['taskAction'] = action; button.addEventListener('click', (event) => { event.stopPropagation(); act(item, action); more.open = false; }); menu.append(button); }
+  // The Book panel is already the Book: 打开所在图书 is the 任务 page's alone (Issue #1680).
+  for (const [label, action] of [['查看计划', 'plan'], ['查看运行', 'run'], ...(inBook ? [] : [['打开所在图书', 'book']] as const)] as const) { const button = el('button', 'quiet', label); button.dataset['taskAction'] = action; button.addEventListener('click', (event) => { event.stopPropagation(); act(item, action); more.open = false; }); menu.append(button); }
   more.addEventListener('click', (event) => event.stopPropagation()); actions.append(more); node.append(body, actions);
   node.addEventListener('click', () => act(item, 'open')); return node;
 }
@@ -58,14 +41,19 @@ export interface TaskOverviewOptions {
   readonly onChanged?: () => void; readonly onProjection?: (projection: TaskOverviewProjection) => void;
   readonly root: HTMLElement; readonly api: Pick<RendererApi, 'inspectTaskOverview' | 'controlAllTasks' | 'startQuickTasks' | 'reorderQueuedRun' | 'taskOverviewCall' | 'pollServiceJob'>; readonly bookId?: string;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
-  readonly openTarget: (item: TaskOverviewItemProjection, view?: 'plan' | 'run' | 'redo') => void;
+  /** `cancel` opens the plan with 取消任务's Cancellation Impact Summary open; `redo` with 重新开始… pressed (Issue #1680). */
+  readonly openTarget: (item: TaskOverviewItemProjection, view?: 'plan' | 'run' | 'redo' | 'cancel') => void;
+  /** The record's own surface (继续 of a 审阅 a closed service left half-way: the 审阅 page, where it goes on). */
+  readonly openRecord?: (item: TaskOverviewItemProjection) => void;
+  /** 去设置 › 模型服务 › 网络代理 of a Run the proxy or the model service stopped. */
+  readonly openNetworkProxySettings?: () => void;
   readonly openBook: (bookId: string) => void; readonly openResult: (item: TaskOverviewItemProjection) => void;
   readonly configure?: (bookId: string, kind: 'review' | 'writing') => void;
   readonly closeDrawer?: () => void; readonly jumpToSelection?: (item: TaskOverviewItemProjection) => void;
 }
 export interface TaskOverviewSurface { refresh(): void; showStart(): void; focus(itemId: string): void; destroy(): void; }
 export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSurface {
-  let destroyed = false, busy = false, inFlight = false; let projection: TaskOverviewProjection | null = null; let painted = ''; let selectedId: string | null = null; let pendingFocus: string | null = null; let confirmItemId: string | null = null;
+  let destroyed = false, busy = false, inFlight = false; let projection: TaskOverviewProjection | null = null; let painted = ''; let selectedId: string | null = null; let pendingFocus: string | null = null;
   const key = `ai7.task-overview.filters.${options.bookId ?? 'all'}`;
   let selectedBook = options.bookId ?? 'all', selectedType = 'all', selectedTime = 'today';
   try { const saved = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, string>; selectedBook = options.bookId ?? saved['book'] ?? 'all'; selectedType = saved['type'] ?? 'all'; selectedTime = saved['time'] ?? 'today'; } catch { /* A missing view preference uses its default. */ }
@@ -75,11 +63,11 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   const start = el('button', 'primary', '发起任务 ▾'); start.dataset['taskOverviewStart'] = ''; start.disabled = true;
   const all = el('button', 'quiet'); all.addEventListener('click', () => void perform(async () => { await options.api.controlAllTasks({ action: projection?.queueFrozen ? 'resume' : 'pause' }); }));
   const context = el('span', 'task-overview-context'); headingRow.append(heading, context, start); if (!options.bookId) headingRow.append(all);
-  const filters = el('div', 'task-overview-filters'); const host = el('div', 'task-overview-groups'); const confirm = el('div', 'task-overview-confirm'); confirm.hidden = true; confirm.setAttribute('role', 'alert');
+  const filters = el('div', 'task-overview-filters'); const host = el('div', 'task-overview-groups');
   if (options.bookId) { heading.hidden = true; context.hidden = true; selectedType = 'all'; selectedTime = 'all'; }
   // The page's one sentence while it holds tasks; with none, the sentence in its place is the empty page's.
   const note = el('p', 'field-note', '队列顺序保存在本次使用中；重新启动后按发起顺序排列。'); note.hidden = true;
-  const sheet = createSheet('task-overview-sheet'); options.root.append(headingRow, filters, host, confirm, note, sheet);
+  const sheet = createSheet('task-overview-sheet'); options.root.append(headingRow, filters, host, note, sheet);
   // The sheet is painted before it is shown, so its focus and its ticked Book are there when it opens; the sheet itself takes focus in and returns it.
   let sheetOpening = false;
   const openSheet = (): Promise<void> => paintSheet().then(() => { if (!destroyed) { start.focus(); sheet.show(); } }, (error: unknown) => options.setStatus(rendererErrorMessage(error, '暂时无法打开发起任务。'), 'error'));
@@ -129,35 +117,31 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     const types = el('div', 'task-overview-filter-row'); types.append(el('span', undefined, '类型')); for (const type of ['all', '分析', '审阅', '评估', '写作', '对话', '工序']) types.append(filter(type === 'all' ? '全部' : type, selectedType === type, () => { selectedType = type; remember(); }));
     const time = el('div', 'task-overview-filter-row'); time.append(el('span', undefined, '最近完成')); for (const [value, label] of [['today', '今天'], ['week', '7 天'], ['all', '全部']]) time.append(filter(label!, selectedTime === value, () => { selectedTime = value!; remember(); })); rows.push(types, time); filters.replaceChildren(...rows);
   }
-  async function perform(action: () => Promise<void>): Promise<void> { if (busy) return; busy = true; try { await action(); } catch (error) { options.setStatus(rendererErrorMessage(error, '任务操作未能完成。'), 'error'); } finally { busy = false; options.onChanged?.(); refresh(); } }
+  // One action at a time; an answer that arrives after the surface left paints, focuses and opens nothing (Issue #1680).
+  async function perform(action: () => Promise<void>): Promise<void> { if (busy || destroyed) return; busy = true; try { await action(); } catch (error) { if (!destroyed) options.setStatus(rendererErrorMessage(error, '任务操作未能完成。'), 'error'); } finally { busy = false; if (!destroyed) { options.onChanged?.(); refresh(); } } }
   async function call(item: TaskOverviewItemProjection, operation: TaskOverviewCall['operation'], input: object): Promise<unknown> { if (!item.bookId) return; return options.api.taskOverviewCall({ operation, bookId: item.bookId, input } as TaskOverviewCall); }
-  /** 继续保留 and Escape close the confirmation and hand focus back to the card it asked about. */
-  function dismissConfirm(): void {
-    confirm.hidden = true;
-    const id = confirmItemId; confirmItemId = null;
-    if (id !== null) [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === id)?.focus();
-  }
   function act(item: TaskOverviewItemProjection, action: TaskCardAction): void {
+    if (destroyed) return;
     selectedId = item.itemId;
     if (action === 'answer' && item.nextAction === 'answer-clarification' && item.plan) { void answerOnCard(item); return; }
-    if (['open', 'answer', 'plan', 'run'].includes(action)) { options.openTarget(item, action === 'plan' ? 'plan' : 'run'); return; }
+    if (action === 'open' || action === 'answer' || action === 'plan' || action === 'run' || action === 'next' || action === 'unconfirmed') { options.openTarget(item, action === 'plan' ? 'plan' : 'run'); return; }
     if (action === 'jump') { options.jumpToSelection?.(item); return; }
     if (action === 'book') { if (item.bookId) options.openBook(item.bookId); return; }
     if (action === 'result') { options.openResult(item); return; }
-    if (action === 'cancel') {
-      confirmItemId = item.itemId;
-      confirm.replaceChildren(el('span', undefined, `取消${item.bookTitle ? `《${item.bookTitle}》的` : ''}「${item.label}」？已经完成的结果会保留。`));
-      const yes = el('button', 'danger', '确认取消'); yes.addEventListener('click', () => { confirm.hidden = true; confirmItemId = null; void perform(() => cancel(item)); });
-      const no = el('button', 'quiet', '继续保留'); no.addEventListener('click', dismissConfirm); confirm.append(yes, no); confirm.hidden = false; yes.focus(); return;
-    }
+    if (action === 'proxy') { options.openNetworkProxySettings?.(); return; }
+    // 重新开始… opens the plan and its relaunch there, with the model chooser (Issue #1680); nothing is sent from the card.
+    if (action === 'redo') { options.openTarget(item, 'redo'); return; }
+    // A 审阅 a closed service left half-way goes on on its own page.
+    if (action === 'resume' && item.attention.state === 'review-continuable') { options.openRecord?.(item); return; }
+    // One cancellation (Issue #1680): what has sent nothing is cancelled in one press; a started Run through the plan's impact summary.
+    if (action === 'cancel' && !taskCardView(item).cancelInOnePress) { options.openTarget(item, 'cancel'); return; }
     void perform(async () => {
-      if (action === 'again' && options.beforeStart && !await options.beforeStart()) return;
       if ((action === 'up' || action === 'top') && item.runRecordId) await options.api.reorderQueuedRun({ runRecordId: item.runRecordId, position: action === 'top' ? 1 : Math.max(1, (item.queuePosition ?? 1) - 1) });
-      else if (action === 'again' && item.target.kind === 'dialogue') await dialogueAction(item, 'regenerateDialogueAnswer');
-      else if (action === 'again' && item.bookId && item.plan?.ref && item.plan.kind !== 'fixed-task') await options.api.startQuickTasks({ tasks: [{ bookId: item.bookId, procedureId: 'repeat', repeat: { kind: item.plan.kind, ref: item.plan.ref } }] });
-      else if (action === 'redo') options.openTarget(item, 'redo');
+      else if (action === 'again' && item.target.kind === 'dialogue') { if (options.beforeStart && !await options.beforeStart()) return; await dialogueAction(item, 'regenerateDialogueAnswer'); }
+      else if (action === 'cancel') { const notSent = await cancel(item); if (!destroyed) options.setStatus(notSent ? TASK_BAR_CANCELLED : TASK_BAR_CANCELLED_NOTE, 'success'); }
       else if (item.target.kind === 'dialogue') { await dialogueAction(item, action === 'pause' ? 'stopDialogueAnswer' : 'continueDialogueAnswer'); }
       else if (item.plan?.ref) await call(item, item.plan.kind === 'baseline-analysis' ? action === 'pause' ? 'pauseBaselineAnalysisRun' : 'resumeBaselineAnalysisRun' : 'controlTaskRun', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : { ...item.plan, action });
+      if (destroyed) return;
       if ((action === 'up' || action === 'top') && item.runRecordId && item.queuePosition !== null) showToast('队列顺序已更新。', { action: { label: '撤销', run: () => void perform(async () => { await options.api.reorderQueuedRun({ runRecordId: item.runRecordId!, position: item.queuePosition! }); }) } });
       else if (action === 'pause' || action === 'resume') showToast(action === 'pause' ? '任务已暂停。' : '任务已继续。', { action: { label: '撤销', run: () => act(item, action === 'pause' ? 'resume' : 'pause') } });
     });
@@ -192,11 +176,14 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     const latest = dialogue.attempts.at(-1);
     if (latest) await call(item, operation, { dialogueId: item.target.dialogueId, attemptId: latest.attemptId, ...(cancel ? { cancel: true } : {}) });
   }
-  async function cancel(item: TaskOverviewItemProjection): Promise<void> {
-    if (item.target.kind === 'dialogue') { await dialogueAction(item, 'stopDialogueAnswer', true); return; }
-    if (!item.plan?.ref) return;
-    if (item.state === 'queued' && !['analysis-paused', 'analysis-resumable', 'analysis-yielded', 'analysis-waiting-network', 'analysis-waiting-connection', 'analysis-waiting-admission'].includes(item.attention.state)) await call(item, item.plan.kind === 'baseline-analysis' ? 'cancelWaitingBaselineAnalysis' : 'cancelWaitingTask', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : item.plan);
+  /** The one-press cancellations; `true` when nothing had been sent. */
+  async function cancel(item: TaskOverviewItemProjection): Promise<boolean> {
+    if (item.target.kind === 'dialogue') { await dialogueAction(item, 'stopDialogueAnswer', true); return false; }
+    if (!item.plan?.ref) return false;
+    if (item.attention.state === 'review-continuable') { await call(item, 'cancelReviewRun', { reviewRunId: item.plan.ref }); return false; }
+    if (TASK_CARD_WAIT_CANCELLED.has(item.attention.state) || item.state === 'queued' && !TASK_CARD_RUN_WAIT_CANCELLED.has(item.attention.state)) await call(item, item.plan.kind === 'baseline-analysis' ? 'cancelWaitingBaselineAnalysis' : 'cancelWaitingTask', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : item.plan);
     else await call(item, item.plan.kind === 'baseline-analysis' ? 'cancelBaselineAnalysisRun' : 'controlTaskRun', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : { ...item.plan, action: 'cancel' });
+    return true;
   }
   function paint(): void {
     if (!projection) return; start.disabled = false; const signature = JSON.stringify([projection, selectedBook, selectedType, selectedTime]); if (signature === painted) return; painted = signature;
@@ -207,11 +194,15 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     all.textContent = projection.queueFrozen ? '继续全部' : '暂停全部'; all.disabled = projection.groups.some((group) => group.items.some((item) => item.attention.state === 'analysis-pausing')); all.hidden = !projection.queueFrozen && projection.runningCount === 0;
     note.hidden = !!options.bookId || nothingToShow();
     paintFilters(); const midnight = new Date(); midnight.setHours(0, 0, 0, 0); const since = selectedTime === 'all' ? 0 : selectedTime === 'week' ? Date.now() - 7 * 86400000 : midnight.getTime();
-    const visible = projection.groups.map((group) => ({ ...group, items: group.items.filter((item) => (selectedBook === 'all' || item.bookId === selectedBook) && (selectedType === 'all' || item.taskKind === selectedType) && (group.key !== 'recent' || Date.parse(item.at) >= since)) }));
-    const groups = options.bookId ? [{ key: 'waiting' as const, items: visible[2]!.items }, { key: 'running' as const, items: [...visible[0]!.items, ...visible[1]!.items, ...visible[3]!.items] }, { key: 'recent' as const, items: visible[4]!.items }] : visible;
+    // The renderer places each card by its record's state (Issue #1680); the service's own groups are only read as one list.
+    const listed = projection.groups.flatMap((group) => group.items).filter((item) => (selectedBook === 'all' || item.bookId === selectedBook) && (selectedType === 'all' || item.taskKind === selectedType));
+    const placed = listed.map((item) => ({ item, view: taskCardView(item) })).filter(({ item, view }) => view.pageGroup !== 'recent' || Date.parse(item.at) >= since);
+    const groups = options.bookId
+      ? TASK_PANEL_GROUPS.map((key) => ({ key, heading: TASK_PANEL_GROUP_LABELS[key], items: placed.filter(({ view }) => view.panelGroup === key).map(({ item }) => item) }))
+      : TASK_PAGE_GROUPS.map((key) => ({ key, heading: TASK_PAGE_GROUP_LABELS[key], items: placed.filter(({ view }) => view.pageGroup === key).map(({ item }) => item) }));
     const painting = options.bookId ? groups : groups.filter((group) => group.items.length > 0);
     if (!options.bookId && painting.length === 0) host.replaceChildren(el('p', 'task-overview-none', nothingToShow() ? '现在没有任务，可以用上面的「发起任务」开始一项。' : '没有符合所选筛选的任务。'));
-    else host.replaceChildren(...painting.map((group) => { const section = el('section', 'task-overview-group'); section.dataset['taskGroup'] = group.key; section.append(el('h3', 'task-overview-group-heading', `${options.bookId && group.key === 'running' ? '进行中' : GROUP_LABELS[group.key]}`)); const count = el('span', 'task-overview-count', String(group.items.length)); section.firstElementChild?.append(' · ', count); const list = el('div', 'task-overview-items'); list.append(...group.items.map((item) => taskOverviewCard(item, act))); section.append(group.items.length ? list : el('p', 'task-overview-empty', '这里暂时没有任务。')); return section; }));
+    else host.replaceChildren(...painting.map((group) => { const section = el('section', 'task-overview-group'); section.dataset['taskGroup'] = group.key; section.append(el('h3', 'task-overview-group-heading', group.heading)); const count = el('span', 'task-overview-count', String(group.items.length)); section.firstElementChild?.append(' · ', count); const list = el('div', 'task-overview-items'); list.append(...group.items.map((item) => taskOverviewCard(item, act, options.bookId !== undefined))); section.append(group.items.length ? list : el('p', 'task-overview-empty', '这里暂时没有任务。')); return section; }));
     for (const { form, itemId } of answers) { const card = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === itemId); card?.append(form); }
     restoreInteraction();
     if (pendingFocus) { const target = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === pendingFocus); if (target) { target.focus(); pendingFocus = null; } }
@@ -221,10 +212,10 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return;
     const cards = [...host.querySelectorAll<HTMLElement>('[data-task-item]')]; const index = cards.findIndex((node) => node === document.activeElement || node.contains(document.activeElement));
     if (['ArrowDown', 'ArrowUp', 'j', 'k'].includes(event.key)) { event.preventDefault(); const next = Math.max(0, Math.min(cards.length - 1, index + (event.key === 'ArrowUp' || event.key === 'k' ? -1 : 1))); cards[next]?.focus(); selectedId = cards[next]?.dataset['taskItem'] ?? null; return; }
-    if (event.key === 'Escape') { if (sheet.open) sheet.close(); else if (!confirm.hidden) dismissConfirm(); else options.closeDrawer?.(); return; }
+    if (event.key === 'Escape') { if (sheet.open) sheet.close(); else options.closeDrawer?.(); return; }
     if (event.target instanceof HTMLButtonElement || event.target instanceof HTMLElement && event.target.closest('details')) return;
     const item = projection?.groups.flatMap((group) => group.items).find((row) => row.itemId === (cards[index]?.dataset['taskItem'] ?? selectedId)); if (!item) return;
-    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Delete') { event.preventDefault(); if (event.key === 'Enter') act(item, 'open'); else if (event.key === 'Delete' && ['running', 'queued', 'paused'].includes(item.state)) act(item, 'cancel'); else if (event.key === ' ' && ['running', 'paused'].includes(item.state)) act(item, item.state === 'running' ? 'pause' : 'resume'); }
+    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Delete') { event.preventDefault(); const offered = new Set(taskCardView(item).actions.map((entry) => entry.action)); if (event.key === 'Enter') act(item, 'open'); else if (event.key === 'Delete' && offered.has('cancel')) act(item, 'cancel'); else if (event.key === ' ' && (offered.has('pause') || offered.has('resume'))) act(item, offered.has('pause') ? 'pause' : 'resume'); }
   }
   const visible = (): void => { if (document.visibilityState === 'visible') refresh(); };
   document.addEventListener('visibilitychange', visible);
