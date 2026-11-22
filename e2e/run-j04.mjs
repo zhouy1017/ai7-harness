@@ -1,3 +1,4 @@
+import { pressReachable } from './task-card-reach.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions } from './launch-task-bar.mjs';
@@ -2885,7 +2886,7 @@ async function main() {
     // The drawer beside ②B read the plan again as the Run moved; it now states the Run's end.
     const settledReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'settled', 'review-drawer-settled');
     requireJourney(settledReviewDrawer?.pill === '已完成' && settledReviewDrawer.drift === null && typeof settledReviewDrawer.technical.authorization === 'string' &&
-      settledReviewDrawer.bar?.state === 'started' && settledReviewDrawer.bar.status === '已完成' && barActions(settledReviewDrawer) === 'run-link:查看审阅:enabled',
+      settledReviewDrawer.bar?.state === 'started' && settledReviewDrawer.bar.status === '已完成' && barActions(settledReviewDrawer) === 'redo:重新开始…:enabled|run-link:查看审阅:enabled',
       'review-drawer-settled-plan', settledReviewDrawer);
 
     // Completion is a quiet 查看 notice while the editor is working in 审阅, even with the preference on.
@@ -4136,6 +4137,51 @@ async function main() {
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
+    at('evaluation-relaunch-references');
+    // A source with no series in its saved scope. The window stays on its original Book while editing the other Book's references.
+    await writeFile(connectivityPath, 'offline');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'evaluation-reference-tasks');
+    const referenceBook = recordedBook.bookId;
+    const priorBook = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then(route => route?.bookId ?? null)`);
+    requireJourney(priorBook !== referenceBook, 'evaluation-reference-foreign-book');
+    const fixture = await renderer.evaluate(`(async () => {
+      const bookId = ${JSON.stringify(referenceBook)};
+      await window.ai7.inspectTaskOverview();
+      const { seriesId } = await window.ai7.createSeries({ title: '初评参考书系', note: '' });
+      const change = { seriesId, bookId, kind: 'add' };
+      const { previewDigest } = await window.ai7.previewSeriesMembershipChange(change);
+      await window.ai7.changeSeriesMembership({ ...change, previewDigest });
+      const run = await window.ai7.taskOverviewCall({ operation: 'launchInitialEvaluation', bookId, input: { clientCommandId: crypto.randomUUID(), startWhen: 'when-online' } });
+      return { seriesId, ref: run.taskIntentId };
+    })()`);
+    const referenceCard = `[data-task-item=${JSON.stringify('task:' + fixture.ref)}] .task-overview-card-title strong`;
+    await pressReachable(renderer, waitFor, requireJourney, referenceCard, 'evaluation-reference-source');
+    const drawerButton = name => `#task-drawer [data-task-drawer-control=${JSON.stringify(name)}]:not(:disabled)`;
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef === ${JSON.stringify(fixture.ref)}`, 'evaluation-reference-source-open');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('cancel-wait'), 'evaluation-reference-cancel-wait');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('redo'), 'evaluation-reference-redo');
+    const options = '#task-drawer .task-launch-options > summary';
+    await pressReachable(renderer, waitFor, requireJourney, options, 'evaluation-reference-options');
+    const series = '#task-drawer select[aria-label="本次任务的书系参考"]';
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(series)})?.value === ''`, 'evaluation-reference-original-book-only');
+    const choice = await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(series)}).options).findIndex(o => o.value === ${JSON.stringify(fixture.seriesId)})`);
+    requireJourney(choice > 0, 'evaluation-reference-target-series');
+    for (const [index, value, label] of [[choice, fixture.seriesId, 'series'], [0, '', 'book']]) {
+      await pressReachable(renderer, waitFor, requireJourney, series + ' + .ui-select-trigger', `evaluation-reference-${label}-chooser`);
+      await pressReachable(renderer, waitFor, requireJourney, series + ` ~ .ui-select-popover [data-index="${index}"]`, `evaluation-reference-${label}-choice`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(series)})?.value === ${JSON.stringify(value)}`, `evaluation-reference-${label}-selected`);
+    }
+    await pressReachable(renderer, waitFor, requireJourney, options, 'evaluation-reference-options-close');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('launch'), 'evaluation-reference-start');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanKind === 'initial-evaluation' && drawer.dataset.taskPlanRef && drawer.dataset.taskPlanRef !== ${JSON.stringify(fixture.ref)}; })()`, 'evaluation-reference-new-run');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('cancel-wait'), 'evaluation-reference-settle');
+    await waitFor(renderer, `(async () => {
+      const ref = document.querySelector('#task-drawer')?.dataset.taskPlanRef;
+      if (!ref || ref === ${JSON.stringify(fixture.ref)}) return false;
+      const plan = await window.ai7.taskOverviewCall({ operation: 'inspectTaskPlan', bookId: ${JSON.stringify(referenceBook)}, input: { kind: 'initial-evaluation', ref } });
+      const route = await window.ai7.getBookWorkbenchRoute();
+      return plan.state.key === 'cancelled' && plan.relaunch?.operation === 'launchInitialEvaluation' && !Object.hasOwn(plan.relaunch.input, 'seriesId') && (route?.bookId ?? null) === ${JSON.stringify(priorBook)};
+    })()`, 'evaluation-reference-saved-book-only');
   } finally {
     finalCleanupRequested = true;
     try { await cancellation.cleanup(); } finally { cancellation.dispose(); }
