@@ -1,3 +1,4 @@
+import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 import { openTaskResultWindow } from '../../src/renderer/task-result-window.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
@@ -60,6 +61,49 @@ describe('task overview', () => {
       }
       expect(tick).toBeGreaterThanOrEqual(3);
     } finally { panel.stop(); vi.useRealTimers(); vi.unstubAllGlobals(); setTechnicalLayerVisible(true); uninstall(); }
+  });
+  it('runs each Book menu entry for the displayed Book and explains a disabled analysis', async () => {
+    const uninstall = installMiniDom(); vi.useFakeTimers();
+    vi.stubGlobal('window', { setInterval, clearInterval, setTimeout, clearTimeout });
+    const startQuickTasks = vi.fn(), startWholeBook = vi.fn(), openComposer = vi.fn(), configure = vi.fn();
+    const projection = composeTaskOverview({ groups: [], actionableCount: 0, running: false, processing: { state: 'local' } }, 2, () => null);
+    const updates = {
+      blockedByActiveRun: false,
+      actions: {
+        'sync-current': { label: '同步到当前稿件', available: true, goal: '同步', unavailableReason: null },
+        'reanalyze-book': { label: '重新分析全书', available: true, goal: '全书', unavailableReason: null },
+      },
+    };
+    let first = true;
+    const panel = mountTaskPanel({ api: {
+      inspectTaskOverview: async () => ({ ...projection, quickStarts: [
+        { bookId: 'book', procedureId: 'rule:sync', label: '同步规则' }, { bookId: 'other', procedureId: 'other', label: '其他规则' },
+      ] }),
+      inspectBaselineAnalysis: async () => ({ actions: { canPrepare: true }, updateControls: first ? null : updates }),
+      inspectBookTasks: async () => ({ bookId: 'book', running: false, groups: [] }), startQuickTasks,
+    } as unknown as RendererApi, startWholeBook, openComposer, configure, onRecorded: vi.fn(), parked: () => null,
+    settle: async () => true, setStatus: vi.fn(), errorMessage: () => '' } as unknown as Parameters<typeof mountTaskPanel>[0]);
+    const entry = (id: string) => panel.element.querySelector<HTMLButtonElement>(`[data-task-compose-action="${id}"]`);
+    try {
+      panel.show('book'); await vi.advanceTimersByTimeAsync(0);
+      expect(entry('other')).toBeNull();
+      for (const id of ['compose', 'review', 'writing', 'initial-evaluation', 'rule:sync', 'first-baseline']) {
+        entry(id)!.click(); await vi.advanceTimersByTimeAsync(0);
+      }
+      expect(openComposer).toHaveBeenCalledTimes(1);
+      expect(configure.mock.calls).toEqual([['book', 'review'], ['book', 'writing']]);
+      expect(startQuickTasks.mock.calls).toEqual(['initial-evaluation', 'rule:sync'].map(procedureId => [{ tasks: [{ bookId: 'book', procedureId }] }]));
+      expect(startWholeBook).toHaveBeenCalledWith({ goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, quick: null });
+      first = false; panel.refresh(); await vi.advanceTimersByTimeAsync(0);
+      for (const mode of ['sync-current', 'reanalyze-book'] as const) {
+        entry(mode)!.click(); await vi.advanceTimersByTimeAsync(0);
+        expect(startWholeBook).toHaveBeenLastCalledWith({ goal: updates.actions[mode].goal, update: { mode, selectedRange: null }, quick: null });
+      }
+      Object.assign(updates.actions['sync-current'], { available: false, unavailableReason: '稿件尚未改变。' });
+      panel.refresh(); await vi.advanceTimersByTimeAsync(0);
+      expect(entry('sync-current')?.disabled).toBe(true);
+      expect(entry('sync-current')?.textContent).toContain('稿件尚未改变。');
+    } finally { panel.stop(); vi.useRealTimers(); vi.unstubAllGlobals(); uninstall(); }
   });
   it('shows a completed writing task without navigating away from the current plan', () => {
     const uninstall = installMiniDom();

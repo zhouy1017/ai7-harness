@@ -99,6 +99,7 @@ export interface ManuscriptScreen {
   interrupt(): void;
   blockedClose(): boolean;
   /** AI 写作 on 稿件's switcher reads again (Issue #1403): the Task Drawer started or recorded its Task. */
+  openWriting(): void;
   refreshWriting(): void;
   destroy(): void;
 }
@@ -1008,6 +1009,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       protectionSurface?.openOptions(PROTECTION_CLOSE_BLOCKED);
       return true;
     },
+    openWriting: () => switcher?.openWriting(),
     refreshWriting: () => switcher?.refreshWriting(),
     destroy,
   };

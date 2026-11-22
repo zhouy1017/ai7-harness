@@ -59,6 +59,7 @@ export interface ManuscriptSwitcher {
   readonly element: HTMLElement;
   /** A rename on the editor's own title (Issue #1404): the switcher's entry says it at once, then the Book is read again. */
   renamed(documents: ProductionDocumentsProjection): void;
+  openWriting(): void;
   refreshWriting(): void;
   destroy(): void;
 }
@@ -330,6 +331,7 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
       projection = documents;
       paintBar();
     },
+    openWriting: () => writing.open(null),
     refreshWriting: () => writing.refresh(),
     destroy: () => {
       destroyed = true;

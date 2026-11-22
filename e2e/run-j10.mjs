@@ -1171,6 +1171,8 @@ async function main() {
       stillStopped.run.attempt?.spans?.length === 2, 'resumable-sends-nothing');
 
     at('resumable-task-card');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('attention'), 'resumable-attention-entry');
+    await waitFor(renderer, `document.querySelector('[data-attention-group="exceptions"] [data-attention-state="analysis-resumable"][data-book-id=${JSON.stringify(secondBookId)}]')`, 'resumable-attention-exception');
     // Issue #1680: on the 任务 page and in the Book's 任务 panel the Run AI7 closed under says so — 任务已中断 · AI7 关闭时正在运行,
     // never 「你 … 暂停」 — with 继续 · 重新开始… · 取消任务, each inside the window.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'resumable-tasks-page');

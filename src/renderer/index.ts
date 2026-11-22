@@ -173,6 +173,7 @@ const taskDrawer = mountTaskDrawer({
     if (route.via === 'page') void leaveThen(() => openGlobalAttentionTarget(route.target));
     else openTaskResult(entry, backToPanel, overviewDrawerBookId === null ? api : overviewApi);
   },
+  configureBookTask: (bookId, kind) => configureBookTask(bookId, kind),
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
   // 跳到所选文字 on a selection Task's card (Issue #423, S77 deferred item d): every refusal is said on the status line.
   jumpToSelection: (bookId, selection) => void jumpToSelectionText(bookId, selection),
@@ -3457,7 +3458,7 @@ const { renderModelServiceSettings } = createModelServiceSettings({
   element, button, setStatus, rendererErrorMessage, panel, initializeStartup, replaceScreen,
 });
 
-const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
+const { configureBookTask, openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
   technicalDetails,
   get authorityInterrupted() { return authorityInterrupted; },
   set authorityInterrupted(value) { authorityInterrupted = value; },
@@ -3485,6 +3486,7 @@ const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNo
   requestBookWorkbenchRoute: (...args) => requestBookWorkbenchRoute(...args),
   jumpToSelectionText: (...args) => jumpToSelectionText(...args),
   renderBookReview: (...args) => renderBookReview(...args),
+  openManuscriptWriting: () => manuscriptOnScreen?.openWriting(),
   renderBookManuscript: (...args) => renderBookManuscript(...args),
   button: (...args) => button(...args),
   element: (...args) => element(...args),

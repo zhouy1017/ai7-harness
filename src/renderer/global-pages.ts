@@ -48,6 +48,7 @@ interface Options {
   requestBookWorkbenchRoute: (route: BookWorkbenchRoute, onRequestingWindow?: (resolved: ResolvedBookWorkbenchRoute) => Promise<void>, recoveryReturn?: RecoveryReturnContext, navigationRoute?: NavigationCheckpoint) => Promise<void>;
   jumpToSelectionText: (bookId: string, selection: { readonly manuscriptId: string; readonly fromBlockId: string; readonly toBlockId: string; }) => Promise<boolean>;
   renderBookReview: (bookId: string, bookTitle: string, focus?: ReviewFocus | null, procedureId?: string | null) => void;
+  openManuscriptWriting(): void;
   renderBookManuscript: (bookId: string, bookTitle: string, route?: NavigationCheckpoint) => Promise<NavigationCheckpoint | undefined>;
   button: (label: string, className: "primary" | "secondary" | "quiet", action: () => void | Promise<void>) => HTMLButtonElement;
   element: <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => HTMLElementTagNameMap[K];
@@ -178,6 +179,17 @@ async function openResult(item: TaskOverviewItemProjection, from: ResultEntrance
   if (route.via === 'page') await openGlobalAttentionTarget(route.target, route.analysisRevisionId);
   else if (route.via === 'window') await openResultWindow(item);
 }
+function configureBookTask(bookId: string, kind: 'review' | 'writing', returnToOverview = false): void {
+  void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
+    if (kind === 'review') renderBookReview(bookId, route.bookTitle);
+    else {
+      const shown = await renderBookManuscript(bookId, route.bookTitle, navigation.route());
+      if (!shown?.isCurrent()) return;
+      if (!returnToOverview) state.openManuscriptWriting();
+    }
+    if (returnToOverview) screen.firstElementChild?.append(button('返回任务总览', 'quiet', () => renderTaskOverview()));
+  });
+}
 function renderTaskOverview(focusItemId?: string): void {
   taskDrawer.close(false);
   const content = panel(); content.classList.add('task-overview');
@@ -188,13 +200,7 @@ function renderTaskOverview(focusItemId?: string): void {
     openBook: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }),
     jumpToSelection: (item) => { if (item.bookId && item.selection) void jumpToSelectionText(item.bookId, item.selection); },
     openResult: (item) => void openResult(item, 'overview'), closeDrawer: () => taskDrawer.close(true),
-    configure: (bookId, kind) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
-      const current = navigation.route();
-      if (kind === 'review') renderBookReview(bookId, route.bookTitle);
-      // 写作 lives on 稿件 (Issue #1403).
-      else { const shown = await renderBookManuscript(bookId, route.bookTitle, current); if (!shown?.isCurrent()) return; }
-      const back = button('返回任务总览', 'quiet', () => renderTaskOverview()); content.append(back); screen.firstElementChild?.append(back);
-    }),
+    configure: (bookId, kind) => configureBookTask(bookId, kind, true),
   });
   replaceScreen('task-overview', content); state.taskOverviewSurface = surface;
   if (focusItemId) { const page = navigation.read(content); surface.focus(focusItemId); window.setTimeout(() => { if (page.isCurrent()) surface.focus(focusItemId); }, 300); }
@@ -356,5 +362,5 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
   }
 }
 
-return { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget };
+return { configureBookTask, openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openResult, openResultWindow, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget };
 }
