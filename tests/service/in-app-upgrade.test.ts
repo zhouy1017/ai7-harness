@@ -578,10 +578,12 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   await cp(roots.dataRoot,seed,{recursive:true});
   const deleted = 'removed-after-upgrade.bin';
   const changed = 'changed-after-upgrade.bin';
+  const unchanged = 'unchanged-after-upgrade.bin';
   const oldBytes = Buffer.from([1,116]);
   const newBytes = Buffer.from([2,117,8]);
   await writeFile(join(seed,deleted),oldBytes);
   await writeFile(join(seed,changed),oldBytes);
+  await writeFile(join(seed,unchanged),oldBytes);
   await beginUpgrade(seed);
   await resumeUpgrade(seed,'0.8.0');
   await rm(join(seed,deleted));
@@ -633,6 +635,7 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   await rm(join(saved,'rollback-ready.json'));
   await rm(join(root,'shell','upgrade-'+id,'rollback-ready.json'));
   const independent = join(root,'shell','upgrade-'+id,'current-database');
+  const commitment = await readFile(join(independent,'rollback-ready.json'));
   await writeFile(join(independent,'rollback-ready.json'),'{');
   const allFiles = JSON.parse(await readFile(join(independent,'files.json'),'utf8')) as Array<{path:string}>;
   const shortened = allFiles.filter(file => file.path !== unreferenced);
@@ -651,6 +654,33 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   expect(storeRevisionOnDisk(sql)).toBe(116);
   await rename(held,join(savedPayload,key));
   await writeFile(join(savedPayload,changed),newBytes);
+  // 116 and 117 both exported this unreferenced file. Only the independent 117 inventory now proves that 117 kept it.
+  await rm(join(savedPayload,unchanged));
+  const remembered = join(root,'shell','upgrade-'+id,'current-files.json');
+  const shortJson = JSON.stringify(allFiles.filter(file => ![unchanged,changed,unreferenced].includes(file.path)));
+  await writeFile(remembered,shortJson);
+  const sealed = join(independent,'files.json');
+  await writeFile(sealed,JSON.stringify(allFiles));
+  const read = replacement.readSmallFile;
+  const unavailable = vi.spyOn(replacement,'readSmallFile').mockImplementation(async (path,maxBytes) => {
+    if (path === sealed) throw Object.assign(Error('busy'),{code:'EBUSY'});
+    return read(path,maxBytes);
+  });
+  try { await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'EBUSY'}); } finally { unavailable.mockRestore(); }
+  expect(await readFile(phase)).toEqual(stale);
+  expect(await readFile(remembered,'utf8')).toBe(shortJson);
+  expect(await readFile(join(root,unchanged))).toEqual(oldBytes);
+  expect(existsSync(join(savedPayload,unchanged))).toBe(false);
+  expect(storeRevisionOnDisk(sql)).toBe(116);
+  await rm(sealed);
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  expect(await readFile(phase)).toEqual(stale);
+  expect(await readFile(remembered,'utf8')).toBe(shortJson);
+  await writeFile(sealed,JSON.stringify(allFiles));
+  // The old published root also has a deliberately deleted member. Negative evidence alone cannot authorize deleting it.
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  expect(await readFile(phase)).toEqual(stale);
+  await writeFile(join(independent,'rollback-ready.json'),commitment);
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
   await verifyLibraryFiles(root,117);
   expect(hasDraft(sql)).toBe(true);
@@ -667,6 +697,7 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   const pkg = await verifyDatabasePackage(exported,{dataRoot:root});
   expect(pkg.manifest.members.find(file => file.path === unreferenced)).toEqual({path:unreferenced,...extraDigest});
   expect(pkg.manifest.members.some(file => file.path === deleted)).toBe(false);
+  expect(pkg.manifest.members.find(file => file.path === unchanged)?.sha256).toBe(createHash('sha256').update(oldBytes).digest('hex'));
   expect(pkg.manifest.members.find(file => file.path === changed)?.sha256).toBe(createHash('sha256').update(newBytes).digest('hex'));
   await beginUpgradeRollback(root);
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
@@ -819,7 +850,7 @@ it.each(['write','read'] as const)('keeps the backup phase retryable after a nat
   await verifyLibraryFiles(root,117);
 },180_000);
 
-it.each(['old-payloads','incoming','archive','unavailable'] as const)('preserves the bound inventory and recovers an unreferenced member from %s',async source => {
+it.each(['old-payloads','incoming','archive','unavailable','short-sealed','shared-read'] as const)('preserves the complete inventory with an unreferenced member across %s',async source => {
   const root = join(roots.inputRoot,'retained-inventory-'+source);
   await cp(roots.dataRoot,root,{recursive:true});
   const member = 'retained-entry.bin';
@@ -834,21 +865,38 @@ it.each(['old-payloads','incoming','archive','unavailable'] as const)('preserves
   const {id,backup} = JSON.parse(stale.toString('utf8'));
   const note = join(root,'shell','upgrade-'+id);
   const parked = join(root,'shell','store-after-0.8.0-'+id);
-  await expect(resumeUpgrade(root,'0.8.0',stage => { if (stage === 'publish-old') throw Error('interrupted'); })).rejects.toThrow('interrupted');
+  await expect(resumeUpgrade(root,'0.8.0',(stage,moved) => { if (stage === 'publish-old' && Boolean(moved) === (source === 'shared-read')) throw Error('interrupted'); })).rejects.toThrow('interrupted');
   await rm(join(parked,'rollback-ready.json'));
   await rm(join(note,'rollback-ready.json'));
   const manifest = join(note,'current-files.json');
   const complete = JSON.parse(await readFile(manifest,'utf8')) as Array<{path:string}>;
   const shortened = JSON.stringify(complete.filter(file => file.path !== member));
-  await writeFile(manifest,shortened);
+  if (source === 'short-sealed') {
+    await writeFile(join(note,'current-database','rollback-ready.json'),'{');
+    await writeFile(join(note,'current-database','files.json'),shortened);
+  } else await writeFile(manifest,shortened);
+  if (source === 'shared-read') await rm(join(note,'current-database','rollback-ready.json'));
   if (source !== 'archive') await rm(join(backupLocationFor(root),backup.backup.fileName));
   if (source === 'old-payloads' || source === 'incoming') {
     const dir = source === 'incoming' ? join(replacementStagingFor(join(note,'restore')),'incoming') : join(note,source);
     await mkdir(dir,{recursive:true});
     await rename(join(root,member),join(dir,member));
-  } else await rm(join(root,member));
-  await rm(join(parked,'payloads',member));
+  } else if (source !== 'short-sealed' && source !== 'shared-read') await rm(join(root,member));
+  if (source !== 'short-sealed') await rm(join(parked,'payloads',member));
   await writeFile(phase,stale);
+  if (source === 'shared-read') {
+    const sealed = join(note,'current-database','files.json');
+    const read = replacement.readSmallFile;
+    const busy = vi.spyOn(replacement,'readSmallFile').mockImplementation(async (path,maxBytes) => {
+      if (path === sealed) throw Object.assign(Error('busy'),{code:'EBUSY'});
+      return read(path,maxBytes);
+    });
+    try { await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'EBUSY'}); } finally { busy.mockRestore(); }
+    expect(await readFile(phase)).toEqual(stale);
+    expect(await readFile(manifest,'utf8')).toBe(shortened);
+    expect(await readFile(join(root,member))).toEqual(contents);
+    expect(existsSync(join(parked,'payloads',member))).toBe(false);
+  }
   if (source === 'unavailable') {
     await writeFile(join(note,'current-database','files.json'),shortened);
     await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
@@ -860,7 +908,16 @@ it.each(['old-payloads','incoming','archive','unavailable'] as const)('preserves
   expect(await readFile(join(root,'new-entry.bin'))).toEqual(Buffer.from([8,0]));
   await verifyLibraryFiles(root,117);
   const opened = await EditorialStore.open(root,roots.codeRoot);
-  try { expect(opened.listBooks(null).items).toHaveLength(2); } finally { opened.markCleanShutdown(); opened.close(); }
+  try {
+    expect(opened.listBooks(null).items).toHaveLength(2);
+    if (source === 'shared-read') {
+      const path = join(roots.inputRoot,'shared-read.ai7db');
+      const prep = await opened.prepareDatabaseExport(path,true);
+      await opened.approveDatabaseExport(prep.preparationId,true);
+      const pkg = await verifyDatabasePackage(path,{dataRoot:root});
+      expect(pkg.manifest.members.find(file => file.path === member)?.sha256).toBe(createHash('sha256').update(contents).digest('hex'));
+    }
+  } finally { opened.markCleanShutdown(); opened.close(); }
 },180_000);
 
 it.each(['original','extracted'] as const)('reuses extracted offline payloads with the %s database and budgets simultaneous copies',async source => {
@@ -884,12 +941,13 @@ it.each(['original','extracted'] as const)('reuses extracted offline payloads wi
   await rm(manifest);
   const prepared = join(note,'prepared-payloads');
   await mkdir(prepared,{recursive:true});
-  await writeFile(join(prepared,'partial.bin'),Buffer.alloc(4096));
+  const partial = join(prepared,'partial.bin');
+  await writeFile(partial,Buffer.alloc(4096));
   const write = replacement.writeAtomic;
   let reclaimed = false;
   const disk = vi.spyOn(replacement,'writeAtomic').mockImplementation(async (path,contents) => {
     if (path === manifest) {
-      if (existsSync(prepared)) throw Object.assign(Error('disk full'),{code:'ENOSPC'});
+      if (existsSync(partial)) throw Object.assign(Error('disk full'),{code:'ENOSPC'});
       reclaimed = true;
     }
     await write(path,contents);
@@ -902,7 +960,9 @@ it.each(['original','extracted'] as const)('reuses extracted offline payloads wi
     const base = rollbackDataPeak(currentBytes);
     const free = source === 'original' ? base + Math.floor(originalFile.bytes*1.5) : base;
     if (source === 'extracted') expect(originalFile.bytes).toBeGreaterThan(free);
-    await expect(resumeUpgrade(root,'0.8.0',undefined,free)).rejects.toMatchObject({code:'UPGRADE_SPACE'});
+    await expect(resumeUpgrade(root,'0.8.0',undefined,free)).rejects.toMatchObject({code:'UPGRADE_SPACE',message:expect.stringContaining('回退的临时文件空间不足')});
+    expect(reclaimed).toBe(true);
+    expect(existsSync(partial)).toBe(false);
     expect(storeRevisionOnDisk(sql)).toBe(117);
     expect(JSON.parse(await readFile(join(root,'shell','storage-upgrade.json'),'utf8')).stage).toBe('restore');
     expect(existsSync(oldOnly)).toBe(false);
