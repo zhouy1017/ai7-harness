@@ -1,4 +1,4 @@
-import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { capturePointerFailure, chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions } from './launch-task-bar.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
@@ -419,26 +419,102 @@ async function openAnalysisDestination(renderer, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis .baseline-analysis-card')`, `${name}-destination`);
 }
 
+// Opening the drawer also animates the page's reserved space (Issue #1664).
+async function waitForOfflineDrawerSettled(renderer, name) {
+  await waitFor(renderer, `new Promise(resolve => {
+    let previous;
+    const frame = () => {
+      const drawer=document.querySelector('#task-drawer');
+      const tab=document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]');
+      if(!drawer || !tab){resolve(false);return;}
+      const owners=[drawer,document.body];
+      const animating=owners.some(node=>node.getAnimations().some(animation=>animation.playState!=='finished'));
+      const rectangle=JSON.stringify([...owners,tab].map(node=>{
+        const r=node.getBoundingClientRect();return [r.x,r.y,r.width,r.height];
+      }));
+      if(!animating && rectangle===previous){resolve(true);return;}
+      if(previous!==undefined || animating){resolve(false);return;}
+      previous=rectangle;
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  })`, name);
+}
+
+async function assertOfflineControlReachable(renderer, selector, name) {
+  try {
+    await assertRenderer(renderer, `(() => {
+    const control=document.querySelector(${JSON.stringify(selector)});
+    if(!control)return false;
+    const r=control.getBoundingClientRect();
+    if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;
+    for(let parent=control.parentElement;parent;parent=parent.parentElement){
+      const style=getComputedStyle(parent),box=parent.getBoundingClientRect();
+      if(/auto|scroll|hidden|clip/.test(style.overflowX)&&(r.left<box.left||r.right>box.right))return false;
+      if(/auto|scroll|hidden|clip/.test(style.overflowY)&&(r.top<box.top||r.bottom>box.bottom))return false;
+    }
+    return control.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));
+    })()`, name);
+  } catch (error) {
+    Object.defineProperty(error, 'pointerFailure', { value: await capturePointerFailure(renderer, selector, { includeTargetAncestors: true }) });
+    throw error;
+  }
+}
+
+// The history panel is longer than the window. Reach its controls with real wheel
+// input before asserting visibility; pointerClick's scripted scroll is not evidence.
+async function scrollToOfflineControl(renderer, selector, name) {
+  for (let step=0;step<24;step++) {
+    const wheel=await renderer.evaluate(`(() => {
+      const control=document.querySelector(${JSON.stringify(selector)});
+      if(!control)return null;
+      const r=control.getBoundingClientRect();
+      if(r.top>=0&&r.bottom<=innerHeight)return null;
+      const page=document.querySelector('#screen').getBoundingClientRect();
+      return {x:Math.max(1,Math.min(innerWidth-1,page.left+Math.min(80,page.width/2))),
+        y:innerHeight/2,deltaY:Math.max(-500,Math.min(500,r.top+r.height/2-innerHeight/2))};
+    })()`);
+    if(wheel===null)break;
+    await renderer.send('Input.dispatchMouseEvent', {type:'mouseWheel',deltaX:0,...wheel});
+    await renderer.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+  }
+  await assertOfflineControlReachable(renderer, selector, name);
+}
+
 /**
  * Each ordinary update opens the execution chooser and starts from its bar. Its optional estimate is read-only;
  * after launch the frozen plan remains readable. Quick starts retain the Default Execution Rule owner.
  */
-async function startUpdate(renderer, mode, label, name, launch = true) {
+async function startUpdate(renderer, mode, label, name, launch = true, settleOfflineDrawer = false) {
   void label;
   // The previous Run's 查看结果 window may have opened over the page when it finished; the editor closes it first.
-  if (await renderer.evaluate(`!!document.querySelector('.task-result-window')`)) await pointerClick(renderer, waitFor, '.task-result-window [data-task-result-action="close"]', `${name}-result-close`);
+  if (await renderer.evaluate(`!!document.querySelector('.task-result-window')`)) {
+    if (settleOfflineDrawer) await assertOfflineControlReachable(renderer, '.task-result-window [data-task-result-action="close"]', `${name}-result-close-reachable`);
+    await pointerClick(renderer, waitFor, '.task-result-window [data-task-result-action="close"]', `${name}-result-close`);
+  }
+  if (settleOfflineDrawer) await waitForOfflineDrawerSettled(renderer, `${name}-drawer-settled`);
   // Below 1120 px the Task Drawer overlays the page: when it covers the history tab, the editor closes it first.
-  const tabCovered = `(() => { const tab=document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]'); if(!tab)return false; tab.scrollIntoView({block:'center',behavior:'instant'}); const r=tab.getBoundingClientRect(); return !tab.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)) && !!document.querySelector('#task-drawer:not([hidden])')?.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)); })()`;
+  const tabCovered = `(() => { const tab=document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]'); if(!tab)return false; ${settleOfflineDrawer ? '' : "tab.scrollIntoView({block:'center',behavior:'instant'});"} const r=tab.getBoundingClientRect(); return !tab.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)) && !!document.querySelector('#task-drawer:not([hidden])')?.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)); })()`;
   if (await renderer.evaluate(tabCovered)) {
     // Only the overlay form is closed away: a docked drawer (the page made room for it) over the tab is a defect of the page.
     requireJourney(await renderer.evaluate(`Number.parseFloat(getComputedStyle(document.body).paddingRight)===0`) === true, `${name}-docked-drawer-covers-tab`);
+    if (settleOfflineDrawer) await assertOfflineControlReachable(renderer, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close-reachable`);
     await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close`);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `${name}-drawer-closed`);
+  }
+  if (settleOfflineDrawer) {
+    await waitForOfflineDrawerSettled(renderer, `${name}-page-settled`);
+    await assertOfflineControlReachable(renderer, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab-reachable`);
   }
   await pointerClick(renderer, waitFor, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab`);
   const choice = `.baseline-analysis-card [data-analysis-action="${mode}"]`;
   await waitFor(renderer, `document.querySelector(${JSON.stringify(choice)})?.disabled===false`, `${name}-selected-plan-ready`);
+  if (settleOfflineDrawer) await scrollToOfflineControl(renderer, choice, `${name}-mode-reachable`);
   await pointerClick(renderer, waitFor, choice, `${name}-mode`);
+  if (settleOfflineDrawer) {
+    await waitForOfflineDrawerSettled(renderer, `${name}-launch-drawer-settled`);
+    await scrollToOfflineControl(renderer, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan-reachable`);
+  }
   await pointerClick(renderer, waitFor, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan`);
   if (!launch) return;
   await launchTaskFromBar(renderer, waitFor, name);
@@ -2510,7 +2586,7 @@ async function main() {
     at('sync-current-prepare');
     at('connectivity-offline-bar');
     await writeFile(connectivityPath, 'offline');
-    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'offline-sync-open', false);
+    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'offline-sync-open', false, true);
     // A new start has no prepared record; the optional timing choice and launch remain keyboard reachable.
     try {
       for(const [width,height] of [[1280,800],[1008,681]]) {
