@@ -567,7 +567,10 @@ const READ_BACKGROUND = `(() => {
 const READ_ITEMS = `window.ai7.inspectGlobalAttention().then((projection) => ({
   count: projection.actionableCount,
   running: projection.running,
-  items: projection.groups.flatMap((group) => group.items.map((item) => ({ group: group.key, itemId: item.itemId, bookId: item.book.bookId, state: item.state, progress: item.facts?.progress ?? null }))),
+  items: projection.groups.flatMap((group) => group.items.map((item) => ({ group: group.key, itemId: item.itemId, bookId: item.book.bookId, state: item.state,
+    taskIntentId: item.target.kind === 'analysis' ? item.target.taskIntentId : null,
+    revisionId: item.technical.find(row => row.key === 'result-set-revision')?.value ?? null, ordinal: item.facts?.revisionOrdinal ?? null,
+    progress: item.facts?.progress ?? null }))),
 }))`;
 async function waitForItems(renderer, predicate, name, timeout = 120_000) {
   const deadline = Date.now() + timeout;
@@ -1077,7 +1080,7 @@ async function main() {
       blockedItem.next === '查看运行' && (blockedItem.time ?? '').startsWith('记录于 ') && blockedItem.technical === false,
     'blocked-run-item', blockedItem);
     requireJourney(decisions.length === 0, 'no-preapproval-decision');
-    const completionItem = { itemId: `analysis-outcome:${settledB.taskOutcome.outcomeId}` };
+    const completionItem = { itemId: `analysis-outcome:${settledB.taskOutcome.outcomeId}`, revisionId: settledB.resultSetRevision.revisionId };
     requireJourney(service?.count === 1 && !service.running && service.groups[0].items[0].nextStep === 'view-run',
       'blocked-run-needs-attention', service);
     // Nothing here grants anything: no 待审批 or 批准, no control carries 授权, and no item claims a pause.
@@ -1112,13 +1115,16 @@ async function main() {
     requireJourney((routeA?.bookId ?? null) === (routeBeforeCard?.bookId ?? null), 'blocked-record-route', routeA);
 
     at('open-completion');
-    async function openCompletedTask(itemId, name) {
-      await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), name + '-page');
+    async function openCompletedTask(item, name) {
+      const { itemId, revisionId } = item;
+      requireJourney(typeof revisionId === 'string', `${name}-revision-ref`);
+      await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), `${name}-page`);
       const selector = `[data-task-group="recent"] [data-task-item=${JSON.stringify(itemId)}] [data-task-action="result"]`;
-      await pressReachable(renderer, waitFor, requireJourney, selector, name + '-result');
+      await pressReachable(renderer, waitFor, requireJourney, selector, `${name}-result`);
+      const card = `[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card`;
+      await waitFor(renderer, `(() => { const record = document.querySelector(${JSON.stringify(card)})?.dataset; return (record?.inspectedRevisionId ?? record?.resultRevisionId) === ${JSON.stringify(revisionId)}; })()`, `${name}-record`, 30_000);
     }
-    await openCompletedTask(completionItem.itemId, 'completion');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}]')`, 'completion-record', 30_000);
+    await openCompletedTask(completionItem, 'completion');
 
     at('j14-attention-keyboard');
     // Without a pointer: Enter on the header's 待我处理 opens the screen with its heading focused, Tab reaches the
@@ -1391,12 +1397,12 @@ async function main() {
     requireJourney(cancelledC.resultSetRevision.manuscriptPin?.revisionId === beforeMark.revisionId && afterCancel.revisionId === afterApply.revisionId &&
       afterCancel.journalSequence === afterApply.journalSequence && afterCancel.applied === true,
     'concurrent-c-apply-effect-kept', { pinnedAsAuthorized: cancelledC.resultSetRevision.manuscriptPin?.revisionId === beforeMark.revisionId, journal: [afterApply.journalSequence, afterCancel.journalSequence], applied: afterCancel.applied });
-    const settledAll = await waitForItems(renderer, (answer) => answer.items.some((item) => item.group === 'recent' && item.bookId === bookB && item.itemId !== completionItem.itemId) &&
+    const isSecondB = item => item.group === 'recent' && item.bookId === bookB && item.taskIntentId === pendingTaskB && item.ordinal === 2;
+    const settledAll = await waitForItems(renderer, (answer) => answer.items.some(isSecondB) &&
       !answer.items.some((item) => item.group === 'active' && item.bookId === bookB) &&
       answer.items.some((item) => item.group === 'active' && item.bookId === bookA && item.state === 'analysis-paused'), 'concurrent-b-completed');
-    const completionB = settledAll.items.find((item) => item.group === 'recent' && item.bookId === bookB && item.itemId !== completionItem.itemId);
-    await openCompletedTask(completionB.itemId, 'isolation-b');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')?.dataset.analysisState==='settled'`, 'isolation-b-record', 30_000);
+    const completionB = settledAll.items.find(isSecondB);
+    await openCompletedTask(completionB, 'isolation-b');
     const settledB2 = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const transitionsB = settledB2?.run?.transitions ?? [];
     requireJourney(settledB2?.bookId === bookB && settledB2.state === 'settled' && settledB2.run?.runRecordId === runB && settledB2.taskIntent?.mode === 'reanalyze-range' &&
@@ -1486,18 +1492,17 @@ async function main() {
     await editAndSave(renderer, '〔后台处理登记旅程的改动〕', 'background-edit');
     const backgroundFocusBefore = await renderer.evaluate(FOCUS_STATE);
     requireJourney(backgroundFocusBefore?.screen === 'editor' && backgroundFocusBefore.book === bookB && backgroundFocusBefore.focused === true, 'background-focus-before', backgroundFocusBefore);
-    const settledBackground = await waitForItems(renderer, (answer) => answer.items.some((item) => item.group === 'recent' && item.bookId === bookB &&
-      item.itemId !== completionItem.itemId && item.itemId !== completionB.itemId), 'background-run-completed', 120_000);
+    const isThirdB = item => item.group === 'recent' && item.bookId === bookB && item.ordinal === 3 && item.revisionId !== null;
+    const settledBackground = await waitForItems(renderer, answer => answer.items.some(isThirdB), 'background-run-completed', 120_000);
     const backgroundFocusAfter = await renderer.evaluate(FOCUS_STATE);
     requireJourney(JSON.stringify(backgroundFocusAfter) === JSON.stringify(backgroundFocusBefore) && (await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`))?.bookId === bookB,
       'background-run-steals-nothing', { before: backgroundFocusBefore, after: backgroundFocusAfter });
-    const backgroundCompletion = settledBackground.items.find((item) => item.group === 'recent' && item.bookId === bookB && item.itemId !== completionItem.itemId && item.itemId !== completionB.itemId);
+    const backgroundCompletion = settledBackground.items.find(isThirdB);
 
     at('background-run-record');
     // The Run is an exact Task of its own: 同步到当前稿件, its authorization's origin the enrollment version, recorded as such, and
     // its revision 乙's third. ②A names it among the Runs the Enrollment started.
-    await openCompletedTask(backgroundCompletion.itemId, 'background-run');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')?.dataset.analysisState==='settled'`, 'background-run-card', 30_000);
+    await openCompletedTask(backgroundCompletion, 'background-run');
     const backgroundRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(backgroundRun?.bookId === bookB && backgroundRun.taskIntent?.mode === 'sync-current' &&
       backgroundRun.taskIntent.taskIntentId !== beforeBackground.taskIntent.taskIntentId &&

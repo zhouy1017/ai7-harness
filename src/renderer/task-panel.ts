@@ -295,6 +295,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     const book = bookId;
     if (book === null) return;
     const menu = el('details', 'ui-disclosure-menu task-panel-launch');
+    menu.dataset['menuAnchor'] = 'start';
     const summary = el('summary', 'btn primary', '发起任务 ▾');
     const list = menuPanel();
     function entry(id: string, label: string, meaning: string, act: () => void, enabled = true): void {
