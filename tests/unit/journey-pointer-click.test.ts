@@ -115,6 +115,42 @@ it('prepares only a local check on a punctuation-free loaded paragraph and stops
   expect(renderer.send).not.toHaveBeenCalled();
 });
 
+it('compares every existing review run before and after an operation, including when the latest run stays the same', async () => {
+  const {draftReviewRunIds,draftReviewRunsUnchanged}=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  let runs=[{reviewRunId:'already-completed'}],truncated=false;
+  const window={ai7:{inspectReviewWorkspace:async()=>({run:runs[0],runs,runsTruncated:truncated})}};
+  const renderer={evaluate:async(expression:string)=>await Function('window',`return (${expression})`)(window)};
+  const check=(ok:boolean,name:string)=>{if(!ok)throw Error(name);};
+  const before=await draftReviewRunIds(renderer,check,'before');
+  expect(before).toEqual(['already-completed']);
+  await draftReviewRunsUnchanged(renderer,check,before,'unchanged');
+  runs=[...runs,{reviewRunId:'unexpected-new-run'}];
+  await expect(draftReviewRunsUnchanged(renderer,check,before,'no-new-run')).rejects.toThrow('no-new-run');
+  runs=[{reviewRunId:'replacement-run'}];
+  await expect(draftReviewRunsUnchanged(renderer,check,before,'no-replacement')).rejects.toThrow('no-replacement');
+  truncated=true;
+  await expect(draftReviewRunIds(renderer,check,'all-runs')).rejects.toThrow('all-runs-complete');
+});
+
+it('rejects an identical-word draft row at another paragraph and a composer quoting another selection', async () => {
+  const {assertDraftPlace}=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  let top=206,quote='合';
+  const block={getBoundingClientRect:()=>({left:80,bottom:200})};
+  const node={getBoundingClientRect:()=>({left:80,top}),querySelector:()=>({textContent:quote})};
+  const document={querySelector:(selector:string)=>selector.includes('[data-block-id=')?block:node};
+  const proof={text:new Map([['original-paragraph','合成范围']])};
+  const renderer={evaluate:async(expression:string)=>await Function('document','__draftProof',`return (${expression})`)(document,proof)};
+  const check=(ok:boolean,name:string)=>{if(!ok)throw Error(name);};
+  await assertDraftPlace(renderer,check,'row','original-paragraph',0,1,'row');
+  await assertDraftPlace(renderer,check,'composer','original-paragraph',0,1,'range',true);
+  top=306;
+  await expect(assertDraftPlace(renderer,check,'row','original-paragraph',0,1,'wrong-row')).rejects.toThrow('wrong-row');
+  top=206;quote='成';
+  await expect(assertDraftPlace(renderer,check,'composer','original-paragraph',0,1,'wrong-selection',true)).rejects.toThrow('wrong-selection');
+  quote='合成';
+  await expect(assertDraftPlace(renderer,check,'composer','original-paragraph',0,1,'wrong-length',true)).rejects.toThrow('wrong-length');
+});
+
 
 it('records the covering element and four geometry frames without reading text or attribute values (#1433 hosted diagnosis)', async () => {
   const target = scene({ covered: true });

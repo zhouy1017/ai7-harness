@@ -1,4 +1,4 @@
-import { draftClick, draftKey, draftGeometry, draftSelect, markDraftKept } from './mark-drafts.mjs';
+import { draftClick, draftKey, draftGeometry, draftSelect, markDraftKept, draftReviewRunIds, draftReviewRunsUnchanged } from './mark-drafts.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { commentsPaneForms, commentsSelectMark, commentsTriageForms } from './comments-pane.mjs';
 import { commentsMarksPaging, railJump } from './marks-paging.mjs';
@@ -1134,6 +1134,7 @@ async function main() {
     // The composer quotes the span; 准备任务 saves a draft — no Task, plan or Run — pinning every paragraph with its digest. Nothing
     // is written.
     at('selection-span-draft');
+    const spanRunIds = await draftReviewRunIds(renderer, requireJourney, 'span-runs-before');
     const spanBlocks = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); const clean = (node) => node instanceof HTMLParagraphElement && /^blk_[0-9a-f]{24}$/.test(node.dataset.blockId ?? '') && node.querySelectorAll('.editorial-mark').length === 0 && (node.textContent ?? '').length >= 8 && Array.from(segmenter.segment(node.textContent ?? '')).length === (node.textContent ?? '').length; const start = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).find((node) => clean(node) && clean(node.nextElementSibling) && clean(node.nextElementSibling?.nextElementSibling)); return start === undefined ? null : [start, start.nextElementSibling, start.nextElementSibling.nextElementSibling].map((node) => node.dataset.blockId); })()`);
     requireJourney(Array.isArray(spanBlocks) && spanBlocks.length === 3, 'span-paragraphs');
     const [spanA, spanB, spanC] = spanBlocks;
@@ -1153,7 +1154,8 @@ async function main() {
     await assertRenderer(renderer, `(() => { ${composerOf}.querySelector('[data-task-composer-action="save-draft"]').click(); return true; })()`, 'span-prepare');
     await waitFor(renderer, `${composerOf}?.dataset.taskComposer === 'draft' && ${composerOf}.querySelector('[data-task-composer-resolution]') !== null`, 'span-draft-saved', 30_000);
     // The draft pins the span exactly — its first paragraph's range, then every paragraph with its digest — and is no Task yet.
-    await assertRenderer(renderer, `(async () => { const read = await window.ai7.inspectTaskIntentDrafts({ draftId: null }); const draft = read.drafts.find((entry) => entry.promotion === null && entry.version.goal === '核对这三段的称谓是否前后一致'); const range = draft?.version.ranges[0]; window.__j05SpanDraft = draft; const review = await window.ai7.inspectReviewWorkspace({ reviewRunId: null }); return draft?.version.ranges.length === 1 && range.blockId === ${JSON.stringify(spanA)} && range.fromGrapheme === 2 && range.text === window.__j05Span.words && JSON.stringify(range.span.map((pin) => [pin.blockId, pin.fromGrapheme, pin.toGrapheme])) === JSON.stringify([[${JSON.stringify(spanA)}, 2, window.__j05Span.a.length], [${JSON.stringify(spanB)}, 0, window.__j05Span.b.length], [${JSON.stringify(spanC)}, 0, 3]]) && range.span.every((pin) => /^[0-9a-f]{64}$/.test(pin.blockDigest)) && review.run === null; })()`, 'span-draft-pins');
+    await assertRenderer(renderer, `(async () => { const read = await window.ai7.inspectTaskIntentDrafts({ draftId: null }); const draft = read.drafts.find((entry) => entry.promotion === null && entry.version.goal === '核对这三段的称谓是否前后一致'); const range = draft?.version.ranges[0]; window.__j05SpanDraft = draft; return draft?.version.ranges.length === 1 && range.blockId === ${JSON.stringify(spanA)} && range.fromGrapheme === 2 && range.text === window.__j05Span.words && JSON.stringify(range.span.map((pin) => [pin.blockId, pin.fromGrapheme, pin.toGrapheme])) === JSON.stringify([[${JSON.stringify(spanA)}, 2, window.__j05Span.a.length], [${JSON.stringify(spanB)}, 0, window.__j05Span.b.length], [${JSON.stringify(spanC)}, 0, 3]]) && range.span.every((pin) => /^[0-9a-f]{64}$/.test(pin.blockDigest)); })()`, 'span-draft-pins');
+    await draftReviewRunsUnchanged(renderer, requireJourney, spanRunIds, 'span-draft-no-new-run');
 
     // Policy retirement makes the existing review choices available for this admitted SampleBook-derived span.
     // Saving remains a draft: selection pins are unchanged and no Task, plan or Run is created.
@@ -1165,7 +1167,8 @@ async function main() {
         requireJourney(await renderer.evaluate(`(async () => { const composer = ${composerOf}; const range = window.__j05SpanDraft.version.ranges[0]; const read = (await window.ai7.inspectTaskIntentDrafts({ draftId: window.__j05SpanDraft.draftId })).drafts[0]; const choices = Array.from(composer.querySelectorAll('[data-task-composer-field^="choice-"]')); return read.resolution?.state === 'choose' && read.resolution.options.length > 0 && read.resolution.options.every(option => option.available && option.choice.kind === 'review') && choices.length === read.resolution.options.length && choices.some(choice => !choice.disabled) && read.promotion === null && composer.querySelector('li.task-composer-range blockquote footer')?.textContent === '第 ' + range.position + '–' + (range.position + 2) + ' 段 · ' + ([...range.text].length - 2) + ' 字' && document.documentElement.dataset.technicalLayerVisible==='false'; })()`), 'span-review-choices-with-frozen-range');
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
-    await assertRenderer(renderer, `(async () => (await window.ai7.inspectReviewWorkspace({ reviewRunId: null })).run === null && window.__j05.text(${JSON.stringify(spanA)}) === window.__j05Span.a && window.__j05.text(${JSON.stringify(spanB)}) === window.__j05Span.b && window.__j05.text(${JSON.stringify(spanC)}) === window.__j05Span.c)()`, 'span-nothing-prepared-or-written');
+    await assertRenderer(renderer, `(() => window.__j05.text(${JSON.stringify(spanA)}) === window.__j05Span.a && window.__j05.text(${JSON.stringify(spanB)}) === window.__j05Span.b && window.__j05.text(${JSON.stringify(spanC)}) === window.__j05Span.c)()`, 'span-nothing-prepared-or-written');
+    await draftReviewRunsUnchanged(renderer, requireJourney, spanRunIds, 'span-choices-no-new-run');
     await assertRenderer(renderer, `(() => { const close = document.querySelector('#task-drawer [data-task-drawer-control="close"]'); if (!(close instanceof HTMLButtonElement)) return false; close.click(); return true; })()`, 'span-drawer-close');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'span-drawer-closed', 15_000);
     await settled(renderer, 'span-settled');

@@ -175,8 +175,29 @@ export async function replyDraftKept(renderer,check,waitFor,at) {
   await waitFor(renderer,`document.querySelector(${JSON.stringify(card+' [data-mark-region="replies"]')})?.textContent.includes('公开合成离页回复')&&!document.querySelector(${JSON.stringify(input)})?.value`,'reply-draft-late-cleared');
 }
 
-async function verifyComposerWords(renderer,check,waitFor,row,field,name) {
+/** A complete set, rather than the latest opened run, proves that an action prepared no new run. */
+export async function draftReviewRunIds(renderer,check,name) {
+  const ids=await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runsTruncated===false?workspace.runs.map(run=>run.reviewRunId).sort():null)`);
+  check(Array.isArray(ids),name+'-complete');
+  return ids;
+}
+
+export async function draftReviewRunsUnchanged(renderer,check,expected,name) {
+  const actual=await draftReviewRunIds(renderer,check,name);
+  check(JSON.stringify(actual)===JSON.stringify(expected),name);
+}
+
+/** Check the paragraph geometry and the exact original grapheme span, without exposing draft text. */
+export async function assertDraftPlace(renderer,check,selector,blockId,from,to,name,open=false) {
+  return draftGeometry(renderer,selector,async()=>{
+  check(await renderer.evaluate(`(() => {const node=document.querySelector(${JSON.stringify(selector)}),block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id="'+${JSON.stringify(blockId)}+'"]'),original=__draftProof.text.get(${JSON.stringify(blockId)});if(!node||!block||typeof original!=='string')return false;const a=node.getBoundingClientRect(),b=block.getBoundingClientRect();if(Math.abs(a.top-b.bottom-6)>1||Math.abs(a.left-b.left)>1)return false;return ${open}?node.querySelector('[data-mark-quote]')?.textContent===Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(original),part=>part.segment).slice(${from},${to}).join(''):true;})()`)===true,name);
+  },{fallbackSelectors:[`[data-testid="manuscript-editor"] [data-block-id="${blockId}"]`]});
+}
+
+async function verifyComposerWords(renderer,check,waitFor,row,field,name,blockId) {
+  await assertDraftPlace(renderer,check,row,blockId,0,1,name+'-row-place');
   await draftClick(renderer,check,waitFor,row,name+'-expand');
+  await assertDraftPlace(renderer,check,'[data-mark-composer="create-annotation"]',blockId,0,1,name+'-range',true);
   check(await renderer.evaluate(`document.querySelector(${JSON.stringify(field)})?.value==='公开合成未发送批注' && document.activeElement===document.querySelector(${JSON.stringify(field)})`),name+'-words');
   await draftKey(renderer,'Escape',27);
   await waitFor(renderer,`document.querySelector(${JSON.stringify(row)})&&!document.querySelector('[data-mark-composer]')`,name+'-fold');
@@ -253,35 +274,37 @@ export async function markDraftKept(renderer,check,waitFor,at,blockId) {
   await waitFor(renderer,`document.querySelector('.editor-window [data-mark-id="'+__draftBackground.markId+'"]') && ${kept}`,'draft-background-read-kept');
   check(await renderer.evaluate(`(() => {const editor=document.querySelector('[data-testid="manuscript-editor"]');return editor===__draftBackground.editor&&(editor.parentElement.dataset.marksRefreshed??'').split(',').filter(Boolean).length>__draftBackground.refreshCount;})()`)===true,'draft-background-refresh-observed');
   await draftClick(renderer,check,waitFor,'#task-drawer .task-drawer-close','draft-background-tasks-close');
-  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-background-read-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-background-read-kept',blockId);
   const backgroundMark=await renderer.evaluate('__draftBackground.markId');
   await draftClick(renderer,check,waitFor,`.editor-window [data-mark-id="${backgroundMark}"]`,'draft-background-mark-menu','right');
   await waitFor(renderer,`document.querySelector('[data-mark-menu="mark"] [data-mark-action="remove"]')?.disabled===false`,'draft-background-remove-ready');
   await draftClick(renderer,check,waitFor,'[data-mark-menu="mark"] [data-mark-action="remove"]','draft-background-remove');
   await waitFor(renderer,`!document.querySelector('.editor-window [data-mark-id="'+__draftBackground.markId+'"]')`,'draft-background-cleanup');
+  await assertDraftPlace(renderer,check,row,blockId,0,1,'draft-expanded-row-place');
   await draftClick(renderer,check,waitFor,row,'draft-expand');
+  await assertDraftPlace(renderer,check,'[data-mark-composer="create-annotation"]',blockId,0,1,'draft-expanded-range',true);
   check(await renderer.evaluate(`document.querySelector('${field}').value==='公开合成未发送批注' && document.activeElement===document.querySelector('${field}')`),'draft-expanded-words');
   // A real press on the paragraph folds the form, retaining the text without sending it.
   await draftClick(renderer,check,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${blockId}"]`,'draft-text');
   await waitFor(renderer,kept,'draft-text-kept');
-  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-text-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-text-kept',blockId);
   await draftClick(renderer,check,waitFor,row,'draft-mark-expand');
   await draftClick(renderer,check,waitFor,`.editor-window [data-block-id="${blockId}"] [data-mark-kind="personal-highlight"]`,'draft-other-mark');
   await waitFor(renderer,kept,'draft-mark-kept');
-  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-mark-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-mark-kept',blockId);
   await draftClick(renderer,check,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${blockId}"]`,'draft-menu','right');
   await waitFor(renderer,`document.querySelector('[data-mark-menu]')`,'draft-menu-open');
   await draftKey(renderer,'Escape',27); await waitFor(renderer,kept,'draft-menu-kept');
-  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-menu-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-menu-kept',blockId);
   await draftClick(renderer,check,waitFor,'.manuscript-comments-heading [aria-label="关闭批注栏"]','draft-pane-close');
   await draftClick(renderer,check,waitFor,'[data-edge-entry="comments"]','draft-pane-return');
   await waitFor(renderer,kept,'draft-pane-kept');
-  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-pane-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-pane-kept',blockId);
   await draftClick(renderer,check,waitFor,'[data-edge-entry="tasks"]','draft-tasks');
   await waitFor(renderer,`document.querySelector('#task-drawer:not([hidden])')`,'draft-tasks-ready');
   await draftClick(renderer,check,waitFor,'.task-drawer-close','draft-tasks-close');
   await waitFor(renderer,kept,'draft-tasks-kept');
-  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-tasks-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-tasks-kept',blockId);
   for(let turn=0;turn<60 && await renderer.evaluate(`!!document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${blockId}"]')`);turn++) {
     const point=await renderer.evaluate(`(() => {const node=document.querySelector('.editor-window'),r=node.getBoundingClientRect(),x=r.left+16,y=Math.min(innerHeight,r.bottom)-25;return {x,y,delta:Math.max(240,node.clientHeight*.8),hit:node.contains(document.elementFromPoint(x,y))};})()`);
     check(point.hit,'draft-edge-wheel-hit');
@@ -291,18 +314,18 @@ export async function markDraftKept(renderer,check,waitFor,at,blockId) {
   await waitFor(renderer,`!document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${blockId}"]')`,'draft-place-away');
   await railJump(renderer,waitFor,check,0,'draft-page-back');
   await waitFor(renderer,kept,'draft-page-kept');
-  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-page-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-page-kept',blockId);
   await draftClick(renderer,check,waitFor,SIDEBAR.section('overview'),'draft-overview');
   await waitFor(renderer,`!document.querySelector('.editor-shell')`,'draft-overview-ready');
   await draftClick(renderer,check,waitFor,SIDEBAR.section('manuscript'),'draft-manuscript');
   await waitFor(renderer,kept,'draft-screen-kept');
-  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-screen-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-screen-kept',blockId);
   const manuscript=await renderer.evaluate(`(async()=> (await window.ai7.listPriorWork()).find(item=>item.bookId===document.querySelector('.editor-shell').dataset.bookId).manuscriptId)()`);
   await draftClick(renderer,check,waitFor,SIDEBAR.destination('library'),'draft-library');
   await waitFor(renderer,`document.querySelector('.recent-work-item button[data-manuscript-id="${manuscript}"]')`,'draft-library-ready');
   await draftClick(renderer,check,waitFor,`.recent-work-item button[data-manuscript-id="${manuscript}"]`,'draft-book-return');
   await waitFor(renderer,kept,'draft-book-kept');
-  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-book-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-book-kept',blockId);
   await draftClick(renderer,check,waitFor,row,'draft-final-expand');
   check(await renderer.evaluate(`document.querySelector('${field}').value==='公开合成未发送批注'`),'draft-final-words');
   await draftClick(renderer,check,waitFor,field,'draft-discard-field-focus');
