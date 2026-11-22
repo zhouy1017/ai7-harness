@@ -96,6 +96,25 @@ it('times out at the actual J-08 wait boundary when a Promise keeps resolving fa
   } finally {vi.useRealTimers();}
 });
 
+it('never starts the background-review fixture when its plan preview does not disable models', async () => {
+  const {startDraftBackgroundRefresh}=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  const renderer={evaluate:vi.fn(async()=>({scopeReady:true,prepared:true,localOnly:false,itemId:'fixture-task',runId:'fixture-run'})),send:vi.fn()};
+  await expect(startDraftBackgroundRefresh(renderer,(ok:boolean,name:string)=>{if(!ok)throw Error(name);},vi.fn())).rejects.toThrow('draft-background-no-model-preview');
+  expect(renderer.send).not.toHaveBeenCalled();
+});
+
+it('prepares only a local check on a punctuation-free loaded paragraph and stops on preparation failure', async () => {
+  const {startDraftBackgroundRefresh}=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  const prepare=vi.fn(async(_input:unknown)=>({state:'failed'}));
+  const editor={parentElement:{dataset:{}},querySelector:()=>({dataset:{blockId:'window-start'}})};
+  const document={querySelector:()=>editor},window={ai7:{getManuscriptWindowAt:async()=>({blocks:[{kind:'paragraph',blockId:'punctuated',text:'公开合成。'},{kind:'paragraph',blockId:'clean',text:'公开合成'}],marks:[]}),prepareReviewRun:prepare}};
+  const background={manuscriptId:'fixture-manuscript',branchId:'fixture-branch'};
+  const renderer={evaluate:async(expression:string)=>await Function('document','window','__draftBackground',`return (${expression})`)(document,window,background),send:vi.fn()};
+  await expect(startDraftBackgroundRefresh(renderer,(ok:boolean,name:string)=>{if(!ok)throw Error(name);},vi.fn())).rejects.toThrow('draft-background-local-prepared');
+  expect(prepare).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({categoryIds:['local-text-check'],scope:{kind:'selection',fromChapterBlockId:'clean',toChapterBlockId:'clean'},localCheck:expect.objectContaining({numerals:'off',tables:{characters:true,variantWords:false,bookTerms:[],houseWordList:null}})}));
+  expect(renderer.send).not.toHaveBeenCalled();
+});
+
 
 it('records the covering element and four geometry frames without reading text or attribute values (#1433 hosted diagnosis)', async () => {
   const target = scene({ covered: true });

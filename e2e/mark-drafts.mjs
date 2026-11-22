@@ -197,6 +197,27 @@ export async function withDraftDirectEdit(renderer,check,waitFor,edit) {
   finally { if(original!=='direct')try { await choose(original,'draft-edit-mode-restore'); } catch(error) { if(!failed)throw error; } }
 }
 
+/** Prepare only local work, then let the drawer's real start invoke the ordinary review-completion follower. */
+export async function startDraftBackgroundRefresh(renderer,check,waitFor) {
+  const fixture=await renderer.evaluate(`(async()=>{const background=__draftBackground,editor=document.querySelector('[data-testid="manuscript-editor"]'),start=editor.querySelector('[data-block-id]').dataset.blockId,page=await window.ai7.getManuscriptWindowAt({manuscriptId:background.manuscriptId,branchId:background.branchId,target:{kind:'window-start',blockId:start}}),clean=page.blocks.find(block=>block.kind==='paragraph'&&/^[\\p{L}\\p{N}\\s]+$/u.test(block.text)&&block.text.trim().length>0);if(!clean)return {scopeReady:false,prepared:false,localOnly:false,itemId:null};background.markIds=page.marks.map(mark=>mark.markId).sort();background.editor=editor;background.refreshCount=(editor.parentElement.dataset.marksRefreshed??'').split(',').filter(Boolean).length;
+    let job=await window.ai7.prepareReviewRun({categoryIds:['local-text-check'],scope:{kind:'selection',fromChapterBlockId:clean.blockId,toChapterBlockId:clean.blockId},localCheck:{punctuation:'chinese-prose',numerals:'off',publication:'unknown',numeralRules:[],numeralsConfirmed:false,excludedRanges:[],doubledEllipsisBlockIds:[],tables:{characters:true,variantWords:false,bookTerms:[],houseWordList:null}}});const deadline=Date.now()+60000;while((job.state==='queued'||job.state==='running')&&Date.now()<deadline){await new Promise(resolve=>setTimeout(resolve,10));job=await window.ai7.pollServiceJob({jobId:job.jobId});}if(job.state!=='completed'||!job.result?.run)return {scopeReady:true,prepared:false,localOnly:false,itemId:null};background.reviewRunId=job.result.run.reviewRunId;
+    const plan=await window.ai7.inspectTaskPlan({kind:'review-run',ref:background.reviewRunId}),overview=await window.ai7.inspectTaskOverview(),item=overview.groups.flatMap(group=>group.items).find(item=>item.plan?.kind==='review-run'&&item.plan.ref===background.reviewRunId);return {scopeReady:true,prepared:true,runId:background.reviewRunId,itemId:item?.itemId??null,localOnly:plan.service.provider==='不调用模型'&&plan.service.send==='本机读取冻结的所选正文，不发送任何内容'&&plan.service.usage==='本地计算，不产生模型用量'};})()`);
+  check(fixture.scopeReady===true,'draft-background-clean-scope');
+  check(fixture.prepared===true,'draft-background-local-prepared');
+  check(fixture.localOnly===true,'draft-background-no-model-preview');
+  check(typeof fixture.itemId==='string','draft-background-local-task-listed');
+  await draftClick(renderer,check,waitFor,'[data-edge-entry="tasks"]','draft-background-tasks');
+  const card=`#task-drawer [data-task-item="${fixture.itemId}"]`;
+  await waitFor(renderer,`document.querySelector(${JSON.stringify(card)})`,'draft-background-task-ready');
+  await draftTabTo(renderer,card,check,'draft-background-task-focus');
+  await draftClick(renderer,check,waitFor,card+' .task-overview-more > summary','draft-background-task-menu');
+  await draftClick(renderer,check,waitFor,card+' [data-task-action="plan"]','draft-background-task-plan');
+  await waitFor(renderer,`document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(fixture.runId)}&&document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`,'draft-background-plan-ready');
+  await draftClick(renderer,check,waitFor,'#task-drawer [data-task-drawer-control="start"]','draft-background-start-local');
+  await waitFor(renderer,`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(fixture.runId)}}).then(workspace=>workspace.run?.state==='settled')`,'draft-background-local-settled');
+  check(await renderer.evaluate(`(async()=>{const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(fixture.runId)}})).run,page=await window.ai7.getManuscriptWindowAt({manuscriptId:__draftBackground.manuscriptId,branchId:__draftBackground.branchId,target:{kind:'window-start',blockId:document.querySelector('[data-testid="manuscript-editor"] [data-block-id]').dataset.blockId}});return run?.findings.length===0&&JSON.stringify(page.marks.map(mark=>mark.markId).sort())===JSON.stringify(__draftBackground.markIds);})()`)===true,'draft-background-no-extra-results');
+}
+
 export async function markDraftKept(renderer,check,waitFor,at,blockId) {
   at('mark-draft-kept');
   const pane='.manuscript-comments-pane', row='[data-mark-draft-row="annotation"]', field='[data-mark-composer="create-annotation"] textarea';
@@ -228,9 +249,15 @@ export async function markDraftKept(renderer,check,waitFor,at,blockId) {
 
   // Simulate a mark added in another window: the ordinary background read must arrive while the row stands unfocused.
   await renderer.evaluate(`(async()=>{const work=(await window.ai7.listPriorWork()).find(item=>item.bookId===document.querySelector('.editor-shell').dataset.bookId),binding={manuscriptId:work.manuscriptId,branchId:work.branchId},page=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'block',blockId:${JSON.stringify(nextBlock)}}}),block=page.blocks.find(item=>item.blockId===${JSON.stringify(nextBlock)});const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:page.blocks[0].blockId,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:block.blockId,baseBlockDigest:block.digest,fromGrapheme:0,toGrapheme:1,selectedText:Array.from(block.text)[0],kind:'personal-highlight',highlightColor:1,body:'',proposedText:null,rationale:null});globalThis.__draftBackground={...binding,windowStartBlockId:page.blocks[0].blockId,markId:result.markId};return true;})()`);
+  await startDraftBackgroundRefresh(renderer,check,waitFor);
   await waitFor(renderer,`document.querySelector('.editor-window [data-mark-id="'+__draftBackground.markId+'"]') && ${kept}`,'draft-background-read-kept');
+  check(await renderer.evaluate(`(() => {const editor=document.querySelector('[data-testid="manuscript-editor"]');return editor===__draftBackground.editor&&(editor.parentElement.dataset.marksRefreshed??'').split(',').filter(Boolean).length>__draftBackground.refreshCount;})()`)===true,'draft-background-refresh-observed');
+  await draftClick(renderer,check,waitFor,'#task-drawer .task-drawer-close','draft-background-tasks-close');
   await verifyComposerWords(renderer,check,waitFor,row,field,'draft-background-read-kept');
-  await renderer.evaluate(`window.ai7.updateEditorialMark({...__draftBackground,action:'remove',body:null,highlightColor:null,status:null,targetKind:null,proposedText:null,rationale:null})`);
+  const backgroundMark=await renderer.evaluate('__draftBackground.markId');
+  await draftClick(renderer,check,waitFor,`.editor-window [data-mark-id="${backgroundMark}"]`,'draft-background-mark-menu','right');
+  await waitFor(renderer,`document.querySelector('[data-mark-menu="mark"] [data-mark-action="remove"]')?.disabled===false`,'draft-background-remove-ready');
+  await draftClick(renderer,check,waitFor,'[data-mark-menu="mark"] [data-mark-action="remove"]','draft-background-remove');
   await waitFor(renderer,`!document.querySelector('.editor-window [data-mark-id="'+__draftBackground.markId+'"]')`,'draft-background-cleanup');
   await draftClick(renderer,check,waitFor,row,'draft-expand');
   check(await renderer.evaluate(`document.querySelector('${field}').value==='公开合成未发送批注' && document.activeElement===document.querySelector('${field}')`),'draft-expanded-words');
