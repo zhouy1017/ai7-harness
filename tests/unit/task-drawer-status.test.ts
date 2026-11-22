@@ -1,4 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { EditorialStore } from '../../src/service/store.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { createServiceTestRoots } from '../support/temp-data-root.js';
+import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+import { leaveSeries, makeJ13Series } from '../support/series-consistency.js';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { mountTaskDrawer, type MountTaskDrawerOptions, type TaskPlanRequest } from '../../src/renderer/task-drawer.js';
 import { taskStatusDuration, taskStatusName, TASK_DRAWER_TITLE } from '../../src/renderer/task-drawer-labels.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
@@ -6,6 +13,10 @@ import type { TaskPlanProjection, TaskPlanRunControlProjection } from '../../src
 import { composeGlobalAttention } from '../../src/service/global-attention.js';
 import { taskOverviewItem } from '../../src/service/task-overview.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
+import { taskOverviewApi } from '../../src/renderer/task-overview-api.js';
+import { IPC_CHANNELS, type RendererApi, type ServiceOperationMap, type TaskOverviewCall } from '../../src/shared/protocol.js';
+import { registerProductionAndPackageHandlers } from '../../src/main/deliverables-handlers.js';
+import { PREFERENCES_ENVELOPE_VERSION, preferenceDefaults } from '../../src/shared/preferences.js';
 import { taskPlanFixture } from '../support/task-plan-fixture.js';
 
 // The ordinary-mode drawer of a started Task (Issue #1527): the real drawer paints a plan read from a stub service, and the unit reads what
@@ -16,6 +27,10 @@ vi.mock('../../src/renderer/task-panel.js', () => ({
   mountTaskComposer: () => ({ element: document.createElement('div'), stop: vi.fn() }),
 }));
 vi.mock('../../src/renderer/dialogue.js', () => ({ mountDialogue: () => ({ element: document.createElement('div'), stop: vi.fn() }) }));
+
+type BridgeHandler = (...args: unknown[]) => Promise<{ ok: boolean; result?: unknown; error?: { message: string } }>;
+const handlers = vi.hoisted(() => new Map<string, BridgeHandler>());
+vi.mock('electron', () => ({ ipcMain: { handle: (key: string, handler: BridgeHandler) => handlers.set(key, handler) } }));
 
 const NOW = '2026-11-17T08:03:12.000Z';
 let uninstall: () => void;
@@ -50,7 +65,7 @@ const row = (state: 'running' | 'completed', overrides: Record<string, unknown> 
 });
 const overviewOf = (...items: unknown[]) => ({ groups: [{ key: 'recent', items, total: items.length }] });
 
-interface Opening { overview?: () => Promise<unknown>; how?: Parameters<ReturnType<typeof mountTaskDrawer>['open']>[3]; api?: Record<string, unknown> }
+interface Opening { overviewApiForBook?: MountTaskDrawerOptions['overviewApiForBook']; overview?: () => Promise<unknown>; how?: Parameters<ReturnType<typeof mountTaskDrawer>['open']>[3]; api?: Record<string, unknown> }
 async function openDrawer(plan: TaskPlanProjection, opening: Opening = {}) {
   const root = miniDocument.createElement('aside');
   miniDocument.body.append(root);
@@ -62,10 +77,10 @@ async function openDrawer(plan: TaskPlanProjection, opening: Opening = {}) {
   const technicalDetails = (_className: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement => {
     const details = document.createElement('details'); details.append(...rows); return details;
   };
-  const drawer = mountTaskDrawer({ root, shell: document.body, api, technicalDetails, errorMessage: (_error: unknown, fallback: string) => fallback,
+  const drawer = mountTaskDrawer({ root, shell: document.body, api, technicalDetails, overviewApiForBook: opening.overviewApiForBook, settle: async () => true, errorMessage: (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback,
     errorCode: () => null, setStatus, onOpen: vi.fn(), onRecorded: vi.fn(), openTaskResult } as unknown as MountTaskDrawerOptions);
-  const task: TaskPlanRequest = { bookId: 'book', kind: 'baseline-analysis', ref: 'task' };
-  const open = async () => { drawer.open(task, () => null, undefined, opening.how); await vi.waitFor(() => expect(root.dataset['taskPlanState']).toBe(plan.state.key)); };
+  const task: TaskPlanRequest = { bookId: plan.bookId, kind: plan.kind, ref: plan.ref };
+  const open = async () => { drawer.open(task, () => null, undefined, opening.how); await vi.waitFor(() => opening.how?.redo ? expect(root.dataset['taskRelaunch']).toBe(plan.relaunch?.operation) : expect(root.dataset['taskPlanState']).toBe(plan.state.key)); };
   await open();
   return { root, drawer, open, openTaskResult, inspectTaskOverview, inspectTaskPlan, setStatus };
 }
@@ -79,7 +94,187 @@ const controls = (root: MiniElement): string[] => root.querySelectorAll('[data-t
   .map((node) => node.dataset['taskDrawerControl']!);
 const model = (root: MiniElement) => vi.waitFor(() => expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@high'));
 
+type ReferenceOperation = 'inspectTaskOverview' | 'inspectTaskPlan' | 'inspectEvaluation' | 'launchInitialEvaluation' | 'launchReadersReport';
+type ReferenceArgs = { [K in ReferenceOperation]: [K, ServiceOperationMap[K]['input']] }[ReferenceOperation];
+
+async function referenceBridge(sender: { routeGeneration: number; bookId: string }, call: (...args: ReferenceArgs) => Promise<unknown>) {
+  registerProductionAndPackageHandlers({ requireSender: () => sender, requireAuthority: () => {}, requireCurrentRouteGeneration: () => {}, rememberDispatchChoice: () => {},
+    serializeEffect: (effect: () => Promise<unknown>) => effect(), service: { call },
+  } as unknown as Parameters<typeof registerProductionAndPackageHandlers>[0]);
+  expect((await handlers.get(IPC_CHANNELS.inspectTaskOverview)!(sender)).ok).toBe(true);
+  return {
+    getModelServiceSettings: async () => { throw new Error('no settings'); },
+    getPreferences: async () => ({ version: PREFERENCES_ENVELOPE_VERSION, notice: null, values: preferenceDefaults() } as const),
+    taskOverviewCall: async (request: TaskOverviewCall) => {
+      const reply = await handlers.get(IPC_CHANNELS.taskOverviewCall)!(sender, request);
+      if (!reply.ok) throw new Error(reply.error?.message);
+      return reply.result;
+    },
+  };
+}
+
+async function evaluationSeriesFixture() {
+  vi.useRealTimers();
+  const roots = await createServiceTestRoots('ai7-series-relaunch-');
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const governor = new ModelRequestGovernor();
+  const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, () => undefined);
+  onTestFinished(async () => {
+    await capture.owner.dispose();
+    governor.close();
+    await governor.whenIdle();
+    store.close();
+    await roots.dispose();
+  });
+  const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+  store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
+  store.selectSearchBackend('search-tinyfish');
+  const active = await importSample1Book(store, roots.codeRoot, '当前图书');
+  const target = await importSample1Book(store, roots.codeRoot, '初评图书');
+  const bookId = target.bookId;
+  await pinEditorialWorkspaceProfileRevision2(store, bookId);
+  const seriesId = makeJ13Series(store, bookId);
+  const first = store.launchInitialEvaluation({ bookId, seriesId, startWhen: 'when-online', clientCommandId: randomUUID() }, capture.policy);
+  const task = (ref: string) => ({ bookId, kind: 'initial-evaluation' as const, ref });
+  store.cancelWaitingTask(task(first.taskIntentId));
+  const sender = { routeGeneration: 1, bookId: active.bookId };
+  const launch = vi.fn((input: ServiceOperationMap['launchInitialEvaluation']['input']) => {
+    const result = store.launchInitialEvaluation(input, capture.policy);
+    return { taskIntentId: result.taskIntentId, runRecordId: result.runRecordId };
+  });
+  const overview = () => store.inspectTaskOverview(() => null, 2, () => null, false);
+  const api = await referenceBridge(sender, async (...[op, input]) => {
+    switch (op) {
+      case 'inspectTaskOverview': return overview();
+      case 'inspectEvaluation': return store.inspectEvaluation(input.bookId, input.recordId);
+      case 'inspectTaskPlan': return store.inspectTaskPlan(input);
+      case 'launchInitialEvaluation': return launch(input);
+      default: throw new Error(op);
+    }
+  });
+  const scoped = taskOverviewApi(api as unknown as RendererApi & typeof api, () => bookId);
+  const openSource = async (ref: string) => {
+    const plan = await scoped.inspectTaskPlan({ kind: 'initial-evaluation', ref });
+    expect(plan.relaunch?.operation).toBe('launchInitialEvaluation');
+    const view = await openDrawer(plan, { api: { ...api, inspectTaskPlan: scoped.inspectTaskPlan }, how: { redo: true }, overviewApiForBook: () => scoped });
+    const timing = view.root.querySelector('[data-task-start-when]')!;
+    timing.value = 'when-online';
+    timing.dispatchEvent({ type: 'change', bubbles: true } as never);
+    const start = view.root.querySelector('[data-task-drawer-control="launch"]')!;
+    await vi.waitFor(() => expect(start.disabled).toBe(false));
+    return { ...view, start };
+  };
+  return { store, active, bookId, seriesId, first, task, sender, launch, openSource };
+}
+
 describe('the status card of a started Task in ordinary mode', () => {
+  it.each(['launchInitialEvaluation', 'launchReadersReport'] as const)('edits the target Book references through the global overview bridge for %s', async operation => {
+    const bookA = 'a0000000-0000-4000-8000-000000000001', bookB = 'b0000000-0000-4000-8000-000000000002';
+    const sender = { routeGeneration: 1, bookId: bookA };
+    const call = vi.fn(async (name: string, input: { bookId?: string }) => {
+      if (name === 'inspectTaskOverview') return { books: [{ bookId: bookA }, { bookId: bookB }] };
+      if (name === 'inspectEvaluation') {
+        const bookId = input.bookId;
+        return { bookId, materials: { statement: '', more: 0, items: ['old', 'new'].map(id => ({ materialId: id, title: bookId + id, scope: 'book', selectable: true, characters: 2, reason: null })) }, market: { series: [{ seriesId: 'series', title: bookId }] } };
+      }
+      if (name === operation) return { bookId: input.bookId, taskIntentId: 'new-task' };
+      throw new Error(name);
+    });
+    const ambient = vi.fn(async () => { throw new Error('Requires Book route'); });
+    const api = { ...await referenceBridge(sender, call), inspectEvaluation: ambient };
+    const kind = operation === 'launchInitialEvaluation' ? 'initial-evaluation' : 'readers-report';
+    const source = finishedPlan({ bookId: bookB, kind, relaunch: { operation, input: { bookId: bookB, materialIds: ['old'], ...(operation === 'launchInitialEvaluation' ? { seriesId: 'series' } : {}) }, summary: [], cancelsFirst: null } as NonNullable<TaskPlanProjection['relaunch']> });
+    const { root } = await openDrawer(source, { how: { redo: true }, api,
+      overviewApiForBook: bookId => taskOverviewApi(api as unknown as RendererApi & typeof api, () => bookId) });
+    await vi.waitFor(() => expect(root.querySelector('[data-evaluation-material="old"]')?.checked).toBe(true));
+    const added = root.querySelector('[data-evaluation-material="new"]')!;
+    expect(added.closest('label')?.textContent).toContain(bookB);
+    if (operation === 'launchInitialEvaluation') expect(root.querySelector('[aria-label="本次任务的书系参考"]')?.value).toBe('series');
+    added.checked = true;
+    added.dispatchEvent({ type: 'change', bubbles: true } as never);
+    await vi.waitFor(() => expect(root.querySelector('[data-task-drawer-control="launch"]')?.disabled).toBe(false));
+    root.querySelector('[data-task-drawer-control="launch"]')!.click();
+    await vi.waitFor(() => expect(call).toHaveBeenCalledWith(operation, expect.objectContaining({ bookId: bookB, materialIds: ['old', 'new'] })));
+    expect(call).toHaveBeenCalledWith('inspectEvaluation', { bookId: bookB, recordId: null });
+    expect(ambient).not.toHaveBeenCalled();
+    expect(sender).toEqual({ routeGeneration: 1, bookId: bookA });
+  });
+
+  it('relaunches the saved evaluation series through the target Book bridge and only clears it on explicit selection', async () => {
+    const { store, active, bookId, seriesId, first, task, sender, launch, openSource } = await evaluationSeriesFixture();
+    const selector = '[aria-label="本次任务的书系参考"]';
+    const offered = await openSource(first.taskIntentId);
+    const original = offered.root.querySelector(selector)!;
+    expect(original.value).toBe(seriesId);
+    expect(original.querySelectorAll('option').find(option => option.value === seriesId)?.disabled).toBe(false);
+    offered.start.click();
+    await vi.waitFor(() => expect(launch.mock.results[0]?.type).toBe('return'));
+    expect(launch.mock.lastCall?.[0]).toMatchObject({ bookId, seriesId });
+    const repeated = launch.mock.results[0]!.value as { taskIntentId: string };
+    store.cancelWaitingTask(task(repeated.taskIntentId));
+    offered.drawer.close(false);
+
+    leaveSeries(store, seriesId, bookId);
+    launch.mockClear();
+    const saved = await openSource(repeated.taskIntentId);
+    const select = saved.root.querySelector(selector)!;
+    expect(select?.value).toBe(seriesId);
+    expect(select.querySelectorAll('option').find(option => option.value === seriesId)?.disabled).toBe(true);
+    saved.start.click();
+    await vi.waitFor(() => expect(saved.root.querySelector('.task-bar-refusal')?.textContent).toBeTruthy());
+    expect(launch.mock.results[0]).toMatchObject({ type: 'throw', value: { code: 'SERIES_SCOPE_UNAVAILABLE' } });
+    expect(launch.mock.calls[0]?.[0]).toMatchObject({ bookId, seriesId });
+    select.value = '';
+    select.dispatchEvent({ type: 'change', bubbles: true } as never);
+    saved.start.click();
+    await vi.waitFor(() => expect(launch.mock.results[1]?.type).toBe('return'));
+    expect(launch.mock.calls[1]?.[0]).toMatchObject({ bookId, seriesId: null });
+    const cleared = launch.mock.results[1]!.value as { taskIntentId: string };
+    store.cancelWaitingTask(task(cleared.taskIntentId));
+    saved.drawer.close(false);
+
+    const bookOnly = await openSource(cleared.taskIntentId);
+    expect(bookOnly.root.querySelector(selector)).toBeNull();
+    bookOnly.start.click();
+    await vi.waitFor(() => expect(launch.mock.results[2]?.type).toBe('return'));
+    expect(launch.mock.calls[2]?.[0]).not.toHaveProperty('seriesId');
+    expect(sender).toEqual({ routeGeneration: 1, bookId: active.bookId });
+    bookOnly.drawer.close(false);
+  });
+
+  it.each([true, false])('requires one confirmation between review categories with an available recipe %s', async available => {
+    const cancelReviewRun = vi.fn(async () => { throw new Error('这次审阅正在进行。'); });
+    const source = finishedPlan({ kind: 'review-run', state: { key: 'stopped', label: '中途停止 · 可继续审阅' }, relaunch: available ? { operation: 'launchReviewRun', summary: [], input: { bookId: 'book', categoryIds: ['typos-and-usage'], scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null } }, cancelsFirst: { operation: 'cancelReviewRun', input: { bookId: 'book', reviewRunId: 'task' } } } : null });
+    const { root, setStatus } = await openDrawer(source, { how: { cancel: true }, api: { cancelReviewRun } });
+    expect(text(root, '.task-bar-cancel-lines')).toBe('这次审阅将结束，已经记录的结果会保留。');
+    expect(cancelReviewRun).not.toHaveBeenCalled();
+    root.querySelector('[data-task-drawer-control="keep-running"]')!.click();
+    expect(cancelReviewRun).not.toHaveBeenCalled();
+    root.querySelector('[data-task-drawer-control="cancel-run"]')!.click();
+    root.querySelector('[data-task-drawer-control="confirm-cancel-run"]')!.click();
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('这次审阅正在进行。', 'error'));
+    expect(cancelReviewRun).toHaveBeenCalledExactlyOnceWith({ reviewRunId: source.ref });
+  });
+
+  it.each([true, false])('opens the unconfirmed ranges on the first request for a terminal record %s', async terminal => {
+    const source = terminal ? finishedPlan({ unconfirmed: { digest: 'digest', ranges: [{ unitOrdinal: 4, category: null, earlierText: false, recordedAt: NOW }], steps: [] } })
+      : runningPlan({ state: { key: 'outcome-unknown', label: '结果待确认' } }, running({ outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: true } }));
+    const { root } = await openDrawer(source, { how: { view: 'run', unconfirmed: true } });
+    expect(root.querySelector('[data-unconfirmed-unit="4"]')).not.toBeNull();
+  });
+
+  it('moves a queued run through its drawer using the recorded position and identity', async () => {
+    const reorderQueuedRun = vi.fn(async () => ({}));
+    const source = runningPlan({ state: { key: 'queued', label: '排队中' }, runControl: null });
+    const overview = async () => overviewOf(row('running', { runRecordId: 'queued-run', queuePosition: 4, state: 'queued' }));
+    const { root } = await openDrawer(source, { overview, api: { reorderQueuedRun } });
+    root.querySelector('[data-task-drawer-control="queue-up"]')!.click();
+    expect(reorderQueuedRun).toHaveBeenCalledWith({ runRecordId: 'queued-run', position: 3 });
+    await vi.waitFor(() => expect(root.querySelector('[data-task-drawer-control="queue-top"]')?.disabled).toBe(false));
+    root.querySelector('[data-task-drawer-control="queue-top"]')!.click();
+    await vi.waitFor(() => expect(reorderQueuedRun).toHaveBeenCalledWith({ runRecordId: 'queued-run', position: 1 }));
+  });
+
   it('continues a restart-paused baseline without observing a repeated transport stop (#1656 N3)', async () => {
     const resume = vi.fn(async () => ({ run: { runRecordId: 'run', state: 'admitted' } }));
     const timer = vi.spyOn(window, 'setTimeout');

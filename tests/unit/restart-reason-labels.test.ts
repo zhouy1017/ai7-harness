@@ -33,7 +33,7 @@ it.each(['yielded', 'pausing-to-yield', 'queued', 'editor-paused', 'no-route', '
       nextAction: 'view-run', runRecordId: 'run', target: attention.target,
     };
     const line = taskOverviewCard(item, () => undefined).querySelector('.task-overview-card-line')?.textContent;
-    expect(line).toBe(found === 'editor-paused' ? `你 ${new Date(item.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 暂停 · 可继续` : reason);
+    expect(line).toBe(found === 'editor-paused' ? `你在 ${new Date(item.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })} 暂停；继续时接着处理。` : reason);
     const state = { key: queued ? 'blocked' as const : found === 'running' ? 'resumable' as const : 'paused' as const, label: '已暂停', ...(manual ? {} : { stopReason: 'shutdown' as const }) };
     expect(taskBarRestartStatement(state)).toBe(manual || found === 'running' ? null : queued ? QUEUED : PAUSED);
     if (queued) {

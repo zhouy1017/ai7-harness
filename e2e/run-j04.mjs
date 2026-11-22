@@ -1,3 +1,4 @@
+import { pressReachable } from './task-card-reach.mjs';
 import { capturePointerFailure, chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions } from './launch-task-bar.mjs';
@@ -1725,7 +1726,7 @@ async function main() {
     // Run has left (V2-UX-LIVE-004).
     const startedDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'settled', 'analysis-bar-started-drawer');
     requireJourney(startedDrawer?.bar?.state === 'started' && startedDrawer.bar.start === 'started' && startedDrawer.bar.status === '已完成' &&
-      startedDrawer.bar.statement === null && barActions(startedDrawer) === 'run-link:查看运行:enabled' && startedDrawer.actions === 0,
+      startedDrawer.bar.statement === null && barActions(startedDrawer) === 'redo:重新开始…:enabled|run-link:查看运行:enabled' && startedDrawer.actions === 0,
     'analysis-bar-started', startedDrawer?.bar);
     await assertRenderer(renderer, `!['正在开始任务…','已进入调度器'].some((text)=>(document.querySelector('#persistence-status')?.textContent??'').includes(text))`, 'analysis-bar-status-settled');
 
@@ -2649,7 +2650,7 @@ async function main() {
       'offline-launch-no-send',waitingDrawer.bar);
     requireJourney(waitingDrawer.pill==='等待网络' && waitingDrawer.bar.state==='started' && waitingDrawer.bar.statement===null &&
       waitingDrawer.bar.note==='已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容' &&
-      barActions(waitingDrawer)==='cancel-wait:取消:enabled|run-link:查看运行:enabled','offline-launch-waiting-bar',waitingDrawer.bar);
+      barActions(waitingDrawer)==='cancel-wait:取消任务:enabled|run-link:查看运行:enabled','offline-launch-waiting-bar',waitingDrawer.bar);
     requireJourney(waitingAnalysis.authorization.origin==='standard-direct' && waitingAnalysis.authorization.authority==='standard-direct-dispatch' &&
       waitingAnalysis.run.progress===null && waitingAnalysis.run.stateLabel==='等待网络 · 未启动' &&
       sameValue(waitingAnalysis.run.transitions.map(transition=>transition.state),['authorized','awaiting-connectivity']),'offline-launch-waiting-record');
@@ -2665,7 +2666,9 @@ async function main() {
     } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
     await reviewAction(renderer,'#task-drawer [data-task-drawer-control="cancel-wait"]','offline-launch-cancel');
     const cancelledDrawer = await drawerShowing(renderer,offlineIntent,'cancelled','offline-launch-cancelled');
-    requireJourney(cancelledDrawer.pill==='已取消' && cancelledDrawer.bar.status==='已取消 · 未发送任何内容' && barActions(cancelledDrawer)==='run-link:查看运行:enabled','offline-launch-cancelled-no-send',cancelledDrawer.bar);
+    const waitingSource = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'baseline-analysis',ref:${JSON.stringify(offlineIntent)}})`);
+    const waitingActions = waitingSource.relaunch ? 'redo:重新开始…:enabled|run-link:查看运行:enabled' : 'run-link:查看运行:enabled';
+    requireJourney(cancelledDrawer.pill==='已取消' && cancelledDrawer.bar.status==='已取消 · 未发送任何内容' && barActions(cancelledDrawer)===waitingActions,'offline-launch-cancelled-no-send',cancelledDrawer.bar);
     const cancelledAnalysis=await readBaseline(renderer);
     requireJourney(cancelledAnalysis.run.state==='cancelled'&&cancelledAnalysis.run.stateLabel==='已取消 · 未启动'&&cancelledAnalysis.run.attempt===null&&cancelledAnalysis.taskOutcome===null&&
       sameValue(cancelledAnalysis.run.transitions.map(transition=>transition.state),['authorized','awaiting-connectivity','cancelled']),'offline-launch-cancelled-record');
@@ -3037,7 +3040,7 @@ async function main() {
     const preparedReview = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     requireJourney(UUID_PATTERN.test(preparedReview?.reviewRunId ?? '') && preparedReview.categories.length === 3 && preparedReview.state==='waiting' && preparedReview.authorization!==null, 'review-launched-waiting-run');
     const waitingReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'waiting', 'review-waiting-drawer');
-    requireJourney(waitingReviewDrawer?.bar?.status==='等待网络' && barActions(waitingReviewDrawer)==='cancel-wait:取消:enabled|run-link:查看审阅:enabled', 'review-waiting-cancellable', waitingReviewDrawer?.bar);
+    requireJourney(waitingReviewDrawer?.bar?.status==='等待网络' && barActions(waitingReviewDrawer)==='cancel-wait:取消任务:enabled|run-link:查看审阅:enabled', 'review-waiting-cancellable', waitingReviewDrawer?.bar);
     const waitingReview = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     requireJourney(waitingReview.run?.reviewRunId===preparedReview.reviewRunId && waitingReview.run.canContinue===false &&
       waitingReview.run.categories.every(category=>category.state==='waiting') && waitingReview.newReview.available===false,
@@ -3075,7 +3078,7 @@ async function main() {
     // The drawer beside ②B read the plan again as the Run moved; it now states the Run's end.
     const settledReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'settled', 'review-drawer-settled');
     requireJourney(settledReviewDrawer?.pill === '已完成' && settledReviewDrawer.drift === null && typeof settledReviewDrawer.technical.authorization === 'string' &&
-      settledReviewDrawer.bar?.state === 'started' && settledReviewDrawer.bar.status === '已完成' && barActions(settledReviewDrawer) === 'run-link:查看审阅:enabled',
+      settledReviewDrawer.bar?.state === 'started' && settledReviewDrawer.bar.status === '已完成' && barActions(settledReviewDrawer) === 'redo:重新开始…:enabled|run-link:查看审阅:enabled',
       'review-drawer-settled-plan', settledReviewDrawer);
 
     // Completion is a quiet 查看 notice while the editor is working in 审阅, even with the preference on.
@@ -4288,6 +4291,64 @@ async function main() {
     requireJourney(JSON.stringify(rangeReopened?.resultSetRevision) === JSON.stringify(rangeRevision) &&
       JSON.stringify(rangeReopened.taskOutcome) === JSON.stringify(rangeRecorded.taskOutcome) && loopback.healthy() && loopback.observedRequests() === 0,
     'range-recorded-restart-preserves-result');
+
+    at('evaluation-relaunch-references');
+    // A source with no series in its saved scope. The window stays on its original Book while editing the other Book's references.
+    await writeFile(connectivityPath, 'offline');
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'evaluation-reference-tasks');
+    const referenceBook = recordedPausedBook.bookId;
+    const priorBook = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then(route => route?.bookId ?? null)`);
+    requireJourney(priorBook === recordedBook.bookId && priorBook !== referenceBook, 'evaluation-reference-foreign-book');
+    const fixture = await renderer.evaluate(`(async () => {
+      const bookId = ${JSON.stringify(referenceBook)};
+      await window.ai7.inspectTaskOverview();
+      const { seriesId } = await window.ai7.createSeries({ title: '初评参考书系', note: '' });
+      const change = { seriesId, bookId, kind: 'add' };
+      const { previewDigest } = await window.ai7.previewSeriesMembershipChange(change);
+      await window.ai7.changeSeriesMembership({ ...change, previewDigest });
+      const run = await window.ai7.taskOverviewCall({ operation: 'launchInitialEvaluation', bookId, input: { clientCommandId: crypto.randomUUID(), startWhen: 'when-online' } });
+      return { seriesId, ref: run.taskIntentId };
+    })()`);
+    const referenceCard = `[data-task-item=${JSON.stringify('task:' + fixture.ref)}] .task-overview-card-title strong`;
+    await pressReachable(renderer, waitFor, requireJourney, referenceCard, 'evaluation-reference-source');
+    const drawerButton = name => `#task-drawer [data-task-drawer-control=${JSON.stringify(name)}]:not(:disabled)`;
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef === ${JSON.stringify(fixture.ref)}`, 'evaluation-reference-source-open');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('cancel-wait'), 'evaluation-reference-cancel-wait');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('redo'), 'evaluation-reference-redo');
+    const options = '#task-drawer .task-launch-options > summary';
+    await pressReachable(renderer, waitFor, requireJourney, options, 'evaluation-reference-options');
+    const series = '#task-drawer select[aria-label="本次任务的书系参考"]';
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(series)})?.value === ''`, 'evaluation-reference-original-book-only');
+    const choice = await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(series)}).options).findIndex(o => o.value === ${JSON.stringify(fixture.seriesId)})`);
+    requireJourney(choice > 0, 'evaluation-reference-target-series');
+    const chooseSeries = async (index, value, label) => {
+      await pressReachable(renderer, waitFor, requireJourney, series + ' + .ui-select-trigger', `evaluation-reference-${label}-chooser`);
+      await pressReachable(renderer, waitFor, requireJourney, series + ` ~ .ui-select-popover [data-index="${index}"]`, `evaluation-reference-${label}-choice`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(series)})?.value === ${JSON.stringify(value)}`, `evaluation-reference-${label}-selected`);
+    };
+    const closeOptions = async label => {
+      await pressReachable(renderer, waitFor, requireJourney, options, `evaluation-reference-${label}-close`);
+      await waitFor(renderer, `(() => { const node = document.querySelector('#task-drawer .task-launch-options'); return node?.open === false && !node.querySelector(':popover-open'); })()`, `evaluation-reference-${label}-closed`);
+    };
+    await chooseSeries(choice, fixture.seriesId, 'series');
+    await closeOptions('series');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('launch'), 'evaluation-reference-series-start');
+    // This provider-free policy refuses evaluation with series knowledge. It must retain the chosen series after refusal.
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-bar-refusal')?.textContent.includes('书系') && document.querySelector(${JSON.stringify(series)})?.value === ${JSON.stringify(fixture.seriesId)}`, 'evaluation-reference-series-refusal');
+    await pressReachable(renderer, waitFor, requireJourney, options, 'evaluation-reference-options-reopen');
+    await chooseSeries(0, '', 'book');
+    await closeOptions('book');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('launch'), 'evaluation-reference-start');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanKind === 'initial-evaluation' && drawer.dataset.taskPlanRef && drawer.dataset.taskPlanRef !== ${JSON.stringify(fixture.ref)}; })()`, 'evaluation-reference-new-run');
+    await pressReachable(renderer, waitFor, requireJourney, drawerButton('cancel-wait'), 'evaluation-reference-settle');
+    await waitFor(renderer, `(async () => {
+      const ref = document.querySelector('#task-drawer')?.dataset.taskPlanRef;
+      if (!ref || ref === ${JSON.stringify(fixture.ref)}) return false;
+      const plan = await window.ai7.taskOverviewCall({ operation: 'inspectTaskPlan', bookId: ${JSON.stringify(referenceBook)}, input: { kind: 'initial-evaluation', ref } });
+      const route = await window.ai7.getBookWorkbenchRoute();
+      return plan.state.key === 'cancelled' && plan.relaunch?.operation === 'launchInitialEvaluation' && !Object.hasOwn(plan.relaunch.input, 'seriesId') && (route?.bookId ?? null) === ${JSON.stringify(priorBook)};
+    })()`, 'evaluation-reference-saved-book-only');
+    await writeFile(connectivityPath, 'online');
 
     // #1169: a standalone authored stock review, through the normal UI and the same native unit-child
     // composition the service test verifies by its eight distinct child Session spans. No capture is inherited.
