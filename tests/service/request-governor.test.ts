@@ -219,6 +219,47 @@ describe('durable request reader compatibility', () => {
     await expect(EditorialStore.open(crash.snapshot, crash.roots.codeRoot)).rejects.toMatchObject({ code: 'ANALYSIS_RECORD_INVALID' });
   });
 
+  // 用时 (#1670): what the next start writes to discharge an admitted request is not the Run's own work, so the five hours AI7
+  // was closed never count — read on the real review, its category Run left executing, or left cancelling and finished at the start.
+  it.each(['executing', 'cancelling'] as const)('reads no closed hours into the 用时 of a Run left %s with an admitted request (#1670)', async (left) => {
+    const crash = await admittedCrash();
+    const shutdown = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(shutdown);
+      const reopened = await EditorialStore.open(crash.snapshot, crash.roots.codeRoot); crash.opened.push(reopened);
+      reopened.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy: crash.policy,
+        live: { scope: 'ordinary-production', ...crash.binding, runBudgetCeiling: 'unset' } });
+      const kept = reopened.executionLedgerForRun(crash.runRecordId);
+      // The editor's 取消任务 recorded just before AI7 closed.
+      if (left === 'cancelling') kept.recordRunState(crash.runRecordId, 'cancelling', { detail: '正在取消' });
+      const before = reopened.inspectTaskPlan({ bookId: crash.book.bookId, kind: 'review-run', ref: crash.reviewRunId }).work!;
+      vi.setSystemTime(shutdown + 5 * 3_600_000);
+      // Every write of the next start is stamped after the closed hours, each a little later than the one before.
+      const original = BaselineAnalysisStore.prototype.recordRunState;
+      vi.spyOn(BaselineAnalysisStore.prototype, 'recordRunState').mockImplementation(function (this: BaselineAnalysisStore, ...args) {
+        vi.setSystemTime(Date.now() + 10);
+        return Reflect.apply(original, this, args);
+      });
+      reopened.reconcileStoppedReviewCategoryRuns();
+      if (left === 'cancelling') {
+        const restarted = new BaselineAnalysisExecutionOwner({ requestGovernor: governor(), ledger: reopened.baselineAnalysisLedger,
+          launchPolicy: crash.policy, fixture: null, secretResolver: { resolve: async () => 'synthetic-placeholder' },
+          productionPolicyFor: (selected) => resolveSourceCheckoutLaunchPolicySync(crash.roots.codeRoot, 'ordinary-production', selected),
+          production: { scope: 'ordinary-production', nativeFetch: async () => { throw new Error('NOTHING_IS_SENT'); } } });
+        scenarioCleanups.push(() => restarted.dispose());
+        restarted.cancelRun(crash.runRecordId, kept); await restarted.whenIdle();
+      }
+      expect(kept.currentRunState(crash.runRecordId)).toBe(left === 'executing' ? 'resumable' : 'cancelled');
+      const after = reopened.inspectTaskPlan({ bookId: crash.book.bookId, kind: 'review-run', ref: crash.reviewRunId }).work!;
+      expect(after.workingSince).toBeNull();
+      // What the Run worked before AI7 closed, and nothing of the five hours.
+      expect(after.workedMs).toBeLessThanOrEqual(before.workedMs + (before.workingSince === null ? 0 : shutdown - Date.parse(before.workingSince)));
+      expect(after.workedMs).toBeLessThan(60_000);
+      expect(crash.calls()).toBe(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('refuses an unsupported SQLite reader revision without an external marker and leaves canonical records untouched', async () => {
     const crash = await admittedCrash();
     await unlink(dataVersionMarkerPath(crash.snapshot));

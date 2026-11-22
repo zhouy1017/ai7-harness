@@ -22,7 +22,9 @@ describe('runStretches', () => {
     const rows = [row('executing', 6), row('executing', 7), row('resumable', 300, true), row('resumable', 600, true)];
     expect(runStretches(rows, () => own)).toEqual([{ from: T0 + 6 * 60_000, to: T0 + 8 * 60_000 }]);
     // `cancelled` after `cancelling`, written at the next start without a mark, is capped the same way.
-    expect(runStretches([row('executing', 0), row('cancelling', 3), row('cancelled', 240)], () => [])).toEqual([{ from: T0, to: T0 + 3 * 60_000 }]);
+    expect(runStretches([row('executing', 0), row('cancelling', 3), row('cancelled', 240)], () => [at(0), at(3)])).toEqual([{ from: T0, to: T0 + 3 * 60_000 }]);
+    // With nothing the Run recorded after its stretch began, the closed stretch counts nothing: the conservative reading.
+    expect(runStretches([row('executing', 0), row('resumable', 300, true)], () => [at(301)])).toEqual([{ from: T0, to: T0 }]);
     // An open stretch stays open: the reader adds now − workingSince.
     expect(unionWork(runStretches([row('executing', 0), row('paused', 2), row('executing', 10)], () => []))).toEqual({ workedMs: 2 * 60_000, workingSince: T0 + 10 * 60_000 });
   });
@@ -47,6 +49,30 @@ describe('unionWork', () => {
     db.prepare('INSERT INTO analysis_run_records VALUES (?, ?), (?, ?)').run('a', 'category-a', 'b', 'category-b');
     const reader = new TaskWorkReader(db, { reviewTaskIntents: () => [{ taskIntentId: 'category-a', synthesis: false }, { taskIntentId: 'category-b', synthesis: false }], reviewModelLabel: () => null });
     expect(reader.ofReview('review')).toEqual({ workedMs: 14 * 60_000, workingSince: null, finished: null });
+    db.close();
+  });
+});
+
+describe('the measured duration', () => {
+  it('samples a review by its completion in the last 7 days, never by when it was created (#1670)', () => {
+    const now = Date.parse('2026-11-22T08:00:00.000Z');
+    const day = 86_400_000;
+    const db = new DatabaseSync(':memory:');
+    db.exec(`CREATE TABLE review_runs (review_run_id TEXT, created_at TEXT, canonical_json TEXT);
+      CREATE TABLE analysis_task_outcomes (task_intent_id TEXT, classification TEXT, recorded_at TEXT, canonical_json TEXT);
+      CREATE TABLE analysis_run_records (run_record_id TEXT, task_intent_id TEXT);
+      CREATE TABLE analysis_run_states (run_record_id TEXT, sequence INTEGER, state TEXT, recorded_at TEXT, canonical_json TEXT)`);
+    const reader = new TaskWorkReader(db, { reviewTaskIntents: () => [{ taskIntentId: 'category', synthesis: false }], reviewModelLabel: () => null });
+    const completedAgo = (ms: number) => {
+      for (const table of ['review_runs', 'analysis_task_outcomes', 'analysis_run_records', 'analysis_run_states']) db.exec(`DELETE FROM ${table}`);
+      db.prepare('INSERT INTO review_runs VALUES (?, ?, ?)').run('review', new Date(now - 15 * day).toISOString(), JSON.stringify({ categories: [{ task: { taskIntentId: 'category' } }] }));
+      db.prepare('INSERT INTO analysis_task_outcomes VALUES (?, ?, ?, ?)').run('category', 'completed', new Date(now - ms).toISOString(), '{}');
+      db.prepare('INSERT INTO analysis_run_records VALUES (?, ?)').run('run', 'category');
+      db.prepare('INSERT INTO analysis_run_states VALUES (?, ?, ?, ?, ?)').run('run', 1, 'executing', new Date(now - ms - 60_000).toISOString(), JSON.stringify({ unitsTotal: 1 }));
+      db.prepare('INSERT INTO analysis_run_states VALUES (?, ?, ?, ?, ?)').run('run', 2, 'completed', new Date(now - ms).toISOString(), '{}');
+      return reader.perPartMs('review-run', now);
+    };
+    expect([completedAgo(60_000), completedAgo(8 * day)]).toEqual([60_000, null]);
     db.close();
   });
 });

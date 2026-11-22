@@ -136,6 +136,13 @@ function refusal(operation: () => unknown): string {
 const texts = (projection: DialogueProjection, attempt = projection.attempts.length - 1): string[] =>
   projection.attempts[attempt]!.fragments.map((fragment) => fragment.text);
 
+/** Each attempt's execution binding instant, the start of its 用时 (#1670). */
+function boundAt(): Map<string, string> {
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try { return new Map((db.prepare('SELECT attempt_id, bound_at FROM dialogue_execution_bindings').all()).map((row) => [String(row.attempt_id), String(row.bound_at)])); }
+  finally { db.close(); }
+}
+
 function storeBytes(): Buffer {
   return Buffer.concat(readdirSync(join(roots.dataRoot, 'store')).map((name) => readFileSync(join(roots.dataRoot, 'store', name))));
 }
@@ -319,8 +326,8 @@ describe('就这段提问… over the real store and harness', () => {
       expect(running.items.map((entry) => [entry.item.state, entry.item.object, entry.result])).toEqual([
         ['dialogue-answering', { kind: 'dialogue', question: QUESTION }, null],
       ]);
-      // 用时 (#1670): the attempt under way is the open stretch.
-      expect(running.items[0]!.work).toEqual({ workedMs: 0, workingSince: held.attempts[0]!.startedAt, finished: null });
+      // 用时 (#1670): the attempt under way is the open stretch, from the instant its execution was bound.
+      expect(running.items[0]!.work).toEqual({ workedMs: 0, workingSince: boundAt().get(turn.attemptId), finished: null });
 
       // 停止回答: only complete fragments are kept, labelled incomplete; nothing is retried (DIALOG-012, 014).
       expect(refusal(() => store.convertDialogueToChangeSuggestion(book.bookId, { dialogueId: turn.dialogueId, attemptId: turn.attemptId, proposedText: '改', rationale: '' })))
@@ -356,7 +363,8 @@ describe('就这段提问… over the real store and harness', () => {
         .toEqual([['dialogue-answered', { kind: 'dialogue', dialogueId: turn.dialogueId }]]);
       // Once answered: the attempts' summed time, one request each, and the row's model (#1670).
       const doneRow = panelDone.groups.find((group) => group.key === 'recent')!.items[0]!;
-      expect(doneRow.work).toEqual({ workedMs: answered.attempts.reduce((sum, attempt) => sum + Date.parse(attempt.settledAt!) - Date.parse(attempt.startedAt), 0),
+      const bound = boundAt();
+      expect(doneRow.work).toEqual({ workedMs: answered.attempts.reduce((sum, attempt) => sum + Date.parse(attempt.settledAt!) - Date.parse(bound.get(attempt.attemptId)!), 0),
         workingSince: null, finished: { requests: 2, modelLabel: doneRow.item.modelLabel ?? null } });
 
       // A restart: the history is joined again from the records to the Harness Session Ledger.
@@ -528,9 +536,13 @@ describe('就这段提问… over the real store and harness', () => {
     }
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      expect(store.reconcileDialogueAttempts()).toBe(1);
+      // The next start settles it five hours on: none of the hours AI7 was closed is 用时 (#1670), only what the attempt recorded itself.
+      expect(store.reconcileDialogueAttempts(new Date(Date.now() + 5 * 3_600_000))).toBe(1);
       const reconciled = store.inspectDialogue(bookId, dialogueId, 0, () => null);
       expect(reconciled.attempts[1]).toMatchObject({ state: 'interrupted', causeCode: 'SERVICE_STOPPED', source: 'ledger', fragmentTotal: 0 });
+      const row = store.inspectBookTasks(bookId, () => null).groups.flatMap((group) => group.items).find((entry) => entry.item.target.kind === 'dialogue')!;
+      expect(row.work).toMatchObject({ workingSince: null, finished: { requests: 2 } });
+      expect(row.work!.workedMs).toBeLessThan(60_000);
       expect(store.reconcileDialogueAttempts()).toBe(0);
     } finally {
       await dialogues.dispose().catch(() => undefined);

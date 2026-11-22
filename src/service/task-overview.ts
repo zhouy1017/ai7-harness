@@ -1,6 +1,5 @@
 import type { TaskWorkReader } from './task-work.js';
 import type { ProgressReader } from './analysis/baseline-analysis-types.js';
-import type { TaskWorkProjection } from '../shared/protocol/task-plan.js';
 import type { BookTaskItemProjection, BookTasksProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewGroupKey, TaskOverviewItemProjection, TaskOverviewProjection, TaskPlanKind } from '../shared/protocol.js';
 
 const GROUPS: readonly TaskOverviewGroupKey[] = ['running', 'queued', 'waiting', 'paused', 'recent'];
@@ -97,19 +96,13 @@ export function estimateTaskStarts(projection: TaskOverviewProjection, now = Dat
   return { ...projection, groups: projection.groups.map((group) => group.key === 'queued' ? { ...group, items: queued } : group) };
 }
 
-/** 用时 of one row of the Book's 任务 panel (Issue #1670): the reading the plan of the same Task gives; `null` for a Task with no Run. */
-export function taskItemWork(work: TaskWorkReader, item: GlobalAttentionItemProjection, live: (attemptId: string) => boolean): TaskWorkProjection | null {
-  const target = item.target;
-  if (target.kind === 'analysis' || target.kind === 'analysis-plan') return work.ofTaskIntents([target.taskIntentId], item.modelLabel);
-  if (target.kind === 'review' || target.kind === 'review-plan') return work.ofReview(target.reviewRunId, item.modelLabel);
-  if (target.kind === 'task-plan') return work.ofPlan(target.taskKind, target.ref);
-  if (target.kind === 'dialogue') return work.ofDialogue(target.dialogueId, live, item.modelLabel ?? null);
-  return null;
-}
-
+/** 用时 of the rows of the Book's 任务 panel (Issue #1670), read for the whole Book at once: the reading the plan of each Task gives. */
 export function withBookTaskWork(work: TaskWorkReader | null, live: (attemptId: string) => unknown, projection: BookTasksProjection): BookTasksProjection {
-  return work === null ? projection : { ...projection, groups: projection.groups.map((group) => ({ ...group,
-    items: group.items.map((entry) => ({ ...entry, work: taskItemWork(work, entry.item, (attemptId) => live(attemptId) !== null) })) })) };
+  if (work === null) return projection;
+  const entries = projection.groups.flatMap((group) => group.items);
+  const read = work.ofItems(entries.map((entry) => entry.item), (attemptId) => live(attemptId) !== null);
+  const of = new Map(entries.map((entry, index) => [entry, read[index]!]));
+  return { ...projection, groups: projection.groups.map((group) => ({ ...group, items: group.items.map((entry) => ({ ...entry, work: of.get(entry) ?? null })) })) };
 }
 
 /** The finished card's 处理用时 · 约 N 次调用 as it always read: the Run Reports' stage wall times and requests; a dialogue's attempts. */
