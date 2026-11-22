@@ -45,6 +45,14 @@ export const STRUCTURAL_EDIT_SCHEMA_SQL = {
   ) STRICT`,
 } as const;
 
+/**
+ * The lineage walk's index (Issue #1654, from R5-1's review): a reversal reaches a moved target by following `split-from` rows
+ * from the block they name, so each step of the walk is a lookup by `related_block_id`.
+ */
+export const STRUCTURAL_EDIT_INDEX_SQL = {
+  manuscript_block_lineage_related: `CREATE INDEX manuscript_block_lineage_related ON manuscript_block_lineage(related_block_id, relation)`,
+} as const;
+
 /** Whether this store holds revision 100's relations: the lineage relation is created in the transaction that rebuilds the other two. */
 export function hasStructuralEditSchema(db: DatabaseSync): boolean {
   return db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_block_lineage'").get() !== undefined;

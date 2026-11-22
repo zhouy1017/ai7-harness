@@ -138,10 +138,41 @@ export interface DurableHistoryProjection {
   revisionLabel: string;
   journalSequence: number;
   workingDigest: string;
-  commandGroupId: string;
+  /** The last command group the step replayed; `null` for a step of Apply Effects only (Issue #1654). */
+  commandGroupId: string | null;
   completionLabel: string;
   canUndo: boolean;
   canRedo: boolean;
+  /** The editor step taken back or replayed, where it stands now, and whether it was set aside instead (Issue #1654). */
+  stepLabel: string;
+  anchorBlockId: string | null;
+  paragraph: number | null;
+  blocked: boolean;
+}
+
+/** The next step Ctrl+Z or redo would take (Issue #1654): what it is, how large, where, and the review batch it was. */
+export interface EditorStepSummary {
+  stepId: string;
+  kind: 'typing' | 'style' | 'split' | 'merge' | 'replace' | 'accept' | 'accept-batch' | 'replace-all' | 'ai-edit' | 'reverse-card' | 'inline-decision' | 'restore';
+  label: string;
+  changeCount: number;
+  paragraph: number | null;
+  batch: { reviewRunId: string; categoryId: string } | null;
+}
+
+/** `inspectEditorHistory` (Issue #1654): the steps Ctrl+Z and redo would take next. */
+export interface EditorHistoryProjection {
+  branchId: string;
+  undo: EditorStepSummary | null;
+  redo: EditorStepSummary | null;
+}
+
+/** Ctrl+Z, redo and the review page's 撤销本批应用 (`expectedStepId`, Issue #1654). */
+export interface ManuscriptHistoryInput {
+  manuscriptId: string;
+  branchId: string;
+  expectedWorkingDigest: string;
+  expectedStepId?: string;
 }
 
 export interface JournalAcknowledgement {

@@ -318,7 +318,7 @@ import type {
   SaveDeveloperProposalInput,
 } from './protocol/captured-procedures.js';
 
-import type { DurableHistoryProjection, JournalAcknowledgement, ManuscriptRailProjection, ManuscriptWindowAtInput, ManuscriptWindowProjection } from './protocol/manuscript-window.js';
+import type { DurableHistoryProjection, EditorHistoryProjection, JournalAcknowledgement, ManuscriptHistoryInput, ManuscriptRailProjection, ManuscriptWindowAtInput, ManuscriptWindowProjection } from './protocol/manuscript-window.js';
 import type {
   ApplyChangeSuggestionBatchInput, ApplyChangeSuggestionInput, ApplyReceiptProjection, BatchProposalDecisionDraftInput, CreateEditorialMarkInput,
   EditorialMarkCardProjection, EditorialMarkCommandProjection, FindPendingMarkInput, InspectApplyReceiptInput, ManuscriptApplyCommandProjection, ManuscriptApplyOutcomeProjection,
@@ -865,6 +865,7 @@ export const IPC_CHANNELS = {
   revealManuscriptExport: 'ai7:j07:reveal-manuscript-export',
   undoManuscript: 'ai7:j02:undo-manuscript',
   redoManuscript: 'ai7:j02:redo-manuscript',
+  inspectEditorHistory: 'ai7:j02:inspect-editor-history',
   openBookWorkbench: 'ai7:j12:open-book-workbench',
   getBookWorkbenchRoute: 'ai7:j12:get-book-workbench-route',
   leaveBookWorkbench: 'ai7:j12:leave-book-workbench',
@@ -4893,14 +4894,9 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   inspectManuscriptExportReceipt: { input: InspectManuscriptExportReceiptInput; output: ManuscriptExportReceiptProjection };
   /** Main-only (Issue #500, S64b): stage a prepared PDF's page for the main process to print before it approves. */
   stageManuscriptExport: { input: StageManuscriptExportInput; output: ManuscriptExportStageProjection };
-  undoManuscript: {
-    input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
-    output: DurableHistoryProjection;
-  };
-  redoManuscript: {
-    input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
-    output: DurableHistoryProjection;
-  };
+  undoManuscript: { input: ManuscriptHistoryInput; output: DurableHistoryProjection };
+  redoManuscript: { input: ManuscriptHistoryInput; output: DurableHistoryProjection };
+  inspectEditorHistory: { input: { manuscriptId: string; branchId: string }; output: EditorHistoryProjection };
   resolveBookWorkbenchRoute: {
     input: BookWorkbenchRoute;
     output: ResolvedBookWorkbenchRoute;
@@ -5471,6 +5467,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   revealManuscriptExport(input: Omit<InspectManuscriptExportReceiptInput, 'bookId'>): Promise<{ state: 'revealed' }>;
   undoManuscript(input: ServiceOperationMap['undoManuscript']['input']): Promise<DurableHistoryProjection>;
   redoManuscript(input: ServiceOperationMap['redoManuscript']['input']): Promise<DurableHistoryProjection>;
+  inspectEditorHistory(input: ServiceOperationMap['inspectEditorHistory']['input']): Promise<EditorHistoryProjection>;
   openBookWorkbench(input: BookWorkbenchOpenInput): Promise<BookWorkbenchOpenProjection>;
   getBookWorkbenchRoute(): Promise<ResolvedBookWorkbenchRoute | null>;
   leaveBookWorkbench(): Promise<{ state: 'library' }>;

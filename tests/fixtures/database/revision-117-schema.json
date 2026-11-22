@@ -15,6 +15,18 @@
   },
   {
    "type": "index",
+   "name": "editor_steps_walk",
+   "tbl_name": "editor_steps",
+   "sql": "CREATE INDEX editor_steps_walk ON editor_steps(branch_id, status, ordinal)"
+  },
+  {
+   "type": "index",
+   "name": "editorial_marks_pending_walk",
+   "tbl_name": "editorial_marks",
+   "sql": "CREATE INDEX editorial_marks_pending_walk ON editorial_marks(branch_id, block_id, from_grapheme, mark_id) WHERE status = 'open'"
+  },
+  {
+   "type": "index",
    "name": "import_attempts_recovery_order",
    "tbl_name": "import_commit_attempts",
    "sql": "CREATE INDEX import_attempts_recovery_order\n        ON import_commit_attempts(state, completion_acknowledged_at, prepared_at)"
@@ -33,9 +45,9 @@
   },
   {
    "type": "index",
-   "name": "manuscript_outline_order",
-   "tbl_name": "manuscript_outline",
-   "sql": "CREATE INDEX manuscript_outline_order ON manuscript_outline(branch_id, position)"
+   "name": "manuscript_block_lineage_related",
+   "tbl_name": "manuscript_block_lineage",
+   "sql": "CREATE INDEX manuscript_block_lineage_related ON manuscript_block_lineage(related_block_id, relation)"
   },
   {
    "type": "index",
@@ -1067,6 +1079,42 @@
    "type": "index",
    "name": "sqlite_autoindex_editor_inline_revision_marks_1",
    "tbl_name": "editor_inline_revision_marks",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_editor_step_effects_1",
+   "tbl_name": "editor_step_effects",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_editor_step_effects_2",
+   "tbl_name": "editor_step_effects",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_editor_step_mark_anchors_1",
+   "tbl_name": "editor_step_mark_anchors",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_editor_step_parts_1",
+   "tbl_name": "editor_step_parts",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_editor_steps_1",
+   "tbl_name": "editor_steps",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_editor_steps_2",
+   "tbl_name": "editor_steps",
    "sql": null
   },
   {
@@ -3711,8 +3759,8 @@
   },
   {
    "type": "index",
-   "name": "sqlite_autoindex_working_offset_nodes_1",
-   "tbl_name": "working_offset_nodes",
+   "name": "sqlite_autoindex_working_pages_1",
+   "tbl_name": "working_pages",
    "sql": null
   },
   {
@@ -3753,9 +3801,9 @@
   },
   {
    "type": "index",
-   "name": "working_blocks_window",
+   "name": "working_blocks_order_cover",
    "tbl_name": "working_blocks",
-   "sql": "CREATE INDEX working_blocks_window ON working_blocks(branch_id, position)"
+   "sql": "CREATE INDEX working_blocks_order_cover ON working_blocks(branch_id, order_key, grapheme_length)"
   },
   {
    "type": "index",
@@ -4155,6 +4203,30 @@
   },
   {
    "type": "table",
+   "name": "editor_step_effects",
+   "tbl_name": "editor_step_effects",
+   "sql": "CREATE TABLE editor_step_effects (\n    step_id TEXT NOT NULL REFERENCES editor_steps(step_id),\n    slot INTEGER NOT NULL CHECK(slot > 0),\n    generation INTEGER NOT NULL CHECK(generation > 0),\n    effect_id TEXT NOT NULL UNIQUE REFERENCES manuscript_effect_intents(effect_id),\n    polarity TEXT NOT NULL CHECK(polarity IN ('apply', 'reverse')),\n    written_by_step_id TEXT NOT NULL REFERENCES editor_steps(step_id),\n    written_as TEXT NOT NULL CHECK(written_as IN ('do', 'undo', 'redo')),\n    PRIMARY KEY(step_id, slot, generation)\n  ) STRICT"
+  },
+  {
+   "type": "table",
+   "name": "editor_step_mark_anchors",
+   "tbl_name": "editor_step_mark_anchors",
+   "sql": "CREATE TABLE editor_step_mark_anchors (\n    step_id TEXT NOT NULL REFERENCES editor_steps(step_id),\n    side TEXT NOT NULL CHECK(side IN ('pre', 'post')),\n    mark_id TEXT NOT NULL REFERENCES editorial_marks(mark_id),\n    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),\n    from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),\n    to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),\n    anchor_state TEXT NOT NULL CHECK(anchor_state IN ('exact', 'drifted')),\n    PRIMARY KEY(step_id, side, mark_id)\n  ) STRICT"
+  },
+  {
+   "type": "table",
+   "name": "editor_step_parts",
+   "tbl_name": "editor_step_parts",
+   "sql": "CREATE TABLE editor_step_parts (\n    step_id TEXT NOT NULL REFERENCES editor_steps(step_id),\n    seq INTEGER NOT NULL CHECK(seq > 0),\n    command_group_id TEXT REFERENCES manuscript_command_groups(command_group_id),\n    slot_step_id TEXT REFERENCES editor_steps(step_id),\n    slot INTEGER CHECK(slot > 0),\n    inline_mark_id TEXT REFERENCES editorial_marks(mark_id),\n    CHECK((command_group_id IS NOT NULL) + (slot IS NOT NULL) + (inline_mark_id IS NOT NULL) = 1),\n    CHECK((slot IS NULL) = (slot_step_id IS NULL)),\n    PRIMARY KEY(step_id, seq)\n  ) STRICT"
+  },
+  {
+   "type": "table",
+   "name": "editor_steps",
+   "tbl_name": "editor_steps",
+   "sql": "CREATE TABLE editor_steps (\n    step_id TEXT PRIMARY KEY,\n    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),\n    ordinal INTEGER NOT NULL CHECK(ordinal > 0),\n    kind TEXT NOT NULL CHECK(kind IN ('typing', 'style', 'split', 'merge', 'replace', 'accept', 'accept-batch', 'replace-all',\n      'ai-edit', 'reverse-card', 'inline-decision', 'restore')),\n    status TEXT NOT NULL CHECK(status IN ('applied', 'undone', 'superseded', 'kept')),\n    label TEXT NOT NULL CHECK(length(label) BETWEEN 1 AND 400),\n    anchor_block_id TEXT REFERENCES manuscript_blocks(block_id),\n    change_count INTEGER NOT NULL CHECK(change_count >= 1),\n    created_at TEXT NOT NULL,\n    UNIQUE(branch_id, ordinal)\n  ) STRICT"
+  },
+  {
+   "type": "table",
    "name": "editorial_learning_controls",
    "tbl_name": "editorial_learning_controls",
    "sql": "CREATE TABLE editorial_learning_controls (\n  entry_id TEXT PRIMARY KEY,\n  ordinal INTEGER NOT NULL UNIQUE CHECK(ordinal >= 1),\n  kind TEXT NOT NULL CHECK(kind IN ('switch', 'book')),\n  book_id TEXT REFERENCES books(book_id),\n  value INTEGER NOT NULL CHECK(value IN (0, 1)),\n  recorded_at TEXT NOT NULL,\n  canonical_json TEXT NOT NULL,\n  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),\n  CHECK((kind = 'book') = (book_id IS NOT NULL))\n) STRICT"
@@ -4505,7 +4577,7 @@
    "type": "table",
    "name": "manuscript_effect_approvals",
    "tbl_name": "manuscript_effect_approvals",
-   "sql": "CREATE TABLE manuscript_effect_approvals (\n  approval_id TEXT PRIMARY KEY,\n  effect_id TEXT NOT NULL UNIQUE REFERENCES manuscript_effect_intents(effect_id),\n  payload_digest TEXT NOT NULL CHECK(length(payload_digest) = 64),\n  actor TEXT NOT NULL CHECK(actor = 'editor'),\n  interaction TEXT NOT NULL CHECK(interaction IN ('accept-and-apply', 'accept-edited-and-apply', 'apply-recorded-decision', 'confirm-batch-apply', 'confirm-reverse-apply')),\n  approved_at TEXT NOT NULL\n) STRICT"
+   "sql": "CREATE TABLE manuscript_effect_approvals (\n  approval_id TEXT PRIMARY KEY,\n  effect_id TEXT NOT NULL UNIQUE REFERENCES manuscript_effect_intents(effect_id),\n  payload_digest TEXT NOT NULL CHECK(length(payload_digest) = 64),\n  actor TEXT NOT NULL CHECK(actor = 'editor'),\n  interaction TEXT NOT NULL CHECK(interaction IN ('accept-and-apply', 'accept-edited-and-apply', 'apply-recorded-decision', 'confirm-batch-apply', 'confirm-reverse-apply',\n    'undo-step', 'redo-step')),\n  approved_at TEXT NOT NULL\n) STRICT"
   },
   {
    "type": "table",
@@ -4565,7 +4637,7 @@
    "type": "table",
    "name": "manuscript_outline",
    "tbl_name": "manuscript_outline",
-   "sql": "CREATE TABLE manuscript_outline (\n        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),\n        block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),\n        position INTEGER NOT NULL CHECK(position > 0),\n        kind TEXT NOT NULL CHECK(kind IN ('title', 'heading')),\n        level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 6),\n        text TEXT NOT NULL,\n        digest TEXT NOT NULL CHECK(length(digest) = 64),\n        PRIMARY KEY(branch_id, block_id),\n        UNIQUE(branch_id, position)\n      ) STRICT"
+   "sql": "CREATE TABLE manuscript_outline (\n        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),\n        block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),\n        order_key INTEGER NOT NULL CHECK(order_key > 0),\n        kind TEXT NOT NULL CHECK(kind IN ('title', 'heading')),\n        level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 6),\n        text TEXT NOT NULL,\n        digest TEXT NOT NULL CHECK(length(digest) = 64),\n        PRIMARY KEY(branch_id, block_id),\n        UNIQUE(branch_id, order_key)\n      ) STRICT"
   },
   {
    "type": "table",
@@ -5405,13 +5477,13 @@
    "type": "table",
    "name": "working_blocks",
    "tbl_name": "working_blocks",
-   "sql": "CREATE TABLE working_blocks (\n      branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),\n      block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),\n      position INTEGER NOT NULL CHECK(position > 0),\n      kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph', 'note')),\n      level INTEGER,\n      text TEXT NOT NULL,\n      digest TEXT NOT NULL CHECK(length(digest) = 64), grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0),\n      PRIMARY KEY(branch_id, block_id),\n      UNIQUE(branch_id, position)\n    ) STRICT"
+   "sql": "CREATE TABLE working_blocks (\n      branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),\n      block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),\n      order_key INTEGER NOT NULL CHECK(order_key > 0),\n      kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph', 'note')),\n      level INTEGER,\n      text TEXT NOT NULL,\n      digest TEXT NOT NULL CHECK(length(digest) = 64), grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0),\n      PRIMARY KEY(branch_id, block_id),\n      UNIQUE(branch_id, order_key)\n    ) STRICT"
   },
   {
    "type": "table",
-   "name": "working_offset_nodes",
-   "tbl_name": "working_offset_nodes",
-   "sql": "CREATE TABLE working_offset_nodes (\n    branch_id TEXT NOT NULL,\n    position INTEGER NOT NULL CHECK(position > 0),\n    span_graphemes INTEGER NOT NULL CHECK(span_graphemes >= 0),\n    PRIMARY KEY(branch_id, position),\n    FOREIGN KEY(branch_id, position) REFERENCES working_blocks(branch_id, position) ON DELETE CASCADE\n  ) STRICT"
+   "name": "working_pages",
+   "tbl_name": "working_pages",
+   "sql": "CREATE TABLE working_pages (\n    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),\n    first_order_key INTEGER NOT NULL CHECK(first_order_key >= 0),\n    block_count INTEGER NOT NULL CHECK(block_count BETWEEN 1 AND 512),\n    grapheme_total INTEGER NOT NULL CHECK(grapheme_total >= 0),\n    PRIMARY KEY(branch_id, first_order_key)\n  ) STRICT"
   },
   {
    "type": "table",

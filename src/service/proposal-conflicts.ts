@@ -748,7 +748,7 @@ export class ProposalConflictStore {
        WHERE em.branch_id = ? AND em.kind = 'change-suggestion' AND em.anchor_state = 'drifted'
          AND em.status IN ('open', 'applied')
          AND NOT EXISTS (SELECT 1 FROM proposal_conflict_outcomes o WHERE o.mark_id = em.mark_id)
-       ORDER BY wb.position, em.from_grapheme, em.to_grapheme DESC, em.created_at, em.mark_id
+       ORDER BY wb.order_key, em.from_grapheme, em.to_grapheme DESC, em.created_at, em.mark_id
        LIMIT ?`,
     ).all(branchId, MAX_PROPOSAL_CONFLICT_NAVIGATOR + 1) as SqlRow[];
     return {

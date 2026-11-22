@@ -20,7 +20,7 @@ export async function docxDatabase(): Promise<DatabaseSync> {
   try {
     for (const sql of Object.values(DOCX_SOURCE_STUBS)) db.exec(sql);
     createBaselineRelations(db, 'manuscripts', PRODUCTION_DOCUMENT_SCHEMA_SQL, 'import_fidelity_categories', EDITORIAL_MARK_SCHEMA_SQL,
-      IMPORTED_MARK_SCHEMA_SQL, IMPORT_RETENTION_SCHEMA_SQL, WORD_IMPORT_RETENTION_SCHEMA_SQL, 'manuscript_outline', 'working_offset_nodes',
+      IMPORTED_MARK_SCHEMA_SQL, IMPORT_RETENTION_SCHEMA_SQL, WORD_IMPORT_RETENTION_SCHEMA_SQL, 'manuscript_outline', 'working_pages',
       'working_block_search');
     return db;
   } catch (error) { db.close(); throw error; }

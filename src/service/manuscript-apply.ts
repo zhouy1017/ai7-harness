@@ -6,6 +6,8 @@ import type { BoundedManuscriptStore, ExactReplacementCommit, ExactReplacementTa
 import { applyProjection, EditorialMarkError, type EditorialMarkStore } from './editorial-marks.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
 import { inverseTargetsTouchInOrder, type InverseTarget } from './manuscript/structural-edits.js';
+import { workingBlock } from './manuscript/working-positions.js';
+import { recordEffectPart } from './manuscript/editor-steps.js';
 import {
   MAX_MARK_BODY_CODE_UNITS,
   type ApplyChangeSuggestionBatchInput,
@@ -75,7 +77,8 @@ export const MANUSCRIPT_EFFECT_SCHEMA_SQL = {
   effect_id TEXT NOT NULL UNIQUE REFERENCES manuscript_effect_intents(effect_id),
   payload_digest TEXT NOT NULL CHECK(length(payload_digest) = 64),
   actor TEXT NOT NULL CHECK(actor = 'editor'),
-  interaction TEXT NOT NULL CHECK(interaction IN ('accept-and-apply', 'accept-edited-and-apply', 'apply-recorded-decision', 'confirm-batch-apply', 'confirm-reverse-apply')),
+  interaction TEXT NOT NULL CHECK(interaction IN ('accept-and-apply', 'accept-edited-and-apply', 'apply-recorded-decision', 'confirm-batch-apply', 'confirm-reverse-apply',
+    'undo-step', 'redo-step')),
   approved_at TEXT NOT NULL
 ) STRICT`,
   manuscript_effect_dispatches: `CREATE TABLE manuscript_effect_dispatches (
@@ -129,7 +132,7 @@ interface PlannedTarget {
   toGrapheme: number;
   expectedText: string;
   insertText: string;
-  decision: { disposition: 'accepted' | 'accepted-with-edit' | 'withdrawn'; editedText: string | null; reason: string | null } | { existingDecisionId: string };
+  decision: { disposition: 'accepted' | 'accepted-with-edit' | 'withdrawn'; editedText: string | null; reason: string | null; capture?: false } | { existingDecisionId: string };
   standsAs: 'applied' | 'open';
 }
 type ReverseMember = ReturnType<EditorialMarkStore['suggestionTarget']> & InverseTarget & { markId: string };
@@ -154,7 +157,7 @@ export class ManuscriptApplyStore {
   }
 
   /** 接受并应用, 修改后接受, or applying a decision recorded before Apply existed. */
-  apply(input: ApplyChangeSuggestionInput): ManuscriptApplyCommandProjection {
+  apply(input: ApplyChangeSuggestionInput, project = true): ManuscriptApplyCommandProjection {
     this.#requireIdentities(input, [input.markId], input.clientEffectId);
     const replayed = this.#replay(input, input.clientEffectId, input.markId);
     if (replayed) return replayed;
@@ -191,7 +194,7 @@ export class ManuscriptApplyStore {
     return this.#commit(input, 'apply', input.interaction, input.clientEffectId, null, [{
       markId: input.markId, itemId: target.itemId, blockId: target.blockId, fromGrapheme: target.fromGrapheme,
       toGrapheme: target.toGrapheme, expectedText: target.currentText, insertText, decision, standsAs: 'applied',
-    }], input.markId);
+    }], project ? input.markId : null);
   }
 
   /**
@@ -255,7 +258,44 @@ export class ManuscriptApplyStore {
     }), input.markId);
   }
 
-  #reverseMembers(input: PrepareReverseApplyInput, effectId: string): ReverseMember[] {
+  /**
+   * An editor step's reversal of one committed Effect whole (Issue #1654): the governed reversal path of 撤销本次修改, with the
+   * interaction `undo-step` or `redo-step` — no confirmation was shown — and no projection, inside the step's transaction.
+   * Refused, as the card refuses, when the applied words changed since.
+   */
+  reverseForStep(binding: { manuscriptId: string; branchId: string }, effectId: string, interaction: 'undo-step' | 'redo-step'): void {
+    const members = this.#reverseMembers(binding, effectId);
+    requireApply(this.#db.prepare('SELECT 1 FROM manuscript_effect_intents WHERE reverses_effect_id = ?').get(effectId) === undefined, 'APPLY_INVALID', '这次应用已经撤销过。');
+    requireApply(this.#reverseRangesStand(members), 'APPLY_TARGET_DRIFTED', '应用后的文字或修改范围已变，不能直接撤销这次应用。');
+    this.#commit({ ...binding, windowStartBlockId: '' }, 'reverse-apply', interaction, randomUUID(), effectId, members.map((member) => ({
+      markId: member.markId, itemId: member.itemId, blockId: member.blockId, fromGrapheme: member.fromGrapheme, toGrapheme: member.toGrapheme,
+      expectedText: member.standingText, insertText: member.currentText,
+      decision: { disposition: 'withdrawn' as const, editedText: null, reason: null }, standsAs: 'open' as const })), null);
+  }
+
+  /**
+   * An editor step's re-apply of the items `sourceEffectId` applied (Issue #1654): each item's mark must stand open and exact
+   * on its original words again, and the text written is the decision that Effect's target names — the edited text of an
+   * accept-with-edit. The new decision repeats that one; it is not captured for learning again (one signal per accept).
+   */
+  reapplyForStep(binding: { manuscriptId: string; branchId: string }, sourceEffectId: string, interaction: 'undo-step' | 'redo-step'): void {
+    const sources = this.#db.prepare(`SELECT p.mark_id, t.item_id, d.disposition, d.edited_text FROM manuscript_effect_targets t
+      JOIN proposal_change_items p ON p.item_id = t.item_id JOIN proposal_item_decisions d ON d.decision_id = t.decision_id
+      WHERE t.effect_id = ? ORDER BY t.ordinal`).all(sourceEffectId) as SqlRow[];
+    requireApply(sources.length > 0, 'APPLY_INVALID', '找不到这次应用的凭据。');
+    const planned = sources.map((source): PlannedTarget => {
+      const target = this.#marks.suggestionTarget({ ...binding, markId: String(source.mark_id) });
+      requireApply(target.status === 'open' && target.anchorState === 'exact', 'APPLY_TARGET_DRIFTED', '原文已变，本次应用没有写入稿件。');
+      const disposition = String(source.disposition) as 'accepted' | 'accepted-with-edit';
+      const editedText = source.edited_text === null ? null : String(source.edited_text);
+      return { markId: String(source.mark_id), itemId: target.itemId, blockId: target.blockId, fromGrapheme: target.fromGrapheme, toGrapheme: target.toGrapheme,
+        expectedText: target.currentText, insertText: editedText ?? target.proposedText, decision: { disposition, editedText, reason: null, capture: false }, standsAs: 'applied' };
+    });
+    this.#requireAtomicScope(binding.branchId, planned.map((item) => item.itemId));
+    this.#commit({ ...binding, windowStartBlockId: '' }, 'apply', interaction, randomUUID(), null, planned, null);
+  }
+
+  #reverseMembers(input: { manuscriptId: string; branchId: string }, effectId: string): ReverseMember[] {
     // Reversal consumes the original Effect once, so it must restore that Effect's entire committed batch.
     const ids = this.#db.prepare(`SELECT p.mark_id, t.block_id, t.from_grapheme, t.to_grapheme FROM manuscript_effect_targets t
       JOIN proposal_change_items p ON p.item_id = t.item_id WHERE t.effect_id = ? ORDER BY t.ordinal`).all(effectId);
@@ -338,7 +378,7 @@ export class ManuscriptApplyStore {
     const members = this.#reverseMembers(input, String(original.effect_id));
     const exact = this.#reverseRangesStand(members);
     return { ranges: members.map((member) => ({ markId: member.markId,
-      position: Number(this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, member.blockId)?.position ?? 0),
+      position: workingBlock(this.#db, input.branchId, member.blockId)?.position ?? 0,
       fromGrapheme: member.fromGrapheme, toGrapheme: member.toGrapheme })),
       originalEffectId: String(original.effect_id), bookId: String(book.book_id), branchId: input.branchId, revisionId: window.revisionId,
       journalSequence: window.journalSequence, markId: input.markId, blockId: target.blockId, ready: exact && reversed === undefined,
@@ -398,7 +438,7 @@ export class ManuscriptApplyStore {
     clientEffectId: string,
     reversesEffectId: string | null,
     planned: ReadonlyArray<PlannedTarget>,
-    projectedMarkId: string,
+    projectedMarkId: string | null,
   ): ManuscriptApplyCommandProjection {
     // EREC-005: while an Effect identity of this branch stands 结果待确认, no other Apply could be told apart from it.
     requireApply(this.#db.prepare(`SELECT 1 FROM manuscript_outcome_recovery o WHERE o.manuscript_id = ? AND o.branch_id = ? AND o.state = 'unresolved'
@@ -433,7 +473,8 @@ export class ManuscriptApplyStore {
         const written = commit.targets[index]!;
         const decisionId = 'existingDecisionId' in target.decision
           ? target.decision.existingDecisionId
-          : this.#marks.recordDecisionForApply(binding, target.itemId, target.blockId, target.decision.disposition, target.decision.editedText, target.decision.reason, now);
+          : this.#marks.recordDecisionForApply(binding, target.itemId, target.blockId, target.decision.disposition, target.decision.editedText, target.decision.reason, now,
+            target.decision.capture !== false);
         this.#db.prepare(
           `INSERT INTO manuscript_effect_targets(
              effect_id, ordinal, item_id, decision_id, block_id, from_grapheme, to_grapheme, expected_text_digest,
@@ -461,6 +502,10 @@ export class ManuscriptApplyStore {
          ) VALUES (?, ?, ?, 'committed', ?, ?, ?, ?, ?, ?, ?)`,
       ).run(receiptId, effectId, dispatchId, commit.commandGroupId, commit.after.revisionId, commit.after.journalSequence,
         commit.after.workingDigest, planned.length, receiptDigest, now);
+      // One editor step's part (Issue #1654): a new slot of an Apply, the next generation of a reversed one, or — inside an undo
+      // or redo — the replayed slot's next generation.
+      recordEffectPart(this.#db, binding.branchId, { effectId, kind, reversesEffectId, batch: interaction === 'confirm-batch-apply', items: planned.length,
+        anchorBlockId: planned[0]!.blockId });
       // Each mark now stands on the text this Effect wrote: the applied text, or the restored original. A
       // suggestion that deleted its words wrote none, and its mark stands exactly on the empty range they
       // left — nothing has changed there since — so reversing it is an insertion at that point.
@@ -483,6 +528,8 @@ export class ManuscriptApplyStore {
     });
     const application = this.#application(clientEffectId, binding.manuscriptId, binding.branchId);
     requireApply(application !== null, 'APPLY_RECEIPT_MISSING', '应用已提交但无法读取凭据。');
+    // An editor step's dispatch (Issue #1654) and 全部替换's per-occurrence Apply ask for no projection: the caller answers once.
+    if (projectedMarkId === null) return { application } as ManuscriptApplyCommandProjection;
     return { ...this.#marks.commandProjection(binding, projectedMarkId), application, window: this.#window(binding) };
   }
 }

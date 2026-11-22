@@ -46,7 +46,7 @@ import {
  */
 export type ScopedEditStore = Pick<EditorialStore,
   'getManuscriptWindow' | 'dialogueSourceDigest' | 'scopedEditWorkingBlocks' | 'createProducedEditorialMarks' | 'applyChangeSuggestion'> &
-  Partial<Pick<EditorialStore, 'editorialMemory'>>;
+  Partial<Pick<EditorialStore, 'editorialMemory' | 'withEditorStep'>>;
 
 /** Read-only context around a selection: graphemes of the block before and after it, and of a locked block in a range. */
 const CONTEXT_GRAPHEMES = 200;
@@ -277,16 +277,25 @@ export function applyScopedChanges(store: ScopedEditStore, prepared: PreparedSco
     throw error;
   }
   const applied: string[] = [];
-  try {
-    for (const markId of markIds) {
-      store.applyChangeSuggestion({ manuscriptId: prepared.manuscriptId, branchId: prepared.branchId, windowStartBlockId: prepared.windowStartBlockId,
-        markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
-      applied.push(markId);
+  // The applied changes are one editor step (Issue #1654): one Ctrl+Z takes them back; each card keeps its own 撤销本次修改.
+  // Each Apply is still its own savepoint, so a change refused here leaves the ones before it applied.
+  const asOneStep = <T>(work: () => T): T => store.withEditorStep === undefined ? work()
+    : store.withEditorStep(prepared.branchId, { kind: 'ai-edit', label: (count) => `AI 修改（${count.toLocaleString('zh-CN')} 处）` }, work);
+  const failure = asOneStep(() => {
+    try {
+      for (const markId of markIds) {
+        store.applyChangeSuggestion({ manuscriptId: prepared.manuscriptId, branchId: prepared.branchId, windowStartBlockId: prepared.windowStartBlockId,
+          markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+        applied.push(markId);
+      }
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : '';
     }
-  } catch (error) {
+  });
+  if (failure !== null) {
     const left = markIds.length - applied.length;
-    const why = error instanceof Error ? error.message : '';
-    return settle('failed', `已应用 ${applied.length} 处修改；另有 ${left} 处没有应用（${why}），它们作为修改建议留在稿件里，由你决定。`, {
+    return settle('failed', `已应用 ${applied.length} 处修改；另有 ${left} 处没有应用（${failure}），它们作为修改建议留在稿件里，由你决定。`, {
       markIds: applied, changedBlockIds: [...new Set(changed.filter((_, index) => index < applied.length).map(({ target }) => target.blockId))],
       keptBlockCount: prepared.totalBlocks - applied.length,
     });

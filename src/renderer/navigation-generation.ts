@@ -122,7 +122,7 @@ const BOOK_OWNERSHIP_CALLS = new Set<keyof RendererApi>([
   'inspectAnalysisFeedback', 'inspectApplyReceipt', 'inspectBackgroundAnalysisEnrollment', 'inspectBaselineAnalysis',
   'inspectBookDeliveryPackage', 'inspectBookFindings', 'inspectBookTasks', 'inspectCapturedProcedureApplicability',
   'inspectCapturedProcedureRun', 'inspectCustomAnalysisDimensions', 'inspectDeliverables', 'inspectDialogue',
-  'inspectEditorialWorkspaceProfile', 'inspectEvaluation', 'inspectFastInteractionRequest', 'inspectFastInteractionRoutes',
+  'inspectEditorHistory', 'inspectEditorialWorkspaceProfile', 'inspectEvaluation', 'inspectFastInteractionRequest', 'inspectFastInteractionRoutes',
   'inspectForegroundExecutionBoundary', 'inspectMaintenanceCase', 'inspectParagraphAnalysis', 'inspectProcedureCapture',
   'inspectProductionDocuments', 'inspectProposalConflict', 'inspectProposalWorkspace', 'inspectReviewFindingOfMark',
   'inspectReviewWorkspace', 'inspectScopedAiEdit', 'inspectTaskAuthorization', 'inspectTaskIntentDrafts',

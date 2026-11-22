@@ -192,7 +192,7 @@ describe('稿件冲突 of a single 修改建议 (ADR 0085)', () => {
       expect(anchorConflict(store, book, markId)).toBeNull();
       expect(refusal(() => store.inspectProposalConflict({ ...book, markId }))).toBe('PROPOSAL_CONFLICT_NONE');
       // Undoing the edit elsewhere puts the paragraph back as the suggestion was made in.
-      const undone = store.undoManuscript(book.manuscriptId, book.branchId, windowOf(store, book).workingDigest);
+      const undone = store.undoManuscript({ manuscriptId: book.manuscriptId, branchId: book.branchId, expectedWorkingDigest: windowOf(store, book).workingDigest });
       expect(undone).toBeDefined();
       expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).changedElsewhere).toBe(false);
       typeInto(store, book, block.blockId, 5, 5, TYPED);

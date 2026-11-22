@@ -1808,8 +1808,11 @@ async function dispatch(
           request.input.manuscriptId,
           request.input.branchId,
           request.input.expectedWorkingDigest,
+          request.input.expectedStepId,
         ),
       };
+    case 'inspectEditorHistory':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEditorHistory(request.input.manuscriptId, request.input.branchId) };
     case 'redoManuscript':
       return {
         id: request.id,

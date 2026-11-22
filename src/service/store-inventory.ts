@@ -16,7 +16,10 @@ import { openPackageStore } from './database-exports.js';
  *
  * Known differences R5-6 must expect between the old store and the upgraded one (not implemented here):
  * - `tables.manuscript_revisions`: one 「升级时的稿件」 revision more per manuscript (ADR 0105 §5), so old + `manuscripts` rows;
- * - `tables.working_offset_nodes`: dropped by the position conversion (ADR 0105 §6), so 0 after the upgrade;
+ * - `tables.working_pages`: new with the position conversion (ADR 0105 §6, #1654) — 0 before, Σ ⌈blocks / 256⌉ per branch
+ *   after (a last page under 64 blocks stays with the one before it); the Fenwick offset nodes it replaces are not carried;
+ * - `tables.editor_steps`, `editor_step_parts`, `editor_step_effects`, `editor_step_mark_anchors`: new and empty after the
+ *   upgrade (#1654; pre-upgrade history is sealed, D7);
  * - `tables.model_role_choices`: 0 before; 0, 1 or 2 after, from mapping the two selected connection groups (R5-F1a);
  * - `tables.store_versions`: one more row, the Data Version 2 record;
  * - the other position-keyed tables are converted (ADR 0105 §6); R5-6 states any further difference when it lands;
@@ -97,6 +100,10 @@ export const INVENTORY_TABLES = [
   'edit_journal_entries',
   'editor_inline_revision_commands',
   'editor_inline_revision_marks',
+  'editor_step_effects',
+  'editor_step_mark_anchors',
+  'editor_step_parts',
+  'editor_steps',
   'editorial_learning_controls',
   'editorial_mark_replies',
   'editorial_marks',
@@ -295,7 +302,7 @@ export const INVENTORY_TABLES = [
   'workflow_instances',
   'workflow_profiles',
   'working_blocks',
-  'working_offset_nodes',
+  'working_pages',
   'writing_drafts',
   'writing_tasks',
 ] as const;

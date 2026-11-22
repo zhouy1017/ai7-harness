@@ -120,7 +120,9 @@ function mount(state: Stub, status: StatusSetter = Object.assign(vi.fn(), { sett
   });
   const inspectFactualVerification = vi.fn(async () => { throw new Error('no factual lens here'); });
   const unexpected = vi.fn(async () => { throw new Error('unexpected API operation'); });
-  const calls = { inspectReviewWorkspace, getTaskPlanPage, inspectFactualVerification };
+  // The steps Ctrl+Z would take (Issue #1654): none in these cases.
+  const inspectEditorHistory = vi.fn(async (input: { branchId: string }) => ({ branchId: input.branchId, undo: null, redo: null }));
+  const calls = { inspectReviewWorkspace, getTaskPlanPage, inspectFactualVerification, inspectEditorHistory };
   const api = new Proxy(calls, { get: (target, key) => Reflect.get(target, key) ?? unexpected }) as unknown as MountReviewWorkspaceOptions['api'];
   const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: { reviewRunId: RUN, findingId: state.focusFinding ?? null }, api,
     awaitServiceJob: async (initial) => initial,

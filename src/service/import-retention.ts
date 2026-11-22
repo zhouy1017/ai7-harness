@@ -2107,7 +2107,7 @@ export function assertImportPostconditions(host: ImportRetentionOperationsHost, 
              (SELECT count(*) FROM manuscript_revisions WHERE revision_id = ? AND revision_label = 'r1' AND parent_revision_id IS NULL) revisions,
              (SELECT count(*) FROM manuscript_block_versions WHERE revision_id = ?) blocks,
              (SELECT count(*) FROM working_blocks WHERE branch_id = ?) working_blocks,
-             (SELECT count(*) FROM working_offset_nodes WHERE branch_id = ?) offset_nodes,
+             (SELECT coalesce(sum(block_count), 0) FROM working_pages WHERE branch_id = ?) page_blocks,
              (SELECT count(*) FROM branch_working_state
                 WHERE branch_id = ? AND total_graphemes = ?) working_state,
              (SELECT count(*) FROM source_versions
@@ -2185,7 +2185,7 @@ export function assertImportPostconditions(host: ImportRetentionOperationsHost, 
         asNumber(counts.revisions) === 1 &&
         asNumber(counts.blocks) === input.blockCount &&
         asNumber(counts.working_blocks) === input.blockCount &&
-        asNumber(counts.offset_nodes) === input.blockCount &&
+        asNumber(counts.page_blocks) === input.blockCount &&
         asNumber(counts.working_state) === 1 &&
         asNumber(counts.sources) === 1 &&
         asNumber(counts.fidelity_reviews) === 1 &&

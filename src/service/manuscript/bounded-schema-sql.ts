@@ -213,13 +213,13 @@ export const CORE_SCHEMA_SQL = {
   manuscript_outline: `CREATE TABLE manuscript_outline (
         branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
         block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
-        position INTEGER NOT NULL CHECK(position > 0),
+        order_key INTEGER NOT NULL CHECK(order_key > 0),
         kind TEXT NOT NULL CHECK(kind IN ('title', 'heading')),
         level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 6),
         text TEXT NOT NULL,
         digest TEXT NOT NULL CHECK(length(digest) = 64),
         PRIMARY KEY(branch_id, block_id),
-        UNIQUE(branch_id, position)
+        UNIQUE(branch_id, order_key)
       ) STRICT`,
   manuscript_recovery_review_status: `CREATE TABLE manuscript_recovery_review_status (
     branch_id TEXT PRIMARY KEY REFERENCES manuscript_branches(branch_id),
@@ -675,20 +675,21 @@ export const CORE_SCHEMA_SQL = {
   working_blocks: `CREATE TABLE working_blocks (
       branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
       block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
-      position INTEGER NOT NULL CHECK(position > 0),
+      order_key INTEGER NOT NULL CHECK(order_key > 0),
       kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph', 'note')),
       level INTEGER,
       text TEXT NOT NULL,
       digest TEXT NOT NULL CHECK(length(digest) = 64), grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0),
       PRIMARY KEY(branch_id, block_id),
-      UNIQUE(branch_id, position)
+      UNIQUE(branch_id, order_key)
     ) STRICT`,
-  working_offset_nodes: `CREATE TABLE working_offset_nodes (
-    branch_id TEXT NOT NULL,
-    position INTEGER NOT NULL CHECK(position > 0),
-    span_graphemes INTEGER NOT NULL CHECK(span_graphemes >= 0),
-    PRIMARY KEY(branch_id, position),
-    FOREIGN KEY(branch_id, position) REFERENCES working_blocks(branch_id, position) ON DELETE CASCADE
+  // The page summary of the working state's order (Issue #1654, ADR 0105 §6): `manuscript/working-positions.ts` owns it.
+  working_pages: `CREATE TABLE working_pages (
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    first_order_key INTEGER NOT NULL CHECK(first_order_key >= 0),
+    block_count INTEGER NOT NULL CHECK(block_count BETWEEN 1 AND 512),
+    grapheme_total INTEGER NOT NULL CHECK(grapheme_total >= 0),
+    PRIMARY KEY(branch_id, first_order_key)
   ) STRICT`,
 } as const;
 
@@ -716,7 +717,6 @@ export const CORE_INDEX_SQL = {
         ON import_commit_attempts(state, completion_acknowledged_at, prepared_at)`,
   journal_branch_order: `CREATE INDEX journal_branch_order ON edit_journal_entries(branch_id, sequence)`,
   lifetime_outcome_order: `CREATE INDEX lifetime_outcome_order ON service_lifetimes(outcome, started_at)`,
-  manuscript_outline_order: `CREATE INDEX manuscript_outline_order ON manuscript_outline(branch_id, position)`,
   recovery_attention_startup: `CREATE INDEX recovery_attention_startup ON recovery_attention(status, created_at, attention_id)`,
   recovery_snapshot_branch: `CREATE INDEX recovery_snapshot_branch ON recovery_snapshots(branch_id, revision_id, created_at DESC, snapshot_id DESC)`,
   reimport_mappings_page: `CREATE INDEX reimport_mappings_page
@@ -726,7 +726,7 @@ export const CORE_INDEX_SQL = {
         ON manuscript_block_versions(revision_id, digest, kind, level)`,
   staged_reimport_identity: `CREATE INDEX staged_reimport_identity
         ON staged_import_blocks(draft_id, digest, kind, level)`,
-  working_blocks_window: `CREATE INDEX working_blocks_window ON working_blocks(branch_id, position)`,
+  working_blocks_order_cover: `CREATE INDEX working_blocks_order_cover ON working_blocks(branch_id, order_key, grapheme_length)`,
 } as const;
 
 /** The import abandonment-cleanup fence and the import-result exclusivity guards: each keeps its own text and message. */

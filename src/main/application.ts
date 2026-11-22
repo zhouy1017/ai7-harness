@@ -3413,34 +3413,22 @@ export function registerRendererHandlers(
     }),
   );
   registerMilestoneHandlers({ requireSender, requireAuthority, requireCurrentBookRoute, requireManuscriptCapability, rememberManuscriptCapability, requireResourceIdentity, service, serializeEffect });
-  ipcMain.handle(IPC_CHANNELS.undoManuscript, (event, input: ServiceOperationMap['undoManuscript']['input']) =>
-    envelope(async () => {
-      const owned = requireSender(event);
-      return serializeEffect(async () => {
-        requireAuthority();
-        requireManuscriptCapability(owned, input);
-        const result = await service.call('undoManuscript', input);
-        if (result.branchId !== input.branchId) {
-          throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '撤销结果不属于当前稿件分支。');
-        }
-        return result;
-      });
-    }),
-  );
-  ipcMain.handle(IPC_CHANNELS.redoManuscript, (event, input: ServiceOperationMap['redoManuscript']['input']) =>
-    envelope(async () => {
-      const owned = requireSender(event);
-      return serializeEffect(async () => {
-        requireAuthority();
-        requireManuscriptCapability(owned, input);
-        const result = await service.call('redoManuscript', input);
-        if (result.branchId !== input.branchId) {
-          throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '重做结果不属于当前稿件分支。');
-        }
-        return result;
-      });
-    }),
-  );
+  // Ctrl+Z, redo, and the steps they would take next (Issue #1654): each bound to the window's own manuscript branch.
+  for (const [operation, refusal] of [['undoManuscript', '撤销结果不属于当前稿件分支。'], ['redoManuscript', '重做结果不属于当前稿件分支。'],
+    ['inspectEditorHistory', '撤销记录不属于当前稿件分支。']] as const) {
+    ipcMain.handle(IPC_CHANNELS[operation], (event, input: ServiceOperationMap[typeof operation]['input']) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          requireManuscriptCapability(owned, input);
+          const result = await (service.call as (op: typeof operation, value: typeof input) => Promise<{ branchId: string }>)(operation, input);
+          if (result.branchId !== input.branchId) throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', refusal);
+          return result;
+        });
+      }),
+    );
+  }
   // 保存人员 (Issue #431, S83): a Book's 作者, 责编 and 相关人 on its 工作概览 — the Book this window shows, or none yet.
   ipcMain.handle(IPC_CHANNELS.updateBookPeople, (event, input: Parameters<RendererApi['updateBookPeople']>[0]) =>
     envelope(async () => {

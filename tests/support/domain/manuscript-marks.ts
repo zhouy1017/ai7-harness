@@ -58,12 +58,12 @@ const READER_STUBS = {
  */
 const MANUSCRIPT_RELATIONS: ReadonlyArray<string> = [
   'manuscripts', 'manuscript_branches', 'manuscript_blocks', 'manuscript_revisions', 'manuscript_block_versions', 'working_blocks',
-  'branch_working_state', 'edit_journal_entries', 'manuscript_outline', 'working_offset_nodes', 'working_block_search',
+  'branch_working_state', 'edit_journal_entries', 'manuscript_outline', 'working_pages', 'working_block_search',
   'manuscript_search_sessions', 'manuscript_search_results', 'manuscript_replacement_previews', 'manuscript_replacement_matches',
   'milestone_versions', 'milestone_signoff_records', 'service_lifetimes', 'service_lifetime_branch_writes', 'recovery_snapshots',
   'recovery_attention', 'recovery_restore_stages', 'recovery_restore_stage_blocks', 'recovery_decisions', 'recovery_restorations',
   'manuscript_recovery_review_status', 'manuscript_command_groups', 'manuscript_command_edits', 'manuscript_block_lineage',
-  'manuscript_note_sources',
+  'manuscript_note_sources', 'editor_steps', 'editor_step_parts', 'editor_step_effects', 'editor_step_mark_anchors',
 ];
 
 /** The tables of the helper that are labelled stubs; every other table is a production definition. */
@@ -186,7 +186,7 @@ export async function manuscriptMarksBook(blocks = 40, startBlock = 1): Promise<
     factualLineageOfMark: () => null,
   };
   const manuscriptHost: manuscriptOperations.ManuscriptOperationsHost = {
-    authority: db, bounded, boundedAuthority, lifetimeId,
+    authority: db, bounded, boundedAuthority, lifetimeId, manuscriptApply,
     // Labelled stub: recovery objects live on disk; the milestone and recovery cases stay in tests/service.
     get recoveryObjects(): never { throw new Error('recovery objects are files; this case belongs in tests/service'); },
     assertAvailable: () => undefined, boundedCall, withRecoveryObjectLifecycle: (operation) => operation(),

@@ -1,8 +1,12 @@
 import type { ManualCommandRequestPin, ManualCommandSource } from '../shared/protocol/learning.js';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { BoundedStoreError, BoundedStoreFatalError, requireBounded, one, asString, asNumber, canonicalJson, sha256, graphemes, fenwickSpan, appendOffsetSegment,
-  lastWorkingPosition, workingOffsetPrefix, updateWorkingOffsetNodes, transact, stagedBlockLength, UUID_PATTERN, DIGEST_PATTERN, BLOCK_PATTERN,
-  HISTORY_BATCH, MIGRATION_BATCH, type OffsetSegment } from './manuscript/bounded-kernel.js';
+import { BoundedStoreError, BoundedStoreFatalError, requireBounded, one, asString, asNumber, canonicalJson, sha256, graphemes,
+  transact, stagedBlockLength, UUID_PATTERN, DIGEST_PATTERN, BLOCK_PATTERN, HISTORY_BATCH, MIGRATION_BATCH } from './manuscript/bounded-kernel.js';
+import { recordGroupPart, stepQuote, supersedeAllSteps, type EditorStepHost } from './manuscript/editor-steps.js';
+import {
+  assignKeysAndPages, blockAtCharacter, keyAtParagraph, offsetBefore, paragraphAtKey, paragraphCount, placesOfKeys, positionsOfBlocks,
+  replaceWorkingState, rewriteBlock, rowsFrom, validateBranchPositions, workingBlock as workingRow,
+} from './manuscript/working-positions.js';
 import { withNoteReferences } from './manuscript/note-blocks.js';
 import type { ManuscriptSourceObjects } from './manuscript/source-objects.js';
 import { inlineRevisionBaseline, recordInlineEditorRevision, syncInlineEditorRevision } from './inline-editor-revisions.js';
@@ -501,47 +505,6 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
   requireBounded(invalidAttempts.length === 0, 'SCHEMA_INVALID', '导入提交尝试类型与草稿或提交不一致。');
 }
 
-function workingOffsetBefore(db: DatabaseSync, branchId: string, position: number): number {
-  requireBounded(Number.isSafeInteger(position) && position > 0, 'OFFSET_INDEX_INVALID', '稿件偏移查询位置无效。');
-  return workingOffsetPrefix(db, branchId, position - 1);
-}
-
-function resolveWorkingCharacter(
-  db: DatabaseSync,
-  branchId: string,
-  character: number,
-  totalCharacters: number,
-): { position: number; startCharacter: number } {
-  const totalBlocks = lastWorkingPosition(db, branchId);
-  if (totalCharacters === 0) return { position: 1, startCharacter: 0 };
-  requireBounded(
-    Number.isSafeInteger(character) && character >= 0 && character < totalCharacters,
-    'OFFSET_INDEX_INVALID',
-    '全稿字符位置超出偏移索引范围。',
-  );
-  let step = 1;
-  while (step <= Math.floor(totalBlocks / 2)) step *= 2;
-  let position = 0;
-  let prefix = 0;
-  const read = db.prepare('SELECT span_graphemes FROM working_offset_nodes WHERE branch_id = ? AND position = ?');
-  while (step >= 1) {
-    const next = position + step;
-    if (next <= totalBlocks) {
-      const row = read.get(branchId, next) as SqlRow | undefined;
-      requireBounded(row !== undefined, 'OFFSET_INDEX_INVALID', '稿件偏移索引节点缺失。');
-      const candidate = prefix + asNumber(row.span_graphemes);
-      requireBounded(Number.isSafeInteger(candidate), 'OFFSET_INDEX_INVALID', '稿件偏移查询总量无效。');
-      if (candidate <= character) {
-        position = next;
-        prefix = candidate;
-      }
-    }
-    step /= 2;
-  }
-  requireBounded(position < totalBlocks, 'OFFSET_INDEX_INVALID', '全稿字符位置无法解析。');
-  return { position: position + 1, startCharacter: prefix };
-}
-
 function encodedJsonStringBytes(text: string): number {
   return Buffer.byteLength(JSON.stringify(text), 'utf8');
 }
@@ -683,9 +646,8 @@ function requirePersistedBlockTextBounds(
 ): void {
   const ownerColumn = table === 'manuscript_block_versions' ? 'revision_id' : 'branch_id';
   const oversized = db.prepare(
-    `SELECT position FROM ${table}
-     WHERE ${ownerColumn} = ? AND (typeof(text) <> 'text' OR length(CAST(text AS BLOB)) > ?)
-     ORDER BY position LIMIT 1`,
+    `SELECT 1 FROM ${table}
+     WHERE ${ownerColumn} = ? AND (typeof(text) <> 'text' OR length(CAST(text AS BLOB)) > ?) LIMIT 1`,
   ).get(ownerId, MAX_BLOCK_CODE_UNITS * 3) as SqlRow | undefined;
   requireBounded(oversized === undefined, code, message);
 }
@@ -853,88 +815,9 @@ function validateRevisionOffsets(db: DatabaseSync, revisionId: string): void {
   requireBounded(blocks > 0, 'SCHEMA_MIGRATION_FAILED', '不可变修订版缺少内容块。');
 }
 
-function rebuildWorkingOffsetIndex(db: DatabaseSync, branchId: string): number {
-  requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'SCHEMA_MIGRATION_FAILED', '工作稿文字超出有界索引范围。');
-  db.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ?').run(branchId);
-  const insert = db.prepare(
-    'INSERT INTO working_offset_nodes(branch_id, position, span_graphemes) VALUES (?, ?, ?)',
-  );
-  const stack: OffsetSegment[] = [];
-  let position = 0;
-  let expectedPosition = 1;
-  let total = 0;
-  while (true) {
-    const rows = db.prepare(
-      `SELECT position, text, grapheme_length FROM working_blocks
-       WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(branchId, position, MIGRATION_BATCH) as SqlRow[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      position = asNumber(row.position);
-      const length = stagedBlockLength(asString(row.text));
-      requireBounded(
-        position === expectedPosition && asNumber(row.grapheme_length) === length,
-        'SCHEMA_MIGRATION_FAILED',
-        '工作稿内容块顺序或字素长度无法建立偏移索引。',
-      );
-      insert.run(branchId, position, appendOffsetSegment(stack, position, length));
-      total += length;
-      requireBounded(Number.isSafeInteger(total), 'SCHEMA_MIGRATION_FAILED', '工作稿字符总数无效。');
-      expectedPosition += 1;
-    }
-  }
-  const state = one(
-    db.prepare('SELECT total_graphemes FROM branch_working_state WHERE branch_id = ?').all(branchId) as SqlRow[],
-    'SCHEMA_MIGRATION_FAILED',
-    '工作稿状态缺失。',
-  );
-  requireBounded(
-    expectedPosition > 1 && asNumber(state.total_graphemes) === total,
-    'SCHEMA_MIGRATION_FAILED',
-    '工作稿总量无法建立偏移索引。',
-  );
-  return total;
-}
-
 function validateBranchOffsets(db: DatabaseSync, branchId: string): void {
   requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'SCHEMA_MIGRATION_FAILED', '工作稿文字超出有界校验范围。');
-  const stack: OffsetSegment[] = [];
-  let position = 0;
-  let expectedPosition = 1;
-  let total = 0;
-  while (true) {
-    const rows = db.prepare(
-      `SELECT wb.position, wb.text, wb.grapheme_length, oi.span_graphemes
-       FROM working_blocks wb
-       LEFT JOIN working_offset_nodes oi ON oi.branch_id = wb.branch_id AND oi.position = wb.position
-       WHERE wb.branch_id = ? AND wb.position > ? ORDER BY wb.position LIMIT ?`,
-    ).all(branchId, position, MIGRATION_BATCH) as SqlRow[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      position = asNumber(row.position);
-      const length = stagedBlockLength(asString(row.text));
-      requireBounded(
-        position === expectedPosition && asNumber(row.grapheme_length) === length &&
-          asNumber(row.span_graphemes) === appendOffsetSegment(stack, position, length),
-        'SCHEMA_MIGRATION_FAILED',
-        '工作稿的内容块顺序、字素长度或偏移索引校验失败。',
-      );
-      total += length;
-      requireBounded(Number.isSafeInteger(total), 'SCHEMA_MIGRATION_FAILED', '工作稿字符总数无效。');
-      expectedPosition += 1;
-    }
-  }
-  const state = one(
-    db.prepare('SELECT total_graphemes FROM branch_working_state WHERE branch_id = ?').all(branchId) as SqlRow[],
-    'SCHEMA_MIGRATION_FAILED',
-    '工作稿状态缺失。',
-  );
-  requireBounded(
-    expectedPosition > 1 && asNumber(state.total_graphemes) === total &&
-      workingOffsetPrefix(db, branchId, expectedPosition - 1) === total,
-    'SCHEMA_MIGRATION_FAILED',
-    '工作稿总量或偏移索引根校验失败。',
-  );
+  validateBranchPositions(db, branchId);
 }
 
 function forEachSchemaId(
@@ -1104,51 +987,7 @@ function reclaimOrphanedSearchSessions(db: DatabaseSync): void {
 
 function rebuildBranchDerived(db: DatabaseSync, branchId: string): number {
   requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'SCHEMA_MIGRATION_FAILED', '工作稿文字超出有界重建范围。');
-  db.prepare('DELETE FROM manuscript_outline WHERE branch_id = ?').run(branchId);
-  db.prepare('DELETE FROM working_block_search WHERE branch_id = ?').run(branchId);
-  db.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ?').run(branchId);
-  const updateBlock = db.prepare(
-    'UPDATE working_blocks SET grapheme_length = ? WHERE branch_id = ? AND block_id = ?',
-  );
-  const insertOutline = db.prepare(
-    `INSERT INTO manuscript_outline(branch_id, block_id, position, kind, level, text, digest)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  );
-  const insertSearch = db.prepare('INSERT INTO working_block_search(branch_id, block_id, text) VALUES (?, ?, ?)');
-  const insertOffset = db.prepare(
-    'INSERT INTO working_offset_nodes(branch_id, position, span_graphemes) VALUES (?, ?, ?)',
-  );
-  const offsetSegments: OffsetSegment[] = [];
-  let position = 0;
-  let expectedPosition = 1;
-  let offset = 0;
-  while (true) {
-    const rows = db.prepare(
-      `SELECT block_id, position, kind, level, text, digest FROM working_blocks
-       WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(branchId, position, MIGRATION_BATCH) as SqlRow[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      const blockId = asString(row.block_id);
-      position = asNumber(row.position);
-      const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
-      const level = row.level === null ? null : asNumber(row.level);
-      const text = asString(row.text);
-      const digest = asString(row.digest);
-      const length = stagedBlockLength(text);
-      requireBounded(position === expectedPosition, 'SCHEMA_MIGRATION_FAILED', '工作稿内容块顺序不连续。');
-      updateBlock.run(length, branchId, blockId);
-      insertOffset.run(branchId, position, appendOffsetSegment(offsetSegments, position, length));
-      if (kind === 'title' || kind === 'heading') insertOutline.run(branchId, blockId, position, kind, level ?? 1, text, digest);
-      insertSearch.run(branchId, blockId, text);
-      offset += length;
-      requireBounded(Number.isSafeInteger(offset), 'SCHEMA_MIGRATION_FAILED', '工作稿字符总数无效。');
-      expectedPosition += 1;
-    }
-  }
-  db.prepare('UPDATE branch_working_state SET total_graphemes = ? WHERE branch_id = ?').run(offset, branchId);
-  requireBounded(expectedPosition > 1, 'SCHEMA_MIGRATION_FAILED', '工作稿缺少内容块。');
-  return offset;
+  return assignKeysAndPages(db, branchId);
 }
 
 function snapshotWorkingRevision(
@@ -1163,35 +1002,27 @@ function snapshotWorkingRevision(
        revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  let cursor = 0;
   let expectedPosition = 1;
   let offset = 0;
   while (true) {
-    const rows = db.prepare(
-      `SELECT block_id, position, kind, level, text, digest, grapheme_length
-       FROM working_blocks WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(branchId, cursor, MIGRATION_BATCH) as SqlRow[];
+    // A revision keeps dense positions (ADR 0105 §6): the working state's order, numbered from 1.
+    const rows = rowsFrom(db, branchId, expectedPosition, MIGRATION_BATCH);
     if (rows.length === 0) break;
     for (const row of rows) {
-      cursor = asNumber(row.position);
-      const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
-      const level = row.level === null ? null : asNumber(row.level);
-      const text = asString(row.text);
-      const length = stagedBlockLength(text, 'MILESTONE_INVALID', '工作稿文字超出里程碑快照边界。');
+      const length = stagedBlockLength(row.text, 'MILESTONE_INVALID', '工作稿文字超出里程碑快照边界。');
       requireBounded(
-        cursor === expectedPosition && asNumber(row.grapheme_length) === length &&
-          blockDigest(kind, level, text) === asString(row.digest),
+        row.position === expectedPosition && row.graphemeLength === length && blockDigest(row.kind, row.level, row.text) === row.digest,
         'MILESTONE_INVALID',
         '工作稿内容无法建立精确里程碑修订版。',
       );
-      insert.run(revisionId, asString(row.block_id), cursor, kind, level, text, asString(row.digest), offset, length);
+      insert.run(revisionId, row.blockId, row.position, row.kind, row.level, row.text, row.digest, offset, length);
       offset += length;
       requireBounded(Number.isSafeInteger(offset), 'MILESTONE_INVALID', '工作稿字符总数无效。');
       expectedPosition += 1;
     }
   }
   requireBounded(
-    expectedPosition > 1 && offset === expectedTotal && workingOffsetPrefix(db, branchId, expectedPosition - 1) === offset,
+    expectedPosition > 1 && offset === expectedTotal && paragraphCount(db, branchId) === expectedPosition - 1,
     'MILESTONE_INVALID',
     '工作稿偏移索引与里程碑修订版不一致。',
   );
@@ -1384,13 +1215,13 @@ function verifyRecoveryJournalReconstruction(
     'SELECT count(*) total, coalesce(max(position), 0) maximum FROM manuscript_block_versions WHERE revision_id = ?',
   ).all(checkpointRevisionId) as SqlRow[], 'RECOVERY_CLASSIFICATION_UNCERTAIN', '恢复检查点清单缺失。');
   const workingInventory = one(db.prepare(
-    'SELECT count(*) total, coalesce(max(position), 0) maximum FROM working_blocks WHERE branch_id = ?',
+    'SELECT count(*) total FROM working_blocks WHERE branch_id = ?',
   ).all(branchId) as SqlRow[], 'RECOVERY_CLASSIFICATION_UNCERTAIN', '恢复工作状态清单缺失。');
   requireBounded(
     asNumber(checkpointInventory.total) > 0 &&
       asNumber(checkpointInventory.total) === asNumber(checkpointInventory.maximum) &&
       asNumber(checkpointInventory.total) === asNumber(workingInventory.total) &&
-      asNumber(workingInventory.total) === asNumber(workingInventory.maximum),
+      asNumber(workingInventory.total) === paragraphCount(db, branchId),
     'RECOVERY_CLASSIFICATION_UNCERTAIN',
     '恢复检查点与工作状态的内容块清单不一致。',
   );
@@ -1402,6 +1233,8 @@ function verifyRecoveryJournalReconstruction(
        WHERE revision_id = ? AND position > ? ORDER BY position LIMIT ?`,
     ).all(checkpointRevisionId, blockCursor, MIGRATION_BATCH) as SqlRow[];
     if (blocks.length === 0) break;
+    // The working blocks standing at the same paragraph numbers, read once per batch.
+    const standing = new Map(rowsFrom(db, branchId, asNumber(blocks[0]!.position), blocks.length).map((row) => [row.position, row] as const));
     for (const block of blocks) {
       blockCursor = asNumber(block.position);
       const blockId = asString(block.block_id);
@@ -1441,15 +1274,12 @@ function verifyRecoveryJournalReconstruction(
           digest = targetDigest;
         }
       }
-      const current = one(db.prepare(
-        `SELECT block_id, kind, level, text, digest, grapheme_length
-         FROM working_blocks WHERE branch_id = ? AND position = ?`,
-      ).all(branchId, blockCursor) as SqlRow[], 'RECOVERY_CLASSIFICATION_UNCERTAIN', '持久工作内容块缺失。');
+      const current = standing.get(blockCursor);
+      requireBounded(current !== undefined, 'RECOVERY_CLASSIFICATION_UNCERTAIN', '持久工作内容块缺失。');
       requireBounded(
-        asString(current.block_id) === blockId && asString(current.kind) === kind &&
-          (current.level === null ? null : asNumber(current.level)) === level &&
-          asString(current.text) === content && asString(current.digest) === digest &&
-          asNumber(current.grapheme_length) === stagedBlockLength(content, 'RECOVERY_CLASSIFICATION_UNCERTAIN', '恢复工作文字超出有界范围。'),
+        current.blockId === blockId && current.kind === kind && current.level === level &&
+          current.text === content && current.digest === digest &&
+          current.graphemeLength === stagedBlockLength(content, 'RECOVERY_CLASSIFICATION_UNCERTAIN', '恢复工作文字超出有界范围。'),
         'RECOVERY_CLASSIFICATION_UNCERTAIN',
         '修订日志重建结果与持久工作状态不一致。',
       );
@@ -2428,7 +2258,7 @@ export class BoundedManuscriptStore {
     const previous = one(this.#db.prepare(
       'SELECT ordinal, source_version_id FROM manuscript_revisions WHERE revision_id = ?',
     ).all(binding.revisionId) as SqlRow[], 'REIMPORT_CHECKPOINT_INVALID', '当前稿件修订版缺失。');
-    const totalBlocks = lastWorkingPosition(this.#db, branchId);
+    const totalBlocks = paragraphCount(this.#db, branchId);
     requireBounded(totalBlocks > 0, 'REIMPORT_CHECKPOINT_INVALID', '工作稿没有内容块。');
     this.#db.exec(
       `CREATE TEMP TABLE IF NOT EXISTS manuscript_checkpoint_rows(
@@ -2498,10 +2328,7 @@ export class BoundedManuscriptStore {
       'REIMPORT_CHECKPOINT_STALE',
       '建立重新导入安全固定点时稿件已变化。',
     );
-    const rows = this.#db.prepare(
-      `SELECT block_id, position, kind, level, text, digest, grapheme_length
-       FROM working_blocks WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(work.binding.branchId, work.cursor, MIGRATION_BATCH) as SqlRow[];
+    const rows = rowsFrom(this.#db, work.binding.branchId, work.cursor + 1, MIGRATION_BATCH);
     if (rows.length > 0) {
       const insert = this.#db.prepare(
         `INSERT INTO temp.manuscript_checkpoint_rows(
@@ -2510,19 +2337,14 @@ export class BoundedManuscriptStore {
       );
       transact(this.#db, () => {
         for (const row of rows) {
-          const position = asNumber(row.position);
-          const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
-          const level = row.level === null ? null : asNumber(row.level);
-          const text = asString(row.text);
+          const { position, kind, level, text } = row;
           const length = stagedBlockLength(text, 'REIMPORT_CHECKPOINT_INVALID', '工作稿文字超出重新导入固定点边界。');
           requireBounded(
-            position === work.expectedPosition && asNumber(row.grapheme_length) === length &&
-              blockDigest(kind, level, text) === asString(row.digest),
+            position === work.expectedPosition && row.graphemeLength === length && blockDigest(kind, level, text) === row.digest,
             'REIMPORT_CHECKPOINT_INVALID',
             '工作稿内容无法建立精确重新导入固定点。',
           );
-          insert.run(workId, work.revisionId, asString(row.block_id), position, kind, level, text,
-            asString(row.digest), work.offset, length);
+          insert.run(workId, work.revisionId, row.blockId, position, kind, level, text, row.digest, work.offset, length);
           work.cursor = position;
           work.expectedPosition += 1;
           work.offset += length;
@@ -2532,7 +2354,7 @@ export class BoundedManuscriptStore {
     }
     requireBounded(
       work.cursor === work.totalBlocks && work.offset === work.binding.totalCharacters &&
-        workingOffsetPrefix(this.#db, work.binding.branchId, work.totalBlocks) === work.offset,
+        paragraphCount(this.#db, work.binding.branchId) === work.totalBlocks,
       'REIMPORT_CHECKPOINT_INVALID',
       '工作稿偏移索引与重新导入固定点不一致。',
     );
@@ -2793,14 +2615,9 @@ export class BoundedManuscriptStore {
       'MILESTONE_STALE',
       '稿件已变化，里程碑与恢复快照未提交。',
     );
-    return (this.#db.prepare(
-      `SELECT block_id, position, kind, level, text, digest, grapheme_length
-       FROM working_blocks WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(plan.branchId, afterPosition, MIGRATION_BATCH) as SqlRow[]).map((row) => ({
-      blockId: asString(row.block_id), position: asNumber(row.position),
-      kind: asString(row.kind) as ManuscriptBlockProjection['kind'],
-      level: row.level === null ? null : asNumber(row.level), text: asString(row.text),
-      digest: asString(row.digest), graphemeLength: asNumber(row.grapheme_length),
+    return rowsFrom(this.#db, plan.branchId, afterPosition + 1, MIGRATION_BATCH).map((row) => ({
+      blockId: row.blockId, position: row.position, kind: row.kind, level: row.level, text: row.text,
+      digest: row.digest, graphemeLength: row.graphemeLength,
     }));
   }
 
@@ -3139,13 +2956,14 @@ export class BoundedManuscriptStore {
         '恢复的工作状态已变化，无法继续只读查看。',
       );
     }
-    const source = journal ? 'working_blocks' : 'manuscript_block_versions';
-    const ownerColumn = journal ? 'branch_id' : 'revision_id';
-    const ownerId = journal ? asString(attention.branch_id) : asString(attention.checkpoint_revision_id);
-    const rows = this.#db.prepare(
-      `SELECT block_id, position, kind, level, text, digest FROM ${source}
-       WHERE ${ownerColumn} = ? AND position >= ? ORDER BY position LIMIT ?`,
-    ).all(ownerId, start, MAX_WINDOW_BLOCKS + 1) as SqlRow[];
+    const rows = journal
+      ? rowsFrom(this.#db, asString(attention.branch_id), start, MAX_WINDOW_BLOCKS + 1).map((row) => ({
+        block_id: row.blockId, position: row.position, kind: row.kind, level: row.level, text: row.text, digest: row.digest,
+      })) as SqlRow[]
+      : this.#db.prepare(
+        `SELECT block_id, position, kind, level, text, digest FROM manuscript_block_versions
+         WHERE revision_id = ? AND position >= ? ORDER BY position LIMIT ?`,
+      ).all(asString(attention.checkpoint_revision_id), start, MAX_WINDOW_BLOCKS + 1) as SqlRow[];
     const visible = rows.slice(0, MAX_WINDOW_BLOCKS);
     requireBounded(visible.length > 0, 'RECOVERY_WINDOW_NOT_FOUND', '恢复只读内容窗口为空。');
     const revision = one(this.#db.prepare(
@@ -3352,21 +3170,14 @@ export class BoundedManuscriptStore {
         requireBounded(expectedBlocks > 0, 'RECOVERY_SOURCE_INVALID', '恢复来源没有内容块。');
         // Which blocks the restoration leaves as they were (Issue #533): a point in one stands where it stood.
         const blocksBefore = workingBlockDigests(this.#db, binding.branchId);
-        this.#db.prepare('DELETE FROM working_blocks WHERE branch_id = ?').run(binding.branchId);
-        if (selection.kind === 'snapshot') {
-          this.#db.prepare(
-            `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
-             SELECT ?, block_id, position, kind, level, text, digest, grapheme_length
-             FROM recovery_restore_stage_blocks WHERE attention_id = ? ORDER BY position`,
-          ).run(binding.branchId, attentionId);
-        } else {
-          this.#db.prepare(
-            `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
-             SELECT ?, block_id, position, kind, level, text, digest, grapheme_length
-             FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position`,
-          ).run(binding.branchId, asString(attention.checkpoint_revision_id));
-        }
-        rebuiltTotal = rebuildBranchDerived(this.#db, binding.branchId);
+        // The working state replaced whole through its positions owner (ADR 0105 §7 need 1; R5-5's restore shares it).
+        const source = selection.kind === 'snapshot'
+          ? this.#db.prepare('SELECT block_id, kind, level, text, digest FROM recovery_restore_stage_blocks WHERE attention_id = ? ORDER BY position').all(attentionId)
+          : this.#db.prepare('SELECT block_id, kind, level, text, digest FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(asString(attention.checkpoint_revision_id));
+        rebuiltTotal = replaceWorkingState(this.#db, binding.branchId, (source as SqlRow[]).map((row) => ({
+          blockId: asString(row.block_id), kind: asString(row.kind) as ManuscriptBlockProjection['kind'], level: row.level === null ? null : asNumber(row.level),
+          text: asString(row.text), digest: asString(row.digest),
+        })));
         requireBounded(rebuiltTotal === expectedGraphemes, 'RECOVERY_SOURCE_INVALID', '恢复来源字符总数不一致。');
         // The working state was replaced whole, so no span exists to follow: every mark is resolved
         // against the text its block holds now, and one whose block is gone is kept as detached.
@@ -3384,6 +3195,7 @@ export class BoundedManuscriptStore {
         `UPDATE manuscript_command_groups SET status = 'superseded'
          WHERE branch_id = ? AND ordinal <= ? AND status IN ('applied', 'undone')`,
       ).run(binding.branchId, binding.historySequence);
+      supersedeAllSteps(this.#db, binding.branchId);
       requireBounded(
         this.#db.prepare(
           `UPDATE branch_working_state SET base_revision_id = ?, working_digest = ?, total_graphemes = ?,
@@ -3445,15 +3257,29 @@ export class BoundedManuscriptStore {
   getWindow(manuscriptId: string, branchId: string, target: ManuscriptWindowTarget, marks?: { afterOrdinal: number; digest: string }): ManuscriptWindowProjection {
     const binding = this.#binding(manuscriptId, branchId);
     let targetPosition = 1;
+    let targetKey: number | null = null;
     let focusBlockId: string | null = null;
     let focusGrapheme: number | null = null;
     let focusCharacter: number | null = null;
+    const atCharacter = (character: number, refusal: string): void => {
+      const resolved = blockAtCharacter(this.#db, branchId, character);
+      const row = one(this.#db.prepare('SELECT block_id, grapheme_length FROM working_blocks WHERE branch_id = ? AND order_key = ?')
+        .all(branchId, resolved.key) as SqlRow[], 'WINDOW_NOT_FOUND', '全稿位置不存在。');
+      targetPosition = resolved.position;
+      targetKey = resolved.key;
+      focusBlockId = asString(row.block_id);
+      focusGrapheme = character - resolved.startCharacter;
+      requireBounded(focusGrapheme >= 0 && focusGrapheme < asNumber(row.grapheme_length), 'WINDOW_INVALID', refusal);
+      focusCharacter = character;
+    };
     if (target.kind === 'cursor') {
       targetPosition = this.#decodeCursor(target.cursor, 'window', binding).position;
     } else if (target.kind === 'block' || target.kind === 'window-start') {
       requireBounded(BLOCK_PATTERN.test(target.blockId), 'WINDOW_INVALID', '稿件位置无效。');
-      const row = one(this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').all(branchId, target.blockId) as SqlRow[], 'WINDOW_NOT_FOUND', '稿件位置不存在。');
-      targetPosition = asNumber(row.position);
+      const row = workingRow(this.#db, branchId, target.blockId);
+      requireBounded(row !== undefined, 'WINDOW_NOT_FOUND', '稿件位置不存在。');
+      targetPosition = row.position;
+      targetKey = row.key;
       if (target.kind === 'block') {
         focusBlockId = target.blockId;
         focusGrapheme = 0;
@@ -3464,59 +3290,34 @@ export class BoundedManuscriptStore {
         'WINDOW_INVALID',
         '全稿位置超出稿件范围。',
       );
-      const character = target.character;
-      const resolved = resolveWorkingCharacter(this.#db, branchId, character, binding.totalCharacters);
-      const row = one(this.#db.prepare(
-        'SELECT block_id, grapheme_length FROM working_blocks WHERE branch_id = ? AND position = ?',
-      ).all(branchId, resolved.position) as SqlRow[], 'WINDOW_NOT_FOUND', '全稿位置不存在。');
-      targetPosition = resolved.position;
-      focusBlockId = asString(row.block_id);
-      focusGrapheme = character - resolved.startCharacter;
-      requireBounded(focusGrapheme >= 0 && focusGrapheme < asNumber(row.grapheme_length), 'WINDOW_INVALID', '全稿位置无法精确解析到内容块。');
-      focusCharacter = character;
+      atCharacter(target.character, '全稿位置无法精确解析到内容块。');
     } else if (target.kind === 'proportion') {
       requireBounded(Number.isFinite(target.proportion) && target.proportion >= 0 && target.proportion <= 1, 'WINDOW_INVALID', '全稿比例无效。');
       if (binding.totalCharacters > 0) {
-        const character = Math.min(binding.totalCharacters - 1, Math.floor(binding.totalCharacters * target.proportion));
-        const resolved = resolveWorkingCharacter(this.#db, branchId, character, binding.totalCharacters);
-        const row = one(this.#db.prepare(
-          'SELECT block_id, grapheme_length FROM working_blocks WHERE branch_id = ? AND position = ?',
-        ).all(branchId, resolved.position) as SqlRow[], 'WINDOW_NOT_FOUND', '全稿位置不存在。');
-        targetPosition = resolved.position;
-        focusBlockId = asString(row.block_id);
-        focusGrapheme = character - resolved.startCharacter;
-        requireBounded(focusGrapheme >= 0 && focusGrapheme < asNumber(row.grapheme_length), 'WINDOW_INVALID', '全稿比例无法精确解析到内容块。');
-        focusCharacter = character;
+        atCharacter(Math.min(binding.totalCharacters - 1, Math.floor(binding.totalCharacters * target.proportion)), '全稿比例无法精确解析到内容块。');
       }
     }
-    const totalBlocks = lastWorkingPosition(this.#db, branchId);
+    const totalBlocks = paragraphCount(this.#db, branchId);
+    requireBounded(totalBlocks > 0, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
     const startPosition = Math.min(Math.max(1, targetPosition - (focusBlockId ? Math.floor(MAX_WINDOW_BLOCKS / 2) : 0)), Math.max(1, totalBlocks - MAX_WINDOW_BLOCKS + 1));
-    const rows = this.#db.prepare(
-      `SELECT block_id, position, kind, level, text, digest, grapheme_length
-       FROM working_blocks WHERE branch_id = ? AND position >= ? ORDER BY position LIMIT ?`,
-    ).all(branchId, startPosition, MAX_WINDOW_BLOCKS + 1) as SqlRow[];
+    const rows = rowsFrom(this.#db, branchId, startPosition, MAX_WINDOW_BLOCKS + 1);
     const visible = rows.slice(0, MAX_WINDOW_BLOCKS);
     let blocks = withNoteReferences(this.#db, branchId, visible.map((row) => ({
-      blockId: asString(row.block_id),
-      position: asNumber(row.position),
-      kind: asString(row.kind) as ManuscriptBlockProjection['kind'],
-      level: row.level === null ? null : asNumber(row.level),
-      text: asString(row.text),
-      digest: asString(row.digest),
+      blockId: row.blockId, position: row.position, kind: row.kind, level: row.level, text: row.text, digest: row.digest,
     })));
     blocks = this.sourceObjects?.project(binding.revisionId, blocks, branchId) ?? blocks;
     requireBounded(blocks.length > 0 && blocks.length <= MAX_WINDOW_BLOCKS, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
     const first = visible[0]!;
     const last = visible.at(-1)!;
-    const startCharacter = workingOffsetBefore(this.#db, branchId, asNumber(first.position));
-    const endCharacter = workingOffsetPrefix(this.#db, branchId, asNumber(last.position));
-    const resolvedPosition = focusBlockId === null ? asNumber(first.position) : targetPosition;
+    const startCharacter = offsetBefore(this.#db, branchId, first.key);
+    const endCharacter = offsetBefore(this.#db, branchId, last.key) + last.graphemeLength;
+    const resolvedKey = focusBlockId === null ? first.key : targetKey!;
     const resolvedCharacter = focusCharacter ?? (focusBlockId === null
       ? startCharacter
-      : workingOffsetBefore(this.#db, branchId, resolvedPosition));
+      : offsetBefore(this.#db, branchId, resolvedKey));
     const structure = this.#db.prepare(
-      'SELECT text FROM manuscript_outline WHERE branch_id = ? AND position <= ? ORDER BY position DESC LIMIT 1',
-    ).get(branchId, resolvedPosition) as SqlRow | undefined;
+      'SELECT text FROM manuscript_outline WHERE branch_id = ? AND order_key <= ? ORDER BY order_key DESC LIMIT 1',
+    ).get(branchId, resolvedKey) as SqlRow | undefined;
     const proportion = binding.totalCharacters === 0 ? 0 : resolvedCharacter / binding.totalCharacters;
     const cursorBinding = { ...binding };
     const projection: ManuscriptWindowProjection = {
@@ -3533,8 +3334,8 @@ export class BoundedManuscriptStore {
       previousCursor: startPosition > 1 ? this.#encodeCursor('window', cursorBinding, { position: Math.max(1, startPosition - WINDOW_STRIDE) }) : null,
       nextCursor: rows.length > MAX_WINDOW_BLOCKS ? this.#encodeCursor('window', cursorBinding, { position: startPosition + WINDOW_STRIDE }) : null,
       position: {
-        startBlock: asNumber(first.position),
-        endBlock: asNumber(last.position),
+        startBlock: first.position,
+        endBlock: last.position,
         totalBlocks,
         startCharacter,
         endCharacter,
@@ -3544,8 +3345,8 @@ export class BoundedManuscriptStore {
         label: `${structure ? `${asString(structure.text)} · ` : ''}全稿 ${(proportion * 100).toFixed(3)}%`,
       },
       blocks,
-      ...marksOfWindow(this.#db, branchId, asNumber(first.position), marks),
-      ...aiLocksOfWindow(this.#db, branchId, asNumber(first.position)),
+      ...marksOfWindow(this.#db, branchId, first.position, marks),
+      ...aiLocksOfWindow(this.#db, branchId, first.position),
       // A Production Document says so on every window of it, whichever way it was reached (Issue #415, S66).
       ...((this.#db.prepare('SELECT role FROM manuscripts WHERE manuscript_id = ?').get(manuscriptId) as SqlRow | undefined)?.role === 'production-document'
         ? { deliverable: 'production-document' as const }
@@ -3574,29 +3375,25 @@ export class BoundedManuscriptStore {
     const total = Math.max(1, binding.totalCharacters);
     const proportion = (character: number): number => Math.min(1, Math.max(0, character / total));
     const outline = this.#db.prepare(
-      `SELECT block_id, position, level, text FROM manuscript_outline WHERE branch_id = ? ORDER BY position LIMIT ?`,
+      `SELECT block_id, order_key, level, text FROM manuscript_outline WHERE branch_id = ? ORDER BY order_key LIMIT ?`,
     ).all(branchId, MAX_RAIL_CHAPTERS + 1) as SqlRow[];
+    const places = openMarkPlaces(this.#db, branchId, MAX_RAIL_MARKS + 1);
+    // Every offset the rail needs, in one pass over the pages (ADR 0105 §6's batch rank).
+    const offsets = placesOfKeys(this.#db, branchId, [...outline.map((row) => asNumber(row.order_key)), ...places.map((place) => place.key)]);
+    const offsetOf = (key: number): number => offsets.get(key)!.offset;
     const chapters = outline.slice(0, MAX_RAIL_CHAPTERS).map((row) => ({
       blockId: asString(row.block_id),
       title: asString(row.text),
       level: asNumber(row.level),
-      startCharacter: workingOffsetBefore(this.#db, branchId, asNumber(row.position)),
+      startCharacter: offsetOf(asNumber(row.order_key)),
       suggestions: 0,
       annotations: 0,
       notes: 0,
     }));
     const firstOmitted = outline[MAX_RAIL_CHAPTERS];
-    const retainedEnd = firstOmitted === undefined ? Number.POSITIVE_INFINITY
-      : workingOffsetBefore(this.#db, branchId, asNumber(firstOmitted.position));
-    const places = openMarkPlaces(this.#db, branchId, MAX_RAIL_MARKS + 1);
-    const offsets = new Map<number, number>();
+    const retainedEnd = firstOmitted === undefined ? Number.POSITIVE_INFINITY : offsetOf(asNumber(firstOmitted.order_key));
     const marks = places.slice(0, MAX_RAIL_MARKS).map((place) => {
-      let before = offsets.get(place.position);
-      if (before === undefined) {
-        before = workingOffsetBefore(this.#db, branchId, place.position);
-        offsets.set(place.position, before);
-      }
-      const character = before + place.fromGrapheme;
+      const character = offsetOf(place.key) + place.fromGrapheme;
       // The chapter a mark belongs to is the last one that starts at or before it.
       let owner = -1;
       for (let index = 0; index < chapters.length && chapters[index]!.startCharacter <= character; index += 1) owner = index;
@@ -3611,13 +3408,14 @@ export class BoundedManuscriptStore {
     const uncovered = unread === null ? null : unread.flatMap((run) => {
       if (run.blockIds.length === 0) return [];
       const span = this.#db.prepare(
-        `SELECT min(position) first, max(position) last FROM working_blocks
+        `SELECT min(order_key) first, max(order_key) last FROM working_blocks
          WHERE branch_id = ? AND block_id IN (${run.blockIds.map(() => '?').join(', ')})`,
       ).get(branchId, ...run.blockIds) as SqlRow | undefined;
       if (span === undefined || span.first === null || span.last === null) return [];
+      const lastLength = asNumber((this.#db.prepare('SELECT grapheme_length FROM working_blocks WHERE branch_id = ? AND order_key = ?').get(branchId, asNumber(span.last)) as SqlRow).grapheme_length);
       return [{
-        fromProportion: proportion(workingOffsetBefore(this.#db, branchId, asNumber(span.first))),
-        toProportion: proportion(workingOffsetPrefix(this.#db, branchId, asNumber(span.last))),
+        fromProportion: proportion(offsetBefore(this.#db, branchId, asNumber(span.first))),
+        toProportion: proportion(offsetBefore(this.#db, branchId, asNumber(span.last)) + lastLength),
         reason: run.reason,
       }];
     });
@@ -3708,21 +3506,29 @@ export class BoundedManuscriptStore {
     const recordedPosition = this.#db.prepare(
       'SELECT position FROM manuscript_block_versions WHERE revision_id = ? AND block_id = ?',
     ).get(recordedRevisionId, recordedBlockId) as SqlRow | undefined;
-    const nearest = this.#db.prepare(
-      'SELECT block_id FROM working_blocks WHERE branch_id = ? ORDER BY abs(position - ?), position LIMIT 1',
-    ).get(branchId, recordedPosition === undefined ? 1 : asNumber(recordedPosition.position)) as SqlRow | undefined;
-    if (nearest === undefined) return null;
-    return { ...base, blockId: asString(nearest.block_id), grapheme: 0, state: 'nearest-anchor' };
+    // The nearest paragraph number to the one recorded: the paragraphs are numbered 1 … n with no gap.
+    const total = paragraphCount(this.#db, branchId);
+    if (total === 0) return null;
+    const nearest = Math.min(total, Math.max(1, recordedPosition === undefined ? 1 : asNumber(recordedPosition.position)));
+    const nearestKey = keyAtParagraph(this.#db, branchId, nearest);
+    const nearestBlock = this.#db.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? AND order_key = ?').get(branchId, nearestKey) as SqlRow;
+    return { ...base, blockId: asString(nearestBlock.block_id), grapheme: 0, state: 'nearest-anchor' };
   }
 
   getOutline(manuscriptId: string, branchId: string, cursor: string | null): OutlineProjection {
     const binding = this.#binding(manuscriptId, branchId);
+    // The cursor carries the paragraph number of the last heading shown; its key is read back under the same working digest.
     const position = cursor === null ? 0 : this.#decodeCursor(cursor, 'outline', binding).position;
+    const afterKey = position === 0 ? 0 : keyAtParagraph(this.#db, branchId, position);
     const rows = this.#db.prepare(
-      `SELECT block_id, position, kind, level, text FROM manuscript_outline
-       WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(branchId, position, MAX_OUTLINE_RESULTS + 1) as SqlRow[];
+      `SELECT block_id, order_key, kind, level, text FROM manuscript_outline
+       WHERE branch_id = ? AND order_key > ? ORDER BY order_key LIMIT ?`,
+    ).all(branchId, afterKey, MAX_OUTLINE_RESULTS + 1) as SqlRow[];
     const visible = rows.slice(0, MAX_OUTLINE_RESULTS);
+    const earlier = position === 0 ? undefined : this.#db.prepare(
+      `SELECT order_key FROM manuscript_outline WHERE branch_id = ? AND order_key <= ? ORDER BY order_key DESC LIMIT 1 OFFSET ?`,
+    ).get(branchId, afterKey, MAX_OUTLINE_RESULTS) as SqlRow | undefined;
+    const places = placesOfKeys(this.#db, branchId, [...visible.map((row) => asNumber(row.order_key)), ...(earlier === undefined ? [] : [asNumber(earlier.order_key)])]);
     const projection: OutlineProjection = {
       manuscriptId,
       branchId,
@@ -3730,7 +3536,7 @@ export class BoundedManuscriptStore {
       workingDigest: binding.workingDigest,
       entries: visible.map((row) => {
         const display = boundedOutlineDisplay(asString(row.text));
-        const character = workingOffsetBefore(this.#db, branchId, asNumber(row.position));
+        const character = places.get(asNumber(row.order_key))!.offset;
         return {
           outlineId: `${branchId}:${asString(row.block_id)}`,
           blockId: asString(row.block_id),
@@ -3744,17 +3550,9 @@ export class BoundedManuscriptStore {
       }),
       previousCursor: position === 0
         ? null
-        : this.#encodeCursor('outline', binding, {
-            position: asNumber((this.#db.prepare(
-              `SELECT COALESCE((
-                 SELECT position FROM manuscript_outline
-                 WHERE branch_id = ? AND position <= ?
-                 ORDER BY position DESC LIMIT 1 OFFSET ?
-               ), 0) position`,
-            ).get(branchId, position, MAX_OUTLINE_RESULTS) as SqlRow).position),
-          }),
+        : this.#encodeCursor('outline', binding, { position: earlier === undefined ? 0 : places.get(asNumber(earlier.order_key))!.position }),
       nextCursor: rows.length > MAX_OUTLINE_RESULTS
-        ? this.#encodeCursor('outline', binding, { position: asNumber(visible.at(-1)!.position) })
+        ? this.#encodeCursor('outline', binding, { position: places.get(asNumber(visible.at(-1)!.order_key))!.position })
         : null,
     };
     requireBounded(
@@ -3799,7 +3597,7 @@ export class BoundedManuscriptStore {
       if (input.structure !== undefined) return writeStructuralEdit(this.#db, { ...input, structure: input.structure }, fingerprint, serviceLifetimeId,
         { binding, recordLifetimeWrite: (sequence, digest, at) => this.#recordLifetimeJournalWrite(serviceLifetimeId, binding, sequence, digest, at) });
       const block = one(this.#db.prepare(
-        'SELECT position, kind, level, text, digest, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
+        'SELECT kind, level, text, digest, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
       ).all(input.branchId, input.blockId) as SqlRow[], 'EDIT_BLOCK_CHANGED', '稳定内容块不存在。');
       requireBounded(asString(block.digest) === input.baseBlockDigest, 'EDIT_BLOCK_CHANGED', '内容块已变化，请刷新窗口。');
       const beforeText = asString(block.text);
@@ -3816,13 +3614,14 @@ export class BoundedManuscriptStore {
       const groupId = randomUUID();
       const historyOrdinal = binding.historySequence + 1;
       const durableAt = new Date().toISOString();
-      this.#db.prepare("UPDATE manuscript_command_groups SET status = 'superseded' WHERE branch_id = ? AND status = 'undone'").run(input.branchId);
       this.#db.prepare(
         `INSERT INTO manuscript_command_groups(
            command_group_id, branch_id, ordinal, kind, status, source_group_id,
            before_working_digest, after_working_digest, created_at
          ) VALUES (?, ?, ?, 'edit', 'applied', NULL, ?, ?, ?)`,
       ).run(groupId, input.branchId, historyOrdinal, binding.workingDigest, '0'.repeat(64), durableAt);
+      // Typing is an editor step (Issue #1654); opening it supersedes what was undone.
+      recordGroupPart(this.#db, input.branchId, groupId, 'typing', input.blockId);
       this.#db.prepare(
         `INSERT INTO manuscript_command_edits(
            command_group_id, position, block_id, before_text, before_digest, after_text, after_digest
@@ -3840,13 +3639,8 @@ export class BoundedManuscriptStore {
         '编辑命令证据无法绑定工作状态链。',
       );
       const delta = after.length - before.length;
-      const updated = this.#db.prepare(
-        `UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ?
-         WHERE branch_id = ? AND block_id = ? AND digest = ?`,
-      ).run(afterText, afterDigest, after.length, input.branchId, input.blockId, input.baseBlockDigest);
-      requireBounded(updated.changes === 1, 'EDIT_BLOCK_CHANGED', '内容块在保存时已变化。');
-      updateWorkingOffsetNodes(this.#db, input.branchId, asNumber(block.position), delta);
-      this.#refreshBlockIndexes(input.branchId, input.blockId, asNumber(block.position), kind, level, afterText, afterDigest);
+      requireBounded(rewriteBlock(this.#db, input.branchId, input.blockId, { kind, level, text: afterText, digest: afterDigest }, input.baseBlockDigest) !== null,
+        'EDIT_BLOCK_CHANGED', '内容块在保存时已变化。');
       // The renderer derives this span from the block's two texts, as an undo's is derived here (Issue #568).
       followBlockTextChangeForMarks(this.#db, input.branchId, input.blockId, beforeText, afterText, sequence, [
         { fromGrapheme: input.fromGrapheme, toGrapheme: input.toGrapheme, insertedGraphemes: inserted.length, inserted },
@@ -3883,7 +3677,8 @@ export class BoundedManuscriptStore {
     requireBounded(graphemes(query).length <= MAX_SEARCH_QUERY_GRAPHEMES, 'SEARCH_INVALID', '搜索文字过长。');
     const binding = this.#binding(manuscriptId, branchId);
     this.#pruneTransientSearches();
-    const totalBlocks = lastWorkingPosition(this.#db, branchId);
+    const totalBlocks = paragraphCount(this.#db, branchId);
+    requireBounded(totalBlocks > 0, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
     const searchId = randomUUID();
     this.#db.prepare(
       `INSERT INTO manuscript_search_sessions(
@@ -3915,22 +3710,25 @@ export class BoundedManuscriptStore {
       throw new BoundedStoreError('SEARCH_STALE', '稿件已变化，请刷新搜索。');
     }
     const afterPosition = asNumber(session.scanned_position);
+    const afterKey = afterPosition === 0 ? 0 : keyAtParagraph(this.#db, binding.branchId, afterPosition);
     const query = asString(session.query);
     const useTrigram = graphemes(query).length >= 3;
     const ftsQuery = `"${query.replace(/"/g, '""')}"`;
     const rows = (useTrigram
       ? this.#db.prepare(
-          `SELECT wb.block_id, wb.position, wb.text, wb.digest
+          `SELECT wb.block_id, wb.order_key, wb.text, wb.digest
            FROM working_block_search
            JOIN working_blocks wb ON wb.branch_id = working_block_search.branch_id
              AND wb.block_id = working_block_search.block_id
-           WHERE working_block_search.branch_id = ? AND working_block_search MATCH ? AND wb.position > ?
-           ORDER BY wb.position LIMIT ?`,
-        ).all(binding.branchId, ftsQuery, afterPosition, SEARCH_BATCH)
+           WHERE working_block_search.branch_id = ? AND working_block_search MATCH ? AND wb.order_key > ?
+           ORDER BY wb.order_key LIMIT ?`,
+        ).all(binding.branchId, ftsQuery, afterKey, SEARCH_BATCH)
       : this.#db.prepare(
-          `SELECT block_id, position, text, digest FROM working_blocks
-           WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
-        ).all(binding.branchId, afterPosition, SEARCH_BATCH)) as SqlRow[];
+          `SELECT block_id, order_key, text, digest FROM working_blocks
+           WHERE branch_id = ? AND order_key > ? ORDER BY order_key LIMIT ?`,
+        ).all(binding.branchId, afterKey, SEARCH_BATCH)) as SqlRow[];
+    // The paragraph numbers and offsets of the batch in one pass over the pages.
+    const places = placesOfKeys(this.#db, binding.branchId, rows.map((row) => asNumber(row.order_key)));
     let scannedPosition = afterPosition;
     let nextOrdinal = asNumber(session.total_matches);
     const needle = graphemes(query);
@@ -3943,14 +3741,14 @@ export class BoundedManuscriptStore {
     transact(this.#db, () => {
       for (const row of rows) {
         const blockId = asString(row.block_id);
-        const blockPosition = asNumber(row.position);
-        scannedPosition = Math.max(scannedPosition, blockPosition);
+        const place = places.get(asNumber(row.order_key))!;
+        scannedPosition = Math.max(scannedPosition, place.position);
         const text = graphemes(asString(row.text));
         const heading = this.#db.prepare(
-          'SELECT text FROM manuscript_outline WHERE branch_id = ? AND position <= ? ORDER BY position DESC LIMIT 1',
-        ).get(binding.branchId, blockPosition) as SqlRow | undefined;
+          'SELECT text FROM manuscript_outline WHERE branch_id = ? AND order_key <= ? ORDER BY order_key DESC LIMIT 1',
+        ).get(binding.branchId, asNumber(row.order_key)) as SqlRow | undefined;
         const headingLabel = boundedProtocolDisplay(heading ? asString(heading.text) : '正文').text;
-        const blockStart = workingOffsetBefore(this.#db, binding.branchId, blockPosition);
+        const blockStart = place.offset;
         for (let start = 0; start <= text.length - needle.length; start += 1) {
           if (!needle.every((part, index) => text[start + index] === part)) continue;
           nextOrdinal += 1;
@@ -4229,13 +4027,13 @@ export class BoundedManuscriptStore {
       const ordinal = binding.historySequence + 1;
       const now = new Date().toISOString();
       const sequence = binding.journalSequence + 1;
-      this.#db.prepare("UPDATE manuscript_command_groups SET status = 'superseded' WHERE branch_id = ? AND status = 'undone'").run(binding.branchId);
       this.#db.prepare(
         `INSERT INTO manuscript_command_groups(
            command_group_id, branch_id, ordinal, kind, status, source_group_id,
            before_working_digest, after_working_digest, created_at
          ) VALUES (?, ?, ?, 'replacement', 'applied', NULL, ?, ?, ?)`,
       ).run(groupId, binding.branchId, ordinal, binding.workingDigest, '0'.repeat(64), now);
+      recordGroupPart(this.#db, binding.branchId, groupId, 'replace', null, `替换「${stepQuote(asString(preview.query))}」${asNumber(preview.included_matches).toLocaleString('zh-CN')} 处`);
       const insertEdit = this.#db.prepare(
         `INSERT INTO manuscript_command_edits(
            command_group_id, position, block_id, before_text, before_digest, after_text, after_digest
@@ -4248,15 +4046,15 @@ export class BoundedManuscriptStore {
       let totalDelta = 0;
       while (true) {
         const page = this.#db.prepare(
-          `SELECT DISTINCT rm.block_id, wb.position, wb.kind, wb.level, wb.text, wb.digest
+          `SELECT DISTINCT rm.block_id, wb.order_key, wb.kind, wb.level, wb.text, wb.digest
            FROM manuscript_replacement_matches rm
            JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = rm.block_id
-           WHERE rm.preview_id = ? AND rm.included = 1 AND wb.position > ?
-           ORDER BY wb.position LIMIT ?`,
+           WHERE rm.preview_id = ? AND rm.included = 1 AND wb.order_key > ?
+           ORDER BY wb.order_key LIMIT ?`,
         ).all(binding.branchId, previewId, blockCursor, HISTORY_BATCH) as SqlRow[];
         if (page.length === 0) break;
         for (const row of page) {
-          blockCursor = asNumber(row.position);
+          blockCursor = asNumber(row.order_key);
           editPosition += 1;
           const blockId = asString(row.block_id);
           const beforeText = asString(row.text);
@@ -4283,12 +4081,8 @@ export class BoundedManuscriptStore {
           const afterDigest = blockDigest(kind, level, afterText);
           insertEdit.run(groupId, editPosition, blockId, beforeText, asString(row.digest), afterText, afterDigest);
           const delta = after.length - before.length;
-          const update = this.#db.prepare(
-            'UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ? AND digest = ?',
-          ).run(afterText, afterDigest, after.length, binding.branchId, blockId, asString(row.digest));
-          requireBounded(update.changes === 1, 'REPLACEMENT_STALE', '匹配范围在提交时已变化。');
-          updateWorkingOffsetNodes(this.#db, binding.branchId, blockCursor, delta);
-          this.#refreshBlockIndexes(binding.branchId, blockId, blockCursor, kind, level, afterText, afterDigest);
+          requireBounded(rewriteBlock(this.#db, binding.branchId, blockId, { kind, level, text: afterText, digest: afterDigest }, asString(row.digest)) !== null,
+            'REPLACEMENT_STALE', '匹配范围在提交时已变化。');
           followBlockTextChangeForMarks(this.#db, binding.branchId, blockId, beforeText, afterText, sequence, markSpans);
           totalDelta += delta;
           requireBounded(Number.isSafeInteger(totalDelta), 'REPLACEMENT_TOO_LARGE', '替换后的全稿字符总数无效。');
@@ -4376,7 +4170,7 @@ export class BoundedManuscriptStore {
        FROM manuscript_replacement_matches rm
        JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = rm.block_id
        WHERE rm.preview_id = ? AND rm.included = 1
-       ORDER BY wb.position, rm.from_grapheme DESC`,
+       ORDER BY wb.order_key, rm.from_grapheme DESC`,
     ).all(binding.branchId, previewId) as SqlRow[];
     requireBounded(rows.length === asNumber(preview.included_matches) && rows.length > 0, 'REPLACEMENT_NOT_READY', '替换匹配缺失。');
     return {
@@ -4478,8 +4272,8 @@ export class BoundedManuscriptStore {
       );
       const committed: ExactReplacementCommit['targets'][number][] = [];
       const blocks = (this.#db.prepare(
-        `SELECT block_id, position, kind, level, text, digest FROM working_blocks
-         WHERE branch_id = ? AND block_id IN (${[...byBlock.keys()].map(() => '?').join(', ')}) ORDER BY position`,
+        `SELECT block_id, kind, level, text, digest FROM working_blocks
+         WHERE branch_id = ? AND block_id IN (${[...byBlock.keys()].map(() => '?').join(', ')}) ORDER BY order_key`,
       ).all(branchId, ...byBlock.keys()) as SqlRow[]);
       // A target whose block left the working state has drifted as surely as one whose text changed.
       requireBounded(blocks.length === byBlock.size, 'APPLY_TARGET_DRIFTED', '原文已变，本次应用没有写入稿件。');
@@ -4524,12 +4318,8 @@ export class BoundedManuscriptStore {
         editPosition += 1;
         insertEdit.run(groupId, editPosition, blockId, beforeText, asString(row.digest), afterText, afterDigest);
         const delta = after.length - before.length;
-        const update = this.#db.prepare(
-          'UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ? AND digest = ?',
-        ).run(afterText, afterDigest, after.length, branchId, blockId, asString(row.digest));
-        requireBounded(update.changes === 1, 'APPLY_TARGET_DRIFTED', '原文已变，本次应用没有写入稿件。');
-        updateWorkingOffsetNodes(this.#db, branchId, asNumber(row.position), delta);
-        this.#refreshBlockIndexes(branchId, blockId, asNumber(row.position), kind, level, afterText, afterDigest);
+        requireBounded(rewriteBlock(this.#db, branchId, blockId, { kind, level, text: afterText, digest: afterDigest }, asString(row.digest)) !== null,
+          'APPLY_TARGET_DRIFTED', '原文已变，本次应用没有写入稿件。');
         followBlockTextChangeForMarks(this.#db, branchId, blockId, beforeText, afterText, sequence, spans);
         totalDelta += delta;
         let shift = 0;
@@ -4570,9 +4360,8 @@ export class BoundedManuscriptStore {
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 'replacement', ?)`,
       ).run(randomUUID(), randomUUID(), sha256(canonicalJson({ applyCommandGroupId: groupId })), manuscriptId, branchId,
         binding.revisionId, sequence, firstBlockId!, firstInsert, firstDigest!, workingDigest, now, groupId, serviceLifetimeId);
-      // The Apply is one more entry of the history (ADR 0096 §1): 撤销 steps over it to what was typed before it, and only a
-      // new command takes away what was undone.
-      this.#db.prepare("UPDATE manuscript_command_groups SET status = 'superseded' WHERE branch_id = ? AND status = 'undone'").run(branchId);
+      // Supersession belongs to the editor-step owner (Issue #1654): the Apply's own step, opened by its Effect, supersedes what
+      // was undone, and an Apply that an undo or redo dispatches supersedes nothing.
       const state = this.#db.prepare(
         `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?, history_sequence = ?, total_graphemes = total_graphemes + ?
          WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
@@ -4709,103 +4498,20 @@ export class BoundedManuscriptStore {
     });
   }
 
-  undo(manuscriptId: string, branchId: string, expectedWorkingDigest: string, serviceLifetimeId: string): DurableHistoryProjection {
-    return this.#applyHistory('undo', manuscriptId, branchId, expectedWorkingDigest, serviceLifetimeId);
-  }
-
-  redo(manuscriptId: string, branchId: string, expectedWorkingDigest: string, serviceLifetimeId: string): DurableHistoryProjection {
-    return this.#applyHistory('redo', manuscriptId, branchId, expectedWorkingDigest, serviceLifetimeId);
-  }
-
-  #applyHistory(
-    action: 'undo' | 'redo',
-    manuscriptId: string,
-    branchId: string,
-    expectedWorkingDigest: string,
-    serviceLifetimeId: string,
-  ): DurableHistoryProjection {
-    requireBounded(DIGEST_PATTERN.test(expectedWorkingDigest), 'HISTORY_INVALID', '历史状态绑定无效。');
+  /**
+   * What the editor-step owner replays through (Issue #1654): the branch as it stands now — refused while it awaits recovery —
+   * and the service lifetime's high-water mark each journal write records.
+   */
+  editorStepHost(manuscriptId: string, branchId: string, serviceLifetimeId: string): Pick<EditorStepHost, 'binding' | 'recordLifetimeWrite' | 'lifetimeId'> {
     requireBounded(UUID_PATTERN.test(serviceLifetimeId), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
-    return transact(this.#db, () => {
-      const binding = this.#binding(manuscriptId, branchId);
-      this.#requireBranchEditable(branchId);
-      requireBounded(binding.workingDigest === expectedWorkingDigest, 'HISTORY_STALE', '稿件已变化，请刷新历史状态。');
-      const group = one(this.#db.prepare(
-        action === 'undo'
-          ? "SELECT * FROM manuscript_command_groups WHERE branch_id = ? AND status = 'applied' AND kind <> 'apply' AND ordinal > ? ORDER BY ordinal DESC LIMIT 1"
-          : "SELECT * FROM manuscript_command_groups WHERE branch_id = ? AND status = 'undone' AND ordinal > ? ORDER BY ordinal ASC LIMIT 1",
-      ).all(branchId, binding.historyBoundarySequence) as SqlRow[], action === 'undo' ? 'NOTHING_TO_UNDO' : 'NOTHING_TO_REDO', action === 'undo' ? '没有可撤销的编辑。' : '没有可重做的编辑。');
-      const groupId = asString(group.command_group_id);
-      validateCommandHistoryGroup(this.#db, groupId);
-      let cursor = 0;
-      let totalDelta = 0;
-      // A split or merge is one step whichever way it goes, and changes no character count (Issue #1175).
-      if (isStructuralGroup(asString(group.kind))) replayStructuralGroup(this.#db, branchId, groupId, asString(group.kind) as 'split' | 'merge', action, binding.journalSequence + 1);
-      while (!isStructuralGroup(asString(group.kind))) {
-        const rows = this.#db.prepare(
-          `SELECT position, block_id, before_text, before_digest, after_text, after_digest
-           FROM manuscript_command_edits WHERE command_group_id = ? AND position > ? ORDER BY position LIMIT ?`,
-        ).all(groupId, cursor, HISTORY_BATCH) as SqlRow[];
-        if (rows.length === 0) break;
-        for (const row of rows) {
-          cursor = asNumber(row.position);
-          const expectedDigest = action === 'undo' ? asString(row.after_digest) : asString(row.before_digest);
-          const targetText = action === 'undo' ? asString(row.before_text) : asString(row.after_text);
-          const targetDigest = action === 'undo' ? asString(row.before_digest) : asString(row.after_digest);
-          const current = this.#db.prepare(
-            'SELECT position, kind, level, text, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
-          ).get(branchId, asString(row.block_id)) as SqlRow | undefined;
-          if (current === undefined) throw historyStale(this.#db, branchId, groupId, [asString(row.block_id)]);
-          const { kind, level } = blockShapeFromDigest(targetText, targetDigest);
-          const targetLength = graphemes(targetText).length;
-          const delta = targetLength - asNumber(current.grapheme_length);
-          const update = this.#db.prepare(
-            'UPDATE working_blocks SET kind = ?, level = ?, text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ? AND digest = ?',
-          ).run(kind, level, targetText, targetDigest, targetLength, branchId, asString(row.block_id), expectedDigest);
-          if (update.changes !== 1) throw historyStale(this.#db, branchId, groupId, [asString(row.block_id)]);
-          updateWorkingOffsetNodes(this.#db, branchId, asNumber(current.position), delta);
-          this.#refreshBlockIndexes(branchId, asString(row.block_id), asNumber(current.position), kind, level, targetText, targetDigest);
-          followBlockTextChangeForMarks(this.#db, branchId, asString(row.block_id), asString(current.text), targetText, binding.journalSequence + 1);
-          totalDelta += delta;
-          requireBounded(Number.isSafeInteger(totalDelta), 'HISTORY_CORRUPT', '历史命令字符变化无效。');
-        }
-      }
-      const sequence = binding.journalSequence + 1;
-      const nextDigest = recoveryWorkingDigest(
-        binding.workingDigest, sequence, action, groupId, recoveryCommandEvidenceDigest(this.#db, groupId),
-      );
-      const now = new Date().toISOString();
-      requireBounded(
-        this.#db.prepare('UPDATE manuscript_command_groups SET status = ? WHERE command_group_id = ? AND status = ?').run(action === 'undo' ? 'undone' : 'applied', groupId, action === 'undo' ? 'applied' : 'undone').changes === 1,
-        'HISTORY_STALE',
-        '稿件历史状态已变化。',
-      );
-      const representative = one(this.#db.prepare('SELECT block_id, before_digest, after_digest FROM manuscript_command_edits WHERE command_group_id = ? ORDER BY position LIMIT 1').all(groupId) as SqlRow[], 'HISTORY_CORRUPT', '历史命令内容缺失。');
-      this.#db.prepare(
-        `INSERT INTO edit_journal_entries(
-           journal_entry_id, client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id,
-           sequence, block_id, from_grapheme, to_grapheme, insert_text, resulting_block_digest,
-           resulting_working_digest, durable_at, command_group_id, command_kind, service_lifetime_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '', ?, ?, ?, ?, ?, ?)`,
-      ).run(randomUUID(), randomUUID(), sha256(canonicalJson({ action, groupId, sequence })), manuscriptId, branchId,
-        binding.revisionId, sequence, asString(representative.block_id), action === 'undo' ? asString(representative.before_digest) : asString(representative.after_digest),
-        nextDigest, now, groupId, action, serviceLifetimeId);
-      const state = this.#db.prepare(
-        `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?,
-           total_graphemes = total_graphemes + ?
-         WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
-      ).run(sequence, nextDigest, totalDelta, branchId, binding.journalSequence, binding.workingDigest);
-      requireBounded(state.changes === 1, 'HISTORY_STALE', '稿件历史提交时工作状态已变化。');
-      this.#recordLifetimeJournalWrite(serviceLifetimeId, binding, sequence, nextDigest, now);
-      syncInlineEditorRevision(this.#db, groupId);
-      const refreshed = this.#binding(manuscriptId, branchId);
-      return {
-        action, branchId, revisionId: refreshed.revisionId, revisionLabel: refreshed.revisionLabel,
-        journalSequence: sequence, workingDigest: nextDigest, commandGroupId: groupId,
-        completionLabel: action === 'undo' ? '已撤销并写入修订日志' : '已重做并写入修订日志',
-        canUndo: this.#hasHistory(branchId, 'applied'), canRedo: this.#hasHistory(branchId, 'undone'),
-      };
-    });
+    return {
+      lifetimeId: serviceLifetimeId,
+      binding: () => {
+        this.#requireBranchEditable(branchId);
+        return this.#binding(manuscriptId, branchId);
+      },
+      recordLifetimeWrite: (before, sequence, digest, at) => this.#recordLifetimeJournalWrite(serviceLifetimeId, before as BranchBinding, sequence, digest, at),
+    };
   }
 
   manualCommandSource(branchId: string, sequence: number, request: ManualCommandRequestPin): ManualCommandSource {
@@ -5072,20 +4778,6 @@ export class BoundedManuscriptStore {
       recoveredRevisionId: asString(row.recovered_revision_id),
       label: '当前为恢复的工作状态',
     };
-  }
-
-  #refreshBlockIndexes(branchId: string, blockId: string, position: number, kind: ManuscriptBlockProjection['kind'], level: number | null, text: string, digest: string): void {
-    this.#db.prepare('DELETE FROM manuscript_outline WHERE branch_id = ? AND block_id = ?').run(branchId, blockId);
-    this.#db.prepare('DELETE FROM working_block_search WHERE branch_id = ? AND block_id = ?').run(branchId, blockId);
-    this.#db.prepare('INSERT INTO working_block_search(branch_id, block_id, text) VALUES (?, ?, ?)').run(branchId, blockId, text);
-    if (kind === 'title' || kind === 'heading') {
-      this.#db.prepare(
-        `INSERT INTO manuscript_outline(branch_id, block_id, position, kind, level, text, digest)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(branch_id, block_id) DO UPDATE SET position=excluded.position,
-           kind=excluded.kind, level=excluded.level, text=excluded.text, digest=excluded.digest`,
-      ).run(branchId, blockId, position, kind, level ?? 1, text, digest);
-    }
   }
 
   #searchSummary(row: SqlRow): SearchSummaryProjection {
@@ -5357,14 +5049,6 @@ export class BoundedManuscriptStore {
       preservedHistoryLabel: '既有修订版、修订日志、命令记录、里程碑、恢复快照与稿件固定点均保持原位',
       window: this.getWindow(asString(revision.manuscript_id), asString(revision.branch_id), { kind: 'start' }),
     };
-  }
-
-  #hasHistory(branchId: string, state: 'applied' | 'undone'): boolean {
-    return this.#db.prepare(
-      `SELECT 1 ok FROM manuscript_command_groups g
-       JOIN branch_working_state bws ON bws.branch_id = g.branch_id
-       WHERE g.branch_id = ? AND g.status = ? AND g.kind <> 'apply' AND g.ordinal > bws.history_boundary_sequence LIMIT 1`,
-    ).get(branchId, state) !== undefined;
   }
 
   #journalAck(row: SqlRow, input: JournalEditInput): JournalAcknowledgement {
