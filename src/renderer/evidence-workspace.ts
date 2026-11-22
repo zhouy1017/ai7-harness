@@ -1,11 +1,15 @@
-import { technicalWords, identityWords } from './technical-layer.js';
+import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { reportResult } from './notifications.js';
+import { menuPanel } from './components/controls.js';
+import { sourceLinkControls, type SourceLinkApi } from './source-link.js';
 import {
   EVIDENCE_MATRIX_MAX_PINNED,
   type CorrectionProposalDraftProjection,
   type CorrectionProposalSavedProjection,
+  SOURCE_TRANSLATION_LABEL,
   type EvidenceSourceCardProjection,
   type EvidenceWorkspaceProjection,
+  type FactualVerificationResultProjection,
   type RendererApi,
   type VerificationReasonState,
   type VerificationReviewDisposition,
@@ -25,14 +29,17 @@ import {
   CORRECTION_SAVED_GO,
   DECISION_FAILED,
   DECISION_HEADING,
+  DECISION_LABELS,
   DECISION_NOTE,
   DECISION_OWN_WORDS_LABEL,
+  DECISION_OWN_WORDS_RECORD,
   DECISION_REASON_FIELD,
   DECISION_REASON_FREE,
   DECISION_REASON_HEADING,
-  DECISION_RECORD,
   DECISION_RECORDED,
+  DECISION_RECORDING,
   DECISION_SUPERSEDED,
+  EVIDENCE_CONCLUSION_HEADING,
   EVIDENCE_CONFLICTS_HEADING,
   EVIDENCE_HISTORY_HEADING,
   EVIDENCE_LIMITATIONS_HEADING,
@@ -49,36 +56,54 @@ import {
   EVIDENCE_SUMMARY_HEADING,
   EVIDENCE_UNPIN,
   EVIDENCE_WORDING_LABEL,
-  EVIDENCE_WORKSPACE_HEADING,
+  FACT_STALE_SENTENCE,
   factDecisionLine,
   factLevelLine,
+  factLocationLine,
   factSourceCountsLine,
-  factStateLines,
   outcomeTone,
   sourceCardFacts,
   sourceCardTitle,
+  sourceRowDetail,
 } from './evidence-workspace-labels.js';
+import { SOURCE_TRANSLATION_MACHINE } from './research-evidence-labels.js';
 
 /**
- * The Assertion-centered Evidence Workspace (Issue #901; V2-UX-EVID-001 to 013, FREV-004 to 011, CORR-001 to 012): one result,
- * its exact wording apart from AI7's statement, its sources as discrete-state cards — two to four pinned into a comparison,
- * the rest one page after another — conflicts side by side, the non-evidentiary summary, and directly after the result the
- * Factual Review Decision Card and, where offered, the Correction Proposal draft. Reading it changes nothing: only
- * 记录核查审阅决定 and 保存为更正提案 record anything, each the editor's explicit action. Free text is typed into ordinary fields
- * that are never redrawn while the editor types, so Chinese input methods compose undisturbed.
+ * The Assertion-centered Evidence Workspace (Issue #901; V2-UX-EVID-001 to 013, FREV-004 to 011, CORR-001 to 012) as the
+ * expanded fact card's body (Issue #1683 item 12.2): 结论 — the result, its exact wording apart from AI7's statement and the two
+ * other states apart; 为这句核对的来源 — each source one row of a list, two to four pinned into a comparison, conflicts side by
+ * side and the non-evidentiary 小结 last; 你的决定 — one row holding the verification review (each button records at once) and the
+ * finding's own actions, then the Correction Proposal draft where offered. Reading it changes nothing: only a decision button and
+ * 保存为修改建议 record anything, each the editor's explicit action. Free text is typed into ordinary fields that are never redrawn
+ * while the editor types, so Chinese input methods compose undisturbed.
  */
 export interface EvidenceWorkspaceSurface {
   readonly element: HTMLElement;
   readonly resultId: string;
   load(): Promise<void>;
+  /** The fact card that holds the workspace hands it the finding's lines and 批注 actions, and the workspace draws again. */
+  attach(hooks: EvidenceCardHooks): void;
   destroy(): void;
+}
+
+/**
+ * What the fact card adds to the workspace it holds (Issue #1683): the finding's pills and note in 结论, 回到原文 beside the
+ * manuscript wording, a source's 来源译文 from the rows the card already read, and the finding's own actions (set A) on the one
+ * decision row of 你的决定. Each is called at every draw, so a control is always the card's current one.
+ */
+export interface EvidenceCardHooks {
+  readonly lead: () => HTMLElement[];
+  readonly goToText: () => HTMLElement | null;
+  readonly note: () => HTMLElement[];
+  readonly translation: (cardId: string) => string | null;
+  readonly actions: () => { direct: HTMLElement[]; more: HTMLElement[] };
 }
 
 export interface MountEvidenceWorkspaceOptions {
   readonly prepareSupplementary?: (decisionId: string) => Promise<void>;
   readonly bookId: string;
   readonly resultId: string;
-  readonly api: Pick<RendererApi, 'inspectEvidenceWorkspace' | 'recordVerificationReviewDecision' | 'prepareCorrectionProposal' | 'saveCorrectionProposal'>;
+  readonly api: Pick<RendererApi, 'inspectEvidenceWorkspace' | 'recordVerificationReviewDecision' | 'prepareCorrectionProposal' | 'saveCorrectionProposal'> & Partial<SourceLinkApi>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly instant: (iso: string) => string;
@@ -91,11 +116,12 @@ export interface MountEvidenceWorkspaceOptions {
 }
 
 interface DecisionForm {
-  disposition: VerificationReviewDisposition | null;
+  ownWordsOpen: boolean;
   ownWords: string;
   suggestion: string | null;
   reasonText: string;
   reasonEdited: boolean;
+  reasonOpen: boolean;
   problem: string | null;
 }
 
@@ -127,6 +153,15 @@ function facts(rows: ReadonlyArray<readonly [string, string]>): HTMLElement {
   return list;
 }
 
+/** The fact card's one conclusion badge: the 事实核查 state, toned by its outcome (Issue #1683 item 8; FACT-007 keeps the other two apart). */
+export function factStateBadge(result: Pick<FactualVerificationResultProjection, 'states'>): HTMLElement {
+  const badge = el('span', `state-term status-pill evidence-pill evidence-pill-${outcomeTone(result.states.factualVerification)} fact-card-badge`, result.states.factualVerification);
+  badge.dataset['stateTerm'] = '事实核查';
+  return badge;
+}
+
+const emptyForm = (): DecisionForm => ({ ownWordsOpen: false, ownWords: '', suggestion: null, reasonText: '', reasonEdited: false, reasonOpen: false, problem: null });
+
 export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): EvidenceWorkspaceSurface {
   const { api, bookId, resultId } = options;
   const element = el('section', 'evidence-workspace');
@@ -135,16 +170,20 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   element.setAttribute('aria-labelledby', headingId);
   let destroyed = false;
   let working = false;
+  let hooks: EvidenceCardHooks | null = null;
   let projection: EvidenceWorkspaceProjection | null = null;
   let sources: EvidenceSourceCardProjection[] = [];
   let nextCursor: number | null = null;
   const pinned: string[] = [];
   const excludedSources = new Set<string>();
-  let decision: DecisionForm = { disposition: null, ownWords: '', suggestion: null, reasonText: '', reasonEdited: false, problem: null };
+  let decision: DecisionForm = emptyForm();
   let draft: CorrectionProposalDraftProjection | null = null;
   let correction: CorrectionForm | null = null;
   let saved: CorrectionProposalSavedProjection | null = null;
   let savedBlockId: string | null = null;
+  const { openSourceInBrowser, runEditorClipboardCommand } = api;
+  const linkApi: SourceLinkApi | undefined = openSourceInBrowser === undefined || runEditorClipboardCommand === undefined ? undefined
+    : { openSourceInBrowser: (input) => openSourceInBrowser.call(api, input), runEditorClipboardCommand: (input) => runEditorClipboardCommand.call(api, input) };
 
   const button = (label: string, action: string, variant: 'primary' | 'secondary' | 'quiet', run: () => void): HTMLButtonElement => {
     const node = el('button', variant, label);
@@ -204,7 +243,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     element.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(cardId)}"]`)?.focus();
   }
 
-  // ---- rendering ------------------------------------------------------------------------------------------------------
+  // ---- rendering: 结论 → 为这句核对的来源 → 你的决定 (Issue #1683 item 9) -------------------------------------------------
 
   function render(): void {
     if (destroyed || projection === null) return;
@@ -214,37 +253,61 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     element.dataset['outcome'] = result.states.factualVerification;
     element.dataset['version'] = String(result.version);
     element.dataset['anchor'] = result.anchor.state;
-    const heading = el('h6', undefined, EVIDENCE_WORKSPACE_HEADING);
-    heading.id = headingId;
-    heading.append(' · ', el('span', 'evidence-no-mutation', EVIDENCE_NO_MUTATION));
-    const header = el('div', 'evidence-header');
+    const decisionSection = renderDecision(current);
+    const correctionSection = renderCorrection(current);
+    if (correctionSection !== null) decisionSection.append(correctionSection);
+    element.replaceChildren(renderConclusion(current), renderSources(current), decisionSection);
+    restoreFocus(key);
+  }
+
+  function section(name: 'conclusion' | 'sources' | 'decision', className: string, title: string): HTMLElement {
+    const node = el('section', `${className} fact-section`);
+    node.dataset['factSection'] = name;
+    const heading = el('h6', 'fact-section-heading', title);
+    if (name === 'conclusion') heading.id = headingId;
+    node.append(heading);
+    return node;
+  }
+
+  function renderConclusion(current: EvidenceWorkspaceProjection): HTMLElement {
+    const result = current.result;
+    const node = section('conclusion', 'evidence-conclusion', EVIDENCE_CONCLUSION_HEADING);
+    const line = el('p', 'evidence-conclusion-line');
+    line.append(factStateBadge(result), ' ', el('span', 'evidence-level', factLevelLine(result)));
+    node.append(line);
+    const lead = hooks?.lead() ?? [];
+    if (lead.length > 0) {
+      const row = el('div', 'evidence-conclusion-lead');
+      row.append(...lead);
+      node.append(row);
+    }
+    const noMutation = technicalWords(EVIDENCE_NO_MUTATION);
+    if (noMutation !== '') node.append(el('p', 'evidence-no-mutation', noMutation));
     const wording = el('div', 'evidence-wording');
-    wording.append(el('span', 'evidence-term', EVIDENCE_WORDING_LABEL), el('blockquote', 'evidence-quote', result.quote));
+    wording.append(el('span', 'evidence-term', `${EVIDENCE_WORDING_LABEL} · ${factLocationLine(result)}`), el('blockquote', 'evidence-quote', result.quote));
+    const go = hooks?.goToText() ?? null;
+    if (go !== null) wording.append(go);
     const statement = el('div', 'evidence-statement');
     statement.append(el('span', 'evidence-term', EVIDENCE_STATEMENT_LABEL), el('p', undefined, result.normalizedStatement));
-    header.append(wording, statement);
-    const states = el('div', 'evidence-states');
-    for (const [term, value] of factStateLines(result)) {
-      const state = el('span', 'evidence-state');
-      state.dataset['stateTerm'] = term;
-      state.append(el('span', 'evidence-term', term), el('span', `state-term status-pill evidence-pill evidence-pill-${term === '事实核查' ? outcomeTone(result.states.factualVerification) : 'neutral'}`, value));
-      states.append(state);
-    }
-    const children: HTMLElement[] = [heading, header, states, el('p', 'evidence-level', factLevelLine(result)), el('p', 'evidence-counts', factSourceCountsLine(result))];
-    if (result.anchor.label !== null) children.push(el('p', 'evidence-anchor-stale', `${result.anchor.label}：稿件在这段文字处已经改动；这条结果只作为历史保留，不会移到相似的文字上。`));
+    // The other two states, each with its own term, never merged into the badge (FACT-007, ADR 0074 item 4).
+    const states = el('p', 'evidence-states');
+    const integrity = el('span', 'evidence-state', result.states.referenceIntegrity === 'verified' ? '引文已在原文中定位' : '引文未能定位');
+    integrity.dataset['stateTerm'] = '引文完整性';
+    const support = el('span', 'evidence-state', `断言支持：${result.states.claimSupport}`);
+    support.dataset['stateTerm'] = '断言支持';
+    states.append(integrity, ' · ', support);
+    node.append(wording, statement, states, ...(hooks?.note() ?? []));
     if (result.limitations.length > 0) {
       const limits = el('div', 'evidence-limitations');
       limits.append(el('span', 'evidence-term', EVIDENCE_LIMITATIONS_HEADING));
       const list = el('ul');
-      for (const line of result.limitations) list.append(el('li', undefined, line));
+      for (const entry of result.limitations) list.append(el('li', undefined, entry));
       limits.append(list);
-      children.push(limits);
+      node.append(limits);
     }
-    children.push(renderSources(), renderMatrix(), renderConflicts(current), renderSummary(current), renderHistory(current), renderDecision(current));
-    const correctionSection = renderCorrection(current);
-    if (correctionSection !== null) children.push(correctionSection);
-    element.replaceChildren(...children);
-    restoreFocus(key);
+    if (result.anchor.state === 'stale') node.append(el('p', 'evidence-anchor-stale', FACT_STALE_SENTENCE));
+    if (current.history.length > 1) node.append(renderHistory(current));
+    return node;
   }
 
   function renderCard(card: EvidenceSourceCardProjection): HTMLElement {
@@ -253,25 +316,32 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     article.dataset['checkState'] = card.checkState;
     article.dataset['relation'] = card.relation;
     article.tabIndex = -1;
-    const heading = el('h6', undefined, sourceCardTitle(card));
-    if (card.excluded) heading.append(' · 已排除，来源及核查历史保留');
-    article.append(heading);
+    const head = el('p', 'evidence-card-head');
+    head.append(el('strong', 'evidence-card-name', sourceCardTitle(card)), el('span', 'evidence-card-check', ` · ${card.checkLabel} · ${card.relation}`));
+    if (card.excluded) head.append(' · 已排除，来源及核查历史保留');
+    article.append(head);
     if (card.sourceKind === 'web') article.append(el('p', 'technical-identity evidence-card-url', card.sourceRef));
     // An excerpt is shown only when it was obtained exactly; a candidate is never quoted (EVID-004, EVID-005).
-    if (card.excerpt !== null) article.append(el('blockquote', 'evidence-excerpt', card.excerpt));
-    article.append(facts(sourceCardFacts(card, options.instant)));
+    if (card.checkState === 'exact' && card.excerpt !== null) article.append(el('blockquote', 'evidence-excerpt', card.excerpt));
+    const translation = hooks?.translation(card.cardId) ?? null;
+    if (translation !== null) {
+      const translated = el('figure', 'evidence-card-translation');
+      translated.append(el('figcaption', undefined, `${SOURCE_TRANSLATION_LABEL} · ${SOURCE_TRANSLATION_MACHINE}`), el('blockquote', 'evidence-excerpt', translation));
+      article.append(translated);
+    }
+    const detail = sourceRowDetail(card, options.instant);
+    if (detail !== null) article.append(el('p', 'evidence-card-detail', detail));
+    // The whole discrete-state table stays for developer mode only (Issue #1683 item 11).
+    if (technicalLayerVisible) {
+      const table = el('details', 'technical-details evidence-card-facts');
+      table.append(el('summary', undefined, '查看技术详情'), facts(sourceCardFacts(card, options.instant)));
+      article.append(table);
+    }
     const actions = el('div', 'button-row evidence-card-actions');
-    if (!card.excluded && projection?.claimRecheckAvailable && projection.decisionCard.drift === null) {
-      const exclude = el('input');
-      exclude.type = 'checkbox'; exclude.checked = excludedSources.has(card.sourceRef); exclude.disabled = working || (decision.disposition !== null && decision.disposition !== 'request-evidence');
-      exclude.addEventListener('change', () => {
-        if (exclude.checked) {
-          excludedSources.add(card.sourceRef);
-          decision = { ...decision, disposition: 'request-evidence', problem: null };
-        } else excludedSources.delete(card.sourceRef);
-        render();
-      });
-      const label = el('label'); label.append(exclude, el('span', undefined, '排除此来源，并要求补充证据')); actions.append(label);
+    if (card.sourceKind === 'web') actions.append(sourceLinkControls({ address: card.sourceRef, identity: { bookId, resultId, cardId: card.cardId }, ...(linkApi === undefined ? {} : { api: linkApi }) }));
+    if (card.evidenceId !== null) {
+      const evidenceId = card.evidenceId;
+      actions.append(button(EVIDENCE_OPEN_SOURCE, 'open-source', 'quiet', () => options.openSource(evidenceId)));
     }
     const isPinned = pinned.includes(card.cardId);
     const pin = el('input');
@@ -289,34 +359,54 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     const pinLabel = el('label', 'evidence-pin');
     pinLabel.append(pin, el('span', undefined, isPinned ? EVIDENCE_UNPIN : pinned.length >= EVIDENCE_MATRIX_MAX_PINNED ? `${EVIDENCE_PIN} · ${EVIDENCE_PIN_FULL}` : EVIDENCE_PIN));
     actions.append(pinLabel);
-    if (card.evidenceId !== null) {
-      const evidenceId = card.evidenceId;
-      actions.append(button(EVIDENCE_OPEN_SOURCE, 'open-source', 'quiet', () => options.openSource(evidenceId)));
+    if (!card.excluded && projection?.claimRecheckAvailable && projection.decisionCard.drift === null) {
+      // Excluding marks the source only; it goes with 要补充证据 when that is pressed (Issue #1683 item 10).
+      const exclude = el('input');
+      exclude.type = 'checkbox';
+      exclude.checked = excludedSources.has(card.sourceRef);
+      exclude.disabled = working;
+      exclude.dataset['evidenceExclude'] = card.cardId;
+      exclude.addEventListener('change', () => {
+        if (exclude.checked) excludedSources.add(card.sourceRef);
+        else excludedSources.delete(card.sourceRef);
+        render();
+      });
+      const label = el('label', 'evidence-exclude');
+      label.append(exclude, el('span', undefined, '排除此来源，并要求补充证据'));
+      actions.append(label);
     }
     article.append(actions);
     return article;
   }
 
-  function renderSources(): HTMLElement {
-    const section = el('section', 'evidence-sources');
-    section.dataset['totalSources'] = String(projection?.totalSources ?? 0);
-    const heading = el('h6', undefined, EVIDENCE_SOURCES_HEADING);
-    if (sources.length === 0) heading.append(` · ${EVIDENCE_SOURCES_NONE}`);
-    section.append(heading);
-    for (const card of sources) section.append(renderCard(card));
-    if (nextCursor !== null) section.append(button(EVIDENCE_SOURCES_MORE, 'more-sources', 'secondary', () => void moreSources()));
-    return section;
+  function renderSources(current: EvidenceWorkspaceProjection): HTMLElement {
+    const node = section('sources', 'evidence-sources', EVIDENCE_SOURCES_HEADING);
+    node.dataset['totalSources'] = String(current.totalSources);
+    node.append(el('p', 'evidence-counts', factSourceCountsLine(current.result)));
+    if (sources.length === 0) node.append(el('p', 'evidence-sources-none', EVIDENCE_SOURCES_NONE));
+    const conflicts = renderConflicts(current);
+    if (conflicts !== null) node.append(conflicts);
+    const list = el('div', 'evidence-source-rows');
+    for (const card of sources) list.append(renderCard(card));
+    node.append(list);
+    if (nextCursor !== null) node.append(button(EVIDENCE_SOURCES_MORE, 'more-sources', 'secondary', () => void moreSources()));
+    const matrix = renderMatrix();
+    if (matrix !== null) node.append(matrix);
+    node.append(renderSummary(current));
+    return node;
   }
 
-  function renderMatrix(): HTMLElement {
-    const section = el('section', 'evidence-matrix');
-    section.dataset['pinnedCount'] = String(pinned.length);
+  function renderMatrix(): HTMLElement | null {
+    // 来源对比 appears once a source is pinned: its hint while one is, the table from two (Issue #1683 item 9).
+    if (pinned.length === 0) return null;
+    const node = el('section', 'evidence-matrix');
+    node.dataset['pinnedCount'] = String(pinned.length);
     const heading = el('h6', undefined, EVIDENCE_MATRIX_HEADING);
-    section.append(heading);
+    node.append(heading);
     const cards = pinned.map((id) => sources.find((card) => card.cardId === id)).filter((card): card is EvidenceSourceCardProjection => card !== undefined);
     if (cards.length < 2) {
       heading.append(` · ${EVIDENCE_MATRIX_HINT}`);
-      return section;
+      return node;
     }
     const table = el('table', 'evidence-matrix-table');
     const head = el('tr');
@@ -334,15 +424,15 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       for (const card of cards) row.append(el('td', undefined, value(card)));
       table.append(row);
     }
-    section.append(table);
-    return section;
+    node.append(table);
+    return node;
   }
 
-  function renderConflicts(current: EvidenceWorkspaceProjection): HTMLElement {
-    const section = el('section', 'evidence-conflicts');
-    section.dataset['conflictCount'] = String(current.conflicts.length);
-    if (current.conflicts.length === 0) return section;
-    section.append(el('h6', undefined, EVIDENCE_CONFLICTS_HEADING));
+  function renderConflicts(current: EvidenceWorkspaceProjection): HTMLElement | null {
+    if (current.conflicts.length === 0) return null;
+    const node = el('section', 'evidence-conflicts');
+    node.dataset['conflictCount'] = String(current.conflicts.length);
+    node.append(el('h6', undefined, EVIDENCE_CONFLICTS_HEADING));
     for (const conflict of current.conflicts) {
       const pair = el('div', 'evidence-conflict');
       for (const [label, id] of [['支持', conflict.supportingCardId], ['反驳', conflict.refutingCardId]] as const) {
@@ -353,15 +443,15 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
         pair.append(side);
       }
       pair.append(el('p', 'evidence-conflict-point', conflict.point));
-      section.append(pair);
+      node.append(pair);
     }
-    return section;
+    return node;
   }
 
   function renderSummary(current: EvidenceWorkspaceProjection): HTMLElement {
-    const section = el('section', 'evidence-summary');
-    section.dataset['label'] = current.summary.label;
-    section.append(el('h6', undefined, `${EVIDENCE_SUMMARY_HEADING} · 非证据 · ${current.summary.label}`));
+    const node = el('section', 'evidence-summary');
+    node.dataset['label'] = current.summary.label;
+    node.append(el('h6', undefined, EVIDENCE_SUMMARY_HEADING));
     const list = el('ul');
     for (const statement of current.summary.statements) {
       const item = el('li', undefined, statement.text);
@@ -373,79 +463,56 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       }
       list.append(item);
     }
-    section.append(list);
-    return section;
+    node.append(list);
+    return node;
   }
 
   function renderHistory(current: EvidenceWorkspaceProjection): HTMLElement {
-    const section = el('section', 'evidence-history');
-    section.append(el('h6', undefined, EVIDENCE_HISTORY_HEADING));
+    const node = el('section', 'evidence-history');
+    node.append(el('h6', undefined, EVIDENCE_HISTORY_HEADING));
     const list = el('ol');
     for (const entry of current.history) {
       list.append(el('li', entry.resultId === current.result.resultId ? 'evidence-history-current' : undefined,
         `${technicalWords(`第 ${entry.version} 版 · `)}${entry.outcome} · ${options.instant(entry.recordedAt)}`));
     }
-    section.append(list);
-    return section;
+    node.append(list);
+    return node;
   }
 
-  // ---- the Factual Review Decision Card (FREV-004 to FREV-011) -----------------------------------------------------------
+  // ---- 你的决定: one row for the verification review (set B) and the finding's own actions (set A) — Issue #1683 item 10 -----
 
   function renderDecision(current: EvidenceWorkspaceProjection): HTMLElement {
-    const section = el('section', 'evidence-decision');
-    const titleId = uid('decision');
-    const title = el('h6', undefined, `${DECISION_HEADING} · ${DECISION_NOTE}`);
-    title.id = titleId;
-    section.append(title);
-    for (const recorded of current.decisions) {
-      const line = el('p', 'evidence-decision-recorded', factDecisionLine(recorded));
-      line.dataset['decisionId'] = recorded.decisionId;
-      line.dataset['superseded'] = recorded.superseded ? 'true' : 'false';
-      if (recorded.superseded) line.append(` · ${DECISION_SUPERSEDED}`);
-      section.append(line);
-    }
+    const node = section('decision', 'evidence-decision', DECISION_HEADING);
     const card = current.decisionCard;
-    const latest = current.decisions.at(-1);
-    if (current.claimRecheckAvailable && latest?.disposition === 'request-evidence' && latest.resultId === resultId && !latest.superseded && card.drift === null && options.prepareSupplementary !== undefined) {
-      section.append(button('补充核查', 'prepare-supplementary', 'secondary', () => {
-        working = true; render();
-        void options.prepareSupplementary!(latest.decisionId).catch((error: unknown) => {
-          options.setStatus(options.errorMessage(error, '无法准备补充核查计划。'), 'error');
-        }).finally(() => { working = false; if (!destroyed) render(); });
-      }));
-    }
-    if (card.recommendation !== null) {
-      section.append(el('p', 'evidence-decision-recommendation',
-        `AI7 建议「${current.decisionCard.choices.find((choice) => choice.disposition === card.recommendation!.disposition)?.label ?? ''}」：${card.recommendation.rationale}`));
-    }
-    if (card.drift !== null) {
-      const drift = el('p', 'evidence-decision-drift', card.drift);
-      drift.setAttribute('role', 'alert');
-      section.append(drift);
-    }
-    if (!current.result.pendingReview && card.drift === null) return section;
-    const group = el('fieldset', 'evidence-decision-choices');
-    group.setAttribute('aria-labelledby', titleId);
-    const name = uid('choice');
-    for (const choice of card.choices) {
-      const label = el('label', 'evidence-choice');
-      const input = el('input');
-      input.type = 'radio';
-      input.name = name;
-      input.value = choice.disposition;
-      input.checked = decision.disposition === choice.disposition;
-      input.disabled = working || card.drift !== null;
-      input.dataset['decisionChoice'] = choice.disposition;
-      input.dataset['evidenceFocus'] = `choice:${choice.disposition}`;
-      input.addEventListener('change', () => {
-        decision = { ...decision, disposition: choice.disposition, problem: null };
+    const offered = current.result.pendingReview && card.drift === null && card.choices.length > 0;
+    const offers = (disposition: VerificationReviewDisposition): boolean => offered && card.choices.some((choice) => choice.disposition === disposition);
+    const decide = (disposition: VerificationReviewDisposition, tone: 'primary' | 'secondary' | 'quiet'): HTMLButtonElement => {
+      const control = button(DECISION_LABELS[disposition], 'decide', tone, () => {
+        if (disposition !== 'own-words') { void recordDecision(disposition); return; }
+        decision = { ...decision, ownWordsOpen: true, problem: null };
         render();
+        element.querySelector<HTMLElement>('[data-evidence-focus="own-words"]')?.focus();
       });
-      label.append(input, el('span', undefined, choice.label));
-      group.append(label);
+      control.dataset['decisionChoice'] = disposition;
+      control.dataset['evidenceFocus'] = `choice:${disposition}`;
+      return control;
+    };
+    if (offered) node.append(renderReasons(current));
+    const row = el('div', 'button-row evidence-decision-row');
+    for (const disposition of ['accept', 'request-evidence'] as const) if (offers(disposition)) row.append(decide(disposition, disposition === 'accept' ? 'primary' : 'secondary'));
+    if (current.result.correctionAvailable && draft === null && saved === null) row.append(button(CORRECTION_PREPARE, 'prepare-correction', 'secondary', () => void prepareCorrection()));
+    const finding = hooks?.actions() ?? { direct: [], more: [] };
+    row.append(...finding.direct);
+    const more = [...(['decline', 'keep-pending', 'own-words'] as const).filter(offers).map((disposition) => decide(disposition, 'quiet')), ...finding.more];
+    if (more.length > 0) {
+      const fold = el('details', 'review-more review-card-more evidence-decision-more');
+      const summary = el('summary', undefined, '⋯');
+      summary.setAttribute('aria-label', '更多决定');
+      fold.append(summary, menuPanel(...more));
+      row.append(fold);
     }
-    section.append(group);
-    if (decision.disposition === 'own-words') {
+    if (row.childElementCount > 0) node.append(row);
+    if (offers('own-words') && decision.ownWordsOpen) {
       const field = el('label', 'evidence-field');
       const area = el('textarea');
       area.value = decision.ownWords;
@@ -454,12 +521,46 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       area.dataset['evidenceFocus'] = 'own-words';
       area.addEventListener('input', () => { decision.ownWords = area.value; });
       field.append(el('span', undefined, DECISION_OWN_WORDS_LABEL), area);
-      section.append(field);
+      node.append(field, button(DECISION_OWN_WORDS_RECORD, 'record-own-words', 'primary', () => void recordDecision('own-words')));
     }
-    // The optional reason (FREV-009): suggestions unselected; one taken as is, corrected, or the editor's own words.
+    if (decision.problem !== null) node.append(el('p', 'form-error', decision.problem));
+    for (const recorded of current.decisions) {
+      const line = el('p', 'evidence-decision-recorded', factDecisionLine(recorded));
+      line.dataset['decisionId'] = recorded.decisionId;
+      line.dataset['superseded'] = recorded.superseded ? 'true' : 'false';
+      if (recorded.superseded) line.append(` · ${DECISION_SUPERSEDED}`);
+      node.append(line);
+    }
+    if (offered || current.decisions.length > 0) node.append(el('p', 'field-note evidence-decision-note', DECISION_NOTE));
+    if (card.recommendation !== null) {
+      node.append(el('p', 'evidence-decision-recommendation', `AI7 建议「${DECISION_LABELS[card.recommendation.disposition].replace(/…$/u, '')}」：${card.recommendation.rationale}`));
+    }
+    if (card.drift !== null) {
+      const drift = el('p', 'evidence-decision-drift', card.drift);
+      drift.setAttribute('role', 'alert');
+      node.append(drift);
+    }
+    const latest = current.decisions.at(-1);
+    if (current.claimRecheckAvailable && latest?.disposition === 'request-evidence' && latest.resultId === resultId && !latest.superseded && card.drift === null && options.prepareSupplementary !== undefined) {
+      node.append(button('补充核查', 'prepare-supplementary', 'secondary', () => {
+        working = true; render();
+        void options.prepareSupplementary!(latest.decisionId).catch((error: unknown) => {
+          options.setStatus(options.errorMessage(error, '无法准备补充核查计划。'), 'error');
+        }).finally(() => { working = false; if (!destroyed) render(); });
+      }));
+    }
+    return node;
+  }
+
+  /** 写理由 · 可不填 (FREV-009): suggestions unselected; one taken as is, corrected, or the editor's own words — sent with the next set-B button. */
+  function renderReasons(current: EvidenceWorkspaceProjection): HTMLElement {
+    const fold = el('details', 'evidence-decision-reasons-fold');
+    fold.open = decision.reasonOpen;
+    fold.addEventListener('toggle', () => { decision.reasonOpen = fold.open; });
+    const summary = el('summary', undefined, DECISION_REASON_HEADING);
+    summary.dataset['evidenceFocus'] = 'reason-fold';
     const reasons = el('div', 'evidence-decision-reasons');
-    reasons.append(el('span', 'evidence-term', DECISION_REASON_HEADING));
-    for (const suggestion of card.reasonSuggestions) {
+    for (const suggestion of current.decisionCard.reasonSuggestions) {
       const chip = button(suggestion, 'reason-suggestion', decision.suggestion === suggestion ? 'secondary' : 'quiet', () => {
         decision = decision.suggestion === suggestion
           ? { ...decision, suggestion: null, reasonText: '', reasonEdited: false }
@@ -468,6 +569,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       });
       chip.setAttribute('aria-pressed', decision.suggestion === suggestion ? 'true' : 'false');
       chip.dataset['reasonSuggestion'] = suggestion;
+      chip.dataset['evidenceFocus'] = `reason:${suggestion}`;
       reasons.append(chip);
     }
     const reasonField = el('label', 'evidence-field');
@@ -483,29 +585,24 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     });
     reasonField.append(el('span', undefined, DECISION_REASON_FIELD), reason);
     reasons.append(reasonField);
-    section.append(reasons);
-    if (decision.problem !== null) section.append(el('p', 'form-error', decision.problem));
-    const record = button(DECISION_RECORD, 'record-decision', 'primary', () => void recordDecision());
-    record.disabled = working || decision.disposition === null || card.drift !== null;
-    record.dataset['evidenceFocus'] = 'record-decision';
-    section.append(record);
-    return section;
+    fold.append(summary, reasons);
+    return fold;
   }
 
-  async function recordDecision(): Promise<void> {
+  async function recordDecision(disposition: VerificationReviewDisposition): Promise<void> {
     const current = projection;
-    if (current === null || decision.disposition === null) return;
+    if (current === null || working) return;
     const text = decision.reasonText.trim();
     let state: VerificationReasonState | null = null;
     if (text.length > 0) state = decision.suggestion === null ? 'replaced' : !decision.reasonEdited || text === decision.suggestion ? 'selected' : 'corrected';
     working = true;
     render();
-    options.setStatus('正在记录核查审阅决定…', 'busy');
+    options.setStatus(DECISION_RECORDING, 'busy');
     try {
       const recorded = await api.recordVerificationReviewDecision({
-        ...(decision.disposition !== 'request-evidence' || excludedSources.size === 0 ? {} : { excludedSourceRefs: [...excludedSources] }),
-        bookId, resultId, resultVersion: current.result.version, disposition: decision.disposition,
-        ownWords: decision.disposition === 'own-words' ? decision.ownWords : null,
+        ...(disposition !== 'request-evidence' || excludedSources.size === 0 ? {} : { excludedSourceRefs: [...excludedSources] }),
+        bookId, resultId, resultVersion: current.result.version, disposition,
+        ownWords: disposition === 'own-words' ? decision.ownWords : null,
         reason: state === null ? null : { state, text: state === 'selected' ? decision.suggestion! : text, suggestion: state === 'replaced' ? null : decision.suggestion },
       });
       if (destroyed) return;
@@ -513,7 +610,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       sources = [...recorded.workspace.sources];
       nextCursor = recorded.workspace.nextSourceCursor;
       excludedSources.clear();
-      decision = { disposition: null, ownWords: '', suggestion: null, reasonText: '', reasonEdited: false, problem: null };
+      decision = emptyForm();
       options.setStatus(recorded.supplementary === null ? DECISION_RECORDED : `${DECISION_RECORDED}${recorded.supplementary.statement}`, 'success');
       options.changed();
     } catch (error) {
@@ -538,12 +635,8 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       if (first !== undefined) done.append(button(CORRECTION_SAVED_GO, 'go-to-correction', 'secondary', () => void options.goToText({ blockId: savedBlockId ?? current.result.blockId, markId: first })));
       return done;
     }
-    if (draft === null || correction === null) {
-      if (!current.result.correctionAvailable) return null;
-      const section = el('section', 'evidence-correction');
-      section.append(button(CORRECTION_PREPARE, 'prepare-correction', 'secondary', () => void prepareCorrection()));
-      return section;
-    }
+    // 准备修改建议 stands on the decision row; the draft follows it once prepared.
+    if (draft === null || correction === null) return null;
     const form = correction;
     const section = el('section', 'evidence-correction');
     section.append(el('h6', undefined, CORRECTION_HEADING));
@@ -695,6 +788,10 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     element,
     resultId,
     load,
+    attach: (next) => {
+      hooks = next;
+      render();
+    },
     destroy: () => {
       destroyed = true;
       element.remove();

@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountReviewWorkspace, type MountReviewWorkspaceOptions, type ReviewWorkspaceSurface } from '../../src/renderer/review-workspace.js';
 import { mountEvidenceWorkspace } from '../../src/renderer/evidence-workspace.js';
+import { REVIEW_IGNORE_DEFAULT_REASON } from '../../src/renderer/review-labels.js';
 import { createCommandDispatcher } from '../../src/renderer/commands.js';
 import type { EvidenceWorkspaceProjection, FactualVerificationLensProjection, FactualVerificationResultProjection, RendererApi, ReviewFindingProjection, ReviewRunCategoryState, ReviewWorkspaceProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
@@ -65,6 +66,17 @@ function workspace(id = RUN, state: ReviewRunCategoryState = 'failed', findingsC
 function lens(run = RUN, results: FactualVerificationResultProjection[] = [result(run)], nextCursor: number | null = null): FactualVerificationLensProjection {
   return { bookId: BOOK, reviewRunId: run, results, nextCursor, total: results.length, counts: [{ outcome: '证据支持', count: results.length }], chapters: [], run: null,
     policyPin: { document: PIN.document, minimumLevel: null, sha256: PIN.digest }, statement: '公开合成核查结果' };
+}
+
+// A workspace with two web sources and the five decisions offered: what the fact card's decision row is drawn from (Issue #1683).
+function decidable(entry: FactualVerificationResultProjection): EvidenceWorkspaceProjection {
+  const page = evidence({ ...entry, correctionAvailable: true });
+  const source = { sourceRef: 'https://example.org/a', sourceKind: 'web', title: null, checkState: 'candidate', checkLabel: '候选来源 · 尚未核对', relation: '支持', excerpt: null, sourceVersion: null,
+    publisher: null, registrableDomain: null, capturedAt: null, freshness: 'unknown', freshnessLabel: '未知', integrity: 'not-captured', integrityLabel: '未取回', lineage: null, lineageLabel: '来源关系未标注',
+    independenceGroup: null, evidenceId: null, reused: false, excluded: false } as const;
+  return { ...page, claimRecheckAvailable: true, sources: [{ ...source, cardId: 'src_a' }, { ...source, cardId: 'src_b', sourceRef: 'https://example.org/b' }], totalSources: 2,
+    decisionCard: { ...page.decisionCard, reasonSuggestions: ['公开合成建议理由'],
+      choices: (['accept', 'request-evidence', 'keep-pending', 'decline', 'own-words'] as const).map((disposition) => ({ disposition, label: disposition })) } };
 }
 
 function evidence(entry: FactualVerificationResultProjection): EvidenceWorkspaceProjection {
@@ -233,6 +245,8 @@ describe('terminal factual results through the mounted review workspace (#1058 /
   it.each(['ignore', 'convert'])('returns %s cancellation focus to the named visible more summary', async (kind) => {
     const view = mount(); view.inspectReviewWorkspace.mockResolvedValue(workspace());
     Object.assign(view.api, { getEditorialMarkCard: vi.fn(async () => ({ pinnedText: '公开文字', body: '备注' })) });
+    // The ordinary review card's ⋯ (a fact card keeps these two in its expanded decision row, Issue #1683).
+    view.inspectFactualVerification.mockResolvedValue(lens(RUN, []));
     view.surface.refresh(); await flush();
     view.root.querySelector(`[data-review-action="${kind === 'ignore' ? 'ignore' : 'convert-to-suggestion'}"]`)!.click(); await flush();
     view.root.querySelector(`[data-review-action="${kind}-cancel"]`)!.click(); await flush();
@@ -308,16 +322,29 @@ describe('terminal factual results through the mounted review workspace (#1058 /
 
   });
 
-  it('shows each factual finding once with its Lens states and ordinary review actions (#1287)', async () => {
+  it('shows each factual finding once, collapsed to one badge, its wording, one sentence and three controls, expanded 结论 → 来源 → 你的决定 (#1287, #1683)', async () => {
     const view = mount('settled'); await flush();
-    expect(view.root.textContent).toContain('证据支持');
-    expect(view.root.textContent).not.toContain('未外部复核');
-    expect(view.root.querySelectorAll('.review-finding-quote').length).toBe(1);
+    const card = () => view.root.querySelector('li.fact-lens-row article.fact-card')!;
     expect(view.root.querySelectorAll('.fact-lens-row .review-finding').length).toBe(1);
-    expect(view.root.querySelectorAll('.fact-lens-row [data-review-action="mark-handled"]').length).toBe(1);
-    view.root.querySelector('[data-fact-action="fact-workspace"]')!.click(); await flush();
-    expect(view.root.querySelectorAll('.review-finding-quote')).toHaveLength(1);
-    expect(view.root.querySelectorAll('.evidence-workspace')).toHaveLength(1);
+    expect(card().dataset['factCard']).toBe('collapsed');
+    expect(card().querySelectorAll('[data-state-term]').map((node) => [node.dataset['stateTerm'], node.textContent])).toEqual([['事实核查', '证据支持']]);
+    expect(card().querySelectorAll('.review-finding-quote').map((node) => node.textContent)).toEqual(['「公开合成核查文字」']);
+    expect(card().querySelector('.fact-card-sentence')!.textContent).toBe('有已核对来源；待你决定。');
+    expect(card().querySelectorAll('button').map((node) => node.textContent)).toEqual(['展开', '回到原文', '忽略']);
+    expect(card().querySelector('[data-fact-action="fact-workspace"]')!.getAttribute('aria-expanded')).toBe('false');
+    expect(view.root.textContent).not.toContain('未外部复核');
+    expect(view.inspectEvidenceWorkspace).not.toHaveBeenCalled();
+    card().querySelector('[data-fact-action="fact-workspace"]')!.click(); await flush();
+    expect(card().dataset['factCard']).toBe('expanded');
+    expect(card().querySelector('[data-fact-action="fact-workspace"]')!.getAttribute('aria-expanded')).toBe('true');
+    expect(card().querySelectorAll('.fact-section-heading').map((node) => [node.closest('[data-fact-section]')!.dataset['factSection'], node.textContent]))
+      .toEqual([['conclusion', '结论'], ['sources', '为这句核对的来源'], ['decision', '你的决定']]);
+    // The other two states stay apart in 结论, each with its own term (FACT-007, ADR 0074 item 4).
+    expect(card().querySelectorAll('[data-state-term]').map((node) => node.dataset['stateTerm'])).toEqual(['事实核查', '事实核查', '引文完整性', '断言支持']);
+    expect(card().querySelectorAll('.review-finding-quote')).toHaveLength(0);
+    expect(card().querySelectorAll('.evidence-workspace')).toHaveLength(1);
+    expect(card().querySelectorAll('.evidence-decision [data-review-action="mark-handled"]')).toHaveLength(1);
+    expect(card().querySelector('.evidence-decision-more summary')!.getAttribute('aria-label')).toBe('更多决定');
   });
 
   it('keeps findings actionable when a partial run produced no evidence result', async () => {
@@ -583,22 +610,30 @@ describe('configuration selection memory (#1374)', () => {
     const surface = mountEvidenceWorkspace({ bookId: BOOK, resultId: RESULT, api: { inspectEvidenceWorkspace: async () => page, recordVerificationReviewDecision: record } as unknown as Parameters<typeof mountEvidenceWorkspace>[0]['api'],
       setStatus: vi.fn(), errorMessage: (_e, fallback) => fallback, instant: (s) => s, openSource: vi.fn(), goToText: async () => undefined, changed: vi.fn() });
     const root = surface.element as unknown as MiniElement; miniDocument.body.append(root); setTechnicalLayerVisible(false); await surface.load();
-    const exclude = () => root.querySelector('.evidence-card-actions input')!;
+    const exclude = () => root.querySelector('[data-evidence-exclude]')!;
     exclude().checked = true; exclude().dispatchEvent({ type: 'change' });
-    root.querySelector('[data-decision-choice="keep-pending"]')!.dispatchEvent({ type: 'change' });
-    expect(exclude().checked).toBe(true); expect(exclude().disabled).toBe(true);
-    root.querySelector('[data-evidence-action="record-decision"]')!.click(); await flush();
+    // Each decision button records at once; the marked source goes with 要补充证据 only (Issue #1683 item 10).
+    root.querySelector('[data-decision-choice="keep-pending"]')!.click(); await flush();
     expect(record.mock.calls[0]![0]).not.toHaveProperty('excludedSourceRefs');
-    root.querySelector('[data-decision-choice="request-evidence"]')!.dispatchEvent({ type: 'change' });
     expect(exclude().checked).toBe(true); expect(exclude().disabled).toBe(false);
-    root.querySelector('[data-evidence-action="record-decision"]')!.click(); await flush();
-    expect(record).toHaveBeenLastCalledWith(expect.objectContaining({ excludedSourceRefs: ['https://example.org/public'] })); surface.destroy();
+    root.querySelector('[data-decision-choice="request-evidence"]')!.click(); await flush();
+    expect(record).toHaveBeenLastCalledWith(expect.objectContaining({ disposition: 'request-evidence', excludedSourceRefs: ['https://example.org/public'] })); surface.destroy();
   });
 });
 
 it('scans the review results and evidence in ordinary mode (#1315)', async () => {
   setTechnicalLayerVisible(false);
-  try { const view = mount('settled'); await flush(); expectNoTechnicalText(view.root); }
+  try {
+    const view = mount('settled');
+    view.inspectEvidenceWorkspace.mockImplementation(async (input) => decidable(result(RUN, input.resultId)));
+    await flush(); expectNoTechnicalText(view.root);
+    // Expanded, with its sources and decision row (Issue #1683): no address, no table, no version words in ordinary mode.
+    view.root.querySelector('[data-fact-action="fact-workspace"]')!.click(); await flush();
+    expectNoTechnicalText(view.root);
+    expect(view.root.textContent).not.toContain('https://');
+    expect(view.root.querySelectorAll('.evidence-facts')).toHaveLength(0);
+    expect(view.root.querySelectorAll('.evidence-card-url').map((node) => node.textContent)).toEqual(['', '']);
+  }
   finally { setTechnicalLayerVisible(true); }
 });
 
@@ -727,21 +762,29 @@ describe('review triage in place (#1525)', () => {
   const inCard = (root: MiniElement, id: string, action: string) => root.querySelector(`article[data-finding-id="${id}"] [data-review-action="${action}"]`)!;
   const rejected = (decisionId: string | null = null) => ({ card: { status: 'open', suggestion: decisionId === null ? null : { decision: { decisionId } } } });
 
-  it('keeps a fact-lens row whole when one of its actions repaints it in place', async () => {
-    const view = mount('settled'); await flush();
+  it('keeps a fact card whole — expanded, its typed reason and its pins — when one of its actions repaints it in place (#1683)', async () => {
+    const view = mount('settled');
+    view.inspectEvidenceWorkspace.mockImplementation(async (input) => decidable(result(RUN, input.resultId)));
+    await flush();
     Object.assign(view.api, { updateEditorialMark: vi.fn(async () => ({ card: { status: 'resolved' } })) });
     const row = () => view.root.querySelector('li.fact-lens-row')!;
+    row().querySelector('[data-fact-action="fact-workspace"]')!.click(); await flush();
+    const workspace = row().querySelector('.evidence-workspace')!;
+    const reason = () => row().querySelector('[data-decision-field="reason"]')!;
+    reason().value = '公开合成理由'; reason().dispatchEvent({ type: 'input' });
+    const pin = () => row().querySelector('[data-evidence-pin="src_a"]')!;
+    pin().checked = true; pin().dispatchEvent({ type: 'change' });
     row().querySelector('[data-review-action="ignore"]')!.click(); await flush();
     row().querySelector('[data-review-action="ignore-cancel"]')!.click(); await flush();
-    for (const selector of ['.fact-lens-states', '.fact-lens-level', '.fact-lens-decision', '[data-fact-action="fact-workspace"]', '[data-fact-action="fact-go-to-text"]']) {
-      expect(row().querySelector(selector)).not.toBeNull();
-    }
-    expect(view.root.textContent).not.toContain('未外部复核');
     view.inspectReviewWorkspace.mockClear();
     row().querySelector('[data-review-action="mark-handled"]')!.click(); await flush();
     expect(view.inspectReviewWorkspace).not.toHaveBeenCalled();
     expect(row().querySelector('article.review-finding')!.dataset['status']).toBe('handled');
-    expect(row().querySelector('.fact-lens-states')).not.toBeNull();
+    expect(row().querySelector('article.fact-card')!.dataset['factCard']).toBe('expanded');
+    expect(row().querySelector('.evidence-workspace')).toBe(workspace);
+    expect(reason().value).toBe('公开合成理由');
+    expect(pin().checked).toBe(true);
+    expect(row().querySelector('.evidence-matrix')!.dataset['pinnedCount']).toBe('1');
     expect(view.root.textContent).not.toContain('未外部复核');
   });
 
@@ -984,6 +1027,7 @@ describe('review triage in place (#1525)', () => {
       expect(menu().open).toBe(false);
     }
     const lens = mount('settled'); await flush();
+    lens.root.querySelector('li.fact-lens-row [data-fact-action="fact-workspace"]')!.click(); await flush();
     const lensMenu = () => lens.root.querySelector('li.fact-lens-row details.review-card-more')!;
     lensMenu().open = true;
     lens.root.querySelector('li.fact-lens-row [data-review-action="ignore"]')!.click(); await flush();
@@ -1084,7 +1128,7 @@ describe('the way back from a finding (#1525)', () => {
 
   it('names the row\'s finding for a jump from a fact-lens row', async () => {
     const view = mount('settled'); await flush();
-    view.root.querySelector('[data-fact-action="fact-go-to-text"]')!.click(); await flush();
+    view.root.querySelector('li.fact-lens-row [data-review-action="go-to-text"]')!.click(); await flush();
     expect(view.goToText).toHaveBeenCalledWith(expect.objectContaining({ ordinal: 1, blockId: result().blockId }));
   });
   it('names the row\'s finding for a jump from the Evidence Workspace and from the synthesis evidence', async () => {
@@ -1264,5 +1308,89 @@ describe('上一条 / 下一条待处理 across a round trip through 审阅 (#15
         expect(ran, `${enter} / ${leave}`).toEqual(['second:previous', 'second:next']);
       }
     }
+  });
+});
+
+// Issue #1683 item 10: the expanded fact card's one decision row. Each button sends exactly the request it sent before the merge
+// of the two sets — the verification review (set B) or the finding's own (set A) — and nothing else.
+describe('the fact card decision row (#1683)', () => {
+  type Sent = 'recordVerificationReviewDecision' | 'prepareCorrectionProposal' | 'updateEditorialMark' | 'recordReviewFindingDisposition' | 'getEditorialMarkCard';
+  async function expanded() {
+    const view = mount('settled');
+    view.inspectEvidenceWorkspace.mockImplementation(async (input) => decidable(result(RUN, input.resultId)));
+    const calls: Record<Sent, ReturnType<typeof vi.fn>> = {
+      recordVerificationReviewDecision: vi.fn(async (input: { resultId: string }) => ({ workspace: decidable(result(RUN, input.resultId)), supplementary: null })),
+      prepareCorrectionProposal: vi.fn(async () => ({ result: result(), variants: [], ranges: [], label: null, missingChecks: [], scopeStatement: '公开合成范围。' })),
+      updateEditorialMark: vi.fn(async () => ({ card: { status: 'resolved' } })),
+      recordReviewFindingDisposition: vi.fn(async () => ({ run: null })),
+      getEditorialMarkCard: vi.fn(async () => ({ pinnedText: '公开文字', body: '备注' })),
+    };
+    Object.assign(view.api, calls);
+    await flush();
+    view.root.querySelector('[data-fact-action="fact-workspace"]')!.click(); await flush();
+    const press = async (label: string) => {
+      const control = view.root.querySelectorAll('.evidence-decision button').find((node) => node.textContent === label);
+      expect(control, label).toBeDefined();
+      control!.click(); await flush();
+    };
+    return { ...view, calls, press };
+  }
+  const reviewed = { bookId: BOOK, resultId: RESULT, resultVersion: 3, ownWords: null, reason: null };
+
+  it.each([
+    ['采纳结论', 'recordVerificationReviewDecision', { ...reviewed, disposition: 'accept' }],
+    ['要补充证据', 'recordVerificationReviewDecision', { ...reviewed, disposition: 'request-evidence' }],
+    ['不采纳结论', 'recordVerificationReviewDecision', { ...reviewed, disposition: 'decline' }],
+    ['维持未决', 'recordVerificationReviewDecision', { ...reviewed, disposition: 'keep-pending' }],
+    ['准备修改建议', 'prepareCorrectionProposal', { bookId: BOOK, resultId: RESULT }],
+    ['标记为已处理', 'updateEditorialMark', expect.objectContaining({ markId: RESULT, action: 'set-status', status: 'resolved' })],
+    ['忽略', 'recordReviewFindingDisposition', { reviewRunId: RUN, findingId: finding().findingId, disposition: 'ignored', reason: REVIEW_IGNORE_DEFAULT_REASON }],
+    ['转为修改建议', 'getEditorialMarkCard', { manuscriptId: MANUSCRIPT.manuscriptId, branchId: MANUSCRIPT.branchId, markId: RESULT }],
+  ] as const)('「%s」 sends %s and nothing else', async (label, sent, input) => {
+    const view = await expanded();
+    await view.press(label);
+    for (const [name, call] of Object.entries(view.calls)) expect(call.mock.calls, name).toEqual(name === sent ? [[input]] : []);
+  });
+
+  it('writes the editor’s own conclusion before recording it, and opens 忽略并备注… without sending anything', async () => {
+    const view = await expanded();
+    await view.press('自己写结论…');
+    expect(view.calls.recordVerificationReviewDecision).not.toHaveBeenCalled();
+    const field = view.root.querySelector('[data-decision-field="own-words"]')!;
+    field.value = '公开合成结论'; field.dispatchEvent({ type: 'input' });
+    await view.press('记下我的结论');
+    expect(view.calls.recordVerificationReviewDecision.mock.calls).toEqual([[{ ...reviewed, disposition: 'own-words', ownWords: '公开合成结论' }]]);
+    await view.press('忽略并备注…');
+    expect(view.root.querySelector('.review-ignore-form')).not.toBeNull();
+    expect(view.calls.recordReviewFindingDisposition).not.toHaveBeenCalled();
+  });
+
+  it('sends the reason fold’s text with the next verification decision only, then clears it', async () => {
+    const view = await expanded();
+    view.root.querySelector('[data-reason-suggestion]')!.click(); await flush();
+    await view.press('维持未决');
+    expect(view.calls.recordVerificationReviewDecision).toHaveBeenLastCalledWith(expect.objectContaining({ disposition: 'keep-pending',
+      reason: { state: 'selected', text: '公开合成建议理由', suggestion: '公开合成建议理由' } }));
+    expect(view.status).toHaveBeenCalledWith('已记下你的决定。', 'success');
+    expect(view.root.querySelector('[data-decision-field="reason"]')!.value).toBe('');
+    await view.press('采纳结论');
+    expect(view.calls.recordVerificationReviewDecision).toHaveBeenLastCalledWith({ ...reviewed, disposition: 'accept' });
+  });
+
+  it('arrives expanded for the finding a deep link names, its sources shown directly', async () => {
+    const root = new MiniElement('main');
+    miniDocument.body.append(root);
+    const inspectEvidenceWorkspace = vi.fn(async (input: { resultId: string }) => decidable(result(RUN, input.resultId)));
+    const api = new Proxy({ inspectReviewWorkspace: async () => workspace(RUN, 'settled'), inspectFactualVerification: async () => lens(), inspectEvidenceWorkspace },
+      { get: (target, key) => Reflect.get(target, key) ?? (async () => { throw new Error('unexpected API operation'); }) }) as unknown as MountReviewWorkspaceOptions['api'];
+    const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: { reviewRunId: RUN, findingId: finding().findingId }, api,
+      awaitServiceJob: async (initial) => initial, technicalDetails: () => new MiniElement('dl') as unknown as HTMLElement, setStatus: Object.assign(vi.fn(), { settle: vi.fn() }),
+      errorMessage: (_error, fallback) => fallback, errorCode: () => null, openManuscript: async () => undefined, goToText: async () => undefined, openPlan: () => undefined,
+      openSearchSettings: () => undefined, planChanged: () => undefined });
+    surfaces.push(surface);
+    surface.start(); await flush();
+    expect(root.querySelector('article.fact-card')!.dataset['factCard']).toBe('expanded');
+    expect(root.querySelectorAll('.evidence-card').map((node) => node.dataset['cardId'])).toEqual(['src_a', 'src_b']);
+    expect(inspectEvidenceWorkspace).toHaveBeenCalledOnce();
   });
 });
