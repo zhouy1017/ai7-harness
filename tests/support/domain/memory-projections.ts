@@ -139,6 +139,12 @@ export const MEMORY_SOURCE_PROJECTION_SQL = {
   branch_id TEXT NOT NULL,
   reverses_effect_id TEXT,
   kind TEXT NOT NULL,
+  base_journal_sequence INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (effect_id)
+) STRICT`,
+  manuscript_effect_approvals: `CREATE TABLE manuscript_effect_approvals (
+  effect_id TEXT NOT NULL,
+  interaction TEXT NOT NULL,
   PRIMARY KEY (effect_id)
 ) STRICT`,
   manuscript_effect_receipts: `CREATE TABLE manuscript_effect_receipts (

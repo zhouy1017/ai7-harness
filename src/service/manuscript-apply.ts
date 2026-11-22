@@ -132,7 +132,7 @@ interface PlannedTarget {
   toGrapheme: number;
   expectedText: string;
   insertText: string;
-  decision: { disposition: 'accepted' | 'accepted-with-edit' | 'withdrawn'; editedText: string | null; reason: string | null; capture?: false } | { existingDecisionId: string };
+  decision: { disposition: 'accepted' | 'accepted-with-edit' | 'withdrawn'; editedText: string | null; reason: string | null } | { existingDecisionId: string };
   standsAs: 'applied' | 'open';
 }
 type ReverseMember = ReturnType<EditorialMarkStore['suggestionTarget']> & InverseTarget & { markId: string };
@@ -276,20 +276,22 @@ export class ManuscriptApplyStore {
   /**
    * An editor step's re-apply of the items `sourceEffectId` applied (Issue #1654): each item's mark must stand open and exact
    * on its original words again, and the text written is the decision that Effect's target names — the edited text of an
-   * accept-with-edit. The new decision repeats that one; it is not captured for learning again (one signal per accept).
+   * accept-with-edit. The new decision repeats that one and is captured as any accept is: a signal stands while its decision is
+   * the item's latest (the learning ledger's rule), so the undo's 「withdrawn」 set the first accept's signal aside and this one
+   * stands in its place — one standing signal for the accept, whichever way the editor went.
    */
   reapplyForStep(binding: { manuscriptId: string; branchId: string }, sourceEffectId: string, interaction: 'undo-step' | 'redo-step'): void {
     const sources = this.#db.prepare(`SELECT p.mark_id, t.item_id, d.disposition, d.edited_text FROM manuscript_effect_targets t
       JOIN proposal_change_items p ON p.item_id = t.item_id JOIN proposal_item_decisions d ON d.decision_id = t.decision_id
       WHERE t.effect_id = ? ORDER BY t.ordinal`).all(sourceEffectId) as SqlRow[];
-    requireApply(sources.length > 0, 'APPLY_INVALID', '找不到这次应用的凭据。');
+    requireApply(sources.length > 0, 'APPLY_INVALID', '找不到这次应用的记录。');
     const planned = sources.map((source): PlannedTarget => {
       const target = this.#marks.suggestionTarget({ ...binding, markId: String(source.mark_id) });
       requireApply(target.status === 'open' && target.anchorState === 'exact', 'APPLY_TARGET_DRIFTED', '原文已变，本次应用没有写入稿件。');
       const disposition = String(source.disposition) as 'accepted' | 'accepted-with-edit';
       const editedText = source.edited_text === null ? null : String(source.edited_text);
       return { markId: String(source.mark_id), itemId: target.itemId, blockId: target.blockId, fromGrapheme: target.fromGrapheme, toGrapheme: target.toGrapheme,
-        expectedText: target.currentText, insertText: editedText ?? target.proposedText, decision: { disposition, editedText, reason: null, capture: false }, standsAs: 'applied' };
+        expectedText: target.currentText, insertText: editedText ?? target.proposedText, decision: { disposition, editedText, reason: null }, standsAs: 'applied' };
     });
     this.#requireAtomicScope(binding.branchId, planned.map((item) => item.itemId));
     this.#commit({ ...binding, windowStartBlockId: '' }, 'apply', interaction, randomUUID(), null, planned, null);
@@ -473,8 +475,7 @@ export class ManuscriptApplyStore {
         const written = commit.targets[index]!;
         const decisionId = 'existingDecisionId' in target.decision
           ? target.decision.existingDecisionId
-          : this.#marks.recordDecisionForApply(binding, target.itemId, target.blockId, target.decision.disposition, target.decision.editedText, target.decision.reason, now,
-            target.decision.capture !== false);
+          : this.#marks.recordDecisionForApply(binding, target.itemId, target.blockId, target.decision.disposition, target.decision.editedText, target.decision.reason, now);
         this.#db.prepare(
           `INSERT INTO manuscript_effect_targets(
              effect_id, ordinal, item_id, decision_id, block_id, from_grapheme, to_grapheme, expected_text_digest,

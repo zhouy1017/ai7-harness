@@ -2384,10 +2384,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   /**
    * Ctrl+Z and redo take back or replay one editor step (Issue #1654), an accepted 修改建议 included. A large step says so while
    * it runs; the answer names the step and its paragraph, and the view goes there. A step whose words changed since is set
-   * aside by the service, which says where; nothing to undo or redo is said plainly.
+   * aside by the service, which says where and why, in the error tone; nothing to undo or redo is said plainly. Words typed
+   * just before are saved first, so they are the step Ctrl+Z takes back.
    */
   async function runHistory(action: 'undo' | 'redo'): Promise<void> {
-    if (authoritativeMutationBusy() || !editor) return;
+    if (authoritativeMutationBusy() || !editor || !(await settleLocalEdit()) || !editor) return;
     const verb = action === 'undo' ? '撤销' : '重做';
     const binding = editor.currentWindow();
     const scope = { manuscriptId: binding.manuscriptId, branchId: binding.branchId };
@@ -2408,8 +2409,14 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         await loadOutline(true);
       });
       if (!result) return;
-      if (!result.blocked && result.anchorBlockId !== null) await navigate({ kind: 'block', blockId: result.anchorBlockId });
-      setStatus(result.completionLabel, 'success');
+      // The view goes to the place: within the window the paragraph is brought into view where it stands; outside it the
+      // window is opened there.
+      if (!result.blocked && result.anchorBlockId !== null) {
+        const shown = editorWindow.querySelector<HTMLElement>(`[data-block-id="${result.anchorBlockId}"]`);
+        if (shown !== null) shown.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+        else await navigate({ kind: 'block', blockId: result.anchorBlockId });
+      }
+      setStatus(result.completionLabel, result.blocked ? 'error' : 'success');
     } catch (error) {
       setStatus(rendererErrorMessage(error, `${verb}未完成。`), 'error');
     }

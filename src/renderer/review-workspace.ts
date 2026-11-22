@@ -626,6 +626,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   let sheetState: SheetState | null = null;
   /** The editor closed the applied batch's strip with 完成: it is not shown again from the step while this page stands. */
   let batchDismissed = false;
+  /** The Run and manuscript state the batch step was last read for (`followBatchStep`). */
+  let batchStepReadFor: string | null = null;
   /** The Run whose 取消任务 waits for its confirmation (Issue #64, S29b); `null` while none does. */
   let scopeCancel: string | null = null;
   let sheetOpening = false;
@@ -2978,17 +2980,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const window = await api.getManuscriptWindowAt({ ...scope, target: { kind: 'start' } });
       const undone = await api.undoManuscript({ ...scope, expectedWorkingDigest: window.workingDigest, ...(step === null ? { expectedStepId: BATCH_STEP_GONE } : { expectedStepId: step.stepId }) });
       ui.applied = null;
-      options.setStatus(undone.blocked ? undone.completionLabel : reviewBatchUndoneLine(last.count), 'success');
+      options.setStatus(undone.blocked ? undone.completionLabel : reviewBatchUndoneLine(last.count), undone.blocked ? 'error' : 'success');
     });
   }
 
   /**
    * The batch step Ctrl+Z would take next, when it is this Run's (Issue #1654): its strip with 撤销本批应用 stands again on entering
    * the page and after a restart. A strip the page holds is never taken away here; 撤销本批应用 names its step, and the service
-   * refuses it in plain words once a newer change stands.
+   * refuses it in plain words once a newer change stands. It is read once per Run and manuscript state the page shows, not on
+   * every refresh of the projection.
    */
   function followBatchStep(run: ReviewRunProjection): void {
     if (ui.batch !== null || ui.applied != null || batchDismissed) return;
+    const state = `${run.reviewRunId} ${run.manuscript.workingDigest}`;
+    if (state === batchStepReadFor) return;
+    batchStepReadFor = state;
     void api.inspectEditorHistory({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId }).then((history) => {
       if (destroyed || ui.batch !== null || ui.applied != null || projection?.run?.reviewRunId !== run.reviewRunId) return;
       const step = history.undo;

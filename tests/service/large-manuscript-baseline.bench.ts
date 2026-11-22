@@ -40,6 +40,8 @@ const REPS = Number(process.env.AI7_BASELINE_REPS ?? '7');
 /** Spread marks for the whole-book mark list (#1654: 10,001, the list's own limit), and the marks of one dense paragraph. */
 const SPREAD_MARKS = Number(process.env.AI7_BASELINE_SPREAD_MARKS ?? '10001');
 const DENSE_MARKS = Number(process.env.AI7_BASELINE_DENSE_MARKS ?? '10000');
+/** `mark-list` measures only the whole-book mark list (a rerun of that one row, base and head on one guest). */
+const ONLY = process.env.AI7_BASELINE_ONLY ?? '';
 const REPLACE_ALL_PLACES = Number(process.env.AI7_BASELINE_REPLACE_ALL ?? '2000');
 const ENTERS = 20;
 /** `blockReachesThroughLineage`'s walk, for its query plan. */
@@ -163,7 +165,8 @@ async function measureSize(size: number, blocks: readonly ParsedDocxBlock[]): Pr
     let spread = 0;
     for (let index = 0; spread < SPREAD_MARKS && index < front.length; index += 1) {
       for (let slot = 0; slot < perParagraph && spread < SPREAD_MARKS; slot += 1, spread += 1) {
-        mark(front[index]!.block_id, slot * 2, slot * 2 + 1, spread % 2 === 0 ? 'annotation' : 'change-suggestion');
+        // Every spread mark is a 修改建议: the whole-book list (the proposal workspace) lists proposals, 10,001 of them (#1654 review).
+        mark(front[index]!.block_id, slot * 2, slot * 2 + 1, 'change-suggestion');
       }
     }
     const dense = candidates.find((row) => paragraphOf.get(row.block_id)! >= size * 0.95 && row.grapheme_length >= 40) ?? candidates.at(-1)!;
@@ -173,6 +176,11 @@ async function measureSize(size: number, blocks: readonly ParsedDocxBlock[]): Pr
     }
 
     store.recordManuscriptEntryPosition(book.manuscriptId, book.branchId, midId, 3);
+
+    // The whole-book list reads at least SPREAD_MARKS live proposals: asserted before anything is timed.
+    const proposals = Number((probe.prepare(`SELECT count(*) n FROM editorial_marks m JOIN proposal_change_items i ON i.mark_id = m.mark_id
+      WHERE m.branch_id = ? AND m.status IN ('open', 'resolved', 'applied')`).get(book.branchId) as { n: number }).n);
+    if (proposals < Math.min(SPREAD_MARKS, front.length * perParagraph)) throw new Error(`BASELINE_PROPOSALS_SHORT ${proposals}`);
 
     // ---- measuring -----------------------------------------------------------------------------------------------------
     const rows = new Map<string, { operation: string; position: string } & Timing & { crossOk: boolean }>();
@@ -306,6 +314,17 @@ async function measureSize(size: number, blocks: readonly ParsedDocxBlock[]): Pr
         () => store.findPendingMark({ ...book, from: { blockId: allBlocks.at(-1)!, grapheme: 0, markId: null }, direction: 'previous', categories: ['risk'], models: [] }));
     };
 
+    const listRow = `whole-book mark list (proposal workspace, ${proposals} proposals)`;
+    const result = (): SizeResult => ({
+      size, counts,
+      graphemes: { total: totals.g, meanPerBlock: totals.g / totals.n, meanPerBody: body.g / body.n },
+      marks: spread + DENSE_MARKS, importSeconds, pageBytes: pageSize, lineagePlan: [],
+      rows: [...rows.values()].map((row) => ({ operation: row.operation, position: row.position, ms: row.ms, bytes: row.bytes, frames: row.frames, frameCrossCheck: row.crossOk })),
+    });
+    if (ONLY === 'mark-list') {
+      for (let round = -1; round < REPS; round += 1) measure(listRow, '-', round, () => store.inspectProposalWorkspace({ manuscriptId: book.manuscriptId, branchId: book.branchId, resultId: null }));
+      return result();
+    }
     for (let round = -1; round < REPS; round += 1) {
       splitJoin(startId, 'start', round);
       splitJoin(midId, 'middle', round);
@@ -327,7 +346,7 @@ async function measureSize(size: number, blocks: readonly ParsedDocxBlock[]): Pr
         do { const page = store.getOutline(book.manuscriptId, book.branchId, cursor); cursor = page.nextCursor; pages += 1; } while (cursor !== null);
         return pages;
       });
-      measure('whole-book mark list (proposal workspace)', '-', round, () => store.inspectProposalWorkspace({ manuscriptId: book.manuscriptId, branchId: book.branchId, resultId: null }));
+      measure(listRow, '-', round, () => store.inspectProposalWorkspace({ manuscriptId: book.manuscriptId, branchId: book.branchId, resultId: null }));
     }
 
     // ---- one lineage reach (the reversal guard's walk), and the plan SQLite chooses for it -------------------------------

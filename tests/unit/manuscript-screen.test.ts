@@ -28,7 +28,7 @@ const children = vi.hoisted(() => ({
   realParagraphAnalysis: false,
   destroyed: [] as string[],
   editors: [] as unknown[],
-  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn> }>,
+  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn>; flush: ReturnType<typeof vi.fn> }>,
   marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn>; bookPendingChanged: ReturnType<typeof vi.fn>; refreshComments: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
   writingStates: [] as Array<(state: { underWay: boolean; drafted: number }) => void>,
@@ -420,6 +420,42 @@ describe('the Manuscript screen lifecycle', () => {
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
       .toEqual(['修订 · 自动应用改动留痕，停笔后自动写入稿件，可逐条撤销。', '修订 · 待我确认改动留痕为待处理的修订卡，由你逐条应用。', '直接改稿 · 不留痕直接改动正文，不生成修订卡。', '让 AI 修改…', '', '', '重试权威刷新']);
+    app.showing?.destroy();
+  });
+
+  it('saves the words just typed before Ctrl+Z reads the history, so they are the step it takes back; a step set aside answers in the error tone (#1654)', async () => {
+    const calls: string[] = [];
+    let flushed = false;
+    const typing = { stepId: 'step-1', kind: 'typing', label: '编辑文字', changeCount: 1, paragraph: 3, batch: null };
+    const answers = [{ blocked: false, completionLabel: '已撤销：编辑文字（第 3 段）' }, { blocked: true, completionLabel: '第 3 段在「编辑文字」之后又改过，这一步不能撤销。再按 Ctrl+Z 撤销更早的一步。' }];
+    const history = new Proxy({
+      platform: 'win32', recordManuscriptEntryPosition: async () => undefined,
+      inspectEditorHistory: async () => { calls.push('inspect'); return { branchId: 'branch-main', undo: flushed ? typing : null, redo: null }; },
+      undoManuscript: async () => {
+        calls.push('undo');
+        return { action: 'undo', branchId: 'branch-main', revisionId: 'rev-2', revisionLabel: 'r2', journalSequence: 6, workingDigest: 'c'.repeat(64), commandGroupId: null,
+          canUndo: true, canRedo: true, stepLabel: '编辑文字', anchorBlockId: null, paragraph: 3, ...answers.shift()! };
+      },
+      getManuscriptWindowAt: async () => ({ ...windowOf('book-one'), journalSequence: 6, workingDigest: 'c'.repeat(64) }),
+      getOutline: async () => ({ entries: [], nextCursor: null }),
+    } as Record<string | symbol, unknown>, { get: (known, key) => key in known ? known[key] : () => new Promise<never>(() => undefined) }) as unknown as RendererApi;
+    const tones: Array<[string, string | undefined]> = [];
+    const app = shell(history);
+    app.open(windowOf('book-one'), { setStatus: (message, tone) => { tones.push([message, tone]); } });
+    const editor = children.editors.at(-1) as EditorOptions;
+    const surface = children.editorSurfaces.at(-1)!;
+    // Typed within the auto-save delay: the edit is still local when Ctrl+Z comes.
+    editor.onStateChange(state({ dirty: true }));
+    surface.flush.mockImplementation(async () => { calls.push('flush'); flushed = true; editor.onStateChange(state({ journalSequence: 5 })); });
+    const undoButton = app.screen.querySelector<HTMLButtonElement>('.editor-history-undo')!;
+    const settle = async (): Promise<void> => { for (let index = 0; index < 50; index += 1) await Promise.resolve(); };
+    undoButton.click();
+    await settle();
+    expect(calls.slice(0, 3)).toEqual(['flush', 'inspect', 'undo']);
+    expect(tones.at(-1)).toEqual(['已撤销：编辑文字（第 3 段）', 'success']);
+    undoButton.click();
+    await settle();
+    expect(tones.at(-1)).toEqual([expect.stringContaining('这一步不能撤销'), 'error']);
     app.showing?.destroy();
   });
 

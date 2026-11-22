@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { DurableHistoryProjection, EditorStepSummary } from '../../shared/protocol/manuscript-window.js';
-import { followBlockTextChangeForMarks } from '../editorial-marks.js';
+import { EditorialMarkError, followBlockTextChangeForMarks } from '../editorial-marks.js';
 import { syncInlineEditorRevision } from '../inline-editor-revisions.js';
 import { BoundedStoreError, HISTORY_BATCH, asNumber, asString, canonicalJson, graphemes, one, requireBounded, sha256, transact, type SqlRow } from './bounded-kernel.js';
 import { blockShapeFromDigest, recoveryCommandEvidenceDigest, recoveryWorkingDigest, validateCommandHistoryGroup } from './command-history.js';
@@ -19,8 +19,10 @@ import { rewriteBlock, workingBlock } from './working-positions.js';
  * only ever reverses or re-applies its slot's current generation, through the governed Effect path with interaction
  * `undo-step` or `redo-step`. A card's 撤销本次修改 adds a generation to the slot that owns the Effect it reversed, so undoing
  * it returns that slot to the accepting step. Only a new step supersedes undone steps; a dispatch made by undo or redo opens
- * nothing and supersedes nothing. A step whose words changed afterwards is not undone: nothing is written, the answer names
- * the place, and the step is set `kept`, so the next Ctrl+Z moves to the step before (a redo that cannot stand is dropped).
+ * nothing and supersedes nothing. A step whose words changed afterwards, or whose suggestion was handled another way, is not
+ * undone: nothing is written, the answer names the place and the cause, and the step is set `kept`, so the next Ctrl+Z moves
+ * to the step before (a redo that cannot stand is dropped). A step a card had already taken back writes nothing and is set
+ * aside the same way, with an answer that says so.
  *
  * A split or merge step also records the anchors of the marks at its caret before and after it; its undo (redo) puts back
  * the recorded `pre` (`post`) anchor of a mark that still stands exactly on the other side, which the byte-identical text
@@ -87,7 +89,7 @@ export interface EditorStepSpec {
 }
 
 interface OpenStep { readonly branchId: string; readonly spec: EditorStepSpec; stepId: string | null; seq: number; slots: number; changes: number }
-interface Replay { readonly stepId: string; readonly action: 'undo' | 'redo'; target: { stepId: string; slot: number } | null }
+interface Replay { readonly stepId: string; readonly action: 'undo' | 'redo'; target: { stepId: string; slot: number } | null; partBlockId: string | null; wrote: boolean }
 interface Context { ambient: OpenStep[]; replay: Replay | null }
 
 const contexts = new WeakMap<DatabaseSync, Context>();
@@ -260,8 +262,19 @@ export interface EditorStepHost {
   reapplyEffect(sourceEffectId: string, interaction: 'undo-step' | 'redo-step'): void;
 }
 
-const BLOCKING = new Set(['APPLY_TARGET_DRIFTED', 'APPLY_INVALID', 'APPLY_ALREADY_COMMITTED', 'HISTORY_STALE', 'HISTORY_AFTER_APPLY', 'EDIT_BLOCK_CHANGED',
-  'STRUCTURE_INVALID', 'EDIT_RANGE_INVALID', 'EDIT_TOO_LARGE', 'MARK_BINDING_CHANGED', 'MARK_ACTION_INVALID', 'PROPOSAL_ATOMIC_SCOPE']);
+/**
+ * A replay refused by the manuscript or mark owners blocks the step (it is set aside, the next press moves on); only a fault
+ * — a corrupt or immutable record, an unresolved outcome — fails the press. A refusal names one of two causes: the words
+ * changed since, or the suggestion was handled another way (converted, rejected, removed).
+ */
+const FAULT = /CORRUPT|IMMUTABLE|UNCERTAIN|UNRESOLVED|STORE_INVALID|RECEIPT_MISSING|IDEMPOTENCY|MANUSCRIPT_NOT_FOUND|RECOVERY/;
+const TEXT_CHANGED = new Set(['APPLY_TARGET_DRIFTED', 'HISTORY_STALE', 'HISTORY_AFTER_APPLY', 'EDIT_BLOCK_CHANGED', 'STRUCTURE_INVALID', 'EDIT_RANGE_INVALID',
+  'EDIT_TOO_LARGE', 'MARK_BINDING_CHANGED', 'MARK_ANCHOR_CHANGED', 'PROPOSAL_SCOPE_MOVED']);
+function refusal(error: unknown): 'text' | 'mark' | null {
+  if (!(error instanceof BoundedStoreError) && !(error instanceof EditorialMarkError)) return null;
+  if (FAULT.test(error.code)) return null;
+  return TEXT_CHANGED.has(error.code) ? 'text' : 'mark';
+}
 
 /** One command group replayed backward (undo) or forward (redo), journaled as one entry (#applyHistory's replay, moved here). */
 function replayGroup(host: EditorStepHost, groupId: string, action: 'undo' | 'redo', stepId: string): void {
@@ -354,15 +367,19 @@ function replayStep(host: EditorStepHost, step: StepRow, action: 'undo' | 'redo'
   const interaction = action === 'undo' ? 'undo-step' : 'redo-step';
   let lastGroup: string | null = null;
   for (const part of parts) {
+    // Where this part stands, read before it runs: a part refused here is the place the answer names (a blocked step).
+    replay.partBlockId = partPlace(db, part);
     if (part.command_group_id !== null) {
       lastGroup = asString(part.command_group_id);
       replayGroup(host, lastGroup, action, step.stepId);
+      replay.wrote = true;
     } else if (part.inline_mark_id !== null) {
       const markId = asString(part.inline_mark_id);
       const [from, to, accepted] = action === 'undo' ? ['applied', 'open', 0] : ['open', 'applied', 1];
       requireBounded(db.prepare(`UPDATE editorial_marks SET status = ?, updated_at = ? WHERE mark_id = ? AND status = ? AND anchor_state = 'exact'`)
         .run(to, new Date().toISOString(), markId, from).changes === 1, 'MARK_ACTION_INVALID', '这处修订又改过。');
       db.prepare('UPDATE editor_inline_revision_marks SET accepted = ? WHERE mark_id = ?').run(accepted, markId);
+      replay.wrote = true;
     } else {
       const target = { stepId: asString(part.slot_step_id), slot: asNumber(part.slot) };
       const state = slotState(db, target.stepId, target.slot);
@@ -370,14 +387,29 @@ function replayStep(host: EditorStepHost, step: StepRow, action: 'undo' | 'redo'
       // An Apply step takes back its slot's current Apply, and puts back only what its own undo took; a card's step does the
       // opposite. A slot already standing the other way (taken back by a kept card step, or sealed) is skipped.
       const reversing = step.kind !== 'reverse-card' ? action === 'undo' : action === 'redo';
-      if (reversing && state.polarity === 'apply') host.reverseEffect(state.effectId, interaction);
-      else if (!reversing && state.polarity === 'reverse' && (step.kind === 'reverse-card' || (state.writtenBy === step.stepId && state.writtenAs === 'undo'))) {
+      if (reversing && state.polarity === 'apply') {
+        host.reverseEffect(state.effectId, interaction);
+        replay.wrote = true;
+      } else if (!reversing && state.polarity === 'reverse' && (step.kind === 'reverse-card' || (state.writtenBy === step.stepId && state.writtenAs === 'undo'))) {
         host.reapplyEffect(state.source, interaction);
+        replay.wrote = true;
       }
       replay.target = null;
     }
   }
   return lastGroup;
+}
+
+/** The block a part acts on: its group's first member, its slot's current Effect's first mark, or its in-place revision's mark. */
+function partPlace(db: DatabaseSync, part: SqlRow): string | null {
+  const row = (part.command_group_id !== null
+    ? db.prepare('SELECT block_id FROM manuscript_command_edits WHERE command_group_id = ? ORDER BY position LIMIT 1').get(asString(part.command_group_id))
+    : part.inline_mark_id !== null
+      ? db.prepare('SELECT block_id FROM editorial_marks WHERE mark_id = ?').get(asString(part.inline_mark_id))
+      : db.prepare(`SELECT m.block_id FROM editor_step_effects e JOIN manuscript_effect_targets t ON t.effect_id = e.effect_id
+          JOIN proposal_change_items i ON i.item_id = t.item_id JOIN editorial_marks m ON m.mark_id = i.mark_id
+          WHERE e.step_id = ? AND e.slot = ? ORDER BY e.generation DESC, t.ordinal LIMIT 1`).get(asString(part.slot_step_id), asNumber(part.slot))) as SqlRow | undefined;
+  return row === undefined ? null : asString(row.block_id);
 }
 
 /** Where a step stands now, for the answer: its first Apply's mark, or its anchor block; the paragraph number when it stands. */
@@ -392,12 +424,21 @@ function placeOf(db: DatabaseSync, branchId: string, step: StepRow): { blockId: 
   return { blockId: row === undefined ? null : row.blockId, paragraph: row?.position ?? null };
 }
 
-function blockedSentence(action: 'undo' | 'redo', step: StepRow, paragraph: number | null): string {
+/** The answer for a step set aside: why (its words changed, or its suggestion was handled another way), and what the next press does. */
+function blockedSentence(action: 'undo' | 'redo', step: StepRow, paragraph: number | null, cause: 'text' | 'mark'): string {
   const place = paragraph === null ? '这一处' : `第 ${paragraph.toLocaleString('zh-CN')} 段`;
-  if (action === 'redo') return `${place}在撤销后又改过，「${step.label}」不能重做；再按重做会重做后面的一步。`;
+  const next = action === 'undo' ? '再按 Ctrl+Z 撤销更早的一步。' : '再按重做会重做后面的一步。';
+  if (cause === 'mark') return `${place}的修改建议${action === 'undo' ? '在接受后' : '在撤销后'}已另作处理，「${step.label}」不能${action === 'undo' ? '撤销' : '重做'}。${next}`;
+  if (action === 'redo') return `${place}在撤销后又改过，「${step.label}」不能重做。${next}`;
   const apply = step.kind === 'accept' || step.kind === 'accept-batch' || step.kind === 'replace-all' || step.kind === 'ai-edit';
-  return apply ? `${place}这处在接受后又改过，这一步不能撤销；可以在卡片上处理。再按 Ctrl+Z 撤销更早的一步。`
-    : `${place}在「${step.label}」之后又改过，这一步不能撤销。再按 Ctrl+Z 撤销更早的一步。`;
+  return apply ? `${place}这处在接受后又改过，这一步不能撤销；可以在卡片上处理。${next}`
+    : `${place}在「${step.label}」之后又改过，这一步不能撤销。${next}`;
+}
+
+/** The answer for a step whose every change a card had already taken back (or put back): nothing was written. */
+function skippedSentence(action: 'undo' | 'redo', step: StepRow): string {
+  return action === 'undo' ? `「${step.label}」已在卡片上撤销过，这次没有改动文字。再按 Ctrl+Z 撤销更早的一步。`
+    : `「${step.label}」已在卡片上处理过，这次没有改动文字。再按重做会重做后面的一步。`;
 }
 
 export function editorStepSummary(db: DatabaseSync, branchId: string, action: 'undo' | 'redo'): EditorStepSummary | null {
@@ -426,30 +467,38 @@ export function replayEditorStep(host: EditorStepHost, action: 'undo' | 'redo', 
     requireBounded(before.workingDigest === expectedWorkingDigest, 'HISTORY_STALE', '稿件已变化，请刷新历史状态。');
     const step = nextStep(db, before.branchId, action);
     if (step === null) throw new BoundedStoreError(action === 'undo' ? 'NOTHING_TO_UNDO' : 'NOTHING_TO_REDO', action === 'undo' ? '没有可撤销的修改。' : '没有可重做的修改。');
-    requireBounded(expectedStepId === undefined || expectedStepId === step.stepId, 'HISTORY_STEP_CHANGED', '这一步之后又有新的修改；请先撤销它们，或在卡片上逐条撤销。');
+    requireBounded(expectedStepId === undefined || expectedStepId === step.stepId, 'HISTORY_STEP_CHANGED', '这一批之后又有新的修改；请先按 Ctrl+Z 撤销后来的修改，或在这一批的任一张卡片上撤销本次修改。');
     const context = contextOf(db);
     requireBounded(context.replay === null, 'HISTORY_CORRUPT', '撤销不能嵌套。');
     let lastGroup: string | null = null;
-    let blocked = false;
-    context.replay = { stepId: step.stepId, action, target: null };
+    let cause: 'text' | 'mark' | null = null;
+    let blockedAt: string | null = null;
+    let wrote = false;
+    context.replay = { stepId: step.stepId, action, target: null, partBlockId: null, wrote: false };
     try {
       lastGroup = transact(db, () => replayStep(host, step, action));
+      wrote = context.replay.wrote;
     } catch (error) {
-      if (!(error instanceof Error) || !BLOCKING.has(String((error as { code?: unknown }).code))) throw error;
-      blocked = true;
+      cause = refusal(error);
+      if (cause === null) throw error;
+      blockedAt = context.replay.partBlockId;
     } finally {
       context.replay = null;
     }
-    const status = blocked ? (action === 'undo' ? 'kept' : 'superseded') : action === 'undo' ? 'undone' : 'applied';
+    const blocked = cause !== null;
+    // A step set aside, or one that wrote nothing (a card had already taken it back), never comes back to the next press.
+    const status = blocked || !wrote ? (action === 'undo' ? 'kept' : 'superseded') : action === 'undo' ? 'undone' : 'applied';
     requireBounded(db.prepare('UPDATE editor_steps SET status = ? WHERE step_id = ? AND status = ?').run(status, step.stepId, action === 'undo' ? 'applied' : 'undone').changes === 1,
       'HISTORY_STALE', '稿件历史状态已变化。');
     const after = host.binding();
-    const place = placeOf(db, after.branchId, step);
+    // A step set aside is named where the part that refused stands now; a step taken back, where it stands now.
+    const refused = blockedAt === null ? undefined : workingBlock(db, after.branchId, blockedAt);
+    const place = blocked && refused !== undefined ? { blockId: refused.blockId, paragraph: refused.position } : placeOf(db, after.branchId, step);
     const done = `${action === 'undo' ? '已撤销' : '已重做'}：${step.label}${place.paragraph === null ? '' : `（第 ${place.paragraph.toLocaleString('zh-CN')} 段）`}`;
     return {
       action, branchId: after.branchId, revisionId: after.revisionId, revisionLabel: after.revisionLabel,
       journalSequence: after.journalSequence, workingDigest: after.workingDigest, commandGroupId: lastGroup,
-      completionLabel: blocked ? blockedSentence(action, step, place.paragraph) : done,
+      completionLabel: cause !== null ? blockedSentence(action, step, place.paragraph, cause) : wrote ? done : skippedSentence(action, step),
       canUndo: nextStep(db, after.branchId, 'undo') !== null, canRedo: nextStep(db, after.branchId, 'redo') !== null,
       stepLabel: step.label, anchorBlockId: place.blockId, paragraph: place.paragraph, blocked,
     };

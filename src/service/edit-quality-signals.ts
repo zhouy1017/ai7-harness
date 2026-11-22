@@ -61,7 +61,13 @@ function* targetSignals(db: DatabaseSync, bookId: string | null, operationalScop
       -- The words as they stand now are read where the mark stands now: a split or join may have moved them (Issue #1654, loss 5).
       w.digest AS current_digest, w.text AS current_text,
       COALESCE((SELECT f.category_id FROM review_findings f WHERE f.mark_id = m.mark_id ORDER BY rowid DESC LIMIT 1), 'editorial') AS category_id,
-      EXISTS(SELECT 1 FROM manuscript_effect_intents reverse WHERE reverse.reverses_effect_id = i.effect_id) AS reversed
+      -- An Apply that Ctrl+Z took back and redo put back stands again: its target is read once, through the first Apply
+      -- (Issue #1654); the redo's own Effect is not another applied target.
+      EXISTS(SELECT 1 FROM manuscript_effect_intents reverse WHERE reverse.reverses_effect_id = i.effect_id) AND NOT EXISTS(
+        SELECT 1 FROM manuscript_effect_targets rt JOIN manuscript_effect_intents ri ON ri.effect_id = rt.effect_id
+        JOIN manuscript_effect_approvals ra ON ra.effect_id = rt.effect_id
+        WHERE rt.item_id = t.item_id AND ri.kind = 'apply' AND ra.interaction = 'redo-step' AND ri.base_journal_sequence > i.base_journal_sequence
+          AND NOT EXISTS(SELECT 1 FROM manuscript_effect_intents back WHERE back.reverses_effect_id = ri.effect_id)) AS reversed
     FROM manuscript_effect_targets t JOIN manuscript_effect_intents i ON i.effect_id = t.effect_id
     JOIN manuscript_effect_receipts r ON r.effect_id = i.effect_id
     JOIN proposal_item_decisions d ON d.decision_id = t.decision_id
@@ -69,6 +75,7 @@ function* targetSignals(db: DatabaseSync, bookId: string | null, operationalScop
     JOIN editorial_marks m ON m.mark_id = p.mark_id
     LEFT JOIN working_blocks w ON w.branch_id = i.branch_id AND w.block_id = m.block_id
     WHERE i.kind = 'apply' AND d.disposition IN ('accepted', 'accepted-with-edit') AND (? IS NULL OR i.book_id = ?)
+      AND NOT EXISTS(SELECT 1 FROM manuscript_effect_approvals a WHERE a.effect_id = i.effect_id AND a.interaction = 'redo-step')
     ORDER BY i.book_id, i.effect_id, t.ordinal`).all(bookId, bookId);
   for (const target of targets) {
     if (operationalScope !== undefined) {

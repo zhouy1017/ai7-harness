@@ -252,6 +252,37 @@ describe('the chapter-level Reimport Comparison', () => {
     }
   }, 180_000);
 
+  it('supersedes every editor step: after a reimport there is nothing to undo or redo (#1654)', async () => {
+    const first = await compose('steps-base', [paragraph(span(21)), paragraph(span(22))]);
+    const second = await compose('steps-revised', [paragraph(span(21, 0, 10)), paragraph(span(21, 10), span(22), span(23, 0, 8))]);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store, first);
+      const type = (position: number): void => {
+        const view = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+        const block = view.blocks[position - 1]!;
+        store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: view.revisionId, blockId: block.blockId, windowStartBlockId: view.blocks[0]!.blockId,
+          baseBlockDigest: block.digest, expectedJournalSequence: view.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '〔甲〕' });
+      };
+      // One applied step and one undone step stand before the reimport.
+      type(1);
+      type(2);
+      store.undoManuscript(book.manuscriptId, book.branchId, store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest);
+      expect(store.inspectEditorHistory(book.manuscriptId, book.branchId)).toMatchObject({ undo: { kind: 'typing' }, redo: { kind: 'typing' } });
+      let review = await prepareReimport(store, book, second);
+      const page = store.getReimportMappingPage(review.draftId, review.draftVersion, null);
+      review = resolve(store, review, page.items[0]!.groupId, 'rewrite');
+      expect((await commit(store, review)).resultKind).toBe('changed');
+      expect(store.inspectEditorHistory(book.manuscriptId, book.branchId)).toMatchObject({ undo: null, redo: null });
+      const digest = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest;
+      expect(code(() => store.undoManuscript(book.manuscriptId, book.branchId, digest))).toBe('NOTHING_TO_UNDO');
+      expect(code(() => store.redoManuscript(book.manuscriptId, book.branchId, digest))).toBe('NOTHING_TO_REDO');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
   it('sets a mark aside when a split leaves its words twice, never landing it on the other place', async () => {
     // One paragraph whose opening words stand twice; the new file splits it between the two.
     const first = await compose('twice-base', [paragraph(span(21, 0, 6), span(21, 0, 6), span(22))]);

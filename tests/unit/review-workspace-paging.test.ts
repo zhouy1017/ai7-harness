@@ -308,6 +308,20 @@ describe('a paged review workspace on the 审阅 page (#1592)', () => {
   });
 });
 
+describe('the batch step behind 撤销本批应用 (#1654)', () => {
+  it('reads the step Ctrl+Z would take once per manuscript state, not on every refresh of the page', async () => {
+    const state: Stub = { full: workspace(3), budget: 4 * 1024 * 1024 };
+    const view = mount(state); await flush();
+    for (let poll = 0; poll < 3; poll += 1) { view.surface.refresh(); await flush(); }
+    expect(view.inspectEditorHistory).toHaveBeenCalledTimes(1);
+    const run = state.full.run!;
+    state.full = { ...state.full, run: { ...run, manuscript: { ...run.manuscript, journalSequence: run.manuscript.journalSequence + 1, workingDigest: 'e'.repeat(64) } } };
+    view.surface.refresh(); await flush();
+    view.surface.refresh(); await flush();
+    expect(view.inspectEditorHistory).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('a refused workspace read on the 审阅 page (#1592)', () => {
   const TOO_LARGE = '审阅摘要超出可读取范围。';
   it('stands once in the bar and on the card through refused polls and repaints, and a read that succeeds ends it', async () => {

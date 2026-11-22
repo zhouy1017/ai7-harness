@@ -237,6 +237,15 @@ async function pressChord(renderer, key, code, virtualKey, modifiers) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...chord });
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...chord });
 }
+/**
+ * A paragraph in the engine's own geometry (wave rule, Issue #1662): its first line inside the window and inside the editor's
+ * visible box, and the element under that line's middle is the paragraph — no scripted scroll in between.
+ */
+const paragraphInView = (blockIdJson) => `(() => { const block = window.__j05.block(${blockIdJson}); const box = document.querySelector('[data-testid="manuscript-editor"]')?.closest('.editor-window') ?? document.querySelector('[data-testid="manuscript-editor"]')?.parentElement; const rect = block?.getClientRects()[0]; const view = box?.getBoundingClientRect(); if (!rect || !view) return false; const x = rect.left + Math.min(rect.width / 2, 40), y = rect.top + Math.min(rect.height / 2, 8); return rect.top >= 0 && rect.top < innerHeight && rect.left >= 0 && rect.left < innerWidth && y >= Math.max(0, view.top) && y < Math.min(innerHeight, view.bottom) && block.contains(document.elementFromPoint(x, y)); })()`;
+/** The 1-based paragraph number the service gives a block of the 标记旅程甲 manuscript. */
+async function paragraphOf(renderer, blockId) {
+  return renderer.evaluate(`(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'block', blockId: ${JSON.stringify(blockId)} } }); return page.blocks.find((block) => block.blockId === ${JSON.stringify(blockId)})?.position ?? null; })()`);
+}
 async function press(renderer, key, modifiers = 0) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, modifiers });
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, modifiers });
@@ -733,10 +742,25 @@ async function main() {
     // One interaction recorded the decision and its reason, approved the Effect and wrote the text; 已应用 is said of the receipt.
     await assertRenderer(renderer, `(() => { const card = window.__j05.card(); window.__j05Original.first = window.__j05Original.first.slice(0, ${RANGES.suggestion[0]}) + ${JSON.stringify(ACCEPTED_TEXT)} + window.__j05Original.first.slice(${RANGES.suggestion[1]}); const terms = Array.from(card.querySelectorAll('[data-mark-receipt] dt')).map((term) => term.textContent); return card.querySelector('[data-mark-state]').textContent === '已接受' && card.querySelector('[data-mark-application]').textContent.startsWith('已接受 · 已写入稿件') && card.querySelector('[data-mark-reason]')?.dataset.markReason === 'reason-field' && card.querySelector('[data-mark-reason]').textContent.includes(${JSON.stringify(ACCEPTED_REASON)}) && card.querySelector('[data-mark-reasons]') === null && card.querySelector('[data-mark-region="content"] ins').textContent === ${JSON.stringify(ACCEPTED_TEXT)} && document.querySelector('[data-mark-preview]') === null && card.querySelector('[data-mark-receipt]') === null && terms.length === 0 && !/[0-9a-f]{8}-[0-9a-f-]{27}|[0-9a-f]{64}/i.test(card.textContent) && card.querySelector('[data-mark-action="reverse-revision"]')?.disabled === false && card.querySelector('[data-mark-action="prepare-reverse"]') === null && card.querySelector('[data-mark-action="accept-and-apply"]') === null && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first && window.__j05.markText('change-suggestion', ${JSON.stringify(first)}) === ${JSON.stringify(ACCEPTED_TEXT)}; })()`, 'accepted-with-edit-is-applied-with-its-receipt');
     await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); const wrote = page.journalSequence === window.__j05Journal + 1; window.__j05Journal = page.journalSequence; return wrote && page.blocks.find((block) => block.blockId === ${JSON.stringify(first)})?.text === window.__j05Original.first; })()`, 'apply-wrote-the-manuscript-once');
-    // A committed Apply is not taken back by 撤销: reversing it is an Effect of its own.
+    // 撤销 takes back the committed Apply as its own editor step (Issue #1654; ADR 0105 §1): the words before it stand again and
+    // the status names the step. 重做 writes the edited words once more (a new governed Effect), so the stages after it see the Apply.
     await press(renderer, 'Escape');
-    await click(renderer, '撤销', 'undo-after-apply');
-    await waitFor(renderer, `window.__j05.status().includes('没有可撤销的编辑') && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first`, 'apply-is-not-undone-by-history', 15_000);
+    at('apply-undone-by-ctrl-z');
+    await assertRenderer(renderer, `(() => { window.__j05AppliedText = window.__j05.text(${JSON.stringify(first)}); return window.__j05AppliedText === window.__j05Original.first; })()`, 'apply-text-before-undo');
+    const firstParagraph = await paragraphOf(renderer, first);
+    requireJourney(Number.isSafeInteger(firstParagraph), 'apply-undo-paragraph-known');
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, 0, 0)`, 'apply-undo-caret');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+    await waitFor(renderer, paragraphInView(JSON.stringify(first)), 'apply-undo-paragraph-in-view-before-ctrl-z', 10_000);
+    await pressChord(renderer, 'z', 'KeyZ', 90, CTRL);
+    const firstPlace = `（第 ${Number(firstParagraph).toLocaleString('zh-CN')} 段）`;
+    await waitFor(renderer, `(window.__j05.status() + window.__j05.notice()).includes(${JSON.stringify(`已撤销：接受修改建议${firstPlace}`)}) && window.__j05.text(${JSON.stringify(first)}) !== window.__j05AppliedText && !window.__j05.text(${JSON.stringify(first)}).includes(${JSON.stringify(ACCEPTED_TEXT)}) && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'apply-is-undone-by-ctrl-z', 15_000);
+    await waitFor(renderer, paragraphInView(JSON.stringify(first)), 'apply-undo-view-at-the-place', 10_000);
+    await settled(renderer, 'apply-undo-settled');
+    await waitFor(renderer, paragraphInView(JSON.stringify(first)), 'apply-redo-paragraph-in-view-before-press', 10_000);
+    await pressChord(renderer, 'z', 'KeyZ', 90, CTRL | SHIFT);
+    await waitFor(renderer, `(window.__j05.status() + window.__j05.notice()).includes(${JSON.stringify(`已重做：接受修改建议${firstPlace}`)}) && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first && window.__j05.mark('change-suggestion', ${JSON.stringify(first)})[0]?.dataset.markStatus === 'applied' && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'apply-is-redone-by-history', 15_000);
+    await settled(renderer, 'apply-redo-settled');
     await openMarkCard(renderer, 'change-suggestion', first, 'applied-card-again');
     // Preserve the developer disclosure checks without assuming the whole Journey runs in that mode.
     await markTechnicalMode(renderer, true, 'mark-developer-roundtrip');
@@ -1040,7 +1064,7 @@ async function main() {
     await settled(renderer, 'proposal-settled');
 
     // Issue #1175 (ADR 0096 §1): Enter at the caret splits a paragraph and Backspace at a paragraph's start merges it back, each
-    // one journal entry shown at once; an Apply between them is one more entry that 撤销 steps over, never takes back.
+    // one journal entry shown at once; an Apply between them is an editor step of its own, which Ctrl+Z takes back first (#1654).
     at('structure-split');
     const structural = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); const clean = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node) => ![${JSON.stringify(first)}, ${JSON.stringify(second)}].includes(node.dataset.blockId) && node.querySelectorAll('.editorial-mark').length === 0 && Array.from(segmenter.segment((node.textContent ?? '').slice(0, 24))).length === 24); return clean.length >= 2 ? [clean[0].dataset.blockId, clean[1].dataset.blockId] : null; })()`);
     requireJourney(Array.isArray(structural) && structural.every((id) => /^blk_[0-9a-f]{24}$/.test(id)), 'structure-paragraphs');
@@ -1073,6 +1097,7 @@ async function main() {
     requireJourney(Number.isSafeInteger(appliedParagraph), 'undo-apply-paragraph-known');
     await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(appliedBlock)}, 0, 0)`, 'undo-apply-caret');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+    await waitFor(renderer, paragraphInView(JSON.stringify(appliedBlock)), 'undo-apply-paragraph-in-view-before-ctrl-z', 10_000);
     await pressChord(renderer, 'z', 'KeyZ', 90, CTRL);
     const undoneLine = `已撤销：接受修改建议（第 ${Number(appliedParagraph).toLocaleString('zh-CN')} 段）`;
     await waitFor(renderer, `window.__j05.text(${JSON.stringify(appliedBlock)}) === window.__j05Structure.applied && window.__j05.block(window.__j05Split) !== null && (window.__j05.status() + window.__j05.notice()).includes(${JSON.stringify(undoneLine)}) && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'undo-apply-names-the-paragraph', 15_000);

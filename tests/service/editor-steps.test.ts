@@ -142,23 +142,27 @@ describe('undo by editor step (ADR 0105 §1)', () => {
     ]);
   });
 
-  it('re-applies the edited text on redo of an accept-with-edit, and the learning ledger holds one signal for the accept throughout', () => {
+  it('re-applies the edited text on redo of an accept-with-edit, and exactly one learning signal stands for an applied accept', () => {
     const x = paragraphs()[0]!;
     const markId = suggestion(x.blockId, 4, 8);
-    const signals = (): number => ledger((db) => Number((db.prepare('SELECT count(*) n FROM learning_signals').get() as { n: number }).n));
-    const before = signals();
+    // The signals of this suggestion and where each stands now (a signal stands while its decision is the item's latest).
+    const standing = (): string[] => store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals
+      .filter((signal) => 'markId' in signal.source && signal.source.markId === markId).map((signal) => signal.currentEligibility);
+    const stands = (states: string[]): number => states.filter((state) => state !== 'superseded').length;
     accept(markId, '〔编辑改定〕');
     const edited = texts();
-    const captured = signals();
-    expect(captured).toBe(before + 1);
+    expect(stands(standing())).toBe(1);
+    const usable = standing()[0]!;
+    expect(['book', 'house']).toContain(usable);
     undo();
-    expect(signals()).toBe(captured);
+    expect(stands(standing())).toBe(0);
     redo();
     expect(texts()).toEqual(edited);
     expect(textOf(x.blockId).includes('〔编辑改定〕')).toBe(true);
-    expect(signals()).toBe(captured);
+    // The redone accept's own signal stands; the first is set aside, never counted twice.
+    expect(standing().sort()).toEqual([usable, 'superseded'].sort());
     undo();
-    expect(signals()).toBe(captured);
+    expect(stands(standing())).toBe(0);
     // The card reads the decision as it stands: withdrawn after the last undo, as a card reversal leaves it.
     expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).suggestion?.decision).toBeNull();
   });
@@ -198,11 +202,52 @@ describe('undo by editor step (ADR 0105 §1)', () => {
     db.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(undo().blocked).toBe(true);
-    // The accepting step's slot already stands reversed by the kept card step: undoing it writes nothing and is no refusal.
+    // The accepting step's slot already stands reversed by the kept card step: undoing it writes nothing and is no refusal,
+    // its answer says so (never 「已撤销」), and it is set aside so no later press comes back to it.
     const skipped = undo();
     expect(skipped.blocked).toBe(false);
+    expect(skipped.completionLabel).toBe('「接受修改建议」已在卡片上撤销过，这次没有改动文字。再按 Ctrl+Z 撤销更早的一步。');
     expect(texts()).toEqual(original);
-    expect(steps().map((step) => [step.kind, step.status])).toEqual([['accept', 'undone'], ['reverse-card', 'kept']]);
+    expect(steps().map((step) => [step.kind, step.status])).toEqual([['accept', 'kept'], ['reverse-card', 'kept']]);
+    expect(code(redo)).toBe('NOTHING_TO_REDO');
+  });
+
+  it('sets aside a redo whose suggestion became a 批注 since, says why, and the next redo moves on (B2)', () => {
+    const [x, b] = paragraphs() as [ManuscriptWindowProjection['blocks'][number], ManuscriptWindowProjection['blocks'][number]];
+    const markId = suggestion(x.blockId, 4, 8);
+    accept(markId);
+    journal(b.blockId, 0, '〔乙〕');
+    undo();
+    undo();
+    const original = texts();
+    store.updateEditorialMark({ ...binding(), markId, action: 'convert', body: null, highlightColor: null, status: null, rationale: null, targetKind: 'annotation', proposedText: null });
+    const blocked = redo();
+    expect(blocked.blocked).toBe(true);
+    expect(blocked.completionLabel).toMatch(/^第 [\d,]+ 段的修改建议在撤销后已另作处理，「接受修改建议」不能重做。再按重做会重做后面的一步。$/);
+    expect(texts()).toEqual(original);
+    expect(redo().completionLabel).toMatch(/^已重做：编辑文字/);
+    expect(textOf(b.blockId).startsWith('〔乙〕')).toBe(true);
+    expect(textOf(x.blockId)).toBe(original[window().blocks.findIndex((block) => block.blockId === x.blockId)]);
+    expect(steps().map((step) => step.status)).toEqual(['superseded', 'applied']);
+  });
+
+  it('never re-applies on redo a slot that another step took back: only the step\'s own undo is put back', () => {
+    const [a, b] = paragraphs() as [ManuscriptWindowProjection['blocks'][number], ManuscriptWindowProjection['blocks'][number]];
+    const original = texts();
+    const marks = [suggestion(a.blockId, 4, 8), suggestion(b.blockId, 2, 6)];
+    store.withEditorStep(book.branchId, { kind: 'ai-edit', label: (count) => `AI 修改（${count} 处）` }, () => marks.forEach((markId) => accept(markId)));
+    const bothApplied = texts();
+    // A's card takes A back; A's suggestion then becomes a 批注, so the card step's own undo is set aside.
+    expect(reverseCard(marks[0]!)).toBe('no-error');
+    store.updateEditorialMark({ ...binding(), markId: marks[0]!, action: 'convert', body: null, highlightColor: null, status: null, rationale: null, targetKind: 'annotation', proposedText: null });
+    expect(undo().blocked).toBe(true);
+    // The AI edit's undo takes back B (A already stands taken back by the card); its redo puts back B only.
+    expect(undo().completionLabel).toMatch(/^已撤销：AI 修改（2 处）/);
+    expect(texts()).toEqual(original);
+    expect(redo().blocked).toBe(false);
+    const at = (blockId: string): number => window().blocks.findIndex((block) => block.blockId === blockId);
+    expect(textOf(a.blockId)).toBe(original[at(a.blockId)]);
+    expect(textOf(b.blockId)).toBe(bothApplied[at(b.blockId)]);
   });
 
   it('undoes a 全部替换 as one step, each occurrence still reversible on its card first', () => {
@@ -236,6 +281,44 @@ describe('undo by editor step (ADR 0105 §1)', () => {
     expect(steps()).toEqual([{ kind: 'ai-edit', status: 'applied' }]);
     expect(undo().completionLabel).toMatch(/^已撤销：AI 修改（2 处）/);
     expect(texts()).toEqual(original);
+  });
+
+  it('names the paragraph of the part that refused when a composite step is set aside', async () => {
+    const all = paragraphs();
+    const [a, b] = [all[0]!, all[3]!];
+    const marks = [suggestion(a.blockId, 4, 8), suggestion(b.blockId, 2, 6)];
+    store.withEditorStep(book.branchId, { kind: 'ai-edit', label: (count) => `AI 修改（${count} 处）` }, () => marks.forEach((markId) => accept(markId)));
+    // The later paragraph's applied mark no longer stands on its words; the earlier one's still does.
+    store.markCleanShutdown();
+    store.close();
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    db.prepare("UPDATE editorial_marks SET anchor_state = 'drifted' WHERE mark_id = ?").run(marks[1]!);
+    db.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const blocked = undo();
+    const later = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: b.blockId }).blocks.find((block) => block.blockId === b.blockId)!.position;
+    expect(blocked.blocked).toBe(true);
+    expect(blocked.paragraph).toBe(later);
+    expect(blocked.completionLabel.startsWith(`第 ${later.toLocaleString('zh-CN')} 段`)).toBe(true);
+  });
+
+  it('puts back no anchor of a mark that left its recorded post side, even when the text replays exactly', async () => {
+    const target = paragraphs()[0]!;
+    const deletion = suggestion(target.blockId, 10, 12, '');
+    accept(deletion);
+    const created = `blk_${randomBytes(12).toString('hex')}`;
+    journal(target.blockId, 10, '', 10, { kind: 'split', newBlockId: created });
+    // The point at the caret was recorded (pre: exact at 10, post: as the split left it); move it elsewhere without a word changing.
+    expect(markAt(deletion).anchorState).toBe('drifted');
+    store.markCleanShutdown();
+    store.close();
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    db.prepare('UPDATE editorial_marks SET from_grapheme = 3, to_grapheme = 3 WHERE mark_id = ?').run(deletion);
+    db.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    undo();
+    expect(window().blocks.some((block) => block.blockId === created)).toBe(false);
+    expect(markAt(deletion)).toMatchObject({ blockId: target.blockId, from: 3, to: 3, anchorState: 'drifted' });
   });
 
   it('takes back an in-place revision decision as a step', () => {
@@ -299,7 +382,7 @@ describe('undo by editor step (ADR 0105 §1)', () => {
     expect(texts()).toEqual(original);
   });
 
-  it('supersedes every step on a split block\'s new id and never writes a ledger row twice: undo and redo of a split keep the identities', () => {
+  it('undo and redo of a split keep the new block\'s identity', () => {
     const x = paragraphs()[0]!;
     const created = `blk_${randomBytes(12).toString('hex')}`;
     journal(x.blockId, 5, '', 5, { kind: 'split', newBlockId: created });

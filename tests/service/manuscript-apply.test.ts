@@ -148,6 +148,28 @@ describe('AI7 Apply on a Change Suggestion', () => {
     } finally { store.markCleanShutdown(); store.close(); }
   }, 120_000);
 
+  it('counts an Apply that Ctrl+Z took back and redo put back as one applied target (#1654)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const block = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[0]!;
+      const suggestion = suggest(store, book, block.blockId, 6, 12, '建议');
+      store.applyChangeSuggestion({ ...binding(store, book), markId: suggestion.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+      const digest = (): string => store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest;
+      const signals = (): { applied: number; surviving: number } => {
+        const { applied, surviving } = store.inspectEditQualitySignals(null);
+        return { applied, surviving };
+      };
+      expect(signals()).toEqual({ applied: 1, surviving: 1 });
+      for (let round = 0; round < 2; round += 1) {
+        store.undoManuscript(book.manuscriptId, book.branchId, digest());
+        expect(signals()).toEqual({ applied: 1, surviving: 0 });
+        store.redoManuscript(book.manuscriptId, book.branchId, digest());
+        expect(signals()).toEqual({ applied: 1, surviving: 1 });
+      }
+    } finally { store.markCleanShutdown(); store.close(); }
+  }, 120_000);
+
   it('projects judged suggestion survival and edit effort through unrelated, reverting and reverse-apply edits', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

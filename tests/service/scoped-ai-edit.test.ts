@@ -175,6 +175,31 @@ describe('就选中部分让 AI 修改: the scoped splice guard', () => {
     expect(reversed.get(c.blockId)!.text).toBe(`〔丙改〕${from(c.text, 4)}`);
   }, 300_000);
 
+  it('is one editor step: one Ctrl+Z takes back every applied change, redo puts them back, and each card still reverses alone (#1654)', async () => {
+    const target = primary();
+    const { blocks } = threeParagraphs(target);
+    const [a, b, c] = blocks;
+    const before = allBlocks(target);
+    const input = base(target, '把这几段改得更紧凑', spanOver(blocks));
+    const requests = answering(frozen(input), { schema: SCOPED_EDIT_RESULT_SCHEMA, targets: [{ id: 'T1', text: '〔甲改〕' }, { id: 'T3', text: '〔丙改〕' }] });
+    const result = await settled(requests, requests.scopedEdit(book.bookId, input));
+    expect(result.state).toBe('applied');
+    const applied = allBlocks(target);
+    expect(store.inspectEditorHistory(target.manuscriptId, target.branchId).undo).toMatchObject({ kind: 'ai-edit', changeCount: 2, label: 'AI 修改（2 处）' });
+    const digest = (): string => store.getManuscriptWindow(target.manuscriptId, target.branchId, null).workingDigest;
+    expect(store.undoManuscript(target.manuscriptId, target.branchId, digest()).completionLabel).toMatch(/^已撤销：AI 修改（2 处）/);
+    expect(allBlocks(target)).toEqual(before);
+    store.redoManuscript(target.manuscriptId, target.branchId, digest());
+    expect(allBlocks(target)).toEqual(applied);
+    // Each change keeps its own card: taking back A leaves C applied, and C's card then takes back C.
+    store.reverseAppliedChangeSuggestion({ ...target, windowStartBlockId: a.blockId, markId: result.markIds[0]!, clientEffectId: randomUUID() });
+    expect(allBlocks(target).get(a.blockId)!.text).toBe(a.text);
+    expect(allBlocks(target).get(c.blockId)!.text).toBe(applied.get(c.blockId)!.text);
+    store.reverseAppliedChangeSuggestion({ ...target, windowStartBlockId: a.blockId, markId: result.markIds[1]!, clientEffectId: randomUUID() });
+    expect(allBlocks(target).get(c.blockId)!.text).toBe(c.text);
+    expect(allBlocks(target).get(b.blockId)!.text).toBe(b.text);
+  }, 300_000);
+
   it('never changes a locked block inside the selection, and the store refuses any AI7 suggestion onto a locked block', async () => {
     const target = primary();
     const { blocks } = threeParagraphs(target);

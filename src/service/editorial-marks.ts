@@ -1582,8 +1582,6 @@ export class EditorialMarkStore {
     editedText: string | null,
     reason: string | null,
     now: string,
-    /** `false` for the decision an editor step's redo repeats (Issue #1654): one accept is one learning signal. */
-    capture = true,
   ): string {
     const current = this.#db.prepare(
       'SELECT decision_id, ordinal FROM proposal_item_decisions WHERE item_id = ? ORDER BY ordinal DESC LIMIT 1',
@@ -1606,7 +1604,7 @@ export class EditorialMarkStore {
         "INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, 'reason-field', ?)",
       ).run(decisionId, this.#body(reason), now);
     }
-    if (capture) new EditorialMemoryFacade(this.#db).captureDecision(decisionId);
+    new EditorialMemoryFacade(this.#db).captureDecision(decisionId);
     return decisionId;
   }
 
