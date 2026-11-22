@@ -1789,9 +1789,29 @@ async function main() {
     const filterTrigger = '.task-overview-filters select[aria-label="图书"] + .ui-select-trigger';
     const filterIndex = await renderer.evaluate(`Array.from(document.querySelector('.task-overview-filters select[aria-label="图书"]').options).findIndex((option) => option.value === ${JSON.stringify(overviewBooks[3])})`);
     requireJourney(filterIndex > 0, 'overview-filter-lists-the-book', { filterIndex });
+    await renderer.evaluate(`(() => {
+      const selector='.task-overview-filters select[aria-label="图书"]', expected=${JSON.stringify(overviewBooks[3])};
+      const first=document.querySelector(selector), root=document.querySelector('.task-overview-filters'), trace=[];
+      const snap=(phase,event)=>{if(trace.length>=128)return;const select=document.querySelector(selector),trigger=select?.nextElementSibling,popup=trigger?.nextElementSibling;
+        const active=popup?.querySelector('[data-active="true"]'),focus=document.activeElement;
+        trace.push({phase,key:event?(['ArrowDown','ArrowUp','Enter','Tab'].includes(event.key)?event.key:'other'):null,
+          sameSelect:select===first,selectedIndex:select?.selectedIndex,expectedIndex:select?Array.from(select.options).findIndex(option=>option.value===expected):-1,
+          selectedAll:select?.value==='all',selectedMatches:select?.value===expected,activeIndex:active?Number(active.dataset.index):-1,
+          popupOpen:trigger?.getAttribute('aria-expanded')==='true',focusTrigger:focus===trigger,focusFilter:focus?.matches('.ui-select-search')??false,
+          targetTrigger:!!event&&trigger?.contains(event.target)===true,visible:document.visibilityState==='visible',focused:document.hasFocus()});};
+      const types=['pointerdown','pointerup','click','keydown','keyup','change'];
+      const onEvent=event=>{if(root.contains(event.target))snap(event.type,event);};
+      for(const type of types)document.addEventListener(type,onEvent,true);
+      let last=first;const observer=new MutationObserver(()=>{const select=document.querySelector(selector);if(select!==last){last=select;snap('replace');}});
+      observer.observe(root,{childList:true,subtree:true});
+      globalThis.__j09FilterObservation={trace,snap,stop:()=>{observer.disconnect();for(const type of types)document.removeEventListener(type,onEvent,true);}};
+      snap('before-pointer');return true;
+    })()`);
     await pointerClick(renderer, waitFor, filterTrigger, 'overview-filter-open');
-    for (let step = 0; step < filterIndex; step += 1) await press(renderer, 'ArrowDown');
+    await renderer.evaluate(`__j09FilterObservation.snap('after-pointer')`);
+    for (let step = 0; step < filterIndex; step += 1) { await press(renderer, 'ArrowDown'); await renderer.evaluate(`__j09FilterObservation.snap('after-arrow')`); }
     await press(renderer, 'Enter');
+    await renderer.evaluate(`__j09FilterObservation.snap('after-enter')`);
     try {
       await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === ${JSON.stringify(overviewBooks[3])} && document.activeElement?.matches('.task-overview-filters .ui-select-trigger') && document.querySelectorAll('.task-overview-card').length === 0`, 'overview-filter-chosen-by-key');
     } catch (error) {
@@ -1799,7 +1819,7 @@ async function main() {
         const selected = document.querySelector('.task-overview-filters select[aria-label="图书"]'), trigger = document.querySelector('.task-overview-filters select[aria-label="图书"] + .ui-select-trigger');
         const cards = [...document.querySelectorAll('.task-overview-card')], projection = await window.ai7.inspectTaskOverview();
         const items = projection.groups.flatMap(group => group.items), bounds = node => { if (!node) return null; const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height }; };
-        return { selectedMatches: selected?.value === ${JSON.stringify(overviewBooks[3])}, focusIsTrigger: document.activeElement?.matches('.task-overview-filters .ui-select-trigger') === true,
+        return { filterTrace: globalThis.__j09FilterObservation?.trace ?? [], selectedMatches: selected?.value === ${JSON.stringify(overviewBooks[3])}, focusIsTrigger: document.activeElement?.matches('.task-overview-filters .ui-select-trigger') === true,
           visibleCardCount: cards.length, popupOpen: trigger?.getAttribute('aria-expanded') === 'true', viewport: { width: innerWidth, height: innerHeight }, controlBounds: bounds(trigger),
           cards: cards.map(card => { const item = items.find(item => item.itemId === card.dataset.taskItem); return { kind: item?.plan?.kind ?? card.dataset.taskKind ?? null, state: item?.state ?? null, attentionState: card.dataset.taskState ?? item?.attention.state ?? null, bookMatches: item === undefined ? null : item.bookId === selected?.value, expectedBookMatches: item === undefined ? null : item.bookId === ${JSON.stringify(overviewBooks[3])} }; }) };
       })()`).catch(() => ({ unavailable: true }));
