@@ -511,6 +511,29 @@ describe('comments command parity and refresh continuity', () => {
     expect(node.style.top).toBe(top);
     expect(button.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
   });
+  it('keeps the focused tall card in place when a preceding card grows by a fractional pixel (#1661)', async () => {
+    const next = { ...suggestion, markId: 'next', fromGrapheme: 3, toGrapheme: 5 };
+    const ui = mount(suggestion, [next]); await paint();
+    ui.pane.querySelector<HTMLElement>('[data-comment-card="next"]')!.click(); await paint();
+    const { pane, node } = measuredPane(ui, 'next', () => 400);
+    const upper = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    let height = 100;
+    upper.getBoundingClientRect = () => { const top = 100 + Number.parseFloat(upper.style.top) - pane.scrollTop; return { top, bottom: top + height, height } as DOMRect; };
+    const button = node.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!;
+    button.getBoundingClientRect = () => { const top = node.getBoundingClientRect().top + 350; return { top, bottom: top + 28, height: 28 } as DOMRect; };
+    ui.refresh(); await paint();
+    button.focus(); (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true });
+    pane.scrollTop += 78; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    const before = node.getBoundingClientRect().top;
+    height += 0.09375; ui.refresh(); await paint();
+    for (let turn = 0; turn < 6; turn++) {
+      ui.refresh(); await paint();
+      expect(node.getBoundingClientRect().top).toBe(before);
+      expect(button.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+      expect(Number.parseFloat(upper.style.top)).toBeGreaterThanOrEqual(8);
+      expect(Number.parseFloat(upper.style.top) + height + 10).toBeLessThanOrEqual(Number.parseFloat(node.style.top));
+    }
+  });
   it('reveals offscreen words when navigation focuses the already selected card (#1661 B1)', async () => {
     const ui = mount(suggestion); await paint();
     Object.assign(ui.block, { getBoundingClientRect: () => ({ top: 300, bottom: 320, height: 20 }) });
@@ -595,6 +618,24 @@ describe('comments command parity and refresh continuity', () => {
     await paint();
     expect(node.querySelector('[data-mark-action="accept-and-apply"]') === null).toBe(true);
     expect(node.dataset['selected']).toBe('true');
+    expect(document.activeElement === node).toBe(true);
+  });
+  it('falls back to the selected card while its replacement action is disabled (#1661)', async () => {
+    const remove = MiniElement.prototype.remove;
+    vi.spyOn(MiniElement.prototype, 'remove').mockImplementation(function (this: MiniElement) {
+      const owned = this.contains(miniDocument.activeElement); remove.call(this);
+      if (owned) miniDocument.activeElement = miniDocument.body;
+    });
+    vi.spyOn(MiniElement.prototype, 'focus').mockImplementation(function (this: MiniElement) {
+      if (!this.disabled) miniDocument.activeElement = this;
+    });
+    const ui = mount(suggestion); await paint(); await ui.open(); await paint();
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    node.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!.focus();
+    const pending = deferred<EditorialMarkCardProjection>(); ui.get.mockReturnValueOnce(pending.promise);
+    ui.setPage({ blocks: [{ ...windowOf().blocks[0]!, digest: 'edited' }] }); await paint();
+    pending.resolve({ ...suggestion, anchorState: 'drifted' }); await paint();
+    expect(node.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!.disabled).toBe(true);
     expect(document.activeElement === node).toBe(true);
   });
   it('keeps the selected card and text place after the last 显示更多 press (#1661 R1)', async () => {
@@ -1288,14 +1329,28 @@ describe('comments command parity and refresh continuity', () => {
       });
 
       it('accepting the last mark of the third page, where there is no next pending card', async () => {
+        const remove = MiniElement.prototype.remove;
+        vi.spyOn(MiniElement.prototype, 'remove').mockImplementation(function (this: MiniElement) {
+          const owned = this.contains(miniDocument.activeElement); remove.call(this);
+          if (owned) miniDocument.activeElement = miniDocument.body;
+        });
+        vi.spyOn(MiniElement.prototype, 'focus').mockImplementation(function (this: MiniElement) {
+          if (!this.disabled) miniDocument.activeElement = this;
+        });
         const { seen } = await both(async (mounted, list) => {
-          mounted.apply.mockImplementationOnce(async () => ({ ...answer(list, decidedAs(list[5]!, 'applied')), window: windowOf(), application: {} }) as never);
+          const application = { effectId: 'effect', kind: 'apply' as const, interaction: 'accept-and-apply' as const,
+            approvalId: 'approval', dispatchId: 'dispatch', receiptId: 'receipt', changeCount: 1, payloadDigest: 'a'.repeat(64), receiptDigest: 'b'.repeat(64),
+            before: { revisionId: 'revision', journalSequence: 0, workingDigest: 'c'.repeat(64) }, after: { revisionId: 'revision', journalSequence: 1, workingDigest: 'd'.repeat(64) },
+            committedAt: card.createdAt, reversesEffectId: null, reversedByEffectId: null };
+          const applied = { ...decidedAs(list[5]!, 'applied'), suggestion: { ...list[5]!.suggestion!, application } };
+          mounted.apply.mockImplementationOnce(async () => ({ ...answer(list, applied), window: windowOf(), application }) as never);
           row(mounted.pane, 'm5').click(); await paint();
-          row(mounted.pane, 'm5').querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!.click();
+          const accept = row(mounted.pane, 'm5').querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!;
+          accept.focus(); accept.click();
         });
         expect(seen.dense.apply.mock.calls[0]?.[0]).toMatchObject({ markId: 'm5', interaction: 'accept-and-apply' });
-        // The card stays selected; the focus is the ordinary window's (compared above), not necessarily on the card.
-        expect(seen.selected).toBe('m5');
+        // A real application removes the decided action; both window kinds retain focus on its card.
+        expect(seen.selected).toBe('m5'); expect(seen.focus.card).toBe('m5');
       });
 
       it('accepting an edited suggestion on the first page', async () => {

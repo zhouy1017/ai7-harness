@@ -26,7 +26,7 @@ function scene({ covered = false, moveOnPress = false, neverSettles = false, mov
     for (let attempt = 0; attempt < 10; attempt++) if (await target.evaluate(expression)) return;
     throw new Error(name);
   };
-  return { renderer, waitFor, events, blocker };
+  return { renderer, waitFor, events, blocker, node };
 }
 
 it('waits for a moving target to settle across animation frames before pressing (#1490)', async () => {
@@ -130,4 +130,26 @@ it('retains twelve ancestor rectangles while capping the complete structural det
   expect(detail?.coveringAncestors.every(entry => JSON.stringify(entry.rect) === JSON.stringify(rect))).toBe(true);
   expect(JSON.stringify(detail).length).toBeLessThanOrEqual(4096);
   expect(JSON.stringify(detail)).not.toContain('private-payload');
+});
+
+it('attaches admitted four-frame action geometry and card/pane ancestors to a failing card assertion (#1661)', async () => {
+  const { assertCardActionReachable } = await import(pathToFileURL(resolve('e2e/marks-paging.mjs')).href) as {
+    assertCardActionReachable(renderer: Renderer, check: (condition: boolean, name: string) => void, waitFor: WaitFor, selector: string, name: string): Promise<void>;
+  };
+  const target = scene({ covered: true });
+  const ancestor = (className: string, parentElement?: unknown) => ({ tagName: 'DIV', id: '', className, parentElement,
+    getAttributeNames: () => ['data-pane'], hasAttribute: () => false,
+    getBoundingClientRect: () => ({ left: 600, top: 250, width: 300, height: 409 }),
+    get textContent(): never { throw new Error('Text must never be read'); }, getAttribute(): never { throw new Error('Values must never be read'); } });
+  Object.assign(target.node, { tagName: 'BUTTON', parentElement: ancestor('manuscript-comments-card', ancestor('manuscript-comments-scroll', ancestor('manuscript-comments-pane'))) });
+  const renderer: Renderer = { ...target.renderer, evaluate: expression => expression.includes('const card=document.querySelector(')
+    ? Promise.resolve({ branch: 'fits', whole: false, action: false }) : target.renderer.evaluate(expression) };
+  let failure: { message: string; pointerFailure?: { frames: Array<{ contains: boolean }>; coveringAncestors: Array<{ classes: string[] }> } } | undefined;
+  try { await assertCardActionReachable(renderer, (condition, name) => { if (!condition) throw new Error(name); }, async () => {}, '[data-comment-card]', 'card-action'); }
+  catch(error) { failure = error as typeof failure; }
+  expect(failure?.message).toBe('card-action-arrival');
+  expect(failure?.pointerFailure?.frames).toHaveLength(4);
+  expect(failure?.pointerFailure?.frames.every(frame => !frame.contains)).toBe(true);
+  expect(failure?.pointerFailure?.coveringAncestors.map(node => node.classes[0])).toEqual(['manuscript-comments-card', 'manuscript-comments-scroll', 'manuscript-comments-pane']);
+  expect(target.events).toEqual([]);
 });

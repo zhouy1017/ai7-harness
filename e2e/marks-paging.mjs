@@ -1,4 +1,4 @@
-import { pointerClick } from './dispatch-chooser.mjs';
+import { pointerClick, capturePointerFailure } from './dispatch-chooser.mjs';
 
 // J-05, #1604: a stretch of text with more than 400 open marks. The 批注栏 says how many it shows and reads the rest by 显示更多;
 // 上一条待处理 under a category filter goes straight to a mark beyond the 400th; a decision there keeps what was loaded.
@@ -28,8 +28,15 @@ const PLACE = `(() => {
     activeInWindow:(() => { const r=document.activeElement?.getBoundingClientRect(); return !!r && r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.top<=innerHeight-40; })()};
 })()`;
 
+/** The hosted runner admits only this closed, content-free geometry channel on failure. */
+async function attachCardPointerFailure(renderer, selector, error) {
+  const detail=await capturePointerFailure(renderer,selector,{includeTargetAncestors:true});
+  if(error&&typeof error==='object')Object.defineProperty(error,'pointerFailure',{value:detail,configurable:true});
+}
+
 /** Check final engine geometry; Tab reaches a taller card's action while the pane follows focus. */
 export async function assertCardActionReachable(renderer, check, waitFor, selector, name, { returnToCard = false } = {}) {
+  try {
   const facts = `(() => {
     const card=document.querySelector(${JSON.stringify(selector)}), pane=document.querySelector('.manuscript-comments-scroll');
     const button=card?.querySelector('[data-mark-action="accept-and-apply"]');
@@ -99,6 +106,10 @@ export async function assertCardActionReachable(renderer, check, waitFor, select
       }
     }
   }
+  } catch(error) {
+    await attachCardPointerFailure(renderer,`${selector} [data-mark-action="accept-and-apply"]`,error);
+    throw error;
+  }
 }
 
 /** The action was revealed by the reader already: measure and press without moving either pane. */
@@ -118,7 +129,10 @@ async function pressCardAction(renderer, waitFor, selector, name) {
     const hit=await renderer.evaluate(`document.querySelector(${query})?.contains(document.elementFromPoint(${at.x},${at.y}))===true`);
     await renderer.send('Input.dispatchMouseEvent',{type:'mouseReleased',...at,button:'left',buttons:0,clickCount:1});
     if (!hit) throw new Error(name+'-target-moved-after-press');
-  } catch(error) { console.log('COMMENTS_ACTION_PRESS/'+name+'/'+error.message); throw error; }
+  } catch(error) {
+    await attachCardPointerFailure(renderer,selector,error);
+    console.log('COMMENTS_ACTION_PRESS/'+name+'/'+error.message); throw error;
+  }
 }
 
 /** The row's words and where it stands: inside the pane, which is inside the window, with its control under the pointer. */
@@ -199,6 +213,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   for (let shown = 400; shown < facts.total; shown += 400) {
     await pointerClick(renderer, waitFor, '[data-marks-paging] [data-marks-more]', 'marks-paging-more');
     const busyStyle=await renderer.evaluate(`(() => {const button=document.querySelector('[data-marks-more]');return {busy:button.getAttribute('aria-disabled')==='true',opacity:getComputedStyle(button).opacity};})()`);
+    console.log('COMMENTS_MORE_BUSY_STYLE/'+JSON.stringify(busyStyle));
     check(busyStyle.opacity===(busyStyle.busy?'0.5':'1'),'marks-paging-more-busy-style',busyStyle);
     const now = Math.min(facts.total, shown + 400);
     await waitFor(renderer, now >= facts.total ? `document.querySelector('[data-marks-paging]')?.hidden===true` : `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(`已显示 ${now} / ${facts.total} 条。`)} && document.querySelector('[data-marks-more]').getAttribute('aria-disabled')==='false'`, 'marks-paging-page-loaded', 60_000);
@@ -275,7 +290,11 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     const visibleHeight=Math.min(innerHeight,paneBox.top+scroll.clientHeight)-Math.max(0,paneBox.top);
     return {card:cardBox.height<=visibleHeight?inside(cardBox,paneBox) && inside(cardBox,view):cardBox.left>=paneBox.left-1 && cardBox.right<=paneBox.right+1 && cardBox.left>=0 && cardBox.right<=innerWidth && cardBox.top<=innerHeight-80 && cardBox.top>=Math.max(0,paneBox.top) && cardBox.top+24<=Math.min(innerHeight,paneBox.bottom), words:inside(rect(words),rect(editor)) && inside(rect(words),view), row:${rowNow}, cardBox:[cardBox.left,cardBox.top,cardBox.right,cardBox.bottom], cardHeight:cardBox.height,paneHeight:visibleHeight,branch:cardBox.height<=visibleHeight?'fits':'tall',viewport:[innerWidth,innerHeight]};
   })()`);
+  try {
   check(arrived.card && arrived.words && arrived.row === rowWant, 'marks-paging-arrived-beyond-first-page', { ...arrived, rowWant });
+  } catch(error) {
+    await attachCardPointerFailure(renderer,`${card} [data-mark-action="accept-and-apply"]`,error); throw error;
+  }
   // It can be accepted: 接受并应用 on its card, by a real click (a pointer decision stays on the page); the service records the Apply.
   // The next pending card of the marks' category after this one, in the window's reading order: where a pointer decision goes on to.
   const around = await renderer.evaluate(`(async () => { const read=await (${READ_WINDOW}); const at=read.marks.findIndex((mark)=>mark.markId===${JSON.stringify(expected.markId)});

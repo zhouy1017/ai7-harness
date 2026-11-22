@@ -1168,7 +1168,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           const target = reply?.contains(focused) ? focused : action ? entry.node.querySelector<HTMLElement>(`[data-mark-action="${CSS.escape(action)}"]`)
             : focused.tagName === 'SUMMARY' ? entry.node.querySelector<HTMLElement>('.editorial-mark-more summary') : entry.node;
           const enabled = target?.tagName !== 'BUTTON' || !(target as HTMLButtonElement).disabled;
-          (enabled ? target ?? entry.node : entry.node).focus({ preventScroll: true });
+          const restored = enabled ? target : null;
+          (restored ?? (mark.markId === activeComment ? entry.node : null))?.focus({ preventScroll: true });
           if (selection && focused instanceof HTMLTextAreaElement) focused.setSelectionRange(...selection);
         }
       }
@@ -1215,10 +1216,22 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       for (const item of items) if (!existing.includes(item)) {
         held.push({ ...item, top: bottom }); bottom += item.measuredHeight + 10;
       }
+      if (holdingControl) {
+        const pivot = existing.findIndex(item => item.node === selectedNode);
+        if (pivot >= 0) {
+          // A preceding card can finish reading at a different fractional height. Keep the
+          // focused card at the position the reader chose and make room around it instead.
+          held[pivot]!.top = Number.parseFloat(selectedNode!.style.top);
+          for (let index = pivot - 1; index >= 0; index--) held[index]!.top = Math.min(held[index]!.top, held[index + 1]!.top - held[index]!.measuredHeight - 10);
+          for (let index = pivot + 1; index < held.length; index++) held[index]!.top = Math.max(held[index]!.top, held[index - 1]!.top + held[index - 1]!.measuredHeight + 10);
+        }
+      }
       return held;
     })() : stackEditorialComments(items, selectedIndex, { top: paneTop, height: commentsScroll.clientHeight });
     // Shift canvas and scroll together: cards above the selection remain reachable.
-    const shift = selectedIndex < 0 || preservePanePositions || holdingControl ? 0 : Math.max(0, 8 - Math.min(...placed.map(item => item.top)));
+    const neededShift = Math.max(0, 8 - Math.min(...placed.map(item => item.top)));
+    // Integer canvas/scroll shifts cancel exactly even where the engine rounds scrollTop.
+    const shift = holdingControl ? Math.ceil(neededShift) : selectedIndex < 0 || preservePanePositions ? 0 : neededShift;
     for (const item of placed) item.top += shift;
     const forward = revealed?.pending ? placed.find(item => item.mark.markId === revealed!.markId) : undefined;
     if (forward && revealed) { revealed = { markId: revealed.markId, pending: false }; forward.node.focus({ preventScroll: true }); }
@@ -1242,6 +1255,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       : selectedIndex >= 0 ? paneTop + shift + commentsScroll.clientHeight : 0;
     commentsCanvas.style.height = `${Math.max(commentsScroll.clientHeight, scrollFloor, ...placed.map((item) => item.top + item.measuredHeight + 10))}px`;
     if (shift) commentsScroll.scrollTop = paneTop + shift;
+    if (holdingControl && shift) commentsFrameScroll += shift;
     if (activeComment !== undefined && !preservePanePositions && !holdingControl) commentsFrameScroll = paneTop + shift;
     if (hoveredComment !== undefined) for (const node of options.host.querySelectorAll<HTMLElement>(`[data-mark-id="${CSS.escape(hoveredComment)}"]`)) node.dataset['commentHovered'] = 'true';
     const active = selectedIndex < 0 ? undefined : placed.find((item) => item.mark.markId === activeComment);
