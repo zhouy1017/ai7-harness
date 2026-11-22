@@ -330,6 +330,7 @@ export async function markDraftKept(renderer,check,waitFor,at,blockId) {
   const manuscript=await renderer.evaluate(`(async()=> (await window.ai7.listPriorWork()).find(item=>item.bookId===document.querySelector('.editor-shell').dataset.bookId).manuscriptId)()`);
   await draftClick(renderer,check,waitFor,SIDEBAR.destination('library'),'draft-library');
   await waitFor(renderer,`document.querySelector('.recent-work-item button[data-manuscript-id="${manuscript}"]')`,'draft-library-ready');
+  await draftTabTo(renderer,`.recent-work-item button[data-manuscript-id="${manuscript}"]`,check,'draft-book-return-focus');
   await draftClick(renderer,check,waitFor,`.recent-work-item button[data-manuscript-id="${manuscript}"]`,'draft-book-return');
   await waitFor(renderer,kept,'draft-book-kept');
   await verifyComposerWords(renderer,check,waitFor,row,field,'draft-book-kept',blockId);
