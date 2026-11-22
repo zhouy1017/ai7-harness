@@ -26,6 +26,7 @@ export const DERIVATIVE_CREATE_WORDS = {
   type: '稿件类型',
   mode: '创建方式',
   source: '来源材料',
+  droppedFile: (name: string) => `已选择文件：${name}`,
   confirm: '创建并打开',
   cancel: '取消',
   pickSource: '请先选择一份来源材料。',
@@ -40,6 +41,8 @@ export interface DerivativeCreateState {
   mode: DerivativeCreateMode;
   sourceVersionId: string | null;
   problem: string | null;
+  /** A file dropped on the page (Issue #1682): 导入文件 reads it instead of opening the picker. */
+  file?: File;
 }
 
 /** The 稿件题目 offered for a new document of one type: `《书名》新闻稿`, numbered once the Book has one already. */
@@ -47,6 +50,11 @@ export function suggestedDerivativeTitle(bookTitle: string, typeLabel: string, e
   const base = `《${bookTitle}》${typeLabel}`;
   const named = existing === 0 ? base : `${base} ${existing + 1}`;
   return Array.from(named).slice(0, 80).join('');
+}
+
+/** The form's state for a file dropped on the page: 导入文件, the title taken from the file name. */
+export function droppedFileFormState(file: File, typeId: string): DerivativeCreateState {
+  return { title: importedDerivativeTitle(file.name), titleEdited: true, typeId, mode: 'import', sourceVersionId: null, problem: null, file };
 }
 
 /** A file's own name, without its extension, as an imported document's 稿件题目. */
@@ -152,6 +160,11 @@ export function derivativeCreateForm(options: DerivativeCreateFormOptions): Deri
     modes.append(label);
   }
   node.append(el('h3', undefined, DERIVATIVE_CREATE_WORDS.heading), titleLabel, typeLabel, modes);
+  if (state.mode === 'import' && state.file !== undefined) {
+    const dropped = el('p', 'field-note', DERIVATIVE_CREATE_WORDS.droppedFile(state.file.name));
+    dropped.dataset['droppedFile'] = '';
+    node.append(dropped);
+  }
   if (state.mode === 'source') {
     const sources = el('fieldset', 'derivative-sources');
     sources.append(el('legend', undefined, DERIVATIVE_CREATE_WORDS.source));
@@ -200,7 +213,7 @@ export function derivativeCreateForm(options: DerivativeCreateFormOptions): Deri
 }
 
 export type DerivativeCreateApi = Pick<RendererApi, 'createProductionDocument' | 'decideProductionDocumentType' |
-  'selectAndStageManuscript' | 'abandonImportDraft' | 'prepareSourceImportReview' | 'commitSourceImport' | 'acknowledgeImportCompletion'>;
+  'selectAndStageManuscript' | 'stageDroppedManuscript' | 'abandonImportDraft' | 'prepareSourceImportReview' | 'commitSourceImport' | 'acknowledgeImportCompletion'>;
 
 export interface DerivativeCreateRequest {
   api: DerivativeCreateApi;
@@ -228,7 +241,7 @@ export async function createDerivative(request: DerivativeCreateRequest): Promis
   let sourceVersionId = state.mode === 'source' ? state.sourceVersionId : null;
   let title = state.title.trim();
   if (state.mode === 'import') {
-    const picked = await api.selectAndStageManuscript();
+    const picked = state.file === undefined ? await api.selectAndStageManuscript() : await api.stageDroppedManuscript(state.file);
     if (picked.status === 'cancelled') return { kind: 'cancelled' };
     const staged = picked.staged;
     if (!['DOCX', 'MD', 'TXT'].includes(staged.source.format)) {

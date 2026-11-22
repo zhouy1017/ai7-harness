@@ -3295,3 +3295,9 @@ button.danger:hover { box-shadow: inset 0 0 0 1px var(--status-blocked); }
   .house-row { grid-template-columns: minmax(0, 1fr); }
   .house-row-head { display: none; }
 }
+
+/* 要怎样导入？ (Issue #1682): the small question a dropped file asks. */
+.import-entry-sheet { width: min(460px, calc(100vw - 2rem)); }
+.import-entry-sheet .sheet-bar h3 { overflow-wrap: anywhere; }
+.import-entry-sheet .sheet-body:empty { display: none; }
+.import-entry-sheet .sheet-foot { display: flex; flex-wrap: wrap; gap: .5rem; }

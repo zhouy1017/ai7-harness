@@ -14,6 +14,7 @@ import { type ShellPlace } from './shell.js';
 import { FIRST_RUN_CARD_LABELS } from './onboarding-labels.js';
 import { SHELL_LABELS } from './shell-labels.js';
 import { type RecoveryReturnContext } from './import-review.js';
+import { configureImportEntry, installImportDrop } from './import-entry.js';
 import type { RendererApi } from '../shared/protocol.js';
 
 interface Options {
@@ -376,31 +377,8 @@ async function renderLanding(
 }
 
 function installDropHandlers(): void {
-let dropImportBusy = false;
-screen.addEventListener('dragover', (event) => {
-  if (['landing', 'editor', 'book-overview'].includes(screen.dataset['screen'] ?? '') && event.dataTransfer?.types.includes('Files')) event.preventDefault();
-});
-screen.addEventListener('drop', (event) => {
-  const file = event.dataTransfer?.files[0];
-  if (!file || !['landing', 'editor', 'book-overview'].includes(screen.dataset['screen'] ?? '')) return;
-  event.preventDefault();
-  if (dropImportBusy) return;
-  if (!/\.docx$/iu.test(file.name)) {
-    if (!screen.querySelector('[data-manuscript-kind="derivative"]')) setStatus('请拖入 DOCX 格式的稿件。', 'error');
-    return;
-  }
-  dropImportBusy = true;
-  void (async () => {
-    if (!await settleScreen()) return;
-    const result = await api.stageDroppedManuscript(file);
-    if (result.status === 'staged') {
-      const bookId = screen.querySelector<HTMLElement>('.book-overview')?.dataset['bookId'];
-      const choice = result.staged.targetChoices.find((item) => item.kind === 'existing-book' && item.bookId === bookId);
-      renderTargetChoice(result.staged, choice?.id ?? null);
-    }
-  })().catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法导入拖入的 DOCX。'), 'error')).finally(() => { dropImportBusy = false; });
-});
-
+  configureImportEntry({ api, renderTargetChoice, setStatus, rendererErrorMessage, settleScreen });
+  installImportDrop(screen);
 }
 
 function renderImported(result: ImportCommitProjection, recoveryReturn?: RecoveryReturnContext): void {

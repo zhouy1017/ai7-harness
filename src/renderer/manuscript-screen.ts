@@ -7,6 +7,7 @@ import { menuPanel } from './components/controls.js';
 import { icon } from './components/icon-sprite.js';
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { createSaveMenu } from './save-menu.js';
+import { startNewVersionImport } from './import-entry.js';
 import { mountManuscriptExport } from './manuscript-export.js';
 import { SAVE_MENU_WORDS } from './save-menu-labels.js';
 import { mountParagraphAnalysis } from './paragraph-analysis.js';
@@ -730,7 +731,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     updateExclusionSummary();
     if (mode === 'outline') { paintOutline(); revealCurrentChapter(); }
   }
-  const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => void leaveForDeliverables());
+  const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => void startNewVersionImport(initialWindow.bookId), () => void leaveForDeliverables());
   const exportRoot = element('aside', 'manuscript-export-slot'); content.append(exportRoot);
   const manuscriptExport = mountManuscriptExport({ root: exportRoot, bookId: initialWindow.bookId, api,
     setStatus, errorMessage: rendererErrorMessage, beforeExport: () => settleLocalEdit(), onChanged: () => undefined, openerOf: () => null });

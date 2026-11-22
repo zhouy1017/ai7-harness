@@ -674,11 +674,12 @@ async function saveMilestone(renderer) {
   // #1376 review F3: a valid, enabled save action must leave the arrow order when its subsection is collapsed.
   await assertRenderer(renderer, `(() => {
     const menu=document.querySelector('[data-save-menu="manuscript"]'),section=menu?.querySelector('.milestone-section'),outer=menu?.querySelector('summary'),summary=section?.querySelector('summary');
-    const save=section?.querySelector('button'),exportAction=menu?.querySelector('.editor-save-menu-body > button');
-    if(!section||!outer||!summary||!save||save.disabled||!exportAction)return false;
+    const save=section?.querySelector('button'),importAction=menu?.querySelector('.editor-save-menu-body > [data-import-new-version]'),exportAction=Array.from(menu?.querySelectorAll('.editor-save-menu-body > button')??[]).at(-1);
+    if(!section||!outer||!summary||!save||save.disabled||!importAction||!exportAction||importAction===exportAction||importAction.textContent!=='导入新版本…'||exportAction.textContent!=='导出…')return false;
     section.open=false; outer.focus();
     const key=(value)=>document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true}));
     key('ArrowDown');if(document.activeElement!==summary)return false;
+    key('ArrowDown');if(document.activeElement!==importAction)return false;
     key('ArrowDown');if(document.activeElement!==exportAction)return false;
     key('ArrowDown');if(document.activeElement!==summary)return false;
     key('End');if(document.activeElement!==exportAction)return false;

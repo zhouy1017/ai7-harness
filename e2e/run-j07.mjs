@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx, addReadOnlySourceObjects } from './composed-docx.mjs';
 import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { openArchivePackageExport, openRemainingPackageExport } from './package-export-readiness.mjs';
+import { answer, dropFile, noImportDraft, questionOffers, reachable } from './import-entry-stages.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -3436,6 +3437,54 @@ async function main() {
     await assertRenderer(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); return strip instanceof HTMLElement && strip.textContent.includes('校样'); })()`, 'management-category-empty-strip');
     await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="yes"]`, 'management-category-delete');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}) === null && document.querySelector(${JSON.stringify(proofRow)}) === null`, 'management-category-deleted', 60_000);
+
+    at('derivatives-drop');
+    // Issue #1682 (N.10): a file dropped on 衍生稿件管理 asks what it is. Nothing is staged before an answer; 存为衍生稿件 opens the
+    // same form in 导入文件 with the file named and the title taken from its name, and 创建并打开 reads that file without a picker.
+    // The Book already holds sample1 as a source, and reusing one needs an explicit choice (above), so the document is made from
+    // another admitted public SampleBook; sample1 itself is dropped for the question that is cancelled.
+    const dropIo = { renderer, waitFor, assertRenderer, click: (label) => click(renderer, label, 'import-entry-click') };
+    const DROP_DERIVATIVE_FILE = resolve(ROOT, 'SampleBooks', 'luxun-zhaohua-xishi.docx');
+    // The page is where 删除类别 left it: 衍生稿件管理.
+    await dropFile(dropIo, SAMPLE1_PATH, managementPage, 'drop-management');
+    await questionOffers(dropIo, ['update', 'derivative', 'cancel'], 'drop-management');
+    await noImportDraft(dropIo, 'drop-management-unanswered');
+    await answer(dropIo, 'cancel', 'drop-management');
+    await waitFor(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-management-closed');
+    await noImportDraft(dropIo, 'drop-management-cancelled');
+    await dropFile(dropIo, DROP_DERIVATIVE_FILE, managementPage, 'drop-management-again');
+    await questionOffers(dropIo, ['update', 'derivative', 'cancel'], 'drop-management-again');
+    await answer(dropIo, 'derivative', 'drop-management-again');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementForm} [data-dropped-file]`)}) !== null`, 'drop-management-form', 60_000);
+    await assertRenderer(renderer, `(() => { const form = document.querySelector(${JSON.stringify(managementForm)}); return form?.querySelector('[data-dropped-file]')?.textContent === '已选择文件：luxun-zhaohua-xishi.docx' && form.querySelector('.derivative-modes input[value="import"]')?.checked === true && form.querySelector('[data-document-field="title"]')?.value === 'luxun-zhaohua-xishi'; })()`, 'drop-management-form-names-file');
+    await assertRenderer(renderer, reachable(`${managementForm} [data-document-action="create-derivative"]`), 'drop-management-confirm-in-window');
+    await confirmCreate('drop-management');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] .document-title-heading')?.textContent === 'luxun-zhaohua-xishi'`, 'drop-management-open', 120_000);
+
+    at('derivatives-drop-editor');
+    // On a 衍生稿件 open in the editor the same question offers 更新稿件 and 存为衍生稿件; 取消 stages nothing.
+    await dropFile(dropIo, SAMPLE1_PATH, '.editor-shell[data-manuscript-kind="derivative"]', 'drop-editor');
+    await questionOffers(dropIo, ['update', 'derivative', 'cancel'], 'drop-editor');
+    await noImportDraft(dropIo, 'drop-editor-unanswered');
+    await answer(dropIo, 'cancel', 'drop-editor');
+    await waitFor(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-editor-closed');
+    await noImportDraft(dropIo, 'drop-editor-cancelled');
+
+    at('derivatives-drop-text');
+    // A file that is not DOCX, on the editor and on the management page, is answered in words and nothing is staged. The file is one
+    // word of text this Journey writes into its own run root.
+    const dropTextPath = resolve(runRoot, 'drop-note.txt');
+    await writeFile(dropTextPath, '稿', 'utf8');
+    const notDocx = `document.querySelector('#persistence-status')?.textContent === '请拖入 DOCX 格式的文件。'`;
+    await dropFile(dropIo, dropTextPath, '.editor-shell[data-manuscript-kind="derivative"]', 'drop-text-editor');
+    await waitFor(renderer, notDocx, 'drop-text-editor-sentence');
+    await assertRenderer(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-text-editor-no-question');
+    await noImportDraft(dropIo, 'drop-text-editor');
+    await openManagement('drop-text');
+    await dropFile(dropIo, dropTextPath, managementPage, 'drop-text-management');
+    await waitFor(renderer, notDocx, 'drop-text-management-sentence');
+    await assertRenderer(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-text-management-no-question');
+    await noImportDraft(dropIo, 'drop-text-management');
 
     at('scoped-ai-edit');
     // 就选中部分让 AI 修改… (Issue #1412) on the writing Book's exact sample1 manuscript, on a launch whose adapter answers from the

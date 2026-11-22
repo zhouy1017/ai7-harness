@@ -7,6 +7,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { pointerClick } from './dispatch-chooser.mjs';
+import { answer, cancelImportPage, dropFile, newVersionFromSaveMenu, noImportDraft, pressReachable, questionOffers } from './import-entry-stages.mjs';
 import {
   admittedParagraphs,
   admittedSpanText,
@@ -3710,6 +3711,62 @@ async function main() {
       `JSON.stringify(Array.from(document.querySelectorAll('[data-screen="book-overview"] [data-record-kind="revision"], [data-screen="book-overview"] [data-record-kind="source-import-record"], [data-screen="book-overview"] [data-record-kind="manuscript-reimport-record"]'), (button) => button.dataset.recordId)) === ${JSON.stringify(JSON.stringify(latestHistoryIds))}`,
       'reimport-history-roundtrip-exact-ids',
     );
+    await closeProduct();
+
+    // Issue #1682 (11.1, N.10): 导入新版本… and the question a dropped file asks, on the populated Book the re-import scenarios
+    // above made. The file is the composed `reimport-changed.docx`. A launch's scripted picker answers once, so each entry that
+    // opens it has a launch of its own; every stage ends with 取消导入, and the startup read then shows no draft. The stages read
+    // only the import page's two prepare buttons, never its target choice.
+    const entryButtonIo = () => ({ renderer, waitFor, assertRenderer, click: (label) => clickExactButton(renderer, label, 'import-entry-click') });
+    const openEntryBook = async (name, section) => {
+      const book = `[data-screen="landing"] [data-book-id=${JSON.stringify(reimportBookId)}]`;
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(book)})`, `${name}-landing`);
+      await assertRenderer(renderer, `(() => { const open = document.querySelector(${JSON.stringify(book)}); if (!open) return false; open.click(); return true; })()`, `${name}-open`);
+      await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(reimportBookId)}]')`, `${name}-manuscript`);
+      if (section !== 'overview') return;
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), `${name}-to-overview`);
+      await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(reimportBookId)}]')`, `${name}-overview`);
+    };
+    at('new-version-overview-entry');
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticCPath, launchScenario: 'new-version-overview-entry' });
+    await openEntryBook('new-version-overview-entry', 'overview');
+    await pressReachable(entryButtonIo(), '[data-screen="book-overview"] [data-import-new-version="overview"]', 'new-version-overview-entry-press');
+    await cancelImportPage(entryButtonIo(), 'update', reimportBookId, 'new-version-overview-entry');
+    await closeProduct();
+
+    at('new-version-menu-entry');
+    for (const how of ['pointer', 'keyboard']) {
+      const name = `new-version-menu-entry-${how}`;
+      renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticCPath, launchScenario: name });
+      await openEntryBook(name, 'manuscript');
+      await newVersionFromSaveMenu(entryButtonIo(), how, reimportBookId, name);
+      await closeProduct();
+    }
+
+    renderer = await launchProduct({ dataRoot: reimportRoot, launchScenario: 'new-version-drop-question' });
+    const dropQuestionStage = async (stage, section, root) => {
+      const io = entryButtonIo();
+      // The question, nothing staged before an answer, 取消, then 更新稿件 and 存为来源材料 each on a drop of its own.
+      await openEntryBook(stage, section);
+      await dropFile(io, syntheticCPath, root, stage);
+      await questionOffers(io, ['update', 'source', 'cancel'], stage);
+      await noImportDraft(io, `${stage}-unanswered`);
+      await answer(io, 'cancel', `${stage}-cancel`);
+      await waitFor(renderer, `document.querySelector('[data-import-question]') === null`, `${stage}-cancel-closed`);
+      await noImportDraft(io, `${stage}-cancelled`);
+      for (const kind of ['update', 'source']) {
+        // The page the answer opened is cancelled to 书库, so the Book is opened again for the next drop.
+        if (kind === 'source') await openEntryBook(`${stage}-${kind}`, section);
+        await dropFile(io, syntheticCPath, root, `${stage}-${kind}`);
+        await questionOffers(io, ['update', 'source', 'cancel'], `${stage}-${kind}`);
+        await answer(io, kind, `${stage}-${kind}`);
+        await cancelImportPage(io, kind, reimportBookId, `${stage}-${kind}`);
+      }
+    };
+    at('drop-question-overview');
+    await dropQuestionStage('drop-question-overview', 'overview', '[data-screen="book-overview"] .book-overview');
+    at('drop-question-editor');
+    await dropQuestionStage('drop-question-editor', 'manuscript', '.editor-shell');
     await closeProduct();
 
     const reimportDegradedRoot = await createCanonicalExternalDataRoot(
