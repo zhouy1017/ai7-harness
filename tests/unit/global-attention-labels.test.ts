@@ -1,3 +1,5 @@
+import { composeTaskOverview } from '../../src/service/task-overview.js';
+import { taskNavigationCount } from '../../src/renderer/task-navigation-badge.js';
 import { majorityGapReason } from '../../src/shared/analysis-run-summary.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -43,7 +45,7 @@ import {
   type GlobalAttentionStateKey,
 } from '../../src/shared/protocol.js';
 import { TASK_PLAN_STATE_PILLS } from '../../src/renderer/task-drawer-labels.js';
-import { mountGlobalAttention, mountGlobalAttentionEntry, type GlobalAttentionReading, type GlobalAttentionReader } from '../../src/renderer/global-attention.js';
+import { mountGlobalAttention, mountGlobalAttentionEntry, visibleGlobalAttention, type GlobalAttentionReading, type GlobalAttentionReader } from '../../src/renderer/global-attention.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 
@@ -105,7 +107,7 @@ describe('the entry and the screen', () => {
     try {
       const mount = (data: GlobalAttentionProjection, startTask = vi.fn()) => {
         const reader: GlobalAttentionReader = { refresh: () => undefined, interrupt: () => undefined,
-          subscribe: (listener) => { listener({ kind: 'projection', projection: data }); return () => undefined; } };
+          subscribe: (listener) => { listener({ kind: 'projection', projection: data, tasks: composeTaskOverview(data, 2, () => null) }); return () => undefined; } };
         const root = document.createElement('main');
         miniDocument.body.append(root as unknown as MiniElement);
         const surface = mountGlobalAttention({ root, reader, technicalDetails: () => document.createElement('details'), setStatus: () => undefined,
@@ -113,8 +115,14 @@ describe('the entry and the screen', () => {
         surface.start();
         return { root, surface, startTask };
       };
-      const some = mount(projection({ exceptions: [item('analysis-failed')], recent: [item('analysis-completed', { group: 'recent' })] }));
-      expect(Array.from(some.root.querySelectorAll<HTMLElement>('section.global-attention-group'), (group) => group.dataset['attentionGroup'])).toEqual(['exceptions', 'recent']);
+      // Issue #1680: only 异常与结果待确认 and 等待你的决定; an interrupted task joins the exceptions, what runs is one line, what finished
+      // is the 任务 page's.
+      const some = mount(projection({ exceptions: [item('analysis-failed')], active: [item('analysis-resumable', { group: 'active', itemId: 'resumable' }), item('analysis-running', { group: 'active', itemId: 'running' })],
+        recent: [item('analysis-completed', { group: 'recent' })] }));
+      expect(Array.from(some.root.querySelectorAll<HTMLElement>('section.global-attention-group'), (group) => group.dataset['attentionGroup'])).toEqual(['exceptions']);
+      expect(some.root.querySelectorAll('[data-attention-item]')).toHaveLength(2);
+      expect(some.root.querySelector<HTMLElement>('.global-attention-host')!.dataset['attentionCount']).toBe('2');
+      expect(some.root.querySelector('.global-attention-in-progress span')!.textContent).toBe('有 1 项任务正在进行。');
       expect(some.root.querySelector('.global-attention-empty')).toBeNull();
       some.surface.destroy();
       const none = mount(projection({}));
@@ -129,6 +137,26 @@ describe('the entry and the screen', () => {
     } finally { setTechnicalLayerVisible(true); restore(); }
   });
 
+  it.each([false, true])('counts only listed exceptions and all running or interrupted tasks past the attention cap (developer=%s)', developer => {
+    const exceptions = Array.from({ length: 50 }, (_, n) => item('analysis-failed', { itemId: 'failed-' + n, group: 'exceptions' }));
+    const book = { bookId: 'other-book', title: '另一本书' };
+    const running = Array.from({ length: 51 }, (_, n) => item('analysis-running', { itemId: 'running-' + n, group: 'active', ...(n === 50 ? { book } : {}) }));
+    const moved = (['analysis-resumable', 'review-continuable', 'analysis-waiting-connection'] as const)
+      .map(state => item(state, { itemId: state, group: 'active', book }));
+    const bounded = projection({ exceptions, active: running.slice(0, 50) }, { exceptions: 51, active: running.length + moved.length });
+    const tasks = composeTaskOverview(projection({ active: [...running, ...moved] }), 2, () => null);
+    const visible = visibleGlobalAttention(bounded, tasks, developer);
+    expect(visible.groups[0]!.items.map(row => row.itemId)).toEqual(expect.arrayContaining(moved.map(row => row.itemId)));
+    expect(visible.groups[0]!.total).toBe(53);
+    expect(visible.actionableCount).toBe(visible.groups.flatMap(group => group.items).length);
+    expect(visible.inProgress).toBe(51);
+    expect(visible.inProgress).toBe(taskNavigationCount(tasks));
+    const scoped = visibleGlobalAttention(bounded, tasks, developer, book.bookId);
+    expect(scoped.actionableCount).toBe(3);
+    expect(scoped.inProgress).toBe(1);
+    expect(visibleGlobalAttention(bounded, { groups: [] }, developer).actionableCount).toBe(50);
+  });
+
   it('filters shelved learning targets from both the ordinary attention badge and its items, restoring them in developer mode', () => {
     const restore = installMiniDom();
     setTechnicalLayerVisible(false);
@@ -138,7 +166,7 @@ describe('the entry and the screen', () => {
       const data = projection({ decisions: [learning, item('analysis-prepared', { itemId: 'plan', group: 'decisions' })],
         exceptions: [item('analysis-failed')], recent: [item('analysis-completed', { group: 'recent' })] });
       const listeners = new Set<(reading: GlobalAttentionReading) => void>();
-      const reader: GlobalAttentionReader = { refresh: () => { for (const listener of listeners) listener({ kind: 'projection', projection: data }); },
+      const reader: GlobalAttentionReader = { refresh: () => { for (const listener of listeners) listener({ kind: 'projection', projection: data, tasks: composeTaskOverview(data, 2, () => null) }); },
         subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, interrupt: () => undefined };
       const entry = document.createElement('button');
       const root = document.createElement('main');

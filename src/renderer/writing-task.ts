@@ -58,7 +58,7 @@ export interface WritingTaskSurface {
   /** Read 新建文档 · 写作任务 again and paint it; a Run under way is followed until it settles. */
   refresh(): void;
   /** The sheet for one type, its 稿件题目 already written when the editor wrote it first (Issue #1404). */
-  open(typeId: string, title?: string): void;
+  open(typeId: string | null, title?: string): void;
   destroy(): void;
 }
 

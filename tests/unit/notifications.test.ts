@@ -484,7 +484,7 @@ describe('a Run started from the Task Drawer reaches the observer', () => {
       const running = { ...projection([item({ group: 'active', state: 'analysis-running', itemId: 'run' })]), running: true };
       const settled = projection([item({ group: 'recent', state: 'analysis-completed', itemId: 'outcome' })]);
       let current = projection([]);
-      const reader = createGlobalAttentionReader({ inspectGlobalAttention: async () => current });
+      const reader = createGlobalAttentionReader({ inspectGlobalAttention: async () => current, inspectTaskOverview: async () => composeTaskOverview(current, 2, () => null) });
       const completed = vi.fn();
       const observe = createNotificationObserver({ api: { notify: vi.fn(async () => {}) }, focused: () => true, completed, startedAt: START });
       reader.subscribe((reading) => { if (reading.kind === 'projection') observe(reading.projection); });
@@ -639,16 +639,16 @@ describe('a task that needs the editor (#1528)', () => {
     const restore = installMiniDom();
     try {
       const button = miniDocument.createElement('button'); miniDocument.body.append(button);
-      type Reading = { kind: 'projection'; projection: GlobalAttentionProjection } | { kind: 'unavailable' };
+      type Reading = { kind: 'projection'; projection: GlobalAttentionProjection; tasks: Pick<TaskOverviewProjection, 'groups'> } | { kind: 'unavailable' };
       let listener: (reading: Reading) => void = () => {};
       const open = vi.fn();
       mountAttentionPill({ button: button as unknown as HTMLElement, reader: { subscribe: (next: typeof listener) => { listener = next; return () => {}; } } as never, open });
-      listener({ kind: 'projection', projection: projection([item(), item({ itemId: 'two', group: 'exceptions', state: 'analysis-failed' })]) });
+      listener({ kind: 'projection', tasks: { groups: [] }, projection: projection([item(), item({ itemId: 'two', group: 'exceptions', state: 'analysis-failed' })]) });
       expect(button.hidden).toBe(false);
       expect(button.textContent).toBe('待我处理 2');
-      listener({ kind: 'projection', projection: projection([]) });
+      listener({ kind: 'projection', tasks: { groups: [] }, projection: projection([]) });
       expect(button.hidden).toBe(true);
-      listener({ kind: 'projection', projection: projection([item()]) });
+      listener({ kind: 'projection', tasks: { groups: [] }, projection: projection([item()]) });
       button.click();
       expect(open).toHaveBeenCalledOnce();
     } finally { restore(); }

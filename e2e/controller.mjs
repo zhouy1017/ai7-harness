@@ -1736,6 +1736,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-credential-saved',
     'model-credential-removed',
     'panel-open',
+    'panel-launch-menu',
     'panel-prepare',
     'panel-start',
     'panel-stop-wording',

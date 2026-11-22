@@ -85,7 +85,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   const all = el('button', 'quiet'); all.addEventListener('click', () => void perform(async () => { await options.api.controlAllTasks({ action: projection?.queueFrozen ? 'resume' : 'pause' }); }));
   const context = el('span', 'task-overview-context'); headingRow.append(heading, context, start); if (!options.bookId) headingRow.append(all);
   const filters = el('div', 'task-overview-filters'); const host = el('div', 'task-overview-groups');
-  if (options.bookId) { heading.hidden = true; context.hidden = true; selectedType = 'all'; selectedTime = 'all'; }
+  if (options.bookId) { start.hidden = true; heading.hidden = true; context.hidden = true; selectedType = 'all'; selectedTime = 'all'; }
   // The page's one sentence while it holds tasks; with none, the sentence in its place is the empty page's.
   const note = el('p', 'field-note', '队列顺序保存在本次使用中；重新启动后按发起顺序排列。'); note.hidden = true;
   const sheet = createSheet('task-overview-sheet'); options.root.append(headingRow, filters, host, note, sheet);
