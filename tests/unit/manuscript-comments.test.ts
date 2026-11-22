@@ -331,6 +331,29 @@ describe('comments command parity and refresh continuity', () => {
     else if(leaveAgain){const input=node.querySelector<HTMLTextAreaElement>('textarea')!;input.focus();(input as unknown as MiniElement).dispatchEvent({type:'focusin',bubbles:true});miniDocument.activeElement=miniDocument.body;(input as unknown as MiniElement).dispatchEvent({type:'focusout',bubbles:true,relatedTarget:null});await paint();expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull();expect(ui.scroll.querySelector('[data-mark-draft-row]')).not.toBeNull();expect(ui.focus).not.toHaveBeenCalled();}
     else {expect(ui.scroll.querySelector('[data-mark-composer]')===node).toBe(true);submit.focus();form.dispatchEvent({type:'submit'});await paint();expect(ui.create).toHaveBeenCalledTimes(2);expect(markDrafts.list(windowOf())).toEqual([]);expect(ui.focus).toHaveBeenCalledTimes(1);}
   });
+  it.each(['body','elsewhere'])('folds after a refused textarea shortcut later loses focus to %s, retaining the exact draft (#1689)', async destination => {
+    const ui=mount();await paint();const {node,input}=await draftComposer(ui);ui.create.mockRejectedValueOnce(new Error('synthetic refusal'));
+    const form=node.querySelector<HTMLFormElement>('form')!;
+    Object.assign(form,{requestSubmit:()=> (form as unknown as MiniElement).dispatchEvent({type:'submit'})});
+    input.focus();(input as unknown as MiniElement).dispatchEvent({type:'keydown',key:'Enter',ctrlKey:true,bubbles:true});await paint();
+    expect(ui.create).toHaveBeenCalledTimes(1);expect(document.activeElement).toBe(input);expect(ui.scroll.querySelector('[data-mark-composer]')).toBe(node);
+    const other=document.createElement('button');miniDocument.body.append(other as unknown as MiniElement);
+    if(destination==='body')miniDocument.activeElement=miniDocument.body;else other.focus();
+    (input as unknown as MiniElement).dispatchEvent({type:'focusout',relatedTarget:destination==='body'?null:other,bubbles:true});await paint();
+    expect(ui.scroll.querySelector('[data-mark-composer]')===null).toBe(true);expect(ui.scroll.querySelector('[data-mark-draft-row]')).not.toBeNull();
+    expect(markDrafts.list(windowOf())[0]?.body).toBe('公开合成撰写草稿');expect(ui.focus).not.toHaveBeenCalled();expect(ui.create).toHaveBeenCalledTimes(1);
+    if(destination==='elsewhere')expect(document.activeElement).toBe(other);
+    ui.scroll.querySelector<HTMLButtonElement>('[data-mark-draft-row]')!.click();await paint();
+    expect(ui.scroll.querySelector<HTMLTextAreaElement>('[data-mark-composer] textarea')?.value).toBe('公开合成撰写草稿');expect(ui.create).toHaveBeenCalledTimes(1);
+  });
+  it('does not claim another control\'s BODY blur after a focused-button send (#1689)', async () => {
+    const ui=mount();await paint();const {node,input}=await draftComposer(ui);ui.create.mockRejectedValueOnce(new Error('synthetic refusal'));
+    node.querySelector<HTMLButtonElement>('[data-mark-action="submit"]')!.focus();
+    (node.querySelector('form') as unknown as MiniElement).dispatchEvent({type:'submit'});await paint();
+    miniDocument.activeElement=miniDocument.body;
+    (input as unknown as MiniElement).dispatchEvent({type:'focusout',relatedTarget:null,bubbles:true});await paint();
+    expect(ui.scroll.querySelector('[data-mark-composer]')===null).toBe(true);expect(markDrafts.list(windowOf())[0]?.body).toBe('公开合成撰写草稿');expect(ui.create).toHaveBeenCalledTimes(1);expect(ui.focus).not.toHaveBeenCalled();
+  });
   it('separates the same reply place in two Books and restores a floating draft without focusing its field (#1689 R6)', async () => {
     const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
     const input = ui.pane.querySelector<HTMLTextAreaElement>('textarea')!; input.value = '公开合成图书甲回复';
