@@ -3979,12 +3979,8 @@ export class EditorialStore {
     return this.#analysisCall(() => this.#baselineAnalysis.reconcileStoppedRuns());
   }
 
-  cancellingLedgerRuns(): string[] {
-    return (this.#authority.prepare(`SELECT r.run_record_id FROM analysis_run_records r JOIN analysis_task_intents t
-      ON t.task_intent_id = r.task_intent_id WHERE t.kind <> ? AND (SELECT s.state FROM analysis_run_states s
-      WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) = 'cancelling'`).all(BASELINE_ANALYSIS_KIND) as SqlRow[])
-      .map((row) => asString(row.run_record_id));
-  }
+  finishStoppedReviewCancellations(owner: reviewOperations.CancellationOwner): Promise<void> { return reviewOperations.finishStoppedReviewCancellations(this.#reviewOperationsHost, owner); }
+  finishCancelledReviewRunWhenDone(owner: reviewOperations.CancellationOwner, runRecordId: string): Promise<void> { return reviewOperations.finishCancelledReviewRunWhenDone(this.#reviewOperationsHost, owner, runRecordId); }
 
   finishCancelledReviewRun(runRecordId: string): void {
     return reviewOperations.finishCancelledReviewRun(this.#reviewOperationsHost, runRecordId);
