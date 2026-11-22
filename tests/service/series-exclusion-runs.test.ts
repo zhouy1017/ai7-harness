@@ -325,7 +325,7 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       expect(store.cancelReviewRun(bookId, approved.reviewRunId).run!.state).toBe('cancelled');
       const fresh = prepare(store, bookId);
       expect(refusal(() => store.cancelReviewRun(bookId, fresh.reviewRunId)))
-        .toBe(`REVIEW_RUN_NOT_CANCELLABLE:只有显示「${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}」的审阅可以在这里取消任务。`);
+        .toBe('REVIEW_RUN_NOT_CANCELLABLE:这次审阅不能在这里取消；如有正在运行或已暂停的任务，请从任务计划中取消。');
     });
   }, 300_000);
 
