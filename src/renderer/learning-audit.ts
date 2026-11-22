@@ -253,7 +253,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       selection.clear();
       for (const entry of ticked) {
         const again = page.books.find((book) => book.bookId === entry.bookId)?.materials.find((candidate) => candidate.materialKey === entry.material.materialKey);
-        if (again !== undefined && again.digest === entry.material.digest) selection.set(again.materialKey, { bookId: entry.bookId, material: again });
+        if (again !== undefined && again.digest === entry.material.digest && again.standing === entry.material.standing) selection.set(again.materialKey, { bookId: entry.bookId, material: again });
       }
       batch = null;
       listRefusal = refusal;
@@ -382,7 +382,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     clear.disabled = busy;
     row.append(stop, clear);
     section.append(row);
-    if (!homogeneous()) section.append(el('p', 'field-note learning-audit-mismatch', LEARNING_AUDIT_BATCH_MISMATCH));
+    if (!homogeneous()) section.append(el('p', 'field-note learning-audit-mismatch', ordinary() ? '所选材料须来自同一本书、同一类型，且用于学习的范围相同（仅本书或本社），才能一起停止今后使用。' : LEARNING_AUDIT_BATCH_MISMATCH));
     if (batch !== null && !ordinary()) section.append(previewNode(batch, null, (materialKey) => {
       const entry = selection.get(materialKey);
       return entry === undefined ? null : nameOf(entry.material);
@@ -397,13 +397,14 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     if (projection === null) return;
     const parts: HTMLElement[] = [el('p', 'field-note learning-audit-note', ordinary() ? LEARNING_AUDIT_ORDINARY_NOTE : LEARNING_AUDIT_NOTE)];
     const filters = el('div', 'feedback-filters learning-audit-filters');
+    const dates = el('div', 'learning-audit-dates'); dates.append(dateFilter('from'), dateFilter('to'));
     filters.append(
       searchFilter(),
       select('book', [...knownBooks].sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0)).map(([bookId, title]) => [bookId, `《${title}》`] as const)),
       select('series', filterChoices.series.map((entry) => [entry.seriesId, entry.title] as const)),
       select('kind', LEARNING_MATERIAL_KINDS.map((kind) => [kind, LEARNING_AUDIT_KIND_LABELS[kind]] as const)),
       select('standing', LEARNING_AUDIT_STANDINGS.map((standing) => [standing, standingLabels()[standing]] as const)),
-      dateFilter('from'), dateFilter('to'),
+      dates,
     );
     parts.push(filters);
     // A house with more Books or Series than the filters list says so beside them (Issue #677).

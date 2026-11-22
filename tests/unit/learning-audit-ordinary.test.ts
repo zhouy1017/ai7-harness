@@ -47,8 +47,30 @@ function mounted(rows: LearningAuditMaterialProjection[], decide: (input: Parame
   };
   const setStatus = vi.fn();
   const view = mountLearningAudit({ root, api: api as never, openSourceVersion: vi.fn(), setStatus, errorMessage: (error, fallback) => error instanceof Error ? error.message : fallback });
-  return { root, api, setStatus, view, rows: () => Array.from(root.querySelectorAll<HTMLElement>('li.learning-audit-material')) };
+  return { root, api, setStatus, view, setRows: (rows: LearningAuditMaterialProjection[]) => { current = rows; }, rows: () => Array.from(root.querySelectorAll<HTMLElement>('li.learning-audit-material')) };
 }
+
+it('drops a selected material whose standing changed during a decision re-read', async () => {
+  const setup = mounted([material('a', 'pending'), material('b', 'house')], vi.fn());
+  await setup.view.load(); await settle();
+  const box = setup.root.querySelector<HTMLInputElement>('[data-material-key="b"] .learning-audit-select')!;
+  box.checked = true; (box as unknown as MiniElement).dispatchEvent({ type: 'change' }); await settle();
+  setup.setRows([material('a', 'pending'), material('b', 'excluded')]);
+  setup.rows()[0]!.querySelector<HTMLElement>('[data-learning-audit-action="decide-book"]')!.click(); await settle();
+  expect(setup.root.querySelector('[data-material-key="b"] .learning-audit-select')).toBeNull();
+  expect(setup.root.querySelector('.learning-audit-selected')?.textContent ?? '').not.toContain('已选 1 条');
+});
+
+it('records an ordinary re-inclusion through 确定', async () => {
+  const { root, api, view, rows } = mounted([material('a', 'excluded')], vi.fn());
+  await view.load(); await settle(); rows()[0]!.querySelector<HTMLElement>('[data-learning-audit-action="open"]')!.click(); await settle();
+  root.querySelector<HTMLElement>('[data-learning-audit-action="reinclude"]')!.click(); await settle();
+  const choice = Array.from(root.querySelectorAll<HTMLInputElement>('.learning-reinclude input')).find((input) => input.value === 'book')!;
+  choice.checked = true; (choice as unknown as MiniElement).dispatchEvent({ type: 'change' });
+  const confirm = root.querySelector<HTMLButtonElement>('[data-learning-audit-action="reinclude-record"]')!;
+  expect(confirm.textContent).toBe('确定'); confirm.click(); await settle();
+  expect(api.decideLearningMaterial).toHaveBeenCalledWith(expect.objectContaining({ materialKey: 'a', choice: 'book' }));
+});
 
 it('reads in an editor\'s words: no empty value, version label, time string or 审计详情, filters as dropdowns', async () => {
   const { root, view, rows } = mounted([material('a', 'pending'), material('b', 'pending', { automaticAdmission: { choice: 'house', sourceKeys: [] } }), material('c', 'house')], vi.fn());

@@ -12,7 +12,7 @@ beforeEach(() => { restore = installMiniDom(); setTechnicalLayerVisible(false); 
 afterEach(() => { vi.unstubAllGlobals(); setTechnicalLayerVisible(true); restore(); });
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
 function host(): HTMLElement { const root = document.createElement('main'); miniDocument.body.append(root as unknown as MiniElement); return root; }
-function click(root: HTMLElement, label: string): void { Array.from(root.querySelectorAll('button')).find((button) => button.textContent === label)!.click(); }
+function click(root: Element, label: string): void { Array.from(root.querySelectorAll('button')).find((button) => button.textContent === label)!.click(); }
 const ID = '10000000-0000-4000-8000-000000000001';
 const AT = '2026-11-06T12:00:00.000Z';
 const memory = (itemId: string, state: EditorialMemoryVersion['state']): EditorialMemoryVersion => ({
@@ -31,21 +31,97 @@ function learning() {
   };
   const change = (itemId: string, state: EditorialMemoryVersion['state']) => {
     page = { ...page, items: page.items.map((item) => item.current.itemId === itemId
-      ? { ...item, current: { ...item.current, state } as EditorialMemoryVersion, usable: state === 'active' } : item) }; return page;
+      ? { ...item, current: { ...item.current, state } as EditorialMemoryVersion, usable: state === 'active', row: { ...item.row, group: state === 'active' ? 'enabled' : state === 'proposed' ? 'pending' : 'disabled', reenable: state === 'inactive' ? { standing: 'allowed', sentence: '可以重新启用，恢复到停用前的样子。' } : null } } : item) }; return page;
   };
   let global = { categories: [{ categoryId: 'typos-and-usage', label: '错别字与规范用语' }], books: [], directives: [], items: [
-    { kind: 'preference', itemId: 'legacy', revisionId: 'legacy-version', categoryId: 'typos-and-usage', bookId: null, text: '沿用本社用语', state: 'active', lineage: [] },
+    { kind: 'preference', itemId: 'legacy', revisionId: 'legacy-version', categoryId: 'typos-and-usage', bookId: null, text: '沿用本社用语', state: 'active', lineage: [], row: { group: 'enabled', origin: 'editor', changedAt: AT, pausedInUse: false, pin: 'legacy-version', reenable: null as import('../../src/shared/protocol/learning.js').ReviewPreferenceRow['reenable'] } },
   ] };
   const api = {
     inspectEditorialLearning: vi.fn(async () => page), inspectGlobalAgent: vi.fn(async () => global),
     inspectHouseReviewPreference: vi.fn(async () => ({ current: null, history: [] })),
     acceptEditorialMemory: vi.fn(async (input: Parameters<RendererApi['acceptEditorialMemory']>[0]) => change(input.itemId, 'active')),
     deactivateEditorialMemory: vi.fn(async (input: Parameters<RendererApi['deactivateEditorialMemory']>[0]) => change(input.itemId, 'inactive')),
+    reenableReviewPreference: vi.fn(async (input: Parameters<RendererApi['reenableReviewPreference']>[0]) => change(input.itemId, 'active')),
+    deleteReviewPreference: vi.fn(async (input: Parameters<RendererApi['deleteReviewPreference']>[0]) => { page = { ...page, items: page.items.filter((item) => item.current.itemId !== input.itemId) }; return page; }),
     changeEditorialLearning: vi.fn(async (input: Parameters<RendererApi['changeEditorialLearning']>[0]) => { page = { ...page, enabled: input.kind === 'switch' ? input.enabled : page.enabled, controlEntries: 3 }; return page; }),
-    recordLearningSupervision: vi.fn(async () => (global = { ...global, items: global.items.map((item) => ({ ...item, state: 'inactive' })) })),
+    recordLearningSupervision: vi.fn(async () => (global = { ...global, items: global.items.map((item) => ({ ...item, state: 'inactive', row: { ...item.row, group: 'disabled', reenable: { standing: 'allowed' as const, sentence: '可以重新启用，恢复到停用前的样子。' } } })) })),
   } satisfies Partial<Record<keyof RendererApi, unknown>>;
-  return { api, renderer: api as unknown as RendererApi };
+  return { api, renderer: api as unknown as RendererApi, setPage: (next: EditorialLearningProjection) => { page = next; }, getPage: () => page };
 }
+
+it('moves the same entry through stop, re-enable and stop with one request and restored focus', async () => {
+  const root = host(); const { api, renderer } = learning(); await mountEditorialMemory(root, renderer, vi.fn());
+  const row = () => root.querySelector('[data-memory-item="active"]')!;
+  click(row(), '停用'); await settle();
+  expect(root.querySelector('[data-disabled-preferences]')!.textContent).toContain('统一术语');
+  const reenable = Array.from(row().querySelectorAll('button')).find((button) => button.textContent === '重新启用')!;
+  reenable.click(); reenable.click(); await settle();
+  expect(api.reenableReviewPreference).toHaveBeenCalledOnce();
+  expect(api.reenableReviewPreference).toHaveBeenCalledWith({ itemId: 'active', expectedRevisionId: 'active-version', actionId: expect.any(String) });
+  expect(document.activeElement?.textContent).toBe('停用');
+  click(row(), '停用'); await settle();
+  expect(document.activeElement?.textContent).toBe('重新启用');
+});
+
+it('confirms deletion inside the row, cancels without sending and submits a repeated press once', async () => {
+  const nativeConfirm = vi.fn(); vi.stubGlobal('confirm', nativeConfirm);
+  const root = host(); const { api, renderer } = learning(); await mountEditorialMemory(root, renderer, vi.fn());
+  const row = () => root.querySelector('[data-memory-item="active"]')!;
+  click(row(), '停用'); await settle(); click(row(), '删除…');
+  expect(row().textContent).toContain('删除审阅偏好「统一术语」？删除后它不再使用，也不再列在这里；学习回溯里的记录保留。删除后不能恢复。');
+  expect(document.activeElement?.textContent).toBe('取消');
+  click(row(), '取消'); expect(api.deleteReviewPreference).not.toHaveBeenCalled();
+  expect(document.activeElement?.textContent).toBe('删除…');
+  click(row(), '删除…');
+  (root.querySelector('.review-preference-confirm') as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'Escape', preventDefault() {}, stopPropagation() {} });
+  expect(root.querySelector('.review-preference-confirm')).toBeNull();
+  expect(document.activeElement?.textContent).toBe('删除…');
+  click(row(), '删除…');
+  const confirm = Array.from(row().querySelectorAll('button')).find((button) => button.textContent === '确认删除')!;
+  confirm.click(); confirm.click(); await settle();
+  expect(api.deleteReviewPreference).toHaveBeenCalledOnce(); expect(row()).toBeNull();
+  expect(nativeConfirm).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['REVIEW_PREFERENCE_CHANGED', '这条审阅偏好刚在别处改过，已重新读取。'],
+  ['REVIEW_PREFERENCE_ALREADY_REENABLED', '这条审阅偏好已经重新启用了。'],
+  ['REVIEW_PREFERENCE_DELETED', '这条审阅偏好已经删除了。'],
+  ['REVIEW_PREFERENCE_MERGED', '这条审阅偏好已并入另一条，不能单独重新启用。'],
+  ['REVIEW_PREFERENCE_MATERIAL_STOPPED', '这条审阅偏好依据的学习材料已停止今后使用，不能重新启用。'],
+])('keeps refusal %s inside deletion confirmation and reads both owners again', async (code, message) => {
+  const root = host(); const { api, renderer } = learning(); await mountEditorialMemory(root, renderer, vi.fn());
+  click(root.querySelector('[data-memory-item="active"]')!, '停用'); await settle();
+  const before = api.inspectGlobalAgent.mock.calls.length;
+  api.deleteReviewPreference.mockRejectedValueOnce({ code, message });
+  click(root.querySelector('[data-memory-item="active"]')!, '删除…'); click(root, '确认删除'); await settle();
+  expect(root.querySelector('.review-preference-confirm')!.textContent).toContain(message);
+  expect(api.inspectGlobalAgent.mock.calls.length).toBe(before + 1);
+  expect(api.inspectEditorialLearning).toHaveBeenCalledTimes(2);
+});
+
+it('uses the row projection for groups, provenance, pauses, local time and denied re-enable', async () => {
+  const root = host(); const setup = learning(); const page = setup.getPage();
+  setup.setPage({ ...page, items: page.items.map((item, index) => ({ ...item, history: [], row: { ...item.row,
+    group: index === 0 ? 'disabled' : 'enabled', origin: index === 0 ? 'editor' : 'ai', pausedInUse: index === 1,
+    reenable: index === 0 ? { standing: 'merged', sentence: '已并入另一条，不能单独重新启用。' } : null } })) });
+  await mountEditorialMemory(root, setup.renderer, vi.fn());
+  expect(root.querySelector('[data-disabled-preferences]')!.textContent).toContain(`${localInstantLabel(AT)}停用`);
+  expect(root.querySelector('[data-disabled-preferences]')!.textContent).not.toContain('AI 归纳');
+  expect(root.querySelector('[data-disabled-preferences]')!.textContent).toContain('已并入另一条');
+  expect(Array.from(root.querySelector('[data-disabled-preferences]')!.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['删除…']);
+  expect(root.querySelector('[data-memory-preferences]')!.textContent).toContain('AI 归纳 · 来源受限，暂停使用');
+  expect(root.textContent).not.toMatch(/记忆|2026-11-06T|active-version|candidate-version/u);
+});
+
+it('leaves a detached page and its status untouched when an action finishes', async () => {
+  const root = host(); const { api, renderer, getPage } = learning();
+  let finish!: (page: EditorialLearningProjection) => void;
+  api.deactivateEditorialMemory.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  await mountEditorialMemory(root, renderer, vi.fn()); click(root.querySelector('[data-memory-item="active"]')!, '停用');
+  const section = root.querySelector('section')!; const text = section.textContent; root.replaceChildren();
+  finish(getPage()); await settle(); expect(section.textContent).toBe(text);
+});
 
 it('puts candidates first, accepts and excludes them, disables memory and keeps ordinary metadata private', async () => {
   const root = host(); const { api, renderer } = learning();
@@ -58,10 +134,10 @@ it('puts candidates first, accepts and excludes them, disables memory and keeps 
   // Issue #1531: no raw time in ordinary mode; the history reads the local time.
   expect(root.querySelector('details')!.textContent).toContain(localInstantLabel(AT));
   expect(root.querySelector('details')!.textContent).not.toContain(AT);
-  click(root.querySelector('[data-memory-item="candidate"]')!, '接受记忆'); await settle();
+  click(root.querySelector('[data-memory-item="candidate"]')!, '接受'); await settle();
   expect(api.acceptEditorialMemory).toHaveBeenCalledWith(expect.objectContaining({ itemId: 'candidate', expectedVersionId: 'candidate-version' }));
   click(root.querySelector('[data-memory-item="candidate"]')!, '停用'); await settle();
-  expect(root.querySelector('[data-memory-item="candidate"]')!.textContent).toContain('已停用');
+  expect(root.querySelector('[data-disabled-preferences] [data-memory-item="candidate"]')!.textContent).toContain(`${localInstantLabel(AT)}停用`);
   const second = learning(); await mountEditorialMemory(host(), second.renderer, vi.fn());
   const candidate = document.body.querySelectorAll<HTMLElement>('[data-memory-item="candidate"]')[1]!;
   click(candidate, '排除'); await settle();
@@ -76,7 +152,7 @@ it('keeps the local switch and legacy preference disable connected to their exis
   expect(root.querySelector<HTMLInputElement>('[data-learning-enabled]')!.checked).toBe(false);
   click(root.querySelector('[data-review-preference="legacy"]')!, '停用'); await settle();
   expect(api.recordLearningSupervision).toHaveBeenCalledWith(expect.objectContaining({ operation: 'deactivate', targets: [{ itemId: 'legacy', revisionId: 'legacy-version' }] }));
-  expect(root.querySelector('[data-review-preference="legacy"]')!.textContent).toContain('已停用');
+  expect(root.querySelector('[data-disabled-preferences] [data-review-preference="legacy"]')!.textContent).toContain(`${localInstantLabel(AT)}停用`);
 });
 
 it('preserves the developer budget, signal synthesis and full memory lineage', async () => {

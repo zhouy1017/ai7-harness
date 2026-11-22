@@ -826,6 +826,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'snapshot-none-comparison',
   ]),
   'J-12': Object.freeze([
+    'review-preference-lifecycle',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
