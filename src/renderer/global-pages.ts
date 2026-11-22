@@ -137,12 +137,12 @@ function renderGlobalAttention(bookId?: string | null): void {
 }
 
 /** Global cross-Book task queue (Issue #1328): the page is a projection; records remain Book-owned. */
-function openOverviewTask(item: TaskOverviewItemProjection, view: 'plan' | 'run' | 'redo' = 'run'): void {
+function openOverviewTask(item: TaskOverviewItemProjection, view: 'plan' | 'run' | 'redo' | 'cancel' | 'unconfirmed' = 'run'): void {
   state.overviewDrawerBookId = item.bookId;
   const finder = () => [...screen.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === item.itemId) ?? null;
   if (item.target.kind === 'task-intent-draft') taskDrawer.openDraft(item.target.bookId, item.target.draftId, finder);
   else if (item.target.kind === 'dialogue') taskDrawer.openDialogue(item.target.bookId, item.target.dialogueId, finder);
-  else if (item.bookId && item.plan) taskDrawer.open({ bookId: item.bookId, ...item.plan }, finder, undefined, { view: view === 'redo' ? 'plan' : view, redo: view === 'redo', row: item });
+  else if (item.bookId && item.plan) taskDrawer.open({ bookId: item.bookId, ...item.plan }, finder, undefined, { view: view === 'redo' || view === 'cancel' ? 'plan' : view === 'unconfirmed' ? 'run' : view, redo: view === 'redo', cancel: view === 'cancel', unconfirmed: view === 'unconfirmed', row: item });
 }
 /**
  * A task's notice. A finished task opens its result where the editor is (查看结果, #1528), without the global 任务 page; any other
@@ -183,7 +183,7 @@ function renderTaskOverview(focusItemId?: string): void {
   const surface = mountTaskOverview({ root: content, api: api, setStatus, beforeStart: settleScreen,
     onChanged: () => globalAttentionReader.refresh(),
     onProjection: (projection) => { const count = projection.runningCount + projection.queuedCount + projection.actionableCount; taskNavigationBadge.textContent = String(count); taskNavigationBadge.hidden = count === 0; },
-    openTarget: openOverviewTask,
+    openTarget: openOverviewTask, openRecord: (item) => void openGlobalAttentionTarget(item.target), openNetworkProxySettings: () => void renderModelServiceSettings(),
     openBook: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }),
     jumpToSelection: (item) => { if (item.bookId && item.selection) void jumpToSelectionText(item.bookId, item.selection); },
     openResult: (item) => void openResult(item, 'overview'), closeDrawer: () => taskDrawer.close(true),

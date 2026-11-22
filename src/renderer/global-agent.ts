@@ -497,7 +497,7 @@ export function mountGlobalAgent(options: {
     directives.replaceChildren(el('h3', '学习监督与治理记录'));
     // Times are local (plan #1516 §5), in the app's one instant format; the stored instant stays ISO in the directive record.
     for (const directive of projection.directives) {
-      directives.append(el('p', `${directive.ordinal} · ${directive.text || '停用所选审阅偏好'} · ${localInstantLabel(directive.recordedAt)}`));
+      directives.append(el('p', `${directive.ordinal} · ${directive.text || (directive.operation === 'reactivate' ? '重新启用所选审阅偏好' : directive.operation === 'retire' ? '删除所选审阅偏好' : '停用所选审阅偏好')} · ${localInstantLabel(directive.recordedAt)}`));
     }
     historyList.replaceChildren();
     for (const dialogue of projection.history) {
