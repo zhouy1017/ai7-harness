@@ -113,12 +113,15 @@ it('resumes each phase, imports the older package and recovers missing old files
   const newObject = (await fileDigest(join(roots.inputRoot,'sample1-edited.docx')))!.sha256;
   const newKey = join('objects','sha256',newObject.slice(0,2),newObject+'.docx');
   expect(existsSync(join(root,newKey))).toBe(true);
-  await rm(join(root,newKey));
-  await beginUpgradeRollback(root);
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'DATABASE_PACKAGE_INCOMPLETE'});
-  expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
-  expect(existsSync(join(root,'shell','storage-upgrade.json'))).toBe(false);
-  await cp(join(roots.inputRoot,'sample1-edited.docx'),join(root,newKey));
+  const incomplete = join(roots.inputRoot,'incomplete-current');
+  await cp(root,incomplete,{recursive:true});
+  await rm(join(incomplete,newKey));
+  await beginUpgradeRollback(incomplete);
+  await expect(resumeUpgrade(incomplete,'0.8.0')).rejects.toMatchObject({code:'DATABASE_PACKAGE_INCOMPLETE'});
+  expect(storeRevisionOnDisk(join(incomplete,'store','ai7.sqlite'))).toBe(117);
+  expect(existsSync(join(incomplete,'shell','storage-upgrade.json'))).toBe(true);
+  await cp(join(roots.inputRoot,'sample1-edited.docx'),join(incomplete,newKey));
+  expect(await resumeUpgrade(incomplete,'0.8.0')).toMatchObject({restored:true});
   await rm(join(root,original.find(member => member.path.startsWith('objects/'))!.path));
   await beginUpgradeRollback(root);
   const interruptedCopy = join(root,'store','payloads');
@@ -174,10 +177,21 @@ it('resumes each phase, imports the older package and recovers missing old files
   await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'save-new') throw Error('power loss'); })).rejects.toThrow('power loss');
   const kept = (await readdir(root)).find(name => name.startsWith('store-before-0.8.0-'))!;
   const away = join(roots.inputRoot,'old-library-away');
+  // The post-upgrade snapshot already exists, but the current database has not moved.
+  await rm(join(root,newKey));
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  expect((await fileDigest(join(root,newKey)))?.sha256).toBe(newObject);
+  expect(existsSync(phase)).toBe(false);
+  await beginUpgradeRollback(root);
+  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'save-new') throw Error('power loss'); })).rejects.toThrow('power loss');
   await rename(join(root,kept),away);
   await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
   expect(existsSync(phase)).toBe(false);
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
+  expect((await fileDigest(join(root,newKey)))?.sha256).toBe(newObject);
+  const recoveredCurrent = await EditorialStore.open(root,roots.codeRoot);
+  try { expect(recoveredCurrent.listBooks(null).items).toHaveLength(2); }
+  finally { recoveredCurrent.markCleanShutdown(); recoveredCurrent.close(); }
   await rename(away,join(root,kept));
   await beginUpgradeRollback(root);
   await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'publish-old') throw Error('power loss'); })).rejects.toThrow('power loss');
@@ -268,6 +282,12 @@ it.each(['convert','verify','save-old','publish','record'] as const)('catches mi
   await cp(roots.dataRoot,root,{recursive:true});
   await beginUpgrade(root);
   await expect(resumeUpgrade(root,'0.8.0',phase => { if(phase === stage) throw Error('power loss'); })).rejects.toThrow('power loss');
+  const journal = JSON.parse(await readFile(join(root,'shell','storage-upgrade.json'),'utf8'));
+  const note = join(root,'shell','upgrade-'+journal.id);
+  if (stage === 'convert' || stage === 'publish') await rm(join(note,'payloads.json'));
+  const copies = join(note,'copies');
+  await mkdir(copies,{recursive:true});
+  await writeFile(join(copies,'next-file.partial'),Buffer.alloc(16));
   const missing = (await databasePackageSources(root)).find(member => member.member.startsWith('objects/'))!;
   if (stage === 'verify' || stage === 'record') await writeFile(missing.path,Buffer.alloc(0));
   else await rm(missing.path);
@@ -282,6 +302,7 @@ it.each(['convert','verify','save-old','publish','record'] as const)('catches mi
   expect(repaired?.sha256).toBe(manifest.members.find(member => member.path === missing.member)!.sha256);
   const old = await legacy.openLegacy(root);
   try { expect(old.listBooks(null).items).toHaveLength(2); } finally { old.markCleanShutdown(); old.close(); }
+  expect((await databasePackageSources(root)).some(file => file.member.endsWith('.partial'))).toBe(false);
 },180_000);
 
 it('refuses an altered revision 117 store before final publication',async () => {
@@ -294,6 +315,28 @@ it('refuses an altered revision 117 store before final publication',async () => 
   await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
 });
+
+it('rebuilds the original manifest from the backup across both sides of the old directory rename',async () => {
+  const root = join(roots.inputRoot,'recover-original-manifest');
+  await cp(roots.dataRoot,root,{recursive:true});
+  await beginUpgrade(root);
+  const phase = join(root,'shell','storage-upgrade.json');
+  const stop = (at: string) => resumeUpgrade(root,'0.8.0',stage => { if (stage === at) throw Error('interrupted'); });
+  await expect(stop('convert')).rejects.toThrow('interrupted');
+  const stale = JSON.parse(await readFile(phase,'utf8'));
+  const manifest = join(root,'shell','upgrade-'+stale.id,'payloads.json');
+  const original = await fileDigest(manifest);
+  await rm(manifest);
+  await expect(stop('publish')).rejects.toThrow('interrupted');
+  expect(await fileDigest(manifest)).toEqual(original);
+  expect(existsSync(join(root,'store'))).toBe(false);
+  await rm(manifest);
+  await writeFile(phase,JSON.stringify(stale));
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  expect(await fileDigest(manifest)).toEqual(original);
+  const verified = await EditorialStore.open(root,roots.codeRoot);
+  try { expect(verified.listBooks(null).items).toHaveLength(2); } finally { verified.markCleanShutdown(); verified.close(); }
+},180_000);
 
 it.runIf(process.platform === 'win32')('recovers from a locked fallback directory and a subsequently damaged published old store',async () => {
   const root = join(roots.inputRoot,'locked-fallback');
@@ -323,6 +366,8 @@ it.runIf(process.platform === 'win32')('recovers from a locked fallback director
   expect(existsSync(join(priorExtraction,'interrupted.partial'))).toBe(false);
   const {id} = JSON.parse(await readFile(phase,'utf8'));
   await rm(join(root,'shell','upgrade-'+id,'current-files.json'));
+  // The store rename survived while the journal's restore -> save-new -> publish-old updates did not.
+  await writeFile(phase,JSON.stringify(start));
   const incoming = join(replacementStagingFor(join(root,'shell','upgrade-'+id,'restore')),'incoming','store');
   // A Windows process holds its working directory against rename until it exits.
   const lock = spawn(process.execPath,['-e',"process.stdout.write('ready');process.stdin.resume()"],{cwd:incoming,windowsHide:true,stdio:['pipe','pipe','ignore']});
