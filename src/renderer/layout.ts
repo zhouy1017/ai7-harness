@@ -362,10 +362,24 @@ export function renderViewSettings(view: ViewPreferences, setStatus: (message: s
     input.step = String(bounds.step);
     input.dataset['viewTypography'] = key;
     const output = el('output', 'field-note');
-    input.addEventListener('input', () => { output.textContent = words(Number(input.value)); input.setAttribute('aria-valuetext', output.textContent); });
-    input.addEventListener('change', () => saved(view.adjustTypography({ [key]: key === 'lineHeight' ? Math.round(Number(input.value) * 100) / 100 : Number(input.value) })));
+    const showValue = () => { output.textContent = words(Number(input.value)); input.setAttribute('aria-valuetext', output.textContent); };
+    let pendingWrites = 0;
+    const paint = (state: ViewState) => {
+      if (pendingWrites !== 0) return;
+      input.value = String(state.typography[key]);
+      showValue();
+    };
+    input.addEventListener('input', showValue);
+    input.addEventListener('change', () => {
+      const requested = input.value;
+      pendingWrites += 1;
+      saved(view.adjustTypography({ [key]: key === 'lineHeight' ? Math.round(Number(requested) * 100) / 100 : Number(requested) }).finally(() => {
+        pendingWrites -= 1;
+        if (input.value === requested) paint(view.current);
+      }));
+    });
     label.append(input, output);
-    return { label, input, output, words };
+    return { label, paint };
   };
   const fontSize = range(FONT_SIZE_LABEL, 'fontSize', fontSizeValue);
   const lineHeight = range(LINE_HEIGHT_LABEL, 'lineHeight', lineHeightValue);
@@ -395,12 +409,7 @@ export function renderViewSettings(view: ViewPreferences, setStatus: (message: s
     for (const input of density.inputs) input.checked = input.value === state.density;
     for (const input of preset.inputs) input.checked = input.value === state.typography.preset;
     family.value = state.typography.fontFamily;
-    for (const control of [fontSize, lineHeight, columnWidth]) {
-      const value = state.typography[control.input.dataset['viewTypography'] as 'fontSize' | 'lineHeight' | 'columnWidth'];
-      control.input.value = String(value);
-      control.output.textContent = control.words(value);
-      control.input.setAttribute('aria-valuetext', control.output.textContent);
-    }
+    for (const control of [fontSize, lineHeight, columnWidth]) control.paint(state);
     for (const input of alignment.inputs) input.checked = input.value === state.typography.alignment;
     for (const { region, row } of regionRows) {
       const width = state.regions[region];

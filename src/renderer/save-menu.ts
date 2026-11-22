@@ -14,8 +14,8 @@ export function saveMenuPersistenceLine(state: SaveMenuPersistence, changedSince
   return changedSince === null ? persistence : `${persistence} · ${changedSince}`;
 }
 
-/** Hosts the existing milestone form unchanged; the persistence words remain independently visible. */
-export function createSaveMenu(form: HTMLElement, exportManuscript: () => void): {
+/** Hosts the existing milestone form unchanged; the persistence words remain independently visible. 导入新版本… sits above 导出…. */
+export function createSaveMenu(form: HTMLElement, importNewVersion: () => void, exportManuscript: () => void): {
   element: HTMLElement;
   /** `null` until the editor has reported its persistence state. */
   update(state: SaveMenuPersistence | null, changedSince: string | null): void;
@@ -36,9 +36,12 @@ export function createSaveMenu(form: HTMLElement, exportManuscript: () => void):
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-editing-protection'] });
   render();
   const body = document.createElement('div'); body.className = 'editor-save-menu-body';
+  const importAction = createButton(); importAction.type = 'button'; importAction.textContent = SAVE_MENU_WORDS.importNewVersion;
+  importAction.dataset['importNewVersion'] = 'manuscript';
+  importAction.addEventListener('click', () => { menu.open = false; importNewVersion(); });
   const exportAction = createButton(); exportAction.type = 'button'; exportAction.textContent = SAVE_MENU_WORDS.exportManuscript;
   exportAction.addEventListener('click', () => { menu.open = false; exportManuscript(); });
-  body.append(form, exportAction); menu.append(summary, body);
+  body.append(form, importAction, exportAction); menu.append(summary, body);
   menu.addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.preventDefault(); menu.open = false; summary.focus(); } });
   return { element: menu, update: (state, changedSince) => { latest = { state, changedSince }; render(); }, destroy: () => observer.disconnect() };
 }

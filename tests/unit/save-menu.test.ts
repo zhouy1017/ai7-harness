@@ -30,7 +30,7 @@ describe('the manuscript save menu persistence facts', () => {
 
   it('hosts the same form, offers export, and removes saved presentation in protection mode', () => {
     const form = document.createElement('details'); form.className = 'milestone-section';
-    const exporter = vi.fn(); const menu = createSaveMenu(form, exporter);
+    const importer = vi.fn(); const exporter = vi.fn(); const menu = createSaveMenu(form, importer, exporter);
     expect(menu.element.querySelector('.milestone-section')).toBe(form);
     expect(menu.element.querySelector('summary')?.textContent).toBe('正在确认修订日志 ▾');
     expect(menu.element.dataset['persistence']).toBe('unconfirmed');
@@ -44,7 +44,10 @@ describe('the manuscript save menu persistence facts', () => {
     document.documentElement.dataset['editingProtection'] = 'active'; observers[0]!.changed();
     expect(menu.element.querySelector('summary')?.textContent).toBe('修订日志写入待确认 ▾');
     expect(menu.element.dataset['persistence']).toBe('unconfirmed');
-    menu.element.querySelector('button')!.click(); expect(exporter).toHaveBeenCalledTimes(1);
+    const actions = [...menu.element.querySelectorAll<HTMLButtonElement>('.editor-save-menu-body button')];
+    expect(actions.map((action) => action.textContent)).toEqual(['导入新版本…', '导出…']);
+    actions[0]!.click(); expect(importer).toHaveBeenCalledTimes(1); expect(exporter).not.toHaveBeenCalled();
+    actions[1]!.click(); expect(exporter).toHaveBeenCalledTimes(1); expect(importer).toHaveBeenCalledTimes(1);
     menu.destroy(); expect(observers[0]!.disconnect).toHaveBeenCalledTimes(1);
   });
 });
