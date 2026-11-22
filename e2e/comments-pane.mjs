@@ -1,6 +1,6 @@
 import { pointerClick, pointerElementDescription, pointerFailureDetail } from './dispatch-chooser.mjs';
 import { SIDEBAR, manuscriptRailJump, sidebarNavigate } from './controller.mjs';
-import { loadEveryMark, assertCardActionReachable } from './marks-paging.mjs';
+import { loadEveryMark, assertCardActionReachable, assertCommentsHeader } from './marks-paging.mjs';
 
 // Docking is possible only when an icon sidebar leaves the full reading measure, padding and edge rail. The rail counts at its
 // design width (4.75rem), never at the page's own measured width, so a rail moved on top of the pane cannot excuse an overlay.
@@ -227,24 +227,11 @@ export async function seedCommentsPane(renderer, check, waitFor, size = {width:1
     pane.querySelector('[data-mark-category-filter="editor"]').click();
     const input=pane.querySelector('[data-mark-search-input]'); input.value='公开合成批注 2'; input.dispatchEvent(new Event('input',{bubbles:true}));
     globalThis.__commentsSearch=input;
-    const measure=()=>{
-      const heading=document.querySelector('.manuscript-comments-heading'),filters=document.querySelector('.editorial-mark-filters');
-      return {heading:heading.getBoundingClientRect().height,filters:filters.getBoundingClientRect().height,headerText:heading.textContent,
-        rows:Array.from(filters.children).map(node=>({className:node.className,hidden:node.hidden,display:getComputedStyle(node).display,height:node.getBoundingClientRect().height,text:node.matches('.marks-paging,.editorial-mark-filter-summary,.editorial-mark-disclosure')?node.textContent:null})),
-        popover:pane.querySelector('.editorial-mark-filter-popover').matches(':popover-open'),viewport:[innerWidth,innerHeight]};
-    };
-    let measured=measure(),stable=false;
-    for(let turn=0;turn<30&&!stable;turn++){
-      const before=JSON.stringify(measured);
-      await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
-      measured=measure();stable=before===JSON.stringify(measured);
-    }
-    return {cardsReady,inlineReady,...measured,stable,headerReady:stable&&measured.heading+measured.filters<=84};
+    return {cardsReady,inlineReady};
   })()`);
-  console.log('COMMENTS_HEADER/'+JSON.stringify(category));
   check(category.cardsReady,'comments-category-badges-and-search-cards',category);
   check(category.inlineReady,'comments-category-badges-and-search-words',category);
-  check(category.cardsReady&&category.inlineReady&&category.headerReady,'comments-category-badges-and-search',category);
+  await assertCommentsHeader(renderer,check,waitFor,'comments-category-badges-and-search');
   await waitFor(renderer, `(() => {
     const pane=document.querySelector('.manuscript-comments-pane');
     return __comments.ids.every((id,index)=>pane.querySelector('[data-comment-card="'+id+'"]')?.hidden===(index!==2)) &&

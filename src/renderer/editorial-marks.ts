@@ -805,12 +805,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     errorMessage: (error, fallback) => options.errorMessage(error, fallback),
     setStatus: (message, tone) => options.setStatus(message, tone),
   });
-  filterBar.append(disclosureLine, filterSummary, paging.row, filterPopover);
+  filterBar.append(filterSummary, filterPopover);
   const commentsCanvas = el('div', 'manuscript-comments-canvas');
   commentsCanvas.setAttribute('role', 'list');
   commentsCanvas.setAttribute('aria-label', '当前可见区域批注');
   commentsScroll.append(commentsCanvas);
-  options.comments?.host.append(filterBar, commentsScroll);
+  options.comments?.host.append(filterBar, disclosureLine, paging.row, commentsScroll);
   const leaders = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   leaders.classList.add('manuscript-comments-leaders');
   leaders.setAttribute('aria-hidden', 'true');
@@ -977,6 +977,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const book = options.bookPending?.read();
     const text = book === undefined ? '' : bookPendingLabel(book.places.length, book.truncated);
     if (bookPending.textContent !== text) bookPending.textContent = text;
+    bookPending.title = text ? `${text}。${COMMENTS_TRIAGE_WORDS.bookPendingTitle}` : COMMENTS_TRIAGE_WORDS.bookPendingTitle;
   }
   function layoutComments(): void {
     paintBookPending();
@@ -1035,6 +1036,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     filterSummary.hidden = !filtering;
     const summary = `已筛选 ${matching.size} / ${comments.length}${matching.size === 0 ? ' · 没有匹配的批注' : ''}`;
     if (filterSummary.textContent !== summary) filterSummary.textContent = summary;
+    filterSummary.title = summary;
     const viewport = options.scroll.getBoundingClientRect();
     const listed = comments.flatMap(mark => {
       if (!matching.has(mark.markId)) return [];
@@ -3714,6 +3716,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       options.host.removeEventListener('pointerdown', onTextPointerDown, { capture: true });
       options.host.removeEventListener('pointerout', onMarkHover);
       filterBar.remove();
+      disclosureLine.remove();
+      paging.row.remove();
       leaders.remove();
       editor.setLinkedMark(null);
       editor.setVisibleMarkIds(null);

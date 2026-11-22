@@ -4,7 +4,7 @@ import { commentsMarksPaging, railJump } from './marks-paging.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile, appendFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -177,23 +177,7 @@ async function attachRenderer(browser) {
     send,
     evaluate: async (expression) => {
       const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-      if (response.exceptionDetails) await writeFile(join(ROOT, '.cache', '1604-evaluate-failure.json'), JSON.stringify({ location, exception: response.exceptionDetails, caller: new Error().stack }));
       requireJourney(!response.exceptionDetails, 'renderer-evaluate', localDebugEnabled() ? response.exceptionDetails : undefined);
-      // Temporary baseline-only geometry probe; no manuscript content is read or retained.
-      const value=response.result.value;
-      if(value&&typeof value==='object'&&(value.label==='显示更多'||value.headerReady!==undefined)) {
-        const original=(await send('Runtime.evaluate',{expression:'({width:innerWidth,height:innerHeight})',returnByValue:true})).result.value;
-        try {
-          for(const size of [{width:1164,height:781},{width:1008,height:681}]) {
-            await send('Emulation.setDeviceMetricsOverride',{...size,deviceScaleFactor:1,mobile:false});
-            const measured=await send('Runtime.evaluate',{expression:`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>{const pane=document.querySelector('.manuscript-comments-pane'),box=node=>{const r=node.getBoundingClientRect();return [r.left,r.top,r.width,r.height]};resolve({viewport:[innerWidth,innerHeight],pane:box(pane),scroll:box(pane.querySelector('.manuscript-comments-scroll')),heading:box(pane.querySelector('.manuscript-comments-heading')),filters:box(pane.querySelector('.editorial-mark-filters')),notices:[...pane.querySelectorAll('.marks-paging,.editorial-mark-disclosure')].map(node=>({hidden:node.hidden,box:box(node)}))});})))`,awaitPromise:true,returnByValue:true});
-            await appendFile(join(ROOT,'.cache','1604-header-baseline.jsonl'),JSON.stringify({location,kind:value.label==='显示更多'?'paged':'loaded',...measured.result.value})+'\n');
-          }
-        } finally {
-          await send('Emulation.setDeviceMetricsOverride',{...original,deviceScaleFactor:1,mobile:false});
-          await send('Runtime.evaluate',{expression:'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))',awaitPromise:true,returnByValue:true});
-        }
-      }
       return response.result.value;
     },
   };

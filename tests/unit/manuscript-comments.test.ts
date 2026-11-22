@@ -356,6 +356,8 @@ describe('comments command parity and refresh continuity', () => {
     const ui = mount({ ...card, body: '【未联网核查】公开合成说明' }); await paint();
     const line = ui.pane.querySelector<HTMLElement>('.editorial-mark-disclosure')!;
     expect(line.hidden).toBe(false);
+    expect(line.parentElement).toBe(ui.pane);
+    expect(ui.pane.querySelector('.marks-paging')?.parentElement).toBe(ui.pane);
     const search = ui.pane.querySelector<HTMLInputElement>('[data-mark-search-input]')!;
     search.value = '没有这个词'; (search as unknown as MiniElement).dispatchEvent({ type: 'input' }); await paint();
     expect(line.hidden).toBe(true); expect(ui.pane.querySelector('.editorial-mark-filter-summary')?.textContent).toContain('没有匹配的批注');
@@ -381,6 +383,7 @@ describe('comments command parity and refresh continuity', () => {
     const shown = () => Array.from(ui.pane.querySelectorAll<HTMLElement>('[data-comment-card]')).filter(node => !node.hidden).map(node => node.dataset['commentCard']);
     expect(shown()).toEqual(['model-a']);
     expect(ui.pane.querySelector('.editorial-mark-filter-summary')?.textContent).toBe('已筛选 1 / 3');
+    expect(ui.pane.querySelector<HTMLElement>('.editorial-mark-filter-summary')?.title).toBe('已筛选 1 / 3');
     ui.refresh(); await paint(); expect(shown()).toEqual(['model-a']);
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-model-filter="模型乙"]')!.click(); await paint(); expect(shown()).toEqual(['model-a', 'model-b']);
   });
@@ -998,6 +1001,7 @@ describe('comments command parity and refresh continuity', () => {
     const paragraph = document.createElement('p'); paragraph.dataset['blockId'] = 'far-block'; ui.host.append(paragraph);
     ui.setPage({ ...atPage('block', 1, 0), marks: [anchor()] }); await paint(); await ui.open(); await paint();
     expect(ui.pane.querySelector('[data-comments-book-pending]')?.textContent).toBe('全书待处理 3');
+    expect(ui.pane.querySelector<HTMLElement>('[data-comments-book-pending]')?.title).toContain('全书待处理 3');
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-category-filter="editor"]')!.click(); await paint();
     // Under a category filter the service names the mark (#1604): no window is probed, and the step starts from the selected card.
     ui.find.mockResolvedValueOnce({ mark: { markId: 'far', blockId: 'far-block', fromGrapheme: 0 } });
