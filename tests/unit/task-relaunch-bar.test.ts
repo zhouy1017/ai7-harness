@@ -30,7 +30,7 @@ afterEach(() => { setTechnicalLayerVisible(true); vi.unstubAllGlobals(); uninsta
 function mount(relaunch: NonNullable<TaskPlanProjection['relaunch']>, api: Partial<Record<keyof RelaunchApi, unknown>>) {
   const full = { getModelServiceSettings: async () => { throw new Error('none'); }, getPreferences: async () => ({ values: preferenceDefaults() }),
     previewTaskLaunch: vi.fn(async () => ({ steps: ['读稿'], scope: '全书', units: 1, reference: [], send: '稿件', usage: '用量', adaptations: [] })),
-    controlTaskRun: vi.fn(async () => ({})), ...api } as unknown as RelaunchApi;
+    controlTaskRun: vi.fn(async () => ({})), inspectTaskPlan: vi.fn(async () => ({ state: { key: 'cancelled-after-start' }, runControl: null })), ...api } as unknown as RelaunchApi;
   const calls = { openRun: vi.fn(), onStale: vi.fn(), onRecorded: vi.fn(), setStatus: vi.fn() };
   const plan = { ...taskPlanFixture({ kind: relaunch.operation === 'launchReviewRun' ? 'review-run' : 'writing' }), bookId: BOOK, ref: SOURCE.ref, relaunch };
   const mounted = mountRelaunch({ api: full, plan, relaunch, title: '重新开始…', interrupted: false, settle: async () => true,
@@ -62,6 +62,17 @@ describe('重新开始… (Issue #1680)', () => {
     const { bookId: _book, ...copied } = WRITING.input as Record<string, unknown>;
     expect(second).toMatchObject(copied);
     expect(second).not.toHaveProperty('bookId');
+  });
+
+  it('launches only once the cancellation it sent has settled', async () => {
+    const inspectTaskPlan = vi.fn().mockResolvedValueOnce({ state: { key: 'cancelling' }, runControl: { cancelling: true } }).mockResolvedValue({ state: { key: 'cancelled-after-start' }, runControl: null });
+    const launchWritingTask = vi.fn(async () => ({ taskIntentId: 'new', runRecordId: 'run' }));
+    const { calls } = mount(WRITING, { inspectTaskPlan, launchWritingTask });
+    await vi.waitFor(() => expect(start().disabled).toBe(false));
+    start().click();
+    await vi.waitFor(() => expect(calls.openRun).toHaveBeenCalledOnce());
+    expect(inspectTaskPlan).toHaveBeenCalledTimes(2);
+    expect(inspectTaskPlan.mock.invocationCallOrder[1]!).toBeLessThan(launchWritingTask.mock.invocationCallOrder[0]!);
   });
 
   it('offers the cancellation first when a preview needs it, then shows the preview', async () => {

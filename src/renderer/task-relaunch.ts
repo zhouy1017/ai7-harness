@@ -17,7 +17,7 @@ export const TASK_RELAUNCH_KEPT_HEADING = '重新开始后';
 export const TASK_RELAUNCH_CANCEL_FIRST = '取消任务';
 export const TASK_RELAUNCH_CANCELLED = '已取消这项任务，可以查看重新开始后的计划。';
 
-export type RelaunchApi = LaunchBarApi & Pick<RendererApi, 'launchReviewRun' | 'cancelReviewRun' | 'cancelBaselineAnalysisRun' | 'cancelWaitingBaselineAnalysis' | 'cancelWaitingTask' | 'controlTaskRun'>;
+export type RelaunchApi = LaunchBarApi & Pick<RendererApi, 'launchReviewRun' | 'cancelReviewRun' | 'cancelBaselineAnalysisRun' | 'cancelWaitingBaselineAnalysis' | 'cancelWaitingTask' | 'controlTaskRun' | 'inspectTaskPlan'>;
 
 export interface MountRelaunchOptions extends Omit<MountLaunchBarOptions, 'api' | 'request'> {
   readonly api: RelaunchApi;
@@ -66,10 +66,20 @@ export function mountRelaunch(options: MountRelaunchOptions): Relaunch {
   const { api, relaunch } = options;
   let cancelled = false;
   let cancelling: Promise<void> | null = null;
-  /** The cancellation the recipe needs, sent at most once. */
+  /**
+   * The cancellation the recipe needs, sent at most once; the launch waits until it has settled — a Run that stops at its next
+   * boundary reads 正在取消 a moment first, and the service accepts the recipe only once the source is terminal.
+   */
+  const settled = async (): Promise<void> => {
+    for (let turn = 0; turn < 120; turn += 1) {
+      const current = await api.inspectTaskPlan({ kind: options.plan.kind, ref: options.plan.ref });
+      if (current.state.key !== 'cancelling' && current.runControl?.cancelling !== true) return;
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+  };
   const cancelFirst = (): Promise<void> => {
     if (relaunch.cancelsFirst === null || cancelled) return Promise.resolve();
-    cancelling ??= sendRelaunchCancellation(api, relaunch.cancelsFirst).then(() => { cancelled = true; }).finally(() => { cancelling = null; });
+    cancelling ??= sendRelaunchCancellation(api, relaunch.cancelsFirst).then(settled).then(() => { cancelled = true; }).finally(() => { cancelling = null; });
     return cancelling;
   };
   const stale = (error: unknown): void => { if (options.errorCode(error) === RELAUNCH_STALE) options.onStale(options.errorMessage(error, '这项任务已经变化，请重新打开任务后再开始。')); };
