@@ -21,6 +21,7 @@ import { type AnalysisTabId } from './baseline-analysis-card.js';
 import { type RecoveryReturnContext } from './import-review.js';
 import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
 import { taskOverviewApi } from './task-overview-api.js';
+import { paintTaskNavigationBadge } from './task-navigation-badge.js';
 import { finishedResultRoute, type ResultEntrance } from './result-destination.js';
 import type { RendererApi, TaskOverviewItemProjection } from '../shared/protocol.js';
 
@@ -182,7 +183,7 @@ function renderTaskOverview(focusItemId?: string): void {
   const content = panel(); content.classList.add('task-overview');
   const surface = mountTaskOverview({ root: content, api: api, setStatus, beforeStart: settleScreen,
     onChanged: () => globalAttentionReader.refresh(),
-    onProjection: (projection) => { const count = projection.runningCount + projection.queuedCount + projection.actionableCount; taskNavigationBadge.textContent = String(count); taskNavigationBadge.hidden = count === 0; },
+    onProjection: (projection) => paintTaskNavigationBadge(taskNavigationBadge, projection),
     openTarget: openOverviewTask, openRecord: (item) => void openGlobalAttentionTarget(item.target), openNetworkProxySettings: () => void renderModelServiceSettings(),
     openBook: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }),
     jumpToSelection: (item) => { if (item.bookId && item.selection) void jumpToSelectionText(item.bookId, item.selection); },

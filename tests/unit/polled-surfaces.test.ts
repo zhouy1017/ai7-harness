@@ -19,8 +19,9 @@ it.each([false, true])('retains attention action or disclosure focus across two 
   setTechnicalLayerVisible(developer); const root = rootNode(); let tick = 0;
   const reader = createGlobalAttentionReader({ inspectGlobalAttention: async (): Promise<GlobalAttentionProjection> => ({
     actionableCount: 0, running: true, processing: { state: 'local' }, groups: [{ key: 'active', total: 1, items: [{
-      itemId: 'task', group: 'active', state: tick === 0 ? 'analysis-running' : tick === 1 ? 'analysis-pausing' : 'analysis-paused', blocked: false, at: new Date().toISOString(), book: { bookId: 'book', title: '公开合成书' },
-      object: { kind: 'analysis', mode: 'first-baseline' }, facts: { progress: { stage: 'units', unitsSettled: ++tick, unitsTotal: 10 }, categories: [], revisionOrdinal: null }, nextStep: 'view-run',
+      // An interrupted task 待我处理 lists among its exceptions (Issue #1680), whose reading changes on each poll.
+      itemId: 'task', group: 'active', state: 'analysis-resumable', blocked: false, at: new Date(Date.now() + tick * 1000).toISOString(), book: { bookId: 'book', title: '公开合成书' },
+      object: { kind: 'analysis', mode: 'first-baseline' }, facts: { progress: { stage: 'units', unitsSettled: ++tick, unitsTotal: 10 }, categories: [], revisionOrdinal: null, stopReason: 'shutdown' }, nextStep: 'view-run',
       target: { kind: 'analysis', bookId: 'book', taskIntentId: 'task' }, technical: [],
     }] }],
   }) });

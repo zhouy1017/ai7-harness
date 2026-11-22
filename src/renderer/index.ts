@@ -94,6 +94,7 @@ import { createBaselineAnalysisCard, analysisTabChoice, type AnalysisTabId } fro
 import { createImportReview, type RecoveryReturnContext } from './import-review.js';
 import { type TaskOverviewSurface } from './tasks-overview.js';
 import { taskOverviewApi } from './task-overview-api.js';
+import { mountTaskNavigationBadge } from './task-navigation-badge.js';
 import type { RendererApi } from '../shared/protocol.js';
 
 function requiredElement(selector: string): HTMLElement {
@@ -816,22 +817,8 @@ const shell = mountShell({
   },
 });
 
-// 任务's sidebar badge follows the same read-only projection as the page (Issue #1328).
-const taskNavigationBadge = element('span', 'task-navigation-badge');
-taskNavigationBadge.setAttribute('aria-hidden', 'true');
-const taskNavigationLink = document.querySelector<HTMLElement>('[data-nav-destination="tasks"]');
-if (taskNavigationLink !== null) {
-  taskNavigationLink.append(taskNavigationBadge);
-  const refreshTaskBadge = (): void => {
-    void api.inspectTaskOverview().then((projection) => {
-      const count = projection.runningCount + projection.queuedCount + projection.actionableCount;
-      taskNavigationBadge.textContent = count > 0 ? String(count) : '';
-      taskNavigationBadge.hidden = count === 0;
-    }, () => undefined);
-  };
-  taskNavigationBadge.hidden = true;
-  globalAttentionReader.subscribe((reading) => { if (reading.kind === 'projection') refreshTaskBadge(); });
-}
+// 任务's sidebar badge: the tasks in progress, from the same read-only projection as the page (Issue #1328, #1680).
+const taskNavigationBadge = mountTaskNavigationBadge(document.querySelector<HTMLElement>('[data-nav-destination="tasks"]'), api, globalAttentionReader, () => element('span'));
 
 // Another window may have pinned or opened a Book: the list is read again whenever this one gains focus.
 window.addEventListener('focus', () => void shellPreferences.load().catch(() => undefined));

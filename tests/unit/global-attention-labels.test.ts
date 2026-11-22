@@ -113,8 +113,14 @@ describe('the entry and the screen', () => {
         surface.start();
         return { root, surface, startTask };
       };
-      const some = mount(projection({ exceptions: [item('analysis-failed')], recent: [item('analysis-completed', { group: 'recent' })] }));
-      expect(Array.from(some.root.querySelectorAll<HTMLElement>('section.global-attention-group'), (group) => group.dataset['attentionGroup'])).toEqual(['exceptions', 'recent']);
+      // Issue #1680: only 异常与结果待确认 and 等待你的决定; an interrupted task joins the exceptions, what runs is one line, what finished
+      // is the 任务 page's.
+      const some = mount(projection({ exceptions: [item('analysis-failed')], active: [item('analysis-resumable', { group: 'active', itemId: 'resumable' }), item('analysis-running', { group: 'active', itemId: 'running' })],
+        recent: [item('analysis-completed', { group: 'recent' })] }));
+      expect(Array.from(some.root.querySelectorAll<HTMLElement>('section.global-attention-group'), (group) => group.dataset['attentionGroup'])).toEqual(['exceptions']);
+      expect(some.root.querySelectorAll('[data-attention-item]')).toHaveLength(2);
+      expect(some.root.querySelector<HTMLElement>('.global-attention-host')!.dataset['attentionCount']).toBe('2');
+      expect(some.root.querySelector('.global-attention-in-progress span')!.textContent).toBe('有 1 项任务正在进行。');
       expect(some.root.querySelector('.global-attention-empty')).toBeNull();
       some.surface.destroy();
       const none = mount(projection({}));

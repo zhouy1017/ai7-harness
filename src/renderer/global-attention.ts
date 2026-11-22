@@ -2,7 +2,8 @@ import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js
 import { identityWords, technicalLayerVisible } from './technical-layer.js';
 import { showToast } from './components/toast.js';
 import { attentionPillLabel } from './notification-labels.js';
-import type { GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../shared/protocol.js';
+import { taskInProgress } from './task-card-view.js';
+import { GLOBAL_ATTENTION_COUNTED_GROUPS, type GlobalAttentionItemProjection, type GlobalAttentionProjection, type RendererApi } from '../shared/protocol.js';
 import {
   GLOBAL_ATTENTION_ENTRY_LABEL,
   GLOBAL_ATTENTION_HEADING,
@@ -10,6 +11,8 @@ import {
   GLOBAL_ATTENTION_NONE,
   GLOBAL_ATTENTION_START,
   GLOBAL_ATTENTION_STATUS_LINES,
+  GLOBAL_ATTENTION_VIEW_TASKS,
+  globalAttentionInProgressLine,
   GLOBAL_ATTENTION_TECHNICAL_ITEM,
   globalAttentionEntryView,
   globalAttentionGroupCounts,
@@ -36,14 +39,23 @@ export const GLOBAL_ATTENTION_POLL_MS = 2_000;
 
 type AttentionApi = Pick<RendererApi, 'inspectGlobalAttention'>;
 
-/** Ordinary attention counts only the reachable items in this bounded reading, like a Book-filtered list. */
-export function visibleGlobalAttention(projection: GlobalAttentionProjection, developerMode: boolean): GlobalAttentionProjection {
-  if (developerMode) return projection;
-  const groups = projection.groups.map((group) => {
-    const items = group.items.filter((item) => item.target.kind !== 'learning-materials');
-    return { ...group, items, total: items.length };
+/** A task that cannot go on without the editor, listed among the exceptions though the service files it under 运行中 (Issue #1680). */
+const NEEDS_THE_EDITOR: ReadonlySet<GlobalAttentionItemProjection['state']> = new Set(['analysis-resumable', 'review-continuable', 'analysis-waiting-connection']);
+
+/**
+ * What 待我处理 lists (Issue #1680; item 8.2 of #1539): only 异常与结果待确认 and 等待你的决定 — a task that cannot go on without the
+ * editor among the exceptions — and how many tasks are in progress, which the 任务 page lists. Its count is the count of what it
+ * lists, in ordinary and developer mode; ordinary mode also leaves out what it cannot reach (学习材料, a developer page).
+ */
+export function visibleGlobalAttention(projection: GlobalAttentionProjection, developerMode: boolean): GlobalAttentionProjection & { inProgress: number } {
+  const reachable = (item: GlobalAttentionItemProjection): boolean => developerMode || item.target.kind !== 'learning-materials';
+  const active = projection.groups.find((group) => group.key === 'active')?.items ?? [];
+  const groups = GLOBAL_ATTENTION_COUNTED_GROUPS.map((key) => projection.groups.find((group) => group.key === key) ?? { key, items: [], total: 0 }).map((group) => {
+    const items = [...group.items, ...(group.key === 'exceptions' ? active.filter((item) => NEEDS_THE_EDITOR.has(item.state)) : [])].filter(reachable);
+    return { ...group, items, total: items.length + Math.max(0, group.total - group.items.length) };
   });
-  return { ...projection, groups, actionableCount: groups.reduce((count, group) => count + (globalAttentionGroupCounts(group.key) ? group.total : 0), 0) };
+  return { ...projection, groups, actionableCount: groups.reduce((count, group) => count + group.total, 0),
+    inProgress: active.filter((item) => taskInProgress(item.state)).length };
 }
 
 export type GlobalAttentionReading =
@@ -285,12 +297,23 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     return node;
   }
 
-  function nothingWaiting(): HTMLElement {
+  function nothingWaiting(inProgress: number): HTMLElement {
     const none = el('section', 'global-attention-none');
     const start = el('button', 'primary', GLOBAL_ATTENTION_START); start.type = 'button'; start.dataset['attentionStart'] = '';
     start.addEventListener('click', () => options.startTask?.());
     none.append(el('p', undefined, GLOBAL_ATTENTION_NONE), start);
+    if (inProgress > 0) none.append(inProgressLine(inProgress));
     return none;
+  }
+
+  /** 「有 N 项任务正在进行。」 with 查看任务: what is under way is the 任务 page's, never listed here (Issue #1680). */
+  function inProgressLine(count: number): HTMLElement {
+    const line = el('p', 'global-attention-in-progress');
+    line.dataset['attentionInProgress'] = String(count);
+    const open = el('button', 'quiet', GLOBAL_ATTENTION_VIEW_TASKS); open.type = 'button'; open.dataset['attentionViewTasks'] = '';
+    open.addEventListener('click', () => options.openTasks?.());
+    line.append(el('span', undefined, globalAttentionInProgressLine(count)), ' ', open);
+    return line;
   }
 
   function groupNode(view: GlobalAttentionGroupView, projection: GlobalAttentionProjection): HTMLElement {
@@ -308,12 +331,11 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     section.setAttribute('aria-labelledby', headingId);
     section.append(groupHeading);
     const list = el('ol', 'global-attention-items');
-    for (const item of view.key === 'active' ? view.items.slice(0, 3) : view.items) {
+    for (const item of view.items) {
       const entry = group?.items.find((candidate) => candidate.itemId === item.itemId);
       if (entry !== undefined) list.append(itemNode(item, entry));
     }
     section.append(list);
-    if (view.key === 'active') { const all = el('button', 'quiet', '在任务总览里看全部'); all.addEventListener('click', () => options.openTasks?.()); section.append(all); }
     return section;
   }
 
@@ -332,7 +354,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     loading.remove();
     // A group is drawn only while it holds an item; with none at all the page is one sentence and the way to start a task.
     const shown = globalAttentionView(projection).filter((view) => view.empty === null);
-    host.replaceChildren(...(shown.length > 0 ? shown.map((view) => groupNode(view, projection)) : [nothingWaiting()]));
+    host.replaceChildren(...(shown.length > 0 ? [...shown.map((view) => groupNode(view, projection)), ...(projection.inProgress > 0 ? [inProgressLine(projection.inProgress)] : [])] : [nothingWaiting(projection.inProgress)]));
     lede.hidden = readAll.hidden = shown.length === 0;
     if (opening) for (const button of host.querySelectorAll<HTMLButtonElement>('button.global-attention-open')) button.disabled = true;
     restoreInteraction();
