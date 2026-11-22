@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { requireBaselineSchema } from './baseline-schema.js';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
 import {
-  DATA_VERSION_MARKER_FILE, DataVersionLedger, readDataVersionMarker, readUpgrade, SCHEMA_REVISION_CLASSES,
+  DATA_VERSION_MARKER_FILE, DataVersionLedger, readDataVersionMarker, readDataVersionMarkerText, readUpgrade, SCHEMA_REVISION_CLASSES,
   storeRevisionOnDisk, type DataVersionUpgrade
 } from './data-version.js';
 import { DATABASE_PACKAGE_STORE_MEMBER, databasePackageSources, openPackageStore, verifyCopiedPayloads, type DatabasePackageMember } from './database-exports.js';
@@ -15,7 +15,7 @@ import { extractReplacement, readSmallFile, replacementStagingFor, writeAtomic }
 import { fileDigest } from './manuscript-export.js';
 import { backupLocationFor } from './scheduled-backups.js';
 import { requireStore } from './store-records.js';
-import { backUpBeforeUpgrade, readPendingUpgrade } from './upgrade-backup.js';
+import { backUpBeforeUpgrade, prepareUpgradeBackupAttempt, readPendingUpgrade } from './upgrade-backup.js';
 import { convertUpgradeStore, requireUpgradeSource, verifyUpgradeStore } from './upgrade-store.js';
 
 const stages = ['backup', 'convert', 'verify', 'save-old', 'publish', 'record', 'return-old', 'restore', 'save-new', 'publish-old', 'return-new'] as const;
@@ -33,7 +33,9 @@ interface UpgradeState {
   currentDigest?: string;
   currentManifestDigest?: string;
   rollbackAttempt?: string;
+  upgradeRecordId?: string;
   backupStoreBytes?: number;
+  backupStoreDigest?: string;
   backupPayloadBytes?: number;
 }
 const journal = (root: string) => join(root, 'shell', 'storage-upgrade.json');
@@ -139,7 +141,9 @@ async function backupMembers(root: string, state: UpgradeState): Promise<Databas
   const {manifest} = await verifyDatabasePackage(archive,{dataRoot:scratch,expectedSha256:state.backup!.backup.sha256})
     .finally(() => rm(scratch,{recursive:true,force:true}));
   const files = manifest.members.filter(member => member.path !== DATABASE_PACKAGE_STORE_MEMBER);
-  state.backupStoreBytes = manifest.members.find(member => member.path === DATABASE_PACKAGE_STORE_MEMBER)!.bytes;
+  const store = manifest.members.find(member => member.path === DATABASE_PACKAGE_STORE_MEMBER)!;
+  state.backupStoreBytes = store.bytes;
+  state.backupStoreDigest = createHash('sha256').update(store.sha256).digest('hex');
   state.backupPayloadBytes = files.reduce((total,member) => total + member.bytes,0);
   return files;
 }
@@ -152,7 +156,7 @@ async function rememberMembers(root: string, state: UpgradeState): Promise<void>
 
 async function originalMembers(root: string, state: UpgradeState, rebuild = true): Promise<DatabasePackageMember[]> {
   const path = manifestFile(root,state);
-  let json = await readSmallFile(path,MAX_MANIFEST_BYTES);
+  let json = await readSmallFile(path,MAX_MANIFEST_BYTES).catch(() => null);
   if (json === null || createHash('sha256').update(json).digest('hex') !== state.payloadManifestDigest) {
     requireStore(rebuild,'UPGRADE_FILES_INVALID','升级前的文件清单需要从备份恢复。');
     const fromArchive = JSON.stringify(await backupMembers(root,state));
@@ -203,16 +207,26 @@ async function sourceFingerprint(root: string, dir: string): Promise<string> {
   return createHash('sha256').update(databaseFile.sha256).update(log?.bytes ? log.sha256 : '').digest('hex');
 }
 
-async function verifyCurrentLibrary(root: string,dir: string,state: UpgradeState,files: DatabasePackageMember[]): Promise<void> {
+async function verifyCurrentIdentity(root: string,dir: string,state: UpgradeState): Promise<void> {
   requireStore((await readState(join(dir,originFile)))?.id === state.id,'UPGRADE_MISMATCH','当前书库与升级记录不一致。');
+  const marker = readDataVersionMarkerText(await readSmallFile(join(dir,DATA_VERSION_MARKER_FILE),4096) ?? '');
+  requireStore(marker.dataVersion === 2 && marker.schemaRevision === 117,'UPGRADE_MISMATCH','新版书库的启动标记不一致。');
   const sql = await checkedStore(root,dir);
   const db = openPackageStore(sql);
   try {
     requireBaselineSchema(db);
+    const ledger = new DataVersionLedger(db).standing();
+    requireStore(ledger.latest?.dataVersion === 2 && ledger.latest.schemaRevision === 117 &&
+      ledger.upgrades.some(entry => entry.recordId === state.upgradeRecordId && entry.upgrade?.backup.sha256 === state.backup?.backup.sha256),
+      'UPGRADE_MISMATCH','新版数据库的升级记录与保留的书库不一致。');
     requireStore(db.prepare('PRAGMA integrity_check').get()?.integrity_check === 'ok' && !db.prepare('PRAGMA foreign_key_check').get(),
       'UPGRADE_MISMATCH','当前书库未通过完整性核对。');
   } finally { db.close(); }
-  await verifyCopiedPayloads(sql,files,117);
+}
+
+async function verifyCurrentLibrary(root: string,dir: string,state: UpgradeState,files: DatabasePackageMember[]): Promise<void> {
+  await verifyCurrentIdentity(root,dir,state);
+  await verifyCopiedPayloads(database(dir),files,117);
 }
 
 async function liveCurrentIsComplete(root: string,state: UpgradeState): Promise<boolean> {
@@ -241,16 +255,25 @@ async function copyCurrentDatabase(root: string,from: string,to: string): Promis
 }
 
 async function recoverCurrentDatabase(root: string,dir: string,note: string,state: UpgradeState): Promise<void> {
-  if (await sourceFingerprint(root,dir).catch(() => null) === state.currentDigest) return;
+  const intact = await sourceFingerprint(root,dir).catch(() => null) === state.currentDigest;
+  if (intact && await verifyCurrentIdentity(root,dir,state).then(() => true,() => false)) return;
   const spare = join(note,'current-database');
   requireStore(typeof state.currentDigest === 'string' && await sourceFingerprint(root,spare) === state.currentDigest &&
-    (await readState(join(dir,originFile)))?.id === state.id,'UPGRADE_MISMATCH','无法核对保留的新版数据库。');
+    (intact || (await readState(join(dir,originFile)))?.id === state.id),'UPGRADE_MISMATCH','无法核对保留的新版数据库。');
+  await verifyCurrentIdentity(root,spare,state);
   const damaged = await ensureCanonicalDataDirectory(note,'damaged-sqlite-'+randomUUID());
-  for (const suffix of ['','-wal','-shm','-journal']) {
-    const found = await inspectCanonicalDataFile(root,dir,'ai7.sqlite'+suffix);
-    if (found.exists) await rename(found.path,join(damaged,'ai7.sqlite'+suffix));
+  if (!intact) {
+    for (const suffix of ['','-wal','-shm','-journal']) {
+      const found = await inspectCanonicalDataFile(root,dir,'ai7.sqlite'+suffix);
+      if (found.exists) await rename(found.path,join(damaged,'ai7.sqlite'+suffix));
+    }
+    await copyCurrentDatabase(root,spare,dir);
   }
-  await copyCurrentDatabase(root,spare,dir);
+  for (const name of [originFile,DATA_VERSION_MARKER_FILE]) {
+    const found = await inspectCanonicalDataFile(root,dir,name);
+    if (found.exists) await copyFile(found.path,join(damaged,name));
+    await writeAtomic(found.path,(await readSmallFile(join(spare,name),16384))!);
+  }
   requireStore(await sourceFingerprint(root,dir) === state.currentDigest,'UPGRADE_MISMATCH','新版数据库恢复核对失败。');
 }
 
@@ -265,7 +288,8 @@ export async function beginUpgrade(root: string): Promise<void> {
 
 async function verifyOld(root: string, state: UpgradeState, rebuild = true): Promise<string> {
   const old = join(root, 'store-before-0.8.0-' + state.id);
-  requireStore(await sourceFingerprint(root, old) === state.sourceDigest, 'UPGRADE_SOURCE_CHANGED', '原书库已变化。');
+  const digest = await sourceFingerprint(root,old);
+  requireStore(digest === state.sourceDigest || digest === state.backupStoreDigest, 'UPGRADE_SOURCE_CHANGED', '原书库已变化。');
   const path = database(old);
   const db = openPackageStore(path);
   try {
@@ -280,10 +304,12 @@ async function verifyOld(root: string, state: UpgradeState, rebuild = true): Pro
 
 async function currentMembers(note: string,state: UpgradeState,snapshot: string): Promise<DatabasePackageMember[]> {
   const path = join(note,'current-files.json');
-  let json = await readSmallFile(path,MAX_MANIFEST_BYTES);
+  let json = await readSmallFile(path,MAX_MANIFEST_BYTES).catch(() => null);
   if (json === null || createHash('sha256').update(json).digest('hex') !== state.currentManifestDigest) {
     // The directory rename can survive without the manifest rename on Windows.
-    json = JSON.stringify(await readMembers(snapshot));
+    const redundant = await readSmallFile(join(note,'current-database','files.json'),MAX_MANIFEST_BYTES);
+    json = redundant !== null && createHash('sha256').update(redundant).digest('hex') === state.currentManifestDigest
+      ? redundant : JSON.stringify(await readMembers(snapshot));
     requireStore(createHash('sha256').update(json).digest('hex') === state.currentManifestDigest,
       'UPGRADE_FILES_INVALID','回退前的文件清单核对失败。');
     await writeAtomic(path,json);
@@ -291,7 +317,7 @@ async function currentMembers(note: string,state: UpgradeState,snapshot: string)
   return JSON.parse(json);
 }
 
-async function installMembers(root: string, source: string, expected: DatabasePackageMember[], note: string, preserved: DatabasePackageMember[]): Promise<void> {
+async function installMembers(root: string, sources: string[], expected: DatabasePackageMember[], note: string, preserved: DatabasePackageMember[]): Promise<void> {
   const wanted = new Map(expected.map(member => [member.path,member]));
   const stored = new Map(preserved.map(member => [member.path,member.sha256]));
   const needed = new Set(wanted.keys());
@@ -310,11 +336,38 @@ async function installMembers(root: string, source: string, expected: DatabasePa
     await copyPayloads(retained,root,new Set(changed.map(member => member.path)),note);
     await verifyMembers(retained,changed,true);
   }
-  await copyPayloads(root,source,needed,note);
+  for (const source of sources) {
+    if (!needed.size || !existsSync(source)) continue;
+    const verified = new Set<string>();
+    for (const file of await databasePackageSources(source)) {
+      if (!needed.has(file.member)) continue;
+      const want = wanted.get(file.member)!;
+      if (file.bytes !== want.bytes || (await fileDigest(file.path))?.sha256 !== want.sha256) continue;
+      verified.add(file.member);
+      needed.delete(file.member);
+    }
+    await copyPayloads(root,source,verified,note);
+  }
   await verifyMembers(root,expected,false);
   // Every current file was independently copied and verified before any live path was touched.
   for (const extra of extras) await rm(extra);
   await verifyMembers(root,expected,true);
+}
+
+async function reconcileSavedFiles(root: string,dir: string,note: string,state: UpgradeState,current: DatabasePackageMember[]): Promise<void> {
+  const saved = await ensureCanonicalDataDirectory(dir,'payloads');
+  try { await verifyMembers(saved,current,true); return; } catch { /* reconcile from verified members below */ }
+  const sources = [root,join(note,'previous-payloads'),join(note,'prepared-payloads'),join(replacementStagingFor(join(note,'restore')),'incoming')];
+  try { await installMembers(saved,sources,current,note,[]); }
+  catch (error) {
+    if ((error as {code?:string}).code !== 'UPGRADE_FILES_INVALID') throw error;
+    const archive = await verifyBackup(root,state);
+    const area = await ensureCanonicalDataDirectory(note,'recover-files');
+    const extraction = replacementStagingFor(area);
+    await extractReplacement(area,archive,state.backup!.backup.sha256);
+    try { await installMembers(saved,[join(extraction,'incoming')],current,note,[]); }
+    finally { for (const path of [extraction,area]) await rm(path,{recursive:true,force:true}); }
+  }
 }
 
 async function repairPayloads(root: string,note: string,incoming: string,live: DatabasePackageMember[],repair: Set<string>): Promise<void> {
@@ -417,7 +470,9 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
   const archiveRoot = join(note,'restore');
   const extraction = replacementStagingFor(archiveRoot);
   const incoming = join(extraction,'incoming');
-  await rm(join(note,'archive-verification'),{recursive:true,force:true});
+  for (const scratch of [join(note,'archive-verification'),join(note,'recover-files'),replacementStagingFor(join(note,'recover-files'))]) {
+    await rm(scratch,{recursive:true,force:true});
+  }
   const rollbackSource = () => state.fallback ? join(incoming,'store') : old;
   const advance = async (stage: Stage) => {
     state.stage = stage;
@@ -439,13 +494,18 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
       state.currentDigest = await sourceFingerprint(root,newer);
       requireStore(await sourceFingerprint(root,join(note,'current-database')) === state.currentDigest,
         'UPGRADE_MISMATCH','保留的两份新版数据库不一致。');
-      const files = await readMembers(join(newer,'payloads'));
-      const json = JSON.stringify(files);
       const remembered = await readSmallFile(join(note,'current-files.json'),MAX_MANIFEST_BYTES);
-      requireStore(remembered === json || JSON.stringify(await readMembers(root)) === json,'UPGRADE_FILES_INVALID','无法核对回退前的完整文件清单。');
-      await verifyCurrentLibrary(root,newer,state,files);
+      const sealed = await readSmallFile(join(note,'current-database','files.json'),MAX_MANIFEST_BYTES);
+      let json = sealed ?? remembered;
+      if (!json || json !== remembered) {
+        const physical = JSON.stringify(await readMembers(join(newer,'payloads')));
+        requireStore(physical === json || physical === JSON.stringify(await readMembers(root)),'UPGRADE_FILES_INVALID','无法核对回退前的完整文件清单。');
+        json = physical;
+      }
       state.currentManifestDigest = createHash('sha256').update(json).digest('hex');
       await writeAtomic(join(note,'current-files.json'),json);
+      await reconcileSavedFiles(root,newer,note,state,JSON.parse(json));
+      await verifyCurrentLibrary(root,newer,state,JSON.parse(json));
       await advance('return-new');
     }
   }
@@ -480,20 +540,23 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
     switch (state.stage) {
       case 'backup': {
         await ensureCanonicalDataDirectory(root, 'shell', basename(note), 'store');
+        const attemptArea = await prepareUpgradeBackupAttempt(root,note,state.id);
         const pending = await readPendingUpgrade(note);
         if (pending !== null) state.backup = pending.upgrade;
         else {
+          await upgradePreflight(root);
           const db = openPackageStore(await checkedStore(root, store));
           try {
             const result = await backUpBeforeUpgrade(db, root, {
               terminalRevision: 117, classes: SCHEMA_REVISION_CLASSES,
-              softwareVersion, now: new Date(), noteRoot: note
+              softwareVersion, now: new Date(), noteRoot: note, attemptArea
             });
             state.backup = result.upgrade;
           } finally { db.close(); }
         }
         requireStore(state.backup !== null, 'UPGRADE_BACKUP_FAILED', '未能建立升级前备份。');
         await rememberMembers(root,state);
+        await rm(attemptArea,{recursive:true,force:true});
         await advance('convert');
         break;
       }
@@ -502,7 +565,11 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         await ensureCanonicalDataDirectory(root, 'shell', basename(note), 'converted');
         convertUpgradeStore(await checkedStore(root, store), database(staging));
         const db = new DatabaseSync(await checkedStore(root,staging));
-        try { new DataVersionLedger(db).recordOpen({ dataVersion: 2, schemaRevision: 117, softwareVersion, upgrade: state.backup }); }
+        try {
+          const ledger = new DataVersionLedger(db);
+          ledger.recordOpen({ dataVersion: 2, schemaRevision: 117, softwareVersion, upgrade: state.backup });
+          state.upgradeRecordId = ledger.standing().latest!.recordId;
+        }
         finally { db.close(); }
         await advance('verify');
         break;
@@ -576,6 +643,7 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         const saved = join(store,'payloads');
         const prepared = join(note,'prepared-payloads');
         const previous = join(note,'previous-payloads');
+        await verifyCurrentIdentity(root,store,state);
         let current = await readMembers(root);
         const needed = new Map<string,{sha256:string;bytes:number}>();
         await verifyCopiedPayloads(database(store),current,117,undefined,undefined,(path,digest,bytes) => {
@@ -583,6 +651,15 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
           return true;
         });
         const repairBytes = [...needed.values()].reduce((total,file) => total + file.bytes,0);
+        await rm(join(note,'prepared-database'),{recursive:true,force:true});
+        if (existsSync(prepared)) {
+          // Retain solely the bytes which may still repair a live reference before measuring free space.
+          if (!needed.size) await rm(prepared,{recursive:true,force:true});
+          else for (const file of await databasePackageSources(prepared)) {
+            const want = needed.get(file.member);
+            if (!want || file.bytes !== want.bytes || (await fileDigest(file.path))?.sha256 !== want.sha256) await rm(file.path);
+          }
+        }
         // Reclaim this attempt's unfinished bytes before estimating either direct or backup rollback.
         for (const area of [extraction,archiveRoot,join(note,'copies')]) await rm(area,{recursive:true,force:true});
         let ready = old;
@@ -636,8 +713,11 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         state.currentDigest = await sourceFingerprint(root,store);
         const sqlCopy = await ensureCanonicalDataDirectory(note,'prepared-database');
         await copyCurrentDatabase(root,store,sqlCopy);
+        for (const file of [originFile,DATA_VERSION_MARKER_FILE]) await copyFile(join(store,file),join(sqlCopy,file));
+        await verifyCurrentLibrary(root,sqlCopy,state,current);
         requireStore(await sourceFingerprint(root,sqlCopy) === state.currentDigest,'UPGRADE_MISMATCH','回退前的数据库副本与原库不符。');
         await rm(join(note,'current-database'),{recursive:true,force:true});
+        await writeAtomic(join(sqlCopy,'files.json'),json);
         await rename(sqlCopy,join(note,'current-database'));
         state.rollbackDigest = await sourceFingerprint(root, ready);
         const receipt = JSON.stringify({...state,stage:'save-new'});
@@ -671,7 +751,7 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         const expected = await originalMembers(root,state);
         const current = await currentMembers(note,state,saved);
         await recoverCurrentDatabase(root,newer,note,state);
-        await verifyMembers(saved,current,true);
+        await reconcileSavedFiles(root,newer,note,state,current);
         await verifyCurrentLibrary(root,newer,state,current);
         await moveStore(root,rollbackSource(),store,async dir => {
           requireStore(await sourceFingerprint(root,dir) === state.rollbackDigest && storeRevisionOnDisk(database(dir)) === 116,
@@ -681,7 +761,7 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         try { await verifyMembers(root,expected,true); }
         catch {
           await verifyMembers(payloads,expected,state.fallback);
-          await installMembers(root,payloads,expected,note,current);
+          await installMembers(root,[payloads],expected,note,current);
         }
         await verifyFiles(root,database(store));
         before?.(state.stage, true);
@@ -689,6 +769,8 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         await verifyMembers(saved,current,true);
         if (state.fallback && existsSync(old)) await rename(old, join(root, 'shell', basename(old)));
         requireStore(await sourceFingerprint(root,store) === state.rollbackDigest, 'UPGRADE_STATE_INVALID', '旧数据库未能就位。');
+        const marker = await readDataVersionMarker(root);
+        requireStore(marker?.dataVersion === 1 && marker.schemaRevision === 116,'UPGRADE_MISMATCH','旧书库的启动标记不一致。');
         await rm(journal(root));
         // Keep the small manifests for journal replay when NTFS persists cleanup out of order.
         for (const area of [extraction,archiveRoot,join(note,'copies')]) await rm(area, { recursive: true, force: true }).catch(() => undefined);
@@ -705,20 +787,25 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
         const current = await currentMembers(note,state,join(currentStore,'payloads'));
         requireStore((await readState(join(currentStore,originFile)))?.id === state.id &&
           await sourceFingerprint(root,currentStore) === state.currentDigest,'UPGRADE_MISMATCH','当前书库核对失败。');
-        await verifyMembers(join(currentStore,'payloads'),current,true);
+        await reconcileSavedFiles(root,currentStore,note,state,current);
         await verifyCurrentLibrary(root,currentStore,state,current);
         if (existsSync(store) && existsSync(newer)) {
           // Preserve even a damaged or replaced old directory outside the old exporter's scope.
-          const destination = rollbackSource();
-          const matches = existsSync(dirname(destination)) && !existsSync(destination) &&
-            (await sourceFingerprint(root,store).catch(() => null)) === state.rollbackDigest;
+          const identity = await sourceFingerprint(root,store).catch(() => null);
+          const original = identity !== null && (identity === state.sourceDigest || identity === state.backupStoreDigest);
+          const destination = original ? old : rollbackSource();
+          if (original && existsSync(old)) {
+            const prior = await sourceFingerprint(root,old).catch(() => null);
+            if (prior !== state.sourceDigest && prior !== state.backupStoreDigest) await rename(old,join(root,'shell','unpublished-old-'+randomUUID()));
+          }
+          const matches = existsSync(dirname(destination)) && !existsSync(destination) && (original || identity === state.rollbackDigest);
           await rename(store,matches ? destination : join(root,'shell','unpublished-old-'+randomUUID()));
         }
         await moveStore(root,newer,store,async dir => {
           requireStore((await readState(join(dir,originFile)))?.id === state.id && await sourceFingerprint(root,dir) === state.currentDigest,
             'UPGRADE_MISMATCH','当前书库核对失败。');
         });
-        await installMembers(root,join(store,'payloads'),current,note,current);
+        await installMembers(root,[join(store,'payloads')],current,note,current);
         await verifyFiles(root,database(store));
         await rm(journal(root));
         return {restored:false,message:'回退未完成，已恢复升级后的书库。'};

@@ -352,8 +352,28 @@ it('rebuilds the original manifest from the backup across both sides of the old 
   await beginUpgrade(root);
   const phase = join(root,'shell','storage-upgrade.json');
   const stop = (at: string) => resumeUpgrade(root,'0.8.0',stage => { if (stage === at) throw Error('interrupted'); });
+  const beforeBackup = await readFile(phase);
+  const operationId = JSON.parse(beforeBackup.toString('utf8')).id;
+  const location = backupLocationFor(root);
+  const attempt = join(location,'.upgrade-'+operationId);
+  await mkdir(attempt,{recursive:true});
+  await writeFile(join(attempt,'package.ai7db.partial.store'),Buffer.alloc(1024));
+  await writeFile(join(attempt,'package.ai7db.partial'),Buffer.alloc(1024));
+  const otherBackup = join(location,'unrelated.ai7db');
+  await writeFile(otherBackup,Buffer.alloc(64));
   await expect(stop('convert')).rejects.toThrow('interrupted');
   const stale = JSON.parse(await readFile(phase,'utf8'));
+  expect(existsSync(attempt)).toBe(false);
+  const archive = join(location,stale.backup.backup.fileName);
+  const archiveDigest = await fileDigest(archive);
+  await mkdir(join(attempt,'store'),{recursive:true});
+  await rename(join(root,'shell','upgrade-'+operationId,'store','upgrade-pending.json'),join(attempt,'store','upgrade-pending.json'));
+  await rename(archive,join(attempt,'package.ai7db.partial'));
+  await writeFile(phase,beforeBackup);
+  await expect(stop('convert')).rejects.toThrow('interrupted');
+  expect(await fileDigest(archive)).toEqual(archiveDigest);
+  expect((await fileDigest(otherBackup))?.bytes).toBe(64);
+  expect(existsSync(attempt)).toBe(false);
   const manifest = join(root,'shell','upgrade-'+stale.id,'payloads.json');
   const original = await fileDigest(manifest);
   const ownScratch = join(root,'shell','upgrade-'+stale.id,'archive-verification','export-staging');
@@ -516,4 +536,100 @@ it.each(['removed','changed'] as const)('retains an openable revision 117 librar
   await verifyLibraryFiles(recovered,117);
   const current = await EditorialStore.open(recovered,roots.codeRoot);
   try { expect(current.listBooks(null).items).toHaveLength(2); } finally { current.markCleanShutdown(); current.close(); }
+},180_000);
+
+it('recovers files across the rename and preserves both a WAL-only committed draft and the reusable original',async () => {
+  const seed = join(roots.inputRoot,'wal-seed');
+  const root = join(roots.inputRoot,'wal-library');
+  await cp(roots.dataRoot,seed,{recursive:true});
+  await beginUpgrade(seed);
+  await resumeUpgrade(seed,'0.8.0');
+  const sample = join(roots.inputRoot,'sample1-wal.docx');
+  await composeManuscriptDocx(sample,{source:ADMITTED_BASELINE_DOCX,startBlock:2,blocks:13,title:'sample1'});
+  const digest = (await fileDigest(sample))!.sha256;
+  const key = join('objects','sha256',digest.slice(0,2),digest+'.docx');
+  const app = await EditorialStore.open(seed,roots.codeRoot);
+  const reader = new DatabaseSync(join(seed,'store','ai7.sqlite'),{readOnly:true});
+  let draftId: string;
+  try {
+    reader.exec('BEGIN');
+    reader.prepare('SELECT count(*) FROM import_drafts').get();
+    draftId = (await app.stageSelectedManuscript(randomUUID(),sample)).draftId;
+    // Keep the reader's old snapshot while copying the committed WAL, exactly as on a stopped writer.
+    await cp(seed,root,{recursive:true,filter:entry => !entry.endsWith('ai7.sqlite-shm')});
+  } finally { reader.close(); app.markCleanShutdown(); app.close(); }
+  const hasDraft = (path: string) => {
+    const db = new DatabaseSync(path,{readOnly:true});
+    try { return Boolean(db.prepare('SELECT 1 FROM import_drafts WHERE draft_id=?').get(draftId)); } finally { db.close(); }
+  };
+  const sql = join(root,'store','ai7.sqlite');
+  const mainOnly = join(roots.inputRoot,'main-without-committed-wal.sqlite');
+  await cp(sql,mainOnly);
+  expect((await fileDigest(sql+'-wal'))!.bytes).toBeGreaterThan(32);
+  expect(hasDraft(mainOnly)).toBe(false);
+  expect(hasDraft(sql)).toBe(true);
+  expect(existsSync(backupLocationFor(root))).toBe(false);
+  await beginUpgradeRollback(root);
+  const phase = join(root,'shell','storage-upgrade.json');
+  const stale = await readFile(phase);
+  const {id} = JSON.parse(stale.toString('utf8'));
+  const saved = join(root,'shell','store-after-0.8.0-'+id);
+  const pause = (after: boolean) => resumeUpgrade(root,'0.8.0',(stage,renamed) => {
+    if (stage === 'publish-old' && Boolean(renamed) === after) throw Error('interrupted');
+  });
+  await expect(pause(false)).rejects.toThrow('interrupted');
+  await writeFile(join(saved,'payloads',key),Buffer.alloc(0));
+  await expect(pause(true)).rejects.toThrow('interrupted');
+  expect((await fileDigest(join(saved,'payloads',key)))?.sha256).toBe(digest);
+  await rm(join(saved,'rollback-ready.json'));
+  await rm(join(root,'shell','upgrade-'+id,'rollback-ready.json'));
+  await writeFile(phase,stale);
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  await verifyLibraryFiles(root,117);
+  expect(hasDraft(sql)).toBe(true);
+  const reopened = await EditorialStore.open(root,roots.codeRoot);
+  try { expect(reopened.listBooks(null).items).toHaveLength(2); } finally { reopened.markCleanShutdown(); reopened.close(); }
+  await beginUpgradeRollback(root);
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  await verifyLibraryFiles(root,116);
+  expect(hasDraft(sql)).toBe(false);
+  const old = await legacy.openLegacy(root);
+  try { expect(old.listBooks(null).items).toHaveLength(2); } finally { old.markCleanShutdown(); old.close(); }
+},180_000);
+
+it('keeps the independent database when another valid 117 store or a conflicting startup marker is present',async () => {
+  const root = join(roots.inputRoot,'identity');
+  const other = join(roots.inputRoot,'another-upgrade');
+  for (const dir of [root,other]) {
+    await cp(roots.dataRoot,dir,{recursive:true});
+    await beginUpgrade(dir);
+    await resumeUpgrade(dir,'0.8.0');
+  }
+  await beginUpgradeRollback(root);
+  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'save-new') throw Error('interrupted'); })).rejects.toThrow('interrupted');
+  const phase = join(root,'shell','storage-upgrade.json');
+  const state = JSON.parse(await readFile(phase,'utf8'));
+  const retained = join(root,'store-before-0.8.0-'+state.id);
+  const away = join(roots.inputRoot,'identity-original');
+  await rename(retained,away);
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+  await rename(away,retained);
+  const db = join(root,'store','ai7.sqlite');
+  const spare = join(root,'shell','upgrade-'+state.id,'current-database','ai7.sqlite');
+  const expected = await fileDigest(spare);
+  const marker = join(root,'store','ai7-data-version.json');
+  const validMarker = await readFile(marker);
+  const current = join(roots.inputRoot,'original-identity.sqlite');
+  await cp(db,current);
+  await beginUpgradeRollback(root);
+  await cp(join(other,'store','ai7.sqlite'),db);
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+  expect(await fileDigest(spare)).toEqual(expected);
+  await cp(current,db);
+  await writeFile(marker,JSON.stringify({...JSON.parse(validMarker.toString('utf8')),dataVersion:1}));
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+  expect(await fileDigest(spare)).toEqual(expected);
+  await writeFile(marker,validMarker);
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  await verifyLibraryFiles(root,116);
 },180_000);
