@@ -495,6 +495,21 @@ describe('comments command parity and refresh continuity', () => {
     expect(next.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')?.value).toBe('公开合成会话草稿');
     expect(document.activeElement).toBeNull();
   });
+  it('keeps a remounted offscreen reply in memory until its anchor returns to view (#1689 screen-return diagnosis)', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!;
+    input.value = '公开合成离屏草稿'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    mounted!.destroy(); miniDocument.activeElement = null;
+    const next = mount(); let top = 1237;
+    Object.assign(next.block, { getBoundingClientRect: () => ({ top, bottom: top + 27, height: 27 }) });
+    await paint();
+    expect(next.pane.querySelector('[data-comment-card]')).toBeNull();
+    expect(markDrafts.read(windowOf(), { kind: 'reply', markId: card.markId })).toBe('公开合成离屏草稿');
+    top = 180; next.refresh(); await paint();
+    expect(next.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')?.value).toBe('公开合成离屏草稿');
+    expect(document.activeElement).toBeNull(); expect(next.focus).not.toHaveBeenCalled();
+    expect(ui.update).not.toHaveBeenCalled(); expect(next.update).not.toHaveBeenCalled();
+  });
   it('shares the pane reply with the floating form and clears it on explicit Cancel (#1678)', async () => {
     const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
     const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!;

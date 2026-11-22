@@ -1,9 +1,9 @@
 import { capturePointerFailure, pointerFailureDetail } from './dispatch-chooser.mjs';
-import { SIDEBAR, localDebugEnabled, recordDebugDetail } from './controller.mjs';
+import { SIDEBAR } from './controller.mjs';
 import { railJump } from './marks-paging.mjs';
 
 /** Preserve the original failure and use the existing closed, text-free hosted geometry channel. */
-export async function draftGeometry(renderer, selector, assertion, { waitFor, name = 'draft-geometry' } = {}) {
+export async function draftGeometry(renderer, selector, assertion, { waitFor, name = 'draft-geometry', fallbackSelectors = [] } = {}) {
   try {
     if (waitFor) {
       const boxes=`(() => {const node=document.querySelector(${JSON.stringify(selector)});if(!node)return null;return [node,...node.querySelectorAll('button,input,textarea')].map(item=>{const r=item.getBoundingClientRect();return [r.left,r.top,r.width,r.height];});})()`;
@@ -11,6 +11,7 @@ export async function draftGeometry(renderer, selector, assertion, { waitFor, na
     }
     return await assertion();
   } catch (error) {
+    if(fallbackSelectors.length)selector=await renderer.evaluate(`(() => {const candidates=${JSON.stringify([selector,...fallbackSelectors])};return candidates.find(candidate=>document.querySelector(candidate))??candidates[0];})()`).catch(()=>selector);
     const detail=pointerFailureDetail(await capturePointerFailure(renderer,selector,{includeTargetAncestors:true}))??{unavailable:true};
     if(error&&typeof error==='object')Object.defineProperty(error,'pointerFailure',{value:detail,configurable:true});
     throw error;
@@ -70,6 +71,26 @@ export async function draftKey(renderer, key, code, modifiers=0) {
   await renderer.send('Input.dispatchKeyEvent',{type:'keyUp',...values});
 }
 
+/** Returning to this screen can reopen at the top. Reach the loaded place with real wheel input, without focusing it. */
+export async function draftWheelToAnchor(renderer,check,waitFor,selector,name) {
+  await draftGeometry(renderer,selector,async()=>{
+    const facts=`(() => {const node=document.querySelector(${JSON.stringify(selector)}),scroll=document.querySelector('.editor-window');if(!node||!scroll)return null;
+      const r=node.getBoundingClientRect(),p=scroll.getBoundingClientRect(),left=Math.max(0,p.left+scroll.clientLeft),right=Math.min(innerWidth,p.left+scroll.clientLeft+scroll.clientWidth),top=Math.max(0,p.top+scroll.clientTop),bottom=Math.min(innerHeight,p.top+scroll.clientTop+scroll.clientHeight),x=left+Math.min(16,(right-left)/2),y=(top+bottom)/2;
+      return {whole:r.width>0&&r.height>0&&r.left>=left&&r.right<=right&&r.top>=top&&r.bottom<=bottom,x,y,hit:right>left&&bottom>top&&scroll.contains(document.elementFromPoint(x,y)),scrollTop:scroll.scrollTop,delta:Math.max(-(bottom-top)*.6,Math.min((bottom-top)*.6,(r.top+r.bottom-top-bottom)/2)),rect:[r.left,r.top,r.width,r.height]};})()`;
+    for(let turn=0;turn<40;turn++) {
+      await waitFor(renderer,`new Promise(resolve=>requestAnimationFrame(()=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>resolve(before!=='null'&&before===JSON.stringify(${facts})));}))`,name+'-stable');
+      const at=await renderer.evaluate(facts);
+      if(at.whole)return;
+      check(at.hit&&at.delta!==0,name+'-wheel-hit');
+      await renderer.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:at.x,y:at.y,buttons:0});
+      check(JSON.stringify(await renderer.evaluate(facts))===JSON.stringify(at),name+'-before-wheel');
+      await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:at.x,y:at.y,deltaX:0,deltaY:at.delta});
+      await waitFor(renderer,`document.querySelector('.editor-window').scrollTop!==${at.scrollTop}`,name+'-scrolled');
+    }
+    check(false,name+'-reached');
+  },{fallbackSelectors:['.editor-window']});
+}
+
 /** Choose manuscript words with native pointer/keys. Reading the snapshot never installs a selection. */
 export async function draftSelect(renderer, check, waitFor, blockId, from, to, name) {
   await draftClick(renderer,check,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${blockId}"]`,name+'-text');
@@ -81,23 +102,14 @@ export async function draftSelect(renderer, check, waitFor, blockId, from, to, n
   await waitFor(renderer,`(() => {const s=${snapshot};return s?.anchor.blockId===${JSON.stringify(blockId)}&&s.head.blockId===${JSON.stringify(blockId)}&&s.anchor.grapheme===${from}&&s.head.grapheme===${to};})()`,name+'-selected');
 }
 
-/** Guest-debug only: structural focus/list context, never field values, words, ids or attribute payloads. */
-async function recordDraftSeek(renderer,selector,name,turn) {
-  if(!localDebugEnabled())return;
-  const facts=await renderer.evaluate(`(() => {const node=document.querySelector(${JSON.stringify(selector)}),card=node?.closest('[data-comment-card]'),id=card?.dataset.commentCard,ids=globalThis.__comments?.ids??[],focus=document.activeElement,text=document.querySelector('.editor-window'),pane=document.querySelector('.manuscript-comments-scroll'),anchor=id?document.querySelector('.editor-window [data-mark-id="'+id+'"]'):null,box=n=>{const r=n?.getBoundingClientRect();return r?[r.left,r.top,r.width,r.height]:null;},hidden=n=>!!n?.closest('[hidden]');return {turn:${turn},target:!!node,card:ids.indexOf(id),hidden:hidden(card),expanded:card?.dataset.expanded==='true',selected:card?.dataset.selected==='true',updating:card?.dataset.revalidating==='true',anchor:box(anchor),targetBox:box(node),textBox:box(text),paneBox:box(pane),textScroll:text?.scrollTop,paneScroll:pane?.scrollTop,seedBlockLoaded:!!document.querySelector('.editor-window [data-block-id="'+globalThis.__comments?.blockId+'"]'),visibleCards:Array.from(document.querySelectorAll('[data-comment-card]')).filter(n=>!n.hidden).map(n=>ids.indexOf(n.dataset.commentCard)),focusTag:focus?.tagName,focusClasses:typeof focus?.className==='string'?focus.className.split(/\\s+/).slice(0,6):[],focusCard:ids.indexOf(focus?.closest('[data-comment-card]')?.dataset.commentCard),statusFilter:document.querySelector('[data-mark-status-filter][aria-pressed="true"]')?.dataset.markStatusFilter,searchEmpty:!document.querySelector('[data-mark-search-input]')?.value};})()`);
-  recordDebugDetail('J-08','draft-seek/'+name+'/'+JSON.stringify(facts));
-}
-
 export async function draftTabTo(renderer,selector,check,name,{ backwards=false }={}) {
   return draftGeometry(renderer,selector,async()=>{
     for(let turn=0;turn<100;turn++) {
       await renderer.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))');
-      await recordDraftSeek(renderer,selector,name,turn);
       const ready=await renderer.evaluate(`(() => {const node=document.querySelector(${JSON.stringify(selector)}),card=node?.closest('[data-comment-card]'),r=node?.getBoundingClientRect();return !!node&&document.activeElement===node&&r.width>0&&r.height>0&&(!card||card.dataset.selected==='true');})()`);
       if(ready)return;
       await draftKey(renderer,'Tab',9,backwards?8:0);
     }
-    await recordDraftSeek(renderer,selector,name,100);
     check(false,name);
   });
 }
@@ -138,7 +150,10 @@ export async function replyDraftKept(renderer,check,waitFor,at) {
   await draftClick(renderer,check,waitFor,SIDEBAR.section('overview'),'reply-draft-overview');
   await waitFor(renderer,`!document.querySelector('.editor-shell')`,'reply-draft-left-screen');
   await draftClick(renderer,check,waitFor,SIDEBAR.section('manuscript'),'reply-draft-screen-return');
-  await waitFor(renderer,kept(),'reply-draft-screen-kept');
+  const anchor=`.editor-window [data-mark-id="${id}"]`;
+  await draftWheelToAnchor(renderer,check,waitFor,anchor,'reply-draft-screen-place');
+  await draftGeometry(renderer,input,()=>waitFor(renderer,kept(),'reply-draft-screen-kept'),{fallbackSelectors:[card,anchor,'.manuscript-comments-pane','.editor-shell']});
+  check(await renderer.evaluate(`document.activeElement!==document.querySelector(${JSON.stringify(input)})`),'reply-draft-restored-unfocused');
   check(await renderer.evaluate(`(async()=>{const c=await window.ai7.getEditorialMarkCard({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,markId:${JSON.stringify(id)}});return !c.replies.some(reply=>reply.body.includes('公开合成会话回复'));})()`),'reply-draft-before-send-silent');
   await draftTabTo(renderer,input,check,'reply-draft-tab-input');
   await draftClick(renderer,check,waitFor,input,'reply-draft-send-focus');
@@ -152,6 +167,7 @@ export async function replyDraftKept(renderer,check,waitFor,at) {
   await draftClick(renderer,check,waitFor,SIDEBAR.section('overview'),'reply-draft-leave-sending');
   await waitFor(renderer,`!document.querySelector('.editor-shell')`,'reply-draft-late-left');
   await draftClick(renderer,check,waitFor,SIDEBAR.section('manuscript'),'reply-draft-late-return');
+  await draftWheelToAnchor(renderer,check,waitFor,anchor,'reply-draft-late-place');
   await waitFor(renderer,`document.querySelector(${JSON.stringify(card+' [data-mark-region="replies"]')})?.textContent.includes('公开合成离页回复')&&!document.querySelector(${JSON.stringify(input)})?.value`,'reply-draft-late-cleared');
 }
 

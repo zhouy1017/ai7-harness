@@ -302,3 +302,27 @@ it('reaches Reply backwards from its appended textarea without tabbing out and h
   await draftTabTo(renderer,'reply',(ok:boolean,name:string)=>{if(!ok)throw Error(name);},'late-reply',{backwards:true});
   expect(document.activeElement).toBe(reply);expect(leftCard).toBe(false);expect(modifiers).toEqual([8,8]);
 });
+
+it.each([{top:3562,covered:false},{top:300,covered:false},{top:3562,covered:true}])('returns to the loaded anchor at $top through an uncovered wheel target: $covered', async ({top,covered}) => {
+  const { draftWheelToAnchor }=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  let offset=0;const events:Array<{type:string;deltaY?:number}>=[];
+  const editor={},anchor={getBoundingClientRect:()=>({left:253,right:288,top:top-offset,bottom:top-offset+27,width:35,height:27}),focus(){throw Error('must not focus the draft');}};
+  const scroll={clientLeft:0,clientTop:0,clientWidth:525,clientHeight:510,get scrollTop(){return offset;},set scrollTop(_value:number){throw Error('must not scroll by script');},getBoundingClientRect:()=>({left:80,top:150,right:605,bottom:660,width:525,height:510}),contains:(node:unknown)=>node===editor};
+  const document={activeElement:editor,querySelector:(selector:string)=>selector==='.editor-window'?scroll:anchor,elementFromPoint:()=>covered?{}:editor};
+  const renderer={evaluate:async(expression:string)=>expression.includes('const describe=')?null:Function('document','requestAnimationFrame','innerWidth','innerHeight',`return (${expression})`)(document,(callback:()=>void)=>queueMicrotask(callback),1008,681),send:async(_method:string,event:{type:string;deltaY?:number})=>{events.push(event);if(event.type==='mouseWheel')offset+=event.deltaY!;}};
+  const wait=async(_renderer:unknown,expression:string,name:string)=>{if(!await renderer.evaluate(expression))throw Error(name);};
+  const result=draftWheelToAnchor(renderer,(ok:boolean,name:string)=>{if(!ok)throw Error(name);},wait,'.anchor','return-place');
+  if(covered){await expect(result).rejects.toThrow('return-place-wheel-hit');expect(events).toEqual([]);}
+  else {await expect(result).resolves.toBeUndefined();const r=anchor.getBoundingClientRect();expect(r.top).toBeGreaterThanOrEqual(150);expect(r.bottom).toBeLessThanOrEqual(660);expect(events.every(event=>event.type==='mouseMoved'||event.type==='mouseWheel')).toBe(true);if(top===300)expect(events).toEqual([]);else expect(events.some(event=>event.type==='mouseWheel')).toBe(true);}
+  expect(document.activeElement).toBe(editor);
+});
+
+it('records a surviving card when a restored draft field is absent, preserving the primary failure and redacting values', async () => {
+  const { draftGeometry }=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  const card='[data-comment-card="card"]',field=card+' textarea',primary=Error('reply-draft-screen-kept');
+  const metadata={viewport:[1008,681],target:{tag:'article',classes:['manuscript-comments-card'],data:['data-comment-card']},frames:[{rect:[700,300,280,40],point:[840,320],hit:null,contains:false}],body:'private-draft'};
+  const document={querySelector:(selector:string)=>selector===card?{}:null};
+  const renderer={evaluate:async(expression:string)=>expression.includes('const describe=')?expression.includes(JSON.stringify(card))?metadata:{...metadata,target:null,frames:[{rect:null,point:null,hit:null,contains:false}]}:Function('document',`return (${expression})`)(document)};
+  let error:unknown;try{await draftGeometry(renderer,field,async()=>{throw primary},{fallbackSelectors:[card,'.editor-shell']});}catch(caught){error=caught;}
+  expect(error).toBe(primary);expect(error).toHaveProperty('pointerFailure.target.tag','article');expect(JSON.stringify((error as {pointerFailure:unknown}).pointerFailure)).not.toContain('private-draft');
+});
