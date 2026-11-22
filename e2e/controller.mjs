@@ -1150,6 +1150,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'factual-evidence-workspace',
     // Issue #1174: the factual finding's review card and mark card list the result's sources.
     'factual-card-evidence',
+    // Issue #1683: the collapsed and expanded fact card in ordinary mode, and a web source opened and copied by pointer.
+    'factual-card-ordinary',
+    'factual-card-source-open',
     'factual-review-decision',
     'factual-correction-proposal',
     // Issue #922 (slice 7f): a 自定义分析维度 written in 知识库 › 工序与规则, run from ②A's 自定义 tab, its answers read there.
