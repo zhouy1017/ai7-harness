@@ -36,6 +36,34 @@ export async function draftClick(renderer, check, waitFor, selector, name, butto
   });
 }
 
+/** Read the rail's real controls, including ink and badge rectangles; never log names or field values. */
+export async function readDraftRail(renderer) {
+  return renderer.evaluate(`(() => {
+    const rail=document.querySelector('.editor-edge'),r=rail.getBoundingClientRect(),style=getComputedStyle(rail),left=r.left+rail.clientLeft+parseFloat(style.paddingLeft),right=r.left+rail.clientLeft+rail.clientWidth-parseFloat(style.paddingRight),top=r.top+rail.clientTop+parseFloat(style.paddingTop),bottom=r.top+rail.clientTop+rail.clientHeight-parseFloat(style.paddingBottom);
+    const inside=(a,b)=>a.width>0&&a.height>0&&a.left>=b.left&&a.right<=b.right&&a.top>=b.top&&a.bottom<=b.bottom;
+    return Array.from(rail.querySelectorAll('.edge-entries [data-edge-entry]')).map(node=>{
+      const b=node.getBoundingClientRect(),svg=node.querySelector('.icon'),icon=svg.getBoundingClientRect(),ink=svg.querySelector('use').getBoundingClientRect(),label=node.querySelector('.edge-label'),words=document.createRange();words.selectNodeContents(label);const text=words.getBoundingClientRect(),badge=node.querySelector('.edge-badge').getBoundingClientRect(),labelStyle=getComputedStyle(label);
+      const overlap=Math.max(0,Math.min(ink.right,badge.right)-Math.max(ink.left,badge.left))*Math.max(0,Math.min(ink.bottom,badge.bottom)-Math.max(ink.top,badge.top));
+      return {key:node.dataset.edgeEntry,name:node.getAttribute('aria-label'),whole:inside(b,{left:Math.max(0,left),right:Math.min(innerWidth,right),top:Math.max(0,top),bottom:Math.min(innerHeight,bottom)}),hit:node.contains(document.elementFromPoint(b.left+b.width/2,b.top+b.height/2)),width:b.width,icon:[icon.width,icon.height],label:[text.width,text.height],inkWhole:inside(icon,b)&&inside(ink,icon)&&inside(text,b)&&(labelStyle.overflowX==='visible'||label.scrollWidth<=label.clientWidth)&&(labelStyle.overflowY==='visible'||label.scrollHeight<=label.clientHeight),overlap:Math.round(overlap*100)/100};
+    });
+  })()`);
+}
+
+export async function assertDraftRail(renderer,check,waitFor,baseline,name) {
+  await draftGeometry(renderer,'.edge-entries',async()=>{
+    const entries=await readDraftRail(renderer);
+    check(entries.length===4&&baseline.length===4,name+'-all-four');
+    for(const entry of entries) {
+      const prior=baseline.find(item=>item.key===entry.key);
+      await draftGeometry(renderer,`[data-edge-entry="${entry.key}"]`,()=>{
+        check(entry.whole&&entry.hit,name+'-'+entry.key+'-whole-hit');
+        check(entry.width===52&&entry.icon[0]===18&&entry.icon[1]===18&&entry.inkWhole,name+'-'+entry.key+'-whole-symbol-label');
+        check(!!prior&&entry.name===prior.name&&entry.label[0]===prior.label[0]&&entry.label[1]===prior.label[1]&&entry.overlap<=prior.overlap,name+'-'+entry.key+'-unchanged-name-ink');
+      });
+    }
+  },{waitFor,name});
+}
+
 export async function draftKey(renderer, key, code, modifiers=0) {
   const values={key,code:key,windowsVirtualKeyCode:code,nativeVirtualKeyCode:code,modifiers};
   await renderer.send('Input.dispatchKeyEvent',{type:'keyDown',...values,...(key==='Enter'?{text:'\r',unmodifiedText:'\r'}:{})});
@@ -94,6 +122,7 @@ export async function replyDraftKept(renderer,check,waitFor,at) {
   let replyWords='公开合成会话回复';
   const kept=()=>`document.querySelector(${JSON.stringify(input)})?.value===${JSON.stringify(replyWords)}`;
   await waitFor(renderer,kept(),'reply-draft-filter-kept');
+  const railBaseline=await readDraftRail(renderer);
   await draftClick(renderer,check,waitFor,'.manuscript-comments-heading [aria-label="关闭批注栏"]','reply-draft-pane-close');
   await draftClick(renderer,check,waitFor,`.editor-window [data-mark-id="${id}"]`,'reply-draft-floating');
   await waitFor(renderer,`document.querySelector('[data-mark-card="${id}"] [data-mark-form="reply"] textarea')?.value==='公开合成会话回复'`,'reply-draft-floating-kept');
@@ -102,6 +131,7 @@ export async function replyDraftKept(renderer,check,waitFor,at) {
   await draftKey(renderer,'a',65,2); await renderer.send('Input.insertText',{text:'公开合成会话回复 · 浮卡补充'});
   await waitFor(renderer,`document.querySelector(${JSON.stringify(floatingInput)})?.value==='公开合成会话回复 · 浮卡补充'`,'reply-draft-floating-edited');
   await draftKey(renderer,'Escape',27);
+  await assertDraftRail(renderer,check,waitFor,railBaseline,'reply-draft-pane-return-rail');
   await draftClick(renderer,check,waitFor,'[data-edge-entry="comments"]','reply-draft-pane-return');
   replyWords='公开合成会话回复 · 浮卡补充';
   await waitFor(renderer,kept(),'reply-draft-pane-kept');
