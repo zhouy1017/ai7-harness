@@ -163,19 +163,22 @@ it('keeps a header geometry failure when its diagnostic capture also throws', as
   expect(primary).toHaveProperty('pointerFailure', { unavailable: true });
 });
 
-it.each([{ top: 122.4, count: 2, failed: false, passes: true }, { top: 150, count: 2, failed: false, passes: false }, { top: 146.4, count: 1, failed: true, passes: true }, { top: 169, count: 1, failed: true, passes: false }, { top: 101.6, count: 1, failed: false, covered: 'filter', passes: true }, { top: 101.6, count: 1, failed: false, covered: 'other', passes: false }, { top: 146.4, count: 1, failed: true, covered: 'filter', passes: false }])('bounds the entire top area at $top (failure $failed) and clears sampling emulation', async ({ top, count, failed, covered, passes }) => {
+it.each([{ top: 122.4, count: 2, failed: false, passes: true }, { top: 150, count: 2, failed: false, passes: false }, { top: 146.4, count: 1, failed: true, passes: true }, { top: 169, count: 1, failed: true, passes: false }, { top: 101.6, count: 1, failed: false, covered: 'filter', passes: true }, { top: 101.6, count: 1, failed: false, covered: 'other', passes: false }, { top: 146.4, count: 1, failed: true, covered: 'filter', passes: false }])('bounds the entire top area at $top (failure $failed) and restores caller sampling emulation', async ({ top, count, failed, covered, passes }) => {
   const { sampleCommentsHeaderSizes } = await import(pathToFileURL(resolve('e2e/marks-paging.mjs')).href);
   const methods: string[] = [];
+  const caller = { width: 1008, height: 681, deviceScaleFactor: 1, mobile: false };
+  const calls: unknown[] = [];
   const facts = { viewport: [1164, 781], heading: 34, filters: 24, summaryVisible: true, summaryOneLine: true, filterRowFits: true, fullTitles: true, topArea: top,
     rows: [{ aligned: true, inside: true }], notices: [{ kind: 'disclosure', visible: count === 2, oneLine: true, inside: true, button: true, buttonOnTop: true }, { kind: 'paging', visible: true, failed, whole: true, oneLine: !failed, inside: true, button: true, buttonOnTop: covered === undefined, coveredByFilter: covered === 'filter' }] };
-  const renderer = { evaluate: async (expression: string) => expression.includes('const describe=') ? { unavailable: true } : facts,
-    send: async (method: string) => { methods.push(method); } };
+  const renderer = { evaluate: async (expression: string) => expression.includes('devicePixelRatio') ? caller : expression.includes('const describe=') ? { unavailable: true } : facts,
+    send: async (method: string, parameters: unknown) => { methods.push(method); calls.push(parameters); } };
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   try {
     const check = (condition: boolean) => { if (!condition) throw new Error('top-area'); };
     const outcome = sampleCommentsHeaderSizes(renderer, check, async () => {}, 'header');
     if (passes) await expect(outcome).resolves.toBeUndefined(); else await expect(outcome).rejects.toThrow('top-area');
-    expect(methods.at(-1)).toBe('Emulation.clearDeviceMetricsOverride');
-    expect(methods.filter(method => method === 'Emulation.setDeviceMetricsOverride')).toHaveLength(passes ? 2 : 1);
+    expect(methods.at(-1)).toBe('Emulation.setDeviceMetricsOverride');
+    expect(calls.at(-1)).toEqual(caller);
+    expect(methods.filter(method => method === 'Emulation.setDeviceMetricsOverride')).toHaveLength(passes ? 3 : 2);
   } finally { log.mockRestore(); }
 });

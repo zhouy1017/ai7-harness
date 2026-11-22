@@ -202,6 +202,7 @@ const COMMENTS_TOP_GEOMETRY = `(() => {
 const headerBeforePaging = new Map();
 
 export async function sampleCommentsHeaderSizes(renderer,check,waitFor,name,{remember=false}={}) {
+  const caller=await renderer.evaluate('({width:innerWidth,height:innerHeight,deviceScaleFactor:devicePixelRatio,mobile:false})');
   try {
     for(const size of [{width:1164,height:781},{width:1008,height:681}]) {
       await renderer.send('Emulation.setDeviceMetricsOverride',{...size,deviceScaleFactor:1,mobile:false});
@@ -209,7 +210,8 @@ export async function sampleCommentsHeaderSizes(renderer,check,waitFor,name,{rem
       await assertCommentsHeader(renderer,check,waitFor,name,{remember});
     }
   } finally {
-    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await renderer.send('Emulation.setDeviceMetricsOverride',caller);
+    await waitFor(renderer,`innerWidth===${caller.width}&&innerHeight===${caller.height}`,name+'-caller-viewport');
   }
 }
 
