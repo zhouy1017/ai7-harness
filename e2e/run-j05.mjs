@@ -661,7 +661,9 @@ async function main() {
     await draftGeometry(renderer, '.manuscript-comments-heading', () => assertRenderer(renderer, `(() => {const row=document.querySelector('.manuscript-comments-heading'),r=row.getBoundingClientRect(),controls=Array.from(row.children),boxes=controls.map(node=>node.getBoundingClientRect()),count=row.querySelector('[data-comments-book-pending]');return count.getBoundingClientRect().width>=24&&row.offsetHeight<=35&&boxes.every((b,i)=>b.top>=r.top&&b.bottom<=r.bottom&&b.left>=r.left&&b.right<=r.right&&b.left>=0&&b.right<=innerWidth&&boxes.every((other,j)=>j===i||b.right<=other.left||b.left>=other.right));})()`, 'header-add-one-line'), {waitFor,name:'header-add-one-line'});
     await draftSelect(renderer,requireJourney,waitFor,first,0,0,'header-caret');
     await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="editor-note"]','header-no-selection');
-    await waitFor(renderer, `window.__j05.notice().includes('先选中一段文字，再添加备注。')&&!window.__j05.composer()`, 'header-no-selection-reason');
+    await draftGeometry(renderer, '#persistence-status', async () => {
+    await waitFor(renderer, `(() => {const status=document.querySelector('#persistence-status'),line=status?.querySelector('.status-line');if(!status||status.hidden||status.dataset.tone!=='error'||!line||line.textContent!=='先选中一段文字，再添加备注。'||window.__j05.composer())return false;const style=getComputedStyle(status),r=line.getBoundingClientRect();return style.visibility==='visible'&&Number(style.opacity)>0&&r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;})()`, 'header-no-selection-reason');
+    });
     await draftSelect(renderer,requireJourney,waitFor,first,RANGES.note[0],RANGES.note[1],'header-note-selection');
     await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="editor-note"]','header-note-open');
     await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-composer="create-editor-note"] textarea')`, 'header-note-focused');

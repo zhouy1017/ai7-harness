@@ -103,6 +103,34 @@ it('never starts the background-review fixture when its plan preview does not di
   expect(renderer.send).not.toHaveBeenCalled();
 });
 
+it('reads the header refusal from the actual visible error surface, rejecting hidden or offscreen reasons', async () => {
+  const {createStatusSurface}=await import('../../src/renderer/notifications.js');
+  const {installMiniDom,miniDocument}=await import('../support/mini-dom.js');
+  const restore=installMiniDom();
+  try {
+    const source=readFileSync(new URL('../../e2e/run-j05.mjs',import.meta.url),'utf8');
+    const expression=source.match(/await waitFor\(renderer, `([^`]+)`, 'header-no-selection-reason'\)/u)?.[1];
+    if(!expression)throw Error('header reason Journey seam missing');
+    const surface=miniDocument.createElement('div');surface.id='persistence-status';miniDocument.body.append(surface);
+    const status=createStatusSurface(surface as unknown as HTMLElement);
+    let top=600,opacity='1';
+    status('先选中一段文字，再添加备注。','error');
+    const line=surface.querySelector('.status-line')!;
+    line.getBoundingClientRect=()=>({left:80,right:380,top,bottom:top+30,width:300,height:30});
+    const window={__j05:{notice:()=>'',composer:()=>miniDocument.querySelector('[data-mark-composer]')}};
+    const document={querySelector:(selector:string)=>selector==='#persistence-status'?surface:miniDocument.querySelector(selector)};
+    const read=()=>Function('document','window','getComputedStyle','innerWidth','innerHeight',`return (${expression})`)(document,window,()=>({visibility:'visible',opacity}),1008,681);
+    expect(miniDocument.querySelector('[data-toast]')).toBeNull();
+    expect(read()).toBe(true);
+    top=700;expect(read()).toBe(false);top=600;
+    opacity='0';expect(read()).toBe(false);opacity='1';
+    const composer=miniDocument.createElement('section');composer.dataset['markComposer']='create-editor-note';miniDocument.body.append(composer);
+    expect(read()).toBe(false);composer.remove();
+    status('另一条合成错误','error');expect(read()).toBe(false);
+    status('先选中一段文字，再添加备注。','error');status.clearError();expect(read()).toBe(false);
+  } finally {restore();}
+});
+
 it('prepares only a local check on a punctuation-free loaded paragraph and stops on preparation failure', async () => {
   const {startDraftBackgroundRefresh}=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
   const prepare=vi.fn(async(_input:unknown)=>({state:'failed'}));
