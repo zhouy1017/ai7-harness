@@ -674,11 +674,18 @@ async function main() {
     await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="annotation"]','header-annotation-choose');
     await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-composer="create-annotation"] textarea')`, 'header-annotation-focused');
     await renderer.send('Input.insertText',{text:'公开合成栏头批注'});
+    await draftKey(renderer,'Escape',27);
+    await waitFor(renderer,`!window.__j05.composer()&&document.querySelectorAll('[data-mark-draft-row="annotation"]').length===1`,'header-annotation-folded');
+    // Reopening must submit the kept 34–35 span, even after the live selection has moved elsewhere.
+    await draftSelect(renderer,requireJourney,waitFor,first,0,0,'header-annotation-other-caret');
+    await draftClick(renderer,requireJourney,waitFor,'[data-mark-draft-row="annotation"]','header-annotation-reopen');
+    await waitFor(renderer,`document.activeElement===document.querySelector('[data-mark-composer="create-annotation"] textarea')`,'header-annotation-restored-focused');
+    await assertRenderer(renderer,`document.querySelector('[data-mark-composer="create-annotation"] textarea')?.value==='公开合成栏头批注'`,'header-annotation-restored-words');
     await draftKey(renderer,'Tab',9);
     await waitFor(renderer,`document.activeElement===document.querySelector('[data-mark-composer] [data-mark-action="submit"]')`,'header-annotation-submit-focused');
     await draftKey(renderer,'Enter',13,2); await draftKey(renderer,'Enter',13,2);
     await waitFor(renderer, `(() => {const nodes=window.__j05.mark('annotation',${JSON.stringify(first)}),ids=[...new Set(nodes.map(node=>node.dataset.markId))];if(ids.length!==1)return false;globalThis.__headerAnnotationId=ids[0];return !window.__j05.composer();})()`, 'header-annotation-exactly-one');
-    await assertRenderer(renderer, `(async()=>{const work=(await window.ai7.listPriorWork()).find(item=>item.bookId===document.querySelector('.editor-shell').dataset.bookId),page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(first)}}});return page.marks.filter(mark=>mark.kind==='annotation'&&mark.blockId===${JSON.stringify(first)}&&mark.fromGrapheme===34&&mark.toGrapheme===35).length===1;})()`, 'header-annotation-service-once');
+    await assertRenderer(renderer, `(async()=>{const work=(await window.ai7.listPriorWork()).find(item=>item.bookId===document.querySelector('.editor-shell').dataset.bookId),page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(first)}}});return page.marks.filter(mark=>mark.markId===globalThis.__headerAnnotationId&&mark.kind==='annotation'&&mark.blockId===${JSON.stringify(first)}&&mark.fromGrapheme===34&&mark.toGrapheme===35).length===1;})()`, 'header-annotation-service-once');
     await waitFor(renderer,`document.activeElement===document.querySelector('[data-testid="manuscript-editor"]')`,'header-annotation-focus-returned');
     await draftSelect(renderer,requireJourney,waitFor,first,0,0,'header-caret');
     const headerMark=await renderer.evaluate('globalThis.__headerAnnotationId');
