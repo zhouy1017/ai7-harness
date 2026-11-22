@@ -4,7 +4,7 @@ import { commentsMarksPaging, railJump } from './marks-paging.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -177,6 +177,7 @@ async function attachRenderer(browser) {
     send,
     evaluate: async (expression) => {
       const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+      if (response.exceptionDetails) await writeFile(join(ROOT, '.cache', '1604-evaluate-failure.json'), JSON.stringify({ location, exception: response.exceptionDetails, caller: new Error().stack }));
       requireJourney(!response.exceptionDetails, 'renderer-evaluate', localDebugEnabled() ? response.exceptionDetails : undefined);
       return response.result.value;
     },
