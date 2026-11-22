@@ -95,12 +95,12 @@ describe('the preferences registry', () => {
   });
   it('declares the shell keys with their defaults, and each default passes its own validator', () => {
     expect(Object.keys(PREFERENCE_KEYS)).toEqual(['actions.defaults', 'usage.unitPrices', 'keyboard.bindings', 'shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'appearance.theme',
-      'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName', 'editor.density', 'editor.typography', 'layout.regions', 'analysis.lastViewedRevision', 'onboarding.state', 'learning.askFrequency', 'model.favourites', 'model.dispatchChoices']);
+      'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName', 'editor.density', 'editor.typography', 'layout.regions', 'analysis.lastViewedRevision', 'onboarding.state', 'learning.askFrequency', 'model.favourites', 'model.dispatchChoices', 'review.evidenceAssuranceLevel']);
     expect(preferenceDefaults()).toEqual({ 'model.dispatchChoices': {}, 'model.favourites': {}, 'actions.defaults': DEFAULT_QUICK_ACTIONS, 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system',
       'notifications.enabled': false, 'notifications.completions': false, 'notifications.sound': false, 'notifications.bookName': false,
       'editor.density': 'standard',
       'editor.typography': { preset: 'editing', fontFamily: 'serif', fontSize: 17, lineHeight: 1.95, columnWidth: 36, alignment: 'justify' },
-      'layout.regions': { supportingWidth: null, drawerWidth: null, hidden: [] }, 'analysis.lastViewedRevision': {}, 'onboarding.state': null, 'learning.askFrequency': 'occasionally' });
+      'layout.regions': { supportingWidth: null, drawerWidth: null, hidden: [] }, 'analysis.lastViewedRevision': {}, 'onboarding.state': null, 'learning.askFrequency': 'occasionally', 'review.evidenceAssuranceLevel': 'standard' });
     for (const definition of Object.values(PREFERENCE_KEYS)) expect(definition.validate(definition.default)).toBe(true);
   });
 
