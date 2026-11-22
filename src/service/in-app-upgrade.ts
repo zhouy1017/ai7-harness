@@ -35,6 +35,7 @@ interface UpgradeState {
   currentManifestDigest?: string;
   rollbackAttempt?: string;
   inventoryFormat?: 1;
+  rollbackStartFingerprint?: string;
   upgradeRecordId?: string;
   backupStoreBytes?: number;
   backupStoreDigest?: string;
@@ -297,6 +298,41 @@ async function verifyCurrentIdentity(root: string,dir: string,state?: UpgradeSta
 async function verifyCurrentLibrary(root: string,dir: string,state: UpgradeState,files: DatabasePackageMember[]): Promise<void> {
   await verifyCurrentIdentity(root,dir,state);
   await verifyCopiedPayloads(database(dir),files,117);
+}
+
+async function rollbackStartFingerprint(root: string): Promise<string> {
+  const store = join(root,'store');
+  const files = await readMembers(root);
+  const intended = new Map(files.map(file => [file.path,file]));
+  // Repairs to 117 references during preparation must reproduce the same starting inventory.
+  await verifyCopiedPayloads(database(store),files,117,undefined,undefined,(path,sha256,bytes) => {
+    intended.set(path,{path,sha256,bytes}); return true;
+  });
+  const members = [...intended.values()].sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  return createHash('sha256').update(canonicalJson({store:await sourceFingerprint(root,store),members})).digest('hex');
+}
+
+async function canPrepareRollback(root: string,state: UpgradeState): Promise<boolean> {
+  if (state.rollbackStartFingerprint) return await rollbackStartFingerprint(root).catch(() => null) === state.rollbackStartFingerprint;
+  const note = join(root,'shell','upgrade-'+state.id);
+  const retained = [join(root,'store','payloads'),join(root,'store','rollback-ready.json'),join(note,'rollback-ready.json'),
+    join(note,'current-files.json'),join(note,'previous-payloads'),
+    join(note,'prepared-payloads'),...independentDirectories(note)];
+  // An old restore journal can survive both directory moves. The live files may still be from 116.
+  return !retained.some(path => existsSync(path));
+}
+
+async function differentOpenableLibrary(root: string,state: UpgradeState): Promise<boolean> {
+  const dir = join(root,'store');
+  try {
+    await verifyCurrentIdentity(root,dir);
+    const db = openPackageStore(database(dir));
+    try {
+      if (new DataVersionLedger(db).standing().upgrades.some(entry => entry.upgrade && canonicalJson(entry.upgrade) === canonicalJson(state.backup))) return false;
+    } finally { db.close(); }
+    await verifyFiles(root,database(dir));
+    return true;
+  } catch { return false; }
 }
 
 async function liveCurrentIsComplete(root: string,state: UpgradeState): Promise<boolean> {
@@ -614,7 +650,8 @@ export async function checkUpgradeRollback(root: string): Promise<UpgradeState> 
 
 export async function beginUpgradeRollback(root: string): Promise<void> {
   const state = await checkUpgradeRollback(root);
-  await writePhase(root, { ...state, stage: 'restore', rollbackAttempt: randomUUID(), inventoryFormat:1 });
+  await writePhase(root, { ...state, stage: 'restore', rollbackAttempt: randomUUID(), inventoryFormat:1,
+    rollbackStartFingerprint:await rollbackStartFingerprint(root) });
 }
 
 type UpgradeHook = (stage: Stage, afterRename?: boolean) => void;
@@ -641,7 +678,7 @@ export async function resumeUpgrade(root: string, softwareVersion: string, befor
       const live = !existsSync(newer) && existsSync(active) && await liveCurrentIsComplete(root,state);
       if (live) {
         await rm(journal(root),{force:true});
-      } else if (!existsSync(newer) && state.stage === 'restore' && !state.currentDigest) {
+      } else if (!existsSync(newer) && state.stage === 'restore' && !state.currentDigest && await canPrepareRollback(root,state)) {
         // Nothing switched. An independently openable library can be released even if it belongs to another upgrade.
         await verifyCurrentIdentity(root,active);
         await verifyFiles(root,database(active));
@@ -686,11 +723,17 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
       const ready = await recoveryReceipt(path);
       if (!ready || !sameRollbackAttempt(ready,state)) continue;
       Object.assign(state,ready);
-      await advance(existsSync(newer) ? 'publish-old' : 'save-new');
+      if (existsSync(newer)) await advance('publish-old');
+      else await advance(await liveCurrentIsComplete(root,state) ? 'save-new' : 'return-new');
       break;
     }
   }
-  if ((state.stage === 'restore' && existsSync(newer)) ||
+  const ambiguousRestore = state.stage === 'restore' && !existsSync(newer) && !await canPrepareRollback(root,state);
+  if (ambiguousRestore && await differentOpenableLibrary(root,state)) {
+    await rm(journal(root));
+    requireStore(false,'UPGRADE_MISMATCH','当前书库与本次回退记录不一致。');
+  }
+  if ((state.stage === 'restore' && (existsSync(newer) || ambiguousRestore)) ||
       (state.stage === 'return-new' && (!state.currentDigest || !state.currentManifestDigest))) {
     // The 117 directory may already be back on line while the exported files still belong to 116.
     const currentStore = existsSync(newer) ? newer : store;
@@ -715,8 +758,8 @@ async function runUpgrade(root: string, softwareVersion: string, before?: Upgrad
       if (unreadable && (!state.currentDigest || !state.currentManifestDigest)) throw unreadable;
     }
     const liveDigest = await sourceFingerprint(root,currentStore).catch(() => null);
-    const spare = state.currentDigest && liveDigest === state.currentDigest && (state.stage === 'return-new' || state.currentManifestDigest)
-      ? {dir:currentStore,digest:liveDigest,proof:null}
+    const spare = state.currentDigest && (state.stage === 'return-new' || state.currentManifestDigest)
+      ? {dir:await databaseCopyAtDigest(root,state,state.currentDigest,[currentStore,...independentDirectories(note)]),digest:state.currentDigest,proof:null}
       : await independentDatabase(root,note,state,liveDigest);
     state.currentDigest = spare.digest;
     if (!state.currentManifestDigest && spare.proof?.currentManifestDigest) state.currentManifestDigest = spare.proof.currentManifestDigest;

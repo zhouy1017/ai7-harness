@@ -1042,14 +1042,23 @@ it.each([['historical','removed'],['historical','added'],['current','removed'],[
   const incomplete = {...bound};
   delete incomplete.currentManifestDigest;
   const missingCommitment = JSON.stringify(incomplete);
-  await writeFile(phase,missingCommitment);
   await writeFile(join(prepared,receipt),first);
-  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
-  expect(await readFile(phase,'utf8')).toBe(missingCommitment);
-  expect(existsSync(join(root,member))).toBe(change === 'removed');
-  expect(existsSync(join(root,'store','payloads',member))).toBe(change === 'added');
+  for (const replay of [Buffer.from(missingCommitment),stale]) {
+    await writeFile(phase,replay);
+    await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+    expect(await readFile(phase)).toEqual(replay);
+    expect(existsSync(join(root,member))).toBe(change === 'removed');
+    expect(existsSync(join(root,'store','payloads',member))).toBe(change === 'added');
+    expect(await readFile(join(note,receipt))).toEqual(first);
+  }
+  // Restore the evidence, not the missing journal fields. The live SQLite has the correct bytes but a lost startup marker.
+  await writeFile(phase,change === 'added' ? missingCommitment : stale);
+  const marker = join(root,'store','ai7-data-version.json');
+  await rm(marker);
+  expect(existsSync(join(independent,'ai7-data-version.json'))).toBe(true);
   await writeFile(join(root,'store',receipt),JSON.stringify(second));
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  expect((await readDataVersionMarker(root))?.dataVersion).toBe(2);
   expect(existsSync(join(root,member))).toBe(change === 'added');
   await verifyLibraryFiles(root,117);
   const reopened = await EditorialStore.open(root,roots.codeRoot);
