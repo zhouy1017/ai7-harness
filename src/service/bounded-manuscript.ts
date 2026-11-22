@@ -4778,8 +4778,8 @@ export class BoundedManuscriptStore {
 
   listBookVersions(input: ServiceOperationMap['listBookVersions']['input']): ServiceOperationMap['listBookVersions']['output'] {
     const binding = this.#versionBinding(input);
-    const result = this.#db.prepare(`WITH revisions AS (SELECT revision_id, revision_label, created_at FROM manuscript_revisions WHERE manuscript_id = ? AND branch_id = ?), versions AS (
-      SELECT 'revision' kind, CASE WHEN EXISTS (SELECT 1 FROM editor_step_restore_revisions WHERE pre_revision_id = r.revision_id) THEN '恢复前自动保存' ELSE '已保存修订' END || ' · ' || revision_label label,
+    const result = this.#db.prepare(`WITH revisions AS (SELECT revision_id, revision_label, created_at, upgrade_snapshot FROM manuscript_revisions WHERE manuscript_id = ? AND branch_id = ?), versions AS (
+      SELECT 'revision' kind, CASE WHEN upgrade_snapshot = 1 THEN '升级时的稿件' WHEN EXISTS (SELECT 1 FROM editor_step_restore_revisions WHERE pre_revision_id = r.revision_id) THEN '恢复前自动保存' ELSE '已保存修订' END || ' · ' || revision_label label,
         revision_id, created_at, revision_id id FROM revisions r
       UNION ALL SELECT 'milestone', '里程碑 · ' || m.label, r.revision_id, m.created_at, m.milestone_id FROM milestone_versions m JOIN revisions r USING(revision_id) WHERE m.manuscript_id = ? AND m.branch_id = ?
       UNION ALL SELECT 'publication', '发稿版本 · 第 ' || p.ordinal || ' 次', r.revision_id, p.created_at, p.publication_version_id FROM publication_versions p JOIN revisions r USING(revision_id)

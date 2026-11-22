@@ -53,6 +53,6 @@ export async function createUpgradeSample1(root: string, codeRoot: string) {
       selectedText: first, kind: 'change-suggestion', highlightColor: null, body: '', proposedText: first + first, rationale: null
 });
     old.applyChangeSuggestion({ ...binding, windowStartBlockId, markId: mark.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
-    return { openLegacy, binding, markId: mark.markId };
+    return { openLegacy, binding, bookId:window.bookId, markId: mark.markId };
   } finally { old.markCleanShutdown(); old.close(); }
 }

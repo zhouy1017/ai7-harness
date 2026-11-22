@@ -177,6 +177,28 @@ export async function beginUpgradeRollback(root: string): Promise<void> {
 
 type UpgradeHook = (stage: Stage, afterRename?: boolean) => void;
 export async function resumeUpgrade(root: string, softwareVersion: string, before?: UpgradeHook): Promise<{ restored: boolean; message: string } | null> {
+  try {
+    return await runUpgrade(root, softwareVersion, before);
+  } catch (error) {
+    const state = await readState(journal(root));
+    const active = join(root,'store');
+    const old = state && join(root,'store-before-0.8.0-'+state.id);
+    // A verification refusal before publication releases the old library. A killed process leaves the journal to resume.
+    if (state && old && !before && ['backup','convert','verify','save-old','publish'].includes(state.stage)) {
+      if (!existsSync(active) && existsSync(old) && await sourceFingerprint(root,old) === state.sourceDigest) await rename(old,active);
+      if (existsSync(active) && storeRevisionOnDisk(database(active)) === 116) {
+        await rm(join(root,'store.upgrading'),{recursive:true,force:true});
+        await rm(journal(root));
+      }
+    }
+    if (state?.stage === 'restore' && (await readState(join(active,originFile)))?.id === state.id && !before) {
+      await rm(journal(root),{force:true});
+    }
+    throw error;
+  }
+}
+
+async function runUpgrade(root: string, softwareVersion: string, before?: UpgradeHook): Promise<{ restored: boolean; message: string } | null> {
   const state = await readState(journal(root));
   if (!state) return null;
   const store = join(root, 'store');
@@ -241,6 +263,7 @@ export async function resumeUpgrade(root: string, softwareVersion: string, befor
         await advance('publish');
         break;
       case 'publish':
+        await verifyBackup(root,state);
         requireStore(await sourceFingerprint(root, old) === state.sourceDigest, 'UPGRADE_SOURCE_CHANGED', '旧书库核对失败。');
         await moveStore(root, staging, store, async dir => {
           requireStore((await readState(join(dir, originFile)))?.id === state.id && await sourceFingerprint(root, dir) === state.targetDigest,

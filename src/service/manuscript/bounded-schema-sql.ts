@@ -402,6 +402,7 @@ export const CORE_SCHEMA_SQL = {
       source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
       revision_digest TEXT NOT NULL CHECK(length(revision_digest) = 64),
       created_at TEXT NOT NULL,
+      upgrade_snapshot INTEGER NOT NULL DEFAULT 0 CHECK(upgrade_snapshot IN (0,1)),
       UNIQUE(manuscript_id, ordinal),
       UNIQUE(manuscript_id, revision_label)
     ) STRICT`,

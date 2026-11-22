@@ -62,6 +62,7 @@ function verifyGuards(db: DatabaseSync): void {
 function copyTable(source: DatabaseSync, target: DatabaseSync, name: string): void {
   const columns = target.prepare(`PRAGMA table_info("${name}")`).all().map(row => String(row.name));
   const fields = columns.map(c => {
+    if (name === 'manuscript_revisions' && c === 'upgrade_snapshot') return '0 AS upgrade_snapshot';
     if (name === 'working_blocks' && c === 'order_key') return 'position AS order_key';
     if (name === 'branch_working_state' && c === 'history_boundary_sequence') return 'history_sequence AS history_boundary_sequence';
     if (name === 'model_service_connections' && c === 'fast_model_id') return "CASE WHEN fast_selected=1 AND fast_model_id='' THEN model_id ELSE fast_model_id END AS fast_model_id";
@@ -96,9 +97,9 @@ function upgradeVersions(db: DatabaseSync): void {
     check(total === branch.total_graphemes, '稿件字数');
     const revision = randomUUID();
     db.prepare(`INSERT INTO manuscript_revisions (revision_id, manuscript_id, branch_id, ordinal, revision_label,
-      parent_revision_id, source_version_id, revision_digest, created_at)
-      SELECT ?, ?, ?, max(ordinal)+1, ?, ?, ?, ?, ? FROM manuscript_revisions WHERE manuscript_id=?`)
-      .run(revision, branch.manuscript_id!, id, '升级时的稿件', branch.base_revision_id!, branch.source_version_id!,
+      parent_revision_id, source_version_id, revision_digest, created_at, upgrade_snapshot)
+      SELECT ?, ?, ?, max(ordinal)+1, 'r' || (max(ordinal)+1), ?, ?, ?, ?, 1 FROM manuscript_revisions WHERE manuscript_id=?`)
+      .run(revision, branch.manuscript_id!, id, branch.base_revision_id!, branch.source_version_id!,
         branch.working_digest!, new Date().toISOString(), branch.manuscript_id!);
     snapshotWorkingRevision(db, id, revision, total);
     db.prepare('UPDATE branch_working_state SET base_revision_id=?, last_checkpoint_sequence=journal_sequence WHERE branch_id=?').run(revision, id);

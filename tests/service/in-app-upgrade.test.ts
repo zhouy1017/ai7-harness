@@ -59,7 +59,7 @@ it('resumes each phase, imports the older package and recovers missing old files
   } finally { converted.markCleanShutdown(); converted.close(); }
   const db = new DatabaseSync(join(root, 'store', 'ai7.sqlite'), { readOnly: true });
   try {
-    expect(db.prepare("SELECT count(*) n FROM manuscript_revisions WHERE revision_label='升级时的稿件'").get()?.n).toBe(2);
+    expect(db.prepare('SELECT count(*) n FROM manuscript_revisions WHERE upgrade_snapshot=1').get()?.n).toBe(2);
     expect(db.prepare('SELECT count(*) n FROM editor_steps').get()?.n).toBe(0);
   } finally { db.close(); }
   const editor = await EditorialStore.open(root, roots.codeRoot);
