@@ -88,3 +88,46 @@ export async function launchReviewFromSheet(renderer, waitFor, viewport) {
   }
   return runId;
 }
+
+
+/** The real close/reopen sequence remains rapid; geometry is checked without waiting for the old close to settle. */
+export async function checkReviewPlanReopening(renderer, waitFor) {
+  const root = 'dialog.review-sheet .task-launch-estimate';
+  const selector = `${root} > summary`;
+  const geometry = `(${reviewControlGeometry.toString()})(${JSON.stringify(selector)},'.sheet-foot')`;
+  const open = `document.querySelector(${JSON.stringify(root)})?.open===true && ${popoverShownInside(`document.querySelector('${root} .task-launch-popover')`)}`;
+  const closed = `document.querySelector(${JSON.stringify(root)})?.open===false && !document.querySelector('${root} .task-launch-popover')?.matches(':popover-open')`;
+  await pressReviewControl(renderer, waitFor, selector, 'review-reopen-initial', '.sheet-foot');
+  await waitFor(renderer, open, 'review-reopen-initial-open');
+  for (const leg of ['close', 'reopen']) {
+    await waitFor(renderer, `${geometry}?.ready===true`, `review-rapid-${leg}-in-window`);
+    const point = await renderer.evaluate(geometry);
+    if (!point?.ready) await waitFor(renderer, 'false', `review-rapid-${leg}-point-moved`, 1);
+    for (const type of ['mousePressed', 'mouseReleased']) await renderer.send('Input.dispatchMouseEvent', {
+      type, x: point.x, y: point.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1,
+    });
+    if (leg === 'close') await waitFor(renderer, `document.querySelector('${root}')?.open===false`, 'review-rapid-close-state');
+  }
+  await waitFor(renderer, `new Promise(resolve=>{const shown=()=>(${open});const before=shown();requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before&&shown())));})`, 'review-rapid-reopened-stable');
+  // A blank exposed point in the sheet header is outside the popover and activates no other control.
+  const outside = `(() => {const header=document.querySelector('dialog.review-sheet .sheet-bar'),panel=document.querySelector('${root} .task-launch-popover');if(!header||!panel)return null;const r=header.getBoundingClientRect();
+    for(const x of [r.left+8,r.right-8])for(const y of [r.top+8,r.bottom-8]){const hit=document.elementFromPoint(x,y);if(x>=0&&x<=innerWidth&&y>=0&&y<=innerHeight&&header.contains(hit)&&!panel.contains(hit)&&!hit.closest('button,input,select,textarea,summary,a'))return {x,y};}return null;})()`;
+  await waitFor(renderer, `${outside}!==null`, 'review-reopen-outside-point');
+  const point = await renderer.evaluate(outside);
+  if (point === null) await waitFor(renderer, 'false', 'review-reopen-outside-point-moved', 1);
+  for (const type of ['mousePressed', 'mouseReleased']) await renderer.send('Input.dispatchMouseEvent', { type, ...point, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 });
+  await waitFor(renderer, closed, 'review-reopen-outside-closed');
+  await pressReviewControl(renderer, waitFor, selector, 'review-keyboard-initial', '.sheet-foot');
+  await waitFor(renderer, open, 'review-keyboard-initial-open');
+  for (const [key, code, shown, leg] of [['Enter',13,false,'close'],['Enter',13,true,'open']]) {
+    await waitFor(renderer, `${geometry}?.ready===true && document.querySelector('${root} > summary').contains(document.activeElement)`, `review-keyboard-${leg}-ready`);
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, ...(key === 'Enter' ? { text: '\r' } : {}) });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
+    await waitFor(renderer, shown ? open : closed, `review-keyboard-${leg}-state`);
+  }
+  for (let step = 0; step < 60 && await renderer.evaluate(`document.querySelector('${root}')?.open===true`); step++) {
+    await renderer.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+  }
+  await waitFor(renderer, closed, 'review-keyboard-focus-leave-closed');
+}

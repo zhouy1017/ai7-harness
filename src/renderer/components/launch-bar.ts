@@ -138,6 +138,14 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
     });
     if (typeof panel.showPopover === 'function') {
       panel.setAttribute('popover', 'auto');
+      // A native close toggle can arrive after a later opening of the disclosure (#1711).
+      let opening = 0, closingOpening = 0;
+      if (typeof MutationObserver === 'function') new MutationObserver(() => {
+        if (details.open) opening += 1;
+      }).observe(details, { attributes: true, attributeFilter: ['open'] });
+      panel.addEventListener('beforetoggle', event => {
+        if (event.newState === 'closed') closingOpening = opening;
+      });
       // Above or below its whole bar, never over it: a bar that wraps onto two rows keeps its other controls (选项 beside 先看计划)
       // reachable while the panel is open. The side with more room when the panel fits on neither, bounded to that room (its
       // content scrolls), so the summary that closes it stays reachable; across, it starts at its own summary.
@@ -175,7 +183,7 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
         document.addEventListener('scroll', follow, { capture: true, passive: true }); document.addEventListener('transitionend', follow, true); window.addEventListener('resize', follow);
       });
       panel.addEventListener('toggle', () => {
-        if (panel.matches(':popover-open')) return;
+        if (panel.matches(':popover-open') || details.open && closingOpening !== opening) return;
         unfollow();
         details.open = false;
       });
