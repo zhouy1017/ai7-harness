@@ -1,3 +1,4 @@
+import { forgetBookFindings } from './book-findings.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -1846,6 +1847,7 @@ export function finalizeManuscriptReimportCommit(host: ManuscriptReimportOperati
     });
     if (result !== undefined) return result;
     requireStore(committedResult !== undefined, 'COMMIT_FAILED', '稿件重新导入提交未产生结果。');
+    forgetBookFindings(host.authority, committedResult.bookId);
     const reimportReceipt = host.reimportRecordPresentations(committedResult.bookId, [committedResult.reimportRecordId])
       .find((record) => record.kind === 'manuscript-reimport-record');
     requireStore(reimportReceipt?.kind === 'manuscript-reimport-record',

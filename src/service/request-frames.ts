@@ -1,3 +1,4 @@
+import { validBookFindingsFilters } from './book-findings.js';
 import { EVIDENCE_ASSURANCE_LEVELS } from '../shared/protocol/factual-verification.js';
 import { validLocalOptions } from './review/deterministic/plan.js';
 import { validReasoningEffort, validRuntimeExecutionConfig, validTaskRelaunchSource } from '../shared/runtime-execution-config.js';
@@ -887,8 +888,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'inspectBookFindings': {
-      const input = requireInput(value.input, ['bookId', 'offset'], tentativeId);
-      if (!validUuid(input.bookId) || !isSafeInteger(input.offset, 0)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['offset', 'since', 'filters', 'whole'], tentativeId);
+      if (!validUuid(input.bookId) || input.offset !== undefined && !isSafeInteger(input.offset, 0) ||
+          input.since !== undefined && !(typeof input.since === 'string' && /^[a-f0-9]{64}$/u.test(input.since)) ||
+          input.whole !== undefined && typeof input.whole !== 'boolean' ||
+          input.filters !== undefined && !validBookFindingsFilters(input.filters)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectParagraphAnalysis': {
