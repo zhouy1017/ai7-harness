@@ -2031,7 +2031,7 @@ export class EditorialStore {
     this.#usage = new UsageLedger(authority, { sessionLogRoot: join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
       operationalScope: () => this.#baselineAnalysis.launch.operationalScope });
     this.#taskWork = new TaskWorkReader(authority, { reviewTaskIntents: (reviewRunId) => this.#reviewRuns.workTaskIntents(reviewRunId),
-      reviewModelLabel: (reviewRunId) => this.#reviewRuns.modelLabelOf(reviewRunId) });
+      reviewModelLabel: (reviewRunId) => this.#reviewRuns.modelLabelOf(reviewRunId) }, join(dataRoot, 'store', 'ai7.sqlite'));
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#seriesExclusions = new SeriesExclusionLedger(authority);
     this.#dialogues = new DialogueLedger(authority);
@@ -5066,6 +5066,7 @@ export class EditorialStore {
   }
 
   close(): void {
+    this.#taskWork.release();
     this.#checkpointWorker?.abort();
     // An index build under way stops at its next step and records nothing; the next open builds it again (Issue #428, S80a).
     this.#indexStopped = true;

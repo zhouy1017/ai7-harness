@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { durationWords, taskEstimate, withMeasuredDuration } from '../../src/service/task-estimate.js';
 import { runStretches, TaskWorkReader, unionWork } from '../../src/service/task-work.js';
 
@@ -38,6 +38,37 @@ describe('a stretch left open across a restart', () => {
     expect(runStretches(rows, () => [at(0), at(2), at(3)], processStart)).toEqual([{ from: T0, to: T0 + 3 * 60_000 }]);
     // The same stretch, continued in this process, is under way.
     expect(runStretches(rows, () => [at(0), at(3), at(301)], processStart)).toEqual([{ from: T0, to: null }]);
+  });
+});
+
+describe('the boundary of this process', () => {
+  it('is the oldest store open on the database, and a new one once every store closed (#1670)', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec(`CREATE TABLE analysis_run_records (run_record_id TEXT, task_intent_id TEXT);
+      CREATE TABLE analysis_run_states (run_record_id TEXT, sequence INTEGER, state TEXT, recorded_at TEXT, canonical_json TEXT);
+      CREATE TABLE analysis_unit_checkpoints (run_record_id TEXT, recorded_at TEXT, canonical_json TEXT, sha256 TEXT);
+      CREATE TABLE analysis_clarification_requests (raised_at TEXT, sha256 TEXT);
+      CREATE TABLE analysis_task_outcomes (task_intent_id TEXT, recorded_at TEXT, canonical_json TEXT, sha256 TEXT);
+      CREATE TABLE analysis_harness_spans (attempt_id TEXT, recorded_at TEXT);
+      CREATE TABLE analysis_execution_attempts (attempt_id TEXT, run_record_id TEXT)`);
+    db.prepare('INSERT INTO analysis_run_records VALUES (?, ?)').run('run', 'task');
+    db.prepare('INSERT INTO analysis_run_states VALUES (?, ?, ?, ?, ?)').run('run', 1, 'executing', at(10), '{}');
+    const owners = { reviewTaskIntents: () => [], reviewModelLabel: () => null };
+    const path = `memory-${Math.random()}/ai7.sqlite`;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(T0);
+      const first = new TaskWorkReader(db, owners, path);
+      vi.setSystemTime(T0 + 60 * 60_000);
+      const second = new TaskWorkReader(db, owners, path);
+      // The Run began in the first store's lifetime: both read it under way.
+      expect([first.ofTaskIntents(['task'])!.workingSince, second.ofTaskIntents(['task'])!.workingSince]).toEqual([at(10), at(10)]);
+      first.release(); second.release();
+      // Every store closed, then one opened again: a restart, and the stretch left open is not under way.
+      const reopened = new TaskWorkReader(db, owners, path);
+      expect(reopened.ofTaskIntents(['task'])).toEqual({ workedMs: 0, workingSince: null, finished: null });
+      reopened.release();
+    } finally { vi.useRealTimers(); db.close(); }
   });
 });
 

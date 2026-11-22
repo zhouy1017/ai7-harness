@@ -269,6 +269,25 @@ describe('durable request reader compatibility', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // 用时 (#1670): a second store this process opens on the same database while the first one's Run waits on a long request
+  // reads the same open stretch: the boundary is the oldest open store's, not each store's own.
+  it('reads a live Run as under way from a second store on the same database (#1670)', async () => {
+    const crash = await admittedCrash();
+    const first = crash.opened[0]!;
+    const read = (store: EditorialStore) => store.inspectTaskPlan({ bookId: crash.book.bookId, kind: 'review-run', ref: crash.reviewRunId }).work!;
+    const started = read(first);
+    expect(started.workingSince).not.toBeNull();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    try {
+      expect(read(first).workingSince).toBe(started.workingSince);
+      const second = await EditorialStore.open(crash.roots.dataRoot, crash.roots.codeRoot); crash.opened.push(second);
+      second.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy: crash.policy,
+        live: { scope: 'ordinary-production', ...crash.binding, runBudgetCeiling: 'unset' } });
+      expect(read(second)).toEqual(read(first));
+    } finally { vi.useRealTimers(); }
+  });
+
   it('refuses an unsupported SQLite reader revision without an external marker and leaves canonical records untouched', async () => {
     const crash = await admittedCrash();
     await unlink(dataVersionMarkerPath(crash.snapshot));

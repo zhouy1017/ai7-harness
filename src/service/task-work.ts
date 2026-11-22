@@ -1,3 +1,4 @@
+import { resolve as resolvePath } from 'node:path';
 import type { DatabaseSync, SQLOutputValue, StatementSync } from 'node:sqlite';
 import { RECOVERED_REDUCTION_REASON, RECOVERED_SAMPLING_MARK, RECOVERED_UNIT_REASON } from './analysis/request-admission-operations.js';
 import { launchedTaskModelLabels } from './editorial-mark-source.js';
@@ -88,17 +89,39 @@ export interface TaskWorkOwners {
   reviewModelLabel(reviewRunId: string): string | null;
 }
 
+/**
+ * The open instant of the oldest store this process holds open on each database file, with how many hold it open: a second store
+ * on the same file shares the first one's boundary, and a store opened after every one closed — a restart — starts a new one.
+ * Nothing is recorded; the map lives only as long as this process.
+ */
+const OPEN_DATABASES = new Map<string, { readonly cutoff: number; open: number }>();
+const databaseKey = (path: string): string => process.platform === 'win32' ? resolvePath(path).toLowerCase() : resolvePath(path);
+
 export class TaskWorkReader {
   readonly #db: DatabaseSync;
   readonly #owners: TaskWorkOwners;
   readonly #statements = new Map<string, StatementSync>();
-  /** The instant this service process opened its store: a stretch with nothing of its own since then is not under way. */
+  /** When this process began holding the database open: a stretch with nothing of its own since then is not under way. */
   readonly #processStart: number;
+  #release: (() => void) | null = null;
 
-  constructor(db: DatabaseSync, owners: TaskWorkOwners, processStart = Date.now()) {
+  /** `database` is the store's database file, shared by every store this process holds open on it, or a fixed instant. */
+  constructor(db: DatabaseSync, owners: TaskWorkOwners, database: string | number = Date.now()) {
     this.#db = db;
     this.#owners = owners;
-    this.#processStart = processStart;
+    if (typeof database === 'number') { this.#processStart = database; return; }
+    const key = databaseKey(database);
+    const held = OPEN_DATABASES.get(key) ?? { cutoff: Date.now(), open: 0 };
+    held.open += 1;
+    OPEN_DATABASES.set(key, held);
+    this.#processStart = held.cutoff;
+    this.#release = () => { held.open -= 1; if (held.open === 0 && OPEN_DATABASES.get(key) === held) OPEN_DATABASES.delete(key); };
+  }
+
+  /** The store closed: once no store of this process holds the file open, the next open starts a new boundary. */
+  release(): void {
+    this.#release?.();
+    this.#release = null;
   }
 
   /** Every overview read asks the same few questions of each Book: each is compiled once. */
