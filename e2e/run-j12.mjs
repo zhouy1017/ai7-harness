@@ -1051,6 +1051,17 @@ async function main() {
           })()`);
           requireJourney(reversed,'upgrade-card-and-version');
           await close();
+          const unavailable = resolve(runRoot,'upgrade-without-sources');
+          await cp(root,unavailable,{recursive:true});
+          const kept = (await readdir(unavailable)).filter(name => /^store-before-0\.8\.0-\d{13}-[a-f0-9-]{36}$/.test(name));
+          requireJourney(kept.length === 1,'upgrade-retained-library');
+          await rm(join(unavailable,kept[0]),{recursive:true});
+          const recovery = await launch(undefined,undefined,unavailable);
+          const [healthy] = await waitForRendererCount(recovery,1,'upgrade-no-source-opened');
+          await settings(healthy);
+          requireJourney(await healthy.evaluate(`window.ai7.inspectDataVersion().then(v=>!v.canRollbackUpgrade && v.dataVersion===2)`),'upgrade-no-source-healthy');
+          requireJourney(!existsSync(join(unavailable,'shell','storage-upgrade.json')),'upgrade-no-source-no-restart');
+          await close();
           const back = await launch(undefined,undefined,root);
           const [home] = await waitForRendererCount(back,1,'upgrade-library-reopened');
           await settings(home);
@@ -1065,7 +1076,7 @@ async function main() {
         await exitProduct(() => pressUpgradeDialog(executable,root,'书库升级','关闭'));
         requireJourney(await marker(root) === 1,'upgrade-rollback-installed');
       }
-      const imported = resolve(runRoot,'release-package-import');
+      const imported = await createCanonicalExternalDataRoot(resolve(runRoot,'release-package-import'),checkout);
       const manager = await launch(oldPackage,undefined,imported);
       const [page] = await waitForRendererCount(manager,1,'upgrade-import-window');
       await settings(page);

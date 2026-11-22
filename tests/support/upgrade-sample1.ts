@@ -48,11 +48,11 @@ export async function createUpgradeSample1(root: string, codeRoot: string) {
     const windowStartBlockId = window.blocks[0]!.blockId;
     const first = [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(block.text)][0]!.segment;
     const mark = old.createEditorialMark({
-...binding, windowStartBlockId, clientMarkId: randomUUID(), baseRevisionId: window.revisionId,
+      ...binding, windowStartBlockId, clientMarkId: randomUUID(), baseRevisionId: window.revisionId,
       expectedJournalSequence: window.journalSequence, blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 1,
       selectedText: first, kind: 'change-suggestion', highlightColor: null, body: '', proposedText: first + first, rationale: null
-});
+    });
     old.applyChangeSuggestion({ ...binding, windowStartBlockId, markId: mark.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
-    return { openLegacy, binding, bookId:window.bookId, markId: mark.markId };
+    return { openLegacy, binding, bookId: window.bookId, markId: mark.markId };
   } finally { old.markCleanShutdown(); old.close(); }
 }

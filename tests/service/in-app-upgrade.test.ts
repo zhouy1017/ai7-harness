@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { cp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -13,6 +13,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import { backupLocationFor } from '../../src/service/scheduled-backups.js';
 import { databasePackageSources, verifyCopiedPayloads } from '../../src/service/database-exports.js';
 import { fileDigest } from '../../src/service/manuscript-export.js';
+import { verifyDatabasePackage } from '../../src/service/database-package-reader.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { ImportedSkills, acquireSkillPackage } from '../../src/service/imported-skills.js';
 import { ImportedSkillUpdates } from '../../src/service/imported-skill-updates.js';
@@ -23,6 +24,11 @@ let legacy: Awaited<ReturnType<typeof createUpgradeSample1>>;
 beforeAll(async () => {
   roots = await createServiceTestRoots('ai7-upgrade-');
   legacy = await createUpgradeSample1(roots.dataRoot, roots.codeRoot);
+  const old = await legacy.openLegacy(roots.dataRoot);
+  try {
+    old.saveModelServiceConnection('本地验证',randomUUID(),'ready','opencode-go');
+    old.selectBothRoleModels('opencode-go','glm-5.3-flash');
+  } finally { old.markCleanShutdown(); old.close(); }
   const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
   try {
     const skills = new ImportedSkills(db);
@@ -55,6 +61,7 @@ it('resumes each phase, imports the older package and recovers missing old files
   const converted = await EditorialStore.open(root, roots.codeRoot);
   try {
     expect(converted.listBooks(null).items.length).toBe(2);
+    expect(converted.getModelRoles().map(role => role.binding?.modelId)).toEqual(Array(4).fill('glm-5.3-flash'));
     expect(converted.inspectDataVersion().upgrades[0]?.fromDataVersion).toBe(1);
   } finally { converted.markCleanShutdown(); converted.close(); }
   const db = new DatabaseSync(join(root, 'store', 'ai7.sqlite'), { readOnly: true });
@@ -68,6 +75,10 @@ it('resumes each phase, imports the older package and recovers missing old files
     const current = () => editor.getManuscriptWindow(manuscriptId, branchId, null);
     const view = current();
     const before = view.workingDigest;
+    const query = view.blocks.find(block => block.text.length >= 4)!.text.slice(0,4);
+    const search = editor.createSearch(manuscriptId,branchId,query);
+    while (!editor.advanceSearch(search.searchId).done) { /* advance a bounded search page */ }
+    expect(editor.getSearchResults(search.searchId,null).totalMatches).toBeGreaterThan(0);
     const scope = { bookId: view.bookId, manuscriptId, branchId };
     expect(() => editor.undoManuscript(manuscriptId, branchId, before)).toThrow(expect.objectContaining({code:'NOTHING_TO_UNDO'}));
     editor.reverseAppliedChangeSuggestion({ ...legacy.binding, windowStartBlockId: view.blocks[0]!.blockId, markId: legacy.markId, clientEffectId: randomUUID() });
@@ -92,8 +103,14 @@ it('resumes each phase, imports the older package and recovers missing old files
   const opened = await EditorialStore.open(other, roots.codeRoot);
   try { expect(opened.listBooks(null).items.length).toBe(2); }
   finally { opened.markCleanShutdown(); opened.close(); }
-  await rm(join(root, 'objects'), { recursive: true });
-  await mkdir(join(root, 'objects'));
+  const backupFolder = backupLocationFor(root);
+  const backup = (await readdir(backupFolder)).find(name => name.endsWith('.ai7db'))!;
+  const members = async (archive: string) => (await verifyDatabasePackage(archive,{dataRoot:root})).manifest.members.filter(member => member.path !== 'store/ai7.sqlite');
+  const original = await members(join(backupFolder,backup));
+  const newObject = (await fileDigest(join(roots.inputRoot,'sample1-edited.docx')))!.sha256;
+  const newKey = join('objects','sha256',newObject.slice(0,2),newObject+'.docx');
+  expect(existsSync(join(root,newKey))).toBe(true);
+  await rm(join(root,original.find(member => member.path.startsWith('objects/'))!.path));
   await beginUpgradeRollback(root);
   for (const stage of ['restore', 'save-new', 'save-new-renamed', 'publish-old', 'publish-old-renamed']) await expect(run()).rejects.toThrow('interrupted ' + stage);
   expect(await run()).toMatchObject({ restored: true });
@@ -106,6 +123,10 @@ it('resumes each phase, imports the older package and recovers missing old files
     const prep = await oldAgain.prepareDatabaseExport(oldExport, true);
     await oldAgain.approveDatabaseExport(prep.preparationId, true);
   } finally { oldAgain.markCleanShutdown(); oldAgain.close(); }
+  expect(await members(oldExport)).toEqual(original);
+  expect(existsSync(join(root,newKey))).toBe(false);
+  const firstSaved = (await readdir(join(root,'shell'))).find(name => name.startsWith('store-after-0.8.0-'))!;
+  expect((await fileDigest(join(root,'shell',firstSaved,'payloads',newKey)))?.sha256).toBe(newObject);
   const mergeRoot = join(roots.inputRoot, 'merge');
   const merger = await EditorialStore.open(mergeRoot, roots.codeRoot);
   try {
@@ -117,7 +138,14 @@ it('resumes each phase, imports the older package and recovers missing old files
   try { expect(merged.listBooks(null).items).toHaveLength(2); }
   finally { merged.markCleanShutdown(); merged.close(); }
   await beginUpgrade(root);
+  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'publish') throw Error('power loss'); })).rejects.toThrow('power loss');
+  const phase = join(root,'shell','storage-upgrade.json');
+  const journal = JSON.parse(await readFile(phase,'utf8'));
+  await writeFile(phase,JSON.stringify({...journal,stage:'record'}));
   await resumeUpgrade(root, '0.8.0');
+  const upgraded = await EditorialStore.open(root,roots.codeRoot);
+  try { await upgraded.stageSelectedManuscript(randomUUID(),join(roots.inputRoot,'sample1-edited.docx')); }
+  finally { upgraded.markCleanShutdown(); upgraded.close(); }
   const lost = join(roots.inputRoot,'lost-sources');
   await cp(root,lost,{recursive:true});
   for (const entry of await readdir(lost)) if (entry.startsWith('store-before-0.8.0-')) {
@@ -129,8 +157,26 @@ it('resumes each phase, imports the older package and recovers missing old files
   try { expect(healthy.listBooks(null).items).toHaveLength(2); }
   finally { healthy.markCleanShutdown(); healthy.close(); }
   await beginUpgradeRollback(root);
+  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'save-new') throw Error('power loss'); })).rejects.toThrow('power loss');
+  const kept = (await readdir(root)).find(name => name.startsWith('store-before-0.8.0-'))!;
+  const away = join(roots.inputRoot,'old-library-away');
+  await rename(join(root,kept),away);
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+  expect(existsSync(phase)).toBe(false);
+  expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
+  await rename(away,join(root,kept));
+  await beginUpgradeRollback(root);
   expect(await resumeUpgrade(root, '0.8.0')).toMatchObject({ restored: true });
-  expect((await readdir(join(root, 'shell'))).filter(name => name.startsWith('store-after-0.8.0-'))).toHaveLength(2);
+  const saved = (await readdir(join(root,'shell'))).filter(name => name.startsWith('store-after-0.8.0-'));
+  expect(saved).toHaveLength(2);
+  expect((await fileDigest(join(root,'shell',saved.find(name => name !== firstSaved)!,'payloads',newKey)))?.sha256).toBe(newObject);
+  const direct = await legacy.openLegacy(root);
+  const directPackage = join(roots.inputRoot,'direct-rollback.ai7db');
+  try {
+    const prep = await direct.prepareDatabaseExport(directPackage,true);
+    await direct.approveDatabaseExport(prep.preparationId,true);
+  } finally { direct.markCleanShutdown(); direct.close(); }
+  expect(await members(directPackage)).toEqual(original);
 }, 180_000);
 
 it('accepts only the unlink order authorized by an abandoned old import', async () => {
@@ -162,6 +208,13 @@ it('accepts only the unlink order authorized by an abandoned old import', async 
     db.prepare(`INSERT INTO import_abandonment_cleanup_intents(draft_id,object_digest,expected_draft_version,relative_key,state,requested_at,working_object_digest)
       VALUES (?,?,1,?,'prepared',?,?)`).run(draft, source.digest, source.key, now, docx.digest);
     await verify(); // original removed, working DOCX still present
+    const partial = join(roots.inputRoot,'partly-abandoned');
+    await cp(root,partial,{recursive:true});
+    await beginUpgrade(partial);
+    expect(await resumeUpgrade(partial,'0.8.0')).toMatchObject({restored:false});
+    const recovered = await EditorialStore.open(partial,roots.codeRoot);
+    try { expect(recovered.listBooks(null).items).toHaveLength(2); }
+    finally { recovered.markCleanShutdown(); recovered.close(); }
     await rm(join(root, 'objects', docx.key));
     await verify(); // both removed before the state update
     await writeFile(join(root, 'objects', source.key), source.bytes);
