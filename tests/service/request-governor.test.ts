@@ -220,7 +220,7 @@ describe('durable request reader compatibility', () => {
   });
 
   // 用时 (#1670): what the next start writes to discharge an admitted request is not the Run's own work, so the five hours AI7
-  // was closed never count — read on the real review, its category Run left executing, or left cancelling and finished at the start.
+  // was closed never count — read on the real review, its category Run left executing, or left cancelling and finished at the start (#1677).
   it.each(['executing', 'cancelling'] as const)('reads no closed hours into the 用时 of a Run left %s with an admitted request (#1670)', async (left) => {
     const crash = await admittedCrash();
     const shutdown = Date.now();
@@ -255,9 +255,12 @@ describe('durable request reader compatibility', () => {
           productionPolicyFor: (selected) => resolveSourceCheckoutLaunchPolicySync(crash.roots.codeRoot, 'ordinary-production', selected),
           production: { scope: 'ordinary-production', nativeFetch: async () => { throw new Error('NOTHING_IS_SENT'); } } });
         scenarioCleanups.push(() => restarted.dispose());
-        restarted.cancelRun(crash.runRecordId, kept); await restarted.whenIdle();
+        // The start's own finishing of a cancellation AI7 closed on (#1677): the owner ends it, nothing is sent, the review settles.
+        await reopened.finishStoppedReviewCancellations(restarted);
       }
       expect(kept.currentRunState(crash.runRecordId)).toBe(left === 'executing' ? 'resumable' : 'cancelled');
+      expect(reopened.inspectReviewWorkspace(crash.book.bookId, crash.reviewRunId).run!.categories.map((entry) => entry.state))
+        .toEqual([left === 'executing' ? 'interrupted' : 'settled']);
       const after = read();
       expect(after.workingSince).toBeNull();
       // Finishing the cancellation does not make the figure jump.
