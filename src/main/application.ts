@@ -3503,6 +3503,7 @@ export async function runApplication(): Promise<void> {
   let serviceInterrupted = false;
   let productReady = false;
   let quitting = false;
+  let restoreOnShutdown: (() => Promise<unknown>) | undefined;
   let quitReady = false;
   let shutdown: Promise<void> | undefined;
   let unregisterHandlers: (() => void) | undefined;
@@ -3664,6 +3665,7 @@ export async function runApplication(): Promise<void> {
       unregisterHandlers?.();
       unregisterHandlers = undefined;
       await service?.stop();
+      await restoreOnShutdown?.();
       quitReady = true;
       journeyClose('stop-complete');
     })());
@@ -4423,8 +4425,9 @@ export async function runApplication(): Promise<void> {
         const answer = await dialog.showMessageBox({type:'warning',title:'回到升级前的数据',
           message:'升级后所做的修改不在旧书库中。恢复后，请使用上一版 AI7 打开。',buttons:['回到升级前的数据','取消'],defaultId:1,cancelId:1});
         if (answer.response !== 0) return false;
-        if (!(await storageMaintenance(serviceEntry,dataRoot,'rollback'))) return false;
-        app.relaunch({ args:process.argv.slice(1) });
+        if (!(await storageMaintenance(serviceEntry, dataRoot, 'check-rollback'))) return false;
+        if ([...ownedWindows.values()].some(owned => owned.closeRisk && !owned.window.isDestroyed())) return false;
+        restoreOnShutdown = () => storageMaintenance(serviceEntry, dataRoot, 'rollback');
         return true;
       },
     );

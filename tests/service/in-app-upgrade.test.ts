@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { cp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -69,7 +69,7 @@ it('resumes each phase, imports the older package and recovers missing old files
     const view = current();
     const before = view.workingDigest;
     const scope = { bookId: view.bookId, manuscriptId, branchId };
-    expect(editor.undoManuscript(manuscriptId, branchId, before).canUndo).toBe(false);
+    expect(() => editor.undoManuscript(manuscriptId, branchId, before)).toThrow(expect.objectContaining({code:'NOTHING_TO_UNDO'}));
     editor.reverseAppliedChangeSuggestion({ ...legacy.binding, windowStartBlockId: view.blocks[0]!.blockId, markId: legacy.markId, clientEffectId: randomUUID() });
     expect(current().workingDigest === before).toBe(false);
     await editor.saveMilestone(manuscriptId, branchId, '新版本', 'stage-archive', null, '');
@@ -138,25 +138,20 @@ it('accepts only the unlink order authorized by an abandoned old import', async 
   await cp(roots.dataRoot, root, { recursive: true });
   const store = join(root, 'store', 'ai7.sqlite');
   const db = new DatabaseSync(store);
-  const draft = randomUUID();
   const now = new Date().toISOString();
-  const working = await composeManuscriptDocx(join(roots.inputRoot, 'working.docx'), { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 3, title: 'sample1' });
-  const sample = db.prepare("SELECT text FROM working_blocks WHERE length(text)>0 LIMIT 1").get()!;
-  const original = Buffer.from(String(sample.text));
-  const objects = [original, working].map((bytes, i) => {
-    const digest = createHash('sha256').update(bytes).digest('hex');
-    const key = `sha256/${digest.slice(0, 2)}/${digest}.${i ? 'docx' : 'txt'}`;
-    return { digest, key, bytes };
-  });
-  const [source, docx] = objects as [typeof objects[number], typeof objects[number]];
+  const original = Buffer.from(String(db.prepare("SELECT text FROM working_blocks WHERE length(text)>0 LIMIT 1").get()!.text));
+  const selected = join(roots.inputRoot,'sample1.txt');
+  await writeFile(selected,original);
+  const old = await legacy.openLegacy(root);
+  let draft: string;
+  try { draft = (await old.stageSelectedManuscript(randomUUID(),selected)).draftId; }
+  finally { old.markCleanShutdown(); old.close(); }
+  const held = db.prepare(`SELECT d.object_digest, o.relative_key, w.object_digest working_digest, w.relative_key working_key
+    FROM import_drafts d JOIN content_objects o ON o.object_digest=d.object_digest JOIN content_objects w ON w.object_digest=d.working_object_digest
+    WHERE d.draft_id=?`).get(draft)!;
+  const source = { digest:String(held.object_digest), key:String(held.relative_key), bytes:original };
+  const docx = { digest:String(held.working_digest), key:String(held.working_key) };
   try {
-    for (const obj of objects) {
-      db.prepare('INSERT INTO content_objects VALUES(?,?,?,?)').run(obj.digest, obj.key, obj.bytes.length, now);
-      await mkdir(join(root, 'objects', 'sha256', obj.digest.slice(0, 2)), { recursive: true });
-      await writeFile(join(root, 'objects', obj.key), obj.bytes);
-    }
-    db.prepare(`INSERT INTO import_drafts(draft_id,selection_token,state,draft_version,display_name,object_digest,source_format,working_object_digest,converter_identity,staged_at)
-      VALUES (?,?,'staged',1,'sample1.txt',?,'TXT',?,'sample1',?)`).run(draft, randomUUID(), source.digest, docx.digest, now);
     const verify = async () => {
       const members = await Promise.all((await databasePackageSources(root)).map(async file => ({ path: file.member, ...(await fileDigest(file.path))! })));
       await verifyCopiedPayloads(store, members, 116);

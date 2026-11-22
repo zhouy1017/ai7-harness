@@ -163,10 +163,15 @@ export async function hasLocalUpgradeSource(root: string): Promise<boolean> {
   } catch { return false; }
 }
 
-export async function beginUpgradeRollback(root: string): Promise<void> {
+export async function checkUpgradeRollback(root: string): Promise<UpgradeState> {
   const state = await readState(join(root, 'store', originFile));
   requireStore(state?.backup && await readState(journal(root)) === null, 'UPGRADE_STATE_INVALID', '找不到本次升级的备份记录。');
   await verifyOld(root, state).catch(() => verifyBackup(root, state));
+  return state;
+}
+
+export async function beginUpgradeRollback(root: string): Promise<void> {
+  const state = await checkUpgradeRollback(root);
   await writeAtomic(journal(root), JSON.stringify({ ...state, stage: 'restore' }));
 }
 

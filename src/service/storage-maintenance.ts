@@ -1,6 +1,6 @@
 import { createCanonicalExternalDataRoot } from '../shared/data-root.js';
 import { readBuiltIdentity } from '../shared/read-build-identity.js';
-import { beginUpgrade, beginUpgradeRollback, resumeUpgrade, upgradePreflight } from './in-app-upgrade.js';
+import { beginUpgrade, beginUpgradeRollback, checkUpgradeRollback, resumeUpgrade, upgradePreflight } from './in-app-upgrade.js';
 
 export async function runStorageMaintenance(args: string[], codeRoot: string): Promise<void> {
   if (args.length !== 2) throw new Error('Invalid maintenance arguments');
@@ -10,7 +10,11 @@ export async function runStorageMaintenance(args: string[], codeRoot: string): P
     let result = { restored: false, message: '' };
     switch (args[0]) {
       case 'preflight': await upgradePreflight(root); break;
-      case 'rollback': await beginUpgradeRollback(root); break;
+      case 'check-rollback': await checkUpgradeRollback(root); break;
+      case 'rollback':
+        await beginUpgradeRollback(root);
+        result = await resumeUpgrade(root, softwareVersion) ?? result;
+        break;
       case 'upgrade':
       case 'resume':
         if (args[0] === 'upgrade') await beginUpgrade(root);
