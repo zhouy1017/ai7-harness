@@ -24,7 +24,8 @@ const memory = (itemId: string, state: EditorialMemoryVersion['state']): Editori
 function learning() {
   let page: EditorialLearningProjection = {
     basis: '工程依据 SHA ' + 'a'.repeat(64), enabled: true, controlEntries: 2, excludedBooks: [], excludedMaterials: [], signals: [],
-    items: [memory('active', 'active'), memory('candidate', 'proposed')].map((current) => ({ current, usable: current.state === 'active', history: [current] })),
+    items: [memory('active', 'active'), memory('candidate', 'proposed')].map((current) => ({ current, usable: current.state === 'active', history: [current],
+      row: { group: current.state === 'active' ? 'enabled' as const : 'pending' as const, changedAt: AT, origin: 'ai' as const, reenable: null, pin: current.versionId, pausedInUse: false } })),
     nextSignalOffset: null, nextItemOffset: null, nextExclusionOffset: null,
     curation: { available: true, disclosure: '整理预算', envelope: null, passesUsed: 0, reservedTokens: 0, recentRuns: [] },
   };

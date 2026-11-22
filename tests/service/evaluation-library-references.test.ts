@@ -1,4 +1,5 @@
 import { setLibraryDecision } from '../support/library-materials.js';
+import { joinSeries, leaveSeries, makeJ13Series } from '../support/series-consistency.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { clarificationPlanBaseDigest } from '../../src/service/provider/clarification-contract.js';
@@ -172,6 +173,36 @@ function answer(kind: Kind, prepared: InitialEvaluationProjection | ReadersRepor
   entries.set(fixtureEntryKey(0, requestDigest), { unitOrdinal: 0, requestDigest, attempt: null, contentDigest: null,
     response: { kind: 'unit-result', text: JSON.stringify(response), usage: { inputTokens: 10, outputTokens: 10 } } });
 }
+
+it('relaunches an evaluation with its frozen series and materials and accepts a new selection (#1698)', async () => {
+  const seriesId = makeJ13Series(store, bookId);
+  const materialIds = [await material()];
+  const kind = 'initial-evaluation' as const;
+  const source = store.launchInitialEvaluation({ bookId, seriesId, materialIds, clientCommandId: randomUUID(), startWhen: 'when-online' }, launchPolicy);
+  const task = { bookId, kind, ref: source.taskIntentId };
+  store.cancelWaitingTask(task);
+  leaveSeries(store, seriesId, bookId);
+  const recipe = store.inspectTaskPlan(task).relaunch;
+  if (recipe?.operation !== 'launchInitialEvaluation') throw new Error('expected evaluation relaunch');
+  expect(recipe.input).toMatchObject({ bookId, seriesId, materialIds,
+    relaunchOf: { kind, ref: source.taskIntentId, runRecordId: source.runRecordId, cancelsFirst: false } });
+  const request = { ...recipe.input, clientCommandId: randomUUID(), startWhen: 'when-online' as const };
+  const other = await importSample1Book(store, roots.codeRoot, 'Other evaluation');
+  expect(() => store.launchInitialEvaluation({ ...request, bookId: other.bookId }, launchPolicy))
+    .toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+  expect(() => store.launchInitialEvaluation(request, launchPolicy))
+    .toThrowError(expect.objectContaining({ code: 'SERIES_SCOPE_UNAVAILABLE' }));
+  const next = store.launchInitialEvaluation({ ...request, seriesId: null, clientCommandId: randomUUID() }, launchPolicy);
+  const nextTask = { bookId, kind, ref: next.taskIntentId };
+  store.cancelWaitingTask(nextTask);
+  joinSeries(store, seriesId, bookId);
+  expect(store.inspectInitialEvaluation(bookId).runSourceScope).not.toHaveProperty('seriesScopes');
+  const bookOnly = store.inspectTaskPlan(nextTask).relaunch;
+  expect(bookOnly?.input).toMatchObject({ bookId, materialIds, relaunchOf: { ref: next.taskIntentId } });
+  expect(bookOnly!.input).not.toHaveProperty('seriesId');
+  expect(() => store.launchInitialEvaluation({ ...request, seriesId: null, clientCommandId: randomUUID() }, launchPolicy))
+    .toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
+});
 
 describe('审稿意见 references per template (Issue #795 item 4)', () => {
   beforeEach(() => finalize());

@@ -93,7 +93,7 @@ export function reviewHost(db: DatabaseSync): ReviewOperationsHost {
     taskMaterialReadings: () => outside('material text'),
     // External-owner read stub: these cases name no material, and do not prove material preparation.
     prepareTaskMaterials: (_bookId, ids) => { if (ids.length) outside('material preparation'); return []; },
-    resultBinding: () => outside('factual result binding'), launchChoice: () => outside('execution choice'),
+    resultBinding: () => outside('factual result binding'), launchChoice: () => outside('execution choice'), requireRelaunchSource: () => outside('relaunch source'),
     executionLedgerForRun: () => outside('execution ledger'), materializeFactualVerification: () => outside('factual writes'),
     inspectTaskPlanWithConnection: () => outside('task plan'), inspectFactualVerification: () => outside('factual lens'),
     inspectEvidenceWorkspace: () => outside('evidence'), inspectResearchEvidence: () => outside('research evidence'),

@@ -6,6 +6,7 @@ import {
   IPC_CHANNELS,
   TASK_OVERVIEW_OPERATIONS,
   type TaskOverviewCall,
+  type EvaluationReferencesProjection,
   type DeliverablesProjection,
   type DesignatePublicationVersionInput,
   type RendererApi,
@@ -590,6 +591,34 @@ export function registerProductionAndPackageHandlers(context: {
     requireAuthority();
     if (!request || !TASK_OVERVIEW_OPERATIONS.includes(request.operation) || !UUID_PATTERN.test(request.bookId) || !overviewBooks.get(owned)?.has(request.bookId)) {
       throw new ServiceCallError('TASK_OVERVIEW_INVALID', '无法打开这项任务。');
+    }
+    if (request.operation === 'inspectEvaluationReferences') {
+      const { input, bookId } = request;
+      if (!input || typeof input !== 'object' || Array.isArray(input) ||
+          !Object.hasOwn(input, 'recordId') || input.recordId !== null || Object.keys(input).length !== 1) {
+        throw new ServiceCallError('TASK_OVERVIEW_INVALID', '无法读取参考资料。');
+      }
+      const generation = owned.routeGeneration;
+      return serializeEffect(async (): Promise<EvaluationReferencesProjection> => {
+        requireCurrentRouteGeneration(owned, generation);
+        if (!overviewBooks.get(owned)?.has(bookId)) throw new ServiceCallError('TASK_OVERVIEW_INVALID', '无法打开这项任务。');
+        const page = await service.call('inspectEvaluation', { bookId, recordId: null });
+        requireCurrentRouteGeneration(owned, generation);
+        if (page?.bookId !== bookId || !overviewBooks.get(owned)?.has(bookId)) {
+          throw new ServiceCallError('TASK_OVERVIEW_INVALID', '任务结果不属于所选图书。');
+        }
+        const materials = page.materials;
+        return {
+          bookId,
+          ...(materials && { materials: {
+            statement: materials.statement,
+            more: materials.more,
+            items: materials.items.map(({ materialId, title, characters, scope, selectable, reason }) =>
+              ({ materialId, title, characters, scope, selectable, reason })),
+          } }),
+          market: { series: page.market.series.map(({ seriesId, title }) => ({ seriesId, title })) },
+        };
+      });
     }
     return serializeEffect(async () => {
       const generation = owned.routeGeneration;

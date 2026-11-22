@@ -1,3 +1,4 @@
+import { bookFindingsChunk } from './book-findings-wire.js';
 import { driveLaunchedLedgerRun } from './analysis/execution.js';
 import { prepareQuickTask } from './quick-tasks.js';
 import { controlOverviewTasks } from './task-overview.js';
@@ -474,11 +475,15 @@ async function dispatch(
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress, request.input.revisionId),
       };
     case 'inspectBookFindings':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectBookFindings(request.input.bookId, request.input.offset) };
+      return { id: request.id, ok: true, op: request.op, result: bookFindingsChunk(store.inspectBookFindings(request.input.bookId, request.input), request.input.whole === true) };
     case 'inspectParagraphAnalysis':
       return { id: request.id, ok: true, op: request.op, result: store.inspectParagraphAnalysis(request.input.bookId, request.input.manuscriptId, request.input.blockId, request.input.radius) };
-    case 'previewTaskLaunch':
-      return { id: request.id, ok: true, op: request.op, result: store.previewTaskLaunch(request.input, launchPolicy) };
+    case 'previewTaskLaunch': {
+      const launch = request.input.launch;
+      return { id: request.id, ok: true, op: request.op, result: launch.operation === 'startScopedAiEdit'
+        ? fastRoleCall(() => fastRole.requests.previewScopedEdit(request.input.bookId, launch.input))
+        : store.previewTaskLaunch(request.input, launchPolicy) };
+    }
     case 'launchBaselineAnalysis':
     case 'launchCustomAnalysis':
     case 'launchWritingTask':
@@ -636,7 +641,7 @@ async function dispatch(
           }
         }
         if (request.input.kind === 'review-run' && request.input.action === 'cancel') {
-          void analysisExecution.whenDone(runRecordId).then(() => store.finishCancelledReviewRun(runRecordId)).catch(() => undefined);
+          void store.finishCancelledReviewRunWhenDone(analysisExecution, runRecordId);
         }
       }
       return { id: request.id, ok: true, op: request.op, result: store.inspectTaskPlan(request.input, analysisProgress) };
@@ -905,6 +910,10 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.acceptEditorialMemory(request.input) };
     case 'deactivateEditorialMemory':
       return { id: request.id, ok: true, op: request.op, result: store.deactivateEditorialMemory(request.input) };
+    case 'reenableReviewPreference':
+      return { id: request.id, ok: true, op: request.op, result: store.reviewPreferenceLifecycle(request.input, 'reactivate') };
+    case 'deleteReviewPreference':
+      return { id: request.id, ok: true, op: request.op, result: store.reviewPreferenceLifecycle(request.input, 'retire') };
     case 'inspectHouseReviewPreference':
       return { id: request.id, ok: true, op: request.op, result: store.inspectHouseReviewPreference() };
     case 'rebuildHouseReviewPreference':
@@ -1185,6 +1194,11 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.saveHouseWordList(request.input) };
     case 'launchReviewRun': {
       const launched = store.launchReviewRun(request.input, launchPolicy, connectivity.planConnectivity.reading() === 'offline' ? 'when-online' : 'now');
+      if (request.input.startWhen === 'idle' && launched.projection.run?.state === 'waiting') {
+        background.nudge();
+        const reviewRunId = launched.projection.run.reviewRunId;
+        void analysisExecution.whenBackgroundIdle().then(() => store.admitIdleReview(reviewRunId, () => driveReviewRun(reviewRuns, reviewRunId))).catch(() => {});
+      }
       driveReviewRun(reviewRuns, launched.projection.run!.reviewRunId, false, launched);
       if (launched.projection.run?.state === 'waiting') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
       return { id: request.id, ok: true, op: request.op, result: { ...store.inspectReviewWorkspace(request.input.bookId, launched.projection.run!.reviewRunId, analysisProgress),
@@ -2423,13 +2437,8 @@ async function run(): Promise<void> {
     } catch {
       // Reported where ②A's 自定义 tab reads the dimension.
     }
-    for (const runRecordId of store.cancellingLedgerRuns()) {
-      try {
-        analysisExecution.cancelRun(runRecordId, store.executionLedgerForRun(runRecordId));
-        void analysisExecution.whenDone(runRecordId).then(() => store!.finishCancelledReviewRun(runRecordId)).catch(() => undefined);
-      }
-      catch { /* The drawer keeps offering cancellation when the frozen contract cannot be read. */ }
-    }
+    // A Run of any other kind left cancelling is finished the same way, and its review category settles.
+    void store.finishStoppedReviewCancellations(analysisExecution);
     try {
       for (const launched of store.pendingLaunchedLedgerRuns()) {
         try { driveLaunchedLedgerRun(analysisExecution, launched); }

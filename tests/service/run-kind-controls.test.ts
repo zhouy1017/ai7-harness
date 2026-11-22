@@ -104,7 +104,7 @@ for (const [kind, identity] of CASES) it(`${kind}: pause checkpoints, resume the
     // Only Run-honoured edits: these kinds' Runs ask the editor nothing yet, so 先问你 is neither offered nor recorded.
     expect(plan.boundary.adaptable.map((entry) => [entry.id, entry.removable, entry.movable])).toEqual([['safe-retry', true, false]]);
     expect(() => store.editTaskPlan({ ...input, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, removedSteps: [], disallowedAdaptations: [],
-      askFirstAdaptations: ['safe-retry'] })).toThrowError(expect.objectContaining({ code: 'ANALYSIS_PLAN_EDIT_INVALID' }));
+      askFirstAdaptations: ['safe-retry'] })).toThrowError(expect.objectContaining({ code: kind === 'review-run' ? 'REVIEW_RETRY_CHOICE_UNAVAILABLE' : 'ANALYSIS_PLAN_EDIT_INVALID' }));
     plan = store.editTaskPlan({ ...input, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, removedSteps: [], disallowedAdaptations: ['safe-retry'] });
     const revisedCategoryDigests = plan.start.categoryDigests;
     expect(plan.boundary.adaptable.find((entry) => entry.id === 'safe-retry')?.removed).toBe(true);

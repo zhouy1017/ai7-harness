@@ -1,11 +1,12 @@
 import { referencedRules } from './rule-references.js';
 import type { DatabaseSync } from 'node:sqlite';
-import type { GlobalMemoryItem, HouseReviewPreferenceUse, HouseReviewPreferenceVersion, RecordLearningSupervisionInput, TrustedOperationalScope } from '../../shared/protocol.js';
+import type { GlobalMemoryItem, HouseReviewPreferenceUse, HouseReviewPreferenceVersion, RecordLearningSupervisionInput, ReviewPreferenceLifecycleInput, TrustedOperationalScope } from '../../shared/protocol.js';
 import { HouseReviewPreferenceLedger, housePreferenceLabel, preferenceNames, withoutNames } from '../house-review-preference.js';
 import { EditorialLearningLedger } from './ledger.js';
 import { requireStore } from '../store-records.js';
+import { LearningEligibilityError } from '../learning-eligibility.js';
 import { editorialMemoryDigest, editorialMemoryPrompt, type EditorialMemorySnapshot } from './editorial-memory.js';
-import { SupervisionDirectives } from './supervision-directives.js';
+import { governedPreferences, preferenceItems, refuseReviewPreference, SupervisionDirectives } from './supervision-directives.js';
 
 export { housePreferenceLabel, editorialMemoryDigest };
 export type { EditorialMemorySnapshot };
@@ -64,11 +65,66 @@ export class EditorialMemoryFacade {
   recordSupervision(scope: TrustedOperationalScope, input: RecordLearningSupervisionInput, items: readonly GlobalMemoryItem[]) {
     const memoryTargets = new SupervisionDirectives(this.db).memoryTargets(input.targets);
     requireStore(memoryTargets.length === 0 || memoryTargets.length === input.targets.length, 'LEARNING_SUPERVISION_INVALID', '请分别治理记忆与偏好条目。');
-    const directive = new SupervisionDirectives(this.db).record(scope, input, items);
+    let directive;
+    try { directive = new SupervisionDirectives(this.db).record(scope, input, items); } catch (error) {
+      // A 删除-ed entry is listed nowhere, so its pin reads as stale: it is refused as deleted instead (Issue #1655).
+      if (!(error instanceof LearningEligibilityError && error.code === 'LEARNING_SUPERVISION_STALE')) throw error;
+      const retired = memoryTargets.length > 0 ? null : this.preferenceReplay(scope).retired;
+      if (input.targets.some((pin) => retired === null ? this.learning().retired(pin.itemId) : retired.has(pin.itemId))) refuseReviewPreference('DELETED');
+      throw error;
+    }
     if (memoryTargets.length > 0) this.learning().govern(directive, memoryTargets);
     const addsText = input.operation === 'create' || input.operation === 'merge' || input.operation === 'correct' ||
       input.operation === 'supervise' && input.effect === 'correct';
     this.#preferences().refreshGovernance(scope, this.peopleNames(), addsText && (memoryTargets.length > 0 ? 'memory' : true));
+  }
+
+  /**
+   * The preference lines exactly as `inspectGlobalAgent` replays them, and every line a 删除 names: read from the directives
+   * themselves, so a deleted group stays deleted after its derived line vanished from today's base.
+   */
+  preferenceReplay(scope: TrustedOperationalScope) {
+    const preference = this.history(scope).at(-1) ?? null;
+    const directives = new SupervisionDirectives(this.db);
+    const legacy = directives.legacyDirectives(directives.history(scope));
+    const base = preference === null ? null : { ...preference, lines: preference.governance?.baseLines ?? preference.lines };
+    return { preference, entries: governedPreferences(preferenceItems(base), legacy),
+      retired: new Set(legacy.filter((directive) => directive.operation === 'retire').flatMap((directive) => directive.targets.map((pin) => pin.itemId))) };
+  }
+
+  /**
+   * 重新启用 / 删除 (Issue #1655): a memory entry appends to its own chain; a preference line is one directive over the replay
+   * 审阅偏好 lists. Only a line or entry coming back in use is held to the house limit, as accepting or adding it is.
+   */
+  lifecycle(scope: TrustedOperationalScope, input: ReviewPreferenceLifecycleInput, action: 'reactivate' | 'retire'): void {
+    const directives = new SupervisionDirectives(this.db);
+    const memory = directives.memoryTargets([{ itemId: input.itemId, revisionId: input.expectedRevisionId }]).length > 0;
+    const prior = directives.history(scope).find((directive) => directive.actionId === input.actionId);
+    // One action id names one request across both owners: already used by the other one, it names something that changed.
+    if (memory ? prior !== undefined : this.learning().actionUsed(input.actionId)) refuseReviewPreference('CHANGED');
+    if (memory) {
+      const state = this.learning().lifecycle(input, action, scope);
+      if (state !== 'replayed') this.#preferences().refreshGovernance(scope, this.peopleNames(), state === 'active' ? 'memory' : false);
+      return;
+    }
+    if (prior !== undefined) {
+      // The same action id answers the same request again; reused for another request, it names something that changed.
+      if (prior.operation !== action || prior.targets[0]?.itemId !== input.itemId || prior.targets[0]?.revisionId !== input.expectedRevisionId) refuseReviewPreference('CHANGED');
+      return;
+    }
+    const { preference, entries, retired } = this.preferenceReplay(scope);
+    if (retired.has(input.itemId)) refuseReviewPreference('DELETED');
+    const entry = entries.get(input.itemId);
+    if (entry === undefined) refuseReviewPreference('CHANGED');
+    if (entry.item.revisionId !== input.expectedRevisionId) refuseReviewPreference(action === 'reactivate' && entry.last?.operation === 'reactivate' ? 'ALREADY_REENABLED' : 'CHANGED');
+    if (entry.item.state === 'active') refuseReviewPreference('CHANGED');
+    if (action === 'reactivate' && entry.merged) refuseReviewPreference('MERGED');
+    const { item } = entry;
+    directives.record(scope, { actionId: input.actionId, operation: action, targets: [{ itemId: item.itemId, revisionId: item.revisionId }],
+      scope: item.bookId === null ? { kind: 'category', categoryId: item.categoryId } : { kind: 'book', bookId: item.bookId },
+      text: '', categoryId: item.categoryId, effect: 'guide' }, [item], new Date(), true);
+    // A derived line comes back derived and yields as one does; an editor's own words are held to the limit.
+    this.#preferences().refreshGovernance(scope, this.peopleNames(), action === 'reactivate' && entry.before?.revisionId !== preference?.versionId);
   }
 
   globalSourceBasis(scope: TrustedOperationalScope) {
@@ -115,6 +171,7 @@ export class EditorialMemoryFacade {
   adoption(...args: Parameters<EditorialLearningLedger['adoption']>) { return this.learning().adoption(...args); }
   change(...args: Parameters<EditorialLearningLedger['change']>) { return this.learning().change(...args); }
   automaticAdmissionFor(...args: Parameters<EditorialLearningLedger['automaticAdmissionFor']>) { return this.learning().automaticAdmissionFor(...args); }
+  automaticAdmissions(...args: Parameters<EditorialLearningLedger['automaticAdmissions']>) { return this.learning().automaticAdmissions(...args); }
   sourceSnapshot(...args: Parameters<EditorialLearningLedger['sourceSnapshot']>) { return this.learning().sourceSnapshot(...args); }
   validateSourceSnapshot(...args: Parameters<EditorialLearningLedger['validateSourceSnapshot']>) { return this.learning().validateSourceSnapshot(...args); }
   sourceWithdrawalAt(...args: Parameters<EditorialLearningLedger['sourceWithdrawalAt']>) { return this.learning().sourceWithdrawalAt(...args); }

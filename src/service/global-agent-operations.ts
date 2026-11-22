@@ -1,5 +1,5 @@
 import type { ResolvedModelRole } from './model-search-settings.js';
-import { editorialMemoryGovernanceItem, governedMemoryItems, preferenceItems, supervisionSourceCandidates } from './learning/supervision-directives.js';
+import { editorialMemoryGovernanceItem, governedPreferences, preferenceItems, preferenceRow, supervisionSourceCandidates } from './learning/supervision-directives.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { procedureStopped } from './procedures/editable.js';
 import { sha256Hex } from './analysis/canonical.js';
@@ -82,8 +82,10 @@ export function inspectGlobalAgent(host: GlobalAgentOperationsHost, live: (attem
     const facts = memory.globalSources(operationalScope, internalGlobalOriginalFieldsSelected(host), basis);
     const base = basis.preference === null ? null : { ...basis.preference, lines: basis.preference.governance?.baseLines ?? basis.preference.lines };
     const redact = (text: string) => memory.redact(text, facts.names);
-    const items = governedMemoryItems(preferenceItems(base), facts.legacyDirectives).map(item => ({ ...item, text: redact(item.text),
-      revisionId: item.revisionId + '@' + (basis.directives.at(-1)?.directiveId ?? 'base') }));
+    // Each line's own revision is its row pin (Issue #1655); the listed and sent revision keeps the newest directive's suffix.
+    const items = [...governedPreferences(preferenceItems(base), facts.legacyDirectives).values()].filter((entry) => !entry.retired)
+      .map((entry) => ({ ...entry.item, text: redact(entry.item.text), revisionId: entry.item.revisionId + '@' + (basis.directives.at(-1)?.directiveId ?? 'base'),
+        row: preferenceRow(entry, basis.preference?.recordedAt) }));
     const mutableMemories = facts.revisions.map(entry => ({ ...editorialMemoryGovernanceItem(entry, entry.current.editorialDimension), text: redact(entry.current.title) }));
     const sources: GlobalAgentSourceCandidate[] = [
       ...facts.revisions.flatMap(entry => entry.sourceRevision === null ? [] : [{ itemId: entry.current.itemId,

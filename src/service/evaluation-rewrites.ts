@@ -685,7 +685,7 @@ function buildEvaluationRewriteTask(host: EvaluationRewriteStoreHost, bookId: st
   const input = host.evaluationRewriteCall(() => evaluationRewriteContractInput(version));
   const ledger = evaluationRewriteLedger(host, input);
   const latest = latestEvaluationRewrite(host, bookId);
-  requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'EVALUATION_REWRITE_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null, EVALUATION_REWRITE_KIND));
+  requireStore(createPlan.previewAfterCancellation === true || !runIsActive(latest?.projection.run?.state ?? null), 'EVALUATION_REWRITE_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null, EVALUATION_REWRITE_KIND));
   const mode = latest === null || latest.projection.resultSetRevision === null ? 'evaluation-rewrite-first' : 'evaluation-rewrite-again';
   const result = host.analysisCall(() => createPlan(ledger, {
     phase: 'start',

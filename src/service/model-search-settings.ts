@@ -139,8 +139,27 @@ export function getModelServiceRouteConnection(host: ModelSearchSettingsHost, ro
     credentialUpdatedAt: asString(row.credential_updated_at),
     selected: choices.some(choice => choice.roleId === 'foreground-pro' && choice.connectionId === target.connectionId),
     fastSelected: choices.some(choice => choice.roleId === 'foreground-flash' && choice.connectionId === target.connectionId),
-    connectionTest: readModelConnectionTest(row),
+    ...connectionTestsOf(host.authority, target.connectionId, row),
   };
+}
+
+/**
+ * The newest test result of each model tested on a connection. The lighter model's results live here only (the stored slot
+ * stays the one value every build reads, so an older build opens the store), until the service stops.
+ */
+const HELD_CONNECTION_TESTS = new WeakMap<object, Map<string, Map<string, ModelConnectionTestStatus>>>();
+const MAX_HELD_MODELS_PER_CONNECTION = 8;
+
+/** `connectionTest` is the newest of `connectionTests`: every model's newest result, the stored one included, for this credential. */
+function connectionTestsOf(authority: object, connectionId: string, row: SqlRow): Pick<ModelServiceConnectionProjection, 'connectionTest' | 'connectionTests'> {
+  const stored = readModelConnectionTest(row);
+  const results = new Map<string, ModelConnectionTestStatus>();
+  for (const result of [...(HELD_CONNECTION_TESTS.get(authority)?.get(connectionId)?.values() ?? []), ...(stored === null ? [] : [stored])]) {
+    const known = results.get(result.modelId);
+    if (result.credentialUpdatedAt === row.credential_updated_at && (known === undefined || result.testedAt > known.testedAt)) results.set(result.modelId, result);
+  }
+  const connectionTests = [...results.values()].sort((a, b) => (a.testedAt < b.testedAt ? 1 : a.testedAt > b.testedAt ? -1 : 0));
+  return { connectionTest: connectionTests[0] ?? null, connectionTests };
 }
 
 export function getModelServiceConnections(host: ModelSearchSettingsHost): ModelServiceConnectionProjection[] {
@@ -409,8 +428,21 @@ export function recordModelConnectionTest(host: ModelSearchSettingsHost, connect
   };
   readModelConnectionTest({ connection_test: JSON.stringify(sanitized), credential_updated_at: connection.credentialUpdatedAt,
     provider_id: connection.binding.providerId, credential_slot: connection.binding.credentialSlot, credential_reference: connection.credentialReference });
-  requireStore(host.authority.prepare(`UPDATE model_service_connections SET connection_test = ?
-      WHERE connection_id = ? AND credential_reference = ? AND credential_updated_at = ? AND credential_operation_state = 'ready'`)
-    .run(JSON.stringify(sanitized), connection.connectionId, connection.credentialReference, connection.credentialUpdatedAt).changes === 1,
-      'MODEL_SERVICE_CONNECTION_CONFLICT', '连接已变化；请重新测试。');
+  // The chosen lighter model's result is held in memory and leaves the stored slot, which keeps the main model's result;
+  // any other result — the main model's, or a model tested before it was chosen — is stored as before.
+  const lighter = connection.fastBinding !== undefined && connection.fastBinding.modelId === result.modelId && connection.binding.modelId !== result.modelId;
+  const where = `connection_id = ? AND credential_reference = ? AND credential_updated_at = ? AND credential_operation_state = 'ready'`;
+  const arguments_ = [connection.connectionId, connection.credentialReference, connection.credentialUpdatedAt];
+  requireStore(lighter
+    ? host.authority.prepare(`SELECT 1 FROM model_service_connections WHERE ${where}`).get(...arguments_) !== undefined
+    : host.authority.prepare(`UPDATE model_service_connections SET connection_test = ? WHERE ${where}`).run(JSON.stringify(sanitized), ...arguments_).changes === 1,
+  'MODEL_SERVICE_CONNECTION_CONFLICT', '连接已变化；请重新测试。');
+  const held = HELD_CONNECTION_TESTS.get(host.authority) ?? new Map<string, Map<string, ModelConnectionTestStatus>>();
+  HELD_CONNECTION_TESTS.set(host.authority, held);
+  // A held result of an older credential is no longer valid; start the connection's set again.
+  const models = new Map([...(held.get(connection.connectionId) ?? [])].filter(([, kept]) => kept.credentialUpdatedAt === connection.credentialUpdatedAt));
+  models.delete(sanitized.modelId);
+  models.set(sanitized.modelId, sanitized);
+  if (models.size > MAX_HELD_MODELS_PER_CONNECTION) models.delete(models.keys().next().value!);
+  held.set(connection.connectionId, models);
 }

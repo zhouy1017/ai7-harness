@@ -18,6 +18,8 @@ import { type ShellPlace } from './shell.js';
 import { SAMPLE_GUIDANCE_LABELS } from './onboarding-labels.js';
 import { type AnalysisTabId } from './baseline-analysis-card.js';
 import { type RecoveryReturnContext } from './import-review.js';
+import { startNewVersionImport } from './import-entry.js';
+import { IMPORT_ENTRY_WORDS } from './import-entry-labels.js';
 import type { RendererApi } from '../shared/protocol.js';
 import { mountBookVersions } from './book-versions.js';
 
@@ -409,10 +411,14 @@ function renderBookOverview(
         setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
       }
     });
-    actions.append(primaryActionButton);
+    // 导入新版本… (Issue #1682): a new file for this Book, offered as an update of the manuscript.
+    const newVersion = button(IMPORT_ENTRY_WORDS.newVersion, 'secondary', () => void startNewVersionImport(overview.book.bookId, recoveryReturn));
+    newVersion.dataset['importNewVersion'] = 'overview';
+    actions.append(primaryActionButton, newVersion);
     if (completion) {
       primaryActionButton.disabled = true;
-      completionActionButtons.push(primaryActionButton);
+      newVersion.disabled = true;
+      completionActionButtons.push(primaryActionButton, newVersion);
     }
   }
 
@@ -470,8 +476,9 @@ function renderBookOverview(
     const receiptActions = element('div', 'button-row');
     for (const action of Array.from(actions.children)) receiptActions.append(action);
     records.prepend(receiptActions);
-    const open = Array.from(receiptActions.querySelectorAll('button')).find((action) => action.textContent === '继续编辑稿件');
-    if (open) actions.append(open);
+    for (const action of Array.from(receiptActions.querySelectorAll('button'))) {
+      if (action.textContent === '继续编辑稿件' || action.dataset['importNewVersion'] !== undefined) actions.append(action);
+    }
   }
   if (overview.manuscriptState.state === 'empty') {
     if (actions.children.length > 0) content.querySelector('h2')?.after(actions);

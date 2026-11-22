@@ -101,7 +101,45 @@ export interface ReviewReportFindingEntry {
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
+export interface BookFindingsFilters {
+  category?: string;
+  severity?: string;
+  status?: string;
+}
+
+export interface InspectBookFindingsInput {
+  offset?: number;
+  since?: string;
+  filters?: BookFindingsFilters;
+  whole?: boolean;
+}
+
+export interface InspectBookFindingsServiceInput extends InspectBookFindingsInput { bookId: string }
+
+export interface BookFindingPlace {
+  manuscriptId: string;
+  branchId: string;
+  reviewRunId: string;
+  ordinal: number;
+  blockId: string;
+  /** Only a mark that still stands (open, resolved or applied). */
+  markId: string | null;
+  blockExists: boolean;
+}
+
+export type BookFindingDecision = {
+  kind: 'ignore';
+  input: import('./review-runs.js').RecordReviewFindingDispositionInput;
+} | {
+  kind: 'reject';
+  /** Add a fresh clientDecisionId at the press, as on the review card. */
+  input: Omit<import('./editorial-marks.js').RecordChangeSuggestionDecisionInput, 'clientDecisionId'> & { disposition: 'rejected'; editedText: null; reason: null };
+};
+
 export interface BookFindingProjection {
+  /** Present on review rows only; gap and risk targets keep their existing meaning. */
+  place?: BookFindingPlace;
+  decision?: BookFindingDecision | null;
   /** Exact open suggestion offered by the owning review; Apply still revalidates this binding. */
   suggestion?: { manuscriptId: string; branchId: string; markId: string; blockId: string; batchAllowed: boolean; quote: string; replacement: string };
   id: string;
@@ -124,4 +162,12 @@ export interface BookFindingsProjection {
   pageSize: typeof BOOK_FINDINGS_PAGE_SIZE;
   groups: ReadonlyArray<{ category: string; label: string; count: number; bySeverity: Readonly<Record<string, number>>; byStatus: Readonly<Record<string, number>> }>;
   items: ReadonlyArray<BookFindingProjection>;
+}
+
+/** Every service answer carries these, including offset-only reads used by the existing page. */
+export interface BookFindingsReadProjection extends BookFindingsProjection {
+  version: string;
+  /** Keep the displayed list and send the returned version on the next poll; items is empty. */
+  unchanged: boolean;
+  batch: { count: number; sentence: string | null };
 }

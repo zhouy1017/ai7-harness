@@ -58,7 +58,9 @@ export type LearningEligibilityChoice = 'book' | 'house' | 'excluded' | 'deferre
 /** One decision the editor made, as the chain holds it: a later one supersedes, none is rewritten (LEARN-007). */
 export type LibraryMaterialDecisionInput =
   | { readonly kind: 'attribution'; readonly attribution: LibraryAttribution }
-  | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly reason: string | null };
+  | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly reason: string | null }
+  /** 暂不使用 (0.7.4): decided that nobody uses the item; accepted with or without an attribution, superseded by any later one. */
+  | { readonly kind: 'not-used' };
 
 export interface LibraryMaterialDecisionProjection {
   readonly ordinal: number;
@@ -66,7 +68,9 @@ export interface LibraryMaterialDecisionProjection {
   readonly decision:
     | { readonly kind: 'attribution'; readonly scope: 'book'; readonly bookId: string; readonly bookTitle: string }
     | { readonly kind: 'attribution'; readonly scope: 'house' }
-    | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly bookTitle: string | null; readonly reason: string | null; readonly reasonHasMore: boolean };
+    | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly bookTitle: string | null; readonly reason: string | null; readonly reasonHasMore: boolean;
+        /** Present (`true`) on the entry that recorded 暂不使用; it reads as 稍后决定 to a reader that does not know it. */
+        readonly notUsed?: true };
 }
 
 /** One 资料库 item: what arrived, where it belongs, whether it may teach, and whose Tasks may list it under 允许参考. */
@@ -99,6 +103,11 @@ export interface LibraryMaterialProjection {
     | { readonly state: 'available'; readonly scope: 'book'; readonly bookTitle: string }
     | { readonly state: 'available'; readonly scope: 'house' }
     | { readonly state: 'pending' };
+  /**
+   * Present while 暂不使用 is the decision that stands (0.7.4): nothing lists the item in 待我处理 and no Task may use it.
+   * Absent otherwise, including for an item that was left for later before 0.7.4 (that one stays 稍后决定).
+   */
+  readonly notUsed?: { readonly decidedAt: string };
   /** How many decisions the item's chain holds. */
   readonly decisionCount: number;
   /** The latest of them, oldest first, at most `MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN`. */
