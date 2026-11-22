@@ -10,6 +10,7 @@ import type { ReadersReports, latestReadersReport } from './readers-reports.js';
 import type { EvaluationRewrites, latestEvaluationRewrite } from './evaluation-rewrites.js';
 import type { WritingTasks } from './writing-tasks.js';
 import type { BaselineAnalysisStore } from './analysis/baseline-analysis-store.js';
+import { frozenSeriesScopes } from './review/series-consistency.js';
 
 /** Reconstruct the existing editorial request; execution choices belong to the launch owner. */
 export interface TaskRelaunchHost {
@@ -32,9 +33,10 @@ export interface TaskRelaunchHost {
 export const TASK_RELAUNCH_STALE = '这项任务已经变化，请重新打开任务后再开始。';
 
 function ledgerSource(host: TaskRelaunchHost, bookId: string, ref: string) {
-  return host.authority.prepare(`SELECT r.run_record_id, t.kind, s.state, s.sha256,
+  return host.authority.prepare(`SELECT r.run_record_id, t.kind, s.state, s.sha256, a.plan_envelope_sha256,
     t.task_intent_id = (SELECT task_intent_id FROM analysis_task_intents WHERE book_id = t.book_id AND kind = t.kind ORDER BY created_at DESC, rowid DESC LIMIT 1) current
     FROM analysis_task_intents t JOIN analysis_run_records r USING(task_intent_id) JOIN analysis_run_states s USING(run_record_id)
+    JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id AND a.task_intent_id = t.task_intent_id
     WHERE t.book_id = ? AND t.task_intent_id = ? ORDER BY r.rowid DESC, s.sequence DESC LIMIT 1`).get(bookId, ref);
 }
 
@@ -137,7 +139,11 @@ function taskRelaunchPlan(host: TaskRelaunchHost, plan: TaskPlanProjection): Tas
         : { ...common, operation: 'launchCustomAnalysis', input: { ...input, dimensionId: String(row!.kind).slice('custom-analysis/'.length), update } };
       break;
     }
-    case 'initial-evaluation': relaunch = { ...common, operation: 'launchInitialEvaluation', input: { ...input, materialIds: request.materialIds } }; break;
+    case 'initial-evaluation': {
+      const scopes = frozenSeriesScopes(host.authority, ref, asString(row!.plan_envelope_sha256));
+      relaunch = { ...common, operation: 'launchInitialEvaluation', input: { ...input, materialIds: request.materialIds, seriesId: scopes?.[0]?.seriesId ?? null } };
+      break;
+    }
     case 'readers-report': relaunch = { ...common, operation: 'launchReadersReport', input: { ...input, template: request.template, materialIds: request.materialIds } }; break;
     case 'evaluation-rewrite': relaunch = { ...common, operation: 'launchEvaluationRewrite', input: { ...input, recordId: request.recordId } }; break;
     case 'writing': relaunch = { ...common, operation: 'launchWritingTask', input: { ...input, ...request.request } }; break;
