@@ -7,9 +7,11 @@ import {
   type RendererApi,
   type EvidenceSourceCardProjection,
   type ReviewEvidenceSource,
+  type SourceIdentityInput,
 } from '../shared/protocol.js';
 import { findingEvidenceSources } from '../shared/report-wording.js';
 import { technicalWords } from './technical-layer.js';
+import { webSourceName } from './source-link.js';
 
 /**
  * The words of 来源与证据 and of a 事实核查 finding's sources (Issue #425, plan slice S70; V2-UX-SRC-013, EGR-003, FACT-007,
@@ -36,19 +38,29 @@ export const SOURCE_SAVE_NOTE = '仅在本机资料库保存；不发布、导�
 export const SOURCE_ORIGINAL_LABEL = '原文';
 export const SOURCE_TRANSLATION_MACHINE = '机器翻译，仅供理解；以原文为准。';
 export const SOURCE_UNITS_HEADING = '各部分的联网核查';
+export const SOURCE_FOR_SENTENCE = '为稿件这句找的：';
+export const SOURCE_FOR_NO_SENTENCE = '没有对应稿件里的哪一句。';
 /** A factual card's way to the row 来源与证据 archives (Issue #1174). */
 export const FINDING_EVIDENCE_OPEN = '在来源与证据中查看';
 
 type InstantLabel = (iso: string) => string;
 
-/** The site a source names: its title, else its host. */
+/** The site a source names: its title, else its domain — never the raw address (Issue #1683). */
 export function sourceName(record: Pick<ResearchEvidenceProjection, 'sourceTitle' | 'url'>): string {
-  if (record.sourceTitle !== null && record.sourceTitle.trim().length > 0) return record.sourceTitle.trim();
-  try {
-    return new URL(record.url).hostname;
-  } catch {
-    return record.url;
-  }
+  return webSourceName(record.sourceTitle, record.url);
+}
+
+/** 「为稿件这句找的：「…」」 (Issue #1683): the manuscript sentence a retained row was kept for, from the read alone. */
+export function sourceFindingLine(record: Pick<ResearchEvidenceProjection, 'findingId' | 'runRecordId' | 'claim'>, findings: ResearchEvidenceBookProjection['findings']): string | null {
+  if (record.findingId === null) return SOURCE_FOR_NO_SENTENCE;
+  const quote = findings.find((entry) => entry.findingId === record.findingId && entry.runRecordId === record.runRecordId)?.quote
+    ?? (record.claim?.origin === 'finding-quote' ? record.claim.text : null);
+  return quote === null ? null : `${SOURCE_FOR_SENTENCE}「${quote}」`;
+}
+
+/** A finding card's source with the identity its 在浏览器中打开 sends: the result and card it was read from (renderer only). */
+export interface FindingSourceEntry extends ReviewEvidenceSource {
+  readonly identity?: SourceIdentityInput;
 }
 
 /** 「来源全文 · 取回于 …」: how the source was captured, and when. */
@@ -127,9 +139,9 @@ export async function readFindingResearch(api: Pick<RendererApi, 'inspectResearc
 export async function readFindingSources(
   api: Pick<RendererApi, 'inspectFactualVerification' | 'inspectEvidenceWorkspace' | 'inspectResearchEvidence'>,
   bookId: string, reviewRunId: string, research?: ReadonlyMap<string, ResearchEvidenceBookProjection>, only?: string,
-): Promise<Map<string, ReviewEvidenceSource[]>> {
+): Promise<Map<string, FindingSourceEntry[]>> {
   const latest = new Map<string, { resultId: string; taskIntentId: string }>();
-  const sources = new Map<string, ReviewEvidenceSource[]>();
+  const sources = new Map<string, FindingSourceEntry[]>();
   try {
     let after: number | null = null;
     do {
@@ -150,7 +162,9 @@ export async function readFindingSources(
         sourcesAfter = workspace.nextSourceCursor;
       } while (sourcesAfter !== null);
       const retained = research?.get(findingId) ?? await readFindingResearch(api, bookId, taskIntentId, findingId);
-      sources.set(findingId, findingEvidenceSources(cards, retained.records));
+      // The shared rows stay byte-identical to the report's; each is zipped with its card over the same filter.
+      const kept = cards.filter((card) => card.excluded !== true);
+      sources.set(findingId, findingEvidenceSources(cards, retained.records).map((row, index) => ({ ...row, identity: { bookId, resultId, cardId: kept[index]!.cardId } })));
     } catch { /* The read failure grants no source. */ }
   }
   return sources;

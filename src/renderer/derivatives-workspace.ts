@@ -5,7 +5,8 @@ import { documentCreatedLine } from './production-document-labels.js';
 import { showToast } from './components/toast.js';
 import { menuPanel } from './components/controls.js';
 import { DERIVATIVE_CREATE_WORDS, createDerivative, derivativeCreateForm, suggestedDerivativeTitle,
-  type DerivativeCreateFocus, type DerivativeCreateState } from './components/derivative-create.js';
+  droppedFileFormState, type DerivativeCreateFocus, type DerivativeCreateState } from './components/derivative-create.js';
+import { registerDerivativeImportForm } from './import-entry.js';
 import { mountWritingTask, type WritingTaskSurface } from './writing-task.js';
 import type { TaskLaunchRequest } from './task-drawer.js';
 
@@ -36,7 +37,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, classN
 }
 
 /** A book's derivatives share the manuscript editor; this surface owns browsing and management only. */
-export function mountDerivativesWorkspace(options: WorkspaceOptions): { start(): void; destroy(): void } {
+export function mountDerivativesWorkspace(options: WorkspaceOptions): { start(): void; openImportedFile(file: File): boolean; destroy(): void } {
   const { root, api } = options;
   root.classList.add('derivatives-workspace');
   let stopped = false;
@@ -477,6 +478,16 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
     if (!stopped) options.setStatus(result.outcomeLabel, result.outcome === 'created' || result.outcome === 'replaced' ? 'success' : 'error');
   }
 
-  return { start: () => { options.setStatus('衍生稿件'); void reload(); },
-    destroy: () => { stopped = true; writing?.destroy(); } };
+  /** A file dropped on this page (Issue #1682): the form open in 导入文件, the file named and the title taken from it. */
+  function openImportedFile(file: File): boolean {
+    const first = projection?.types[0];
+    if (stopped || busy || first === undefined || projection?.unavailableReason !== null) return false;
+    form = droppedFileFormState(file, first.typeId);
+    paint('confirm');
+    return true;
+  }
+  const unregister = registerDerivativeImportForm(openImportedFile);
+
+  return { start: () => { options.setStatus('衍生稿件'); void reload(); }, openImportedFile,
+    destroy: () => { stopped = true; unregister(); writing?.destroy(); } };
 }
