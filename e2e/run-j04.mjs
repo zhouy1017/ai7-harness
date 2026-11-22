@@ -461,6 +461,26 @@ async function assertOfflineControlReachable(renderer, selector, name) {
   }
 }
 
+// The history panel is longer than the window. Reach its controls with real wheel
+// input before asserting visibility; pointerClick's scripted scroll is not evidence.
+async function scrollToOfflineControl(renderer, selector, name) {
+  for (let step=0;step<24;step++) {
+    const wheel=await renderer.evaluate(`(() => {
+      const control=document.querySelector(${JSON.stringify(selector)});
+      if(!control)return null;
+      const r=control.getBoundingClientRect();
+      if(r.top>=0&&r.bottom<=innerHeight)return null;
+      const page=document.querySelector('#screen').getBoundingClientRect();
+      return {x:Math.max(1,Math.min(innerWidth-1,page.left+Math.min(80,page.width/2))),
+        y:innerHeight/2,deltaY:Math.max(-500,Math.min(500,r.top+r.height/2-innerHeight/2))};
+    })()`);
+    if(wheel===null)break;
+    await renderer.send('Input.dispatchMouseEvent', {type:'mouseWheel',deltaX:0,...wheel});
+    await renderer.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+  }
+  await assertOfflineControlReachable(renderer, selector, name);
+}
+
 /**
  * Each ordinary update opens the execution chooser and starts from its bar. Its optional estimate is read-only;
  * after launch the frozen plan remains readable. Quick starts retain the Default Execution Rule owner.
@@ -489,9 +509,12 @@ async function startUpdate(renderer, mode, label, name, launch = true, settleOff
   await pointerClick(renderer, waitFor, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab`);
   const choice = `.baseline-analysis-card [data-analysis-action="${mode}"]`;
   await waitFor(renderer, `document.querySelector(${JSON.stringify(choice)})?.disabled===false`, `${name}-selected-plan-ready`);
-  if (settleOfflineDrawer) await assertOfflineControlReachable(renderer, choice, `${name}-mode-reachable`);
+  if (settleOfflineDrawer) await scrollToOfflineControl(renderer, choice, `${name}-mode-reachable`);
   await pointerClick(renderer, waitFor, choice, `${name}-mode`);
-  if (settleOfflineDrawer) await assertOfflineControlReachable(renderer, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan-reachable`);
+  if (settleOfflineDrawer) {
+    await waitForOfflineDrawerSettled(renderer, `${name}-launch-drawer-settled`);
+    await scrollToOfflineControl(renderer, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan-reachable`);
+  }
   await pointerClick(renderer, waitFor, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan`);
   if (!launch) return;
   await launchTaskFromBar(renderer, waitFor, name);
