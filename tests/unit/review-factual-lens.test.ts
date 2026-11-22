@@ -495,7 +495,7 @@ async function selectionSheet(composite = false) {
   Object.assign(view.api, { launchReviewRun: prepare });
   view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
   view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
-  const box = (id: string) => view.root.querySelector(`[data-review-category-option="${id}"] input`)!;
+  const box = (id: string) => view.root.querySelector(id === 'local-text-check' ? '[data-review-local-switch] input' : `[data-review-category-option="${id}"] input`)!;
   const change = (node: MiniElement, value: string | boolean) => { if (typeof value === 'boolean') node.checked = value; else node.value = value; node.dispatchEvent({ type: 'change', bubbles: true }); };
   if (!composite) change(box('style-and-format'), true);
   return { ...view, prepare, box, change, scope: (kind: string) => change(view.root.querySelector(`[data-review-scope-option="${kind}"] input`)!, true) };
@@ -642,7 +642,7 @@ vi.mock('../../src/renderer/evidence-workspace.js', async (original) => {
   const actual = await original<typeof import('../../src/renderer/evidence-workspace.js')>();
   return { ...actual, mountEvidenceWorkspace: vi.fn(actual.mountEvidenceWorkspace) };
 });
-vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({ ...DEFAULT_QUICK_ACTIONS }), rememberActionDefaults: async () => undefined }));
+vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({ ...DEFAULT_QUICK_ACTIONS }), rememberActionDefaults: async () => undefined, readEvidenceAssuranceLevel: async () => 'standard', rememberEvidenceAssuranceLevel: async () => undefined }));
 
 // Issue #1410 items 5 and 6: one-step batch apply with 撤销本批应用, and one-click 忽略, against the real surface.
 describe('one-step review actions (#1410)', () => {

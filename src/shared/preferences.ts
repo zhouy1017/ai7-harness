@@ -12,6 +12,7 @@ import type { GlobalAttentionTarget } from './protocol.js';
 import { isThemePreference, type ThemePreference } from './appearance.js';
 import { MODEL_SERVICE_CHANNELS, validModelServiceModelId, type ModelServiceChannelId } from './protocol/model-service.js';
 import { DISPATCH_TASK_KINDS, validRuntimeExecutionConfig, type DispatchTaskKind, type RuntimeExecutionConfig } from './runtime-execution-config.js';
+import { EVIDENCE_ASSURANCE_DEFAULT_LEVEL, EVIDENCE_ASSURANCE_LEVELS, type EvidenceAssuranceLevel } from './protocol/factual-verification.js';
 
 /** Last dispatch choice on this instance, separately for each task kind. */
 export type DispatchChoices = Readonly<Partial<Record<DispatchTaskKind, RuntimeExecutionConfig>>>;
@@ -355,6 +356,8 @@ export const PREFERENCE_KEYS = Object.freeze({
   'learning.askFrequency': preference((value: unknown): value is LearningAskFrequency => value === 'often' || value === 'occasionally' || value === 'off', 'occasionally' as LearningAskFrequency),
   'model.favourites': preference(isModelFavourites, {} as ModelFavourites),
   'model.dispatchChoices': preference(isDispatchChoices, {} as DispatchChoices),
+  // 0.7.4 (I-2): the 核查力度 the editor last started or planned a 事实核查 with, for every Book; a stored value that is no level reads as the default.
+  'review.evidenceAssuranceLevel': preference((value: unknown): value is EvidenceAssuranceLevel => EVIDENCE_ASSURANCE_LEVELS.some((level) => level === value), EVIDENCE_ASSURANCE_DEFAULT_LEVEL as EvidenceAssuranceLevel),
 });
 
 export type PreferenceKey = keyof typeof PREFERENCE_KEYS;
