@@ -8,17 +8,23 @@ const commentsCanDock = `(() => { const pane=document.querySelector('.manuscript
 // The permanent rail keeps its own grid place beside an overlaid column: static, and to the right of the pane.
 const commentsRailBeside = `(() => { const edge=document.querySelector('.editor-edge'),pane=document.querySelector('.manuscript-comments-pane'); return getComputedStyle(edge).position==='static' && pane.getBoundingClientRect().right<=edge.getBoundingClientRect().left+1; })()`;
 
-async function commentsReadingSize(renderer, check, waitFor, size) {
+async function commentsReadingSize(renderer, check, waitFor, size, leg) {
   await pointerClick(renderer,waitFor,SIDEBAR.settings,'comments-reading-settings');
   await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation [data-settings-nav="appearance"]')`, 'comments-reading-settings-ready');
   await pointerClick(renderer,waitFor,'.settings-navigation [data-settings-nav="appearance"]','comments-reading-appearance');
   await waitFor(renderer, `document.querySelector('[data-view-typography="fontSize"]')`, 'comments-reading-size-ready');
   const bounds=await renderer.evaluate(`(() => {const input=document.querySelector('[data-view-typography="fontSize"]');return {min:Number(input.min),max:Number(input.max),step:Number(input.step)};})()`);
-  await pointerClick(renderer,waitFor,'[data-view-typography="fontSize"]','comments-reading-size-focus');
+  const name=`comments-reading-size-${leg}`;
+  const state=`(() => {const input=document.querySelector('[data-view-typography="fontSize"]'),active=document.activeElement,css=getComputedStyle(document.documentElement).getPropertyValue('--manuscript-font-size').trim();return {control:input?.valueAsNumber??null,root:/^\\d+px$/.test(css)?parseInt(css,10):null,focus:input && active===input?'slider':active===document.body?'body':'other'};})()`;
+  await pointerClick(renderer,waitFor,'[data-view-typography="fontSize"]',`${name}-focus`);
   const press=async(key,code)=>{await renderer.send('Input.dispatchKeyEvent',{type:'keyDown',key,code:key,windowsVirtualKeyCode:code});await renderer.send('Input.dispatchKeyEvent',{type:'keyUp',key,code:key,windowsVirtualKeyCode:code});};
   if(size===bounds.max)await press('End',35);
   else {await press('Home',36);for(let index=0;index<(size-bounds.min)/bounds.step;index++)await press('ArrowRight',39);}
-  await waitFor(renderer, `document.querySelector('[data-view-typography="fontSize"]').value===${JSON.stringify(String(size))} && getComputedStyle(document.documentElement).getPropertyValue('--manuscript-font-size').trim()===${JSON.stringify(String(size)+'px')}`, 'comments-reading-size-saved');
+  try {
+    await waitFor(renderer, `(({control,root})=>control===${size} && root===${size})(${state})`, `${name}-saved`);
+  } finally {
+    console.log(`COMMENTS_READING_SIZE/${leg}/${JSON.stringify({target:size,...await renderer.evaluate(state)})}`);
+  }
   await pointerClick(renderer,waitFor,SIDEBAR.section('manuscript'),'comments-reading-return');
   await waitFor(renderer, `document.querySelector('.manuscript-comments-pane') && document.querySelector('.ProseMirror')`, 'comments-reading-editor-ready');
   if(await renderer.evaluate(`document.querySelector('.manuscript-comments-pane').hidden`))await pointerClick(renderer,waitFor,'[data-edge-entry="comments"]','comments-reading-pane-open');
@@ -152,14 +158,14 @@ export async function commentsPaneForms(renderer, check, waitFor, at, action) {
         at('comments-connector-'+action+'-overlay');
         const originalSize=await renderer.evaluate(`parseFloat(getComputedStyle(document.querySelector('.ProseMirror')).fontSize)`);
         try {
-          await commentsReadingSize(renderer,check,waitFor,24);
+          await commentsReadingSize(renderer,check,waitFor,24,'set');
           await seedCommentsPane(renderer,check,waitFor,size);
           await waitFor(renderer, `!${commentsCanDock} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position==='absolute' && ${commentsRailBeside}`, 'comments-reading-overlay-measure');
           await commentsGeometryAndScroll(renderer,check,waitFor);
           if(action==='apply')await commentsApplyAndReject(renderer,check,waitFor);
           else await commentsReplyAndResolve(renderer,check,waitFor);
           await commentsSeedConnectorCases(renderer,check,waitFor);
-        } finally { await commentsReadingSize(renderer,check,waitFor,originalSize); }
+        } finally { await commentsReadingSize(renderer,check,waitFor,originalSize,'restore'); }
       }
       check(true,'comments-'+form+'-complete');
     }
