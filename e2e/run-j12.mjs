@@ -997,7 +997,7 @@ async function main() {
     const close = closeOwnedBrowser;
 
     if (process.platform === 'win32') {
-      at('historical-library-upgrade');
+      at('upgrade-release-library');
       const { createUpgradeSample1 } = await import('../tests/support/upgrade-sample1.ts');
       const { pressUpgradeDialog } = await import('./upgrade-dialog.mjs');
       const { cp } = await import('node:fs/promises');
@@ -1027,16 +1027,19 @@ async function main() {
       const marker = async root => JSON.parse(await readFile(join(root,'store','ai7-data-version.json'),'utf8')).dataVersion;
       const root = resolve(runRoot,'upgrade-library');
       await cp(baseline,root,{recursive:true});
+      at('upgrade-decline');
       await launch(undefined,undefined,root);
       await exitProduct(() => pressUpgradeDialog(executable,root,'升级书库','关闭'));
       requireJourney(await marker(root) === 1 && !existsSync(join(root,'shell','storage-upgrade.json')),'upgrade-declined');
       for (const fallback of [false,true]) {
+        at('upgrade-consent');
         const manager = await launch(undefined,undefined,root);
         await pressUpgradeDialog(executable,root,'升级书库','升级');
         await pressUpgradeDialog(executable,root,'书库升级','关闭');
         const [page] = await waitForRendererCount(manager,1,'upgrade-library-opened');
         await waitFor(page,`document.querySelector('[data-screen="landing"]')`,'upgrade-library-ready');
         if (!fallback) {
+          at('upgrade-card');
           await page.evaluate(`window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(legacy.bookId)}})`);
           const reversed = await page.evaluate(`(async () => {
             const binding=${JSON.stringify(legacy.binding)};
@@ -1062,12 +1065,14 @@ async function main() {
           requireJourney(await healthy.evaluate(`window.ai7.inspectDataVersion().then(v=>!v.canRollbackUpgrade && v.dataVersion===2)`),'upgrade-no-source-healthy');
           requireJourney(!existsSync(join(unavailable,'shell','storage-upgrade.json')),'upgrade-no-source-no-restart');
           await close();
+          at('upgrade-retained-rollback');
           const back = await launch(undefined,undefined,root);
           const [home] = await waitForRendererCount(back,1,'upgrade-library-reopened');
           await settings(home);
           await click(home,'回到升级前的数据','upgrade-rollback-button');
         } else {
           await settings(page);
+          at('upgrade-backup-rollback');
           requireJourney(await marker(root) === 2,'upgrade-recorded');
           await rm(join(root,'objects'),{recursive:true});
           await click(page,'回到升级前的数据','upgrade-backup-rollback-button');
@@ -1076,6 +1081,7 @@ async function main() {
         await exitProduct(() => pressUpgradeDialog(executable,root,'书库升级','关闭'));
         requireJourney(await marker(root) === 1,'upgrade-rollback-installed');
       }
+      at('upgrade-package');
       const imported = await createCanonicalExternalDataRoot(resolve(runRoot,'release-package-import'),checkout);
       const manager = await launch(oldPackage,undefined,imported);
       const [page] = await waitForRendererCount(manager,1,'upgrade-import-window');
