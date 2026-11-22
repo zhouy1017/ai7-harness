@@ -97,6 +97,7 @@ export async function checkReviewPlanReopening(renderer, waitFor) {
   const geometry = `(${reviewControlGeometry.toString()})(${JSON.stringify(selector)},'.sheet-foot')`;
   const open = `document.querySelector(${JSON.stringify(root)})?.open===true && ${popoverShownInside(`document.querySelector('${root} .task-launch-popover')`)}`;
   const closed = `document.querySelector(${JSON.stringify(root)})?.open===false && !document.querySelector('${root} .task-launch-popover')?.matches(':popover-open')`;
+  await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-review-action="start"]')?.disabled===false`, 'review-reopen-ready');
   await pressReviewControl(renderer, waitFor, selector, 'review-reopen-initial', '.sheet-foot');
   await waitFor(renderer, open, 'review-reopen-initial-open');
   for (const leg of ['close', 'reopen']) {
