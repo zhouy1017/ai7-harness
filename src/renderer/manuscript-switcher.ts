@@ -10,7 +10,8 @@ import type {
 import { DOCUMENT_STATUS_LINES, documentCreatedLine } from './production-document-labels.js';
 import { mountWritingTask, type WritingTaskSurface } from './writing-task.js';
 import { DERIVATIVE_CREATE_WORDS, createDerivative, derivativeCreateForm, suggestedDerivativeTitle,
-  type DerivativeCreateFocus, type DerivativeCreateState } from './components/derivative-create.js';
+  droppedFileFormState, type DerivativeCreateFocus, type DerivativeCreateState } from './components/derivative-create.js';
+import { registerDerivativeImportForm } from './import-entry.js';
 
 /**
  * 本书稿件 on 稿件 (Issues #1403, #1404): the Book's manuscript and every derivative document — 新闻稿、内容简介、审稿意见 … — side by
@@ -33,7 +34,7 @@ export function derivativeSwitchLabel(typeLabel: string, title: string): string 
 }
 
 type SwitcherApi = Pick<RendererApi, 'inspectProductionDocuments' | 'createProductionDocument' | 'decideProductionDocumentType' |
-  'selectAndStageManuscript' | 'abandonImportDraft' | 'prepareSourceImportReview' | 'commitSourceImport' | 'acknowledgeImportCompletion' |
+  'selectAndStageManuscript' | 'stageDroppedManuscript' | 'abandonImportDraft' | 'prepareSourceImportReview' | 'commitSourceImport' | 'acknowledgeImportCompletion' |
   'inspectWritingTask' | 'prepareWritingTask' | 'quickStartWritingTask' | 'createWritingDraft'> &
   Partial<Pick<RendererApi, 'inspectTaskPlan' | 'authorizeWritingTask' | 'searchReferableMaterials'>>;
 
@@ -61,6 +62,8 @@ export interface ManuscriptSwitcher {
   renamed(documents: ProductionDocumentsProjection): void;
   openWriting(): void;
   refreshWriting(): void;
+  /** A file dropped on a 衍生稿件 (Issue #1682): the form open in 导入文件, the file named and the title taken from it. */
+  openImportedFile(file: File): boolean;
   destroy(): void;
 }
 
@@ -323,8 +326,18 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
   paintBar();
   refresh();
   writing.refresh();
+  const openImportedFile = (file: File): boolean => {
+    const first = projection?.types[0];
+    if (destroyed || working || first === undefined || projection?.unavailableReason !== null) return false;
+    form = droppedFileFormState(file, first.typeId);
+    paintPanel('confirm');
+    paintBar();
+    return true;
+  };
+  const unregister = registerDerivativeImportForm(openImportedFile);
   return {
     element: root,
+    openImportedFile,
     renamed: (documents) => {
       if (destroyed || documents.bookId !== bookId) return;
       ticket += 1;
@@ -336,6 +349,7 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
     destroy: () => {
       destroyed = true;
       ticket += 1;
+      unregister();
       writing.destroy();
     },
   };

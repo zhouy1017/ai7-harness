@@ -1,4 +1,5 @@
 import { leaveReviewReturn } from './review-return.js';
+import { createImportWindow } from './import-window.js';
 import { createLibraryScreen } from './library-screen.js';
 import { createBookOverviewScreen } from './book-overview-screen.js';
 import { createSettingsScreens } from './settings-screens.js';
@@ -105,7 +106,8 @@ function requiredElement(selector: string): HTMLElement {
 
 const screen = requiredElement('#screen');
 if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
-const api = reconcileBookWorkbenchApi(window.ai7, {
+const importWindow = createImportWindow(window.ai7);
+const api = reconcileBookWorkbenchApi(importWindow.api, {
   bookOnScreen: () => navigation.bookId,
   editorOnScreen: () => manuscriptOnScreen === null ? null : { manuscriptId: manuscriptOnScreen.manuscriptId, branchId: manuscriptOnScreen.branchId },
   left: () => shell.leaveBook(),
@@ -3562,8 +3564,6 @@ const { renderBookOverview } = createBookOverviewScreen({
   set authorityInterrupted(value) { authorityInterrupted = value; },
   get statusRevision() { return statusRevision; },
 });
-
-
 const { renderBookFilter, renderLanding, renderImported, reimportUnfollowedLine, reimportLandingSection, installDropHandlers } = createLibraryScreen({
   element: (...args) => element(...args),
   button: (...args) => button(...args),
@@ -3587,7 +3587,7 @@ const { renderBookFilter, renderLanding, renderImported, reimportUnfollowedLine,
   returnToRecoveryComparison: (...args) => returnToRecoveryComparison(...args),
   appendRecoveryReturnAction: (...args) => appendRecoveryReturnAction(...args),
   replaceScreen: (...args) => replaceScreen(...args),
-  screen,
+  screen, importWindow,
   settleScreen: (...args) => settleScreen(...args),
   renderEditorWindow: (...args) => renderEditorWindow(...args),
   get statusRevision() { return statusRevision; },

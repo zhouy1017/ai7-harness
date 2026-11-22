@@ -399,6 +399,10 @@ const J01_LAUNCH_SCENARIOS = Object.freeze([
   'reimport-unconfirmed-no-change',
   'reimport-no-change-lineage',
   'reimport-no-change-lineage-restart',
+  'new-version-overview-entry',
+  'new-version-menu-entry-pointer',
+  'new-version-menu-entry-keyboard',
+  'new-version-drop-question',
   'reimport-degraded-initial',
   'reimport-degraded-review',
   'reimport-degraded-restart-required',
@@ -530,6 +534,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'reimport-history',
     // Issue #1521: a populated Book's records through 工作概览 by real input, once the 历史与恢复 row is gone.
     'book-records-reachable',
+    // Issue #1682: 导入新版本… from 工作概览 and from the manuscript's save menu, and the question a dropped file asks there.
+    'new-version-overview-entry',
+    'new-version-menu-entry',
+    'drop-question-overview',
+    'drop-question-editor',
     // The source-only intake of a PDF: identified from its bytes, refused as editable, retained.
     'synthetic-pdf-identity',
     'source-only-pdf-landing',
@@ -1151,6 +1160,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'factual-evidence-workspace',
     // Issue #1174: the factual finding's review card and mark card list the result's sources.
     'factual-card-evidence',
+    // Issue #1683: the collapsed and expanded fact card in ordinary mode, and a web source opened and copied by pointer.
+    'factual-card-ordinary',
+    'factual-card-source-open',
     'factual-review-decision',
     'factual-correction-proposal',
     // Issue #922 (slice 7f): a 自定义分析维度 written in 知识库 › 工序与规则, run from ②A's 自定义 tab, its answers read there.
@@ -1403,6 +1415,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'derivatives-management-writing',
     'derivatives-management-menus',
     'derivatives-management-category',
+    // Issue #1682: a file dropped on 衍生稿件管理 and on a 衍生稿件 in the editor asks what it is; a file that is not DOCX is answered.
+    'derivatives-drop',
+    'derivatives-drop-editor',
+    'derivatives-drop-text',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

@@ -426,3 +426,18 @@ it('follows an AI 写作 start on the management page and opens its draft (#1551
   expect(openDocument).toHaveBeenCalledWith(expect.objectContaining({ documentId: 'doc-98' }), expect.objectContaining({ typeId: 'promotion-article' }));
   surface.destroy();
 });
+
+it('opens the create form in 导入文件 for a dropped file, naming it, and 创建并打开 reads that file without a picker (#1682)', async () => {
+  const { root, methods, surface } = setup(); await flush();
+  const file = { name: '首发通稿.docx' } as File;
+  const dropStage = vi.fn(async () => ({ status: 'cancelled' }));
+  (methods as Record<string, unknown>)['stageDroppedManuscript'] = dropStage;
+  expect(surface.openImportedFile(file)).toBe(true);
+  expect(root.querySelector<HTMLInputElement>('[data-document-field="title"]')!.value).toBe('首发通稿');
+  expect([...root.querySelectorAll<HTMLInputElement>('input')].find((node) => node.value === 'import')!.checked).toBe(true);
+  expect(root.querySelector('[data-dropped-file]')!.textContent).toBe('已选择文件：首发通稿.docx');
+  click(root, '创建并打开'); await flush();
+  expect(dropStage).toHaveBeenCalledWith(file);
+  expect(methods.selectAndStageManuscript).not.toHaveBeenCalled();
+  surface.destroy();
+});

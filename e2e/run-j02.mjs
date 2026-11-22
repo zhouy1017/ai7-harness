@@ -1,5 +1,6 @@
 import { pressReachable } from './task-card-reach.mjs';
 import { commentsLayouts, commentsOrdinaryForEditor } from './comments-pane.mjs';
+import { reachable } from './import-entry-stages.mjs';
 import { createWriteStream, existsSync, statSync } from 'node:fs';
 import { lstat, mkdtemp, opendir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
@@ -1039,6 +1040,8 @@ async function milestoneGeometry(renderer) {
   for (const [width, height] of [[1280, 800], [1008, 681]]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-menu');
+    // Issue #1682: 导入新版本… and 导出… stand whole inside the window, each the topmost thing at its own centre, before the form opens.
+    await assertRenderer(renderer, `${reachable('.editor-save-menu [data-import-new-version="manuscript"]')} && ${reachable('.editor-save-menu .editor-save-menu-body > button:last-of-type')}`, 'milestone-geometry-actions-in-window');
     await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form');
     // The click must have opened the form inside the still-open save menu, not landed on whatever lies under a moved panel.
     await assertRenderer(renderer, `document.querySelector('details.editor-save-menu')?.open === true && document.querySelector('.milestone-section')?.open === true`, 'milestone-geometry-form-opened');
