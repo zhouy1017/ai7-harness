@@ -1180,8 +1180,12 @@ async function main() {
     await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'resumable-tasks-page');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] .task-overview-card[data-task-state="analysis-resumable"]')`, 'resumable-tasks-card', 30_000);
     await assertResumableCard(renderer, '[data-screen="task-overview"] .task-overview-card[data-task-state="analysis-resumable"]', 'resumable-page');
-    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.section('manuscript'), 'resumable-manuscript');
+    // Attention released the Book route. Reopen this interrupted Book from the shelf before checking its own task panel.
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('library'), 'resumable-library');
+    const interruptedBook = `[data-screen="landing"] button[data-book-id=${JSON.stringify(secondBookId)}]`;
+    await pressReachable(renderer, waitFor, requireJourney, interruptedBook, 'resumable-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(secondBookId)}] [data-edge-entry="tasks"]')`, 'resumable-manuscript-ready', 120_000);
+    await assertReachable(renderer, waitFor, requireJourney, SIDEBAR.section('manuscript'), 'resumable-manuscript-section');
     await pressReachable(renderer, waitFor, requireJourney, '[data-edge-entry="tasks"]', 'resumable-panel-entry');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-panel .task-overview-card[data-task-state="analysis-resumable"]')`, 'resumable-panel-card', 30_000);
     // Never measured while the docked drawer still moves (240 ms).
