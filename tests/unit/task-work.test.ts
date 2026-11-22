@@ -58,14 +58,17 @@ describe('the boundary of this process', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(T0);
-      const first = new TaskWorkReader(db, owners, path);
+      const first = new TaskWorkReader(db, owners, path); first.acquire();
+      vi.setSystemTime(T0 + 30 * 60_000);
+      // A store whose open was refused never acquires: it keeps no boundary alive.
+      new TaskWorkReader(db, owners, path);
       vi.setSystemTime(T0 + 60 * 60_000);
-      const second = new TaskWorkReader(db, owners, path);
+      const second = new TaskWorkReader(db, owners, path); second.acquire();
       // The Run began in the first store's lifetime: both read it under way.
       expect([first.ofTaskIntents(['task'])!.workingSince, second.ofTaskIntents(['task'])!.workingSince]).toEqual([at(10), at(10)]);
       first.release(); second.release();
       // Every store closed, then one opened again: a restart, and the stretch left open is not under way.
-      const reopened = new TaskWorkReader(db, owners, path);
+      const reopened = new TaskWorkReader(db, owners, path); reopened.acquire();
       expect(reopened.ofTaskIntents(['task'])).toEqual({ workedMs: 0, workingSince: null, finished: null });
       reopened.release();
     } finally { vi.useRealTimers(); db.close(); }

@@ -2561,6 +2561,7 @@ export class EditorialStore {
       }).catch(() => {
         throw new StoreError('DATA_VERSION_MARKER_UNWRITABLE', DATA_VERSION_MARKER_UNWRITABLE);
       });
+      store.#taskWork.acquire();
       return store;
     } catch (error) {
       // A refused open leaves no handle behind, so the caller can remove the Agent Data Root

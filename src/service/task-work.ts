@@ -102,16 +102,29 @@ export class TaskWorkReader {
   readonly #owners: TaskWorkOwners;
   readonly #statements = new Map<string, StatementSync>();
   /** When this process began holding the database open: a stretch with nothing of its own since then is not under way. */
-  readonly #processStart: number;
+  #processStart: number;
+  readonly #database: string | null;
   #release: (() => void) | null = null;
 
-  /** `database` is the store's database file, shared by every store this process holds open on it, or a fixed instant. */
+  /**
+   * `database` is the store's database file, shared by every store this process holds open on it once `acquire` is called, or
+   * a fixed instant. Until then the boundary is the instant the reader was made.
+   */
   constructor(db: DatabaseSync, owners: TaskWorkOwners, database: string | number = Date.now()) {
     this.#db = db;
     this.#owners = owners;
-    if (typeof database === 'number') { this.#processStart = database; return; }
-    const key = databaseKey(database);
-    const held = OPEN_DATABASES.get(key) ?? { cutoff: Date.now(), open: 0 };
+    this.#processStart = typeof database === 'number' ? database : Date.now();
+    this.#database = typeof database === 'number' ? null : databaseKey(database);
+  }
+
+  /**
+   * The store's open succeeded: it holds the file open from now on, at the boundary of the oldest store still open on it, or at
+   * its own if it is the only one. A refused open never calls this, so it can never keep a boundary alive.
+   */
+  acquire(): void {
+    const key = this.#database;
+    if (key === null || this.#release !== null) return;
+    const held = OPEN_DATABASES.get(key) ?? { cutoff: this.#processStart, open: 0 };
     held.open += 1;
     OPEN_DATABASES.set(key, held);
     this.#processStart = held.cutoff;

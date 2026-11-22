@@ -288,6 +288,32 @@ describe('durable request reader compatibility', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // 用时 (#1670): a refused open holds no boundary, so once every store that opened has closed, the next open is a restart and
+  // a Run left 正在取消 reads none of the closed hours.
+  it.each([false, true])('caps a stretch left open after every opened store closed, an earlier open refused=%s (#1670)', async (refused) => {
+    const crash = await admittedCrash();
+    const shutdown = Date.now();
+    const bind = (store: EditorialStore) => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy: crash.policy,
+      live: { scope: 'ordinary-production', ...crash.binding, runBudgetCeiling: 'unset' } });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(shutdown);
+      if (refused) await expect(EditorialStore.open(crash.snapshot, crash.roots.codeRoot, { induceUnprovableReconciliation: false,
+        persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false,
+        interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: null, interruptUpgradeAt: 'before-record' }))
+        .rejects.toMatchObject({ code: 'E2E_CONTROL_INTERRUPTED' });
+      vi.setSystemTime(shutdown + 1000);
+      const opened = await EditorialStore.open(crash.snapshot, crash.roots.codeRoot); bind(opened);
+      opened.executionLedgerForRun(crash.runRecordId).recordRunState(crash.runRecordId, 'cancelling', { detail: '正在取消' });
+      opened.close();
+      vi.setSystemTime(shutdown + 5 * 3_600_000);
+      const reopened = await EditorialStore.open(crash.snapshot, crash.roots.codeRoot); crash.opened.push(reopened); bind(reopened);
+      const work = reopened.inspectTaskPlan({ bookId: crash.book.bookId, kind: 'review-run', ref: crash.reviewRunId }).work!;
+      expect(work.workingSince).toBeNull();
+      expect(work.workedMs).toBeLessThan(60_000);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('refuses an unsupported SQLite reader revision without an external marker and leaves canonical records untouched', async () => {
     const crash = await admittedCrash();
     await unlink(dataVersionMarkerPath(crash.snapshot));
