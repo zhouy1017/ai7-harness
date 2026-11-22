@@ -7,7 +7,7 @@ import { DataVersionError, SOFTWARE_VERSION, breakingChanges, dataVersionAt, rea
 import { DATABASE_PACKAGE_EXTENSION, writeDatabasePackage } from './database-exports.js';
 import { readSmallFile, writeAtomic } from './database-replacement.js';
 import { fileDigest, takeFreeName } from './manuscript-export.js';
-import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
+import { ensureCanonicalDataDirectory, isStorageFullError } from '../shared/data-root.js';
 import { ensureBackupLocation } from './scheduled-backups.js';
 import { UPGRADE_BACKUP_EXISTS, UPGRADE_BACKUP_FAILED, UPGRADE_BACKUP_UNSUPPORTED } from '../shared/data-version-labels.js';
 
@@ -281,7 +281,7 @@ export async function backUpBeforeUpgrade(
     return { upgrade, earlier };
   } catch (error) {
     if (error instanceof DataVersionError) throw error;
-    if ((error as NodeJS.ErrnoException).code === 'ENOSPC') throw new DataVersionError('UPGRADE_SPACE','备份磁盘空间不足。释放空间后重新打开 AI7 即可继续。');
+    if (isStorageFullError(error)) throw new DataVersionError('UPGRADE_SPACE','备份磁盘空间不足。释放空间后重新打开 AI7 即可继续。');
     throw new DataVersionError('UPGRADE_BACKUP_FAILED', UPGRADE_BACKUP_FAILED);
   } finally {
     if (partial !== null) await rm(partial, { force: true }).catch(() => undefined);

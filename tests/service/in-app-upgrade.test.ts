@@ -5,8 +5,8 @@ import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/pro
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterAll, beforeAll, expect, it } from 'vitest';
-import { createUpgradeSample1, legacySampleService } from '../support/upgrade-sample1.js';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { createUpgradeSample1, legacySampleService, upgradeWithEarlierOrigin } from '../support/upgrade-sample1.js';
 import { reimportVersion } from '../support/reimport-version.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { readDataVersionMarker, storeRevisionOnDisk } from '../../src/service/data-version.js';
@@ -15,6 +15,7 @@ import { replacementStagingFor } from '../../src/service/database-replacement.js
 import { EditorialStore } from '../../src/service/store.js';
 import { backupLocationFor } from '../../src/service/scheduled-backups.js';
 import { databasePackageSources, verifyCopiedPayloads } from '../../src/service/database-exports.js';
+import * as packageWriter from '../../src/service/database-exports.js';
 import { fileDigest } from '../../src/service/manuscript-export.js';
 import { verifyDatabasePackage } from '../../src/service/database-package-reader.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
@@ -236,6 +237,8 @@ it('resumes each phase, imports the older package and recovers missing old files
   await rm(join(moved,'rollback-ready.json'));
   await rm(join(note,'rollback-ready.json'));
   await rename(join(note,'current-database'),join(note,'prepared-database'));
+  await rm(join(note,'current-files.json'));
+  await writeFile(join(note,'prepared-database','files.json'),'[]');
   await rm(join(moved,'ai7.sqlite'));
   await writeFile(join(moved,'payloads',newKey),Buffer.alloc(0));
   await writeFile(phase,staleRestore);
@@ -387,7 +390,11 @@ it('rebuilds the original manifest from the backup across both sides of the old 
   await rename(join(root,'shell','upgrade-'+operationId,'store','upgrade-pending.json'),join(attempt,'store','upgrade-pending.json'));
   await rename(archive,join(attempt,'package.ai7db.partial'));
   await writeFile(phase,beforeBackup);
+  const abandonedConversion = join(root,'shell','upgrade-'+operationId,'converted');
+  await mkdir(abandonedConversion,{recursive:true});
+  await writeFile(join(abandonedConversion,'unfinished-copy'),Buffer.alloc(4096));
   await expect(resumeUpgrade(root,'0.8.0',undefined,0)).rejects.toMatchObject({code:'UPGRADE_SPACE'});
+  expect(existsSync(abandonedConversion)).toBe(false);
   expect(JSON.parse(await readFile(phase,'utf8')).stage).toBe('backup');
   expect(await fileDigest(archive)).toEqual(archiveDigest);
   await expect(stop('convert')).rejects.toThrow('interrupted');
@@ -437,6 +444,7 @@ it.runIf(process.platform === 'win32')('recovers from a locked fallback director
   const priorExtraction = replacementStagingFor(retryArea);
   await mkdir(priorExtraction,{recursive:true});
   await writeFile(join(priorExtraction,'interrupted.partial'),Buffer.alloc(4096));
+  await rm(join(root,'shell','upgrade-'+start.id,'payloads.json'));
   const stop = (point: string, after = false) => resumeUpgrade(root,'0.8.0',(stage,renamed) => {
     if (stage === point && Boolean(renamed) === after) throw Error('interrupted');
   });
@@ -540,6 +548,11 @@ it.each(['removed','changed'] as const)('retains an openable revision 117 librar
   const saved = join(root,'shell','store-after-0.8.0-'+id);
   const path = join(saved,'ai7.sqlite');
   const expected = await fileDigest(path);
+  const note = join(root,'shell','upgrade-'+id);
+  const external = (await databasePackageSources(root)).find(file => file.member.startsWith('objects/'))!;
+  await writeFile(join(saved,'payloads',external.member),Buffer.alloc(0));
+  await rm(join(note,'current-files.json'));
+  await writeFile(join(note,'current-database','files.json'),'[]');
   if (defect === 'removed') await rm(path);
   else {
     const altered = new DatabaseSync(path);
@@ -603,6 +616,9 @@ it('recovers files across the rename and preserves both a WAL-only committed dra
   expect((await fileDigest(join(saved,'payloads',key)))?.sha256).toBe(digest);
   await rm(join(saved,'rollback-ready.json'));
   await rm(join(root,'shell','upgrade-'+id,'rollback-ready.json'));
+  const independent = join(root,'shell','upgrade-'+id,'current-database');
+  await writeFile(join(independent,'rollback-ready.json'),'{');
+  await writeFile(join(independent,'files.json'),'[]');
   await writeFile(phase,stale);
   expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
   await verifyLibraryFiles(root,117);
@@ -692,4 +708,40 @@ it('reclaims the interrupted backup attempt on a changed source while preserving
   expect(existsSync(phase)).toBe(false);
   expect((await fileDigest(other))?.bytes).toBe(64);
   await verifyLibraryFiles(root,116);
+},180_000);
+
+it('restores from the package recorded by the earlier converter without disk-size or ledger-id fields',async () => {
+  const root = join(roots.inputRoot,'earlier-upgrade-origin');
+  await cp(roots.dataRoot,root,{recursive:true});
+  await upgradeWithEarlierOrigin(root,roots.codeRoot);
+  const origin = JSON.parse(await readFile(join(root,'store','upgrade-origin.json'),'utf8'));
+  expect(origin.backupStoreBytes).toBeUndefined();
+  expect(origin.backupPayloadBytes).toBeUndefined();
+  expect(origin.upgradeRecordId).toBeUndefined();
+  await rm(join(root,'store-before-0.8.0-'+origin.id),{recursive:true});
+  await beginUpgradeRollback(root);
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  expect((await readDataVersionMarker(root))?.dataVersion).toBe(1);
+  await verifyLibraryFiles(root,116);
+  const old = await legacy.openLegacy(root);
+  try { expect(old.listBooks(null).items).toHaveLength(2); } finally { old.markCleanShutdown(); old.close(); }
+},180_000);
+
+it('keeps the backup phase retryable after a native SQLite FULL result',async () => {
+  const root = join(roots.inputRoot,'sqlite-full');
+  await cp(roots.dataRoot,root,{recursive:true});
+  await beginUpgrade(root);
+  const db = new DatabaseSync(':memory:');
+  let full: unknown;
+  try {
+    db.exec('PRAGMA page_size=512; PRAGMA max_page_count=2; CREATE TABLE capacity(bytes BLOB)');
+    try { db.exec('INSERT INTO capacity VALUES(zeroblob(4096))'); } catch (error) { full = error; }
+  } finally { db.close(); }
+  expect(full).toMatchObject({errcode:13});
+  const writer = vi.spyOn(packageWriter,'writeDatabasePackage').mockRejectedValueOnce(full);
+  try { await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_SPACE'}); }
+  finally { writer.mockRestore(); }
+  expect(JSON.parse(await readFile(join(root,'shell','storage-upgrade.json'),'utf8')).stage).toBe('backup');
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+  await verifyLibraryFiles(root,117);
 },180_000);

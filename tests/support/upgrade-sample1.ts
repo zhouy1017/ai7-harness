@@ -13,16 +13,28 @@ const run = promisify(execFile);
 const release = '790acbcbde8ca268217b152194f83241d1f13d10';
 
 /** Build the released service outside the checkout, using only its committed source and installed dependencies. */
-export async function legacySampleService(root: string, codeRoot: string, revision = release) {
+async function historicalModule(root: string, codeRoot: string, revision: string, name: string) {
   const checkout = await mkdtemp(join(dirname(root), 'released-service-'));
   const archive = join(checkout, 'release.tar');
   await run('git', ['-C', codeRoot, 'archive', '--format=tar', '-o', archive, revision, 'src', 'config', 'package.json']);
   await run('tar', ['-xf', archive, '-C', checkout]);
   await symlink(join(codeRoot, 'node_modules'), join(checkout, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
   const entry = join(checkout, 'service.mjs');
-  await build({ entryPoints: [join(checkout, 'src', 'service', 'store.ts')], outfile: entry, bundle: true, format: 'esm', platform: 'node', packages: 'external', logLevel: 'silent' });
+  await build({ entryPoints: [join(checkout, 'src', 'service', name)], outfile: entry, bundle: true, format: 'esm', platform: 'node', packages: 'external', logLevel: 'silent' });
+  return {entry,checkout};
+}
+
+export async function legacySampleService(root: string, codeRoot: string, revision = release) {
+  const {entry,checkout} = await historicalModule(root,codeRoot,revision,'store.ts');
   const service = createRequire(import.meta.url)(entry) as { EditorialStore: typeof EditorialStore };
   return (dataRoot: string) => service.EditorialStore.open(dataRoot, checkout);
+}
+
+export async function upgradeWithEarlierOrigin(root: string,codeRoot: string): Promise<void> {
+  const {entry} = await historicalModule(root,codeRoot,'416adb15a9dcf76b2f49e202775597645286c18e','in-app-upgrade.ts');
+  const earlier = createRequire(import.meta.url)(entry) as typeof import('../../src/service/in-app-upgrade.js');
+  await earlier.beginUpgrade(root);
+  await earlier.resumeUpgrade(root,'0.8.0');
 }
 
 // The released service performs its actual migrations and records its own version.
