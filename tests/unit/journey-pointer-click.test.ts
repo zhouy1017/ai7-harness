@@ -103,6 +103,25 @@ it('never starts the background-review fixture when its plan preview does not di
   expect(renderer.send).not.toHaveBeenCalled();
 });
 
+it('rejects a second stored annotation at the same span even when only the first ID is rendered', async () => {
+  const source=readFileSync(new URL('../../e2e/run-j05.mjs',import.meta.url),'utf8');
+  const raw=source.match(/await assertRenderer\(renderer, `([^`]+)`, 'header-annotation-service-once'\)/u)?.[1];
+  if(!raw)throw Error('header service readback Journey seam missing');
+  const expression=raw.replaceAll('${JSON.stringify(first)}',JSON.stringify('original-paragraph'));
+  const shown={markId:'shown',kind:'annotation',blockId:'original-paragraph',fromGrapheme:34,toGrapheme:35};
+  let marks=[shown],truncated=false;
+  const document={querySelector:()=>({dataset:{bookId:'book'}})};
+  const window={ai7:{listPriorWork:async()=>[{bookId:'book',manuscriptId:'manuscript',branchId:'branch'}],getManuscriptWindowAt:async()=>({marks,marksTruncated:truncated})}};
+  const read=()=>Function('document','window','globalThis',`return (${expression})`)(document,window,{__headerAnnotationId:'shown'});
+  expect(await read()).toBe(true);
+  marks=[shown,{...shown,markId:'second-unrendered'}];
+  expect(await read()).toBe(false);
+  marks=[{...shown,markId:'different-only-id'}];expect(await read()).toBe(false);
+  marks=[shown,{...shown,kind:'editor-note'},{...shown,blockId:'another-paragraph'},{...shown,fromGrapheme:33}];
+  expect(await read()).toBe(true);
+  truncated=true;expect(await read()).toBe(false);
+});
+
 it('reads the header refusal from the actual visible error surface, rejecting hidden or offscreen reasons', async () => {
   const {createStatusSurface}=await import('../../src/renderer/notifications.js');
   const {installMiniDom,miniDocument}=await import('../support/mini-dom.js');
