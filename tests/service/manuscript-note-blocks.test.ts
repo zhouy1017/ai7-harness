@@ -8,6 +8,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, admittedSourcePath, composeManuscriptDocx, type ComposedRetentionContent } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { reimportVersion } from '../support/reimport-version.js';
 
 // Service-integration suite (L2) for the note block (Issue #1204, W22-S4b; ADR 0096 §1) over the real store. Every manuscript
 // is composed from exact `sample1` (ADR 0043/0044): six paragraphs, a footnote after the third whose note is the source's
@@ -76,6 +77,22 @@ describe('the note block (#1204)', () => {
     checkOwner(into!.blockId);
     store.redoManuscript(book.manuscriptId, book.branchId, view().workingDigest);
     checkOwner(absorbed!.blockId);
+    const scope = { bookId: before.bookId, manuscriptId: before.manuscriptId, branchId: before.branchId };
+    const mergedVersion = store.listBookVersions({ ...scope, offset: 0 }).rows.find(row => row.label.startsWith('恢复前自动保存'))!.revisionId;
+    const restore = (revisionId: string) => store.restoreBookVersion({ ...scope, revisionId, expectedBase: view().revisionId, expectedDigest: view().workingDigest });
+    restore(mergedVersion);
+    const movedPath = join(roots.inputRoot, 'moved-footnote.docx');
+    await composeManuscriptDocx(movedPath, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '注释组稿',
+      retention: { ...NOTES, footnote: { block: 4, noteSourceBlock: 9 } } });
+    await reimportVersion(store, book.bookId, movedPath, false);
+    const newOwner = view().blocks[3]!.blockId;
+    checkOwner(newOwner);
+    restore(mergedVersion);
+    checkOwner(into!.blockId);
+    store.undoManuscript(book.manuscriptId, book.branchId, view().workingDigest);
+    checkOwner(newOwner);
+    store.redoManuscript(book.manuscriptId, book.branchId, view().workingDigest);
+    checkOwner(into!.blockId);
   });
 
   it('imports a footnote and an endnote as note blocks after the body, each naming the paragraph that refers to it', async () => {

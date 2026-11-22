@@ -127,4 +127,27 @@ it('keeps a source image visible when its body paragraph is merged and undone', 
   checkOwner(into!.blockId);
   store.redoManuscript(added.manuscriptId, added.branchId, view().workingDigest);
   checkOwner(absorbed!.blockId);
+  const scope = { bookId: added.bookId, manuscriptId: added.manuscriptId, branchId: added.branchId };
+  const mergedVersion = store.listBookVersions({ ...scope, offset: 0 }).rows.find(row => row.label.startsWith('恢复前自动保存'))!.revisionId;
+  const restore = (revisionId: string) => store.restoreBookVersion({ ...scope, revisionId, expectedBase: view().revisionId, expectedDigest: view().workingDigest });
+  restore(mergedVersion);
+  await reimportVersion(store, added.bookId, path, true);
+  const reimportedOwner = view().blocks[3]!.blockId;
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    const active = () => Number(db.prepare("SELECT count(*) n FROM manuscript_command_groups WHERE branch_id = ? AND kind = 'merge' AND status = 'applied'").get(added.branchId)!.n);
+    expect(active()).toBe(0);
+    checkOwner(reimportedOwner);
+    restore(mergedVersion);
+    expect(active()).toBe(1);
+    checkOwner(into!.blockId);
+    store.undoManuscript(added.manuscriptId, added.branchId, view().workingDigest);
+    expect(active()).toBe(0);
+    checkOwner(reimportedOwner);
+    store.redoManuscript(added.manuscriptId, added.branchId, view().workingDigest);
+    expect(active()).toBe(1);
+    checkOwner(into!.blockId);
+  } finally { db.close(); }
 });
+import { reimportVersion } from '../support/reimport-version.js';
+import { DatabaseSync } from 'node:sqlite';
