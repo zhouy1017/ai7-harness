@@ -1,6 +1,6 @@
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cp, unlink, writeFile } from 'node:fs/promises';
+import { cp, readFile, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
 import {
@@ -249,15 +249,16 @@ describe('durable request reader compatibility', () => {
       const started = read();
       expect(started.workingSince).toBeNull();
       expect(started.workedMs).toBeLessThan(60_000);
-      if (left === 'cancelling') {
-        const restarted = new BaselineAnalysisExecutionOwner({ requestGovernor: governor(), ledger: reopened.baselineAnalysisLedger,
-          launchPolicy: crash.policy, fixture: null, secretResolver: { resolve: async () => 'synthetic-placeholder' },
-          productionPolicyFor: (selected) => resolveSourceCheckoutLaunchPolicySync(crash.roots.codeRoot, 'ordinary-production', selected),
-          production: { scope: 'ordinary-production', nativeFetch: async () => { throw new Error('NOTHING_IS_SENT'); } } });
-        scenarioCleanups.push(() => restarted.dispose());
-        // The start's own finishing of a cancellation AI7 closed on (#1677): the owner ends it, nothing is sent, the review settles.
-        await reopened.finishStoppedReviewCancellations(restarted);
-      }
+      let restartedSends = 0;
+      const restarted = new BaselineAnalysisExecutionOwner({ requestGovernor: governor(), ledger: reopened.baselineAnalysisLedger,
+        launchPolicy: crash.policy, fixture: null, secretResolver: { resolve: async () => 'synthetic-placeholder' },
+        productionPolicyFor: (selected) => resolveSourceCheckoutLaunchPolicySync(crash.roots.codeRoot, 'ordinary-production', selected),
+        production: { scope: 'ordinary-production', nativeFetch: async () => { restartedSends += 1; throw new Error('NOTHING_IS_SENT'); } } });
+      scenarioCleanups.push(() => restarted.dispose());
+      // The start's own finishing of a cancellation AI7 closed on (#1677), run for both cases: it ends the cancelling Run through
+      // the owner and settles its review, and leaves the executing one as the reconciliation made it.
+      await reopened.finishStoppedReviewCancellations(restarted);
+      expect(restartedSends).toBe(0);
       expect(kept.currentRunState(crash.runRecordId)).toBe(left === 'executing' ? 'resumable' : 'cancelled');
       expect(reopened.inspectReviewWorkspace(crash.book.bookId, crash.reviewRunId).run!.categories.map((entry) => entry.state))
         .toEqual([left === 'executing' ? 'interrupted' : 'settled']);
@@ -270,6 +271,18 @@ describe('durable request reader compatibility', () => {
       expect(after.workedMs).toBeLessThan(60_000);
       expect(crash.calls()).toBe(1);
     } finally { vi.useRealTimers(); }
+  });
+
+  // The service's start calls that finishing, after the reconciliations and before any request is read (#1677). Nothing runs the
+  // service's `run()` in a test, so the wiring is pinned in its source as the other service-entry tests read it.
+  it('has the service start finish a stopped cancellation after the reconciliations', async () => {
+    const entry = await readFile(join(import.meta.dirname, '../../src/service/index.ts'), 'utf8');
+    const reconcile = entry.indexOf('store.reconcileStoppedReviewCategoryRuns();');
+    const finish = entry.indexOf('void store.finishStoppedReviewCancellations(analysisExecution);');
+    expect(reconcile).toBeGreaterThan(0);
+    expect(finish).toBeGreaterThan(reconcile);
+    expect(finish).toBeLessThan(entry.indexOf('new ReviewRunDriver(', finish));
+    expect(entry).not.toContain('cancellingLedgerRuns');
   });
 
   // 用时 (#1670): a second store this process opens on the same database while the first one's Run waits on a long request
