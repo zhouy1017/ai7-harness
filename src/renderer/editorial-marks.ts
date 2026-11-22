@@ -1848,6 +1848,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         return;
       }
       problem.hidden = true;
+      draftComposers?.submitStarted(form);
       submit.disabled = true;
       const sending = config.draft ? (markDrafts.write(config.draft.scope, config.draft.place, values.body), markDrafts.send(config.draft.scope, config.draft.place, async () => (await config.submit(values)) !== false)) : config.submit(values);
       void sending.finally(() => {

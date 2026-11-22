@@ -11,7 +11,7 @@ export function createDraftComposers(host: {
   expand(place: ComposerPlace): void;
   closed(): void;
 }) {
-  let open: { place: ComposerPlace; node: HTMLElement; } | undefined;
+  let open: { place: ComposerPlace; node: HTMLElement; submitBlur?: boolean; } | undefined;
   let dead = false;
   const rows = new Map<string, HTMLButtonElement>();
   const sheet = new CSSStyleSheet();
@@ -73,17 +73,19 @@ export function createDraftComposers(host: {
   };
   return {
     restore, fold,
+    submitStarted(form: HTMLElement): void { if (open?.node.contains(form)) open.submitBlur = true; },
     isOpen(place: ComposerPlace): boolean { return open !== undefined && samePlace(open.place, place); },
     owns(node: HTMLElement | undefined): boolean { return open?.node === node && node !== undefined; },
     attach(node: HTMLElement, place: ComposerPlace): void {
       open = { node, place };
       restore();
+      node.addEventListener('focusin', () => { if (open?.node === node) open.submitBlur = false; });
       node.addEventListener('focusout', (event) => {
         // Chromium briefly reports BODY while focus moves between descendants. The destination is authoritative.
         if (event.relatedTarget instanceof HTMLElement && node.contains(event.relatedTarget)) return;
-        const disabledSubmit = event.target instanceof HTMLButtonElement && event.target.type === 'submit' && event.target.disabled;
         const settle = (): void => {
-          const submittingBlur = disabledSubmit && markDrafts.sending(host.scope(), place) && document.activeElement === document.body;
+          // The answer and button re-enable can precede even delivery of this focusout.
+          const submittingBlur = open?.submitBlur === true && document.activeElement === document.body;
           if (!dead && open?.node === node && !node.contains(document.activeElement) && !submittingBlur) fold();
         };
         if (event.relatedTarget === null || event.relatedTarget === undefined) requestAnimationFrame(settle);

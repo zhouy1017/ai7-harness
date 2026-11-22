@@ -318,6 +318,19 @@ describe('comments command parity and refresh continuity', () => {
     if (outcome === 'failure') { expect(ui.scroll.querySelector('[data-mark-composer]') === node).toBe(true); expect(markDrafts.list(windowOf())[0]?.body).toBe('公开合成撰写草稿'); expect(submit.disabled).toBe(false); expect(ui.focus).not.toHaveBeenCalled(); }
     else { expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull(); expect(markDrafts.list(windowOf())).toEqual([]); if(outcome==='success')expect(ui.focus).toHaveBeenCalledTimes(1); else { expect(ui.focus).not.toHaveBeenCalled(); expect(document.activeElement).toBe(elsewhere); } }
   });
+  it.each([...([false,true].flatMap(elsewhere=>[false,true].map(blurAfterRefusal=>({elsewhere,blurAfterRefusal,leaveAgain:false})))),{elsewhere:false,blurAfterRefusal:true,leaveAgain:true}])('keeps fast refusal open unless focus moves: $elsewhere; delayed blur: $blurAfterRefusal; leave after refocus: $leaveAgain (#1689)', async ({elsewhere,blurAfterRefusal,leaveAgain}) => {
+    const ui=mount();await paint();const {node}=await draftComposer(ui);ui.create.mockRejectedValueOnce(new Error('synthetic refusal'));
+    const submit=node.querySelector<HTMLButtonElement>('[data-mark-action="submit"]')!,form=node.querySelector('form')! as unknown as MiniElement;
+    submit.focus();form.dispatchEvent({type:'submit'});miniDocument.activeElement=miniDocument.body;
+    const blur=()=> (node as unknown as MiniElement).dispatchEvent({type:'focusout',target:submit as unknown as MiniElement,relatedTarget:null});
+    if(!blurAfterRefusal)blur();await new Promise(resolve=>setTimeout(resolve,0));if(blurAfterRefusal)blur();
+    expect(markDrafts.sending(windowOf(),markDrafts.list(windowOf())[0]!.place)).toBe(false);expect(submit.disabled).toBe(false);
+    const other=document.createElement('button');miniDocument.body.append(other as unknown as MiniElement);if(elsewhere)other.focus();await paint();
+    expect(ui.create).toHaveBeenCalledTimes(1);expect(markDrafts.list(windowOf())[0]?.body).toBe('公开合成撰写草稿');expect(ui.focus).not.toHaveBeenCalled();
+    if(elsewhere){expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull();expect(ui.scroll.querySelector('[data-mark-draft-row]')).not.toBeNull();expect(document.activeElement).toBe(other);}
+    else if(leaveAgain){const input=node.querySelector<HTMLTextAreaElement>('textarea')!;input.focus();(input as unknown as MiniElement).dispatchEvent({type:'focusin',bubbles:true});miniDocument.activeElement=miniDocument.body;(input as unknown as MiniElement).dispatchEvent({type:'focusout',bubbles:true,relatedTarget:null});await paint();expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull();expect(ui.scroll.querySelector('[data-mark-draft-row]')).not.toBeNull();expect(ui.focus).not.toHaveBeenCalled();}
+    else {expect(ui.scroll.querySelector('[data-mark-composer]')===node).toBe(true);submit.focus();form.dispatchEvent({type:'submit'});await paint();expect(ui.create).toHaveBeenCalledTimes(2);expect(markDrafts.list(windowOf())).toEqual([]);expect(ui.focus).toHaveBeenCalledTimes(1);}
+  });
   it('separates the same reply place in two Books and restores a floating draft without focusing its field (#1689 R6)', async () => {
     const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
     const input = ui.pane.querySelector<HTMLTextAreaElement>('textarea')!; input.value = '公开合成图书甲回复';
