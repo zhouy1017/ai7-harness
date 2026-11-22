@@ -120,7 +120,9 @@ function mount(state: Stub, status: StatusSetter = Object.assign(vi.fn(), { sett
   });
   const inspectFactualVerification = vi.fn(async () => { throw new Error('no factual lens here'); });
   const unexpected = vi.fn(async () => { throw new Error('unexpected API operation'); });
-  const calls = { inspectReviewWorkspace, getTaskPlanPage, inspectFactualVerification };
+  // The steps Ctrl+Z would take (Issue #1654): none in these cases.
+  const inspectEditorHistory = vi.fn(async (input: { branchId: string }) => ({ branchId: input.branchId, undo: null, redo: null }));
+  const calls = { inspectReviewWorkspace, getTaskPlanPage, inspectFactualVerification, inspectEditorHistory };
   const api = new Proxy(calls, { get: (target, key) => Reflect.get(target, key) ?? unexpected }) as unknown as MountReviewWorkspaceOptions['api'];
   const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: { reviewRunId: RUN, findingId: state.focusFinding ?? null }, api,
     awaitServiceJob: async (initial) => initial,
@@ -303,6 +305,20 @@ describe('a paged review workspace on the 审阅 page (#1592)', () => {
     ]);
     expect(view.root.querySelectorAll('[data-review-page]')).toHaveLength(0);
     expect(listed(view.root, MUST, 'li')).toHaveLength(3);
+  });
+});
+
+describe('the batch step behind 撤销本批应用 (#1654)', () => {
+  it('reads the step Ctrl+Z would take once per manuscript state, not on every refresh of the page', async () => {
+    const state: Stub = { full: workspace(3), budget: 4 * 1024 * 1024 };
+    const view = mount(state); await flush();
+    for (let poll = 0; poll < 3; poll += 1) { view.surface.refresh(); await flush(); }
+    expect(view.inspectEditorHistory).toHaveBeenCalledTimes(1);
+    const run = state.full.run!;
+    state.full = { ...state.full, run: { ...run, manuscript: { ...run.manuscript, journalSequence: run.manuscript.journalSequence + 1, workingDigest: 'e'.repeat(64) } } };
+    view.surface.refresh(); await flush();
+    view.surface.refresh(); await flush();
+    expect(view.inspectEditorHistory).toHaveBeenCalledTimes(2);
   });
 });
 

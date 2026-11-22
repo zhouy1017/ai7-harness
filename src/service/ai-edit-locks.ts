@@ -4,6 +4,7 @@ import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { canonicalJson, sha256Hex } from './analysis/canonical.js';
 import { StoreError, requireStore } from './store-records.js';
 import { MAX_WINDOW_BLOCKS } from '../shared/protocol.js';
+import { paragraphAtKey, windowKeys } from './manuscript/working-positions.js';
 import {
   MAX_AI_EDIT_LOCK_TARGETS,
   type AiEditLockTarget,
@@ -76,7 +77,7 @@ function currentLocks(db: DatabaseSync, branchId: string): LockSet {
        AND e.sequence = (SELECT MAX(l.sequence) FROM ai_edit_lock_events l
                          WHERE l.branch_id = e.branch_id AND l.target_kind = e.target_kind AND l.block_id = e.block_id)
        AND (e.target_kind = 'block' OR wb.kind = 'heading')
-     ORDER BY wb.position`,
+     ORDER BY wb.order_key`,
   ).all(branchId) as SqlRow[];
   return {
     blockIds: rows.filter((row) => row.target_kind === 'block').map((row) => String(row.block_id)),
@@ -84,18 +85,21 @@ function currentLocks(db: DatabaseSync, branchId: string): LockSet {
   };
 }
 
-/** The positions a locked section covers: from its heading up to, not including, the next heading of its level or above, or the title. */
+/**
+ * The order keys a locked section covers (Issue #1654: keys, not paragraph numbers): from its heading up to, not including, the
+ * next heading of its level or above, or the title.
+ */
 function sectionRanges(db: DatabaseSync, branchId: string, headingBlockIds: ReadonlyArray<string>): Array<{ from: number; to: number }> {
-  const heading = db.prepare("SELECT position, level FROM working_blocks WHERE branch_id = ? AND block_id = ? AND kind = 'heading'");
+  const heading = db.prepare("SELECT order_key, level FROM working_blocks WHERE branch_id = ? AND block_id = ? AND kind = 'heading'");
   const next = db.prepare(
-    `SELECT MIN(position) AS position FROM working_blocks
-     WHERE branch_id = ? AND position > ? AND (kind = 'title' OR (kind = 'heading' AND COALESCE(level, 1) <= ?))`,
+    `SELECT MIN(order_key) AS order_key FROM working_blocks
+     WHERE branch_id = ? AND order_key > ? AND (kind = 'title' OR (kind = 'heading' AND COALESCE(level, 1) <= ?))`,
   );
   return headingBlockIds.flatMap((blockId) => {
     const row = heading.get(branchId, blockId) as SqlRow | undefined;
     if (row === undefined) return [];
-    const from = Number(row.position);
-    const end = (next.get(branchId, from, Number(row.level ?? 1)) as SqlRow | undefined)?.position;
+    const from = Number(row.order_key);
+    const end = (next.get(branchId, from, Number(row.level ?? 1)) as SqlRow | undefined)?.order_key;
     return [{ from, to: end === null || end === undefined ? Number.MAX_SAFE_INTEGER : Number(end) }];
   });
 }
@@ -111,15 +115,15 @@ export function aiLockedBlocks(db: DatabaseSync, branchId: string, blockIds?: Re
   if (set.blockIds.length === 0 && set.sectionHeadingBlockIds.length === 0) return { locked, digest };
   const direct = new Set(set.blockIds);
   const ranges = sectionRanges(db, branchId, set.sectionHeadingBlockIds);
-  const at = db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?');
-  const candidates = blockIds ?? (db.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? ORDER BY position').all(branchId) as SqlRow[]).map((row) => String(row.block_id));
+  const at = db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+  const candidates = blockIds ?? (db.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? ORDER BY order_key').all(branchId) as SqlRow[]).map((row) => String(row.block_id));
   for (const blockId of candidates) {
     if (direct.has(blockId)) { locked.add(blockId); continue; }
     if (ranges.length === 0) continue;
     const row = at.get(branchId, blockId) as SqlRow | undefined;
     if (row === undefined) continue;
-    const position = Number(row.position);
-    if (ranges.some((range) => position >= range.from && position < range.to)) locked.add(blockId);
+    const key = Number(row.order_key);
+    if (ranges.some((range) => key >= range.from && key < range.to)) locked.add(blockId);
   }
   return { locked, digest };
 }
@@ -130,8 +134,9 @@ export function aiLockedBlocks(db: DatabaseSync, branchId: string, blockIds?: Re
  */
 export function aiLocksOfWindow(db: DatabaseSync, branchId: string, startPosition: number): ManuscriptWindowAiLocks {
   if (!relationExists(db)) return {};
-  const ids = (db.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? AND position >= ? AND position < ? ORDER BY position')
-    .all(branchId, startPosition, startPosition + MAX_WINDOW_BLOCKS) as SqlRow[]).map((row) => String(row.block_id));
+  const keys = windowKeys(db, branchId, startPosition, MAX_WINDOW_BLOCKS);
+  const ids = (db.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? AND order_key >= ? AND order_key < ? ORDER BY order_key')
+    .all(branchId, keys.from, keys.to) as SqlRow[]).map((row) => String(row.block_id));
   const { locked, digest } = aiLockedBlocks(db, branchId, ids);
   return { aiLockedBlockIds: ids.filter((id) => locked.has(id)), aiLocksDigest: digest };
 }
@@ -218,22 +223,35 @@ export interface ScopedEditWorkingBlock {
 export function scopedEditWorkingBlocks(db: DatabaseSync, branchId: string,
   selector: { readonly kind: 'blocks'; readonly blockIds: ReadonlyArray<string> } | { readonly kind: 'document' } | { readonly kind: 'section'; readonly headingBlockId: string },
 ): { blocks: ScopedEditWorkingBlock[]; locksDigest: string; range: { from: number; to: number } | null } {
-  const columns = 'block_id, position, kind, level, text, digest';
-  const rows = (from: number, to: number): SqlRow[] => db.prepare(`SELECT ${columns} FROM working_blocks WHERE branch_id = ? AND position >= ? AND position <= ? ORDER BY position`)
-    .all(branchId, from, to) as SqlRow[];
+  const columns = 'block_id, order_key, kind, level, text, digest';
+  // Rows by key, from the block before `from` (when there is one) through `to` inclusive (ADR 0105 §6: keys, not numbers).
+  const rows = (from: number, to: number): SqlRow[] => {
+    const previous = db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND order_key < ? ORDER BY order_key DESC LIMIT 1').get(branchId, from) as SqlRow | undefined;
+    return db.prepare(`SELECT ${columns} FROM working_blocks WHERE branch_id = ? AND order_key >= ? AND order_key <= ? ORDER BY order_key`)
+      .all(branchId, previous === undefined ? from : Number(previous.order_key), to) as SqlRow[];
+  };
   let found: SqlRow[];
   let section: { from: number; to: number } | null = null;
   if (selector.kind === 'document') {
-    found = db.prepare(`SELECT ${columns} FROM working_blocks WHERE branch_id = ? ORDER BY position`).all(branchId) as SqlRow[];
+    found = db.prepare(`SELECT ${columns} FROM working_blocks WHERE branch_id = ? ORDER BY order_key`).all(branchId) as SqlRow[];
   } else if (selector.kind === 'section') {
     const range = sectionRanges(db, branchId, [selector.headingBlockId])[0];
     if (range === undefined) throw new StoreError('AI_EDIT_SCOPE_INVALID', '这一节的标题已不在当前稿件中；请重新选择。');
     section = range;
-    found = rows(range.from - 1, range.to);
+    found = rows(range.from, range.to);
   } else {
-    const at = db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?');
-    const positions = selector.blockIds.map((blockId) => (at.get(branchId, blockId) as SqlRow | undefined)?.position).filter((value) => value !== undefined).map(Number);
-    found = positions.length === 0 ? [] : rows(Math.min(...positions) - 1, Math.max(...positions) + 1);
+    const at = db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+    const keys = selector.blockIds.map((blockId) => (at.get(branchId, blockId) as SqlRow | undefined)?.order_key).filter((value) => value !== undefined).map(Number);
+    const next = keys.length === 0 ? undefined : db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND order_key > ? ORDER BY order_key LIMIT 1')
+      .get(branchId, Math.max(...keys)) as SqlRow | undefined;
+    found = keys.length === 0 ? [] : rows(Math.min(...keys), next === undefined ? Math.max(...keys) : Number(next.order_key));
+  }
+  // The rows are consecutive: their paragraph numbers follow from the first one's.
+  const firstPosition = found.length === 0 ? 0 : paragraphAtKey(db, branchId, Number(found[0]!.order_key));
+  const positionOfKey = new Map(found.map((row, index) => [Number(row.order_key), firstPosition + index] as const));
+  if (section !== null) {
+    const end = section.to;
+    section = { from: positionOfKey.get(section.from)!, to: end === Number.MAX_SAFE_INTEGER ? end : positionOfKey.get(end) ?? paragraphAtKey(db, branchId, end) };
   }
   const ids = found.map((row) => String(row.block_id));
   const { locked, digest } = aiLockedBlocks(db, branchId, ids);
@@ -241,7 +259,7 @@ export function scopedEditWorkingBlocks(db: DatabaseSync, branchId: string,
     locksDigest: digest,
     range: section,
     blocks: found.map((row) => ({
-      blockId: String(row.block_id), position: Number(row.position), kind: String(row.kind), level: row.level === null ? null : Number(row.level),
+      blockId: String(row.block_id), position: positionOfKey.get(Number(row.order_key))!, kind: String(row.kind), level: row.level === null ? null : Number(row.level),
       text: String(row.text), digest: String(row.digest), locked: locked.has(String(row.block_id)),
     })),
   };

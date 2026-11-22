@@ -6,6 +6,8 @@ import { frozenModelLabels, historicalMarkModelLabels, markModelLabels, readMark
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { proposalReviewPosition } from './editorial-workspace-profile.js';
+import { paragraphAtKey, placesOfKeys, windowKeys } from './manuscript/working-positions.js';
+import { blockReachesThroughLineage } from './manuscript/structural-edits.js';
 import {
   coverSpanEdit,
   followGraphemeEdit,
@@ -58,6 +60,7 @@ import {
 import { DecisionFeedbackLedger } from './decision-feedback.js';
 import { aiLocksOfWindow } from './ai-edit-locks.js';
 import { requireBounded } from './manuscript/bounded-kernel.js';
+import { schemaHas } from './statement-cache.js';
 
 /**
  * Editorial Marks and the Proposal Change Items behind 修改建议 (Issue #407, schema revision 22).
@@ -175,6 +178,14 @@ export const EDITORIAL_MARK_SCHEMA_SQL = {
   reason_source TEXT NOT NULL CHECK(reason_source IN ('reason-field', 'suggested', 'free-text')),
   recorded_at TEXT NOT NULL
 ) STRICT`,
+} as const;
+
+/**
+ * 下一条待处理's walk (Issue #1654, the index PR #1630 named): the open marks of a paragraph in their place order, so the walk
+ * reads them block by block in the working state's key order and never sorts a dense paragraph.
+ */
+export const EDITORIAL_MARK_INDEX_SQL = {
+  editorial_marks_pending_walk: `CREATE INDEX editorial_marks_pending_walk ON editorial_marks(branch_id, block_id, from_grapheme, mark_id) WHERE status = 'open'`,
 } as const;
 
 export const EDITORIAL_MARK_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
@@ -542,8 +553,19 @@ export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: strin
  * Reverse Apply that counteracted it when there is one. Read from the Effect ledger revision 23 adds;
  * a store without it has applied nothing.
  */
+/**
+ * Whether the latest Apply of `markId`'s item wrote its words in a block that is `blockId` or reaches it through block lineage
+ * — the reversal guard's own paragraph check (`blockReachesThroughLineage`), which the card and the step's undo both meet.
+ */
+export function appliedWordsReach(db: DatabaseSync, branchId: string, markId: string, blockId: string): boolean {
+  const target = db.prepare(`SELECT t.block_id FROM proposal_change_items i JOIN manuscript_effect_targets t ON t.item_id = i.item_id
+    JOIN manuscript_effect_intents e ON e.effect_id = t.effect_id AND e.kind = 'apply' JOIN manuscript_effect_receipts r ON r.effect_id = e.effect_id
+    WHERE i.mark_id = ? ORDER BY r.resulting_journal_sequence DESC LIMIT 1`).get(markId) as SqlRow | undefined;
+  return target === undefined || blockReachesThroughLineage(db, branchId, text(target.block_id), blockId);
+}
+
 export function applicationOfItem(db: DatabaseSync, itemId: string): ManuscriptApplyProjection | null {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_effect_receipts'").get() === undefined) return null;
+  if (!schemaHas(db, 'manuscript_effect_receipts')) return null;
   const row = db.prepare(
     `SELECT i.effect_id, i.kind, i.payload_digest, i.target_count, i.base_revision_id, i.base_journal_sequence, i.base_working_digest,
             i.reverses_effect_id, a.approval_id, a.interaction, d.dispatch_id, r.receipt_id, r.receipt_digest, r.committed_at,
@@ -588,17 +610,17 @@ export function openMarkPlaces(
   db: DatabaseSync,
   branchId: string,
   limit: number,
-): Array<{ kind: 'change-suggestion' | 'annotation' | 'editor-note'; blockId: string; position: number; fromGrapheme: number }> {
+): Array<{ kind: 'change-suggestion' | 'annotation' | 'editor-note'; blockId: string; key: number; fromGrapheme: number }> {
   if (!marksRelationExists(db)) return [];
   return (db.prepare(
-    `SELECT em.kind, em.block_id, wb.position, em.from_grapheme FROM editorial_marks em
+    `SELECT em.kind, em.block_id, wb.order_key, em.from_grapheme FROM editorial_marks em
      JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id
      WHERE em.branch_id = ? AND em.status = 'open' AND em.kind <> 'personal-highlight' AND em.anchor_state IN ('exact', 'drifted')
-     ORDER BY wb.position, em.from_grapheme, em.mark_id LIMIT ?`,
+     ORDER BY wb.order_key, em.from_grapheme, em.mark_id LIMIT ?`,
   ).all(branchId, limit) as SqlRow[]).map((row) => ({
     kind: text(row.kind) as 'change-suggestion' | 'annotation' | 'editor-note',
     blockId: text(row.block_id),
-    position: integer(row.position),
+    key: integer(row.order_key),
     fromGrapheme: integer(row.from_grapheme),
   }));
 }
@@ -664,11 +686,13 @@ export function marksOfWindow(
   page?: { afterOrdinal: number; digest: string },
 ): Pick<EditorialMarkCommandProjection, 'marks' | 'marksTruncated' | 'marksPage'> {
   if (!marksRelationExists(db)) return { marks: [], marksTruncated: false };
-  const select = anchorSelect(proposalConflictRelationsExist(db), db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() !== undefined);
+  const select = anchorSelect(proposalConflictRelationsExist(db), schemaHas(db, 'editor_inline_revision_marks'));
   const where = `WHERE em.branch_id = ? AND em.status IN ${LIVE_STATUSES} AND em.anchor_state IN ('exact', 'drifted')
-       AND wb.position >= ? AND wb.position < ?`;
-  const order = 'ORDER BY wb.position, em.from_grapheme, em.to_grapheme DESC, em.created_at, em.mark_id';
-  const window = [branchId, startPosition, startPosition + MAX_WINDOW_BLOCKS] as const;
+       AND wb.order_key >= ? AND wb.order_key < ?`;
+  const order = 'ORDER BY wb.order_key, em.from_grapheme, em.to_grapheme DESC, em.created_at, em.mark_id';
+  // The window's blocks are the keys from its first block up to the block MAX_WINDOW_BLOCKS later (ADR 0105 §6).
+  const keys = windowKeys(db, branchId, startPosition, MAX_WINDOW_BLOCKS);
+  const window = [branchId, keys.from, keys.to] as const;
   const first = page === undefined ? db.prepare(`${select}
      ${where}
      ${order}
@@ -884,9 +908,9 @@ export class EditorialMarkStore {
     const state = this.#branchState(input.manuscriptId, input.branchId);
     const rows = this.#db.prepare(`SELECT m.mark_id, m.block_id, m.from_grapheme, m.to_grapheme,
       m.pinned_revision_id, m.pinned_journal_sequence, m.anchor_state, m.status, i.item_id, i.change_type, i.atomic_group_id,
-      w.position, g.reason atomic_reason,
-      (SELECT h.block_id FROM working_blocks h WHERE h.branch_id = m.branch_id AND h.kind = 'heading' AND h.position <= w.position ORDER BY h.position DESC LIMIT 1) chapter_id,
-      (SELECT h.text FROM working_blocks h WHERE h.branch_id = m.branch_id AND h.kind = 'heading' AND h.position <= w.position ORDER BY h.position DESC LIMIT 1) chapter,
+      w.order_key, g.reason atomic_reason,
+      (SELECT h.block_id FROM working_blocks h WHERE h.branch_id = m.branch_id AND h.kind = 'heading' AND h.order_key <= w.order_key ORDER BY h.order_key DESC LIMIT 1) chapter_id,
+      (SELECT h.text FROM working_blocks h WHERE h.branch_id = m.branch_id AND h.kind = 'heading' AND h.order_key <= w.order_key ORDER BY h.order_key DESC LIMIT 1) chapter,
       (SELECT d.disposition FROM proposal_decision_drafts d WHERE d.item_id = i.item_id ORDER BY d.ordinal DESC LIMIT 1) draft,
       (SELECT MAX(d.ordinal) FROM proposal_decision_drafts d WHERE d.item_id = i.item_id) draft_ordinal,
       (SELECT d.disposition FROM proposal_item_decisions d WHERE d.item_id = i.item_id ORDER BY d.ordinal DESC LIMIT 1) disposition,
@@ -896,18 +920,20 @@ export class EditorialMarkStore {
       LEFT JOIN working_blocks w ON w.branch_id = m.branch_id AND w.block_id = m.block_id
       LEFT JOIN proposal_atomic_groups g ON g.group_id = i.atomic_group_id
       WHERE m.manuscript_id = ? AND m.branch_id = ? AND m.status IN ('open', 'resolved', 'applied')
-      AND ${this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() ? 'NOT EXISTS(SELECT 1 FROM editor_inline_revision_marks r WHERE r.mark_id = m.mark_id)' : '1=1'}
+      AND ${schemaHas(this.#db, 'editor_inline_revision_marks') ? 'NOT EXISTS(SELECT 1 FROM editor_inline_revision_marks r WHERE r.mark_id = m.mark_id)' : '1=1'}
       AND (? IS NULL OR m.source_task_id = ? OR EXISTS(SELECT 1 FROM review_findings f WHERE f.mark_id = m.mark_id AND f.review_run_id = ?))
-      ORDER BY COALESCE(w.position, 2147483647), m.from_grapheme, m.mark_id LIMIT 10001`)
+      ORDER BY COALESCE(w.order_key, 9223372036854775807), m.from_grapheme, m.mark_id LIMIT 10001`)
       .all(input.manuscriptId, input.branchId, input.resultId, input.resultId, input.resultId) as SqlRow[];
+    // Every listed paragraph number in one pass over the pages (ADR 0105 §6's batch rank).
+    const places = placesOfKeys(this.#db, input.branchId, rows.flatMap((row) => row.order_key === null ? [] : [integer(row.order_key)]));
     const items: ProposalNavigatorItem[] = rows.slice(0, 10000).map((row) => ({
       markId: text(row.mark_id), itemId: text(row.item_id), blockId: text(row.block_id),
-      position: row.position === null ? 0 : integer(row.position), fromGrapheme: integer(row.from_grapheme), toGrapheme: integer(row.to_grapheme),
+      position: row.order_key === null ? 0 : places.get(integer(row.order_key))!.position, fromGrapheme: integer(row.from_grapheme), toGrapheme: integer(row.to_grapheme),
       chapterBlockId: nullableText(row.chapter_id), chapter: nullableText(row.chapter)?.slice(0, 120) ?? '未分章',
       changeType: text(row.change_type) as ProposalNavigatorItem['changeType'], baseRevisionId: text(row.pinned_revision_id),
       stale: row.pinned_revision_id !== state.revisionId || Number(row.pinned_journal_sequence) !== state.journalSequence,
       anchorState: text(row.anchor_state) as ProposalNavigatorItem['anchorState'], conflict: row.anchor_state !== 'exact',
-      loaded: row.position !== null, otherVersion: false,
+      loaded: row.order_key !== null, otherVersion: false,
       atomicGroupId: nullableText(row.atomic_group_id), atomicReason: nullableText(row.atomic_reason),
       draft: nullableText(row.draft) as ProposalNavigatorItem['draft'], draftOrdinal: Number(row.draft_ordinal ?? 0),
       decisionId: nullableText(row.item_decision_id), disposition: row.disposition === 'withdrawn' ? null : nullableText(row.disposition) as ProposalNavigatorItem['disposition'],
@@ -1109,7 +1135,7 @@ export class EditorialMarkStore {
    */
   findPending(input: FindPendingMarkInput): { mark: PendingMarkPlace | null } {
     requireMark(UUID_PATTERN.test(input.manuscriptId) && UUID_PATTERN.test(input.branchId) && BLOCK_PATTERN.test(input.from.blockId), 'MARK_INVALID', '标记标识无效。');
-    const start = this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, input.from.blockId) as SqlRow | undefined;
+    const start = this.#db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, input.from.blockId) as SqlRow | undefined;
     requireMark(start !== undefined, 'MARK_BINDING_CHANGED', '稿件窗口已变化，请刷新后再试。');
     const [compare, order] = input.direction === 'next' ? ['>', 'ASC'] : ['<', 'DESC'];
     const open = `em.manuscript_id = ? AND em.branch_id = ? AND em.status = 'open' AND em.kind <> 'personal-highlight' AND em.anchor_state IN ('exact', 'drifted')`;
@@ -1147,9 +1173,9 @@ export class EditorialMarkStore {
       `SELECT em.mark_id, em.block_id, em.from_grapheme, em.source_task_id, em.created_at, em.converted_from_mark_id,
               ${unnamed.size === 0 ? "''" : frozenOf} source FROM editorial_marks em
        JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id
-       WHERE ${open} ${tests.map((test) => `AND ${test}`).join(' ')} AND (wb.position, em.from_grapheme, em.mark_id) ${compare} (?, ?, ?)
-       ORDER BY wb.position ${order}, em.from_grapheme ${order}, em.mark_id ${order}${unnamed.size === 0 ? ' LIMIT 1' : ''}`,
-    ).iterate(...binding, ...values, integer(start.position), input.from.grapheme, input.from.markId ?? '') as Iterable<SqlRow>;
+       WHERE ${open} ${tests.map((test) => `AND ${test}`).join(' ')} AND (wb.order_key, em.from_grapheme, em.mark_id) ${compare} (?, ?, ?)
+       ORDER BY wb.order_key ${order}, em.from_grapheme ${order}, em.mark_id ${order}${unnamed.size === 0 ? ' LIMIT 1' : ''}`,
+    ).iterate(...binding, ...values, integer(start.order_key), input.from.grapheme, input.from.markId ?? '') as Iterable<SqlRow>;
     for (const row of rows) {
       if (unnamed.has(text(row.source))) {
         const markId = text(row.mark_id);
@@ -1186,14 +1212,18 @@ export class EditorialMarkStore {
     const modelLabels = row.source_kind === 'ai7' ? historicalMarkModelLabels(this.#db, markId) : {};
     const category = resolveEditorialMarkCategory({ sourceKind: text(row.source_kind) as EditorialMarkSourceProjection['kind'],
       sourceOrigin: nullableText(row.source_origin) as EditorialMarkSourceProjection['origin'], sourceLabel: nullableText(row.source_label) });
+    // The card offers 撤销本次修改 exactly when the reversal guard would accept it (Issue #1654, loss 4): an applied mark standing in
+    // a paragraph its Apply's words did not flow to reads as drifted, as the guard refuses it.
+    const anchorState = row.status === 'applied' && row.anchor_state === 'exact' && !appliedWordsReach(this.#db, branchId, markId, text(row.block_id))
+      ? 'drifted' : text(row.anchor_state) as EditorialMarkCardProjection['anchorState'];
     return {
       markId,
       categoryKey: category.key,
       categoryLabel: category.label,
-      ...(this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() && this.#db.prepare('SELECT 1 FROM editor_inline_revision_marks WHERE mark_id = ?').get(markId) ? { inlineRevision: true } : {}),
+      ...(schemaHas(this.#db, 'editor_inline_revision_marks') && this.#db.prepare('SELECT 1 FROM editor_inline_revision_marks WHERE mark_id = ?').get(markId) ? { inlineRevision: true } : {}),
       kind,
       status: text(row.status) as EditorialMarkStatus,
-      anchorState: text(row.anchor_state) as EditorialMarkCardProjection['anchorState'],
+      anchorState,
       highlightColor: row.highlight_color === null ? null : integer(row.highlight_color) as PersonalHighlightColor,
       blockId: text(row.block_id),
       fromGrapheme: integer(row.from_grapheme),
@@ -1282,7 +1312,7 @@ export class EditorialMarkStore {
       'MARK_INVALID',
       '处理方式无效。',
     );
-    requireMark(!this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() ||
+    requireMark(!schemaHas(this.#db, 'editor_inline_revision_marks') ||
       !this.#db.prepare('SELECT 1 FROM editor_inline_revision_marks WHERE mark_id = ?').get(input.markId),
       'MARK_ACTION_INVALID', '请在编辑修订卡片上应用或还原这处修改。');
     const prior = this.#db.prepare('SELECT 1 FROM proposal_item_decisions WHERE client_decision_id = ?').get(input.clientDecisionId);
@@ -1493,7 +1523,7 @@ export class EditorialMarkStore {
       ...this.#decisionFeedback.standing(text(row.decision_id), firstReasonOf(row)),
       recordedAt: text(row.recorded_at),
     };
-    const inline = this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get()
+    const inline = schemaHas(this.#db, 'editor_inline_revision_marks')
       ? this.#db.prepare('SELECT before_text, after_text FROM editor_inline_revision_marks WHERE mark_id = ?').get(markId) : undefined;
     return {
       itemId: text(item.item_id),
@@ -1518,7 +1548,7 @@ export class EditorialMarkStore {
     decision: { decisionId: string; disposition: string; editedText: string | null } | null;
   } {
     const mark = this.#liveMark(binding);
-    requireMark(!this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() ||
+    requireMark(!schemaHas(this.#db, 'editor_inline_revision_marks') ||
       !this.#db.prepare('SELECT 1 FROM editor_inline_revision_marks WHERE mark_id = ?').get(binding.markId),
       'MARK_ACTION_INVALID', '请在编辑修订卡片上应用或还原这处修改。');
     requireMark(mark.kind === 'change-suggestion', 'MARK_ACTION_INVALID', '只有修改建议可以应用。');
@@ -1553,6 +1583,7 @@ export class EditorialMarkStore {
     editedText: string | null,
     reason: string | null,
     now: string,
+    reasonSource: 'reason-field' | 'suggested' | 'free-text' = 'reason-field',
   ): string {
     const current = this.#db.prepare(
       'SELECT decision_id, ordinal FROM proposal_item_decisions WHERE item_id = ? ORDER BY ordinal DESC LIMIT 1',
@@ -1572,8 +1603,8 @@ export class EditorialMarkStore {
     );
     if (reason !== null) {
       this.#db.prepare(
-        "INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, 'reason-field', ?)",
-      ).run(decisionId, this.#body(reason), now);
+        'INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, ?, ?)',
+      ).run(decisionId, this.#body(reason), reasonSource, now);
     }
     new EditorialMemoryFacade(this.#db).captureDecision(decisionId);
     return decisionId;
@@ -1680,13 +1711,14 @@ export class EditorialMarkStore {
   }
 
   #command(binding: { manuscriptId: string; branchId: string; windowStartBlockId: string }, markId: string, gone = false): EditorialMarkCommandProjection {
-    const start = this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(binding.branchId, binding.windowStartBlockId) as SqlRow | undefined;
+    const start = this.#db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(binding.branchId, binding.windowStartBlockId) as SqlRow | undefined;
     requireMark(start !== undefined, 'MARK_BINDING_CHANGED', '稿件窗口已变化，请刷新后再试。');
     const live = gone ? undefined : this.#db.prepare(`SELECT 1 FROM editorial_marks WHERE mark_id = ? AND status IN ${LIVE_STATUSES}`).get(markId);
+    const startPosition = paragraphAtKey(this.#db, binding.branchId, integer(start.order_key));
     return {
       markId,
-      ...marksOfWindow(this.#db, binding.branchId, integer(start.position)),
-      ...aiLocksOfWindow(this.#db, binding.branchId, integer(start.position)),
+      ...marksOfWindow(this.#db, binding.branchId, startPosition),
+      ...aiLocksOfWindow(this.#db, binding.branchId, startPosition),
       card: live === undefined ? null : this.card(binding.manuscriptId, binding.branchId, markId),
     };
   }

@@ -15,6 +15,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { asNumber, asString, requireStore, type SqlRow } from './store-records.js';
 import { isModelTextAttemptProvenance } from './material-index.js';
 import { hasExactKeys, isRecord } from './analysis/canonical.js';
+import { cacheStatements } from './statement-cache.js';
 
 export function configureDatabase(db: DatabaseSync, tempStore: 'MEMORY' | 'FILE' = 'MEMORY'): void {
   db.exec(`
@@ -34,6 +35,7 @@ export function configureDatabase(db: DatabaseSync, tempStore: 'MEMORY' | 'FILE'
     'SCHEMA_INVALID',
     'SQLite 递归触发器未启用，无法保护不可变记录。',
   );
+  cacheStatements(db);
 }
 
 export const WAL_CHECKPOINT_LIMITS = { softBytes: 256 * 1024 * 1024, emergencyBytes: 16 * 1024 * 1024 * 1024 };

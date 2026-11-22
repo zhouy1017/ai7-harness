@@ -148,6 +148,50 @@ describe('AI7 Apply on a Change Suggestion', () => {
     } finally { store.markCleanShutdown(); store.close(); }
   }, 120_000);
 
+  it('counts an Apply taken back and put back by editor steps (redo, or Ctrl+Z of a card reversal) as one applied target (#1654)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const block = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[0]!;
+      const suggestion = suggest(store, book, block.blockId, 6, 12, '建议');
+      store.applyChangeSuggestion({ ...binding(store, book), markId: suggestion.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+      const digest = (): string => store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest;
+      const signals = (): { applied: number; surviving: number } => {
+        const { applied, surviving } = store.inspectEditQualitySignals(null);
+        return { applied, surviving };
+      };
+      expect(signals()).toEqual({ applied: 1, surviving: 1 });
+      for (let round = 0; round < 2; round += 1) {
+        store.undoManuscript(book.manuscriptId, book.branchId, digest());
+        expect(signals()).toEqual({ applied: 1, surviving: 0 });
+        store.redoManuscript(book.manuscriptId, book.branchId, digest());
+        expect(signals()).toEqual({ applied: 1, surviving: 1 });
+      }
+      // The card's 撤销本次修改, then Ctrl+Z of it, puts the same accepted change back: still one applied target, twice over.
+      for (let round = 0; round < 2; round += 1) {
+        store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId: suggestion.markId, clientEffectId: randomUUID() });
+        expect(signals()).toEqual({ applied: 1, surviving: 0 });
+        store.undoManuscript(book.manuscriptId, book.branchId, digest());
+        expect(signals()).toEqual({ applied: 1, surviving: 1 });
+      }
+      // Two accepted changes: each Apply's re-applied generations are counted once, through the card and the history alike.
+      const other = suggest(store, book, paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[1]!.blockId, 4, 7, '甲');
+      store.applyChangeSuggestion({ ...binding(store, book), markId: other.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+      expect(signals()).toEqual({ applied: 2, surviving: 2 });
+      store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId: suggestion.markId, clientEffectId: randomUUID() });
+      expect(signals()).toEqual({ applied: 2, surviving: 1 });
+      store.undoManuscript(book.manuscriptId, book.branchId, digest());
+      expect(signals()).toEqual({ applied: 2, surviving: 2 });
+      store.redoManuscript(book.manuscriptId, book.branchId, digest());
+      expect(signals()).toEqual({ applied: 2, surviving: 1 });
+      store.undoManuscript(book.manuscriptId, book.branchId, digest());
+      store.undoManuscript(book.manuscriptId, book.branchId, digest());
+      expect(signals()).toEqual({ applied: 2, surviving: 1 });
+      store.redoManuscript(book.manuscriptId, book.branchId, digest());
+      expect(signals()).toEqual({ applied: 2, surviving: 2 });
+    } finally { store.markCleanShutdown(); store.close(); }
+  }, 120_000);
+
   it('projects judged suggestion survival and edit effort through unrelated, reverting and reverse-apply edits', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -224,10 +268,11 @@ describe('AI7 Apply on a Change Suggestion', () => {
       // Another identity on the same suggestion is a second Apply, and is refused.
       expect(storeError(() => first.applyChangeSuggestion({ ...binding(first, book), markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null })))
         .toBe('APPLY_ALREADY_COMMITTED');
-      // A committed Apply is not taken back by 撤销, and an applied suggestion is neither re-decided nor converted.
-      expect(storeError(() => first.undoManuscript(book.manuscriptId, book.branchId, applied.window.workingDigest))).toBe('NOTHING_TO_UNDO');
+      // An applied suggestion is neither re-decided nor converted. The committed Apply is the editor step Ctrl+Z would take back
+      // next (#1654); tests/service/editor-steps.test.ts takes it back.
       expect(storeError(() => first.recordChangeSuggestionDecision({ ...binding(first, book), markId, clientDecisionId: randomUUID(), disposition: 'withdrawn', editedText: null, reason: null })))
         .toBe('MARK_DECISION_INVALID');
+      expect(first.inspectEditorHistory(book.manuscriptId, book.branchId).undo).toMatchObject({ kind: 'accept', label: '接受修改建议', changeCount: 1 });
       first.markCleanShutdown();
     } finally {
       first.close();

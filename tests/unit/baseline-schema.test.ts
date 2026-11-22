@@ -42,6 +42,35 @@ const INTENDED_DELTA: ReadonlyArray<{ readonly object: string; readonly change: 
   { object: 'index:sqlite_autoindex_material_index_vectors_1', change: 'removed', slice: 'R5-F2c' },
   { object: 'trigger:material_index_vectors_no_update', change: 'removed', slice: 'R5-F2c' },
   { object: 'trigger:material_index_vectors_no_delete', change: 'removed', slice: 'R5-F2c' },
+  // R5-3 + R5-4 (#1654): positions as gapped order keys with a page summary (ADR 0105 §6), the lineage and pending-walk
+  // indexes, and the editor steps (ADR 0105 §1) with the widened Apply interaction.
+  { object: 'table:working_blocks', change: 'changed', slice: 'R5-3+R5-4' },
+  { object: 'table:manuscript_outline', change: 'changed', slice: 'R5-3+R5-4' },
+  { object: 'table:manuscript_effect_approvals', change: 'changed', slice: 'R5-3+R5-4' },
+  { object: 'table:working_offset_nodes', change: 'removed', slice: 'R5-3+R5-4' },
+  { object: 'index:sqlite_autoindex_working_offset_nodes_1', change: 'removed', slice: 'R5-3+R5-4' },
+  { object: 'index:working_blocks_window', change: 'removed', slice: 'R5-3+R5-4' },
+  { object: 'index:manuscript_outline_order', change: 'removed', slice: 'R5-3+R5-4' },
+  { object: 'table:working_pages', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'index:sqlite_autoindex_working_pages_1', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'index:working_blocks_order_cover', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'index:manuscript_block_lineage_related', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'index:editorial_marks_pending_walk', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'table:editor_steps', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'index:sqlite_autoindex_editor_steps_1', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'index:sqlite_autoindex_editor_steps_2', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'table:editor_step_parts', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'index:sqlite_autoindex_editor_step_parts_1', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'table:editor_step_effects', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'index:sqlite_autoindex_editor_step_effects_1', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'index:sqlite_autoindex_editor_step_effects_2', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'table:editor_step_mark_anchors', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'index:sqlite_autoindex_editor_step_mark_anchors_1', change: 'added', slice: 'R5-3+R5-4' },
+  // The write-lock plan (#1654 profile): the Effect ledger's reversal and item lookups.
+  { object: 'index:manuscript_effect_intents_reversal', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'index:manuscript_effect_targets_item', change: 'added', slice: 'R5-3+R5-4' },
+  // A manual edit's learning source reads its command group's journal entries (#1654 typing at a long history).
+  { object: 'index:edit_journal_entries_command_group', change: 'added', slice: 'R5-3+R5-4' },
 ];
 
 const reference = JSON.parse(readFileSync('tests/fixtures/database/revision-116-schema.json', 'utf8')) as { userVersion: number; rows: DumpRow[] };
@@ -117,7 +146,7 @@ describe('storage baseline (revision 117)', () => {
   it('passes its own exact check, which refuses any object dropped, changed or added', () => {
     for (const damage of [
       'DROP TRIGGER review_runs_no_update',
-      'DROP INDEX working_blocks_window',
+      'DROP INDEX working_blocks_order_cover',
       'CREATE TABLE stray (id INTEGER PRIMARY KEY) STRICT',
       'ALTER TABLE books ADD COLUMN extra TEXT',
       'CREATE VIEW stray_view AS SELECT 1',

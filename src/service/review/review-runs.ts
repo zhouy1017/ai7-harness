@@ -1,4 +1,5 @@
 import { appendOnly } from '../append-only.js';
+import { paragraphCount, placesOfKeys, positionsOfBlocks, rowsFrom, workingBlock } from '../manuscript/working-positions.js';
 import { reviewSynthesisOmissionLabel, reviewSynthesisOrdinalRanges } from '../../shared/review-synthesis-wording.js';
 import { readClosedBaselineSynopses, reviewSynthesisRequestBytes } from '../analysis/baseline-synopsis.js';
 import { REVIEW_UNCHECKED_DISCLOSURE } from '../../shared/review-basis.js';
@@ -847,6 +848,8 @@ interface SuggestionVersionView {
   readonly kind: EditorialMarkKind | null;
   readonly markStatus: ReviewMarkStatus | null;
   readonly anchor: string | null;
+  /** The paragraph the mark stands in now, which a split or join may have moved it to (Issue #1654, loss 5). */
+  readonly blockId: string | null;
   readonly from: number | null;
   readonly to: number | null;
   readonly decision: string | null;
@@ -1177,9 +1180,10 @@ export class ReviewRunStore {
 
   #localBlocks(branchId: string, scope: RunSnapshot['scope'] | ResolvedReviewScope): LocalCheckBlock[] {
     const range = scope.selectedRange;
-    return (this.#db.prepare('SELECT block_id, position, text FROM working_blocks WHERE branch_id = ? AND position >= ? AND position <= ? ORDER BY position')
-      .all(branchId, range?.startPosition ?? 1, range?.endPosition ?? Number.MAX_SAFE_INTEGER) as SqlRow[])
-      .map((row) => ({ blockId: text(row.block_id), position: integer(row.position), text: text(row.text) }));
+    const total = paragraphCount(this.#db, branchId);
+    const from = range?.startPosition ?? 1;
+    const to = Math.min(range?.endPosition ?? total, total);
+    return to < from ? [] : rowsFrom(this.#db, branchId, from, to - from + 1).map((row) => ({ blockId: row.blockId, position: row.position, text: row.text }));
   }
 
   #prepareLocal(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, head: ManuscriptHead): ReviewRunPreparationProgress {
@@ -1954,12 +1958,13 @@ export class ReviewRunStore {
   #selectionMoved(snapshot: RunSnapshot): boolean {
     const blockIds = snapshot.scope.kind === 'selection' ? snapshot.scope.blockIds : undefined;
     if (blockIds === undefined) return false;
-    const read = this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+    // Order is the blocks' keys' order (ADR 0105 §6); no paragraph number is needed to compare them.
+    const read = this.#db.prepare('SELECT order_key FROM working_blocks WHERE branch_id = ? AND block_id = ?');
     let previous = 0;
     for (const blockId of blockIds) {
       const row = read.get(snapshot.manuscript.branchId, blockId) as SqlRow | undefined;
-      if (row === undefined || integer(row.position) <= previous) return true;
-      previous = integer(row.position);
+      if (row === undefined || integer(row.order_key) <= previous) return true;
+      previous = integer(row.order_key);
     }
     return false;
   }
@@ -3563,8 +3568,8 @@ export class ReviewRunStore {
     }
     const blocks = new Map(baseline.readRevisionBlocks(revision.manuscriptPin.manuscriptId, revision.manuscriptPin.revisionId)
       .map((block) => [block.blockId, block] as const));
-    const working = new Map((this.#db.prepare('SELECT block_id, position FROM working_blocks WHERE branch_id = ?').all(snapshot.manuscript.branchId) as SqlRow[])
-      .map((row) => [text(row.block_id), integer(row.position)] as const));
+    const working = new Map(rowsFrom(this.#db, snapshot.manuscript.branchId, 1, paragraphCount(this.#db, snapshot.manuscript.branchId))
+      .map((row) => [row.blockId, row.position] as const));
     const range = category.selectedRange;
     // A 当前选区 keeps the leads anchored on its paragraphs by identity (Issue #423 review, P2-2): positions move with every edit.
     const selected = selectionBlocks(snapshot);
@@ -4156,11 +4161,13 @@ export class ReviewRunStore {
    * which follow every body block, belong to no chapter: the last chapter ends at the last body block.
    */
   #chapterOptions(bookId: string, head: ManuscriptHead): ChapterOptions {
-    const headings = (this.#db.prepare(
-      "SELECT block_id, position, level, text FROM manuscript_outline WHERE branch_id = ? AND kind = 'heading' ORDER BY position",
-    ).all(head.branchId) as SqlRow[]).map((row) => ({
+    const outline = this.#db.prepare(
+      "SELECT block_id, order_key, level, text FROM manuscript_outline WHERE branch_id = ? AND kind = 'heading' ORDER BY order_key",
+    ).all(head.branchId) as SqlRow[];
+    const places = placesOfKeys(this.#db, head.branchId, outline.map((row) => integer(row.order_key)));
+    const headings = outline.map((row) => ({
       blockId: text(row.block_id),
-      position: integer(row.position),
+      position: places.get(integer(row.order_key))!.position,
       level: integer(row.level),
       title: boundedTitle(text(row.text)),
     }));
@@ -4217,16 +4224,12 @@ export class ReviewRunStore {
   #resolveSelection(request: ReviewRunScopeRequest, head: ManuscriptHead): ResolvedReviewScope {
     requireReview(typeof request.fromChapterBlockId === 'string' && BLOCK_ID_PATTERN.test(request.fromChapterBlockId) &&
       typeof request.toChapterBlockId === 'string' && BLOCK_ID_PATTERN.test(request.toChapterBlockId), 'REVIEW_SCOPE_INVALID', SELECTION_UNAVAILABLE_REASON);
-    const position = (blockId: string): number | null => {
-      const row = this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(head.branchId, blockId) as SqlRow | undefined;
-      return row === undefined ? null : integer(row.position);
-    };
+    const position = (blockId: string): number | null => workingBlock(this.#db, head.branchId, blockId)?.position ?? null;
     const from = position(request.fromChapterBlockId);
     const to = position(request.toChapterBlockId);
     requireReview(from !== null && to !== null && from <= to, 'REVIEW_SCOPE_INVALID', SELECTION_GONE_REASON);
     requireReview(to - from < MAX_SELECTION_BLOCKS, 'REVIEW_SCOPE_INVALID', SELECTION_TOO_LONG_REASON);
-    const blockIds = (this.#db.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? AND position BETWEEN ? AND ? ORDER BY position')
-      .all(head.branchId, from, to) as SqlRow[]).map((row) => text(row.block_id));
+    const blockIds = rowsFrom(this.#db, head.branchId, from, to - from + 1).map((row) => row.blockId);
     return { kind: 'selection', selectedRange: { startPosition: from, endPosition: to }, blockIds };
   }
 
@@ -5238,7 +5241,7 @@ export class ReviewRunStore {
    */
   #findingViews(reviewRunId: string, branchId: string, findingId: string | null): FindingView[] {
     const rows = this.#db.prepare(
-      `SELECT f.*, em.kind mark_kind, em.status mark_status, em.anchor_state mark_anchor, em.from_grapheme mark_from, em.to_grapheme mark_to,
+      `SELECT f.*, em.kind mark_kind, em.status mark_status, em.anchor_state mark_anchor, em.block_id mark_block, em.from_grapheme mark_from, em.to_grapheme mark_to,
               COALESCE((SELECT d.decision_id FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id WHERE i.mark_id = f.mark_id ORDER BY d.ordinal DESC LIMIT 1),
                 (SELECT d.disposition_id FROM review_finding_dispositions d WHERE d.review_run_id = f.review_run_id AND d.finding_id = f.finding_id ORDER BY d.ordinal DESC LIMIT 1)) learning_decision_id,
               (SELECT d.disposition FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id
@@ -5249,20 +5252,24 @@ export class ReviewRunStore {
                 WHERE x.disposition = 'ignored'
                   AND ((y.review_run_id = f.review_run_id AND y.finding_id = f.finding_id) OR (f.mark_id IS NOT NULL AND y.mark_id = f.mark_id))
                 ORDER BY x.recorded_at DESC, x.ordinal DESC LIMIT 1) ignore_reason,
-              wb.position block_position
+              f.block_id finding_block
        FROM review_findings f
        LEFT JOIN editorial_marks em ON em.mark_id = f.mark_id
-       LEFT JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = f.block_id
        WHERE f.review_run_id = ? AND (? IS NULL OR f.finding_id = ?)
        ORDER BY f.ordinal`,
-    ).all(branchId, reviewRunId, findingId, findingId) as SqlRow[];
-    return rows.map((row): FindingView => {
+    ).all(reviewRunId, findingId, findingId) as SqlRow[];
+    const views = rows.map((row) => ({ row, mark: newestSuggestionVersion(this.#versionView(row), (version) =>
+      version.convertedTo === 'change-suggestion' && version.markId !== null ? this.#nextVersion(version.markId) : null) }));
+    // A finding with a mark reads the mark's paragraph and offsets together (Issue #1654, loss 5): a split or join moves the
+    // mark, never the finding's own record. The paragraph numbers come in one pass over the pages.
+    const placeOf = (view: typeof views[number]): string => view.mark.markId !== null && view.mark.blockId !== null ? view.mark.blockId : text(view.row.finding_block);
+    const positions = positionsOfBlocks(this.#db, branchId, views.map(placeOf));
+    return views.map(({ row, mark }): FindingView => {
       const originMarkId = nullableText(row.mark_id);
       const ignoreReason = nullableText(row.ignore_reason);
       // A suggestion a conflict saved as a new version is the same finding's: it reads the newest version.
-      const mark = newestSuggestionVersion(this.#versionView(row), (version) =>
-        version.convertedTo === 'change-suggestion' && version.markId !== null ? this.#nextVersion(version.markId) : null);
       const { markId, markStatus, decision } = mark;
+      const blockId = placeOf({ row, mark });
       const { status, statusDetail } = reviewFindingStatus({
         ignored: ignoreReason !== null,
         markId,
@@ -5278,7 +5285,7 @@ export class ReviewRunStore {
         severity: text(row.severity) as ReviewFindingSeverity,
         output: text(row.output) as FindingView['output'],
         riskPoint: integer(row.risk_point) === 1,
-        blockId: text(row.block_id),
+        blockId,
         fromGrapheme: markId === null || mark.from === null ? integer(row.from_grapheme) : mark.from,
         toGrapheme: markId === null || mark.to === null ? integer(row.to_grapheme) : mark.to,
         quote: text(row.quote),
@@ -5293,7 +5300,7 @@ export class ReviewRunStore {
         originMarkId,
         markStatus,
         anchorState: markId === null ? 'anchor-changed' : mark.anchor as FindingView['anchorState'],
-        blockPosition: row.block_position === null || row.block_position === undefined ? null : integer(row.block_position),
+        blockPosition: positions.get(blockId) ?? null,
         ignoreReason,
         status,
         statusDetail,
@@ -5308,6 +5315,7 @@ export class ReviewRunStore {
       kind: nullableText(row.mark_kind) as EditorialMarkKind | null,
       markStatus: nullableText(row.mark_status) as ReviewMarkStatus | null,
       anchor: nullableText(row.mark_anchor),
+      blockId: nullableText(row.mark_block),
       from: row.mark_from === null || row.mark_from === undefined ? null : integer(row.mark_from),
       to: row.mark_to === null || row.mark_to === undefined ? null : integer(row.mark_to),
       decision: nullableText(row.decision),
@@ -5318,7 +5326,7 @@ export class ReviewRunStore {
   /** The 修改建议 saved from a mark as its next version, with what the finding reads of it, or `null`. */
   #nextVersion(markId: string): SuggestionVersionView | null {
     const row = this.#db.prepare(
-      `SELECT c.mark_id, c.kind mark_kind, c.status mark_status, c.anchor_state mark_anchor, c.from_grapheme mark_from, c.to_grapheme mark_to,
+      `SELECT c.mark_id, c.kind mark_kind, c.status mark_status, c.anchor_state mark_anchor, c.block_id mark_block, c.from_grapheme mark_from, c.to_grapheme mark_to,
               (SELECT d.disposition FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id
                 WHERE i.mark_id = c.mark_id ORDER BY d.ordinal DESC LIMIT 1) decision,
               (SELECT x.kind FROM editorial_marks x WHERE x.converted_from_mark_id = c.mark_id ORDER BY x.created_at LIMIT 1) converted_to

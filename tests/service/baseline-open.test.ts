@@ -139,7 +139,7 @@ describe('opening the storage baseline', () => {
 
   it.each([
     ['a ledger trigger dropped', 'DROP TRIGGER store_versions_no_update'],
-    ['an index dropped', 'DROP INDEX working_blocks_window'],
+    ['an index dropped', 'DROP INDEX working_blocks_order_cover'],
     ['a column added', 'ALTER TABLE books ADD COLUMN extra TEXT'],
     ['a relation added', 'CREATE TABLE stray (id INTEGER PRIMARY KEY) STRICT'],
   ])('refuses a revision-117 store with %s', async (_label, damage) => {

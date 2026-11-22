@@ -39,6 +39,8 @@ import * as factualVerificationOperations from './factual-verification-operation
 import * as initialEvaluationOperations from './initial-evaluation-operations.js';
 import { pinTaskDeliverable, taskDeliverableStale } from './task-deliverable-target.js';
 import { ManuscriptSourceObjects } from './manuscript/source-objects.js';
+import { paragraphAtKey, paragraphCount, rowsFrom, workingBlock } from './manuscript/working-positions.js';
+import { withEditorStep, type EditorStepSpec } from './manuscript/editor-steps.js';
 import {
   commitNoteSources,
   stageNoteSources,
@@ -321,7 +323,7 @@ import {
   type SourceImportTargetSelection,
   type StagedImportProjection,
   type ContinueImportProjection,
-  type DurableHistoryProjection,
+  type DurableHistoryProjection, type EditorHistoryProjection,
   type ManuscriptWindowTarget,
   type MilestoneProjection,
   type OutlineProjection,
@@ -2147,14 +2149,14 @@ export class EditorialStore {
 
   inspectParagraphAnalysis(bookId: string, manuscriptId: string, blockId: string, radius: number): ParagraphAnalysisProjection {
     requireStore(Number.isSafeInteger(radius) && radius >= 0 && radius <= 4, 'ANALYSIS_RANGE_INVALID', '段落分析范围无效。');
-    const block = this.#authority.prepare(`SELECT wb.position, wb.branch_id FROM manuscripts m
+    const block = this.#authority.prepare(`SELECT wb.order_key, wb.branch_id FROM manuscripts m
       JOIN branch_working_state bws ON bws.manuscript_id = m.manuscript_id
       JOIN working_blocks wb ON wb.branch_id = bws.branch_id
       WHERE m.book_id = ? AND m.manuscript_id = ? AND m.role = 'primary' AND wb.block_id = ?`).get(bookId, manuscriptId, blockId) as SqlRow | undefined;
     requireStore(block !== undefined, 'ANALYSIS_BLOCK_UNAVAILABLE', '这段文字已不在当前稿件中。');
-    const nearby = this.#authority.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? AND position BETWEEN ? AND ?')
-      .all(asString(block.branch_id), asNumber(block.position) - radius, asNumber(block.position) + radius) as SqlRow[];
-    return paragraphAnalysis(bookId, manuscriptId, blockId, new Set(nearby.map((row) => asString(row.block_id))), this.#latestAnalysisRevision(bookId));
+    const at = paragraphAtKey(this.#authority, asString(block.branch_id), asNumber(block.order_key)), from = Math.max(1, at - radius);
+    const nearby = rowsFrom(this.#authority, asString(block.branch_id), from, at + radius - from + 1).map((row) => row.blockId);
+    return paragraphAnalysis(bookId, manuscriptId, blockId, new Set(nearby), this.#latestAnalysisRevision(bookId));
   }
 
   /** The latest settled result set alone: the panel reads it on a cadence, so none of 分析's page decorations are built. */
@@ -4991,26 +4993,19 @@ export class EditorialStore {
     // other connection. Everything else this projection reads comes from the same connection.
     const position = this.#boundedCall(() => this.#boundedAuthority.readManuscriptEntryPosition(manuscriptId, branchId));
     if (position === null) return anchor;
-    const block = this.#authority.prepare(
-      'SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?',
-    ).get(branchId, position.blockId) as SqlRow | undefined;
+    const block = workingBlock(this.#authority, branchId, position.blockId);
     // The resolution already answered against the working state, so a block it named that is not in
     // the working state means the two disagree: the overview then leads with the Revision alone
     // rather than with a position no window could open.
     if (block === undefined) return anchor;
-    const blockPosition = asNumber(block.position);
-    // The last working position, the same total the window projection reports, so the anchor's reading
+    const blockPosition = block.position;
+    // The working state's block count, the same total the window projection reports, so the anchor's reading
     // and the window the entry opens count the manuscript the same way.
-    const totalBlocks = asNumber(one(
-      this.#authority.prepare(
-        'SELECT position FROM working_blocks WHERE branch_id = ? ORDER BY position DESC LIMIT 1',
-      ).all(branchId) as SqlRow[],
-      'BOOK_RECORD_GRAPH_INVALID',
-      '稿件工作稿内容块不完整。',
-    ).position);
+    const totalBlocks = paragraphCount(this.#authority, branchId);
+    requireStore(totalBlocks > 0, 'BOOK_RECORD_GRAPH_INVALID', '稿件工作稿内容块不完整。');
     const structure = this.#authority.prepare(
-      'SELECT text FROM manuscript_outline WHERE branch_id = ? AND position <= ? ORDER BY position DESC LIMIT 1',
-    ).get(branchId, blockPosition) as SqlRow | undefined;
+      'SELECT text FROM manuscript_outline WHERE branch_id = ? AND order_key <= ? ORDER BY order_key DESC LIMIT 1',
+    ).get(branchId, block.key) as SqlRow | undefined;
     const structureLabel = structure === undefined ? null : asString(structure.text);
     return {
       ...anchor,
@@ -7736,7 +7731,7 @@ export class EditorialStore {
       get authority() { return store.#authority; },
       get bounded() { return store.#bounded; },
       get boundedAuthority() { return store.#boundedAuthority; },
-      get recoveryObjects() { return store.#recoveryObjects; },
+      get recoveryObjects() { return store.#recoveryObjects; }, get manuscriptApply() { return store.#manuscriptApply; },
       get lifetimeId() { return store.#lifetimeId; },
       assertAvailable: this.#assertAvailable.bind(this),
       boundedCall: this.#boundedCall.bind(this),
@@ -9385,7 +9380,7 @@ export class EditorialStore {
    */
   #draftRanges(ranges: ReadonlyArray<StoredDraftRange>): TaskIntentDraftRangeProjection[] {
     return ranges.map((range) => {
-      const block = this.#authority.prepare('SELECT text, position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(range.branchId, range.blockId) as SqlRow | undefined;
+      const block = workingBlock(this.#authority, range.branchId, range.blockId);
       const holds = block !== undefined && (range.span === undefined ? graphemesOf(asString(block.text)).slice(range.fromGrapheme, range.toGrapheme).join('') === range.text : heldSpanPins(this.#authority, range.branchId, { ...range, span: range.span }) !== null);
       const branch = this.#authority.prepare('SELECT base_revision_id, last_checkpoint_sequence FROM branch_working_state WHERE branch_id = ?').get(range.branchId) as SqlRow | undefined;
       const state: TaskIntentDraftRangeProjection['state'] = !holds || branch === undefined ? 'reselect'
@@ -9775,9 +9770,12 @@ export class EditorialStore {
     }
   }
 
-  undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection { return manuscriptOperations.undoManuscript(this.#manuscriptOperationsHost, manuscriptId, branchId, expectedWorkingDigest); }
+  undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string, expectedStepId?: string): DurableHistoryProjection { return manuscriptOperations.undoManuscript(this.#manuscriptOperationsHost, { manuscriptId, branchId, expectedWorkingDigest, ...(expectedStepId === undefined ? {} : { expectedStepId }) }); }
 
-  redoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection { return manuscriptOperations.redoManuscript(this.#manuscriptOperationsHost, manuscriptId, branchId, expectedWorkingDigest); }
+  redoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection { return manuscriptOperations.redoManuscript(this.#manuscriptOperationsHost, { manuscriptId, branchId, expectedWorkingDigest }); }
+  inspectEditorHistory(manuscriptId: string, branchId: string): EditorHistoryProjection { return manuscriptOperations.inspectEditorHistory(this.#manuscriptOperationsHost, manuscriptId, branchId); }
+  /** A composite action as one editor step on the authority connection (Issue #1654): an AI edit's Applies. */
+  withEditorStep<T>(branchId: string, spec: EditorStepSpec, work: () => T): T { return this.#boundedCall(() => withEditorStep(this.#authority, branchId, spec, work)); }
 
   #loadCommitAttempt(attemptId: string): CommitAttempt {
     const row = one(

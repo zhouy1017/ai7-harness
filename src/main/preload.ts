@@ -828,6 +828,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['undoManuscript']['output']>(IPC_CHANNELS.undoManuscript, input),
   redoManuscript: (input: ServiceOperationMap['redoManuscript']['input']) =>
     invoke<ServiceOperationMap['redoManuscript']['output']>(IPC_CHANNELS.redoManuscript, input),
+  inspectEditorHistory: (input: ServiceOperationMap['inspectEditorHistory']['input']) =>
+    invoke<ServiceOperationMap['inspectEditorHistory']['output']>(IPC_CHANNELS.inspectEditorHistory, input),
   openBookWorkbench: (input: Parameters<RendererApi['openBookWorkbench']>[0]) => {
     isNonActivatingBookOpen(input);
     return invoke<Awaited<ReturnType<RendererApi['openBookWorkbench']>>>(IPC_CHANNELS.openBookWorkbench, input);

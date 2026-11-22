@@ -214,6 +214,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     prepareSelectionTask, renderEditorWindow, renderBookAnalysis, renderBookReview, renderBookDeliverables,
     renderProposalConflict, renderProposalWorkspace, returnToRecoveryComparison } = options;
   const rendererErrorMessage = options.errorMessage;
+  /** From how many changes an undo or redo says it is running (Issue #1654): 「正在撤销 2,000 处修改…」. */
+  const LARGE_STEP_CHANGES = 20;
   let viewportObserver: ResizeObserver | undefined;
   let taskBadgeTimer: number | undefined;
   let taskBadgeReading = false;
@@ -2379,25 +2381,52 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     }
   }
 
+  /**
+   * Ctrl+Z and redo take back or replay one editor step (Issue #1654), an accepted 修改建议 included. A large step says so while
+   * it runs; the answer names the step and its paragraph, and the view goes there. A step whose words changed since is set
+   * aside by the service, which says where and why, in the error tone; nothing to undo or redo is said plainly. Words typed
+   * just before are saved first, so they are the step Ctrl+Z takes back. The controls stand busy from the press on, the save
+   * and the read of the step included, so no second press or command starts in between.
+   */
   async function runHistory(action: 'undo' | 'redo'): Promise<void> {
     if (authoritativeMutationBusy() || !editor) return;
+    const verb = action === 'undo' ? '撤销' : '重做';
+    publishAuthoritativeMutationStarting(true);
+    let next: Awaited<ReturnType<typeof api.inspectEditorHistory>> | null = null;
+    try {
+      if (!(await settleLocalEdit()) || !editor) return;
+      const binding = editor.currentWindow();
+      next = await Promise.resolve().then(() => api.inspectEditorHistory({ manuscriptId: binding.manuscriptId, branchId: binding.branchId })).catch(() => null);
+    } finally {
+      // runAuthoritativeMutation below marks them busy again in the same turn, before anything else can run.
+      publishAuthoritativeMutationStarting(false);
+    }
+    const step = next === null ? undefined : action === 'undo' ? next.undo : next.redo;
+    if (step === null) {
+      setStatus(`没有可${verb}的修改。`, 'success');
+      return;
+    }
+    if (step !== undefined && step.changeCount >= LARGE_STEP_CHANGES) setStatus(`正在${verb} ${step.changeCount.toLocaleString('zh-CN')} 处修改…`, 'busy');
     try {
       const result = await runAuthoritativeMutation(() => {
-        const binding = editor!.currentWindow();
-        const input = {
-          manuscriptId: binding.manuscriptId,
-          branchId: binding.branchId,
-          expectedWorkingDigest: binding.workingDigest,
-        };
+        const current = editor!.currentWindow();
+        const input = { manuscriptId: current.manuscriptId, branchId: current.branchId, expectedWorkingDigest: current.workingDigest };
         return action === 'undo' ? api.undoManuscript(input) : api.redoManuscript(input);
       }, async () => {
         await invalidateSearchIfStale('稿件历史状态已变化；先前搜索结果和返回位置已失效。');
         await loadOutline(true);
       });
       if (!result) return;
-      setStatus(result.completionLabel, 'success');
+      // The view goes to the place: within the window the paragraph is brought into view where it stands; outside it the
+      // window is opened there.
+      if (!result.blocked && result.anchorBlockId !== null) {
+        const shown = editorWindow.querySelector<HTMLElement>(`[data-block-id="${result.anchorBlockId}"]`);
+        if (shown !== null) shown.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+        else await navigate({ kind: 'block', blockId: result.anchorBlockId });
+      }
+      setStatus(result.completionLabel, result.blocked ? 'error' : 'success');
     } catch (error) {
-      setStatus(rendererErrorMessage(error, `${action === 'undo' ? '撤销' : '重做'}未完成。`), 'error');
+      setStatus(rendererErrorMessage(error, `${verb}未完成。`), 'error');
     }
   }
 

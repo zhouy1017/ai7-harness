@@ -45,6 +45,8 @@ Every editor action writes one **editor step** in its existing transaction: typi
 - The Apply Effects it **owns**, by generation.
 - For a restore, the mark anchors before and after.
 
+> Clarification, 2026-11-22 (Commander decision; R5-3 + R5-4, #1654): a split or merge step records the pre / post anchors of the marks at its caret (and of an absorbed block whose boundary fuses graphemes); an undo restores them only when the mark's current anchor equals the recorded post side (ED-044 holds: the words are byte-identical). A step owns its Effects per Effect (one slot per Effect it wrote, each a chain of generations), not per proposal item, because a reversal consumes its whole Effect.
+
 **What Ctrl+Z does.**
 - Ctrl+Z takes back the newest step as **one** transaction, whatever its kind. Redo replays the oldest undone step.
 - Text steps replay their command groups. Apply steps write the governed reversal through the existing Effect path (UI ADR 0003 kept: receipts are never rewritten). The reversal is recorded with its own interaction value, `undo-step` or `redo-step`, never `confirm-reverse-apply`, because no confirmation is shown.
@@ -185,6 +187,10 @@ This narrows the R5 row of the #1458 plan, 「移除阻碍正常更新的过程�
 **Targets,** measured against the [#1557](https://github.com/zhouy1017/ai7-harness/issues/1557) baseline on `SampleBooks/` at about 2,000, 15,000 and 46,000 paragraphs:
 - a split or join at 46,000 paragraphs writes under 1 % of today's write-ahead bytes, and grows less than 2× from the smallest size to the largest;
 - typing, window, outline, offset and whole-book mark-list reads stay within 10 % of the baseline.
+
+> Clarification, 2026-11-22 (Commander decision; R5-3 + R5-4, #1654; reported to the Owner): two targets are revised after the measurements on the test guests.
+> - **Consecutive Enters.** "20 consecutive Enters write under 5 % of one base split" becomes: one Enter costs the same at any manuscript size and position, and at 46,000 paragraphs it writes under 1 % of one base split. Each Enter must write its journal, command-history and lineage rows, about 30 pages, so the old target sat below that floor. Measured: one Enter writes 0.43 % of a base split at 46,000 paragraphs.
+> - **The write lock of a large undo** (§1). "At most 2 s for a 2,000-place 全部替换" becomes: at most the time the 全部替换 itself takes, flat as the history grows, with the 「正在撤销 N 处修改…」 line. A scoped AI edit holds the lock for at most 2 s. Two ways to reach 2 s were declined, because each breaks a guarantee of §1: one Effect per step (each card's own 撤销本次修改) and undo in chunks (one Ctrl+Z, all or nothing).
 
 ### 7 · Delivery
 

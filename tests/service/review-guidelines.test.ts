@@ -2,7 +2,7 @@ import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { DatabaseSync, type SQLInputValue, type StatementResultingChanges } from 'node:sqlite';
+import { DatabaseSync, StatementSync, type SQLInputValue, type StatementResultingChanges } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
@@ -515,18 +515,19 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
     await requireExactSample1(roots.codeRoot);
     const session = await openStore();
     const inserts: boolean[] = [];
-    const prepare = DatabaseSync.prototype.prepare;
-    const spy = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, sql: string) {
-      const statement = prepare.call(this, sql);
-      if (/INTO temp\.guideline_/u.test(sql)) {
-        const run = statement.run.bind(statement) as (...values: SQLInputValue[]) => StatementResultingChanges;
-        statement.run = ((...values: SQLInputValue[]) => {
-          inserts.push(this.isTransaction);
-          return run(...values);
-        }) as typeof statement.run;
-      }
-      return statement;
+    // Executions, counted where they run (the store keeps its prepared statements): the connection is the one that opened the
+    // transaction (exec), and each insert into the guideline scratch tables is asked whether that transaction is still open.
+    let connection: DatabaseSync | null = null;
+    const exec = DatabaseSync.prototype.exec;
+    const execSpy = vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function (this: DatabaseSync, sql: string) {
+      connection = this;
+      return exec.call(this, sql);
     });
+    const run = StatementSync.prototype.run;
+    const spy = vi.spyOn(StatementSync.prototype, 'run').mockImplementation(function (this: StatementSync, ...values: SQLInputValue[]): StatementResultingChanges {
+      if (/INTO temp\.guideline_/u.test(this.sourceSQL)) inserts.push(connection?.isTransaction === true);
+      return (run as (...parameters: SQLInputValue[]) => StatementResultingChanges).apply(this, values);
+    } as never);
     try {
       const { store, driver } = session;
       recordMissingCredentialConnection(store, 'L2 主编辑连接');
@@ -542,6 +543,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(inserts.every((open) => open)).toBe(true);
     } finally {
       spy.mockRestore();
+      execSpy.mockRestore();
       await close(session);
     }
   }, 300_000);

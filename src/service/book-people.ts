@@ -17,6 +17,7 @@ import {
 } from '../shared/protocol.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { SERIES_TITLE_FILTER_SQL } from './series.js';
+import { schemaHas } from './statement-cache.js';
 
 /**
  * 作者 · 责编 · 相关人 of a Book (Issue #431, plan slice S83; V2-UX-BOOK-006, FDBK-013). Authors and editors may be several
@@ -106,7 +107,6 @@ type SqlRow = Record<string, SQLOutputValue>;
 
 const RECORD_SCHEMA = 'ai7.book-people/1';
 const ACTOR = '本机编辑';
-const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'book_people_versions'";
 /** A name never holds a separator, a list comma or a line break: each field is read back as its names. */
 const NAME_FORBIDDEN = /[、,，;；\r\n]/u;
 
@@ -293,7 +293,7 @@ export class BookPeople {
    * pinned — whichever shipped list that was, never only today's.
    */
   *#verified(bookId: string): IterableIterator<VerifiedPeopleVersion> {
-    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return;
+    if (!schemaHas(this.#db, 'book_people_versions')) return;
     const rows = this.#db.prepare('SELECT * FROM book_people_versions WHERE book_id = ? ORDER BY version').iterate(bookId) as IterableIterator<SqlRow>;
     let prior: string | null = null;
     let index = 0;

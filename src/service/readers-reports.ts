@@ -839,7 +839,7 @@ export function createReadersReportDraft(host: ReadersReportStoreHost, bookId: s
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const insertWorking = host.authority.prepare(
-      `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
+      `INSERT INTO working_blocks(branch_id, block_id, order_key, kind, level, text, digest, grapheme_length)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     let offset = 0;

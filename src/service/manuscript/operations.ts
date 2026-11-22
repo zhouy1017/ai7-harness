@@ -2,6 +2,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import {
   resolveMilestonePurpose,
   type DurableHistoryProjection,
+  type EditorHistoryProjection,
+  type ManuscriptHistoryInput,
   type JournalAcknowledgement,
   type JournalEditInput,
   type ManuscriptEntryPositionProjection,
@@ -31,6 +33,9 @@ import type {
   VerifiedRecoverySnapshot,
 } from '../bounded-manuscript.js';
 import type { RecoveryObjectStore } from '../recovery-objects.js';
+import { EditorialMarkError } from '../editorial-marks.js';
+import type { ManuscriptApplyStore } from '../manuscript-apply.js';
+import { editorStepSummary, replayEditorStep, type EditorStepHost } from './editor-steps.js';
 import { asNumber, asString, requireStore, StoreError, type SqlRow } from '../store-records.js';
 
 /**
@@ -46,6 +51,8 @@ export interface ManuscriptOperationsHost {
   /** The bounded manuscript store on the authority connection. */
   readonly boundedAuthority: BoundedManuscriptStore;
   readonly recoveryObjects: RecoveryObjectStore;
+  /** The Apply owner on the authority connection, which an editor step's Effects are written through (Issue #1654). */
+  readonly manuscriptApply: ManuscriptApplyStore;
   readonly lifetimeId: string;
   assertAvailable(): void;
   boundedCall<T>(operation: () => T): T;
@@ -224,12 +231,39 @@ export function dismissReplacementPreview(host: ManuscriptOperationsHost, previe
 
 // ---- History: the storage-facing interface for R5 (undo, redo, revisions, milestones, recovery) -----------------
 
-export function undoManuscript(host: ManuscriptOperationsHost, manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
-  return host.boundedCall(() => host.bounded.undo(manuscriptId, branchId, expectedWorkingDigest, host.lifetimeId));
+/**
+ * Ctrl+Z and redo by editor step (Issue #1654), on the authority connection: a step may hold Apply Effects, which only the Apply
+ * owner there writes. A refusal of the Apply owner reaches the caller as the store's own refusal.
+ */
+function editorStep(host: ManuscriptOperationsHost, action: 'undo' | 'redo', input: ManuscriptHistoryInput): DurableHistoryProjection {
+  const binding = { manuscriptId: input.manuscriptId, branchId: input.branchId };
+  const stepHost: EditorStepHost = {
+    db: host.authority, ...host.boundedAuthority.editorStepHost(input.manuscriptId, input.branchId, host.lifetimeId),
+    reverseEffect: (effectId, interaction) => host.manuscriptApply.reverseForStep(binding, effectId, interaction),
+    reapplyEffect: (effectId, interaction) => host.manuscriptApply.reapplyForStep(binding, effectId, interaction),
+  };
+  try {
+    return host.boundedCall(() => replayEditorStep(stepHost, action, input.expectedWorkingDigest, input.expectedStepId));
+  } catch (error) {
+    if (error instanceof EditorialMarkError) throw new StoreError(error.code, error.message);
+    throw error;
+  }
 }
 
-export function redoManuscript(host: ManuscriptOperationsHost, manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
-  return host.boundedCall(() => host.bounded.redo(manuscriptId, branchId, expectedWorkingDigest, host.lifetimeId));
+export function undoManuscript(host: ManuscriptOperationsHost, input: ManuscriptHistoryInput): DurableHistoryProjection {
+  return editorStep(host, 'undo', input);
+}
+
+export function redoManuscript(host: ManuscriptOperationsHost, input: ManuscriptHistoryInput): DurableHistoryProjection {
+  return editorStep(host, 'redo', input);
+}
+
+/** The steps Ctrl+Z and redo would take next (Issue #1654): the busy line of a large undo, and 撤销本批应用's step. */
+export function inspectEditorHistory(host: ManuscriptOperationsHost, manuscriptId: string, branchId: string): EditorHistoryProjection {
+  return host.boundedCall(() => {
+    host.boundedAuthority.bookIdOf(manuscriptId, branchId);
+    return { branchId, undo: editorStepSummary(host.authority, branchId, 'undo'), redo: editorStepSummary(host.authority, branchId, 'redo') };
+  });
 }
 
 export function getHistoricalRevision(host: ManuscriptOperationsHost, revisionId: string, cursor: string | null): HistoricalRevisionProjection {

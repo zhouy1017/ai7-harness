@@ -3247,15 +3247,24 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'undoManuscript':
     case 'redoManuscript': {
-      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'expectedWorkingDigest'], tentativeId);
+      // `expectedStepId` (Issue #1654): the review page's 撤销本批应用 names the batch step it means.
+      const input = requireInputWithOptional(value.input, ['manuscriptId', 'branchId', 'expectedWorkingDigest'], value.op === 'undoManuscript' ? ['expectedStepId'] : [], tentativeId);
       if (
         !isBoundedString(input.manuscriptId, 36) ||
         !UUID_PATTERN.test(input.manuscriptId) ||
         !isBoundedString(input.branchId, 36) ||
         !UUID_PATTERN.test(input.branchId) ||
         !isBoundedString(input.expectedWorkingDigest, 64) ||
-        !HEX_DIGEST_PATTERN.test(input.expectedWorkingDigest)
+        !HEX_DIGEST_PATTERN.test(input.expectedWorkingDigest) ||
+        (Object.hasOwn(input, 'expectedStepId') && !(isBoundedString(input.expectedStepId, 36) && UUID_PATTERN.test(input.expectedStepId as string)))
       ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectEditorHistory': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId'], tentativeId);
+      if (!isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) || !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId)) {
         throw new ProtocolError(tentativeId);
       }
       break;
