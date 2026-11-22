@@ -1,0 +1,349 @@
+import { capturePointerFailure, pointerFailureDetail } from './dispatch-chooser.mjs';
+import { SIDEBAR } from './controller.mjs';
+import { railJump } from './marks-paging.mjs';
+
+/** Preserve the original failure and use the existing closed, text-free hosted geometry channel. */
+export async function draftGeometry(renderer, selector, assertion, { waitFor, name = 'draft-geometry', fallbackSelectors = [] } = {}) {
+  try {
+    if (waitFor) {
+      const boxes=`(() => {const node=document.querySelector(${JSON.stringify(selector)});if(!node)return null;return [node,...node.querySelectorAll('button,input,textarea')].map(item=>{const r=item.getBoundingClientRect();return [r.left,r.top,r.width,r.height];});})()`;
+      await waitFor(renderer,`new Promise(resolve=>requestAnimationFrame(()=>{const before=JSON.stringify(${boxes});requestAnimationFrame(()=>resolve(before!=='null'&&before===JSON.stringify(${boxes})));}))`,name+'-stable');
+    }
+    return await assertion();
+  } catch (error) {
+    if(fallbackSelectors.length)selector=await renderer.evaluate(`(() => {const candidates=${JSON.stringify([selector,...fallbackSelectors])};return candidates.find(candidate=>document.querySelector(candidate))??candidates[0];})()`).catch(()=>selector);
+    const detail=pointerFailureDetail(await capturePointerFailure(renderer,selector,{includeTargetAncestors:true}))??{unavailable:true};
+    if(error&&typeof error==='object')Object.defineProperty(error,'pointerFailure',{value:detail,configurable:true});
+    throw error;
+  }
+}
+
+/** A named control must already be reachable before the real press. Never scroll it by script. */
+export async function draftClick(renderer, check, waitFor, selector, name, button = 'left') {
+  return draftGeometry(renderer, selector, async () => {
+  const point = `(() => {const node=document.querySelector(${JSON.stringify(selector)});if(!node)return null;
+    let range=document.createRange();range.selectNodeContents(node);if(${button === 'right'}&&node.matches('[data-block-id]')&&getSelection()?.rangeCount&&!getSelection().isCollapsed)range=getSelection().getRangeAt(0);const rects=node.matches('[data-block-id]')?Array.from(range.getClientRects()):[node.getBoundingClientRect()];
+    for(const r of rects){if(r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)continue;
+      let visible=true,escaped=!!node.parentElement&&getComputedStyle(node).position==='fixed';for(let parent=node.parentElement;parent;parent=parent.parentElement){const style=getComputedStyle(parent),p=parent.getBoundingClientRect(),left=p.left+parent.clientLeft,top=p.top+parent.clientTop;
+        // A fixed menu escapes intervening clips until an ancestor establishes its containing block.
+        const containsFixed=['transform','filter','perspective'].some(key=>style[key]&&style[key]!=='none')||/paint|layout|strict|content/.test(style.contain)||/transform|filter|perspective/.test(style.willChange);
+        if(escaped&&containsFixed)escaped=false;
+        if(!escaped&&((/auto|scroll|hidden|clip/.test(style.overflowX)&&(r.left<left||r.right>left+parent.clientWidth))||(/auto|scroll|hidden|clip/.test(style.overflowY)&&(r.top<top||r.bottom>top+parent.clientHeight)))){visible=false;break;}
+        if(style.position==='fixed')escaped=true;}
+      const x=r.left+r.width/2,y=r.top+r.height/2;if(visible&&node.contains(document.elementFromPoint(x,y)))return {x,y};}return null;})()`;
+  await waitFor(renderer, `new Promise(resolve=>requestAnimationFrame(()=>{const before=JSON.stringify(${point});requestAnimationFrame(()=>resolve(before!=='null'&&before===JSON.stringify(${point})));}))`, name+'-visible');
+  const at = await renderer.evaluate(point); check(at!==null,name+'-hit');
+  await renderer.send('Input.dispatchMouseEvent',{type:'mouseMoved',...at,buttons:0});
+  check(JSON.stringify(await renderer.evaluate(point))===JSON.stringify(at),name+'-before-press');
+  await renderer.send('Input.dispatchMouseEvent',{type:'mousePressed',...at,button,buttons:button==='left'?1:2,clickCount:1});
+  await renderer.send('Input.dispatchMouseEvent',{type:'mouseReleased',...at,button,buttons:0,clickCount:1});
+  await renderer.evaluate('new Promise(resolve=>setTimeout(()=>resolve(true),280))');
+  });
+}
+
+/** Read the rail's real controls, including ink and badge rectangles; never log names or field values. */
+export async function readDraftRail(renderer) {
+  return renderer.evaluate(`(() => {
+    const rail=document.querySelector('.editor-edge'),r=rail.getBoundingClientRect(),style=getComputedStyle(rail),left=r.left+rail.clientLeft+parseFloat(style.paddingLeft),right=r.left+rail.clientLeft+rail.clientWidth-parseFloat(style.paddingRight),top=r.top+rail.clientTop+parseFloat(style.paddingTop),bottom=r.top+rail.clientTop+rail.clientHeight-parseFloat(style.paddingBottom);
+    const inside=(a,b)=>a.width>0&&a.height>0&&a.left>=b.left&&a.right<=b.right&&a.top>=b.top&&a.bottom<=b.bottom;
+    return Array.from(rail.querySelectorAll('.edge-entries [data-edge-entry]')).map(node=>{
+      const b=node.getBoundingClientRect(),svg=node.querySelector('.icon'),icon=svg.getBoundingClientRect(),ink=svg.querySelector('use').getBoundingClientRect(),label=node.querySelector('.edge-label'),words=document.createRange();words.selectNodeContents(label);const text=words.getBoundingClientRect(),badge=node.querySelector('.edge-badge').getBoundingClientRect(),labelStyle=getComputedStyle(label);
+      const overlap=Math.max(0,Math.min(ink.right,badge.right)-Math.max(ink.left,badge.left))*Math.max(0,Math.min(ink.bottom,badge.bottom)-Math.max(ink.top,badge.top));
+      return {key:node.dataset.edgeEntry,name:node.getAttribute('aria-label'),whole:inside(b,{left:Math.max(0,left),right:Math.min(innerWidth,right),top:Math.max(0,top),bottom:Math.min(innerHeight,bottom)}),hit:node.contains(document.elementFromPoint(b.left+b.width/2,b.top+b.height/2)),width:b.width,icon:[icon.width,icon.height],label:[text.width,text.height],inkWhole:inside(icon,b)&&inside(ink,icon)&&inside(text,b)&&(labelStyle.overflowX==='visible'||label.scrollWidth<=label.clientWidth)&&(labelStyle.overflowY==='visible'||label.scrollHeight<=label.clientHeight),overlap:Math.round(overlap*100)/100};
+    });
+  })()`);
+}
+
+export async function assertDraftRail(renderer,check,waitFor,baseline,name) {
+  await draftGeometry(renderer,'.edge-entries',async()=>{
+    const entries=await readDraftRail(renderer);
+    check(entries.length===4&&baseline.length===4,name+'-all-four');
+    for(const entry of entries) {
+      const prior=baseline.find(item=>item.key===entry.key);
+      await draftGeometry(renderer,`[data-edge-entry="${entry.key}"]`,()=>{
+        check(entry.whole&&entry.hit,name+'-'+entry.key+'-whole-hit');
+        check(entry.width===52&&entry.icon[0]===18&&entry.icon[1]===18&&entry.inkWhole,name+'-'+entry.key+'-whole-symbol-label');
+        check(!!prior&&entry.name===prior.name&&entry.label[0]===prior.label[0]&&entry.label[1]===prior.label[1]&&entry.overlap<=prior.overlap,name+'-'+entry.key+'-unchanged-name-ink');
+      });
+    }
+  },{waitFor,name});
+}
+
+export async function draftKey(renderer, key, code, modifiers=0) {
+  const values={key,code:key,windowsVirtualKeyCode:code,nativeVirtualKeyCode:code,modifiers};
+  await renderer.send('Input.dispatchKeyEvent',{type:'keyDown',...values,...(key==='Enter'?{text:'\r',unmodifiedText:'\r'}:{})});
+  await renderer.send('Input.dispatchKeyEvent',{type:'keyUp',...values});
+}
+
+/** Returning to this screen can reopen at the top. Reach the loaded place with real wheel input, without focusing it. */
+export async function draftWheelToAnchor(renderer,check,waitFor,selector,name,{firstLine=false}={}) {
+  await draftGeometry(renderer,selector,async()=>{
+    const facts=`(() => {const node=document.querySelector(${JSON.stringify(selector)}),scroll=document.querySelector('.editor-window');if(!node||!scroll)return null;
+      let r;if(${firstLine}){const range=document.createRange();range.selectNodeContents(node);r=Array.from(range.getClientRects()).find(rect=>rect.width>0&&rect.height>0);if(!r)return null;}else r=node.getBoundingClientRect();const p=scroll.getBoundingClientRect(),left=Math.max(0,p.left+scroll.clientLeft),right=Math.min(innerWidth,p.left+scroll.clientLeft+scroll.clientWidth),top=Math.max(0,p.top+scroll.clientTop),bottom=Math.min(innerHeight,p.top+scroll.clientTop+scroll.clientHeight),x=left+Math.min(16,(right-left)/2),y=(top+bottom)/2;
+      return {idle:scroll.dataset.scrolling!=='true',whole:r.width>0&&r.height>0&&r.left>=left&&r.right<=right&&r.top>=top&&r.bottom<=bottom,x,y,hit:right>left&&bottom>top&&scroll.contains(document.elementFromPoint(x,y)),scrollTop:scroll.scrollTop,delta:Math.max(-(bottom-top)*.6,Math.min((bottom-top)*.6,(r.top+r.bottom-top-bottom)/2)),rect:[r.left,r.top,r.width,r.height]};})()`;
+    for(let turn=0;turn<40;turn++) {
+      await waitFor(renderer,`new Promise(resolve=>requestAnimationFrame(()=>{const before=${facts};requestAnimationFrame(()=>resolve(before?.idle===true&&JSON.stringify(before)===JSON.stringify(${facts})));}))`,name+'-stable');
+      const at=await renderer.evaluate(facts);
+      if(at.whole)return;
+      check(at.hit&&at.delta!==0,name+'-wheel-hit');
+      await renderer.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:at.x,y:at.y,buttons:0});
+      check(JSON.stringify(await renderer.evaluate(facts))===JSON.stringify(at),name+'-before-wheel');
+      await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:at.x,y:at.y,deltaX:0,deltaY:at.delta});
+      await waitFor(renderer,`document.querySelector('.editor-window').scrollTop!==${at.scrollTop}`,name+'-scrolled');
+    }
+    check(false,name+'-reached');
+  },{fallbackSelectors:['.editor-window']});
+}
+
+/** Choose manuscript words with native pointer/keys. Reading the snapshot never installs a selection. */
+export async function draftSelect(renderer, check, waitFor, blockId, from, to, name) {
+  await draftWheelToAnchor(renderer,check,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${blockId}"]`,name+'-first-line',{firstLine:true});
+  await draftClick(renderer,check,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${blockId}"]`,name+'-text');
+  await draftKey(renderer,'Home',36);
+  const snapshot=`(() => {const raw=document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot;return raw?JSON.parse(raw):null;})()`;
+  await waitFor(renderer,`(() => {const s=${snapshot};return s?.anchor.blockId===${JSON.stringify(blockId)}&&s.head.blockId===${JSON.stringify(blockId)}&&s.anchor.grapheme===0&&s.head.grapheme===0;})()`,name+'-start');
+  for(let step=0;step<from;step++)await draftKey(renderer,'ArrowRight',39);
+  for(let step=from;step<to;step++)await draftKey(renderer,'ArrowRight',39,8);
+  await waitFor(renderer,`(() => {const s=${snapshot};return s?.anchor.blockId===${JSON.stringify(blockId)}&&s.head.blockId===${JSON.stringify(blockId)}&&s.anchor.grapheme===${from}&&s.head.grapheme===${to};})()`,name+'-selected');
+}
+
+export async function draftTabTo(renderer,selector,check,name,{ backwards=false }={}) {
+  return draftGeometry(renderer,selector,async()=>{
+    for(let turn=0;turn<100;turn++) {
+      await renderer.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))');
+      const ready=await renderer.evaluate(`(() => {const node=document.querySelector(${JSON.stringify(selector)}),card=node?.closest('[data-comment-card]'),r=node?.getBoundingClientRect();return !!node&&document.activeElement===node&&r.width>0&&r.height>0&&(!card||card.dataset.selected==='true');})()`);
+      if(ready)return;
+      await draftKey(renderer,'Tab',9,backwards?8:0);
+    }
+    check(false,name);
+  });
+}
+
+export async function replyDraftKept(renderer,check,waitFor,at) {
+  at('reply-draft-kept');
+  const id=await renderer.evaluate('__comments.ids[2]');
+  const card=`[data-comment-card="${id}"]`, input=card+' [data-comment-reply]', reply=card+' [data-mark-action="reply"]';
+  // Tab is the reader's way to reach a low control of a tall card; no scripted scroll precedes the hit check.
+  await draftTabTo(renderer,reply,check,'reply-draft-tab-first-reply');
+  await draftClick(renderer,check,waitFor,reply,'reply-draft-open');
+  await waitFor(renderer,`document.activeElement===document.querySelector(${JSON.stringify(input)})`,'reply-draft-focused');
+  await renderer.send('Input.insertText',{text:'公开合成会话回复'});
+  const other=await renderer.evaluate('__comments.ids[3]');
+  await draftTabTo(renderer,`[data-comment-card="${other}"]`,check,'reply-draft-tab-other');
+  check(await renderer.evaluate(`document.querySelector(${JSON.stringify(input)})?.value==='公开合成会话回复' && document.querySelector('[data-comment-card="${other}"]').dataset.selected==='true'`),'reply-draft-other-card-kept');
+  await draftClick(renderer,check,waitFor,'[data-mark-filter-toggle]','reply-draft-filter');
+  await draftClick(renderer,check,waitFor,'[data-mark-status-filter="open"]','reply-draft-hide');
+  await waitFor(renderer,`document.querySelector(${JSON.stringify(card)})?.hidden===true`,'reply-draft-hidden');
+  await draftClick(renderer,check,waitFor,'[data-mark-status-filter="all"]','reply-draft-unfilter');
+  await draftClick(renderer,check,waitFor,'[data-mark-filter-toggle]','reply-draft-filter-close');
+  let replyWords='公开合成会话回复';
+  const kept=()=>`document.querySelector(${JSON.stringify(input)})?.value===${JSON.stringify(replyWords)}`;
+  await waitFor(renderer,kept(),'reply-draft-filter-kept');
+  const railBaseline=await readDraftRail(renderer);
+  await draftClick(renderer,check,waitFor,'.manuscript-comments-heading [aria-label="关闭批注栏"]','reply-draft-pane-close');
+  await draftClick(renderer,check,waitFor,`.editor-window [data-mark-id="${id}"]`,'reply-draft-floating');
+  await waitFor(renderer,`document.querySelector('[data-mark-card="${id}"] [data-mark-form="reply"] textarea')?.value==='公开合成会话回复'`,'reply-draft-floating-kept');
+  const floatingInput=`[data-mark-card="${id}"] [data-mark-form="reply"] textarea`;
+  await draftClick(renderer,check,waitFor,floatingInput,'reply-draft-floating-edit');
+  await draftKey(renderer,'a',65,2); await renderer.send('Input.insertText',{text:'公开合成会话回复 · 浮卡补充'});
+  await waitFor(renderer,`document.querySelector(${JSON.stringify(floatingInput)})?.value==='公开合成会话回复 · 浮卡补充'`,'reply-draft-floating-edited');
+  await draftKey(renderer,'Escape',27);
+  await assertDraftRail(renderer,check,waitFor,railBaseline,'reply-draft-pane-return-rail');
+  await draftClick(renderer,check,waitFor,'[data-edge-entry="comments"]','reply-draft-pane-return');
+  replyWords='公开合成会话回复 · 浮卡补充';
+  await waitFor(renderer,kept(),'reply-draft-pane-kept');
+  await draftClick(renderer,check,waitFor,SIDEBAR.section('overview'),'reply-draft-overview');
+  await waitFor(renderer,`!document.querySelector('.editor-shell')`,'reply-draft-left-screen');
+  await draftClick(renderer,check,waitFor,SIDEBAR.section('manuscript'),'reply-draft-screen-return');
+  const anchor=`.editor-window [data-mark-id="${id}"]`;
+  await draftWheelToAnchor(renderer,check,waitFor,anchor,'reply-draft-screen-place');
+  await draftGeometry(renderer,input,()=>waitFor(renderer,kept(),'reply-draft-screen-kept'),{fallbackSelectors:[card,anchor,'.manuscript-comments-pane','.editor-shell']});
+  check(await renderer.evaluate(`document.activeElement!==document.querySelector(${JSON.stringify(input)})`),'reply-draft-restored-unfocused');
+  check(await renderer.evaluate(`(async()=>{const c=await window.ai7.getEditorialMarkCard({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,markId:${JSON.stringify(id)}});return !c.replies.some(reply=>reply.body.includes('公开合成会话回复'));})()`),'reply-draft-before-send-silent');
+  await draftTabTo(renderer,input,check,'reply-draft-tab-input');
+  await draftClick(renderer,check,waitFor,input,'reply-draft-send-focus');
+  await draftKey(renderer,'Enter',13); await draftKey(renderer,'Enter',13);
+  await waitFor(renderer,`document.querySelector(${JSON.stringify(card+' [data-mark-region="replies"]')})?.textContent.includes('公开合成会话回复 · 浮卡补充')&&!document.querySelector(${JSON.stringify(input)})?.value`,'reply-draft-sent');
+  check(await renderer.evaluate(`(async()=>{const c=await window.ai7.getEditorialMarkCard({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,markId:${JSON.stringify(id)}});return c.replies.filter(reply=>reply.body==='公开合成会话回复 · 浮卡补充').length===1;})()`),'reply-draft-sent-once');
+  await draftTabTo(renderer,reply,check,'reply-draft-tab-late-reply',{backwards:true});
+  await draftClick(renderer,check,waitFor,reply,'reply-draft-late-open');
+  await renderer.send('Input.insertText',{text:'公开合成离页回复'});
+  await draftKey(renderer,'Enter',13);
+  await draftClick(renderer,check,waitFor,SIDEBAR.section('overview'),'reply-draft-leave-sending');
+  await waitFor(renderer,`!document.querySelector('.editor-shell')`,'reply-draft-late-left');
+  await draftClick(renderer,check,waitFor,SIDEBAR.section('manuscript'),'reply-draft-late-return');
+  await draftWheelToAnchor(renderer,check,waitFor,anchor,'reply-draft-late-place');
+  await waitFor(renderer,`document.querySelector(${JSON.stringify(card+' [data-mark-region="replies"]')})?.textContent.includes('公开合成离页回复')&&!document.querySelector(${JSON.stringify(input)})?.value`,'reply-draft-late-cleared');
+}
+
+/** A complete set, rather than the latest opened run, proves that an action prepared no new run. */
+export async function draftReviewRunIds(renderer,check,name) {
+  const ids=await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runsTruncated===false?workspace.runs.map(run=>run.reviewRunId).sort():null)`);
+  check(Array.isArray(ids),name+'-complete');
+  return ids;
+}
+
+export async function draftReviewRunsUnchanged(renderer,check,expected,name) {
+  const actual=await draftReviewRunIds(renderer,check,name);
+  check(JSON.stringify(actual)===JSON.stringify(expected),name);
+}
+
+/** Check the paragraph geometry and the exact original grapheme span, without exposing draft text. */
+export async function assertDraftPlace(renderer,check,selector,blockId,from,to,name,open=false) {
+  return draftGeometry(renderer,selector,async()=>{
+  check(await renderer.evaluate(`(() => {const node=document.querySelector(${JSON.stringify(selector)}),block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id="'+${JSON.stringify(blockId)}+'"]'),original=__draftProof.text.get(${JSON.stringify(blockId)});if(!node||!block||typeof original!=='string')return false;const a=node.getBoundingClientRect(),b=block.getBoundingClientRect();if(Math.abs(a.top-b.bottom-6)>1||Math.abs(a.left-b.left)>1)return false;return ${open}?node.querySelector('[data-mark-quote]')?.textContent===Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(original),part=>part.segment).slice(${from},${to}).join(''):true;})()`)===true,name);
+  },{fallbackSelectors:[`[data-testid="manuscript-editor"] [data-block-id="${blockId}"]`]});
+}
+
+async function verifyComposerWords(renderer,check,waitFor,row,field,name,blockId) {
+  // A restored row is drawn at its paragraph; returning to the Book's start need not reveal that later paragraph.
+  await renderer.evaluate(`(() => {__draftProof.restoreFocus=document.activeElement;return true;})()`);
+  await draftWheelToAnchor(renderer,check,waitFor,row,name+'-place');
+  check(await renderer.evaluate(`document.activeElement===__draftProof.restoreFocus&&!document.querySelector('[data-mark-composer]')`)===true,name+'-quiet-navigation');
+  await assertDraftPlace(renderer,check,row,blockId,0,1,name+'-row-place');
+  await draftClick(renderer,check,waitFor,row,name+'-expand');
+  await assertDraftPlace(renderer,check,'[data-mark-composer="create-annotation"]',blockId,0,1,name+'-range',true);
+  check(await renderer.evaluate(`document.querySelector(${JSON.stringify(field)})?.value==='公开合成未发送批注' && document.activeElement===document.querySelector(${JSON.stringify(field)})`),name+'-words');
+  await draftKey(renderer,'Escape',27);
+  await waitFor(renderer,`document.querySelector(${JSON.stringify(row)})&&!document.querySelector('[data-mark-composer]')`,name+'-fold');
+}
+
+/** The temporary responsiveness edit must return the exact persisted choice, even when its assertion fails. */
+export async function withDraftDirectEdit(renderer,check,waitFor,edit) {
+  const original=await renderer.evaluate(`document.querySelector('[data-edit-method][aria-checked="true"]')?.dataset.editMethod`);
+  check(['direct','confirm','auto'].includes(original),'draft-original-edit-method');
+  const choose=async(method,name)=>{
+    await draftClick(renderer,check,waitFor,'[data-editor-input-mode-toggle]',name+'-menu');
+    await draftClick(renderer,check,waitFor,`[data-edit-method="${method}"]`,name+'-choose');
+    await waitFor(renderer,`document.querySelector('[data-edit-method="${method}"]').getAttribute('aria-checked')==='true'`,name+'-ready');
+  };
+  let failed=false;
+  try { if(original!=='direct')await choose('direct','draft-direct-mode'); await edit(); }
+  catch(error) { failed=true; throw error; }
+  finally { if(original!=='direct')try { await choose(original,'draft-edit-mode-restore'); } catch(error) { if(!failed)throw error; } }
+}
+
+/** Prepare only local work, then let the drawer's real start invoke the ordinary review-completion follower. */
+export async function startDraftBackgroundRefresh(renderer,check,waitFor) {
+  const fixture=await renderer.evaluate(`(async()=>{const background=__draftBackground,editor=document.querySelector('[data-testid="manuscript-editor"]'),start=editor.querySelector('[data-block-id]').dataset.blockId,page=await window.ai7.getManuscriptWindowAt({manuscriptId:background.manuscriptId,branchId:background.branchId,target:{kind:'window-start',blockId:start}}),clean=page.blocks.find(block=>block.kind==='paragraph'&&/^[\\p{L}\\p{N}\\s]+$/u.test(block.text)&&block.text.trim().length>0);if(!clean)return {scopeReady:false,prepared:false,localOnly:false,itemId:null};background.markIds=page.marks.map(mark=>mark.markId).sort();background.editor=editor;background.refreshCount=(editor.parentElement.dataset.marksRefreshed??'').split(',').filter(Boolean).length;
+    let job=await window.ai7.prepareReviewRun({categoryIds:['local-text-check'],scope:{kind:'selection',fromChapterBlockId:clean.blockId,toChapterBlockId:clean.blockId},localCheck:{punctuation:'chinese-prose',numerals:'off',publication:'unknown',numeralRules:[],numeralsConfirmed:false,excludedRanges:[],doubledEllipsisBlockIds:[],tables:{characters:true,variantWords:false,bookTerms:[],houseWordList:null}}});const deadline=Date.now()+60000;while((job.state==='queued'||job.state==='running')&&Date.now()<deadline){await new Promise(resolve=>setTimeout(resolve,10));job=await window.ai7.pollServiceJob({jobId:job.jobId});}if(job.state!=='completed'||!job.result?.run)return {scopeReady:true,prepared:false,localOnly:false,itemId:null};background.reviewRunId=job.result.run.reviewRunId;
+    const plan=await window.ai7.inspectTaskPlan({kind:'review-run',ref:background.reviewRunId}),overview=await window.ai7.inspectTaskOverview(),item=overview.groups.flatMap(group=>group.items).find(item=>item.plan?.kind==='review-run'&&item.plan.ref===background.reviewRunId);return {scopeReady:true,prepared:true,runId:background.reviewRunId,itemId:item?.itemId??null,localOnly:plan.service.provider==='不调用模型'&&plan.service.send==='本机读取冻结的所选正文，不发送任何内容'&&plan.service.usage==='本地计算，不产生模型用量'};})()`);
+  check(fixture.scopeReady===true,'draft-background-clean-scope');
+  check(fixture.prepared===true,'draft-background-local-prepared');
+  check(fixture.localOnly===true,'draft-background-no-model-preview');
+  check(typeof fixture.itemId==='string','draft-background-local-task-listed');
+  await draftClick(renderer,check,waitFor,'[data-edge-entry="tasks"]','draft-background-tasks');
+  const card=`#task-drawer [data-task-item="${fixture.itemId}"]`;
+  await waitFor(renderer,`document.querySelector(${JSON.stringify(card)})`,'draft-background-task-ready');
+  await draftTabTo(renderer,card,check,'draft-background-task-focus');
+  await draftClick(renderer,check,waitFor,card+' .task-overview-more > summary','draft-background-task-menu');
+  await draftClick(renderer,check,waitFor,card+' [data-task-action="plan"]','draft-background-task-plan');
+  await waitFor(renderer,`document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(fixture.runId)}&&document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`,'draft-background-plan-ready');
+  await draftClick(renderer,check,waitFor,'#task-drawer [data-task-drawer-control="start"]','draft-background-start-local');
+  await waitFor(renderer,`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(fixture.runId)}}).then(workspace=>workspace.run?.state==='settled')`,'draft-background-local-settled');
+  check(await renderer.evaluate(`(async()=>{const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(fixture.runId)}})).run,page=await window.ai7.getManuscriptWindowAt({manuscriptId:__draftBackground.manuscriptId,branchId:__draftBackground.branchId,target:{kind:'window-start',blockId:document.querySelector('[data-testid="manuscript-editor"] [data-block-id]').dataset.blockId}});return run?.findings.length===0&&JSON.stringify(page.marks.map(mark=>mark.markId).sort())===JSON.stringify(__draftBackground.markIds);})()`)===true,'draft-background-no-extra-results');
+}
+
+export async function markDraftKept(renderer,check,waitFor,at,blockId) {
+  at('mark-draft-kept');
+  const pane='.manuscript-comments-pane', row='[data-mark-draft-row="annotation"]', field='[data-mark-composer="create-annotation"] textarea';
+  if(await renderer.evaluate(`document.querySelector('${pane}').hidden`)) await draftClick(renderer,check,waitFor,'[data-edge-entry="comments"]','draft-pane-open');
+  await draftSelect(renderer,check,waitFor,blockId,0,1,'draft-range');
+  await draftClick(renderer,check,waitFor,'[data-comments-add="annotation"]','draft-add');
+  await waitFor(renderer,`document.activeElement===document.querySelector('${field}')`,'draft-focus');
+  await renderer.send('Input.insertText',{text:'公开合成未发送批注'});
+  await renderer.evaluate(`(() => {const editor=document.querySelector('.ProseMirror'),block=document.querySelector('[data-block-id="${blockId}"]');globalThis.__draftProof={block,mutations:0,text:new Map(Array.from(editor.querySelectorAll('[data-block-id]')).map(node=>[node.dataset.blockId,window.__j05.text(node.dataset.blockId)]))};__draftProof.observer=new MutationObserver(records=>{__draftProof.mutations+=records.filter(record=>record.target!==editor||record.type!=='attributes'||record.attributeName!=='class').length;});__draftProof.observer.observe(editor,{childList:true,subtree:true,attributes:true,characterData:true});return true;})()`);
+  // An internal press on the quote must not close either an empty or a populated composer.
+  await draftClick(renderer,check,waitFor,'[data-mark-composer] [data-mark-quote]','draft-inside-quote');
+  check(await renderer.evaluate(`document.querySelector('${field}')?.value==='公开合成未发送批注'`),'draft-inside-kept');
+  const before=await renderer.evaluate(`document.querySelector('.editor-window').scrollTop`);
+  await draftKey(renderer,'Escape',27);
+  const kept=`document.querySelector('${row}') && !document.querySelector('[data-mark-composer]') && !document.querySelector('${row}').contains(document.activeElement)`;
+  await waitFor(renderer,kept,'draft-folded');
+  check(await renderer.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>{const block=document.querySelector('[data-block-id="${blockId}"]');__draftProof.observer.disconnect();resolve(__draftProof.mutations===0&&block===__draftProof.block&&block.getAttribute('style')===null);})))`),'draft-fold-no-editor-mutations');
+  await draftGeometry(renderer,row,async()=>{ check(await renderer.evaluate(`(() => {const row=document.querySelector('${row}'),block=document.querySelector('[data-block-id="${blockId}"]'),next=block.nextElementSibling;if(!next)return false;const a=row.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(next);const b=range.getClientRects()[0];return b&&a.bottom<=b.top&&document.querySelector('.editor-window').scrollTop===${before};})()`),'draft-fold-gap-scroll'); }, {waitFor,name:'draft-fold-gap-scroll'});
+  // Type elsewhere while the row is folded, read it back, then undo this admitted sample edit.
+  const nextBlock=await renderer.evaluate(`document.querySelector('[data-block-id="${blockId}"]').nextElementSibling.dataset.blockId`);
+  const nextBefore=await renderer.evaluate(`window.__j05.text(${JSON.stringify(nextBlock)})`);
+  await withDraftDirectEdit(renderer,check,waitFor,async()=>{
+    await draftClick(renderer,check,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${nextBlock}"]`,'draft-responsive-text');
+    await renderer.send('Input.insertText',{text:'⟐'});
+    await waitFor(renderer,`(() => {const text=window.__j05.text(${JSON.stringify(nextBlock)});return text?.length===${nextBefore.length+1}&&text.replace('⟐','')===${JSON.stringify(nextBefore)};})()`,'draft-responsive-readback');
+    await draftKey(renderer,'z',90,2);
+    await waitFor(renderer,`window.__j05.text(${JSON.stringify(nextBlock)})===${JSON.stringify(nextBefore)}`,'draft-responsive-undone');
+  });
+
+  // Simulate a mark added in another window: the ordinary background read must arrive while the row stands unfocused.
+  await renderer.evaluate(`(async()=>{const work=(await window.ai7.listPriorWork()).find(item=>item.bookId===document.querySelector('.editor-shell').dataset.bookId),binding={manuscriptId:work.manuscriptId,branchId:work.branchId},page=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'block',blockId:${JSON.stringify(nextBlock)}}}),block=page.blocks.find(item=>item.blockId===${JSON.stringify(nextBlock)});const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:page.blocks[0].blockId,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:block.blockId,baseBlockDigest:block.digest,fromGrapheme:0,toGrapheme:1,selectedText:Array.from(block.text)[0],kind:'personal-highlight',highlightColor:1,body:'',proposedText:null,rationale:null});globalThis.__draftBackground={...binding,windowStartBlockId:page.blocks[0].blockId,markId:result.markId};return true;})()`);
+  await startDraftBackgroundRefresh(renderer,check,waitFor);
+  await waitFor(renderer,`document.querySelector('.editor-window [data-mark-id="'+__draftBackground.markId+'"]') && ${kept}`,'draft-background-read-kept');
+  check(await renderer.evaluate(`(() => {const editor=document.querySelector('[data-testid="manuscript-editor"]');return editor===__draftBackground.editor&&(editor.parentElement.dataset.marksRefreshed??'').split(',').filter(Boolean).length>__draftBackground.refreshCount;})()`)===true,'draft-background-refresh-observed');
+  await draftClick(renderer,check,waitFor,'#task-drawer .task-drawer-close','draft-background-tasks-close');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-background-read-kept',blockId);
+  const backgroundMark=await renderer.evaluate('__draftBackground.markId');
+  await draftClick(renderer,check,waitFor,`.editor-window [data-mark-id="${backgroundMark}"]`,'draft-background-mark-menu','right');
+  await waitFor(renderer,`document.querySelector('[data-mark-menu="mark"] [data-mark-action="remove"]')?.disabled===false`,'draft-background-remove-ready');
+  await draftClick(renderer,check,waitFor,'[data-mark-menu="mark"] [data-mark-action="remove"]','draft-background-remove');
+  await waitFor(renderer,`!document.querySelector('.editor-window [data-mark-id="'+__draftBackground.markId+'"]')`,'draft-background-cleanup');
+  await assertDraftPlace(renderer,check,row,blockId,0,1,'draft-expanded-row-place');
+  await draftClick(renderer,check,waitFor,row,'draft-expand');
+  await assertDraftPlace(renderer,check,'[data-mark-composer="create-annotation"]',blockId,0,1,'draft-expanded-range',true);
+  check(await renderer.evaluate(`document.querySelector('${field}').value==='公开合成未发送批注' && document.activeElement===document.querySelector('${field}')`),'draft-expanded-words');
+  // A real press on the paragraph folds the form, retaining the text without sending it.
+  await draftClick(renderer,check,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${blockId}"]`,'draft-text');
+  await waitFor(renderer,kept,'draft-text-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-text-kept',blockId);
+  await draftClick(renderer,check,waitFor,row,'draft-mark-expand');
+  // Bringing the open form into view can leave the paragraph's first marked line above the text viewport.
+  await draftWheelToAnchor(renderer,check,waitFor,`.editor-window [data-block-id="${blockId}"] [data-mark-kind="personal-highlight"]`,'draft-other-mark-place');
+  check(await renderer.evaluate(`document.querySelector(${JSON.stringify(field)})?.value==='公开合成未发送批注'&&document.activeElement===document.querySelector(${JSON.stringify(field)})`)===true,'draft-other-mark-still-editing');
+  await draftClick(renderer,check,waitFor,`.editor-window [data-block-id="${blockId}"] [data-mark-kind="personal-highlight"]`,'draft-other-mark');
+  await waitFor(renderer,kept,'draft-mark-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-mark-kept',blockId);
+  await draftClick(renderer,check,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${blockId}"]`,'draft-menu','right');
+  await waitFor(renderer,`document.querySelector('[data-mark-menu]')`,'draft-menu-open');
+  await draftKey(renderer,'Escape',27); await waitFor(renderer,kept,'draft-menu-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-menu-kept',blockId);
+  await draftClick(renderer,check,waitFor,'.manuscript-comments-heading [aria-label="关闭批注栏"]','draft-pane-close');
+  await draftClick(renderer,check,waitFor,'[data-edge-entry="comments"]','draft-pane-return');
+  await waitFor(renderer,kept,'draft-pane-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-pane-kept',blockId);
+  await draftClick(renderer,check,waitFor,'[data-edge-entry="tasks"]','draft-tasks');
+  await waitFor(renderer,`document.querySelector('#task-drawer:not([hidden])')`,'draft-tasks-ready');
+  await draftClick(renderer,check,waitFor,'.task-drawer-close','draft-tasks-close');
+  await waitFor(renderer,kept,'draft-tasks-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-tasks-kept',blockId);
+  for(let turn=0;turn<60 && await renderer.evaluate(`!!document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${blockId}"]')`);turn++) {
+    const point=await renderer.evaluate(`(() => {const node=document.querySelector('.editor-window'),r=node.getBoundingClientRect(),x=r.left+16,y=Math.min(innerHeight,r.bottom)-25;return {x,y,delta:Math.max(240,node.clientHeight*.8),hit:node.contains(document.elementFromPoint(x,y))};})()`);
+    check(point.hit,'draft-edge-wheel-hit');
+    await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:point.x,y:point.y,deltaX:0,deltaY:point.delta});
+    await renderer.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))');
+  }
+  await waitFor(renderer,`!document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${blockId}"]')`,'draft-place-away');
+  await railJump(renderer,waitFor,check,0,'draft-page-back');
+  await waitFor(renderer,kept,'draft-page-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-page-kept',blockId);
+  await draftClick(renderer,check,waitFor,SIDEBAR.section('overview'),'draft-overview');
+  await waitFor(renderer,`!document.querySelector('.editor-shell')`,'draft-overview-ready');
+  await draftClick(renderer,check,waitFor,SIDEBAR.section('manuscript'),'draft-manuscript');
+  await waitFor(renderer,kept,'draft-screen-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-screen-kept',blockId);
+  const manuscript=await renderer.evaluate(`(async()=> (await window.ai7.listPriorWork()).find(item=>item.bookId===document.querySelector('.editor-shell').dataset.bookId).manuscriptId)()`);
+  await draftClick(renderer,check,waitFor,SIDEBAR.destination('library'),'draft-library');
+  await waitFor(renderer,`document.querySelector('.recent-work-item button[data-manuscript-id="${manuscript}"]')`,'draft-library-ready');
+  await draftTabTo(renderer,`.recent-work-item button[data-manuscript-id="${manuscript}"]`,check,'draft-book-return-focus');
+  await draftClick(renderer,check,waitFor,`.recent-work-item button[data-manuscript-id="${manuscript}"]`,'draft-book-return');
+  await waitFor(renderer,kept,'draft-book-kept');
+  await verifyComposerWords(renderer,check,waitFor,row,field,'draft-book-kept',blockId);
+  await draftClick(renderer,check,waitFor,row,'draft-final-expand');
+  check(await renderer.evaluate(`document.querySelector('${field}').value==='公开合成未发送批注'`),'draft-final-words');
+  await draftClick(renderer,check,waitFor,field,'draft-discard-field-focus');
+  await draftClick(renderer,check,waitFor,'[data-mark-composer] [data-mark-action="cancel"]','draft-discard');
+  await waitFor(renderer,`!document.querySelector('${row}')&&!document.querySelector('[data-mark-composer]')`,'draft-discarded');
+  check(await renderer.evaluate(`Array.from(__draftProof.text).every(([id,text])=>window.__j05.text(id)===text)`),'draft-text-unchanged');
+  await draftClick(renderer,check,waitFor,SIDEBAR.section('overview'),'draft-cancel-leave');
+  await waitFor(renderer,`!document.querySelector('.editor-shell')`,'draft-cancel-left');
+  await draftClick(renderer,check,waitFor,SIDEBAR.section('manuscript'),'draft-cancel-return');
+  await waitFor(renderer,`document.querySelector('.editor-shell')&&!document.querySelector('${row}')&&!document.querySelector('[data-mark-composer]')`,'draft-cancel-stays-gone');
+  await draftClick(renderer,check,waitFor,'.manuscript-comments-heading [aria-label="关闭批注栏"]','draft-pane-reset');
+}

@@ -1,3 +1,5 @@
+import * as toastModule from '../../src/renderer/components/toast.js';
+import { markDrafts } from '../../src/renderer/mark-drafts.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialCardCache, mountEditorialMarks, editorialCommentStartFromFragments, editorialCommentStart, stackEditorialComments, pickEditorialComment } from '../../src/renderer/editorial-marks.js';
 import { matchesEditorialMarkFilter } from '../../src/renderer/editorial-mark-filter.js';
@@ -168,6 +170,7 @@ describe('comments command parity and refresh continuity', () => {
   let technicalBefore: boolean;
   let restore: () => void; let frames: Array<() => void>; let mounted: ReturnType<typeof mountEditorialMarks> | undefined;
   beforeEach(() => {
+    for (const draft of markDrafts.list(windowOf())) markDrafts.discard(draft.scope, draft.place);
     restore = installMiniDom(); frames = []; technicalBefore = technicalLayerVisible; setTechnicalLayerVisible(false);
     const create = miniDocument.createElement;
     vi.spyOn(miniDocument, 'createElement').mockImplementation((tag) => {
@@ -213,6 +216,7 @@ describe('comments command parity and refresh continuity', () => {
       latest = input.action === 'reply' ? { ...latest, replies: [{ replyId: 'reply', body: input.body, createdAt: card.createdAt }] } : { ...latest, status: input.status };
       return { markId: latest.markId, card: latest, marks: [anchor(latest)], marksTruncated: false };
     });
+    const create = vi.fn(async (_input: Record<string, unknown>) => ({ markId: 'new', card: null, marks: [anchor()], marksTruncated: false }));
     const decide = vi.fn(async (_input: Record<string, unknown>) => ({ markId: latest.markId, card: latest, marks: [anchor(latest)], marksTruncated: false }));
     const apply = vi.fn(async (_input: Record<string, unknown>) => ({ markId: latest.markId, card: latest, marks: [anchor(latest)], marksTruncated: false, window: page, application: {} }));
     const write = vi.fn(async (operation: () => Promise<unknown>) => operation());
@@ -228,17 +232,388 @@ describe('comments command parity and refresh continuity', () => {
     const options = { host, scroll, comments: { host: pane, enabled: () => enabled },
       editor: { currentWindow: () => page, setMarks: (marks: EditorialMarkAnchorProjection[], _truncated: boolean, marksPage?: ManuscriptWindowProjection['marksPage']) => { const { marksPage: _held, ...rest } = page; page = { ...rest, marks, ...(marksPage === undefined ? {} : { marksPage }) }; }, setActiveMark: active, setLinkedMark: linked, setVisibleMarkIds: vi.fn(), captureContinuity: () => ({ head: { blockId: 'block', grapheme: caret } }), followNativeCaret: () => { const selection = window.getSelection(); return selection?.isCollapsed === false ? null : { blockId: 'block', grapheme: nativeCaret }; }, focus: vi.fn(), selectRange: vi.fn(), flush: async () => undefined,
         selectedRange: () => ({ kind: rangeKind, blockId: 'block', blockDigest: 'digest', fromGrapheme: 0, toGrapheme: 2, text: '合成' }) },
-      api: { getManuscriptWindowAt: pageAt, findPendingMark: find, inspectReviewFindingOfMark: async () => null, getManuscriptApplyOutcome: outcome, inspectApplyReceipt: receipt, getEditorialMarkCard: get, updateEditorialMark: update, recordChangeSuggestionDecision: decide, applyChangeSuggestion: apply,
+      api: { createEditorialMark: create, getManuscriptWindowAt: pageAt, findPendingMark: find, inspectReviewFindingOfMark: async () => null, getManuscriptApplyOutcome: outcome, inspectApplyReceipt: receipt, getEditorialMarkCard: get, updateEditorialMark: update, recordChangeSuggestionDecision: decide, applyChangeSuggestion: apply,
         inspectProposalWorkspace: async () => ({ items: [], offerWorkspace: false }), recordLearningReasonAsk: async () => null },
       busy: () => false, writeManuscript: write, setStatus: status, errorMessage: (_error: unknown, fallback: string) => fallback, ...extra,
     } as unknown as Parameters<typeof mountEditorialMarks>[0];
+    const apiSpies = Object.keys(options.api).map(name => ({ name, spy: vi.spyOn(options.api, name as keyof typeof options.api) }));
     mounted = mountEditorialMarks(options);
-    return { host, pane, block, scroll, get, update, decide, apply, write, status, active, linked, outcome, receipt, pageAt, find, held: () => page.marks.map((mark) => mark.markId),
+    return { host, pane, block, scroll, focus: options.editor.focus, get, create, update, apiSpies, decide, apply, write, status, active, linked, outcome, receipt, pageAt, find, held: () => page.marks.map((mark) => mark.markId),
       setRange: (next: string) => { rangeKind = next; }, setCaret: (next: number) => { caret = nativeCaret = next; }, setNativeCaret: (next: number) => { nativeCaret = next; }, open: () => mounted!.openMark(value.markId), refresh: () => mounted!.refreshComments(),
       setEnabled: (next: boolean) => { enabled = next; mounted!.refreshComments(); },
       setPage: (next: Partial<ManuscriptWindowProjection>) => { page = { ...page, ...next }; mounted!.refreshComments(); },
     };
   }
+  async function draftComposer(ui: ReturnType<typeof mount>, body = '公开合成撰写草稿', kind = 'annotation') {
+    ui.setRange('range'); ui.pane.querySelector<HTMLButtonElement>(`[data-comments-add="${kind}"]`)!.click(); await paint();
+    const node = ui.scroll.querySelector<HTMLElement>('[data-mark-composer]')!;
+    const input = node.querySelector<HTMLTextAreaElement>('textarea')!;
+    input.value = body; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    return { node, input };
+  }
+  function openSelectionMenu(ui: ReturnType<typeof mount>) {
+    vi.stubGlobal('Element', MiniElement); vi.stubGlobal('Node', MiniElement); ui.setRange('range');
+    (ui.block as unknown as MiniElement).dispatchEvent({ type: 'contextmenu', bubbles: true });
+    return document.querySelector<HTMLElement>('[data-mark-menu="selection"]')!;
+  }
+  function metadataOf(node: MiniElement): unknown[] {
+    return [node.title, Object.fromEntries(node.attributes), { ...node.dataset }, ...node.children.flatMap(metadataOf)];
+  }
+  it('settles a folded row without writing editor nodes or replacing unrelated adopted sheets (#1689 R1)', async () => {
+    const before = new CSSStyleSheet(); document.adoptedStyleSheets.push(before);
+    const ui = mount(); await paint(); const replace = vi.spyOn(CSSStyleSheet.prototype, 'replaceSync');
+    const { node } = await draftComposer(ui);
+    Object.defineProperty(ui.block, 'style', { value: new Proxy(ui.block.style, { set() { throw new Error('editor-owned DOM write'); } }) });
+    miniDocument.activeElement = miniDocument.body; (node as unknown as MiniElement).dispatchEvent({ type: 'focusout' }); await paint();
+    const row = ui.scroll.querySelector<HTMLElement>('[data-mark-draft-row]')!; const writes = vi.fn();
+    Object.defineProperty(row, 'style', { value: new Proxy(row.style, { set(target, key, value) { writes(); Reflect.set(target, key, value); return true; } }) });
+    const count = replace.mock.calls.length; mounted!.reanchor(); await paint(); mounted!.reanchor(); await paint();
+    expect(writes).not.toHaveBeenCalled(); expect(replace).toHaveBeenCalledTimes(count);
+    expect(ui.block.getAttribute('style')).toBeNull(); expect(ui.block.className).toBe('');
+    const later = new CSSStyleSheet(); document.adoptedStyleSheets.push(later); mounted!.destroy();
+    expect(document.adoptedStyleSheets).toEqual([before, later]); expect(document.adoptedStyleSheets[0]).toBe(before); expect(document.adoptedStyleSheets[1]).toBe(later);
+  });
+  it('retains the closing scroll guard on Cancel and focus-loss folding, then releases it (#1689 R2)', async () => {
+    const ui = mount(); await paint(); await draftComposer(ui);
+    ui.scroll.querySelector<HTMLButtonElement>('[data-mark-action="cancel"]')!.click();
+    expect(mounted!.ownsScroll()).toBe(true); await paint(); expect(mounted!.ownsScroll()).toBe(false);
+    const { node } = await draftComposer(ui); miniDocument.activeElement = miniDocument.body;
+    (node as unknown as MiniElement).dispatchEvent({ type: 'focusout', relatedTarget: miniDocument.body }); await Promise.resolve();
+    expect(mounted!.ownsScroll()).toBe(true); await paint(); expect(mounted!.ownsScroll()).toBe(false);
+  });
+  it.each(['quote', 'cancel', 'submit'])('retains the textarea-to-%s focus transition while Chromium temporarily focuses BODY (#1689)', async action => {
+    vi.stubGlobal('Node', MiniElement); vi.stubGlobal('Element', MiniElement);
+    const ui = mount(); await paint(); const { node } = await draftComposer(ui);
+    const target = action === 'quote' ? node : node.querySelector<HTMLButtonElement>(`[data-mark-action="${action}"]`)!;
+    miniDocument.activeElement = miniDocument.body;
+    (node as unknown as MiniElement).dispatchEvent({ type: 'focusout', relatedTarget: target as unknown as MiniElement, bubbles: true });
+    await Promise.resolve(); expect(ui.scroll.querySelector('[data-mark-composer]') === node).toBe(true);
+    target.focus(); await paint(); expect(ui.scroll.querySelector('[data-mark-composer]') === node).toBe(true);
+    if (action === 'cancel') { target.click(); await paint(); expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull(); expect(markDrafts.list(windowOf())).toEqual([]); }
+    if (action === 'submit') { (node.querySelector('form') as unknown as MiniElement).dispatchEvent({ type: 'submit' }); await paint(); expect(ui.create).toHaveBeenCalledTimes(1); expect(ui.create.mock.calls[0]?.[0]).toMatchObject({ body: '公开合成撰写草稿' }); }
+    if (action !== 'submit') expect(ui.create).not.toHaveBeenCalled();
+  });
+  it('settles an indeterminate focus destination before folding, then folds on genuine external focus (#1689)', async () => {
+    const ui = mount(); await paint(); const { node, input } = await draftComposer(ui);
+    miniDocument.activeElement = miniDocument.body;
+    (node as unknown as MiniElement).dispatchEvent({ type: 'focusout', relatedTarget: null }); await Promise.resolve();
+    expect(ui.scroll.querySelector('[data-mark-composer]') === node).toBe(true);
+    input.focus(); await paint(); expect(ui.scroll.querySelector('[data-mark-composer]') === node).toBe(true);
+    miniDocument.activeElement = miniDocument.body;
+    (node as unknown as MiniElement).dispatchEvent({ type: 'focusout', relatedTarget: null }); await paint();
+    expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull(); expect(ui.scroll.querySelector('[data-mark-draft-row]')).not.toBeNull();
+  });
+  it.each(['success','failure','navigation'])('keeps a disabled Submit focus loss in flight and handles %s without stealing focus (#1689)', async outcome => {
+    const ui = mount(); await paint(); const { node } = await draftComposer(ui); const answer = deferred<never>(); ui.create.mockReturnValueOnce(answer.promise);
+    const submit = node.querySelector<HTMLButtonElement>('[data-mark-action="submit"]')!; submit.focus();
+    (node.querySelector('form') as unknown as MiniElement).dispatchEvent({ type: 'submit' });
+    miniDocument.activeElement = miniDocument.body;
+    (node as unknown as MiniElement).dispatchEvent({ type: 'focusout', target: submit as unknown as MiniElement, relatedTarget: null }); await paint();
+    expect.soft(ui.create).toHaveBeenCalledTimes(1); expect.soft(submit.disabled).toBe(true); expect.soft(ui.scroll.querySelector('[data-mark-composer]') === node).toBe(true);
+    const elsewhere = document.createElement('button'); miniDocument.body.append(elsewhere as unknown as MiniElement);
+    if (outcome === 'navigation') elsewhere.focus();
+    if (outcome === 'failure') answer.reject(new Error('synthetic unavailable'));
+    else answer.resolve({ markId:'new',card:null,marks:[anchor()],marksTruncated:false } as never);
+    await paint(); expect(ui.create).toHaveBeenCalledTimes(1);
+    if (outcome === 'failure') { expect(ui.scroll.querySelector('[data-mark-composer]') === node).toBe(true); expect(markDrafts.list(windowOf())[0]?.body).toBe('公开合成撰写草稿'); expect(submit.disabled).toBe(false); expect(ui.focus).not.toHaveBeenCalled(); }
+    else { expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull(); expect(markDrafts.list(windowOf())).toEqual([]); if(outcome==='success')expect(ui.focus).toHaveBeenCalledTimes(1); else { expect(ui.focus).not.toHaveBeenCalled(); expect(document.activeElement).toBe(elsewhere); } }
+  });
+  it.each([...([false,true].flatMap(elsewhere=>[false,true].map(blurAfterRefusal=>({elsewhere,blurAfterRefusal,leaveAgain:false})))),{elsewhere:false,blurAfterRefusal:true,leaveAgain:true}])('keeps fast refusal open unless focus moves: $elsewhere; delayed blur: $blurAfterRefusal; leave after refocus: $leaveAgain (#1689)', async ({elsewhere,blurAfterRefusal,leaveAgain}) => {
+    const ui=mount();await paint();const {node}=await draftComposer(ui);ui.create.mockRejectedValueOnce(new Error('synthetic refusal'));
+    const submit=node.querySelector<HTMLButtonElement>('[data-mark-action="submit"]')!,form=node.querySelector('form')! as unknown as MiniElement;
+    submit.focus();form.dispatchEvent({type:'submit'});miniDocument.activeElement=miniDocument.body;
+    const blur=()=> (node as unknown as MiniElement).dispatchEvent({type:'focusout',target:submit as unknown as MiniElement,relatedTarget:null});
+    if(!blurAfterRefusal)blur();await new Promise(resolve=>setTimeout(resolve,0));if(blurAfterRefusal)blur();
+    expect(markDrafts.sending(windowOf(),markDrafts.list(windowOf())[0]!.place)).toBe(false);expect(submit.disabled).toBe(false);
+    const other=document.createElement('button');miniDocument.body.append(other as unknown as MiniElement);if(elsewhere)other.focus();await paint();
+    expect(ui.create).toHaveBeenCalledTimes(1);expect(markDrafts.list(windowOf())[0]?.body).toBe('公开合成撰写草稿');expect(ui.focus).not.toHaveBeenCalled();
+    if(elsewhere){expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull();expect(ui.scroll.querySelector('[data-mark-draft-row]')).not.toBeNull();expect(document.activeElement).toBe(other);}
+    else if(leaveAgain){const input=node.querySelector<HTMLTextAreaElement>('textarea')!;input.focus();(input as unknown as MiniElement).dispatchEvent({type:'focusin',bubbles:true});miniDocument.activeElement=miniDocument.body;(input as unknown as MiniElement).dispatchEvent({type:'focusout',bubbles:true,relatedTarget:null});await paint();expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull();expect(ui.scroll.querySelector('[data-mark-draft-row]')).not.toBeNull();expect(ui.focus).not.toHaveBeenCalled();}
+    else {expect(ui.scroll.querySelector('[data-mark-composer]')===node).toBe(true);submit.focus();form.dispatchEvent({type:'submit'});await paint();expect(ui.create).toHaveBeenCalledTimes(2);expect(markDrafts.list(windowOf())).toEqual([]);expect(ui.focus).toHaveBeenCalledTimes(1);}
+  });
+  it.each(['body','elsewhere'])('folds after a refused textarea shortcut later loses focus to %s, retaining the exact draft (#1689)', async destination => {
+    const ui=mount();await paint();const {node,input}=await draftComposer(ui);ui.create.mockRejectedValueOnce(new Error('synthetic refusal'));
+    const form=node.querySelector<HTMLFormElement>('form')!;
+    Object.assign(form,{requestSubmit:()=> (form as unknown as MiniElement).dispatchEvent({type:'submit'})});
+    input.focus();(input as unknown as MiniElement).dispatchEvent({type:'keydown',key:'Enter',ctrlKey:true,bubbles:true});await paint();
+    expect(ui.create).toHaveBeenCalledTimes(1);expect(document.activeElement).toBe(input);expect(ui.scroll.querySelector('[data-mark-composer]')).toBe(node);
+    const other=document.createElement('button');miniDocument.body.append(other as unknown as MiniElement);
+    if(destination==='body')miniDocument.activeElement=miniDocument.body;else other.focus();
+    (input as unknown as MiniElement).dispatchEvent({type:'focusout',relatedTarget:destination==='body'?null:other,bubbles:true});await paint();
+    expect(ui.scroll.querySelector('[data-mark-composer]')===null).toBe(true);expect(ui.scroll.querySelector('[data-mark-draft-row]')).not.toBeNull();
+    expect(markDrafts.list(windowOf())[0]?.body).toBe('公开合成撰写草稿');expect(ui.focus).not.toHaveBeenCalled();expect(ui.create).toHaveBeenCalledTimes(1);
+    if(destination==='elsewhere')expect(document.activeElement).toBe(other);
+    ui.scroll.querySelector<HTMLButtonElement>('[data-mark-draft-row]')!.click();await paint();
+    expect(ui.scroll.querySelector<HTMLTextAreaElement>('[data-mark-composer] textarea')?.value).toBe('公开合成撰写草稿');expect(ui.create).toHaveBeenCalledTimes(1);
+  });
+  it('does not claim another control\'s BODY blur after a focused-button send (#1689)', async () => {
+    const ui=mount();await paint();const {node,input}=await draftComposer(ui);ui.create.mockRejectedValueOnce(new Error('synthetic refusal'));
+    node.querySelector<HTMLButtonElement>('[data-mark-action="submit"]')!.focus();
+    (node.querySelector('form') as unknown as MiniElement).dispatchEvent({type:'submit'});await paint();
+    miniDocument.activeElement=miniDocument.body;
+    (input as unknown as MiniElement).dispatchEvent({type:'focusout',relatedTarget:null,bubbles:true});await paint();
+    expect(ui.scroll.querySelector('[data-mark-composer]')===null).toBe(true);expect(markDrafts.list(windowOf())[0]?.body).toBe('公开合成撰写草稿');expect(ui.create).toHaveBeenCalledTimes(1);expect(ui.focus).not.toHaveBeenCalled();
+  });
+  it('separates the same reply place in two Books and restores a floating draft without focusing its field (#1689 R6)', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('textarea')!; input.value = '公开合成图书甲回复';
+    (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    ui.setPage({ bookId: 'other-book' }); await paint(); expect(ui.pane.querySelector('[data-comment-reply]')).toBeNull();
+    ui.setPage(windowOf()); await paint(); ui.setEnabled(false); await ui.open(); await paint();
+    const restored = ui.scroll.querySelector<HTMLTextAreaElement>('[data-mark-form="reply"] textarea')!;
+    expect(restored.value).toBe('公开合成图书甲回复'); expect(document.activeElement).not.toBe(restored);
+  });
+  it('folds and restores composers on Book changes and when a floating card opens (#1689 R6)', async () => {
+    const ui = mount(); await paint(); await draftComposer(ui);
+    ui.setPage({ bookId: 'other-book' }); await paint(); expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull();
+    expect(ui.scroll.querySelector('[data-mark-draft-row]')).toBeNull(); ui.setPage(windowOf()); await paint();
+    ui.scroll.querySelector<HTMLButtonElement>('[data-mark-draft-row]')!.click(); await paint();
+    ui.setEnabled(false); await ui.open(); await paint();
+    expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull(); expect(ui.scroll.querySelector('[data-mark-draft-row]')).not.toBeNull();
+  });
+  it('holds a focused composer, and excludes an unfocused standing one from both guards (#1689 R6)', async () => {
+    const ui = mount(); await paint(); const { input } = await draftComposer(ui);
+    input.focus(); expect(mounted!.holdsFloating()).toBe(true); expect(mounted!.ownsScroll()).toBe(true);
+    miniDocument.activeElement = miniDocument.body;
+    expect(mounted!.holdsFloating()).toBe(false); expect(mounted!.ownsScroll()).toBe(false);
+  });
+  it('includes the restored reply form before fitting the opened floating card to the window (#1689)', async () => {
+    const ui = mount(); await paint(); markDrafts.write(windowOf(), { kind: 'reply', markId: card.markId }, '公开合成待回复');
+    const present: boolean[] = []; vi.spyOn(MiniElement.prototype, 'scrollIntoView').mockImplementation(function (this: MiniElement) {
+      if (this.dataset['markCard']) present.push(this.querySelector('[data-mark-form="reply"]') !== null);
+    });
+    ui.setEnabled(false); await ui.open(); await paint(); expect(present).toEqual([true]);
+  });
+  it('uses the draft when the floating Reply button is pressed and brings edits back to the pane (#1689 R6)', async () => {
+    const ui = mount(); await paint(); markDrafts.write(windowOf(), { kind: 'reply', markId: card.markId }, '公开合成原回复');
+    ui.setEnabled(false); await ui.open(); await paint();
+    ui.scroll.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click(); await paint();
+    const input = ui.scroll.querySelector<HTMLTextAreaElement>('[data-mark-form="reply"] textarea')!;
+    expect(input.value).toBe('公开合成原回复'); input.value = '公开合成浮卡回复'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    ui.setEnabled(true); await paint(); expect(ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')?.value).toBe('公开合成浮卡回复');
+  });
+  it('keeps each swatch named in one row and moves left and right within it (#1689 R6)', async () => {
+    const ui = mount(); await paint(); const menu = openSelectionMenu(ui);
+    const colors = [1, 2, 3].map(color => menu.querySelector<HTMLButtonElement>(`[data-mark-action="add-highlight-${color}"]`)!);
+    expect(new Set(colors.map(node => node.parentElement)).size).toBe(1); expect(colors[0]!.parentElement!.classList.contains('editorial-mark-swatch-row')).toBe(true);
+    expect(colors.map(node => [node.getAttribute('aria-label'), node.title])).toEqual([['加高亮 · 黄','加高亮 · 黄'],['加高亮 · 橙','加高亮 · 橙'],['加高亮 · 绿','加高亮 · 绿']]);
+    colors[0]!.focus(); (menu as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'ArrowRight' }); expect(document.activeElement).toBe(colors[1]);
+    (menu as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'ArrowLeft' }); expect(document.activeElement).toBe(colors[0]);
+  });
+  it('pins the unchanged AI menu group for the same selection and no house procedures (#1689 R6)', async () => {
+    const ui = mount(card, [], { scopedAiEdit: { host: {}, sectionOf: () => undefined } }); await paint(); const menu = openSelectionMenu(ui);
+    const items = Array.from(menu.querySelectorAll<HTMLElement>('[aria-label="AI7 任务"] [role="menuitem"]'));
+    expect(items.map(node => [node.dataset['markAction'], node.querySelector('.menu-caption')?.textContent, (node as HTMLButtonElement).disabled])).toEqual([
+      ['task-on-selection','就这段发起任务…',true],['ask-on-selection','就这段提问…对话，不改稿件',true],['preset-polish','润色这段常用工序 · 生成修改建议',true],
+      ['scoped-ai-edit','就选中部分让 AI 修改…',false],['ai-lock-selection','🔒 锁定所选范围（AI 不修改）',false],
+    ]);
+  });
+  it.each(['annotation','editor-note'])('says the header reason with no selection (%s, #1689 R6)', async kind => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>(`[data-comments-add="${kind}"]`)!.click();
+    expect(ui.status).toHaveBeenCalledWith(kind === 'annotation' ? '先选中一段文字，再添加批注。' : '先选中一段文字，再添加备注。', 'error');
+    expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull();
+  });
+  it('clears a reply on conversion or pane Cancel and keeps keyboard focus on the card (#1689 R6)', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('textarea')!; input.value = '公开合成取消回复'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="cancel-reply"]')!.click(); await paint();
+    expect(markDrafts.read(windowOf(), { kind: 'reply', markId: card.markId })).toBe(''); expect(document.activeElement).toBe(ui.pane.querySelector('[data-comment-card]'));
+    markDrafts.write(windowOf(), { kind: 'reply', markId: card.markId }, '公开合成待转换回复');
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="convert-change-suggestion"]')!.click(); await paint();
+    const form = ui.scroll.querySelector('[data-mark-form]')! as unknown as MiniElement;
+    form.dispatchEvent({ type: 'submit' }); await paint(); expect(ui.update.mock.calls.at(-1)?.[0]).toMatchObject({ action: 'convert' });
+    expect(markDrafts.read(windowOf(), { kind: 'reply', markId: card.markId })).toBe('');
+  });
+  it('does not paint a late reply answer onto another Book or close another composer after a send (#1689 R6)', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('textarea')!; input.value = '公开合成迟到回复'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    const answer = deferred<never>(); ui.update.mockReturnValueOnce(answer.promise);
+    (ui.pane.querySelector('form') as unknown as MiniElement).dispatchEvent({ type: 'submit' }); ui.setPage({ bookId: 'other-book' }); await paint(); ui.status.mockClear();
+    answer.resolve({ markId: card.markId, card, marks: [anchor()], marksTruncated: false } as never); await paint();
+    expect(ui.status).not.toHaveBeenCalled(); expect(ui.pane.querySelector('[data-mark-region="replies"]')?.textContent ?? '').not.toContain('公开合成迟到回复');
+    ui.setPage(windowOf()); await paint(); await draftComposer(ui, '公开合成第一次批注');
+    const created = deferred<never>(); ui.create.mockReturnValueOnce(created.promise);
+    (ui.scroll.querySelector('[data-mark-form]') as unknown as MiniElement).dispatchEvent({ type: 'submit' }); await paint();
+    ui.setEnabled(false); await ui.open(); await paint(); const opened = ui.scroll.querySelector('[data-mark-card]'); created.resolve({ markId: 'new', card: null, marks: [anchor()], marksTruncated: false } as never); await paint();
+    expect(ui.scroll.querySelector('[data-mark-card]')).toBe(opened);
+  });
+  it('never leaks mounted draft words across type, fold, restore and send (#1689 R7)', async () => {
+    const secret = '公开合成草稿边界哨兵'; const ui = mount(); await paint(); const surfaces = [ui]; let sendsAllowed = 0;
+    class MemoryStorage { setItem(_key: string, _value: string) {} }
+    vi.stubGlobal('Storage', MemoryStorage); vi.stubGlobal('localStorage', new MemoryStorage()); vi.stubGlobal('sessionStorage', new MemoryStorage());
+    const storage = vi.spyOn(MemoryStorage.prototype, 'setItem');
+    const consoleSpies = (['log','warn','error','info','debug','trace'] as const).map(name => vi.spyOn(console, name).mockImplementation(() => undefined));
+    const toast = vi.spyOn(toastModule, 'showToast').mockImplementation(() => undefined);
+    const assertSealed = () => {
+      for (const spy of [storage, toast, ...surfaces.map(surface => surface.status), ...consoleSpies]) expect(JSON.stringify(spy.mock.calls)).not.toContain(secret);
+      expect(JSON.stringify(metadataOf(miniDocument.body))).not.toContain(secret);
+      const escaped = surfaces.flatMap(surface => surface.apiSpies).flatMap(({ name, spy }) => spy.mock.calls.filter(args => JSON.stringify(args).includes(secret)).map(args => ({ name, args })));
+      expect(escaped).toHaveLength(sendsAllowed); expect(escaped.every(call => call.name === 'createEditorialMark' || call.name === 'updateEditorialMark' && (call.args[0] as { action: string }).action === 'reply')).toBe(true);
+    };
+    await draftComposer(ui, secret); mounted!.close(); await paint(); assertSealed();
+    mounted!.destroy(); const next = mount(); surfaces.push(next); await paint(); assertSealed();
+    next.scroll.querySelector<HTMLButtonElement>('[data-mark-draft-row]')!.click(); await paint();
+    sendsAllowed++; (next.scroll.querySelector('[data-mark-form]') as unknown as MiniElement).dispatchEvent({ type: 'submit' }); await paint();
+    expect(next.create.mock.calls[0]?.[0]).toMatchObject({ body: secret });
+    next.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click(); const input = next.pane.querySelector<HTMLTextAreaElement>('textarea')!;
+    input.value = secret; (input as unknown as MiniElement).dispatchEvent({ type: 'input' }); assertSealed();
+    next.setEnabled(false); await next.open(); await paint();
+    const floating = next.scroll.querySelector<HTMLTextAreaElement>('[data-mark-form="reply"] textarea')!;
+    expect(floating.value).toBe(secret); floating.value = secret + ' · 浮卡补充';
+    (floating as unknown as MiniElement).dispatchEvent({ type: 'input' }); assertSealed();
+    (floating as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'Escape', bubbles: true }); await paint(); assertSealed();
+    next.setEnabled(true); await paint(); const restored = next.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!;
+    expect(restored.value).toBe(secret + ' · 浮卡补充'); expect(document.activeElement).not.toBe(restored); assertSealed();
+    sendsAllowed++; (next.pane.querySelector('.manuscript-comments-reply') as unknown as MiniElement).dispatchEvent({ type: 'submit' }); await paint();
+    for (const spy of [storage, toast, next.status, ...consoleSpies]) expect(JSON.stringify(spy.mock.calls)).not.toContain(secret);
+    expect(next.update.mock.calls[0]?.[0]).toMatchObject({ action: 'reply', body: secret + ' · 浮卡补充' }); assertSealed();
+    expect(JSON.stringify(metadataOf(miniDocument.body))).not.toContain(secret);
+  });
+  it('preserves the text scroll when adopting a folded-row rule triggers browser anchoring (#1689 R6)', async () => {
+    const ui = mount(); await paint(); const { node } = await draftComposer(ui); ui.scroll.scrollTop = 42;
+    const original = CSSStyleSheet.prototype.replaceSync;
+    vi.spyOn(CSSStyleSheet.prototype, 'replaceSync').mockImplementation(function (this: CSSStyleSheet, text: string) { original.call(this, text); ui.scroll.scrollTop += 40; });
+    miniDocument.activeElement = miniDocument.body; (node as unknown as MiniElement).dispatchEvent({ type: 'focusout' }); await paint();
+    expect(ui.scroll.scrollTop).toBe(42);
+  });
+  it.each(['composer', 'pane', 'floating'])('sends once and clears the exact captured draft after repeated submission (%s, #1689 R6)', async surface => {
+    const ui = mount(); await paint(); const answer = deferred<never>(); let form: MiniElement;
+    if (surface === 'composer') { await draftComposer(ui, '公开合成重复发送'); ui.create.mockReturnValueOnce(answer.promise); form = ui.scroll.querySelector('[data-mark-form]')! as unknown as MiniElement; }
+    else {
+      if (surface === 'floating') { ui.setEnabled(false); await ui.open(); await paint(); ui.scroll.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click(); await paint(); }
+      else ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+      const root = surface === 'pane' ? ui.pane : ui.scroll; const input = root.querySelector<HTMLTextAreaElement>('textarea')!;
+      input.value = '公开合成重复发送'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+      ui.update.mockReturnValueOnce(answer.promise); form = root.querySelector('form')! as unknown as MiniElement;
+    }
+    form.dispatchEvent({ type: 'submit' }); form.dispatchEvent({ type: 'submit' }); await paint();
+    expect(ui.create.mock.calls.length + ui.update.mock.calls.length).toBe(1);
+    expect(form.querySelector('button')!.disabled).toBe(true);
+    answer.resolve({ markId: card.markId, card, marks: [anchor()], marksTruncated: false } as never); await paint();
+    expect(markDrafts.list(windowOf())).toEqual([]);
+  });
+  it('pins the full accessible Book count independently of its compact text (#1689 R6)', async () => {
+    const ui = mount(card, [], { bookPending: { read: () => ({ places: [1,2,3], truncated: false }) } }); await paint();
+    const count = ui.pane.querySelector('[data-comments-book-pending]')!;
+    expect(count.textContent).toBe('全书待处理 3'); expect(count.getAttribute('aria-label')).toBe('全书还有 3 条修改建议、批注和备注待处理');
+  });
+  it('names a long truncated Book count truthfully without requiring its text to fit the heading (#1689)', async () => {
+    const ui = mount(card, [], { bookPending: { read: () => ({ places: Array.from({ length: 12345 }), truncated: true }) } }); await paint();
+    const count = ui.pane.querySelector('[data-comments-book-pending]')!;
+    expect(count.textContent).toBe('全书待处理 12345+'); expect(count.getAttribute('role')).toBe('note');
+    expect(count.getAttribute('aria-label')).toBe('全书至少还有 12345 条修改建议、批注和备注待处理');
+  });
+  it('restores a reply after paging, a derivative switch and a complete surface remount without taking focus (#1678)', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!;
+    input.value = '公开合成会话草稿'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    ui.setPage({ marks: [] }); await paint();
+    expect(ui.pane.querySelector('[data-comment-reply]')).toBeNull();
+    ui.setPage(windowOf()); await paint();
+    expect(ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')?.value).toBe('公开合成会话草稿');
+    ui.setPage({ manuscriptId: 'derivative', marks: [] }); await paint();
+    expect(ui.pane.querySelector('[data-comment-reply]')).toBeNull();
+    mounted!.destroy(); miniDocument.activeElement = null;
+    const next = mount(); await paint();
+    expect(next.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')?.value).toBe('公开合成会话草稿');
+    expect(document.activeElement).toBeNull();
+  });
+  it('keeps a remounted offscreen reply in memory until its anchor returns to view (#1689 screen-return diagnosis)', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!;
+    input.value = '公开合成离屏草稿'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    mounted!.destroy(); miniDocument.activeElement = null;
+    const next = mount(); let top = 1237;
+    Object.assign(next.block, { getBoundingClientRect: () => ({ top, bottom: top + 27, height: 27 }) });
+    await paint();
+    expect(next.pane.querySelector('[data-comment-card]')).toBeNull();
+    expect(markDrafts.read(windowOf(), { kind: 'reply', markId: card.markId })).toBe('公开合成离屏草稿');
+    top = 180; next.refresh(); await paint();
+    expect(next.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')?.value).toBe('公开合成离屏草稿');
+    expect(document.activeElement).toBeNull(); expect(next.focus).not.toHaveBeenCalled();
+    expect(ui.update).not.toHaveBeenCalled(); expect(next.update).not.toHaveBeenCalled();
+  });
+  it('shares the pane reply with the floating form and clears it on explicit Cancel (#1678)', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!;
+    input.value = '公开合成共同回复'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    ui.setEnabled(false); await ui.open(); await paint();
+    const form = ui.scroll.querySelector<HTMLFormElement>('[data-mark-form="reply"]')!;
+    expect(form.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('公开合成共同回复');
+    form.querySelector<HTMLButtonElement>('[data-mark-action="cancel"]')!.click(); await paint();
+    expect(markDrafts.read(windowOf(), { kind: 'reply', markId: 'comment' })).toBe('');
+  });
+  it('keeps a composer as a folded row outside focus and restores its original words on expansion (#1678)', async () => {
+    vi.stubGlobal('Node', MiniElement); vi.stubGlobal('Element', MiniElement);
+    const ui = mount(); await paint(); ui.setRange('range');
+    ui.pane.querySelector<HTMLButtonElement>('[data-comments-add="annotation"]')!.click(); await paint();
+    const input = ui.scroll.querySelector<HTMLTextAreaElement>('[data-mark-field="body"]')!;
+    input.value = '公开合成未发送批注'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    ui.scroll.scrollTop = 42;
+    (ui.block as unknown as MiniElement).dispatchEvent({ type: 'mousedown', bubbles: true }); await paint();
+    expect(ui.scroll.querySelector('[data-mark-composer]')).toBeNull();
+    expect(ui.scroll.querySelector('[data-mark-draft-row]')?.textContent).toBe('未发送的批注 · 展开');
+    expect(ui.block.style.marginBottom).toBeUndefined(); expect(miniDocument.adoptedStyleSheets.flatMap(sheet => sheet.cssRules).map(rule => rule.cssText).join('')).toContain('margin-bottom: 40px'); expect(ui.scroll.scrollTop).toBe(42);
+    ui.scroll.querySelector<HTMLButtonElement>('[data-mark-draft-row]')!.click(); await paint();
+    expect(ui.scroll.querySelector<HTMLTextAreaElement>('[data-mark-field="body"]')?.value).toBe('公开合成未发送批注');
+    ui.scroll.querySelector<HTMLButtonElement>('[data-mark-action="cancel"]')!.click(); await paint();
+    expect(ui.scroll.querySelector('[data-mark-draft-row]')).toBeNull();
+  });
+  it('clears a successful reply after its sender is destroyed, without sending twice (#1678)', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!;
+    input.value = '公开合成离页回复'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    const pending = deferred<never>(); ui.update.mockReturnValueOnce(pending.promise);
+    const form = ui.pane.querySelector('.manuscript-comments-reply')! as unknown as MiniElement;
+    form.dispatchEvent({ type: 'submit' }); form.dispatchEvent({ type: 'submit' });
+    expect(ui.update).toHaveBeenCalledTimes(1);
+    mounted!.destroy(); const next = mount(); await paint();
+    expect(next.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')?.value).toBe('公开合成离页回复');
+    pending.resolve({ markId: card.markId, card: { ...card, replies: [{ replyId: 'reply', body: '公开合成离页回复', createdAt: card.createdAt }] }, marks: [anchor()], marksTruncated: false } as never);
+    await paint();
+    expect(markDrafts.read(windowOf(), { kind: 'reply', markId: card.markId })).toBe('');
+    expect(next.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')?.value ?? '').toBe('');
+  });
+  it('discards the reply when its own annotation is deleted and keeps draft words out of status (#1678)', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!;
+    input.value = '公开合成待删除草稿'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    ui.update.mockResolvedValueOnce({ markId: card.markId, card: null, marks: [], marksTruncated: false } as never);
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="remove"]')!.click(); await paint();
+    expect(markDrafts.read(windowOf(), { kind: 'reply', markId: card.markId })).toBe('');
+    expect(JSON.stringify(ui.status.mock.calls)).not.toContain('公开合成待删除草稿');
+  });
+  it('folds with Escape, keeps several rows through a DOM replacement, and restores them without holding paging (#1678)', async () => {
+    vi.stubGlobal('Node', MiniElement); vi.stubGlobal('Element', MiniElement);
+    const ui = mount(); await paint(); ui.setRange('range');
+    for (const kind of ['annotation', 'editor-note']) {
+      ui.pane.querySelector<HTMLButtonElement>(`[data-comments-add="${kind}"]`)!.click(); await paint();
+      const input = ui.scroll.querySelector<HTMLTextAreaElement>('[data-mark-field="body"]')!;
+      input.value = '公开合成双草稿'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+      miniDocument.body.dispatchEvent({ type: 'keydown', key: 'Escape', bubbles: true }); await paint();
+    }
+    expect(ui.scroll.querySelectorAll('[data-mark-draft-row]').length).toBe(2);
+    expect(mounted!.holdsFloating()).toBe(false); expect(mounted!.ownsScroll()).toBe(false);
+    const block = document.createElement('p'); block.dataset['blockId'] = 'block'; ui.host.replaceChildren(block);
+    mounted!.reanchor(); await paint();
+    expect(block.style.marginBottom).toBeUndefined(); expect(miniDocument.adoptedStyleSheets.flatMap(sheet => sheet.cssRules).map(rule => rule.cssText).join('')).toContain('margin-bottom: 80px');
+    mounted!.destroy(); expect(block.style.marginBottom ?? '').toBe(''); miniDocument.activeElement = null;
+    const next = mount(); await paint();
+    expect(next.scroll.querySelectorAll('[data-mark-draft-row]').length).toBe(2);
+    expect(next.scroll.querySelector('[data-mark-composer]')).toBeNull(); expect(document.activeElement).toBeNull();
+  });
+  it('keeps newly typed composer words when a previous captured send succeeds (#1678)', async () => {
+    const ui = mount(); await paint(); ui.setRange('range');
+    ui.pane.querySelector<HTMLButtonElement>('[data-comments-add="annotation"]')!.click(); await paint();
+    const input = ui.scroll.querySelector<HTMLTextAreaElement>('[data-mark-field="body"]')!;
+    input.value = '公开合成第一次批注'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    const pending = deferred<never>(); ui.create.mockReturnValueOnce(pending.promise);
+    (ui.scroll.querySelector('[data-mark-form]') as unknown as MiniElement).dispatchEvent({ type: 'submit' }); await paint();
+    input.value = '公开合成接着写的批注'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    pending.resolve({ markId: 'new', card: null, marks: [anchor()], marksTruncated: false } as never); await paint();
+    expect(ui.create).toHaveBeenCalledTimes(1);
+    expect(markDrafts.list(windowOf()).find(draft => draft.place.kind === 'annotation')?.body).toBe('公开合成接着写的批注');
+  });
   it('combines category chips, status and search while keeping selections and search focus across polling (#1429)', async () => {
     const literary: EditorialMarkCardProjection = { ...card, markId: 'literary', categoryKey: 'literary', categoryLabel: '文学性与表达',
       source: { ...card.source, kind: 'ai7', origin: 'review-category', label: '文学性与表达改进' }, status: 'applied' };
@@ -386,8 +761,8 @@ describe('comments command parity and refresh continuity', () => {
     expect(paneScroll.scrollTop).toBe(0);
     const shown = () => Array.from(ui.pane.querySelectorAll<HTMLElement>('[data-comment-card]')).filter(node => !node.hidden).map(node => node.dataset['commentCard']);
     expect(shown()).toEqual(['model-a']);
-    expect(ui.pane.querySelector('.editorial-mark-filter-summary')?.textContent).toBe('已筛选 1 / 3');
-    expect(ui.pane.querySelector<HTMLElement>('.editorial-mark-filter-summary')?.title).toBe('已筛选 1 / 3');
+    expect(ui.pane.querySelector('.editorial-mark-filter-summary')?.textContent).toBe('筛选出 1 条 · 已载入 3 条');
+    expect(ui.pane.querySelector<HTMLElement>('.editorial-mark-filter-summary')?.title).toBe('筛选出 1 条 · 已载入 3 条');
     ui.refresh(); await paint(); expect(shown()).toEqual(['model-a']);
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-model-filter="模型乙"]')!.click(); await paint(); expect(shown()).toEqual(['model-a', 'model-b']);
   });
@@ -516,11 +891,12 @@ describe('comments command parity and refresh continuity', () => {
     button.focus(); (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true });
     pane.scrollTop += 78; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
     expect(node.style.top).toBe(top);
-    expect(button.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+    expect(button.getBoundingClientRect().bottom).toBeLessThanOrEqual(395);
   });
   it('keeps the focused tall card in place when a preceding card grows by a fractional pixel (#1661)', async () => {
     const next = { ...suggestion, markId: 'next', fromGrapheme: 3, toGrapheme: 5 };
-    const ui = mount(suggestion, [next]); await paint();
+    const last = { ...suggestion, markId: 'last', fromGrapheme: 6, toGrapheme: 7 };
+    const ui = mount(suggestion, [next, last]); await paint();
     ui.pane.querySelector<HTMLElement>('[data-comment-card="next"]')!.click(); await paint();
     const { pane, node } = measuredPane(ui, 'next', () => 400);
     const upper = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
@@ -532,10 +908,12 @@ describe('comments command parity and refresh continuity', () => {
     button.focus(); (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true });
     pane.scrollTop += 78; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
     const before = node.getBoundingClientRect().top;
-    height += 0.09375; ui.refresh(); await paint();
+    height += 41.09375; ui.refresh(); await paint();
     for (let turn = 0; turn < 6; turn++) {
       ui.refresh(); await paint();
       expect(node.getBoundingClientRect().top).toBe(before);
+      const lower = ui.pane.querySelector<HTMLElement>('[data-comment-card="last"]')!;
+      expect(Number.parseFloat(lower.style.top)).toBe(Number.parseFloat(node.style.top) + 410);
       expect(button.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
       expect(Number.parseFloat(upper.style.top)).toBeGreaterThanOrEqual(8);
       expect(Number.parseFloat(upper.style.top) + height + 10).toBeLessThanOrEqual(Number.parseFloat(node.style.top));
@@ -875,13 +1253,15 @@ describe('comments command parity and refresh continuity', () => {
     expect(ui.update.mock.calls[0]?.[0]).toMatchObject({ body: '已提交的回复' });
     expect(ui.pane.querySelector('[data-mark-region="replies"]')?.textContent).toContain('已提交的回复');
   });
-  it('keeps a surviving reply node across an unrelated structural edit, and discards it on actual Book departure', async () => {
+  it('keeps a surviving reply node across an unrelated structural edit, and restores its words on return from another Book', async () => {
     const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
-    const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!; input.value = '结构编辑前的草稿';
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!; input.value = '结构编辑前的草稿'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' });
     ui.setPage({ journalSequence: 1, blocks: [...windowOf().blocks, { ...windowOf().blocks[0]!, blockId: 'new-unrelated-block' }], marks: [anchor()] });
     await paint(); expect(ui.pane.querySelector('[data-comment-reply]') === input).toBe(true); expect(input.value).toBe('结构编辑前的草稿');
     ui.setPage({ bookId: 'other-book', manuscriptId: 'other-manuscript', marks: [] }); await paint();
     expect(ui.pane.querySelector('[data-comment-reply]')).toBeNull();
+    ui.setPage(windowOf()); await paint();
+    expect(ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')?.value).toBe('结构编辑前的草稿');
   });
   it('keeps focused input and enabled controls during a background re-read, replaces the content it brings, then respects viewport removal', async () => {
     const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
@@ -1005,7 +1385,7 @@ describe('comments command parity and refresh continuity', () => {
     const paragraph = document.createElement('p'); paragraph.dataset['blockId'] = 'far-block'; ui.host.append(paragraph);
     ui.setPage({ ...atPage('block', 1, 0), marks: [anchor()] }); await paint(); await ui.open(); await paint();
     expect(ui.pane.querySelector('[data-comments-book-pending]')?.textContent).toBe('全书待处理 3');
-    expect(ui.pane.querySelector<HTMLElement>('[data-comments-book-pending]')?.title).toContain('全书待处理 3');
+    expect(ui.pane.querySelector<HTMLElement>('[data-comments-book-pending]')?.title).toContain('全书还有 3 条修改建议、批注和备注待处理');
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-category-filter="editor"]')!.click(); await paint();
     // Under a category filter the service names the mark (#1604): no window is probed, and the step starts from the selected card.
     ui.find.mockResolvedValueOnce({ mark: { markId: 'far', blockId: 'far-block', fromGrapheme: 0 } });
@@ -1045,14 +1425,17 @@ describe('comments command parity and refresh continuity', () => {
     const go = vi.fn(async () => { ui.setPage({ ...far }); return true; });
     return { far, windowAt, go, bookPending: { read: () => ({ places, truncated: false }), windowAt, go }, bind: (mounted: ReturnType<typeof mount>) => { ui = mounted; } };
   };
-  it('walks on across pages after a keyboard decision on the page\'s last match, from where the decided card stood (#1523)', async () => {
+  it.each([false, true])('walks on across pages after a keyboard decision on the page\'s last match, from where the decided card stood with an unfocused kept reply %s (#1523)', async kept => {
     const farCard = { ...suggestion, markId: 'far', blockId: 'far-block' };
     const pages = twoPages([anchor(farCard)]);
-    const ui = mount(suggestion, [farCard], { bookPending: pages.bookPending }); pages.bind(ui);
+    if (kept) markDrafts.write(windowOf(), { kind: 'reply', markId: 'kept' }, '公开合成保留回复');
+    const retained = { ...card, markId: 'kept', status: 'resolved' as const };
+    const ui = mount(suggestion, [farCard, retained], { bookPending: pages.bookPending }); pages.bind(ui);
     const paragraph = document.createElement('p'); paragraph.dataset['blockId'] = 'far-block'; ui.host.append(paragraph);
-    ui.setPage({ ...atPage('block', 1, 0), marks: [anchor(suggestion)] }); await paint(); await ui.open(); await paint();
+    ui.setPage({ ...atPage('block', 1, 0), marks: [anchor(suggestion), ...(kept ? [anchor(retained)] : [])] }); await paint(); await ui.open(); await paint();
+    if (kept) expect(ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')?.value).toBe('公开合成保留回复');
     const rejected = rejectedOf(suggestion);
-    ui.decide.mockImplementationOnce(async () => ({ markId: 'comment', card: rejected, marks: [anchor(rejected)], marksTruncated: false }));
+    ui.decide.mockImplementationOnce(async () => ({ markId: 'comment', card: rejected, marks: [anchor(rejected), ...(kept ? [anchor(retained)] : [])], marksTruncated: false }));
     // Enter or Space on the card's own 拒绝: a click with no pointer behind it.
     (row(ui.pane, 'comment').querySelector('[data-mark-action="reject"]') as unknown as MiniElement).dispatchEvent({ ...{ type: 'click', bubbles: true, detail: 0, isTrusted: true } }); await paint();
     expect(pages.go.mock.calls).toEqual([['far-block']]);
@@ -1180,7 +1563,7 @@ describe('comments command parity and refresh continuity', () => {
       const whole = mount(card, [cards[1]!]); await paint();
       expect(rowOf(whole).hidden).toBe(true);
       const ui = await dense();
-      expect(rowOf(ui).hidden).toBe(false); expect(rowOf(ui).querySelector('span')?.textContent).toBe('已显示 3 / 5 条。');
+      expect(rowOf(ui).hidden).toBe(false); expect(rowOf(ui).querySelector('span')?.textContent).toBe('已显示 3 · 本段共 5 条');
       expect(ui.pane.querySelector('[data-marks-more]')?.textContent).toBe('显示更多');
       expect(cardIds(ui)).toEqual(['m0', 'm1', 'm2']);
     });
@@ -1195,7 +1578,7 @@ describe('comments command parity and refresh continuity', () => {
       press(ui); await paint();
       expect(ui.pageAt.mock.calls[0]?.[0]).toEqual({ manuscriptId: 'manuscript', branchId: 'branch', target: { kind: 'window-start', blockId: 'block' }, marks: { afterOrdinal: 3, digest: 'd1' } });
       expect(ui.held()).toEqual(ids([0, 1, 2, 3, 4]));
-      expect(rowOf(ui).hidden).toBe(false); expect(rowOf(ui).querySelector('span')?.textContent).toBe('已显示 5 / 7 条。');
+      expect(rowOf(ui).hidden).toBe(false); expect(rowOf(ui).querySelector('span')?.textContent).toBe('已显示 5 · 本段共 7 条');
       expect(cardIds(ui)).toEqual(ids([0, 1, 2, 3, 4]));
       ui.pageAt.mockResolvedValueOnce(pageOf([4, 5, 6], 3, null, 'd1', 7));
       press(ui); await paint();
