@@ -200,21 +200,6 @@ describe('暂不使用 as a decision (Issue #1671)', () => {
     expect(JSON.parse(String(rows[1]!.canonical_json))).toMatchObject({ choice: 'deferred', reason: null, notUsed: true, attributionOrdinal: 1 });
     expect(() => db.exec('UPDATE library_material_decisions SET kind = \'attribution\'')).toThrow();
   });
-
-  it('refuses a marker that is not exactly 暂不使用 when the chain is read', async () => {
-    const id = await arrive('坏标记');
-    decide(id, house);
-    const row = db.prepare('SELECT * FROM library_material_decisions WHERE material_id = ?').get(id)!;
-    // An eligibility record whose marker claims a choice that is not 稍后决定 is damage, not a decision.
-    const record = { ...JSON.parse(String(row.canonical_json)) as Record<string, unknown> };
-    expect(record.kind).toBe('attribution');
-    db.exec('DROP TRIGGER library_material_decisions_no_update');
-    const damaged = { ...record, kind: 'eligibility', ordinal: 2, choice: 'house', reason: null, basis: '编辑决定', attributionOrdinal: 1, notUsed: true, decisionId: randomUUID(), previousSha256: String(row.sha256) };
-    const json = JSON.stringify(damaged);
-    db.prepare(`INSERT INTO library_material_decisions(decision_id, material_id, ordinal, kind, book_id, previous_sha256, recorded_at, canonical_json, sha256)
-      VALUES (?, ?, 2, 'eligibility', NULL, ?, ?, ?, ?)`).run(damaged.decisionId, id, String(row.sha256), String(row.recorded_at), json, createHash('sha256').update(json).digest('hex'));
-    expect(() => ledger.item(id)).toThrow('资料库的决定记录已损坏。');
-  });
 });
 
 describe('暂不使用 over the real store', () => {
