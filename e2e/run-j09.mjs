@@ -1797,8 +1797,8 @@ async function main() {
         trace.push({phase,key:event?(['ArrowDown','ArrowUp','Enter','Tab'].includes(event.key)?event.key:'other'):null,
           sameSelect:select===first,selectedIndex:select?.selectedIndex,expectedIndex:select?Array.from(select.options).findIndex(option=>option.value===expected):-1,
           selectedAll:select?.value==='all',selectedMatches:select?.value===expected,activeIndex:active?Number(active.dataset.index):-1,
-          popupOpen:trigger?.getAttribute('aria-expanded')==='true',focusTrigger:focus===trigger,focusFilter:focus?.matches('.ui-select-search')??false,
-          targetTrigger:!!event&&trigger?.contains(event.target)===true,visible:document.visibilityState==='visible',focused:document.hasFocus()});};
+          popupOpen:trigger?.getAttribute('aria-expanded')==='true',focusTrigger:focus===trigger,focusFilter:focus?.matches('.ui-select-filter')??false,
+          targetTrigger:!!event&&trigger?.contains(event.target)===true,keyCode:event?.keyCode??null,focusTag:focus?.tagName??null,visible:document.visibilityState==='visible',focused:document.hasFocus()});};
       const types=['pointerdown','pointerup','click','keydown','keyup','change'];
       const onEvent=event=>{if(root.contains(event.target))snap(event.type,event);};
       for(const type of types)document.addEventListener(type,onEvent,true);
