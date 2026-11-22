@@ -68,7 +68,9 @@ describe('the request a start sends, for every control alone and every pair that
     ['只审改动过的章', () => request(workspace(), sheet(['typos-and-usage'], { scope: 'changed' })), { categoryIds: ['typos-and-usage'], scope: { kind: 'changed', fromChapterBlockId: null, toChapterBlockId: null } }],
     ['当前选区 with a held selection', () => request(workspace(), sheet(['typos-and-usage'], { scope: 'selection', selection: { fromBlockId: 'b1', toBlockId: 'b2' } })),
       { categoryIds: ['typos-and-usage'], scope: { kind: 'selection', fromChapterBlockId: 'b1', toChapterBlockId: 'b2' } }],
-    ['the local check over 选章 and over 当前选区', () => request(workspace(), sheet(['local-text-check'], { scope: 'selection', selection: { fromBlockId: 'b1', toBlockId: 'b1' } })),
+    ['the local check over 选章', () => request(workspace(), sheet(['local-text-check'], { scope: 'chapters', from: 'c1', to: 'c2' })),
+      { categoryIds: ['local-text-check'], scope: { kind: 'chapters', fromChapterBlockId: 'c1', toChapterBlockId: 'c2' }, localCheck: LOCAL }],
+    ['the local check over 当前选区', () => request(workspace(), sheet(['local-text-check'], { scope: 'selection', selection: { fromBlockId: 'b1', toBlockId: 'b1' } })),
       { categoryIds: ['local-text-check'], scope: { kind: 'selection', fromChapterBlockId: 'b1', toChapterBlockId: 'b1' }, localCheck: LOCAL }],
     ['an unavailable category that stays ticked is not sent', () => request(workspace({}, IDS.map((id) => category(id, id === 'series-consistency' ? { available: false, unavailableReason: '没有系列。' } : {}))),
       sheet(['typos-and-usage', 'series-consistency'])), { categoryIds: ['typos-and-usage'], scope: WHOLE }],
@@ -95,6 +97,12 @@ describe('the request a start sends, for every control alone and every pair that
     ['a composite definition with 事实核查 sends its level', () => request(workspace(), sheet([], { definition: definition(['typos-and-usage', 'factual-review']), evidenceAssuranceLevel: 'quick' })),
       { categoryIds: ['typos-and-usage', 'factual-review'], scope: WHOLE, evidenceAssuranceLevel: 'quick', procedureDefinition: PIN }],
     ['a single-member definition sends no definition pin', () => request(workspace(), sheet([], { definition: definition(['typos-and-usage'], false) })), { categoryIds: ['typos-and-usage'], scope: WHOLE }],
+    ...(['now', 'when-online'] as const).flatMap((startWhen) => [
+      [`offline composite with local check, ${startWhen}`, () => request(workspace({ connectivity: 'offline' }), sheet([], { startWhen, definition: definition(['local-text-check', 'style-and-format']) })),
+        { categoryIds: ['local-text-check', 'style-and-format'], scope: WHOLE, localCheck: LOCAL, procedureDefinition: PIN, startWhen: 'when-online' }] as const,
+      [`offline composite without local check, ${startWhen}`, () => request(workspace({ connectivity: 'offline' }), sheet([], { startWhen, definition: definition(['style-and-format', 'typos-and-usage']) })),
+        { categoryIds: ['style-and-format', 'typos-and-usage'], scope: WHOLE, procedureDefinition: PIN, startWhen: 'when-online' }] as const,
+    ]),
   ];
   it.each(cases)('%s', (_name, build, expected) => {
     const built = build();
@@ -104,6 +112,30 @@ describe('the request a start sends, for every control alone and every pair that
     const { evidenceAssuranceLevel: _level, startWhen: _when, ...preparation } = built.launch;
     expect(built.preparation).toEqual(preparation);
     expect(built.categoryIds).toEqual((expected as { categoryIds: string[] }).categoryIds);
+  });
+
+  it('restores only eligible remembered ticks after local-only and restores the others when their scope returns', () => {
+    const ws = workspace({}, [category('typos-and-usage'), category('series-consistency', off('没有系列。')),
+      category('style-and-format', { scopes: { whole: on, chapters: off('请选全书。'), changed: on, selection: on } })]);
+    const state = sheet(['local-text-check', 'typos-and-usage', 'series-consistency', 'style-and-format'], { scope: 'chapters', from: 'c1', to: 'c2' });
+    const scope = { kind: 'chapters', fromChapterBlockId: 'c1', toChapterBlockId: 'c2' };
+    expect(request(ws, state)).toHaveProperty('launch', { categoryIds: ['local-text-check'], scope, localCheck: LOCAL });
+    state.categories.delete('local-text-check');
+    expect(request(ws, state)).toHaveProperty('launch', { categoryIds: ['typos-and-usage'], scope });
+    state.scope = 'whole';
+    expect(request(ws, state)).toHaveProperty('launch', { categoryIds: ['typos-and-usage', 'style-and-format'], scope: WHOLE });
+  });
+
+  it('adds and removes the separately chosen series step without dropping the captured procedure pin', () => {
+    const state = sheet(['typos-and-usage'], { seriesId: 'series-1', procedure: filled([
+      { categoryId: 'typos-and-usage', ...on }, { categoryId: 'series-consistency', ...on, chosenApart: true }]) });
+    const capturedProcedure = { versionId: 'v1', documentSha256: 'd'.repeat(64) };
+    const ordinary = { categoryIds: ['typos-and-usage'], scope: WHOLE, seriesId: 'series-1', capturedProcedure };
+    expect(request(workspace(), state, capturedProcedure)).toHaveProperty('launch', ordinary);
+    state.categories.add('series-consistency');
+    expect(request(workspace(), state, capturedProcedure)).toHaveProperty('launch', { ...ordinary, categoryIds: ['typos-and-usage', 'series-consistency'] });
+    state.categories.delete('series-consistency');
+    expect(request(workspace(), state, capturedProcedure)).toHaveProperty('launch', ordinary);
   });
 
   const refused: ReadonlyArray<readonly [string, () => ReturnType<typeof request>, string]> = [
@@ -246,7 +278,11 @@ describe('the mounted new-review form', () => {
     const row = view.root.querySelector('[data-review-category-option="typos-and-usage"]')!;
     const detail = row.querySelector('.review-category-basis-detail')!;
     expect(detail.hidden).toBe(true);
-    expect(detail.querySelector('.review-category-description')!.textContent).toBe('提供审阅发现。');
+    const description = detail.querySelector('.review-category-description')!;
+    expect(description.textContent).toBe('提供审阅发现。');
+    expect(row.querySelector('.review-category-name')!.title).toContain('提供审阅发现。');
+    expect(description.id).toBeTruthy();
+    expect(row.querySelector('input')!.getAttribute('aria-describedby')?.split(' ')).toContain(description.id);
     expect(row.querySelector('.review-category-text')!.querySelector('.review-category-description')).toBeNull();
     row.querySelector('.review-category-basis')!.click();
     expect(detail.hidden).toBe(false);

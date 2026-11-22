@@ -251,22 +251,25 @@ export function createReviewChoices(input: {
     box.checked = state.categories.has(entry.categoryId);
     const text = node('span', 'review-category-text');
     const name = node('strong', 'review-category-name', entry.label);
-    name.title = entry.label;
     const reason = node('span', 'review-category-reason');
     reason.id = input.nextId('category-reason');
     const sentence = entry.description.split(/[；。]/u)[0] + '。';
+    const description = node('span', 'review-category-description', isSwitch ? REVIEW_LOCAL_SWITCH_SENTENCE : sentence);
+    description.id = input.nextId('category-description');
+    description.title = description.textContent ?? '';
+    name.title = `${entry.label}：${description.title}`;
     const basis = node('a', 'review-category-basis', [...entry.guidelineDocuments.map((document) => document.title), entry.procedure.title].join(' · '));
     basis.href = '#'; basis.title = basis.textContent ?? '';
     basis.id = input.nextId('category-basis');
     // The description sentence the row face used to carry sits beside the basis words; the switch shows it on its face.
     const detail = node('p', 'review-category-basis-detail');
-    if (!isSwitch) detail.append(node('span', 'review-category-description', sentence), ' ');
+    if (!isSwitch) detail.append(description, ' ');
     detail.append(reviewBasisWords(entry.basis));
     detail.hidden = true;
     basis.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); detail.hidden = !detail.hidden; basis.setAttribute('aria-expanded', String(!detail.hidden)); });
-    box.setAttribute('aria-describedby', `${basis.id} ${reason.id}`);
+    box.setAttribute('aria-describedby', `${description.id} ${basis.id} ${reason.id}`);
     text.append(name);
-    if (isSwitch) { const face = node('span', 'review-category-description', REVIEW_LOCAL_SWITCH_SENTENCE); face.title = REVIEW_LOCAL_SWITCH_SENTENCE; text.append(face); }
+    if (isSwitch) text.append(description);
     text.append(reason);
     const calls = node('span', 'review-category-calls');
     label.append(box, text, basis, calls, detail);
