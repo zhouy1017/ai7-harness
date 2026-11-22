@@ -1,4 +1,5 @@
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { pressKey, pressReachable, reachable, saveMenuActionsInOrder, tabTo } from './import-entry-stages.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -664,29 +665,36 @@ async function saveEdit(renderer, suffix) {
 async function saveMilestone(renderer) {
   const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
   requireJourney(before !== null, 'milestone-scope');
-  // Synchronized delta with Issue #409: the milestone form lives in the 导航 panel, which opens on demand.
-  await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); const panel=document.querySelector('#manuscript-navigation-panel'); if(!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if(entry.getAttribute('aria-expanded')!=='true') entry.click(); return entry.getAttribute('aria-expanded')==='true' && !panel.hidden; })()`, 'milestone-navigation');
-  await assertRenderer(renderer, `(() => { const menu=document.querySelector('[data-save-menu="manuscript"]'),details=document.querySelector('.milestone-section'); if(!(menu instanceof HTMLDetailsElement)||!(details instanceof HTMLDetailsElement))return false; menu.open=true; details.open=true; return true; })()`, 'milestone-open');
-  await fill(renderer, '#milestone-label', 'J12 后续修订版', 'milestone-label');
-  // Synchronized delta with Issue #414: a purpose is chosen from the unselected cards, not typed.
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('.milestone-section input[type="radio"][name="milestone-purpose"][value="stage-archive"]'); if(!(radio instanceof HTMLInputElement)||radio.disabled)return false; radio.click(); return radio.checked; })()`, 'milestone-purpose');
-  await fill(renderer, '#milestone-note', '本地且离线。', 'milestone-note');
-  // #1376 review F3: a valid, enabled save action must leave the arrow order when its subsection is collapsed.
-  await assertRenderer(renderer, `(() => {
-    const menu=document.querySelector('[data-save-menu="manuscript"]'),section=menu?.querySelector('.milestone-section'),outer=menu?.querySelector('summary'),summary=section?.querySelector('summary');
-    const save=section?.querySelector('button'),exportAction=menu?.querySelector('.editor-save-menu-body > button');
-    if(!section||!outer||!summary||!save||save.disabled||!exportAction)return false;
-    section.open=false; outer.focus();
-    const key=(value)=>document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true}));
-    key('ArrowDown');if(document.activeElement!==summary)return false;
-    key('ArrowDown');if(document.activeElement!==exportAction)return false;
-    key('ArrowDown');if(document.activeElement!==summary)return false;
-    key('End');if(document.activeElement!==exportAction)return false;
-    key('Home');if(document.activeElement!==summary)return false;
-    key('ArrowUp');if(document.activeElement!==exportAction)return false;
-    key('Home');summary.click();return section.open&&!save.disabled&&document.activeElement===summary;
-  })()`, 'milestone-collapsed-menu-keyboard');
-  await click(renderer, '保存里程碑版本', 'milestone-save');
+  const io = { renderer, waitFor, assertRenderer };
+  const outer = '[data-save-menu="manuscript"] > summary', section = '.milestone-section > summary';
+  const navigation = '[data-edge-entry="navigation"]';
+  if (!await renderer.evaluate(`document.querySelector('${navigation}')?.getAttribute('aria-expanded') === 'true'`)) {
+    await pressReachable(io, navigation, 'milestone-navigation');
+  }
+  await pressReachable(io, outer, 'milestone-open-menu');
+  await pressReachable(io, section, 'milestone-open-form');
+  await tabTo(io, '#milestone-label', 'milestone-label');
+  await renderer.send('Input.insertText', { text: 'J12 后续修订版' });
+  const purpose = '.milestone-section input[name="milestone-purpose"][value="stage-archive"]';
+  await tabTo(io, purpose, 'milestone-purpose');
+  await pressReachable(io, purpose, 'milestone-purpose');
+  await tabTo(io, '#milestone-note', 'milestone-note');
+  await renderer.send('Input.insertText', { text: '本地且离线。' });
+  await tabTo(io, section, 'milestone-return-to-summary', undefined, true);
+  await pressReachable(io, section, 'milestone-collapse-form');
+  await assertRenderer(renderer, saveMenuActionsInOrder(), 'milestone-menu-order');
+  await assertRenderer(renderer, reachable(outer), 'milestone-summary-in-window');
+  await renderer.evaluate(`document.querySelector('${outer}').focus({preventScroll:true})`);
+  const entry = '[data-import-new-version="manuscript"]', last = '.editor-save-menu-body > button:last-of-type';
+  for (const [key, selector] of [['ArrowDown',section],['ArrowDown',entry],['ArrowDown',last],['ArrowDown',section],['End',last],['Home',section],['ArrowUp',last],['Home',section]]) {
+    await pressKey(renderer, key);
+    await assertRenderer(renderer, `document.activeElement === document.querySelector('${selector}') && ${reachable(selector)}`, 'milestone-collapsed-menu-keyboard');
+  }
+  await pressKey(renderer, 'Enter');
+  await waitFor(renderer, `document.querySelector('.milestone-section')?.open && !document.querySelector('.milestone-section button')?.disabled`, 'milestone-form-reopened');
+  const save = '.milestone-section button[aria-label="保存里程碑版本"]';
+  await tabTo(io, save, 'milestone-save');
+  await pressReachable(io, save, 'milestone-save');
   await waitFor(renderer, milestonePersisted(before, 'r2'), 'milestone-saved', 120_000);
   await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订版 2')`, 'milestone-revision-caption');
   // #1483: persistence can precede the editor/outline reconciliation that releases the write guard.
