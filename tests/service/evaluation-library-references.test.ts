@@ -197,7 +197,9 @@ it('relaunches an evaluation with its frozen series and materials and accepts a 
   store.cancelWaitingTask(nextTask);
   joinSeries(store, seriesId, bookId);
   expect(store.inspectInitialEvaluation(bookId).runSourceScope).not.toHaveProperty('seriesScopes');
-  expect(store.inspectTaskPlan(nextTask).relaunch?.input).toMatchObject({ seriesId: null, materialIds });
+  const bookOnly = store.inspectTaskPlan(nextTask).relaunch;
+  expect(bookOnly?.input).toMatchObject({ bookId, materialIds, relaunchOf: { ref: next.taskIntentId } });
+  expect(bookOnly!.input).not.toHaveProperty('seriesId');
   expect(() => store.launchInitialEvaluation({ ...request, seriesId: null, clientCommandId: randomUUID() }, launchPolicy))
     .toThrowError(expect.objectContaining({ code: 'TASK_RELAUNCH_STALE' }));
 });

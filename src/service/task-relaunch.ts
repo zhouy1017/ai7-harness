@@ -140,8 +140,10 @@ function taskRelaunchPlan(host: TaskRelaunchHost, plan: TaskPlanProjection): Tas
       break;
     }
     case 'initial-evaluation': {
-      const scopes = frozenSeriesScopes(host.authority, ref, asString(row!.plan_envelope_sha256));
-      relaunch = { ...common, operation: 'launchInitialEvaluation', input: { ...input, materialIds: request.materialIds, seriesId: scopes?.[0]?.seriesId ?? null } };
+      const seriesId = frozenSeriesScopes(host.authority, ref, asString(row!.plan_envelope_sha256))?.[0]?.seriesId;
+      relaunch = { ...common, operation: 'launchInitialEvaluation', input: {
+        ...input, materialIds: request.materialIds, ...(seriesId === undefined ? {} : { seriesId }),
+      } };
       break;
     }
     case 'readers-report': relaunch = { ...common, operation: 'launchReadersReport', input: { ...input, template: request.template, materialIds: request.materialIds } }; break;
