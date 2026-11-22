@@ -3350,6 +3350,20 @@ async function main() {
     const ordinaryRow = await readAudit(renderer, (page) => page.rows.length === 1, 'learning-audit-ordinary-row');
     const ordinaryKey = ordinaryRow.rows[0][0];
     requireJourney(ordinaryRow.note !== null && !ordinaryRow.note.includes('授予') && ordinaryRow.rows[0][1] === 'pending' && ordinaryRow.rows[0][2] === '还没决定' && ordinaryRow.rows[0][4] === false, 'learning-audit-ordinary-row-words', ordinaryRow);
+    // The query press leaves the short window above the decision buttons. Reveal both with the wheel before measuring;
+    // pointerClick's scripted scroll must not supply the evidence that these choices can be reached.
+    for (let step = 0; step < 8; step++) {
+      const wheel = await renderer.evaluate(`(() => {
+        const root=document.querySelector('[data-screen="quality-learning"] .learning-audit');
+        const buttons=Array.from(root.querySelectorAll('li.learning-audit-material .learning-audit-decide button'));
+        const bottom=Math.max(...buttons.map(node=>node.getBoundingClientRect().bottom));
+        const box=root.getBoundingClientRect();
+        return {x:box.left+box.width/2,y:innerHeight-32,deltaY:Math.max(0,bottom-innerHeight+16)};
+      })()`);
+      if (wheel.deltaY <= 0) break;
+      await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheel, deltaX: 0 });
+      await renderer.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+    }
     const ordinaryControls = await renderer.evaluate(`(() => {
       const root = document.querySelector('[data-screen="quality-learning"] .learning-audit');
       const buttons = Array.from(root.querySelectorAll('li.learning-audit-material .learning-audit-decide button'));
@@ -3361,6 +3375,7 @@ async function main() {
       return { labels: buttons.map((node) => node.textContent), reachable: buttons.every((node) => fits(node) && meets(node)), buttons: buttons.length,
         buttonChoices: root.querySelectorAll('.filter-choices').length, filters: filters.length, filtersFit: filters.every(fits), queryFits: fits(query), fromFits: fits(root.querySelector('#learning-audit-filter-from')), datesTogether: Math.abs(root.querySelector('#learning-audit-filter-from').getBoundingClientRect().top-root.querySelector('#learning-audit-filter-to').getBoundingClientRect().top)<=1,
         datesVisible: ['from','to'].every(key=>{const node=root.querySelector('#learning-audit-filter-'+key);return fits(node)&&meets(node);}),
+        decisionRects: buttons.map(node=>{const r=node.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right};}),
         queryRadius: getComputedStyle(query).borderTopLeftRadius, selectRadius: filters[0] ? getComputedStyle(filters[0]).borderTopLeftRadius : null, width: innerWidth, height: innerHeight };
     })()`);
     requireJourney(JSON.stringify(ordinaryControls.labels) === JSON.stringify(['用于学习', '不用']) && ordinaryControls.reachable && ordinaryControls.buttonChoices === 0 && ordinaryControls.filters === 4 &&
