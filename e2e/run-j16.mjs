@@ -1,6 +1,7 @@
 import { rightColumnGeometry } from './comments-pane.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
+import { pressReachable } from './task-card-reach.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -1060,8 +1061,8 @@ async function main() {
     requireJourney(opened.title === '任务' && opened.scope === '这本书 · 0 项' && opened.compose.heading === '发起全书任务' &&
       JSON.stringify(opened.compose.modes) === JSON.stringify([['first-baseline', true, false]]) && opened.compose.prepare === 'enabled' &&
       opened.compose.quick === null && opened.compose.why === null &&
-      JSON.stringify(['waiting', 'running', 'recent'].map((key) => [opened.groups[key]?.heading, opened.groups[key]?.count, opened.groups[key]?.empty, opened.groups[key]?.cards.length])) ===
-        JSON.stringify([['等你处理', '0', '这里暂时没有任务。', 0], ['进行中', '0', '这里暂时没有任务。', 0], ['最近完成', '0', '这里暂时没有任务。', 0]]),
+      JSON.stringify(['pending', 'active', 'recent'].map((key) => [opened.groups[key]?.heading, opened.groups[key]?.count, opened.groups[key]?.empty, opened.groups[key]?.cards.length])) ===
+        JSON.stringify([['待处理', '0', '这里暂时没有任务。', 0], ['进行中', '0', '这里暂时没有任务。', 0], ['最近完成', '0', '这里暂时没有任务。', 0]]),
     'panel-empty', opened);
     await assertRenderer(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === true && document.body.dataset.taskDrawer === 'open'`, 'panel-one-slot');
 
@@ -1077,31 +1078,32 @@ async function main() {
     await launchTaskFromBar(renderer, waitFor, 'panel-first-start');
     await openPanel(renderer, 'panel-launched');
     at('panel-start');
-    await waitForPanel(renderer, (panel) => statesOf(panel, 'running').includes('analysis-running'), 'panel-direct-running', 120_000);
+    await waitForPanel(renderer, (panel) => statesOf(panel, 'active').includes('analysis-running'), 'panel-direct-running', 120_000);
     await assertRenderer(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'`, 'panel-no-plan-wall');
     at('panel-stop-wording');
-    const running = await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-running' &&
-      cardsOf(panel, 'running')[0].reason.startsWith(`已完成 ${FIRST_HOLD} / ${SAMPLE1_UNITS} 个阅读范围`), 'panel-running', 180_000);
-    requireJourney(running.running === 'true' && cardsOf(running, 'running')[0].pill === '运行中' && statesOf(running, 'waiting').length === 0 &&
-      cardsOf(running, 'running')[0].kindLabel === cardsOf(running, 'running')[0].kind &&
-      cardsOf(running, 'running')[0].time.startsWith('记录于 ') && cardsOf(running, 'running')[0].reason.length <= 60 &&
-      JSON.stringify(cardsOf(running, 'running')[0].actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['cancel', '取消', 'enabled']]),
+    const running = await waitForPanel(renderer, (panel) => statesOf(panel, 'active').join() === 'analysis-running' &&
+      cardsOf(panel, 'active')[0].reason.startsWith(`已完成 ${FIRST_HOLD} / ${SAMPLE1_UNITS} 个阅读范围`), 'panel-running', 180_000);
+    requireJourney(running.running === 'true' && cardsOf(running, 'active')[0].pill === '运行中' && statesOf(running, 'pending').length === 0 &&
+      cardsOf(running, 'active')[0].kindLabel === cardsOf(running, 'active')[0].kind &&
+      cardsOf(running, 'active')[0].time.startsWith('记录于 ') && cardsOf(running, 'active')[0].reason.length <= 60 &&
+      JSON.stringify(cardsOf(running, 'active')[0].actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['cancel', '取消任务', 'enabled']]),
     'panel-running-card', running);
 
     at('panel-pause');
     // 暂停 on the card, as the drawer's bar would: 正在暂停 while the range in flight finishes, then 已暂停 with 续行.
     await cardAction(renderer, 'analysis-running', 'pause', 'panel-pause');
-    await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-pausing', 'panel-pausing');
+    await waitForPanel(renderer, (panel) => statesOf(panel, 'active').join() === 'analysis-pausing', 'panel-pausing');
     await writeHold(FIRST_HOLD + 1);
-    const paused = await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-paused', 'panel-paused', 120_000);
-    requireJourney(cardsOf(paused, 'running')[0].pill === '已暂停' &&
-      JSON.stringify(cardsOf(paused, 'running')[0].actions) === JSON.stringify([['resume', '继续', 'enabled'], ['redo', '重新开始', 'enabled']]),
+    const paused = await waitForPanel(renderer, (panel) => statesOf(panel, 'active').join() === 'analysis-paused', 'panel-paused', 120_000);
+    requireJourney(cardsOf(paused, 'active')[0].pill === '已暂停' &&
+      JSON.stringify(cardsOf(paused, 'active')[0].actions) === JSON.stringify([['resume', '继续', 'enabled'], ['redo', '重新开始…', 'enabled'], ['cancel', '取消任务', 'enabled']]) &&
+      cardsOf(paused, 'active')[0].reason.startsWith('你在 ') && cardsOf(paused, 'active')[0].reason.endsWith(' 暂停；继续时接着处理。'),
     'panel-paused-card', paused);
 
     at('panel-resume');
     // 续行 on the card: the same Run goes on, and runs to its end — 已完成 in 最近完成, with 查看结果.
     await cardAction(renderer, 'analysis-paused', 'resume', 'panel-resume');
-    await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-running', 'panel-resumed', 60_000);
+    await waitForPanel(renderer, (panel) => statesOf(panel, 'active').join() === 'analysis-running', 'panel-resumed', 60_000);
     // #1375: keep the original panel pause/resume checks, then advance its real held Run twice on ordinary attention.
     const pollTaskId=await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then(page=>page.taskIntent.taskIntentId)`);
     await clickSelector(renderer,'#task-drawer [data-task-drawer-control="close"]','poll-attention-close-pane');
@@ -1128,9 +1130,9 @@ async function main() {
     await openManuscriptOf(renderer,bookId,'poll-attention-return-book');
     await openPanel(renderer,'poll-attention-return-pane');
     await writeHold(SAMPLE1_UNITS);
-    const done = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-completed' && statesOf(panel, 'running').length === 0, 'panel-completed', 180_000);
+    const done = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-completed' && statesOf(panel, 'active').length === 0, 'panel-completed', 180_000);
     const doneCard = cardsOf(done, 'recent')[0];
-    requireJourney(doneCard.pill === '已完成' && doneCard.reason.startsWith('已有结果 · 用时 ') && JSON.stringify(doneCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新开始', 'enabled']]),
+    requireJourney(doneCard.pill === '已完成' && doneCard.reason.startsWith('已有结果 · 用时 ') && JSON.stringify(doneCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['redo', '重新开始…', 'enabled']]),
     'panel-completed-card', done);
 
     at('panel-compose-update');
@@ -1145,19 +1147,24 @@ async function main() {
     await clickSelector(renderer, '#task-drawer [data-task-compose-action="prepare"]', 'panel-compose-prepare');
     await launchTaskFromBar(renderer, waitFor, 'panel-update-start');
     await openPanel(renderer, 'panel-update-launched');
-    await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-running' && cardsOf(panel, 'running')[0].title === '基线分析 · 重新分析全书', 'panel-update-card', 180_000);
+    await waitForPanel(renderer, (panel) => statesOf(panel, 'active').join() === 'analysis-running' && cardsOf(panel, 'active')[0].title === '基线分析 · 重新分析全书', 'panel-update-card', 180_000);
 
     at('panel-cancel');
-    // 取消任务 on the card opens the plan with its Cancellation Impact Summary focused, where it is confirmed — here by the
-    // keyboard alone. What the Run read is kept: 已取消 stands first in 最近完成 with the partial revision it formed.
-    await cardAction(renderer, 'analysis-running', 'cancel', 'panel-cancel');
-    await waitFor(renderer, `document.querySelector('#task-drawer .task-overview-confirm')?.hidden === false && document.activeElement === document.querySelector('#task-drawer .task-overview-confirm button.danger')`, 'panel-cancel-summary');
+    // 取消任务 on the card (Issue #1680) opens the plan with its Cancellation Impact Summary focused — the one confirmation the card,
+    // the panel, the drawer and the Delete key share — where it is confirmed by the keyboard alone; `← 任务` comes back to the panel.
+    // What the Run read is kept: 已取消 stands first in 最近完成 with the partial revision it formed.
+    await pressReachable(renderer, waitFor, requireJourney, '#task-drawer .task-panel .task-overview-card[data-task-state="analysis-running"] [data-task-action="cancel"]', 'panel-cancel');
+    await waitFor(renderer, `document.activeElement !== null && document.activeElement === document.querySelector('#task-drawer-cancel-impact h4') && document.querySelector('#task-drawer-cancel-impact [data-task-drawer-control="keep-running"]')?.textContent === '不取消'`, 'panel-cancel-summary');
+    await pressTab(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl === 'confirm-cancel-run' && document.activeElement.matches(':focus-visible')`, 'panel-cancel-confirm-reached');
     await pressEnter(renderer);
+    await waitFor(renderer, `['cancelling', 'cancelled-after-start'].includes(document.querySelector('#task-drawer')?.dataset.taskPlanState)`, 'panel-cancel-recorded', 30_000);
     await writeHold(SAMPLE1_UNITS);
-    const cancelled = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-cancelled,analysis-completed' && statesOf(panel, 'running').length === 0, 'panel-cancelled-card', 60_000);
+    await pressReachable(renderer, waitFor, requireJourney, '#task-drawer [data-task-drawer-control="tasks"]', 'panel-cancel-back');
+    const cancelled = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-cancelled,analysis-completed' && statesOf(panel, 'active').length === 0, 'panel-cancelled-card', 60_000);
     const cancelledCard = cardsOf(cancelled, 'recent')[0];
     requireJourney(cancelledCard.pill === '已取消' && cancelledCard.reason.startsWith('已取消 · 保留已有结果') &&
-      JSON.stringify(cancelledCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新开始', 'enabled']]) && cancelled.scope === '这本书 · 2 项',
+      JSON.stringify(cancelledCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['redo', '重新开始…', 'enabled']]) && cancelled.scope === '这本书 · 2 项',
     'panel-cancelled-card-words', cancelled);
 
     at('result-window');
@@ -1413,11 +1420,11 @@ async function main() {
     // `← 任务` puts the dialogue in the background: its card in 进行中 says only 等待回答 and offers 打开对话 (DIALOG-010). Two
     // more deltas arrive meanwhile — the second sentence completes — and the panel shows nothing of them, nor moves focus.
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'dialogue-leave');
-    const background = await waitForPanel(renderer, (panel) => cardsOf(panel, 'running').some((card) => card.state === 'dialogue-answering'), 'dialogue-background-card');
-    const backgroundCard = cardsOf(background, 'running').find((card) => card.state === 'dialogue-answering');
-    requireJourney(backgroundCard.kind === '对话' && backgroundCard.title === `对话 · ${DIALOGUE_QUESTION}` && backgroundCard.pill === '运行中' &&
-      backgroundCard.reason === '正在处理稿件。' &&
-      JSON.stringify(backgroundCard.actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['cancel', '取消', 'enabled']]), 'dialogue-background-words', backgroundCard);
+    const background = await waitForPanel(renderer, (panel) => cardsOf(panel, 'active').some((card) => card.state === 'dialogue-answering'), 'dialogue-background-card');
+    const backgroundCard = cardsOf(background, 'active').find((card) => card.state === 'dialogue-answering');
+    requireJourney(backgroundCard.kind === '对话' && backgroundCard.title === `对话 · ${DIALOGUE_QUESTION}` && backgroundCard.pill === '等待回答' &&
+      backgroundCard.reason === '回答在后台继续；打开对话可以看到已经收到的完整内容。' &&
+      JSON.stringify(backgroundCard.actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['cancel', '取消任务', 'enabled']]), 'dialogue-background-words', backgroundCard);
     await assertRenderer(renderer, `(() => { const title = document.querySelector('#task-drawer-title'); title.focus(); return document.activeElement === title; })()`, 'dialogue-background-focus');
     await writeAnswerHold(4);
     await waitFor(renderer, `window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => dialogue.attempts[0].fragmentTotal === 2 && dialogue.attempts[0].state === 'answering')`, 'dialogue-background-arrived', 30_000);
@@ -1476,8 +1483,8 @@ async function main() {
     // In 最近完成 the card says 已回答 and offers 回答 and 打开对话 (TASK-044); 回答 shows the latest answer in the window.
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'dialogue-to-panel');
     const answeredPanel = await waitForPanel(renderer, (panel) => cardsOf(panel, 'recent')[0]?.state === 'dialogue-answered', 'dialogue-answered-card');
-    requireJourney(JSON.stringify(cardsOf(answeredPanel, 'recent')[0].actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新开始', 'enabled']]) &&
-      cardsOf(answeredPanel, 'recent')[0].pill === '已完成', 'dialogue-answered-card-words', answeredPanel);
+    requireJourney(JSON.stringify(cardsOf(answeredPanel, 'recent')[0].actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新回答', 'enabled']]) &&
+      cardsOf(answeredPanel, 'recent')[0].pill === '已回答', 'dialogue-answered-card-words', answeredPanel);
     await cardAction(renderer, 'dialogue-answered', 'answer', 'dialogue-answer-open');
     await waitFor(renderer, `(() => { const win = document.querySelector('.task-result-window'); return win?.dataset.taskResult === 'ready' && win.dataset.taskResultKind === 'dialogue' && win.querySelector('.task-result-dialogue-answer')?.textContent === ${JSON.stringify(ANSWER_FIRST + ANSWER_SECOND + ANSWER_TAIL)} && win.querySelector('[data-dialogue-state]')?.textContent === '回答完成'; })()`, 'dialogue-answer-window', 30_000);
     await clickSelector(renderer, '.task-result-window [data-task-result-action="close"]', 'dialogue-answer-close');
@@ -1704,7 +1711,7 @@ async function main() {
     at('selection-task-review-run');
     const reviewedPanel = await waitForPanel(renderer, (panel) => cardsOf(panel, 'recent')[0]?.state === 'review-completed', 'selection-task-review-completed', 60_000);
     const reviewedCard = cardsOf(reviewedPanel, 'recent')[0];
-    requireJourney(reviewedCard.title === '审阅 · 第 1 次 · 所选段落' && JSON.stringify(reviewedCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['again', '重新开始', 'enabled'], ['jump', '跳到所选文字', 'enabled']]), 'selection-task-review-completed-words', reviewedCard);
+    requireJourney(reviewedCard.title === '审阅 · 第 1 次 · 所选段落' && JSON.stringify(reviewedCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['redo', '重新开始…', 'enabled'], ['jump', '跳到所选文字', 'enabled']]), 'selection-task-review-completed-words', reviewedCard);
     const reviewedFindings = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: ${JSON.stringify(selectionRun.reviewRunId)} }).then((workspace) => workspace.run.findings.map((finding) => [finding.blockId, finding.markId !== null]))`);
     requireJourney(Array.isArray(reviewedFindings) && reviewedFindings.length > 0 && reviewedFindings.every(([blockId, marked]) => blockId === taskBlock && marked), 'selection-task-review-in-paragraph', reviewedFindings);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-review-close');
@@ -1818,9 +1825,9 @@ async function main() {
     // No Task was prepared for it: the Book's analysis is still the 重新分析所选范围 the editor left prepared.
     requireJourney(await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => analysis.taskIntent?.mode ?? null)`) === 'reanalyze-range', 'composer-no-task');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'composer-back');
-    const draftPanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'waiting').includes('draft-unfinished'), 'composer-draft-waiting');
-    const draftCard = cardsOf(draftPanel, 'waiting').find((card) => card.state === 'draft-unfinished');
-    requireJourney(draftCard.kind === '工序' && draftCard.title === `任务草稿 · 「${COMPOSER_GOAL}」` && draftCard.pill === '等你处理' &&
+    const draftPanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'pending').includes('draft-unfinished'), 'composer-draft-waiting');
+    const draftCard = cardsOf(draftPanel, 'pending').find((card) => card.state === 'draft-unfinished');
+    requireJourney(draftCard.kind === '工序' && draftCard.title === `任务草稿 · 「${COMPOSER_GOAL}」` && draftCard.pill === '任务草稿 · 尚未准备计划' &&
       JSON.stringify(draftCard.actions) === JSON.stringify([['answer', '继续编辑草稿', 'enabled']]), 'composer-draft-card', draftCard);
     const draftAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((attention) => attention.groups.flatMap((group) => group.items).filter((item) => item.state === 'draft-unfinished').map((item) => [item.book.bookId, item.target.kind, item.target.draftId]))`);
     requireJourney(JSON.stringify(draftAttention) === JSON.stringify([[bookId, 'task-intent-draft', saved.draftId]]), 'composer-draft-attention', draftAttention);
@@ -1840,7 +1847,7 @@ async function main() {
     const promotedTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis)=>({taskIntentId:analysis.taskIntent?.taskIntentId,goal:analysis.taskIntent?.goal,authorization:analysis.authorization}))`);
     requireJourney(promotion?.taskKind === 'baseline-analysis' && promotion.taskIntentId === promotedTask.taskIntentId && promotedTask.goal === PROMOTE_GOAL && promotedTask.authorization !== null, 'promote-direct-authorized', {promotion,promotedTask});
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'promote-back');
-    await waitForPanel(renderer, (panel)=>cardsOf(panel,'waiting').some((card)=>card.state==='draft-unfinished'), 'promote-panel-draft-retained');
+    await waitForPanel(renderer, (panel)=>cardsOf(panel, 'pending').some((card)=>card.state==='draft-unfinished'), 'promote-panel-draft-retained');
 
     at('dialogue-promote-draft');
     // 转为任务意图草稿 (Issue #52, S17b; DIALOG-016): a completed dialogue answer becomes a draft carrying its words and provenance — the
