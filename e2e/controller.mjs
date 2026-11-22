@@ -2046,7 +2046,16 @@ export function labelViewPlanInputFailure(error) {
   switch (error.message) {
     case 'review-sheet-view-plan-target-moved-before-press': label = 'review-sheet-view-plan-target-moved-before-press'; break;
     case 'review-sheet-view-plan-pointer-rest': label = 'review-sheet-view-plan-pointer-rest'; break;
-    case 'review-sheet-view-plan-target-moved-after-press': label = 'review-sheet-view-plan-target-moved-after-press'; break;
+    case 'review-sheet-view-plan-target-moved-after-press': {
+      label = 'review-sheet-view-plan-target-moved-after-press';
+      const allowed = [['on','off','unseen'], ['gone','unknown','same','different','replaced'], ['fixed','changed','unknown'],
+        ['inside','outside','no-box'], ['none','drawer','other'], ['closed','expected','not-expected']];
+      const values = error.viewPlanMiss;
+      if (Array.isArray(values) && values.length === allowed.length && allowed.every((words, index) => words.includes(values[index]))) {
+        label = `view-plan-after-press-${values.join('-')}`;
+      }
+      break;
+    }
   }
   Object.defineProperty(error, JOURNEY_CHECK, { value: label });
 }

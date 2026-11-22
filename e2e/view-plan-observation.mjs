@@ -1,13 +1,14 @@
 import { journeyCheckLabel, labelViewPlanInputFailure } from './controller.mjs';
 
 function observePlan(expectedRun) {
-  const button = () => document.querySelector('.review-run [data-review-action="view-plan"]');
+  const button = () => document.querySelector('[data-review-action="view-plan"]');
   const run = () => document.querySelector('.review-workspace-card');
   const drawer = () => document.querySelector('#task-drawer');
   const open = () => drawer()?.dataset.taskDrawer === 'open';
   const expected = () => drawer()?.dataset.taskPlanRef === expectedRun;
   const first = button(), initialState = run()?.dataset.reviewState;
   let previous = first, state = initialState, opened = open(), bound = expected(), down = null, point = null;
+  let downTarget = 'unseen', downRect = null;
   const rows = [];
   const sample = (phase, event) => {
     const node = button(), rect = node?.getBoundingClientRect();
@@ -30,7 +31,11 @@ function observePlan(expectedRun) {
   };
   const input = event => {
     point = [event.clientX, event.clientY];
-    if (event.type === 'pointerdown') down = button();
+    if (event.type === 'pointerdown' && event.isTrusted) {
+      down = button();
+      downTarget = down?.contains(event.target) ? 'on' : 'off';
+      downRect = down?.getBoundingClientRect();
+    }
     sample(event.type, event);
   };
   const types = ['pointermove', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
@@ -39,11 +44,20 @@ function observePlan(expectedRun) {
     attributeFilter: ['data-review-state', 'data-task-plan-ref', 'data-task-drawer'] });
   for (const type of types) window.addEventListener(type, input, { capture: true, passive: true });
   sample('initial');
+  window.__classifyViewPlanMiss = (node, hit, x, y) => {
+    const rect = node?.getBoundingClientRect();
+    const identity = !node ? 'gone' : !down ? 'unknown' : node === down ? 'same' : down.isConnected ? 'different' : 'replaced';
+    const geometry = !rect || !downRect ? 'unknown' : ['x','y','width','height'].every(key => rect[key] === downRect[key]) ? 'fixed' : 'changed';
+    const pointIn = !rect ? 'no-box' : x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom ? 'inside' : 'outside';
+    return [downTarget, identity, geometry, pointIn, !hit ? 'none' : drawer()?.contains(hit) ? 'drawer' : 'other',
+      !open() ? 'closed' : expected() ? 'expected' : 'not-expected'];
+  };
   window.__endViewPlanObservation = () => {
     observer.disconnect();
     for (const type of types) window.removeEventListener(type, input, true);
     sample('final');
     delete window.__endViewPlanObservation;
+    delete window.__classifyViewPlanMiss;
     return { viewport: [innerWidth, innerHeight], rows };
   };
 }

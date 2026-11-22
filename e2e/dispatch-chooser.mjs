@@ -52,7 +52,7 @@ export async function capturePointerFailure(renderer, selector, { includeTargetA
 }
 
 /** Real pointer interaction: wait for layout motion, then require a visible, topmost target. */
-export async function pointerClick(renderer, waitFor, selector, name, { rest = false } = {}) {
+export async function pointerClick(renderer, waitFor, selector, name, { rest = false, observePlanMiss = false } = {}) {
   try {
     const query = JSON.stringify(selector);
     await renderer.evaluate(`document.querySelector(${query})?.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})`);
@@ -84,7 +84,14 @@ export async function pointerClick(renderer, waitFor, selector, name, { rest = f
       if (!rested) throw new Error(`${name}-pointer-rest`);
     }
     await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', buttons: 1, clickCount: 1 });
-    if (!(await renderer.evaluate(`document.querySelector(${query})?.contains(document.elementFromPoint(${point.x},${point.y}))===true`))) throw new Error(`${name}-target-moved-after-press`);
+    const afterPress = await renderer.evaluate(observePlanMiss
+      ? `(() => {const node=document.querySelector(${query}),hit=document.elementFromPoint(${point.x},${point.y});return node?.contains(hit)===true || (window.__classifyViewPlanMiss?.(node,hit,${point.x},${point.y}) ?? false);})()`
+      : `document.querySelector(${query})?.contains(document.elementFromPoint(${point.x},${point.y}))===true`);
+    if (afterPress !== true) {
+      const error = new Error(`${name}-target-moved-after-press`);
+      if (observePlanMiss && Array.isArray(afterPress)) Object.defineProperty(error, 'viewPlanMiss', { value: afterPress });
+      throw error;
+    }
     await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', buttons: 0, clickCount: 1 });
   } catch (error) {
     const detail = await capturePointerFailure(renderer, selector);

@@ -28,7 +28,7 @@ export async function launchReviewFromSheet(renderer, waitFor, viewport) {
   const runId = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.run?.reviewRunId)`);
   if (typeof runId !== 'string') throw new Error('REVIEW_SHEET_RUN_MISSING');
   // The running review draws its card again as findings arrive above 查看计划; the pointer rests on it, then presses once.
-  const press = () => pointerClick(renderer, waitFor, '[data-review-action="view-plan"]', 'review-sheet-view-plan', { rest: true });
+  const press = () => pointerClick(renderer, waitFor, '[data-review-action="view-plan"]', 'review-sheet-view-plan', { rest: true, observePlanMiss: true });
   const awaitPlan = () => waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef === ${JSON.stringify(runId)}`, 'review-sheet-run-plan');
   await observeViewPlan(renderer, runId, press, awaitPlan);
   if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanState==='waiting'`)) {
