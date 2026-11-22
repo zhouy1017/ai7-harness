@@ -133,7 +133,7 @@ function pendingPath(dataRoot: string): string {
  * or is larger than any AI7 writes, is refused, never taken as none (Issue #433 review). It is read through the one handle it
  * is inspected by, never more of it than that bound, so a note that grows or is replaced as it is read takes no more.
  */
-async function readPendingUpgrade(dataRoot: string): Promise<PendingUpgrade | null> {
+export async function readPendingUpgrade(dataRoot: string): Promise<PendingUpgrade | null> {
   let text: string | null;
   try {
     text = await readSmallFile(pendingPath(dataRoot), MAX_NOTE_BYTES);
@@ -203,12 +203,12 @@ export interface UpgradeBackupOptions {
 export async function backUpBeforeUpgrade(
   db: DatabaseSync,
   dataRoot: string,
-  options: UpgradeBackupOptions,
+  options: UpgradeBackupOptions & { noteRoot?: string },
 ): Promise<{ upgrade: DataVersionUpgrade | null; earlier: ReadonlyArray<EarlierUpgrade> }> {
   const revision = Number((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
   const toDataVersion = dataVersionAt(options.terminalRevision, options.classes);
   const target: UpgradeTarget = { softwareVersion: options.softwareVersion, dataVersion: toDataVersion, schemaRevision: options.terminalRevision };
-  const pending = await readPendingUpgrade(dataRoot);
+  const pending = await readPendingUpgrade(options.noteRoot ?? dataRoot);
   // A new store carries nothing on: a note beside it was left by data no longer there.
   if (revision === 0) return { upgrade: null, earlier: [] };
   // An earlier open backed the data up and began its migration, then stopped before the store recorded the upgrade (Issue #433
@@ -275,7 +275,7 @@ export async function backUpBeforeUpgrade(
     };
     // Noted before anything migrates the store, with what it is for and the earlier upgrades it carries on: from here on, an
     // open that stops still records them the next time.
-    await writePendingUpgrade(dataRoot, upgrade, target, earlier);
+    await writePendingUpgrade(options.noteRoot ?? dataRoot, upgrade, target, earlier);
     return { upgrade, earlier };
   } catch (error) {
     if (error instanceof DataVersionError) throw error;

@@ -1826,6 +1826,7 @@ export class EditorialStore {
       throw error;
     });
     const dataRoot = await createCanonicalExternalDataRoot(dataRootInput, codeRoot);
+    requireStore(!existsSync(join(dataRoot, 'shell', 'storage-upgrade.json')), 'UPGRADE_PENDING', '请在应用内继续上次数据升级。');
     // Refuse before pending replacement recovery can remove staging, move data or merge into SQLite (#967 review).
     await EditorialStore.#checkDataVersionMarker(dataRoot, control);
     // 替换本机全部数据 (Issue #434, S86c; ADR 0079 §1.3): a replacement prepared in the last lifetime is applied before anything

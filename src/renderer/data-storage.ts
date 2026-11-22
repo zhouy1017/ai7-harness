@@ -107,6 +107,13 @@ export function createDataStorage(options: DataStorageOptions) {
       mountDatabaseImport({ root: databaseImport, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
       mountScheduledBackup({ root: scheduledBackup, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
       void rendererApi.inspectDataVersion().then((version) => {
+        if (!summary.isConnected) return;
+        if (version.upgrades[0]?.fromDataVersion === 1 && version.upgrades[0].toDataVersion === 2) {
+          summary.append(button('回到升级前的数据','secondary',async () => {
+            try { await rendererApi.quitApplication('rollback-upgrade'); }
+            catch (error) { setStatus(rendererErrorMessage(error,'无法恢复升级前的数据。'),'error'); }
+          }));
+        }
         if (!versions.isConnected) return;
         const identity = currentBuildIdentity();
         requireMatchingVersions(identity, version);

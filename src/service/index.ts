@@ -2113,6 +2113,12 @@ function reachServiceStartup(step: 'process' | 'store' | 'owners' | 'serving'): 
 }
 
 async function run(): Promise<void> {
+  if (process.argv[2] === '--storage-maintenance') {
+    installNodeNetworkDenial();
+    const { runStorageMaintenance } = await import('./storage-maintenance.js');
+    await runStorageMaintenance(process.argv.slice(3), fileURLToPath(new URL('../', import.meta.url)));
+    return;
+  }
   // The native `fetch` is captured before the denial replaces the global; only the developer-live
   // `opencode-go` transport ever receives it, and only through the adapter's transmit step.
   const nativeFetch: typeof fetch = globalThis.fetch;

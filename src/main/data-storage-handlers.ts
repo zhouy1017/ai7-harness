@@ -19,6 +19,7 @@ export function registerDataStorageHandlers(context: {
   preferences: PreferenceStore;
   requireNothingUnsaved: () => void;
   quitApplication: () => "quitting" | "blocked";
+  rollbackUpgrade: (() => Promise<boolean>) | undefined;
 }) {
   const { chooseDatabaseExportFile, chooseUsageCsvFile, chooseDatabaseImportFile, requireSender, serializeEffect, requireAuthority, service, preferences, requireNothingUnsaved, quitApplication } = context;
   // 导出数据库 (Issue #434, S86a): house-wide, bound to no Book route; choosing the file begins the preparation, and approving
@@ -181,10 +182,17 @@ export function registerDataStorageHandlers(context: {
 
   // 现在关闭 AI7 (Issue #434, S86c): the whole application closes, after every effect already asked for, unless a window still
   // holds changes not yet saved — then nothing closes and that window says so, as when the editor closes AI7 themselves.
-  ipcMain.handle(IPC_CHANNELS.quitApplication, (event) =>
+  ipcMain.handle(IPC_CHANNELS.quitApplication, (event, input: { rollbackUpgrade?: boolean }) =>
     envelope(async () => {
       requireSender(event);
-      return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['quitApplication']>>> => ({ outcome: quitApplication() }));
+      return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['quitApplication']>>> => {
+        if (input?.rollbackUpgrade === true) {
+          requireAuthority();
+          requireNothingUnsaved();
+          if (!(await context.rollbackUpgrade?.())) return { outcome:'blocked' };
+        }
+        return { outcome:quitApplication() };
+      });
     }),
   );
 

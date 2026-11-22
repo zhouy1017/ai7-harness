@@ -66,6 +66,10 @@ export const DATABASE_PACKAGE_MANIFEST_MEMBER = 'manifest.json' as const;
 /** The Agent Data Root's own directories a package never carries: the live store — copied consistently instead — the export staging area and the shell's browser profile. */
 export const DATABASE_PACKAGE_EXCLUDED_ROOTS: ReadonlySet<string> = new Set(['store', EXPORT_STAGING_DIRECTORY, 'shell']);
 /** Device environment settings never migrate with editorial databases or backups. */
+export function isUpgradeDirectory(name: string): boolean {
+  return name === 'store.upgrading' || /^store-(?:before|after)-0\.8\.0-\d{13}-[a-f0-9-]{36}$/.test(name);
+}
+
 export function isProxyEnvironmentMember(member: string): boolean {
   return /^settings\/(?:model-service-proxy\.json|proxy-[^/]+\.tmp)$/iu.test(member);
 }
@@ -202,7 +206,7 @@ export async function databasePackageSources(dataRoot: string, bounds: DatabaseP
     if (directories > bounds.directories) refuse();
     const entries: Array<{ name: string; directory: boolean }> = [];
     for await (const entry of await opendir(directory)) {
-      if (prefix === '' && DATABASE_PACKAGE_EXCLUDED_ROOTS.has(entry.name)) continue;
+      if (prefix === '' && (DATABASE_PACKAGE_EXCLUDED_ROOTS.has(entry.name) || isUpgradeDirectory(entry.name))) continue;
       if (isProxyEnvironmentMember(`${prefix}/${entry.name}`.replace(/^\//u, ''))) continue;
       // The Agent Data Root holds no link; a link found there is not followed and not carried.
       if (entry.isSymbolicLink() || !(entry.isDirectory() || entry.isFile())) continue;
@@ -333,9 +337,25 @@ export async function verifyCopiedPayloads(
     return exists;
   };
   try {
+    const removed = new Set<string>();
+    if (schemaRevision >= 116) {
+      for (const row of copy.prepare(`SELECT i.object_digest,i.working_object_digest FROM import_abandonment_cleanup_intents i
+        JOIN import_drafts d ON d.draft_id=i.draft_id AND d.state IN ('staged','reviewed')
+        AND d.draft_version=i.expected_draft_version AND d.object_digest=i.object_digest AND d.working_object_digest IS i.working_object_digest
+        JOIN content_objects o ON o.object_digest=i.object_digest AND o.relative_key=i.relative_key
+        LEFT JOIN content_objects w ON w.object_digest=i.working_object_digest
+        WHERE i.state='bytes-removed' AND i.bytes_removed_at IS NOT NULL AND (i.working_object_digest IS NULL OR w.object_digest IS NOT NULL)`).iterate()) {
+        removed.add(String(row.object_digest));
+        if (row.working_object_digest !== null) removed.add(String(row.working_object_digest));
+      }
+    }
     if (present('content_objects')) for (const row of copy.prepare('SELECT object_digest, relative_key, byte_length FROM content_objects').iterate()) {
       if (typeof row.object_digest !== 'string' || typeof row.relative_key !== 'string' || !isManuscriptObjectKey(row.object_digest, row.relative_key)) incomplete();
       const { object_digest: digest, relative_key: key } = row;
+      if (removed.has(String(digest))) {
+        if (packed.has(`objects/${key}`)) incomplete();
+        continue;
+      }
       await compare(`objects/${key}`, digest, row.byte_length, 'manuscript',
         () => held('SELECT 1 FROM content_objects WHERE relative_key = ? AND object_digest = ?', key as SQLInputValue, digest as SQLInputValue));
     }

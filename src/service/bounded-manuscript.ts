@@ -991,7 +991,7 @@ function rebuildBranchDerived(db: DatabaseSync, branchId: string): number {
   return assignKeysAndPages(db, branchId);
 }
 
-function snapshotWorkingRevision(
+export function snapshotWorkingRevision(
   db: DatabaseSync,
   branchId: string,
   revisionId: string,

@@ -8,7 +8,7 @@ import { Inflate, strFromU8 } from 'fflate';
 import type { DatabaseExportContentsProjection } from '../shared/protocol.js';
 import { DIGEST_PATTERN, isRecord, parseCanonicalJson } from './analysis/canonical.js';
 import {
-  DATABASE_PACKAGE_EXCLUDED_ROOTS,
+  DATABASE_PACKAGE_EXCLUDED_ROOTS, isUpgradeDirectory,
   DATABASE_PACKAGE_MANIFEST_MEMBER,
   DATABASE_PACKAGE_SCHEMA,
   DATABASE_PACKAGE_STORE_MEMBER,
@@ -90,7 +90,7 @@ export function isPackageMemberPath(path: string): boolean {
   if (!MEMBER_PATH.test(path) || segments.some((segment) => segment.trim() !== segment || UNPORTABLE_SEGMENT.test(segment))) return false;
   const folded = path.toLowerCase();
   if (folded === DATABASE_PACKAGE_STORE_MEMBER) return path === DATABASE_PACKAGE_STORE_MEMBER;
-  return folded !== DATABASE_PACKAGE_MANIFEST_MEMBER && !DATABASE_PACKAGE_EXCLUDED_ROOTS.has(segments[0]!.toLowerCase());
+  return folded !== DATABASE_PACKAGE_MANIFEST_MEMBER && !isUpgradeDirectory(segments[0]!.toLowerCase()) && !DATABASE_PACKAGE_EXCLUDED_ROOTS.has(segments[0]!.toLowerCase());
 }
 
 function isContents(value: unknown): value is DatabaseExportContentsProjection {

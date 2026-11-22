@@ -5209,7 +5209,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi, R
   rollBackDatabaseReplacement(input: { replacementId: string }): Promise<DatabaseReplacementsProjection>;
   prepareDatabaseMerge(input: { previewId: string }): Promise<DatabaseReplacementsProjection>;
   /** `现在关闭 AI7`: AI7 closes, unless a window holds changes not yet saved; a prepared replacement completes at the next start. */
-  quitApplication(): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
+  quitApplication(action?: 'rollback-upgrade'): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
   cancelDatabaseExport(input: { activityId: string }): Promise<DatabaseExportActivityProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   inspectProposalWorkspace(input: ProposalWorkspaceInput): Promise<ProposalWorkspaceProjection>;
