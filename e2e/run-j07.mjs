@@ -2799,7 +2799,11 @@ async function main() {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), `${name}-overview`);
       await waitFor(renderer, `document.querySelector('.book-versions > summary')`, `${name}-entry`);
       await clickSelector(renderer, '.book-versions > summary', `${name}-open`);
-      await waitFor(renderer, `document.querySelector('.book-versions li[data-kind="revision"]')`, `${name}-rows`);
+      try { await waitFor(renderer, `document.querySelector('.book-versions li[data-kind="revision"]')`, `${name}-rows`); }
+      catch {
+        const facts = await renderer.evaluate(`(async()=>{const list=document.querySelector('.book-versions');const result=['open-'+Boolean(list?.open),'rows-'+(list?.querySelectorAll('li').length??0)];try{const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookId)},historyCursor:null});const anchor=overview.manuscriptAnchor;const page=await window.ai7.listBookVersions({bookId:overview.book.bookId,manuscriptId:anchor.manuscriptId,branchId:anchor.branchId,offset:0});result.push('saved-'+page.rows.filter(row=>row.kind==='revision').length);}catch(error){result.push(typeof error?.code==='string' && /^[A-Z0-9_]{1,72}$/.test(error.code)?error.code:'unclassified');}return result;})()`);
+        throw journeyCheckFailure('J-07', `${name}-rows`, { failed: facts });
+      }
     };
     await showVersions('version-list');
     const revisionId = await renderer.evaluate(`Array.from(document.querySelectorAll('.book-versions li[data-kind="revision"]')).find(row => row.querySelector('strong').textContent === '已保存修订 · r1')?.dataset.revisionId`);

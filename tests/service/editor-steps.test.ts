@@ -102,7 +102,7 @@ describe('undo by editor step (ADR 0105 §1)', () => {
     const [target, other] = paragraphs();
     const stable = suggestion(other!.blockId, 1, 4);
     const stableAnchor = markAt(stable);
-    const addedBlock = randomUUID();
+    const addedBlock = `blk_${randomBytes(12).toString('hex')}`;
     journal(target!.blockId, 18, '', 18, { kind: 'split', newBlockId: addedBlock });
     const removed = suggestion(addedBlock, 1, 3);
     const removedAnchor = markAt(removed);
