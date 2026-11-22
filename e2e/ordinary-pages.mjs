@@ -56,12 +56,12 @@ export function buttonRowsAtOneEdge(scope) {
  * Switch 设置 › 帮助's developer-mode switch to `developer`, pressed with the pointer, and wait until the window shows it. The ordinary
  * editor's pages are read in ordinary mode, and the Journeys that run in development mode switch back after.
  */
-export async function setDeveloperMode(renderer, waitFor, developer, name) {
-  await pointerClick(renderer, waitFor, SIDEBAR.settings, `${name}-settings-open`);
+export async function setDeveloperMode(renderer, waitFor, developer, name, press = (page, selector, label) => pointerClick(page, waitFor, selector, label)) {
+  await press(renderer, SIDEBAR.settings, `${name}-settings-open`);
   await waitFor(renderer, `document.querySelector('[data-settings-nav="help"]')`, `${name}-settings`);
-  await pointerClick(renderer, waitFor, '[data-settings-nav="help"]', `${name}-help`);
+  await press(renderer, '[data-settings-nav="help"]', `${name}-help`);
   await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `${name}-switch`);
-  if (await renderer.evaluate(`document.querySelector('.help-developer-mode input').checked !== ${developer}`)) await pointerClick(renderer, waitFor, '.help-developer-mode input', `${name}-press`);
+  if (await renderer.evaluate(`document.querySelector('.help-developer-mode input').checked !== ${developer}`)) await press(renderer, '.help-developer-mode input', `${name}-press`);
   await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible===${JSON.stringify(String(developer))}`, `${name}-applied`);
 }
 

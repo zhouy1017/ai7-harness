@@ -1,8 +1,9 @@
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cp, unlink, writeFile } from 'node:fs/promises';
+import { cp, readFile, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
+import ts from 'typescript';
 import {
   BaselineAnalysisExecutionOwner,
   ModelRequestGovernor,
@@ -220,7 +221,7 @@ describe('durable request reader compatibility', () => {
   });
 
   // 用时 (#1670): what the next start writes to discharge an admitted request is not the Run's own work, so the five hours AI7
-  // was closed never count — read on the real review, its category Run left executing, or left cancelling and finished at the start.
+  // was closed never count — read on the real review, its category Run left executing, or left cancelling and finished at the start (#1677).
   it.each(['executing', 'cancelling'] as const)('reads no closed hours into the 用时 of a Run left %s with an admitted request (#1670)', async (left) => {
     const crash = await admittedCrash();
     const shutdown = Date.now();
@@ -249,15 +250,19 @@ describe('durable request reader compatibility', () => {
       const started = read();
       expect(started.workingSince).toBeNull();
       expect(started.workedMs).toBeLessThan(60_000);
-      if (left === 'cancelling') {
-        const restarted = new BaselineAnalysisExecutionOwner({ requestGovernor: governor(), ledger: reopened.baselineAnalysisLedger,
-          launchPolicy: crash.policy, fixture: null, secretResolver: { resolve: async () => 'synthetic-placeholder' },
-          productionPolicyFor: (selected) => resolveSourceCheckoutLaunchPolicySync(crash.roots.codeRoot, 'ordinary-production', selected),
-          production: { scope: 'ordinary-production', nativeFetch: async () => { throw new Error('NOTHING_IS_SENT'); } } });
-        scenarioCleanups.push(() => restarted.dispose());
-        restarted.cancelRun(crash.runRecordId, kept); await restarted.whenIdle();
-      }
+      let restartedSends = 0;
+      const restarted = new BaselineAnalysisExecutionOwner({ requestGovernor: governor(), ledger: reopened.baselineAnalysisLedger,
+        launchPolicy: crash.policy, fixture: null, secretResolver: { resolve: async () => 'synthetic-placeholder' },
+        productionPolicyFor: (selected) => resolveSourceCheckoutLaunchPolicySync(crash.roots.codeRoot, 'ordinary-production', selected),
+        production: { scope: 'ordinary-production', nativeFetch: async () => { restartedSends += 1; throw new Error('NOTHING_IS_SENT'); } } });
+      scenarioCleanups.push(() => restarted.dispose());
+      // The start's own finishing of a cancellation AI7 closed on (#1677), run for both cases: it ends the cancelling Run through
+      // the owner and settles its review, and leaves the executing one as the reconciliation made it.
+      await reopened.finishStoppedReviewCancellations(restarted);
+      expect(restartedSends).toBe(0);
       expect(kept.currentRunState(crash.runRecordId)).toBe(left === 'executing' ? 'resumable' : 'cancelled');
+      expect(reopened.inspectReviewWorkspace(crash.book.bookId, crash.reviewRunId).run!.categories.map((entry) => entry.state))
+        .toEqual([left === 'executing' ? 'interrupted' : 'settled']);
       const after = read();
       expect(after.workingSince).toBeNull();
       // Finishing the cancellation does not make the figure jump.
@@ -267,6 +272,32 @@ describe('durable request reader compatibility', () => {
       expect(after.workedMs).toBeLessThan(60_000);
       expect(crash.calls()).toBe(1);
     } finally { vi.useRealTimers(); }
+  });
+
+  // The service's start calls that finishing, after the reconciliations and before any request is read (#1677). Nothing runs the
+  // service's `run()` in a test, so the wiring is read from its syntax tree: the call is a direct statement of the block that holds
+  // the reconciliation — not in a comment, a branch or a nested function — between that reconciliation and the review driver.
+  // It proves the call is present and ordered, not that `run()` executes it.
+  it('has the service start finish a stopped cancellation after the reconciliations', async () => {
+    const source = ts.createSourceFile('index.ts', await readFile(join(import.meta.dirname, '../../src/service/index.ts'), 'utf8'), ts.ScriptTarget.Latest, true);
+    const run = source.statements.find((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && node.name?.text === 'run')!;
+    // `target.method(...)`, `void target.method(...)` or `x = new Name(...)` as one statement of a block.
+    const calls = (statement: ts.Statement, method: string): boolean => {
+      if (!ts.isExpressionStatement(statement)) return false;
+      let expression = statement.expression;
+      if (ts.isVoidExpression(expression)) expression = expression.expression;
+      return ts.isCallExpression(expression) && ts.isPropertyAccessExpression(expression.expression) && expression.expression.name.text === method;
+    };
+    const constructs = (statement: ts.Statement, name: string): boolean => ts.isExpressionStatement(statement) && ts.isBinaryExpression(statement.expression) &&
+      ts.isNewExpression(statement.expression.right) && statement.expression.right.expression.getText(source) === name;
+    const startup = run.body!.statements.filter(ts.isTryStatement).map((node) => node.tryBlock.statements)
+      .find((statements) => statements.some((statement) => calls(statement, 'reconcileStoppedReviewCategoryRuns')))!;
+    const reconcile = startup.findIndex((statement) => calls(statement, 'reconcileStoppedReviewCategoryRuns'));
+    const finish = startup.findIndex((statement) => calls(statement, 'finishStoppedReviewCancellations'));
+    const driver = startup.findIndex((statement) => constructs(statement, 'ReviewRunDriver'));
+    expect(reconcile).toBeGreaterThanOrEqual(0);
+    expect(finish).toBeGreaterThan(reconcile);
+    expect(driver).toBeGreaterThan(finish);
   });
 
   // 用时 (#1670): a second store this process opens on the same database while the first one's Run waits on a long request

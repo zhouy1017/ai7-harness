@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { findingEvidenceList } from '../../src/renderer/research-evidence.js';
-import { readFindingSources, SOURCE_TRANSLATION_MACHINE } from '../../src/renderer/research-evidence-labels.js';
+import { findingEvidenceList, mountResearchEvidence } from '../../src/renderer/research-evidence.js';
+import { readFindingSources, sourceFindingLine, SOURCE_TRANSLATION_MACHINE } from '../../src/renderer/research-evidence-labels.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { findingEvidenceSources } from '../../src/shared/report-wording.js';
 import { SOURCE_TRANSLATION_LABEL } from '../../src/shared/protocol.js';
 import type {
@@ -93,5 +94,79 @@ describe('a factual finding’s sources on its card', () => {
     expect(sources.get('rvf_a')?.map((source) => source.translation)).toEqual(['这件器物现藏湖北省博物馆。', '这件器物现藏湖北省博物馆。']);
     expect(sources.get('rvf_b')?.[0]?.translation).toBeNull();
     expect([...(await readFindingSources(api, bookId, 'run', handed, 'rvf_b')).keys()]).toEqual(['rvf_b']);
+  });
+});
+
+// Issue #1683 (item 12.1): every list of sources names a web source by its domain in ordinary mode, keeps the full address a
+// developer line, and opens the source by the identity its surface holds — never by an address.
+describe('a source’s domain, 复制链接 and 在浏览器中打开 on every list (#1683)', () => {
+  afterEach(() => { setTechnicalLayerVisible(true); });
+  const controls = (item: Element) => ({
+    domain: item.querySelector('.source-link-domain')?.textContent ?? null,
+    url: item.querySelector('.finding-evidence-url, .research-evidence-url')?.textContent ?? null,
+    open: item.querySelector('[data-source-action="open-in-browser"]')?.textContent ?? null,
+    copy: item.querySelector('[data-source-action="copy-link"]') !== null,
+  });
+
+  it('shows the domain in ordinary mode and the address only in developer mode, and none of it for an in-Book source', () => {
+    const rows = findingEvidenceSources([card({ title: null }), card({ cardId: 'src_b', sourceKind: 'in-book', sourceRef: 'retrieval:1', title: null, evidenceId: null })], []);
+    setTechnicalLayerVisible(false);
+    const ordinary = Array.from(findingEvidenceList(rows).querySelectorAll('li.finding-evidence-source'));
+    expect(ordinary.map(controls)).toEqual([{ domain: 'example.org', url: '', open: null, copy: true }, { domain: null, url: null, open: null, copy: false }]);
+    expect(ordinary[0]!.querySelector('.finding-evidence-name')?.textContent).toBe('example.org');
+    setTechnicalLayerVisible(true);
+    expect(controls(findingEvidenceList(rows).querySelector('li.finding-evidence-source')!).url).toBe('https://example.org/vessel');
+  });
+
+  it('opens a review-card or mark-card row by its result and card, and a report row by its retained row or not at all', async () => {
+    const opened: unknown[] = [];
+    Object.assign(globalThis, { window: { ai7: { openSourceInBrowser: async (input: unknown) => { opened.push(input); return { host: 'example.org' }; } } } });
+    try {
+      const api = {
+        inspectFactualVerification: async () => ({ results: [{ resultId: 'r1', reviewFindingId: 'rvf_a', taskIntentId: 't' }], nextCursor: null }) as unknown as FactualVerificationLensProjection,
+        inspectEvidenceWorkspace: async () => ({ sources: [card({ cardId: 'src_x', excluded: true }), card()], nextSourceCursor: null }) as unknown as EvidenceWorkspaceProjection,
+        inspectResearchEvidence: async () => ({ records: [], next: null }) as unknown as ResearchEvidenceBookProjection,
+      };
+      const read = (await readFindingSources(api, 'book-1', 'run-1')).get('rvf_a')!;
+      expect(read.map(({ identity, ...row }) => [identity, row])).toEqual([[{ bookId: 'book-1', resultId: 'r1', cardId: 'src_1' }, findingEvidenceSources([card()], [])[0]]]);
+      (findingEvidenceList(read).querySelector('[data-source-action="open-in-browser"]') as HTMLButtonElement).click();
+      const report = findingEvidenceSources([card(), card({ cardId: 'src_2', evidenceId: null })], []);
+      const reportItems = Array.from(findingEvidenceList(report, undefined, 'book-1').querySelectorAll('li.finding-evidence-source'));
+      expect(reportItems.map((item) => controls(item).open)).toEqual(['在浏览器中打开 · example.org', null]);
+      (reportItems[0]!.querySelector('[data-source-action="open-in-browser"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+      expect(opened).toEqual([{ bookId: 'book-1', resultId: 'r1', cardId: 'src_1' }, { bookId: 'book-1', evidenceId: EVIDENCE_ID }]);
+    } finally { Reflect.deleteProperty(globalThis, 'window'); }
+  });
+
+  it('says which sentence of the manuscript a retained row was kept for, in all four cases', () => {
+    const findings = [{ findingId: 'f1', runRecordId: 'run-a', quote: '书里的那一句' }] as unknown as ResearchEvidenceBookProjection['findings'];
+    const row = (findingId: string | null, runRecordId: string, claim: ResearchEvidenceProjection['claim'] = null) => ({ findingId, runRecordId, claim });
+    expect(sourceFindingLine(row('f1', 'run-a'), findings)).toBe('为稿件这句找的：「书里的那一句」');
+    expect(sourceFindingLine(row('f1', 'run-b', { text: '模型引的那一句', origin: 'finding-quote' }), findings)).toBe('为稿件这句找的：「模型引的那一句」');
+    expect(sourceFindingLine(row(null, 'run-a'), findings)).toBe('没有对应稿件里的哪一句。');
+    expect(sourceFindingLine(row('f2', 'run-a', { text: '依据里的词句', origin: 'basis-quotation' }), findings)).toBeNull();
+  });
+
+  it('draws the 来源与证据 card with its domain, its sentence and 在浏览器中打开 by its retained row', async () => {
+    const root = document.createElement('div');
+    const opened: unknown[] = [];
+    const record = { ...RETAINED, bookId: 'book-1', runRecordId: 'run-a', unitOrdinal: 1, findingId: 'f1', backendId: null, queryClass: 'claim', url: 'https://example.org/vessel', capturedAt: '2026-07-01T00:00:00.000Z',
+      captureState: 'captured', captureLabel: '来源全文', contentSha256: null, pageSha256: null, snapshotDigest: null, claim: null, alignment: 'aligned', alignmentLabel: '对应', anchors: [],
+      passage: null, translation: null, staleness: { state: 'current', reasons: [], label: null }, savedMaterialId: null, saveRefusal: '不提供' } as unknown as ResearchEvidenceProjection;
+    const surface = mountResearchEvidence({ root, bookId: 'book-1', setStatus: () => undefined, errorMessage: (_error, fallback) => fallback, api: {
+      inspectResearchEvidence: async () => ({ bookId: 'book-1', staleAfterDays: 90, records: [record], next: null, units: [], statement: '来源。',
+        findings: [{ findingId: 'f1', runRecordId: 'run-a', quote: '书里的那一句' }] }) as unknown as ResearchEvidenceBookProjection,
+      saveEvidenceAsMaterial: async () => { throw new Error('unused'); },
+      openSourceInBrowser: async (input) => { opened.push(input); return { host: 'example.org' }; },
+      runEditorClipboardCommand: async () => ({ state: 'done' }),
+    } });
+    setTechnicalLayerVisible(false);
+    await surface.load();
+    const article = root.querySelector('article.research-evidence-card')!;
+    expect(article.querySelector('.research-evidence-finding')?.textContent).toBe('为稿件这句找的：「书里的那一句」');
+    expect(controls(article)).toEqual({ domain: 'example.org', url: '', open: '在浏览器中打开 · example.org', copy: true });
+    (article.querySelector('[data-source-action="open-in-browser"]') as HTMLButtonElement).click();
+    expect(opened).toEqual([{ bookId: 'book-1', evidenceId: EVIDENCE_ID }]);
   });
 });

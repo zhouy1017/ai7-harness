@@ -4,6 +4,7 @@ import { BookOwnershipFailure, sendJournalEdit } from './navigation-generation.j
 import { reviewReportExportButton } from './review-report-export.js';
 import { showTransientNotice } from './notifications.js';
 import { menuPanel } from './components/controls.js';
+import { copyPlainText } from './clipboard-text.js';
 import { icon } from './components/icon-sprite.js';
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { createSaveMenu } from './save-menu.js';
@@ -179,28 +180,6 @@ function button(label: string, className: 'primary' | 'secondary' | 'quiet', act
   node.type = 'button';
   node.addEventListener('click', () => void action());
   return node;
-}
-
-/**
- * Put plain text on the clipboard (Issue #951, 复制受影响内容): the document's copy command over a detached field, else the
- * window's own copy through main. The page holds no clipboard permission, so `navigator.clipboard` is not used.
- */
-async function copyPlainText(api: RendererApi, text: string): Promise<void> {
-  const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  const field = document.createElement('textarea');
-  field.value = text;
-  field.readOnly = true;
-  field.className = 'clipboard-carrier';
-  field.setAttribute('aria-hidden', 'true');
-  document.body.append(field);
-  try {
-    field.focus({ preventScroll: true });
-    field.select();
-    if (!document.execCommand('copy')) await api.runEditorClipboardCommand({ command: 'copy' });
-  } finally {
-    field.remove();
-    returnFocus?.focus({ preventScroll: true });
-  }
 }
 
 /** How long the entry notice stays before it removes itself (V2-UX-COPY-015). */
