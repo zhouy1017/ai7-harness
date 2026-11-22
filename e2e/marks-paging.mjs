@@ -186,23 +186,22 @@ export async function loadEveryMark(renderer, waitFor) {
 
 // Geometry only: counts and optional notices cannot add lines to the pane's compact header.
 const COMMENTS_TOP_GEOMETRY = `(() => {
-  const pane=document.querySelector('.manuscript-comments-pane'),heading=pane.querySelector('.manuscript-comments-heading'),filters=pane.querySelector('.editorial-mark-filters'),scroller=pane.querySelector('.manuscript-comments-scroll'),p=pane.getBoundingClientRect(),v=scroller.getBoundingClientRect();
+  const pane=document.querySelector('.manuscript-comments-pane'),heading=pane.querySelector('.manuscript-comments-heading'),filters=pane.querySelector('.editorial-mark-filters'),scroller=pane.querySelector('.manuscript-comments-scroll'),p=pane.getBoundingClientRect(),v=scroller.getBoundingClientRect(),filterPopover=pane.querySelector('.editorial-mark-filter-popover'),popoverOpen=filterPopover.matches(':popover-open');
   const box=node=>{const r=node.getBoundingClientRect();return [r.left,r.top,r.width,r.height];};
   const rows=[heading,filters].map(row=>{const controls=Array.from(row.children).filter(node=>node.matches('button,input,select,summary')&&node.getClientRects().length);return {box:box(row),controls:controls.map(box),aligned:controls.every(node=>Math.abs(node.getBoundingClientRect().top-controls[0].getBoundingClientRect().top)<=1&&getComputedStyle(node).flexShrink==='0'),inside:controls.every(node=>{const r=node.getBoundingClientRect(),b=row.getBoundingClientRect();return r.left>=b.left&&r.right<=b.right&&r.top>=b.top&&r.bottom<=b.bottom&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight})};});
   const notices=Array.from(pane.querySelectorAll(':scope > .editorial-mark-disclosure,:scope > .marks-paging')).map(row=>{
-    const r=row.getBoundingClientRect(),visible=!row.hidden,button=row.querySelector('button'),b=button?.getBoundingClientRect(),style=getComputedStyle(row),line=parseFloat(style.lineHeight),padding=parseFloat(style.paddingTop)+parseFloat(style.paddingBottom),controls=Array.from(row.children).filter(node=>!node.hidden);
+    const r=row.getBoundingClientRect(),visible=!row.hidden,button=row.querySelector('button'),b=button?.getBoundingClientRect(),style=getComputedStyle(row),line=parseFloat(style.lineHeight),padding=parseFloat(style.paddingTop)+parseFloat(style.paddingBottom),controls=Array.from(row.children).filter(node=>!node.hidden),failure=row.querySelector('.review-page-failed:not([hidden])'),failed=failure!==null,count=row.querySelector('span:first-child'),c=count?.getBoundingClientRect(),f=failure?.getBoundingClientRect(),hit=b?document.elementFromPoint(b.left+b.width/2,b.top+b.height/2):null;
+    const whole=!failed||(controls.every(node=>node.scrollWidth<=node.clientWidth&&node.scrollHeight<=node.clientHeight)&&!!b&&!!c&&f.top>=Math.max(b.bottom,c.bottom)&&c.top<b.bottom&&c.bottom>b.top);
     const oneLine=!visible?r.height===0:r.height<=Math.max(line,b?.height??0)+padding+1&&controls.every(node=>getComputedStyle(node).whiteSpace==='nowrap');
-    return {box:box(row),visible,oneLine,inside:!visible||(r.left>=p.left&&r.right<=p.right&&r.top>=p.top&&r.bottom<=v.top+1&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight),button:!visible||!b||(b.left>=r.left&&b.right<=r.right&&b.top>=r.top&&b.bottom<=r.bottom&&button.contains(document.elementFromPoint(b.left+b.width/2,b.top+b.height/2)))};
+    return {kind:row.classList.contains('marks-paging')?'paging':'disclosure',box:box(row),visible,failed,whole,oneLine,inside:!visible||(r.left>=p.left&&r.right<=p.right&&r.top>=p.top&&r.bottom<=v.top+1&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight),button:!visible||!b||(b.left>=r.left&&b.right<=r.right&&b.top>=r.top&&b.bottom<=r.bottom),buttonOnTop:!visible||!b||button.contains(hit),coveredByFilter:!!b&&visible&&popoverOpen&&filterPopover.contains(hit)};
   });
-  const summary=pane.querySelector('.editorial-mark-filter-summary'),summaryStyle=getComputedStyle(summary),summaryOneLine=summary.hidden||summary.getBoundingClientRect().height<=parseFloat(summaryStyle.lineHeight)+1;
-  const chipsOneLine=Array.from(pane.querySelectorAll('.editorial-mark-filter-chips')).every(row=>{const controls=Array.from(row.children).filter(node=>!node.hidden&&node.getClientRects().length);return controls.every(node=>Math.abs(node.getBoundingClientRect().top-controls[0].getBoundingClientRect().top)<=1&&getComputedStyle(node).flexShrink==='0'&&getComputedStyle(node).whiteSpace==='nowrap')});
-  const fullTitles=[pane.querySelector('[data-comments-book-pending]'),summary].every(node=>!node.textContent||node.title.includes(node.textContent));
-  return {viewport:[innerWidth,innerHeight],rows,notices,summaryOneLine,chipsOneLine,fullTitles,heading:rows[0].box[3],filters:rows[1].box[3],topArea:v.top-p.top,paged:!pane.querySelector('.marks-paging').hidden};
+  const summary=pane.querySelector('.editorial-mark-filter-summary'),summaryStyle=getComputedStyle(summary),summaryVisible=!summary.hidden,summaryOneLine=summary.hidden||summary.getBoundingClientRect().height<=parseFloat(summaryStyle.lineHeight)+parseFloat(summaryStyle.paddingTop)+parseFloat(summaryStyle.paddingBottom)+1,filterRowFits=summaryVisible?Math.abs(filters.getBoundingClientRect().height-24)<=1:filters.getBoundingClientRect().height===0;
+  const fullTitles=[pane.querySelector('[data-comments-book-pending]'),summary,pane.querySelector('.marks-paging > span:first-child'),pane.querySelector('.editorial-mark-disclosure')].every(node=>!node.textContent||node.title.includes(node.textContent));
+  return {viewport:[innerWidth,innerHeight],popoverOpen,rows,notices,summaryVisible,summaryOneLine,filterRowFits,fullTitles,heading:rows[0].box[3],filters:rows[1].box[3],topArea:v.top-p.top,paged:!pane.querySelector('.marks-paging').hidden};
 })()`;
 const headerBeforePaging = new Map();
 
-async function sampleCommentsHeaderSizes(renderer,check,waitFor,name,{remember=false}={}) {
-  const original=await renderer.evaluate('({width:innerWidth,height:innerHeight})');
+export async function sampleCommentsHeaderSizes(renderer,check,waitFor,name,{remember=false}={}) {
   try {
     for(const size of [{width:1164,height:781},{width:1008,height:681}]) {
       await renderer.send('Emulation.setDeviceMetricsOverride',{...size,deviceScaleFactor:1,mobile:false});
@@ -210,8 +209,7 @@ async function sampleCommentsHeaderSizes(renderer,check,waitFor,name,{remember=f
       await assertCommentsHeader(renderer,check,waitFor,name,{remember});
     }
   } finally {
-    await renderer.send('Emulation.setDeviceMetricsOverride',{...original,deviceScaleFactor:1,mobile:false});
-    await waitFor(renderer,`innerWidth===${original.width}&&innerHeight===${original.height}`,name+'-viewport-restored');
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
   }
 }
 
@@ -219,19 +217,21 @@ export async function assertCommentsHeader(renderer,check,waitFor,name,{remember
   try {
     await waitFor(renderer,`new Promise(resolve=>{const before=JSON.stringify(${COMMENTS_TOP_GEOMETRY});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${COMMENTS_TOP_GEOMETRY}))));})`,name+'-rest');
     const facts=await renderer.evaluate(COMMENTS_TOP_GEOMETRY),key=facts.viewport.join('x'),before=headerBeforePaging.get(key);
-    const unchanged=before===undefined||(Math.abs(facts.heading-before.heading)<=1&&Math.abs(facts.filters-before.filters)<=1);
-    const valid=facts.heading+facts.filters<=84&&facts.heading<=35&&facts.filters<=25&&facts.summaryOneLine&&facts.chipsOneLine&&facts.fullTitles&&facts.rows.every(row=>row.aligned&&row.inside)&&facts.notices.every(row=>row.oneLine&&row.inside&&row.button)&&unchanged;
-    console.log('COMMENTS_TOP/'+JSON.stringify({...facts,before:before??null}));
-    check(valid,name,{...facts,before:before??null});
-    if(remember)headerBeforePaging.set(key,{heading:facts.heading,filters:facts.filters});
+    const unchanged=before===undefined||(Math.abs(facts.heading-before.heading)<=1&&(facts.summaryVisible!==before.summaryVisible||Math.abs(facts.filters-before.filters)<=1));
+    const visibleNoticeRows=facts.notices.filter(row=>row.visible).map(row=>row.kind),failureShown=facts.notices.some(row=>row.visible&&row.kind==='paging'&&row.failed),topAreaLimit=84+28*visibleNoticeRows.length+(failureShown?56:0);
+    const valid=facts.topArea<=topAreaLimit&&facts.heading+facts.filters<=84&&facts.heading<=35&&facts.filters<=25&&facts.summaryOneLine&&facts.filterRowFits&&facts.fullTitles&&facts.rows.every(row=>row.aligned&&row.inside)&&facts.notices.every(row=>(row.failed?row.whole:row.oneLine)&&row.inside&&row.button&&(row.buttonOnTop||(!row.failed&&row.coveredByFilter)))&&unchanged;
+    console.log('COMMENTS_TOP/'+JSON.stringify({...facts,visibleNoticeRows,failureShown,topAreaLimit,before:before??null}));
+    check(valid,name,{...facts,visibleNoticeRows,failureShown,topAreaLimit,before:before??null});
+    if(remember)headerBeforePaging.set(key,{heading:facts.heading,filters:facts.filters,summaryVisible:facts.summaryVisible});
     return facts;
   } catch(error) {
-    error.pointerFailure=pointerFailureDetail(await renderer.evaluate(`(() => {
+    try { error.pointerFailure=pointerFailureDetail(await renderer.evaluate(`(() => {
       const describe=${pointerElementDescription.toString()},pane=document.querySelector('.manuscript-comments-pane'),heading=pane.querySelector('.manuscript-comments-heading'),filters=pane.querySelector('.editorial-mark-filters'),controls=[...heading.children,...filters.children].filter(node=>node.matches('button,input,select,summary')&&node.getClientRects().length),rect=node=>{const r=node.getBoundingClientRect();return [r.left,r.top,r.width,r.height];};
       const frames=controls.slice(0,4).map(node=>{const r=node.getBoundingClientRect(),point=[r.left+r.width/2,r.top+r.height/2],hit=document.elementFromPoint(...point);return {rect:rect(node),point,hit:describe(hit),contains:node.contains(hit)};});
-      const nodes=[pane,heading,filters,...heading.children,...filters.children,...pane.querySelectorAll(':scope > .editorial-mark-disclosure,:scope > .marks-paging')].filter((node,index,all)=>all.indexOf(node)===index&&node.getClientRects().length).slice(0,12);
+      const notices=[...pane.querySelectorAll(':scope > .editorial-mark-disclosure,:scope > .marks-paging')],details=notices.flatMap(row=>[...row.children]),popup=pane.querySelector('.editorial-mark-filter-popover');
+      const nodes=[pane,heading,filters,...notices,...details.filter(node=>node.matches('.review-page-failed:not([hidden])')),...controls,...(popup?.matches(':popover-open')?[popup]:[]),...details.filter(node=>node.matches('button')),...details.filter(node=>!node.matches('button,.review-page-failed')),pane.querySelector('[data-comments-book-pending]'),pane.querySelector('.editorial-mark-filter-summary')].filter((node,index,all)=>node&&all.indexOf(node)===index&&node.getClientRects().length).slice(0,12);
       return {viewport:[innerWidth,innerHeight],target:describe(heading),frames,coveringAncestors:nodes.map(node=>({...describe(node),rect:rect(node)}))};
-    })()`))??{unavailable:true};
+    })()`))??{unavailable:true}; } catch { error.pointerFailure={unavailable:true}; }
     throw error;
   }
 }
@@ -248,7 +248,10 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     }
   };
   await opened();
+  const pagingViewport=await renderer.evaluate('({width:innerWidth,height:innerHeight})');
   await sampleCommentsHeaderSizes(renderer,check,waitFor,'marks-paging-header-before',{remember:true});
+  await renderer.send('Emulation.setDeviceMetricsOverride',{...pagingViewport,deviceScaleFactor:1,mobile:false});
+  await waitFor(renderer,`innerWidth===${pagingViewport.width}&&innerHeight===${pagingViewport.height}`,'marks-paging-viewport-restored');
   await assertCommentsHeader(renderer,check,waitFor,'marks-paging-header-before',{remember:true});
   // The text on screen carries more marks than one answer: the first 400, and the sentence says so.
   // The Book's reads answer once the screen has settled after the way in (they are not registered while it changes).
@@ -392,6 +395,6 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   await pointerClick(renderer, waitFor, '[data-mark-category-filter="all"]', 'marks-paging-reset-category');
   await pointerClick(renderer, waitFor, '[data-mark-filter-toggle]', 'marks-paging-reset-close');
   await waitFor(renderer, `!(${isOpen}) && document.querySelector('[data-mark-filter-toggle]').textContent==='筛选'`, 'marks-paging-reset-done');
-  await sampleCommentsHeaderSizes(renderer,check,waitFor,'marks-paging-header-after');
   await assertCommentsHeader(renderer,check,waitFor,'marks-paging-header-after');
+  await sampleCommentsHeaderSizes(renderer,check,waitFor,'marks-paging-header-after');
 }

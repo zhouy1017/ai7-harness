@@ -115,3 +115,26 @@ it('stays over when the editor leaves the window and comes back to one that alre
   release();
   expect(await held).toBe(false); expect(reads).toEqual([2]); expect(sets).toHaveLength(0);
 });
+
+
+it('retains the shown count and full failure sentence after a refused page, and can retry', async () => {
+  const { host, current } = hosted(1234, 400);
+  const read = host.read;
+  host.read = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockImplementation(read);
+  const paging = createMarksPaging(host);
+  paging.paint();
+  const line = paging.row.querySelector('span')!;
+  const button = paging.row.querySelector('button')!;
+  expect(line.textContent).toBe('已显示 400 / 1234 条。');
+  expect(line.title).toBe(line.textContent);
+  expect(await paging.more()).toBe(false);
+  const failed = paging.row.querySelector<HTMLElement>('.review-page-failed')!;
+  expect(failed.hidden).toBe(false);
+  expect(failed.textContent).toBe('没能读取更多批注；已显示的保持原样，可以再试。');
+  expect(line.textContent).toBe('已显示 400 / 1234 条。');
+  expect(button.getAttribute('aria-disabled')).toBe('false');
+  expect(await paging.more()).toBe(true);
+  expect(current().marks).toHaveLength(800);
+  expect(failed.hidden).toBe(true);
+  expect(line.title).toBe('已显示 800 / 1234 条。');
+});

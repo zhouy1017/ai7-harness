@@ -771,6 +771,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   filterPopover.addEventListener('toggle', () => filterButton.setAttribute('aria-expanded', String(filterPopover.matches(':popover-open'))));
   const disclosureLine = el('p', 'editorial-mark-disclosure', '以下 AI 建议未联网核查');
   disclosureLine.hidden = true;
+  disclosureLine.title = disclosureLine.textContent ?? '';
   const bookPending = el('span', 'manuscript-comments-book-pending');
   bookPending.dataset['commentsBookPending'] = '';
   bookPending.title = COMMENTS_TRIAGE_WORDS.bookPendingTitle;

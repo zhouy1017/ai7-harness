@@ -480,9 +480,11 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .review-page-failed { flex-basis: 100%; color: var(--status-blocked); font-weight: 700; }
 /* The same row above the 批注栏's cards when a window holds more marks than were loaded (Issue #1604). */
 .marks-paging { line-height: 20px; flex: none; flex-wrap: nowrap; min-width: 0; margin: .3rem 0; padding-inline: .55rem; }
-.marks-paging > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.marks-paging > span:not(.review-page-failed) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .marks-paging > span:first-child { flex: 1; }
 .marks-paging > button { flex: none; white-space: nowrap; }
+.marks-paging:has(> .review-page-failed:not([hidden])) { flex-wrap: wrap; }
+.marks-paging:has(> .review-page-failed:not([hidden])) > span:first-child { flex: initial; overflow: visible; text-overflow: clip; white-space: normal; }
 .marks-paging[hidden] { display: none; }
 .review-chapter-page { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
 .review-report-part { margin-top: .8rem; }
@@ -3088,14 +3090,14 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .ProseMirror .editorial-mark-applied-badge[data-mark-category] { color: var(--category-text); background: var(--category-fill); }
 .ProseMirror .editorial-mark[data-mark-filtered-out="true"] { background-color: transparent; border-bottom-color: color-mix(in srgb, var(--category-accent) 20%, transparent); outline: none; }
 .ProseMirror :is(.editorial-mark-point, .editorial-mark-applied-badge)[data-mark-filtered-out="true"] { opacity: .25; }
-.editorial-mark-filters { flex: none; display: flex; align-items: center; min-width: 0; height: 24px; box-sizing: border-box; background: var(--surface); }
+.editorial-mark-filters { flex: none; display: flex; align-items: center; min-width: 0; box-sizing: border-box; background: var(--surface); }
 .editorial-mark-filter-popover { position: fixed; margin: 0; width: 280px; max-height: min(440px, 65vh); overflow: auto; box-sizing: border-box; padding: .7rem; color: var(--text); background: var(--surface); border: 1px solid var(--boundary); border-radius: 8px; box-shadow: 0 4px 16px var(--shadow); }
 .editorial-mark-filter-popover > strong { display: block; margin-bottom: .4rem; font-size: .8rem; }
 .editorial-mark-filter-popover .editorial-mark-search { width: 100%; box-sizing: border-box; }
 .editorial-mark-disclosure { flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 16px; margin: 0; padding: .15rem .55rem; font-size: .7rem; color: var(--text-subdued); }
-.editorial-mark-filter-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-inline: .55rem; line-height: 16px; }
-.editorial-mark-filter-chips { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: .25rem; margin-bottom: .4rem; }
-.editorial-mark-filter-chips button { flex: none; white-space: nowrap; min-height: 28px; padding: .15rem .45rem; border: 1px solid var(--boundary); border-radius: 999px; font-size: .76rem; }
+.editorial-mark-filter-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px .55rem; line-height: 16px; }
+.editorial-mark-filter-chips { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: .4rem; }
+.editorial-mark-filter-chips button { min-height: 28px; padding: .15rem .45rem; border: 1px solid var(--boundary); border-radius: 999px; font-size: .76rem; }
 .editorial-mark-filter-chips button[aria-pressed="true"] { background: var(--category-fill, var(--surface-subdued)); color: var(--category-text, var(--text)); border-color: var(--category-accent, var(--focus)); box-shadow: inset 0 0 0 1px var(--category-accent, var(--focus)); font-weight: 700; }
 .editorial-mark-search { width: 100%; box-sizing: border-box; min-height: 30px; }
 .editorial-mark-filter-summary { margin: 0; color: var(--text-subdued); font-size: .76rem; }

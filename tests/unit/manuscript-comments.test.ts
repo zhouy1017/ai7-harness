@@ -356,6 +356,7 @@ describe('comments command parity and refresh continuity', () => {
     const ui = mount({ ...card, body: '【未联网核查】公开合成说明' }); await paint();
     const line = ui.pane.querySelector<HTMLElement>('.editorial-mark-disclosure')!;
     expect(line.hidden).toBe(false);
+    expect(line.title).toBe(line.textContent);
     expect(line.parentElement).toBe(ui.pane);
     expect(ui.pane.querySelector('.marks-paging')?.parentElement).toBe(ui.pane);
     const search = ui.pane.querySelector<HTMLInputElement>('[data-mark-search-input]')!;
@@ -363,6 +364,9 @@ describe('comments command parity and refresh continuity', () => {
     expect(line.hidden).toBe(true); expect(ui.pane.querySelector('.editorial-mark-filter-summary')?.textContent).toContain('没有匹配的批注');
     search.value = ''; (search as unknown as MiniElement).dispatchEvent({ type: 'input' }); await paint();
     Object.assign(ui.block, { getBoundingClientRect: () => ({ top: 3000, bottom: 3100 }) }); ui.refresh(); await paint(); expect(line.hidden).toBe(true);
+    const paging = ui.pane.querySelector('.marks-paging')!;
+    mounted!.destroy(); mounted = undefined;
+    expect(line.parentElement).toBeNull(); expect(paging.parentElement).toBeNull();
   });
   it('keeps an initial failed read compact with an explicit retry, then uses the returned card (#1454)', async () => {
     const ui = mount(); ui.get.mockRejectedValueOnce(new Error('read unavailable')); await paint();

@@ -153,3 +153,29 @@ it('attaches admitted four-frame action geometry and card/pane ancestors to a fa
   expect(failure?.pointerFailure?.coveringAncestors.map(node => node.classes[0])).toEqual(['manuscript-comments-card', 'manuscript-comments-scroll', 'manuscript-comments-pane']);
   expect(target.events).toEqual([]);
 });
+
+
+it('keeps a header geometry failure when its diagnostic capture also throws', async () => {
+  const { assertCommentsHeader } = await import(pathToFileURL(resolve('e2e/marks-paging.mjs')).href);
+  const primary = new Error('header-rest');
+  const renderer = { evaluate: vi.fn().mockRejectedValue(new Error('page gone')), send: vi.fn() };
+  await expect(assertCommentsHeader(renderer, () => {}, async () => { throw primary; }, 'header')).rejects.toBe(primary);
+  expect(primary).toHaveProperty('pointerFailure', { unavailable: true });
+});
+
+it.each([{ top: 122.4, count: 2, failed: false, passes: true }, { top: 150, count: 2, failed: false, passes: false }, { top: 146.4, count: 1, failed: true, passes: true }, { top: 169, count: 1, failed: true, passes: false }, { top: 101.6, count: 1, failed: false, covered: 'filter', passes: true }, { top: 101.6, count: 1, failed: false, covered: 'other', passes: false }, { top: 146.4, count: 1, failed: true, covered: 'filter', passes: false }])('bounds the entire top area at $top (failure $failed) and clears sampling emulation', async ({ top, count, failed, covered, passes }) => {
+  const { sampleCommentsHeaderSizes } = await import(pathToFileURL(resolve('e2e/marks-paging.mjs')).href);
+  const methods: string[] = [];
+  const facts = { viewport: [1164, 781], heading: 34, filters: 24, summaryVisible: true, summaryOneLine: true, filterRowFits: true, fullTitles: true, topArea: top,
+    rows: [{ aligned: true, inside: true }], notices: [{ kind: 'disclosure', visible: count === 2, oneLine: true, inside: true, button: true, buttonOnTop: true }, { kind: 'paging', visible: true, failed, whole: true, oneLine: !failed, inside: true, button: true, buttonOnTop: covered === undefined, coveredByFilter: covered === 'filter' }] };
+  const renderer = { evaluate: async (expression: string) => expression.includes('const describe=') ? { unavailable: true } : facts,
+    send: async (method: string) => { methods.push(method); } };
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const check = (condition: boolean) => { if (!condition) throw new Error('top-area'); };
+    const outcome = sampleCommentsHeaderSizes(renderer, check, async () => {}, 'header');
+    if (passes) await expect(outcome).resolves.toBeUndefined(); else await expect(outcome).rejects.toThrow('top-area');
+    expect(methods.at(-1)).toBe('Emulation.clearDeviceMetricsOverride');
+    expect(methods.filter(method => method === 'Emulation.setDeviceMetricsOverride')).toHaveLength(passes ? 2 : 1);
+  } finally { log.mockRestore(); }
+});
