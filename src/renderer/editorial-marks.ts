@@ -771,6 +771,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   filterPopover.addEventListener('toggle', () => filterButton.setAttribute('aria-expanded', String(filterPopover.matches(':popover-open'))));
   const disclosureLine = el('p', 'editorial-mark-disclosure', '以下 AI 建议未联网核查');
   disclosureLine.hidden = true;
+  disclosureLine.title = disclosureLine.textContent ?? '';
   const bookPending = el('span', 'manuscript-comments-book-pending');
   bookPending.dataset['commentsBookPending'] = '';
   bookPending.title = COMMENTS_TRIAGE_WORDS.bookPendingTitle;
@@ -805,18 +806,19 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     errorMessage: (error, fallback) => options.errorMessage(error, fallback),
     setStatus: (message, tone) => options.setStatus(message, tone),
   });
-  filterBar.append(disclosureLine, filterSummary, paging.row, filterPopover);
+  filterBar.append(filterSummary, filterPopover);
   const commentsCanvas = el('div', 'manuscript-comments-canvas');
   commentsCanvas.setAttribute('role', 'list');
   commentsCanvas.setAttribute('aria-label', '当前可见区域批注');
   commentsScroll.append(commentsCanvas);
-  options.comments?.host.append(filterBar, commentsScroll);
+  options.comments?.host.append(filterBar, disclosureLine, paging.row, commentsScroll);
   const leaders = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   leaders.classList.add('manuscript-comments-leaders');
   leaders.setAttribute('aria-hidden', 'true');
   options.comments?.host.parentElement?.append(leaders);
   let commentsFrame: number | undefined;
   let preservePanePositions = false;
+  let commentsFocus: Element | null = null;
   let commentsFrameScroll = 0;
   let pressedComment: string | undefined;
   let pressedTextMark: EditorialMarkAnchorProjection | undefined;
@@ -976,6 +978,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const book = options.bookPending?.read();
     const text = book === undefined ? '' : bookPendingLabel(book.places.length, book.truncated);
     if (bookPending.textContent !== text) bookPending.textContent = text;
+    bookPending.title = text ? `${text}。${COMMENTS_TRIAGE_WORDS.bookPendingTitle}` : COMMENTS_TRIAGE_WORDS.bookPendingTitle;
   }
   function layoutComments(): void {
     paintBookPending();
@@ -1034,6 +1037,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     filterSummary.hidden = !filtering;
     const summary = `已筛选 ${matching.size} / ${comments.length}${matching.size === 0 ? ' · 没有匹配的批注' : ''}`;
     if (filterSummary.textContent !== summary) filterSummary.textContent = summary;
+    filterSummary.title = summary;
     const viewport = options.scroll.getBoundingClientRect();
     const listed = comments.flatMap(mark => {
       if (!matching.has(mark.markId)) return [];
@@ -1166,7 +1170,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         if (focused && document.activeElement !== focused) {
           const target = reply?.contains(focused) ? focused : action ? entry.node.querySelector<HTMLElement>(`[data-mark-action="${CSS.escape(action)}"]`)
             : focused.tagName === 'SUMMARY' ? entry.node.querySelector<HTMLElement>('.editorial-mark-more summary') : entry.node;
-          target?.focus({ preventScroll: true });
+          const enabled = target?.tagName !== 'BUTTON' || !(target as HTMLButtonElement).disabled;
+          const restored = enabled ? target : null;
+          (restored ?? (mark.markId === activeComment ? entry.node : null))?.focus({ preventScroll: true });
           if (selection && focused instanceof HTMLTextAreaElement) focused.setSelectionRange(...selection);
         }
       }
@@ -1196,7 +1202,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     for (const pending of commentsCanvas.querySelectorAll<HTMLElement>('[data-comment-pending]')) if (!present.has(pending.dataset['commentPending']!)) pending.remove();
     const selectedIndex = items.findIndex(item => item.mark.markId === activeComment && item.anchor.bottom >= viewport.top && item.anchor.top <= viewport.bottom);
     const paneTop = commentsScroll.scrollTop || 0;
-    const holdingFrame = preservePanePositions || (activeComment === undefined && paneTop > 0);
+    const selectedNode = activeComment === undefined ? undefined : commentNodes.get(activeComment)?.node;
+    const holdingControl = selectedNode !== undefined && selectedNode.getBoundingClientRect().height > commentsScroll.clientHeight && document.activeElement !== selectedNode && selectedNode.contains(document.activeElement);
+    const focusMoved = document.activeElement !== commentsFocus;
+    commentsFocus = document.activeElement;
+    const holdingFrame = preservePanePositions || holdingControl || (activeComment === undefined && paneTop > 0);
     const placed = holdingFrame ? (() => {
       const existing = items.filter(item => Number.isFinite(Number.parseFloat(item.node.style.top)))
         .sort((a, b) => Number.parseFloat(a.node.style.top) - Number.parseFloat(b.node.style.top));
@@ -1209,10 +1219,22 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       for (const item of items) if (!existing.includes(item)) {
         held.push({ ...item, top: bottom }); bottom += item.measuredHeight + 10;
       }
+      if (holdingControl) {
+        const pivot = existing.findIndex(item => item.node === selectedNode);
+        if (pivot >= 0) {
+          // A preceding card can finish reading at a different fractional height. Keep the
+          // focused card at the position the reader chose and make room around it instead.
+          held[pivot]!.top = Number.parseFloat(selectedNode!.style.top);
+          for (let index = pivot - 1; index >= 0; index--) held[index]!.top = Math.min(held[index]!.top, held[index + 1]!.top - held[index]!.measuredHeight - 10);
+          for (let index = pivot + 1; index < held.length; index++) held[index]!.top = Math.max(held[index]!.top, held[index - 1]!.top + held[index - 1]!.measuredHeight + 10);
+        }
+      }
       return held;
     })() : stackEditorialComments(items, selectedIndex, { top: paneTop, height: commentsScroll.clientHeight });
     // Shift canvas and scroll together: cards above the selection remain reachable.
-    const shift = selectedIndex < 0 || preservePanePositions ? 0 : Math.max(0, 8 - Math.min(...placed.map(item => item.top)));
+    const neededShift = Math.max(0, 8 - Math.min(...placed.map(item => item.top)));
+    // Integer canvas/scroll shifts cancel exactly even where the engine rounds scrollTop.
+    const shift = holdingControl ? Math.ceil(neededShift) : selectedIndex < 0 || preservePanePositions ? 0 : neededShift;
     for (const item of placed) item.top += shift;
     const forward = revealed?.pending ? placed.find(item => item.mark.markId === revealed!.markId) : undefined;
     if (forward && revealed) { revealed = { markId: revealed.markId, pending: false }; forward.node.focus({ preventScroll: true }); }
@@ -1236,10 +1258,28 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       : selectedIndex >= 0 ? paneTop + shift + commentsScroll.clientHeight : 0;
     commentsCanvas.style.height = `${Math.max(commentsScroll.clientHeight, scrollFloor, ...placed.map((item) => item.top + item.measuredHeight + 10))}px`;
     if (shift) commentsScroll.scrollTop = paneTop + shift;
-    if (activeComment !== undefined && !preservePanePositions) commentsFrameScroll = paneTop + shift;
+    if (holdingControl && shift) commentsFrameScroll += shift;
+    if (activeComment !== undefined && !preservePanePositions && !holdingControl) commentsFrameScroll = paneTop + shift;
     if (hoveredComment !== undefined) for (const node of options.host.querySelectorAll<HTMLElement>(`[data-mark-id="${CSS.escape(hoveredComment)}"]`)) node.dataset['commentHovered'] = 'true';
     const active = selectedIndex < 0 ? undefined : placed.find((item) => item.mark.markId === activeComment);
     if (active) {
+      // Expansion can change the height after the stack measured it. Correct only cards
+      // that fit their final visible box; taller cards retain the stack's head alignment.
+      if (!preservePanePositions && (!holdingControl || focusMoved)) {
+        const pane = commentsScroll.getBoundingClientRect();
+        const box = (holdingControl ? document.activeElement! : active.node).getBoundingClientRect();
+        if (box.height <= commentsScroll.clientHeight) {
+          const visibleBottom = pane.top + commentsScroll.clientHeight;
+          const delta = box.bottom > visibleBottom ? box.bottom - visibleBottom : box.top < pane.top ? box.top - pane.top : 0;
+          // Browser scroll offsets can round fractional pixels back outside the visible box.
+          if (delta) {
+            const step = delta > 0 ? Math.ceil(delta) : Math.floor(delta);
+            commentsCanvas.style.height = `${Math.max(Number.parseFloat(commentsCanvas.style.height), commentsScroll.scrollTop + step + commentsScroll.clientHeight)}px`;
+            commentsScroll.scrollTop += step;
+          }
+          commentsFrameScroll = commentsScroll.scrollTop;
+        }
+      }
       const origin = options.comments!.host.parentElement!.getBoundingClientRect();
       const target = active.node.getBoundingClientRect();
       if (target.bottom >= base.top && target.top <= base.bottom) {
@@ -3677,6 +3717,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       options.host.removeEventListener('pointerdown', onTextPointerDown, { capture: true });
       options.host.removeEventListener('pointerout', onMarkHover);
       filterBar.remove();
+      disclosureLine.remove();
+      paging.row.remove();
       leaders.remove();
       editor.setLinkedMark(null);
       editor.setVisibleMarkIds(null);

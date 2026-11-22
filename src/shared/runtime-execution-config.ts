@@ -78,6 +78,8 @@ export interface TaskLaunchPreviewProjection {
   readonly send: string;
   readonly usage: string;
   readonly adaptations: ReadonlyArray<string>;
+  /** 预计 (Issue #1670): the plan's estimate, with a duration only when measured. */
+  readonly estimate?: import('./protocol/task-plan.js').TaskEstimateProjection;
 }
 
 export function validReasoningEffort(value: unknown): value is string {

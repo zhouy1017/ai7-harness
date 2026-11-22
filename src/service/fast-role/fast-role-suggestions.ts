@@ -45,6 +45,7 @@ import {
 import { EDITORIAL_POLISH_SPAN_ATOMIC_REASON, placeSpanSuggestions, type PolishPlacement } from './polish-span.js';
 import { finishScopedEdit, prepareScopedEdit, scopedEditProjection, type ScopedEditStore } from './scoped-edit.js';
 import type { ScopedAiEditProjection, StartScopedAiEditInput } from '../../shared/protocol/scoped-edit.js';
+import { taskEstimate } from '../task-estimate.js';
 
 /**
  * 润色这段 and 基于当前稿件重新生成建议 as the service runs them (Issue #842): the words are read from the working state as the
@@ -418,7 +419,8 @@ export class FastRoleRequests {
         reference: ['相邻文字与锁定的段落只供参考'],
         send: `修改要求、可修改的文字和只供参考的上下文${binding == null ? '' : `，发往 ${planModelDestination({ kind: binding.route, model: binding.model,
           ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }) })}`}`,
-        usage: '调用模型 1 次；实际用量在完成后确定。', adaptations: ['只修改范围内未锁定的文字'] };
+        usage: '调用模型 1 次；实际用量在完成后确定。', adaptations: ['只修改范围内未锁定的文字'],
+        estimate: taskEstimate({ parts: prepared.targets.length, fewestRequests: 1, verb: '改' }) };
     } finally { if (owner !== this.#owner) owner.dispose(); }
   }
 

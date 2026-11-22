@@ -201,7 +201,8 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
     row.hidden = false;
     const text = marksShownLine(window.marks.length, page.total);
     if (line.textContent !== text) line.textContent = text;
-    button.disabled = reading !== null;
+    line.title = text;
+    button.setAttribute('aria-disabled', String(reading !== null));
     row.setAttribute('aria-busy', String(reading !== null));
     failed.hidden = failure === null;
     if (failure !== null && failed.textContent !== failure) failed.textContent = failure;

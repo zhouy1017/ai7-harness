@@ -202,6 +202,14 @@ export function checkpointRefusedRequests(host: RequestAdmissionOperationsHost, 
     evidence: { kind: 'refused-turn', digest: canonicalRecord(requestRefusal).digest } }, { requestRefusal });
 }
 
+/**
+ * What the next start's discharge of an admitted request records (Issue #1670 reads them so): its words, written nowhere else,
+ * tell these recovery writes apart from what the Run recorded before AI7 closed.
+ */
+export const RECOVERED_UNIT_REASON = '本次请求已准入，AI7 关闭前没有保存可核对的单元结果；结果未知，这次运行不会再次发送。';
+export const RECOVERED_REDUCTION_REASON = '归纳请求可能已经发出，关闭前没有保存可核对的结果；本次运行不会再次发送。';
+export const RECOVERED_SAMPLING_MARK = '的抽样请求可能已经发出，关闭前没有保存结果；';
+
 export function reconcileRequestAdmissions(host: RequestAdmissionOperationsHost, runRecordId: string): void {
   let reading = host.requestAdmissionOf(runRecordId);
   if (reading === null || reading.open.size === 0) return;
@@ -223,7 +231,7 @@ export function reconcileRequestAdmissions(host: RequestAdmissionOperationsHost,
       const existing = host.unitCheckpoints(runRecordId).find((checkpoint) => checkpoint.unit.unitOrdinal === ordinal);
       if (existing === undefined) {
         const unit = manifest.units[ordinal - 1]!;
-        const reason = '本次请求已准入，AI7 关闭前没有保存可核对的单元结果；结果未知，这次运行不会再次发送。';
+        const reason = RECOVERED_UNIT_REASON;
         const question = host.clarificationsOf(runRecordId).find((entry) => entry.unitOrdinal === ordinal);
         host.recordUnitCheckpoint({ runRecordId, attemptId: pins.attemptId, requests: requests.map((request) => request.requestId),
           unit: { unitOrdinal: ordinal, requestDigest: frozen.requestDigest(ordinal, unit.digest), lineage: { kind: 'recomputed' },
@@ -248,7 +256,7 @@ export function reconcileRequestAdmissions(host: RequestAdmissionOperationsHost,
     if (reduction !== undefined && stages.reduction === undefined) {
       stages.reduction = { inputDigest: reduction.inputDigest, contractDigest: reduction.contractDigest, requestDigest: reduction.requestDigest,
         outcome: { state: 'gap', code: 'outcome-unknown', requestDigest: reduction.requestDigest,
-          reason: '归纳请求可能已经发出，关闭前没有保存可核对的结果；本次运行不会再次发送。' } };
+          reason: RECOVERED_REDUCTION_REASON } };
       carried['cross-unit-reduction'].requests += 1;
     }
     const sampling = stageRequests.find((request) => request.stage === 'assurance-sampling');
@@ -265,7 +273,7 @@ export function reconcileRequestAdmissions(host: RequestAdmissionOperationsHost,
           'ANALYSIS_RECORD_INVALID', '抽样请求与抽取记录不一致；不能续行。');
         sample.turns.push({ requestDigest: sampling.requestDigest, unitOrdinal: turn.unitOrdinal, usage: null, state: 'outcome-unknown' });
         sample.nextTurn += 1; sample.ended = true;
-        sample.gapReasons.push(`第 ${turn.unitOrdinal} 个阅读范围的抽样请求可能已经发出，关闭前没有保存结果；本次运行不会再次发送。`);
+        sample.gapReasons.push(`第 ${turn.unitOrdinal} 个阅读范围${RECOVERED_SAMPLING_MARK}本次运行不会再次发送。`);
         carried['assurance-sampling'].requests += 1;
       }
     }

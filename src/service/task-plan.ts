@@ -32,6 +32,7 @@ import type {
   TaskPlanDefaultRuleProjection,
   TaskPlanDriftEntryProjection,
   TaskPlanProjection,
+  TaskEstimateProjection,
   TaskPlanClarificationProjection,
   TaskPlanRedoProjection,
   TaskPlanReprepareProjection,
@@ -50,6 +51,7 @@ import type { Connectivity } from './connectivity.js';
 import { PLAN_MOVED_LABEL } from './reconnect-preflight.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import type { ReviewRunPlanFacts } from './review/review-runs.js';
+import { ledgerPlanEstimate, taskEstimate } from './task-estimate.js';
 import { WRITING_COPY_SIZES, WRITING_COPY_SIZES_V1, WRITING_EXEMPLAR_MOVED, type WritingCopyRules, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
 import type { WritingMaterialSource } from './writing-tasks.js';
 
@@ -738,6 +740,7 @@ export function fixedTaskPlan(input: {
       budgetCeiling: budgetCeilingLabel(provider.runBudgetCeiling),
       accountLimit: ACCOUNT_LIMIT_UNKNOWN,
     },
+    estimate: taskEstimate({ parts: 0, fewestRequests: 0, local: 'record' }),
     outcomes: ['一条运行记录：只记录这次运行授权，不派发，不产出重点清单'],
     notDo: {
       editorial: ['不会开始运行（只记录）', ...EDITORIAL_NOT_DO, '不读这本书以外的内容'],
@@ -1026,7 +1029,7 @@ export function baselineAnalysisPlan(input: {
   const spans = range === null || update?.reusePlan == null ? null : readSpansLabel(readSpans(update.reusePlan.units, manifest));
   const revision = projection.planRevision;
   const boundary = envelope.boundary;
-  return {
+  const built: TaskPlanProjection = {
     bookId: projection.bookId,
     kind: 'baseline-analysis',
     ref: intent.taskIntentId,
@@ -1192,6 +1195,7 @@ export function baselineAnalysisPlan(input: {
     clarifications: baselineClarifications(projection, input.clarifications ?? [], input.stopped),
     budgetStop: baselineBudgetStop(projection),
   };
+  return { ...built, estimate: ledgerPlanEstimate(built, { parts: recomputed, afterParts: units >= 2 ? 1 : 0, sampling: true, webSearch: provider.webToolsBackend !== undefined, ceiling: ceiling !== 'unset' }) };
 }
 
 /**
@@ -1299,7 +1303,7 @@ export function initialEvaluationPlan(input: {
       ? { readiness: 'changed', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null }
       : { readiness: route.kind === 'none' ? 'no-route' : 'ready', needsModelConnection, planEnvelopeDigest: envelope.digest, categoryDigests: [], reconfirm: null };
   const items = profile.items.map((item) => `${item.label}（满分 ${item.fullMarks}）`).join('、');
-  return {
+  const built: TaskPlanProjection = {
     bookId: projection.bookId,
     kind: 'initial-evaluation',
     ref: intent.taskIntentId,
@@ -1402,6 +1406,7 @@ export function initialEvaluationPlan(input: {
     clarifications: [],
     budgetStop: null,
   };
+  return { ...built, estimate: ledgerPlanEstimate(built, { parts: units, afterParts: 1, sampling: false, webSearch: provider.webToolsBackend !== undefined, ceiling: ceiling !== 'unset' }) };
 }
 
 // ---- 审稿意见 (Issue #429, plan slice S81c) ----------------------------------------------------------------------------
@@ -1454,7 +1459,7 @@ export function readersReportPlan(input: {
       : { readiness: route.kind === 'none' ? 'no-route' : 'ready', needsModelConnection, planEnvelopeDigest: envelope.digest, categoryDigests: [], reconfirm: null };
   const templateLabel = READERS_REPORT_TEMPLATE_LABELS[task.template];
   const basis = `第 ${task.recordOrdinal} 版定稿`;
-  return {
+  const built: TaskPlanProjection = {
     bookId: projection.bookId,
     kind: 'readers-report',
     ref: intent.taskIntentId,
@@ -1566,6 +1571,7 @@ export function readersReportPlan(input: {
     clarifications: [],
     budgetStop: null,
   };
+  return { ...built, estimate: ledgerPlanEstimate(built, { parts: units, afterParts: 1, sampling: false, webSearch: provider.webToolsBackend !== undefined, ceiling: ceiling !== 'unset' }) };
 }
 
 // ---- 写作任务 (Issue #432, plan slice S84a; V2-UX-DELIV-007) --------------------------------------------------------------
@@ -1745,7 +1751,7 @@ export function writingPlan(input: {
       ? { readiness: 'changed', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null }
       : { readiness: route.kind === 'none' ? 'no-route' : 'ready', needsModelConnection, planEnvelopeDigest: envelope.digest, categoryDigests: [], reconfirm: null };
   const typeLabel = task.type.label;
-  return {
+  const built: TaskPlanProjection = {
     bookId: projection.bookId,
     kind: 'writing',
     ref: intent.taskIntentId,
@@ -1863,6 +1869,7 @@ export function writingPlan(input: {
     clarifications: [],
     budgetStop: null,
   };
+  return { ...built, estimate: ledgerPlanEstimate(built, { parts: units, afterParts: 1, sampling: false, webSearch: provider.webToolsBackend !== undefined, ceiling: ceiling !== 'unset' }) };
 }
 
 // ---- 按我的评分重写评语 (Issue #429, plan slice S81b2) ------------------------------------------------------------------
@@ -1914,7 +1921,7 @@ export function evaluationRewritePlan(input: {
       : { readiness: route.kind === 'none' ? 'no-route' : 'ready', needsModelConnection, planEnvelopeDigest: envelope.digest, categoryDigests: [], reconfirm: null };
   const basis = `第 ${task.recordOrdinal} 版评估（第 ${task.entryOrdinal} 次保存）`;
   const scored = task.scored.map((item) => `${item.label} ${Number.isInteger(item.score) ? item.score : item.score.toFixed(1)} / ${item.fullMarks}`).join('、');
-  return {
+  const built: TaskPlanProjection = {
     bookId: projection.bookId,
     kind: 'evaluation-rewrite',
     ref: intent.taskIntentId,
@@ -2022,6 +2029,7 @@ export function evaluationRewritePlan(input: {
     clarifications: [],
     budgetStop: null,
   };
+  return { ...built, estimate: ledgerPlanEstimate(built, { parts: units, afterParts: 1, sampling: false, webSearch: provider.webToolsBackend !== undefined, ceiling: ceiling !== 'unset' }) };
 }
 
 /** What the Run read before the Run Budget Ceiling stopped it (Issue #51, S16a; MODEL-016); `null` for any other Run. */
@@ -2626,7 +2634,7 @@ export function reviewRunPlan(input: {
             ...tasks.filter(category => category.categoryId !== 'run-synthesis').map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest }))],
           reconfirm: null,
         };
-  return {
+  const built: TaskPlanProjection = {
     bookId: input.bookId,
     kind: 'review-run',
     ref: facts.reviewRunId,
@@ -2772,6 +2780,7 @@ export function reviewRunPlan(input: {
     clarifications: [],
     budgetStop: null,
   };
+  return { ...built, estimate: reviewEstimate(facts, local !== undefined, ceilings.length > 0 && ceilings.some((entry) => entry !== 'unset'), webSearchLabels.length > 0) };
 }
 
 /** Name the fields the editor sees in the procedure editor, from the frozen content. */
@@ -2786,4 +2795,20 @@ function tasksWithInstruction(facts: ReviewRunPlanFacts): string {
     editorInstruction: facts.categories.some(category => category.task?.procedureContent?.editorInstruction === true),
     exemptionRules: facts.categories.some(category => category.task?.procedureContent?.exemptionRules === true),
   });
+}
+
+/** 预计 of a Review Run (Owner #1320): one request per part each model category reads and its cross-chapter step; the synthesis may add one. */
+function reviewEstimate(facts: ReviewRunPlanFacts, localCheck: boolean, ceiling: boolean, webSearch: boolean): TaskEstimateProjection {
+  const model = facts.categories.filter((category) => category.task !== null);
+  if (model.length === 0) return taskEstimate({ parts: 0, fewestRequests: 0, local: localCheck ? 'local-check' : 'leads' });
+  const parts = model.reduce((total, category) => total + category.task!.plan.recomputed, 0);
+  const frozen = (category: (typeof model)[number]) => category.task!.components['execution-plan'] as
+    { reducerStages?: ReadonlyArray<string>; editorEdits?: { disallowedAdaptations?: ReadonlyArray<string> } } | undefined;
+  const crossChapter = model.filter((category) => category.task!.plan.recomputed > 0 && (frozen(category)?.reducerStages ?? []).includes('cross-chapter-consistency')).length;
+  const retry = model.some((category) => !(frozen(category)?.editorEdits?.disallowedAdaptations ?? []).includes('safe-retry'));
+  // The synthesis is sent only when the Run's findings span two parts or more (review-runs `#freezeSynthesisInput`): it may add one.
+  return taskEstimate({ parts, fewestRequests: parts === 0 ? 0 : parts + crossChapter, ceiling,
+    more: [...(retry ? ['retry' as const] : []), 'sampling', ...(facts.synthesis?.task == null ? [] : ['synthesis' as const]),
+      ...(model.some((category) => category.categoryId === 'factual-review') ? ['tool-turns' as const] : []),
+      ...(webSearch ? ['web-search' as const] : []), 'reflection'] });
 }
