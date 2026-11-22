@@ -117,4 +117,14 @@ it('keeps a source image visible when its body paragraph is merged and undone', 
   store.undoManuscript(added.manuscriptId, added.branchId, merged.workingDigest);
   const restored = store.getManuscriptWindow(added.manuscriptId, added.branchId, null);
   expect(restored.blocks.find((block) => block.blockId === absorbed!.blockId)!.sourceDisplay?.images).toHaveLength(1);
+  const view = () => store.getManuscriptWindow(added.manuscriptId, added.branchId, null);
+  const checkOwner = (owner: string) => expect(view().blocks.filter(block => block.sourceDisplay?.images.length).map(block => block.blockId)).toEqual([owner]);
+  store.redoManuscript(added.manuscriptId, added.branchId, view().workingDigest);
+  const step = store.restoreBookVersion({ bookId: added.bookId, manuscriptId: added.manuscriptId, branchId: added.branchId,
+    revisionId: before.revisionId, expectedBase: view().revisionId, expectedDigest: view().workingDigest });
+  checkOwner(absorbed!.blockId);
+  expect(store.undoManuscript(added.manuscriptId, added.branchId, view().workingDigest, step.stepId).canUndo).toBe(false);
+  checkOwner(into!.blockId);
+  store.redoManuscript(added.manuscriptId, added.branchId, view().workingDigest);
+  checkOwner(absorbed!.blockId);
 });

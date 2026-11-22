@@ -21,7 +21,7 @@ export function mountBookVersions(scope: BookVersionScope, options: {
   const exports = mountManuscriptExport({ root: exportSlot, bookId: scope.bookId, api, setStatus, errorMessage: options.errorMessage,
     onChanged: () => {}, openerOf: () => null });
   const fail = (error: unknown) => { if (root.isConnected) setStatus(options.errorMessage(error, '版本操作未完成，请刷新后再试。'), 'error'); };
-  async function load(offset: number): Promise<void> {
+  async function load(offset: number, paging?: 'previous' | 'next'): Promise<void> {
     const current = ++request;
     selection.replaceChildren(element('p', undefined, '正在读取版本列表…'));
     root.dataset['versionState'] = 'loading';
@@ -52,8 +52,11 @@ export function mountBookVersions(scope: BookVersionScope, options: {
           }));
         item.append(element('strong', undefined, row.label), element('time', undefined, new Date(row.createdAt).toLocaleString('zh-CN')), actions); list.append(item);
       }
-      if (offset > 0) pages.append(button('上一页版本', 'quiet', () => void load(Math.max(0, offset - 30))));
-      if (page.more) pages.append(button('下一页版本', 'quiet', () => void load(offset + page.rows.length)));
+      const previous = offset > 0 ? button('上一页版本', 'quiet', () => void load(Math.max(0, offset - 30), 'previous')) : null;
+      const next = page.more ? button('下一页版本', 'quiet', () => void load(offset + page.rows.length, 'next')) : null;
+      if (previous) pages.append(previous);
+      if (next) pages.append(next);
+      if (paging) (paging === 'next' ? next ?? previous : previous ?? next)?.focus();
       root.dataset['versionState'] = 'ready';
       root.dataset['versionOffset'] = String(offset);
     } catch (error) {

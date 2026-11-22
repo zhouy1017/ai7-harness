@@ -12,7 +12,7 @@ import { withNoteReferences } from './manuscript/note-blocks.js';
 import type { ManuscriptSourceObjects } from './manuscript/source-objects.js';
 import { inlineRevisionBaseline, recordInlineEditorRevision, syncInlineEditorRevision } from './inline-editor-revisions.js';
 import { aiLocksOfWindow } from './ai-edit-locks.js';
-import { blockReachesThroughLineage, historyStale, inverseTargetsTouchInOrder, type InverseTarget, isStructuralGroup, journalHasStructuralEdits, replayStructuralGroup, verifyStructuralReconstruction, writeStructuralEdit } from './manuscript/structural-edits.js';
+import { blockReachesThroughLineage, historyStale, inverseTargetsTouchInOrder, type InverseTarget, isStructuralGroup, journalHasStructuralEdits, replayStructuralGroup, restoreRevisionMergeLineage, verifyStructuralReconstruction, writeStructuralEdit } from './manuscript/structural-edits.js';
 import { blockDigest, blockShapeFromDigest, CommandEvidenceReader, recoveryCommandEvidenceDigest, recoveryWorkingDigest, validateCommandHistoryGroup, type CommandEvidenceHeader, type CommandEvidenceMember } from './manuscript/command-history.js';
 export { BoundedStoreError, BoundedStoreFatalError } from './manuscript/bounded-kernel.js';
 export type { CommandEvidenceHeader, CommandEvidenceMember } from './manuscript/command-history.js';
@@ -4811,6 +4811,7 @@ export class BoundedManuscriptStore {
       level: row.level === null ? null : asNumber(row.level), text: asString(row.text), digest: asString(row.digest) })));
     const digest = asString(revision.revision_digest);
     const descendant = this.#appendVersion(binding, revisionId, asString(revision.source_version_id), digest);
+    restoreRevisionMergeLineage(this.#db, binding.branchId, revisionId);
     snapshotWorkingRevision(this.#db, binding.branchId, descendant, total);
     resolveBranchMarksAfterRewrite(this.#db, binding.branchId, before, true);
     this.#db.prepare(`UPDATE branch_working_state SET base_revision_id = ?, working_digest = ?, total_graphemes = ?, last_checkpoint_sequence = journal_sequence WHERE branch_id = ?`).run(descendant, digest, total, binding.branchId);

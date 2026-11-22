@@ -249,6 +249,25 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
   hooks.recordLifetimeWrite(sequence, workingDigest, durableAt);
 }
 
+export function restoreRevisionMergeLineage(db: DatabaseSync, branchId: string, revisionId: string): void {
+  db.prepare(`WITH RECURSIVE lineage AS (
+      SELECT revision_id, parent_revision_id, source_version_id, revision_digest FROM manuscript_revisions WHERE revision_id = ? AND branch_id = ?
+      UNION SELECT parent.revision_id,parent.parent_revision_id,parent.source_version_id,parent.revision_digest FROM manuscript_revisions parent
+        JOIN lineage child ON child.parent_revision_id = parent.revision_id AND child.source_version_id = parent.source_version_id WHERE parent.branch_id = ?
+    ), cutoffs AS (
+      SELECT journal.base_revision_id, max(journal.sequence) last_sequence FROM lineage
+        JOIN edit_journal_entries journal ON journal.base_revision_id = lineage.parent_revision_id AND journal.resulting_working_digest = lineage.revision_digest
+        WHERE journal.branch_id = ? GROUP BY journal.base_revision_id
+    ), states AS (
+      SELECT journal.command_group_id, journal.command_kind, row_number() OVER (PARTITION BY journal.command_group_id ORDER BY journal.sequence DESC) latest
+        FROM edit_journal_entries journal JOIN cutoffs ON journal.base_revision_id = cutoffs.base_revision_id AND journal.sequence <= cutoffs.last_sequence
+        WHERE journal.branch_id = ? AND journal.command_kind IN ('merge','undo','redo')
+    ), applied AS (SELECT command_group_id FROM states WHERE latest = 1 AND command_kind IN ('merge','redo'))
+    UPDATE manuscript_command_groups SET status = CASE WHEN command_group_id IN applied THEN 'applied' ELSE 'superseded' END
+    WHERE branch_id = ? AND kind = 'merge' AND (status = 'applied' OR command_group_id IN applied)`)
+    .run(revisionId, branchId, branchId, branchId, branchId, branchId);
+}
+
 /** Whether a command group is a structural one, which 撤销 and 重做 replay here rather than member by member. */
 export function isStructuralGroup(kind: string): kind is 'split' | 'merge' {
   return kind === 'split' || kind === 'merge';

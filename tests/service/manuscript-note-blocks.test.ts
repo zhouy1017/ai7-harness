@@ -64,6 +64,18 @@ describe('the note block (#1204)', () => {
     expect(merged.blocks.find((block) => block.blockId === note.blockId)!.note).toMatchObject({ referenceBlockId: into!.blockId, referencePosition: 2 });
     store.undoManuscript(book.manuscriptId, book.branchId, merged.workingDigest);
     expect(view().blocks.find((block) => block.blockId === absorbed!.blockId)!.noteLinks).toEqual([{ blockId: note.blockId, part: 'footnote', ordinal: 1 }]);
+    store.redoManuscript(book.manuscriptId, book.branchId, view().workingDigest);
+    const checkOwner = (owner: string) => {
+      const blocks = view().blocks;
+      expect(blocks.find(block => block.blockId === note.blockId)?.note?.referenceBlockId).toBe(owner);
+      expect(blocks.filter(block => block.noteLinks?.some(link => link.blockId === note.blockId)).map(block => block.blockId)).toEqual([owner]);
+    };
+    const step = store.restoreBookVersion({ ...book, bookId: before.bookId, revisionId: before.revisionId, expectedBase: view().revisionId, expectedDigest: view().workingDigest });
+    checkOwner(absorbed!.blockId);
+    expect(store.undoManuscript(book.manuscriptId, book.branchId, view().workingDigest, step.stepId).canUndo).toBe(false);
+    checkOwner(into!.blockId);
+    store.redoManuscript(book.manuscriptId, book.branchId, view().workingDigest);
+    checkOwner(absorbed!.blockId);
   });
 
   it('imports a footnote and an endnote as note blocks after the body, each naming the paragraph that refers to it', async () => {

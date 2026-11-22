@@ -2827,6 +2827,19 @@ async function main() {
       }
     };
     await showVersions('version-list');
+    for (const direction of ['next','previous']) {
+      const label = direction === 'next' ? '下一页版本' : '上一页版本';
+      let pages = 0;
+      for (;;) {
+        const offset = await renderer.evaluate(`(() => { const root=document.querySelector('.book-versions');const button=Array.from(root.querySelectorAll(':scope > .button-row button')).find(item=>item.textContent===${JSON.stringify(label)});if(!button)return null;button.focus();return root.dataset.versionOffset; })()`);
+        if (offset === null) break;
+        await pressEnter(renderer);
+        await waitFor(renderer, `document.querySelector('.book-versions[data-version-state="ready"]:not([data-version-offset="${offset}"])')`, 'version-list-keyboard-paged');
+        await assertRenderer(renderer, `document.activeElement.matches('.book-versions > .button-row button')`, 'version-list-page-focus');
+        pages++;
+      }
+      requireJourney(pages > 0, 'version-list-reached-edge');
+    }
     const versionRow = await findVersion('revision', '已保存修订 · r1', 'version-list-original');
     const revisionId = await renderer.evaluate(`document.querySelector(${JSON.stringify(versionRow)}).dataset.revisionId`);
     await clickSelector(renderer, `${versionRow} .button-row > button:first-child`, 'version-list-view');
