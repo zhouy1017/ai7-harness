@@ -27,6 +27,7 @@ const controller = (await import(new URL('../../e2e/controller.mjs', import.meta
   classifyJourneyResult(result: JourneyResult, journey: string): Failure;
   collectJourneyCheck(result: JourneyResult, journey: string, failure: Failure): string | null;
   collectJourneyPointerFailure(result: JourneyResult, journey: string, failure: Failure): string | null;
+  collectReadingSizeFailure(result: JourneyResult, journey: string, check: string): string | null;
   journeyElapsedSegment(milliseconds: number): string;
   discloseJ02Viewport(viewport: { width: number; height: number; overlay: boolean }): void;
   collectJ02ViewportDisclosures(result: { stdout: string }): string[];
@@ -59,6 +60,15 @@ it('discloses J-02 viewport geometry without forwarding arbitrary child text', (
   } finally {
     log.mockRestore();
   }
+});
+
+it('forwards only bounded reading-size fields for the leg named by the failed check', () => {
+  const observed = { target: 17, control: 17, root: 17, focus: 'slider', width: 1008, height: 681, editor: 19.5 };
+  const collect = (detail: object, check = 'comments-reading-size-restore-editor-size') => controller.collectReadingSizeFailure(
+    childResult(`COMMENTS_READING_SIZE_FAILURE/restore/${JSON.stringify(detail)}`), 'J-08', check);
+  expect(collect({ ...observed, extra: 'discard this' })).toBe(JSON.stringify(observed));
+  expect(collect({ ...observed, editor: 'unexpected text' })).toBeNull();
+  expect(collect(observed, 'comments-reading-size-set-saved')).toBeNull();
 });
 
 function childResult(stderr: string): JourneyResult {
