@@ -63,13 +63,15 @@ function readings(store: EditorialStore, bookId: string, taskIntentId: string): 
 }
 
 it('reads one 用时 across pause, queue, an answer wait, two restarts and a cancellation, from the rows alone (#1670)', async () => {
-  let store = await open();
   const clock = (minutes: number) => vi.setSystemTime(T0 + minutes * MINUTE);
+  // The service process opens its store before the Run works: what it records from then on is under way in this process.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  clock(-60);
+  let store = await open();
   let bookId = '', taskIntentId = '', runRecordId = '';
   try {
     const prepared = await preparedBaseline(store, '用时 甲', true);
     bookId = prepared.bookId; taskIntentId = prepared.taskIntentId;
-    vi.useFakeTimers({ toFake: ['Date'] });
     clock(0);
     runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.digest).dispatchRunRecordId!;
     const ledger = store.baselineAnalysisLedger;

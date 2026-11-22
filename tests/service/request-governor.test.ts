@@ -227,14 +227,16 @@ describe('durable request reader compatibility', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(shutdown);
-      const reopened = await EditorialStore.open(crash.snapshot, crash.roots.codeRoot); crash.opened.push(reopened);
-      reopened.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy: crash.policy,
+      const bind = (store: EditorialStore) => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy: crash.policy,
         live: { scope: 'ordinary-production', ...crash.binding, runBudgetCeiling: 'unset' } });
-      const kept = reopened.executionLedgerForRun(crash.runRecordId);
       // The editor's 取消任务 recorded just before AI7 closed.
-      if (left === 'cancelling') kept.recordRunState(crash.runRecordId, 'cancelling', { detail: '正在取消' });
-      const before = reopened.inspectTaskPlan({ bookId: crash.book.bookId, kind: 'review-run', ref: crash.reviewRunId }).work!;
+      const closing = await EditorialStore.open(crash.snapshot, crash.roots.codeRoot); bind(closing);
+      if (left === 'cancelling') closing.executionLedgerForRun(crash.runRecordId).recordRunState(crash.runRecordId, 'cancelling', { detail: '正在取消' });
+      const before = closing.inspectTaskPlan({ bookId: crash.book.bookId, kind: 'review-run', ref: crash.reviewRunId }).work!;
+      closing.close();
       vi.setSystemTime(shutdown + 5 * 3_600_000);
+      const reopened = await EditorialStore.open(crash.snapshot, crash.roots.codeRoot); crash.opened.push(reopened); bind(reopened);
+      const kept = reopened.executionLedgerForRun(crash.runRecordId);
       // Every write of the next start is stamped after the closed hours, each a little later than the one before.
       const original = BaselineAnalysisStore.prototype.recordRunState;
       vi.spyOn(BaselineAnalysisStore.prototype, 'recordRunState').mockImplementation(function (this: BaselineAnalysisStore, ...args) {
@@ -242,6 +244,11 @@ describe('durable request reader compatibility', () => {
         return Reflect.apply(original, this, args);
       });
       reopened.reconcileStoppedReviewCategoryRuns();
+      const read = () => reopened.inspectTaskPlan({ bookId: crash.book.bookId, kind: 'review-run', ref: crash.reviewRunId }).work!;
+      // Right after the next start, before anything finishes it: nothing of the five hours, and nothing under way.
+      const started = read();
+      expect(started.workingSince).toBeNull();
+      expect(started.workedMs).toBeLessThan(60_000);
       if (left === 'cancelling') {
         const restarted = new BaselineAnalysisExecutionOwner({ requestGovernor: governor(), ledger: reopened.baselineAnalysisLedger,
           launchPolicy: crash.policy, fixture: null, secretResolver: { resolve: async () => 'synthetic-placeholder' },
@@ -251,8 +258,10 @@ describe('durable request reader compatibility', () => {
         restarted.cancelRun(crash.runRecordId, kept); await restarted.whenIdle();
       }
       expect(kept.currentRunState(crash.runRecordId)).toBe(left === 'executing' ? 'resumable' : 'cancelled');
-      const after = reopened.inspectTaskPlan({ bookId: crash.book.bookId, kind: 'review-run', ref: crash.reviewRunId }).work!;
+      const after = read();
       expect(after.workingSince).toBeNull();
+      // Finishing the cancellation does not make the figure jump.
+      expect(after.workedMs).toBe(started.workedMs);
       // What the Run worked before AI7 closed, and nothing of the five hours.
       expect(after.workedMs).toBeLessThanOrEqual(before.workedMs + (before.workingSince === null ? 0 : shutdown - Date.parse(before.workingSince)));
       expect(after.workedMs).toBeLessThan(60_000);

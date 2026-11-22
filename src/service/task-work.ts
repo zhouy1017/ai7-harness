@@ -27,8 +27,13 @@ const DIALOGUE_STOPPED_CAUSE = 'SERVICE_STOPPED';
 
 export interface RunStateRow { readonly state: string; readonly at: string; readonly reconciled: boolean }
 
-/** The working stretches of one Run, from its state rows in sequence order; `ownInstants` is read only for a capped close. */
-export function runStretches(rows: ReadonlyArray<RunStateRow>, ownInstants: () => ReadonlyArray<string>): WorkInterval[] {
+/**
+ * The working stretches of one Run, from its state rows in sequence order; `ownInstants` is read only for a capped close and for
+ * a stretch still open. An open stretch is working only if the Run recorded something of its own in this service process (since
+ * `processStart`): no execution survives a restart, so a stretch left open across one — a review category left `cancelling`,
+ * which nothing finishes at the next start — is closed at its last own instant.
+ */
+export function runStretches(rows: ReadonlyArray<RunStateRow>, ownInstants: () => ReadonlyArray<string>, processStart: number | null = null): WorkInterval[] {
   const stretches: WorkInterval[] = [];
   let open: number | null = null;
   rows.forEach((row, index) => {
@@ -43,7 +48,11 @@ export function runStretches(rows: ReadonlyArray<RunStateRow>, ownInstants: () =
       : ownInstants().map(Date.parse).filter((at) => at >= from && at < closing).reduce((latest, at) => Math.max(latest, at), from) });
     open = null;
   });
-  if (open !== null) stretches.push({ from: open, to: null });
+  if (open !== null) {
+    const from: number = open;
+    const own = processStart === null ? [] : ownInstants().map(Date.parse).filter((at) => at >= from);
+    stretches.push({ from, to: processStart === null || own.some((at) => at >= processStart) ? null : own.reduce((latest, at) => Math.max(latest, at), from) });
+  }
   return stretches;
 }
 
@@ -83,10 +92,13 @@ export class TaskWorkReader {
   readonly #db: DatabaseSync;
   readonly #owners: TaskWorkOwners;
   readonly #statements = new Map<string, StatementSync>();
+  /** The instant this service process opened its store: a stretch with nothing of its own since then is not under way. */
+  readonly #processStart: number;
 
-  constructor(db: DatabaseSync, owners: TaskWorkOwners) {
+  constructor(db: DatabaseSync, owners: TaskWorkOwners, processStart = Date.now()) {
     this.#db = db;
     this.#owners = owners;
+    this.#processStart = processStart;
   }
 
   /** Every overview read asks the same few questions of each Book: each is compiled once. */
@@ -113,36 +125,55 @@ export class TaskWorkReader {
       const held = byRun.get(String(row.run_record_id));
       if (held === undefined) byRun.set(String(row.run_record_id), [row]); else held.push(row);
     }
+    const stateRows = new Map([...byRun].map(([runRecordId, states]) => [runRecordId,
+      states.map((row) => ({ state: String(row.state), at: String(row.recorded_at), reconciled: row.reconciled === 1 }))]));
+    // First the Runs whose stretches need their own instants — a capped close, or a stretch still open — then those, all at once.
+    const needed = [...stateRows].filter(([, rows]) => {
+      let asked = false;
+      runStretches(rows, () => { asked = true; return []; }, this.#processStart);
+      return asked;
+    }).map(([runRecordId]) => runRecordId);
+    const own = this.#ownInstants(needed);
     return [...byRun].map(([runRecordId, states]) => {
-      const intervals = runStretches(states.map((row) => ({ state: String(row.state), at: String(row.recorded_at), reconciled: row.reconciled === 1 })),
-        () => this.#ownInstants(runRecordId));
+      const intervals = runStretches(stateRows.get(runRecordId)!, () => own.get(runRecordId) ?? [], this.#processStart);
       const executing = states.find((row) => row.state === 'executing' && typeof row.parts === 'number');
       return { taskIntentId: String(states[0]!.task_intent_id), intervals, last: String(states.at(-1)!.state), parts: executing === undefined ? null : Number(executing.parts) };
     });
   }
 
   /**
-   * The instants the Run itself recorded: its state rows, unit checkpoints and request spans, without the next start's recovery
-   * writes. A request resolution takes the instant of the evidence it names; the next start's own discharge — the unit gap, the
-   * reduction or sample outcome, the unavailable reflection it records with words written nowhere else — is no instant at all.
+   * The instants each Run itself recorded: its state rows, unit checkpoints and request spans, without the next start's recovery
+   * writes — one read of the states and one of the checkpoints and spans for all the Runs. A request resolution takes the instant
+   * of the evidence it names; the next start's own discharge — the unit gap, the reduction or sample outcome, the unavailable
+   * reflection it records with words written nowhere else — is no instant at all.
    */
-  #ownInstants(runRecordId: string): string[] {
-    const states = this.#prepare(`SELECT s.recorded_at, json_extract(s.canonical_json, '$.reconciled') reconciled,
+  #ownInstants(runRecordIds: ReadonlyArray<string>): Map<string, string[]> {
+    const result = new Map<string, string[]>();
+    if (runRecordIds.length === 0) return result;
+    const add = (runRecordId: string, at: string) => { const held = result.get(runRecordId); if (held === undefined) result.set(runRecordId, [at]); else held.push(at); };
+    const states = this.#prepare(`SELECT s.run_record_id, s.recorded_at, json_extract(s.canonical_json, '$.reconciled') reconciled,
         json_extract(s.canonical_json, '$.requestAdmission.data.event.kind') event,
         CASE json_extract(s.canonical_json, '$.requestAdmission.data.event.evidence.kind')
           WHEN 'unit-checkpoint' THEN (SELECT c.recorded_at FROM analysis_unit_checkpoints c WHERE c.sha256 = json_extract(s.canonical_json, '$.requestAdmission.data.event.evidence.digest')
-            AND coalesce(json_extract(c.canonical_json, '$.unit.closed.gap.reason'), '') != ?2)
+            AND coalesce(json_extract(c.canonical_json, '$.unit.closed.gap.reason'), '') != ?)
           WHEN 'clarification-checkpoint' THEN (SELECT q.raised_at FROM analysis_clarification_requests q WHERE q.sha256 = json_extract(s.canonical_json, '$.requestAdmission.data.event.evidence.digest'))
           WHEN 'reflection-outcome' THEN (SELECT o.recorded_at FROM analysis_task_outcomes o WHERE o.sha256 = json_extract(s.canonical_json, '$.requestAdmission.data.event.evidence.digest'))
-          WHEN 'stage-checkpoint' THEN CASE WHEN json_extract(s.canonical_json, '$.stageContinuation.data.reduction.outcome.reason') = ?3
-            OR instr(coalesce(json_extract(s.canonical_json, '$.stageContinuation.data.sampling.gapReasons'), ''), ?4) > 0 THEN NULL ELSE s.recorded_at END
+          WHEN 'stage-checkpoint' THEN CASE WHEN json_extract(s.canonical_json, '$.stageContinuation.data.reduction.outcome.reason') = ?
+            OR instr(coalesce(json_extract(s.canonical_json, '$.stageContinuation.data.sampling.gapReasons'), ''), ?) > 0 THEN NULL ELSE s.recorded_at END
           WHEN 'unavailable' THEN NULL ELSE s.recorded_at END evidenced
-      FROM analysis_run_states s WHERE s.run_record_id = ?1`).all(runRecordId, RECOVERED_UNIT_REASON, RECOVERED_REDUCTION_REASON, RECOVERED_SAMPLING_MARK) as SqlRow[];
-    const own = this.#prepare(`SELECT recorded_at FROM analysis_unit_checkpoints WHERE run_record_id = ?1 AND coalesce(json_extract(canonical_json, '$.unit.closed.gap.reason'), '') != ?2
-      UNION ALL SELECT s.recorded_at FROM analysis_harness_spans s JOIN analysis_execution_attempts a ON a.attempt_id = s.attempt_id WHERE a.run_record_id = ?1`)
-      .all(runRecordId, RECOVERED_UNIT_REASON) as SqlRow[];
-    return [...states.flatMap((row) => row.reconciled === 1 ? [] : row.event === 'resolve' ? row.evidenced === null ? [] : [String(row.evidenced)] : [String(row.recorded_at)]),
-      ...own.map((row) => String(row.recorded_at))];
+      FROM analysis_run_states s WHERE s.run_record_id IN (${ids(runRecordIds)})`)
+      .all(RECOVERED_UNIT_REASON, RECOVERED_REDUCTION_REASON, RECOVERED_SAMPLING_MARK, ...runRecordIds) as SqlRow[];
+    for (const row of states) {
+      if (row.reconciled === 1) continue;
+      if (row.event !== 'resolve') add(String(row.run_record_id), String(row.recorded_at));
+      else if (row.evidenced !== null) add(String(row.run_record_id), String(row.evidenced));
+    }
+    const recorded = this.#prepare(`SELECT run_record_id, recorded_at FROM analysis_unit_checkpoints WHERE run_record_id IN (${ids(runRecordIds)})
+        AND coalesce(json_extract(canonical_json, '$.unit.closed.gap.reason'), '') != ?
+      UNION ALL SELECT a.run_record_id, s.recorded_at FROM analysis_harness_spans s JOIN analysis_execution_attempts a ON a.attempt_id = s.attempt_id
+        WHERE a.run_record_id IN (${ids(runRecordIds)})`).all(...runRecordIds, RECOVERED_UNIT_REASON, ...runRecordIds) as SqlRow[];
+    for (const row of recorded) add(String(row.run_record_id), String(row.recorded_at));
+    return result;
   }
 
   /**

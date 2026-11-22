@@ -30,6 +30,17 @@ describe('runStretches', () => {
   });
 });
 
+describe('a stretch left open across a restart', () => {
+  it('is under way only if the Run recorded something of its own in this process; else it ends at its last own instant (#1670)', () => {
+    const rows = [row('executing', 0), row('cancelling', 3)];
+    const processStart = T0 + 300 * 60_000;
+    // Left 正在取消 when AI7 closed, nothing finishes it at the next start: its figure stops where the Run stopped recording.
+    expect(runStretches(rows, () => [at(0), at(2), at(3)], processStart)).toEqual([{ from: T0, to: T0 + 3 * 60_000 }]);
+    // The same stretch, continued in this process, is under way.
+    expect(runStretches(rows, () => [at(0), at(3), at(301)], processStart)).toEqual([{ from: T0, to: null }]);
+  });
+});
+
 describe('unionWork', () => {
   it('counts overlapping, nested and touching intervals once, and clips closed time at the open start', () => {
     const m = (minutes: number) => T0 + minutes * 60_000;
