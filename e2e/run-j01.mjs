@@ -7,7 +7,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { pointerClick } from './dispatch-chooser.mjs';
-import { answer, cancelImportPage, dropFile, newVersionFromSaveMenu, noImportDraft, pressReachable, questionOffers } from './import-entry-stages.mjs';
+import { answer, cancelImportPage, dropFile, newVersionFromSaveMenu, noImportDraft, pressReachable, questionOffers, reachable, tabTo } from './import-entry-stages.mjs';
 import {
   admittedParagraphs,
   admittedSpanText,
@@ -3722,8 +3722,9 @@ async function main() {
     // only the import page's two prepare buttons, never its target choice.
     const entryButtonIo = () => ({ renderer, waitFor, assertRenderer });
     const openEntryBook = async (name, section) => {
-      const book = `[data-screen="landing"] [data-book-id=${JSON.stringify(reimportBookId)}]`;
+      const book = `[data-screen="landing"] button[data-book-id=${JSON.stringify(reimportBookId)}]`;
       await waitFor(renderer, `document.querySelector(${JSON.stringify(book)})`, `${name}-landing`);
+      if (!await renderer.evaluate(reachable(book))) await tabTo(entryButtonIo(), book, `${name}-library-book`);
       await pressReachable(entryButtonIo(), book, `${name}-open`);
       await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(reimportBookId)}]')`, `${name}-manuscript`);
       if (section !== 'overview') return;
