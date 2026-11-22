@@ -36,6 +36,23 @@ describe('one-step drawer launch frames (#1455)', () => {
     ['launchInitialEvaluation', {}], ['launchReadersReport', { template: 'author' }],
     ['launchEvaluationRewrite', { recordId: bookId }],
   ] as const;
+  it('admits review options and both new preview operations with closed inputs (#1657)', () => {
+    const input = { bookId, categoryIds: ['typos-and-usage'], clientCommandId: randomUUID(),
+      scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, startWhen: 'idle',
+      planEdits: { removedSteps: ['assurance-sampling'], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1000 } } };
+    const decode = (op: string, input: unknown) => decodeRequest(encoder.encode(JSON.stringify({ id: bookId, op, input })));
+    expect(decode('launchReviewRun', input).input).toEqual(input);
+    for (const bad of [{ ...input, startWhen: 'later' }, { ...input, planEdits: { ...input.planEdits, extra: true } },
+      { ...input, planEdits: { ...input.planEdits, evidenceAssuranceLevel: 'quick' } }]) expect(() => decode('launchReviewRun', bad)).toThrow(ProtocolError);
+    const { bookId: _book, ...review } = input;
+    const scoped = { manuscriptId: bookId, branchId: bookId, baseRevisionId: bookId, expectedJournalSequence: 0,
+      expectedLocksDigest: 'a'.repeat(64), instruction: '检查选中文字', scope: { mode: 'unlocked-only', range: { kind: 'document' } } };
+    for (const [operation, launchInput] of [['launchReviewRun', review], ['startScopedAiEdit', scoped]]) {
+      const preview = { bookId, launch: { operation, input: launchInput } };
+      expect(decode('previewTaskLaunch', preview).input).toEqual(preview);
+    }
+    expect(() => decode('previewTaskLaunch', { bookId, launch: { operation: 'prepareReviewRun', input: review } })).toThrow(ProtocolError);
+  });
   it('decodes review relaunch through the existing review launch operation (#1656)', () => {
     const frame = { id: randomUUID(), op: 'launchReviewRun', input: { bookId, categoryIds: ['typos-and-usage'],
       scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, clientCommandId: randomUUID(),

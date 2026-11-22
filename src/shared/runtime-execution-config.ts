@@ -2,6 +2,7 @@
  * Missing fields inherit the role default; `off` explicitly omits the effort control on the wire.
  * Effort identifiers are vendor data, not a model/level admission list.
  */
+import type { ServiceOperationMap, PrepareReviewRunInput, EvidenceAssuranceLevel } from './protocol.js';
 import type { PlanEditsProjection } from './protocol/analysis-plan.js';
 
 export interface RuntimeExecutionConfig {
@@ -58,6 +59,16 @@ export interface TaskExecutionLaunchResult {
   readonly launchNotice?: string;
   readonly waitingForNetwork?: boolean;
 }
+
+export type ReviewExecutionLaunchInput = PrepareReviewRunInput & TaskExecutionLaunchInput & {
+  readonly evidenceAssuranceLevel?: EvidenceAssuranceLevel;
+  readonly planEdits?: Omit<PlanEditsProjection, 'evidenceAssuranceLevel'>;
+  readonly startWhen?: 'now' | 'idle' | 'when-online';
+};
+export type TaskLaunchPreviewOperation = LedgerTaskLaunchOperation | 'launchReviewRun' | 'startScopedAiEdit';
+export type TaskLaunchPreviewInput = { bookId: string; launch: { [K in TaskLaunchPreviewOperation]: {
+  operation: K; input: Omit<ServiceOperationMap[K]['input'], 'bookId'>;
+} }[TaskLaunchPreviewOperation] };
 
 export interface TaskLaunchPreviewProjection {
   readonly steps: ReadonlyArray<string>;

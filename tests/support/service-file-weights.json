@@ -136,6 +136,7 @@
     "tests/service/review-fixture-generator.test.ts": 45,
     "tests/service/review-guidelines.test.ts": 10,
     "tests/service/review-library-references.test.ts": 33,
+    "tests/service/review-launch-golden.test.ts": 2,
     "tests/service/review-runs.test.ts": 153,
     "tests/service/review-synthesis-only.test.ts": 18,
     "tests/service/review-synthesis.test.ts": 64,

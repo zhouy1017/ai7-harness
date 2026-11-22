@@ -45,7 +45,7 @@ import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.gen
 import type { ClarificationFacts } from './analysis/clarifications.js';
 import { namedNonEffects, RUN_QUEUED_LABEL, RUN_WAITING_IDLE_LABEL } from './analysis/baseline-analysis-store.js';
 import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
-import { PLAN_CEILING_LAUNCH_REASON, PLAN_EDITABLE_ADAPTATIONS, PLAN_EDIT_ADAPTATION_LABELS, PLAN_EDIT_STEP_LABELS } from './analysis/plan-edits.js';
+import { planEditsOf, PLAN_CEILING_LAUNCH_REASON, PLAN_EDITABLE_ADAPTATIONS, PLAN_EDIT_ADAPTATION_LABELS, PLAN_EDIT_STEP_LABELS } from './analysis/plan-edits.js';
 import type { Connectivity } from './connectivity.js';
 import { PLAN_MOVED_LABEL } from './reconnect-preflight.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
@@ -400,7 +400,7 @@ function providerLabel(providerId: string): string {
 }
 
 /** Editorial display only: reads the plan's frozen route and never changes stored plan bytes. */
-function planModelDestination(route: { kind: string; model: string; reasoningEffort?: string | null }): string {
+export function planModelDestination(route: { kind: string; model: string; reasoningEffort?: string | null }): string {
   return `${providerLabel(route.kind)} · ${markModelLabels({ route: route.kind, model: route.model,
     ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort }) }).modelLabel}`;
 }
@@ -2722,7 +2722,13 @@ export function reviewRunPlan(input: {
       technical: [...(preferences.length === 0 ? [] : [HOUSE_PREFERENCE_NOT_RULE]), ...namedNonEffects(facts.live, unitsRead === 0 ? null : unitsRead)],
     },
     boundary: {
-      adaptable: tasks.length === 0 ? [] : [{ id: 'safe-retry', label: SAFE_RETRY_ADAPTATION, removable: false, removed: false, movable: false, askFirst: false }],
+      adaptable: tasks.map(category => {
+        const edits = planEditsOf(category.task!.components['execution-plan'], Number.MAX_SAFE_INTEGER);
+        return { id: 'safe-retry', label: SAFE_RETRY_ADAPTATION, removable: true,
+          removed: edits.disallowedAdaptations.includes('safe-retry'), movable: false, askFirst: edits.askFirstAdaptations?.includes('safe-retry') ?? false };
+      }).filter((entry, index, entries) => entries.findIndex(other => other.removed === entry.removed && other.askFirst === entry.askFirst) === index)
+        .concat(tasks.some(category => category.categoryId === 'factual-review') ? [{ id: 'factual-tool-retry',
+          label: '事实核查的联网检索保留核查本身的重试规则', removable: false, removed: false, movable: false, askFirst: false }] : []),
       askFirst: [...LOCKED_BOUNDARY],
     },
     edit: NOT_EDITABLE,
