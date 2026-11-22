@@ -322,7 +322,7 @@ function buildInitialEvaluationTask(host: InitialEvaluationOperationsHost, bookI
   internalRequireEvaluationMaterialScope(host, materialIds.length > 0, INITIAL_EVALUATION_KIND);
   internalRequireInitialEvaluationScope(host);
   const current = host.inspectInitialEvaluation(bookId);
-  requireStore(!runIsActive(current.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(current.run?.state ?? null, INITIAL_EVALUATION_KIND));
+  requireStore(createPlan.previewAfterCancellation === true || !runIsActive(current.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(current.run?.state ?? null, INITIAL_EVALUATION_KIND));
   // One reading of the house profile gives both the contract the Task is prepared under and the snapshot it keeps (Issue #427).
   const profile = host.evaluationProfiles.current();
   const ledger = internalInitialLedger(host, profile, { bookId, references: host.prepareTaskMaterials(bookId, materialIds) }, undefined, scopes);

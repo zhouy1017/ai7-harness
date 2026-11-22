@@ -47,36 +47,14 @@ import {
   type ReviewWorkspaceProjection,
   type RendererApi,
   type ResearchEvidenceBookProjection,
-  type ReviewEvidenceSource,
   type ServiceWireJobProjection as ServiceJobProjection,
 } from '../shared/protocol.js';
-import { findingResearchLines, readFindingResearch, readFindingSources } from './research-evidence-labels.js';
+import { findingResearchLines, readFindingResearch, readFindingSources, type FindingSourceEntry } from './research-evidence-labels.js';
 import { findingEvidenceList } from './research-evidence.js';
 import { mountEvidenceWorkspace, type EvidenceWorkspaceSurface } from './evidence-workspace.js';
+import { FACT_SEVERITY_LABELS } from './evidence-workspace-labels.js';
+import { renderFactCard, renderFactLens as factLens } from './fact-card.js';
 import {
-  FACT_CLOSE_WORKSPACE,
-  FACT_LENS_EMPTY_FILTERED,
-  FACT_LENS_FILTER_ALL,
-  FACT_LENS_FILTER_LABELS,
-  FACT_LENS_HEADING,
-  FACT_LENS_MORE,
-  FACT_LENS_NOTE,
-  FACT_OPEN_WORKSPACE,
-  FACT_SEVERITY_LABELS,
-  factActionLine,
-  factDecisionLine,
-  factLensCountsLine,
-  factLevelLine,
-  factLocationLine,
-  factStateLines,
-  outcomeTone,
-} from './evidence-workspace-labels.js';
-import {
-  FACTUAL_ACTION_NEED_LABELS,
-  FACTUAL_SOURCE_CONDITION_LABELS,
-  FACTUAL_VERIFICATION_OUTCOMES,
-  type FactualActionNeed,
-  type FactualSourceCondition,
   type FactualVerificationLensFilters,
   type FactualVerificationLensProjection,
   type FactualVerificationResultProjection,
@@ -271,7 +249,9 @@ type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWo
   // 事实核查's retained sources on its finding cards (Issue #425, S70).
   'inspectProposalWorkspace' | 'inspectResearchEvidence' |
   // The Fact-check Lens and the Evidence Workspace (Issue #901).
-  'inspectFactualVerification' | 'inspectEvidenceWorkspace' | 'recordVerificationReviewDecision' | 'prepareCorrectionProposal' | 'saveCorrectionProposal'
+  'inspectFactualVerification' | 'inspectEvidenceWorkspace' | 'recordVerificationReviewDecision' | 'prepareCorrectionProposal' | 'saveCorrectionProposal' |
+  // A source's 复制链接 and 在浏览器中打开 (Issue #1683).
+  'openSourceInBrowser' | 'runEditorClipboardCommand'
 >;
 
 export interface MountReviewWorkspaceOptions {
@@ -518,6 +498,7 @@ function focusKeyOf(node: HTMLElement): string {
   return [
     node.tagName,
     node.dataset['reviewAction'] ?? '',
+    node.dataset['evidenceFocus'] ?? '',
     node.closest<HTMLElement>('[data-review-filter]')?.dataset['reviewFilter'] ?? '',
     node.dataset['filterValue'] ?? '',
     node.dataset['reviewField'] ?? '',
@@ -689,7 +670,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
    */
   let research = new Map<string, ResearchEvidenceBookProjection>();
   // Each factual finding's sources as its card lists them (Issue #1174): the result's, less the excluded, joined to 来源与证据.
-  let evidence = new Map<string, ReviewEvidenceSource[]>();
+  let evidence = new Map<string, FindingSourceEntry[]>();
   const reasonAsks = new Map<string, HTMLElement>();
   const offerReasonAsk = (findingId: string, decisionId: string | null | undefined): void => {
     if (!decisionId) return;
@@ -706,6 +687,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   const NO_FACT_FILTERS: FactualVerificationLensFilters = { chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null };
   const fact: { reviewRunId: string | null; lens: FactualVerificationLensProjection | null; results: FactualVerificationResultProjection[]; next: number | null; pages: number;
     filters: FactualVerificationLensFilters; open: Map<string, EvidenceWorkspaceSurface> } = { reviewRunId: null, lens: null, results: [], next: null, pages: 1, filters: { ...NO_FACT_FILTERS }, open: new Map() };
+  /** The finding a deep link arrived for: its fact card is drawn expanded once (Issue #1683 item 8). */
+  let factArrival: string | null = options.focus?.findingId ?? null;
   const clearFactual = (reset: boolean): void => {
     for (const surface of fact.open.values()) surface.destroy();
     fact.open.clear();
@@ -1913,152 +1896,99 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     return section;
   }
 
-  // ---- the Fact-check Lens (Issue #901; V2-UX-FACT-004, FACT-005, FACT-007, FACT-008) ------------------------------------
-
-  /** A lens control: its own action key beside the review's, so a repaint finds it again. */
-  function factButton(action: 'fact-more' | 'fact-workspace' | 'fact-go-to-text', tone: 'secondary' | 'quiet', run: () => void): HTMLButtonElement {
-    const control = el('button', tone);
-    control.type = 'button';
-    control.dataset['factAction'] = action;
-    control.addEventListener('click', run);
-    return control;
-  }
+  // ---- the Fact-check Lens (Issue #901; V2-UX-FACT-004, FACT-005, FACT-007, FACT-008; Issue #1683 item 12.2) --------------
 
   function renderFactLens(run: ReviewRunProjection): HTMLElement {
-    const lens = fact.lens!;
-    const section = el('section', 'fact-lens');
-    section.dataset['factLensTotal'] = String(lens.total);
-    const headingId = uid('fact-lens');
-    const heading = el('h6', undefined, FACT_LENS_HEADING);
-    heading.id = headingId;
-    section.setAttribute('aria-labelledby', headingId);
-    const counts = el('p', 'fact-lens-counts', `${factLensCountsLine(lens)} · ${fact.results.length === 0 ? FACT_LENS_NOTE.replace(/。$/u, '') : FACT_LENS_NOTE}`);
-    if (fact.results.length === 0) counts.append(`；${FACT_LENS_EMPTY_FILTERED}`);
-    section.append(heading, counts);
-    if (lens.run?.disclosure != null) section.append(el('p', 'fact-lens-disclosure', lens.run.disclosure));
-    const filters = el('div', 'review-filters fact-lens-filters');
-    filters.setAttribute('role', 'group');
-    filters.setAttribute('aria-label', '筛选核查结果');
-    const select = (name: keyof FactualVerificationLensFilters, choices: ReadonlyArray<readonly [string, string]>): HTMLElement => {
-      const label = el('div', 'review-filter');
-      label.append(el('span', undefined, FACT_LENS_FILTER_LABELS[name === 'chapterBlockId' ? 'chapter' : name]));
-      const control = filterChoices({ label: FACT_LENS_FILTER_LABELS[name === 'chapterBlockId' ? 'chapter' : name],
-        choices: [['', REVIEW_FILTER_ALL], ...choices], value: fact.filters[name] ?? '', disabled: false,
-        change: (value) => {
-          fact.filters = { ...fact.filters, [name]: value || null } as FactualVerificationLensFilters;
-          fact.pages = 1;
-          refresh(true);
-        },
-      });
-      control.dataset['factFilter'] = name;
-      holdForWork(...control.querySelectorAll('button'));
-      label.append(control);
-      return label;
-    };
-    filters.append(
-      select('chapterBlockId', lens.chapters.map((chapter) => [chapter.blockId, chapter.heading] as const)),
-      select('outcome', FACTUAL_VERIFICATION_OUTCOMES.map((outcome) => [outcome, outcome] as const)),
-      select('severity', (['A', 'B', 'C'] as const).map((severity) => [severity, FACT_SEVERITY_LABELS[severity]] as const)),
-      select('sourceCondition', (Object.keys(FACTUAL_SOURCE_CONDITION_LABELS) as FactualSourceCondition[]).map((value) => [value, FACTUAL_SOURCE_CONDITION_LABELS[value]] as const)),
-      select('actionNeed', (Object.keys(FACTUAL_ACTION_NEED_LABELS) as FactualActionNeed[]).map((value) => [value, FACTUAL_ACTION_NEED_LABELS[value]] as const)),
-    );
-    const filterFold = el('details', 'review-fact-filter-fold');
-    filterFold.open = factFiltersOpen;
-    filterFold.addEventListener('toggle', () => { factFiltersOpen = filterFold.open; });
-    filterFold.append(el('summary', undefined, '筛选 ▾'), filters);
-    section.append(filterFold);
-    const list = el('ol', 'fact-lens-rows');
-    for (const result of fact.results) list.append(renderFactRow(run, result));
-    section.append(list);
-    if (fact.next !== null) {
-      const more = factButton('fact-more', 'secondary', () => {
-        fact.pages += 1;
-        refresh(true);
-      });
-      more.textContent = FACT_LENS_MORE;
-      holdForWork(more);
-      section.append(more);
+    return factLens({ lens: fact.lens!, results: fact.results, filters: fact.filters, filtersOpen: factFiltersOpen, allLabel: REVIEW_FILTER_ALL,
+      setFiltersOpen: (open) => { factFiltersOpen = open; }, headingId: uid('fact-lens'), hold: holdForWork, row: (result) => renderFactRow(run, result),
+      filter: (name, value) => { fact.filters = { ...fact.filters, [name]: value } as FactualVerificationLensFilters; fact.pages = 1; refresh(true); },
+      more: fact.next === null ? null : () => { fact.pages += 1; refresh(true); } });
+  }
+
+  /** 展开 / 收起: the row's Evidence Workspace, mounted once and kept across repaints until the card is collapsed. */
+  function toggleFact(run: ReviewRunProjection, result: FactualVerificationResultProjection, jump: (target: { blockId: string; markId: string | null }) => Promise<void>): void {
+    const current = fact.open.get(result.resultId);
+    if (current !== undefined) {
+      current.destroy();
+      fact.open.delete(result.resultId);
+      refresh(true);
+      return;
     }
-    return section;
+    const surface = mountEvidenceWorkspace({
+      bookId, resultId: result.resultId, api, setStatus: options.setStatus, errorMessage: options.errorMessage, instant: localInstantLabel,
+      openSource: (evidenceId) => options.openSource?.(evidenceId), goToText: jump, changed: () => refresh(true),
+      prepareSupplementary: async (decisionId) => {
+        const initial = await api.prepareReviewRun({ categoryIds: ['factual-review'], decisionId,
+          scope: { kind: 'selection', fromChapterBlockId: result.blockId, toChapterBlockId: result.blockId } });
+        const completed = await options.awaitServiceJob(initial, () => {});
+        const prepared = completed.result;
+        if (completed.kind !== 'review-run-preparation' || prepared === null || !('scopeOptions' in prepared) || prepared.run === null) throw new Error('补充核查计划没有准备完成。');
+        query.reviewRunId = prepared.run.reviewRunId;
+        refresh(true); options.openPlan(prepared.run.reviewRunId);
+      },
+    });
+    fact.open.set(result.resultId, surface);
+    void surface.load().then(() => {
+      if (!destroyed && fact.reviewRunId === run.reviewRunId && fact.open.get(result.resultId) === surface) refresh(true);
+    }, (error: unknown) => {
+      if (!destroyed && fact.reviewRunId === run.reviewRunId && fact.open.get(result.resultId) === surface)
+        options.setStatus(options.errorMessage(error, '无法读取证据工作区。'), 'error');
+    });
   }
 
   function renderFactRow(run: ReviewRunProjection, result: FactualVerificationResultProjection): HTMLElement {
+    const finding = run.findings.find((entry) => entry.findingId === result.reviewFindingId);
+    const category = run.categories.find((entry) => entry.categoryId === 'factual-review')!;
     // From a row, the way back names the row's finding, as 回到原文 on its card does; a row with none offers no numbered return.
-    const factJump = (finding: ReviewFindingProjection | undefined, target: { blockId: string; markId: string | null }): Promise<void> => {
+    const jump = (target: { blockId: string; markId: string | null }): Promise<void> => {
       if (finding !== undefined) focusFindingId = finding.findingId;
       rememberLeave(finding?.findingId ?? null);
       return options.goToText({ ordinal: finding?.ordinal, manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, ...target });
     };
-    const row = el('li', 'fact-lens-row');
-    row.dataset['factResultId'] = result.resultId;
-    row.dataset['outcome'] = result.states.factualVerification;
-    row.dataset['anchor'] = result.anchor.state;
-    row.dataset['version'] = String(result.version);
-    const open = fact.open.get(result.resultId);
-    const finding = run.findings.find((entry) => entry.findingId === result.reviewFindingId);
-    const category = run.categories.find((entry) => entry.categoryId === 'factual-review')!;
-    const card = finding === undefined ? el('article', 'review-finding') : renderFinding(run, category, finding, open === undefined, true);
-    if (finding === undefined) {
-      const head = el('div', 'fact-lens-row-heading');
-      head.append(el('span', 'review-finding-location', factLocationLine(result)), el('blockquote', 'review-finding-quote', reviewQuote(result.quote)));
-      card.append(head);
-    }
-    row.append(card);
-    // The three states in their own columns: never one traffic light (FACT-007).
-    const states = el('div', 'fact-lens-states');
-    for (const [term, value] of factStateLines(result)) {
-      const cell = el('span', 'fact-lens-state');
-      cell.dataset['stateTerm'] = term;
-      cell.append(el('span', 'evidence-term', term), el('span', `state-term status-pill evidence-pill evidence-pill-${term === '事实核查' ? outcomeTone(result.states.factualVerification) : 'neutral'}`, value));
-      states.append(cell);
-    }
-    card.append(states, el('p', 'fact-lens-level', factLevelLine(result)), el('p', 'fact-lens-decision', `${factDecisionLine(result.decision)} · ${factActionLine(result)}`));
-    if (result.anchor.label !== null) card.append(el('p', 'fact-lens-anchor', result.anchor.label));
-    const actions = el('div', 'button-row');
-    const toggle = factButton('fact-workspace', 'quiet', () => {
-      const current = fact.open.get(result.resultId);
-      if (current !== undefined) {
-        current.destroy();
-        fact.open.delete(result.resultId);
-        refresh(true);
-        return;
-      }
-      const surface = mountEvidenceWorkspace({
-        bookId, resultId: result.resultId, api, setStatus: options.setStatus, errorMessage: options.errorMessage, instant: localInstantLabel,
-        openSource: (evidenceId) => options.openSource?.(evidenceId),
-        goToText: (target) => factJump(finding, { blockId: target.blockId, markId: target.markId }),
-        changed: () => refresh(true),
-        prepareSupplementary: async (decisionId) => {
-          const initial = await api.prepareReviewRun({ categoryIds: ['factual-review'], decisionId,
-            scope: { kind: 'selection', fromChapterBlockId: result.blockId, toChapterBlockId: result.blockId } });
-          const completed = await options.awaitServiceJob(initial, () => {});
-          const prepared = completed.result;
-          if (completed.kind !== 'review-run-preparation' || prepared === null || !('scopeOptions' in prepared) || prepared.run === null) throw new Error('补充核查计划没有准备完成。');
-          query.reviewRunId = prepared.run.reviewRunId;
-          refresh(true); options.openPlan(prepared.run.reviewRunId);
-        },
-      });
-      fact.open.set(result.resultId, surface);
-      void surface.load().then(() => {
-        if (!destroyed && fact.reviewRunId === run.reviewRunId && fact.open.get(result.resultId) === surface) refresh(true);
-      }, (error: unknown) => {
-        if (!destroyed && fact.reviewRunId === run.reviewRunId && fact.open.get(result.resultId) === surface)
-          options.setStatus(options.errorMessage(error, '无法读取证据工作区。'), 'error');
-      });
-    });
-    toggle.textContent = open === undefined ? FACT_OPEN_WORKSPACE : FACT_CLOSE_WORKSPACE;
-    toggle.setAttribute('aria-expanded', open === undefined ? 'false' : 'true');
-    holdForWork(toggle);
-    actions.append(toggle);
-    const locate = factButton('fact-go-to-text', 'quiet', () => void factJump(finding, { blockId: result.blockId, markId: result.markId }));
-    locate.textContent = '在稿件中查看';
-    locate.disabled = result.anchor.state === 'stale';
-    holdForWork(locate);
-    actions.append(locate);
-    card.append(actions);
-    // The open workspace is the same element across repaints, so what the editor pinned, chose or typed stays.
-    if (open !== undefined) card.append(open.element);
-    return row;
+    // A card the editor arrives at for this finding (a deep link to it) arrives expanded, its sources shown there directly.
+    if (factArrival === result.reviewFindingId && !fact.open.has(result.resultId)) { factArrival = null; toggleFact(run, result, jump); }
+    // The finding's own actions (set A), each sending what its review card sends; 回到原文 is held for a stale anchor.
+    const actions = (): Map<string, HTMLElement> => {
+      const set = new Map<string, HTMLElement>(finding === undefined
+        ? [['go-to-text', actionButton('go-to-text', 'quiet', () => void jump({ blockId: result.blockId, markId: result.markId }))]]
+        : Array.from(renderFindingActions(run, finding).children, (node) => [(node as HTMLElement).dataset['reviewAction'] ?? node.querySelector<HTMLElement>('[data-review-action]')?.dataset['reviewAction'] ?? '', node as HTMLElement]));
+      const go = set.get('go-to-text');
+      for (const control of go === undefined ? [] : [go, ...go.querySelectorAll('button')]) if (control instanceof HTMLButtonElement) control.disabled ||= result.anchor.state === 'stale';
+      if (set.get('convert-to-suggestion')?.classList.contains('review-unavailable')) set.delete('convert-to-suggestion');
+      if (finding === undefined) holdForWork(...[...set.values()].filter((node): node is HTMLButtonElement => node instanceof HTMLButtonElement));
+      return set;
+    };
+    const lead = (): HTMLElement[] => finding === undefined ? [el('span', 'state-term status-pill review-pill', FACT_SEVERITY_LABELS[result.severity])] : [
+      pillElement(finding.severityLabel, REVIEW_SEVERITY_PILLS[finding.severity]), pillElement(finding.statusLabel, REVIEW_STATUS_PILLS[finding.status]),
+      ...(finding.riskPoint ? [el('span', 'review-risk-point', REVIEW_RISK_POINT)] : [])];
+    const note = (): HTMLElement[] => {
+      if (finding === undefined) return [];
+      const detail = serviceWords(finding.statusDetail);
+      return [el('p', 'review-finding-note', houseAnnotationWords(finding.note)), ...[findingReferencedRules(finding)].filter((node): node is HTMLDetailsElement => node !== null),
+        ...(finding.clauseRefs.length === 0 ? [el('p', 'review-finding-basis', reviewBasisWords(category.basis))] : finding.clauseRefs.map((clause) => el('p', 'review-finding-basis', reviewClauseLine(clause)))),
+        ...(finding.stateLine !== null && finding.stateLine !== '未外部复核' ? [el('p', 'review-finding-state', finding.stateLine)] : []),
+        ...(finding.anchorState === 'anchor-changed' ? [el('p', 'review-finding-state', REVIEW_ANCHOR_CHANGED)] : []),
+        ...(finding.status !== 'pending' && detail !== serviceWords(finding.statusLabel) ? [el('p', 'review-finding-status-detail', detail)] : []),
+        ...(finding.ignoreReason === null ? [] : [el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason))]),
+        ...(finding.historicalMarker === null ? [] : [el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker)])];
+    };
+    // A source's 来源译文 comes from the rows this card already read for its finding (Issue #1174), by card.
+    const translations = new Map((evidence.get(result.reviewFindingId) ?? []).flatMap((entry) =>
+      entry.identity !== undefined && 'cardId' in entry.identity && entry.translation !== null ? [[entry.identity.cardId, entry.translation] as const] : []));
+    const after: HTMLElement[] = [];
+    const reasonAsk = finding === undefined ? undefined : reasonAsks.get(finding.findingId);
+    if (reasonAsk !== undefined && reasonAsk.dataset['learningAskState'] !== 'dismissed') after.push(reasonAsk);
+    if (finding !== undefined && ui.capabilityFindingId === finding.findingId) after.push(capabilityNote());
+    if (finding !== undefined && ui.ignore?.findingId === finding.findingId) after.push(renderIgnoreForm(run, finding, ui.ignore));
+    if (finding !== undefined && ui.convert?.findingId === finding.findingId) after.push(renderConvertForm(run, finding, ui.convert));
+    if (finding !== undefined) after.push(options.technicalDetails('review-facts',
+      el('dt', undefined, '发现'), el('dd', 'technical-identity', `${finding.findingId} · 第 ${finding.ordinal} 条`),
+      el('dt', undefined, '标记'), el('dd', 'technical-identity', finding.markId === null ? '无（原文已变）' : `${finding.markId} · ${finding.markStatus ?? '—'} · ${finding.anchorState}`),
+      el('dt', undefined, '段落'), el('dd', 'technical-identity', `${finding.blockId} · 字素 ${finding.fromGrapheme}–${finding.toGrapheme}`)));
+    const ignorable = finding !== undefined && finding.status === 'pending' && (finding.output === 'annotation' || finding.markId === null);
+    return renderFactCard({ result, finding, quote: reviewQuote(result.quote), workspace: fact.open.get(result.resultId), toggle: () => toggleFact(run, result, jump),
+      actions, hooks: { lead, note, translation: (cardId) => translations.get(cardId) ?? null }, openIgnore: ignorable ? () => openIgnore(finding) : null,
+      busy: () => working, hold: holdForWork, after });
   }
 
   function renderGroup(run: ReviewRunProjection, category: ReviewRunCategoryProjection, findings: ReadonlyArray<ReviewFindingProjection>): HTMLElement {
@@ -2553,7 +2483,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         const item = el('li');
         item.dataset['findingIds'] = entry.findingIds.join(' ');
         item.append(el('p', 'review-report-summary-title', reviewReportFindingHeading(index + 1, entry)), ...reviewReportFindingLines({ ...entry, chapterLabel: entry.chapterLabel.replaceAll('内容块', '段落'), locationLabel: entry.locationLabel.replaceAll('内容块', '段落') }).map((line) => el('p', undefined, line)));
-        if (entry.sources.length > 0) item.append(findingEvidenceList(entry.sources, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
+        if (entry.sources.length > 0) item.append(findingEvidenceList(entry.sources, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId), bookId));
         list.append(item);
       }
       const omitted = reviewReportOmittedLine(record.findings.omitted);
@@ -2910,7 +2840,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (projection?.run) paintFinding(projection.run, findingId);
     const control = card?.querySelector<HTMLElement>(`article[data-finding-id="${findingId}"] [data-review-action="${kind === 'ignore' ? 'ignore' : 'convert-to-suggestion'}"]`);
     const closed = control?.closest<HTMLDetailsElement>('details.review-card-more:not([open])');
-    (closed?.querySelector<HTMLElement>('summary') ?? control)?.focus();
+    // A collapsed fact card opened the form by its R key and shows no such control: focus goes back to the card.
+    (closed?.querySelector<HTMLElement>('summary') ?? control ?? card?.querySelector<HTMLElement>(`article[data-finding-id="${findingId}"]`))?.focus();
   }
 
   /**

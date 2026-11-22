@@ -257,7 +257,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
         current = { ...current, decisionCount: current.decisionCount + 1 };
         if (decision.kind === 'attribution') current = { ...current,
           attribution: decision.attribution.scope === 'house' ? { scope: 'house', decidedAt: '' } : { ...decision.attribution, bookTitle: '甲书', decidedAt: '' }, eligibility: null };
-        else current = { ...current, eligibility: { ...own.eligibility, choice: decision.choice, reason: decision.reason } };
+        else if (decision.kind === 'eligibility') current = { ...current, eligibility: { ...own.eligibility, choice: decision.choice, reason: decision.reason } };
         return current;
       } }, initial, answer, () => {});
       expect(calls).toEqual(expected[index]!.map((key, offset) => ({ materialId: 'm', expectedDecisions: 10 + offset, decision: decisions[key as keyof typeof decisions] })));

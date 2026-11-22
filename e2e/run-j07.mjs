@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx, addReadOnlySourceObjects } from './composed-docx.mjs';
 import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { openArchivePackageExport, openRemainingPackageExport } from './package-export-readiness.mjs';
+import { answer, dropFile, noImportDraft, pressReachable, questionOffers, reachable } from './import-entry-stages.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -520,6 +521,8 @@ const PAGE_HELPERS = `(() => {
     pkg: () => document.querySelector('[data-screen="book-deliverables"] .deliverables-package-slot > section.deliverables-package'),
     condition: (id) => window.__j07.pkg()?.querySelector('ol.package-condition-list > li[data-condition-id="' + id + '"]') ?? null,
     packageVersions: () => Array.from(window.__j07.pkg()?.querySelectorAll('ol.package-version-list > li') ?? []),
+    // A heading of the preview with another heading or nothing after it (Issue #1550 rework): the preview's headings that stand over nothing.
+    emptyPreviewHeadings: () => Array.from(window.__j07.pkg()?.querySelectorAll('.package-preview > h5') ?? []).filter((heading) => heading.nextElementSibling === null || /^H[1-6]$/.test(heading.nextElementSibling.tagName)).map((heading) => heading.textContent),
     packageReason: () => document.getElementById(window.__j07.pkg()?.querySelector('[data-package-action="prepare"]')?.getAttribute('aria-describedby') ?? '')?.textContent ?? null,
     // Its export (Issue #416, S67b): the card below a version, and each file's key, format, words and outcome.
     packageExport: () => window.__j07.pkg()?.querySelector('ol.package-version-list > li > section.package-export') ?? null,
@@ -1326,7 +1329,10 @@ async function main() {
       return bundle.querySelector(':scope > h3')?.textContent === '图书交付包' && bundle.parentElement?.parentElement?.lastElementChild === bundle.parentElement &&
         window.__j07.condition('publication')?.dataset.conditionMet === 'false' && window.__j07.condition('work-records')?.dataset.conditionMet === 'true' &&
         prepare instanceof HTMLButtonElement && prepare.disabled &&
-        window.__j07.packageReason() === '还不能准备：发稿版本未满足。' && window.__j07.packageVersions().length === 0;
+        window.__j07.packageReason() === '还不能准备：发稿版本未满足。' && window.__j07.packageVersions().length === 0 &&
+        // A package with nothing to limit it has no 限制 heading, and no heading of the preview stands over nothing.
+        bundle.querySelector('.package-preview') !== null && !Array.from(bundle.querySelectorAll('.package-preview > h5')).some((heading) => heading.textContent === '限制') &&
+        window.__j07.emptyPreviewHeadings().length === 0;
     })()`, 'package-unavailable-before-a-milestone');
     const nothing = await renderer.evaluate(READ_PUBLICATION);
     requireJourney(nothing?.bookId === bookId && nothing.milestones.length === 0 && nothing.designations.length === 0 &&
@@ -2258,6 +2264,7 @@ async function main() {
         // No 不包含 list at all (Issue #1639): neither the four types nor the fixed exclusions are itemised.
         bundle.querySelector('ul.package-excluded') === null && !(bundle.textContent ?? '').includes('不包含') &&
         JSON.stringify(limitations) === ${JSON.stringify(JSON.stringify(['稿件：自发稿版本后有修改，本包按发稿版本。']))} &&
+        window.__j07.emptyPreviewHeadings().length === 0 && Array.from(bundle.querySelectorAll('.package-preview > h5')).some((heading) => heading.textContent === '限制') &&
         !bundle.querySelector('[data-package-action="prepare"]').disabled && window.__j07.packageReason() === '' &&
         bundle.querySelector('[data-package-field="purpose"]')?.value === '';
     })()`, 'package-preview-lists-what-it-holds');
@@ -3430,6 +3437,62 @@ async function main() {
     await assertRenderer(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); return strip instanceof HTMLElement && strip.textContent.includes('校样'); })()`, 'management-category-empty-strip');
     await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="yes"]`, 'management-category-delete');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}) === null && document.querySelector(${JSON.stringify(proofRow)}) === null`, 'management-category-deleted', 60_000);
+
+    at('derivatives-drop');
+    // Issue #1682 (N.10): a file dropped on 衍生稿件管理 asks what it is. Nothing is staged before an answer; 存为衍生稿件 opens the
+    // same form in 导入文件 with the file named and the title taken from its name, and 创建并打开 reads that file without a picker.
+    const dropIo = { renderer, waitFor, assertRenderer };
+    const reopenManagement = async (name) => {
+      await pressReachable(dropIo, SIDEBAR.destination('library'), `${name}-library`);
+      await pressReachable(dropIo, `[data-screen="landing"] button[data-book-id="${writingBookId}"]`, `${name}-book`);
+      await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${writingBookId}"] [data-testid="manuscript-editor"]')`, `${name}-editor`);
+      await pressReachable(dropIo, SIDEBAR.section('derivatives'), `${name}-management`);
+    };
+    // The page is where 删除类别 left it: 衍生稿件管理.
+    await dropFile(dropIo, SAMPLE1_PATH, managementPage, 'drop-management');
+    await questionOffers(dropIo, ['update', 'derivative', 'cancel'], 'drop-management');
+    await noImportDraft(dropIo, 'drop-management-unanswered');
+    await answer(dropIo, 'cancel', 'drop-management');
+    await waitFor(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-management-closed');
+    await noImportDraft(dropIo, 'drop-management-cancelled');
+    await reopenManagement('drop-management-reopen');
+    await waitFor(renderer, `document.querySelector('${managementPage} .derivatives-item')`, 'drop-management-ready');
+    await dropFile(dropIo, SAMPLE1_PATH, managementPage, 'drop-management-again');
+    await questionOffers(dropIo, ['update', 'derivative', 'cancel'], 'drop-management-again');
+    await answer(dropIo, 'derivative', 'drop-management-again');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementForm} [data-dropped-file]`)}) !== null`, 'drop-management-form', 60_000);
+    await assertRenderer(renderer, `(() => { const form = document.querySelector(${JSON.stringify(managementForm)}); return form?.querySelector('[data-dropped-file]')?.textContent === '已选择文件：sample1.docx' && form.querySelector('.derivative-modes input[value="import"]')?.checked === true && form.querySelector('[data-document-field="title"]')?.value === 'sample1'; })()`, 'drop-management-form-names-file');
+    await assertRenderer(renderer, reachable(`${managementForm} [data-document-action="create-derivative"]`), 'drop-management-confirm-in-window');
+    await pressReachable(dropIo, `${managementForm} [data-document-action="create-derivative"]`, 'drop-management-confirm');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] .document-title-heading')?.textContent === 'sample1'`, 'drop-management-open', 120_000);
+
+    await noImportDraft(dropIo, 'drop-management-created');
+
+    at('derivatives-drop-editor');
+    // On a 衍生稿件 open in the editor the same question offers 更新稿件 and 存为衍生稿件; 取消 stages nothing.
+    await dropFile(dropIo, SAMPLE1_PATH, '.editor-shell[data-manuscript-kind="derivative"]', 'drop-editor');
+    await questionOffers(dropIo, ['update', 'derivative', 'cancel'], 'drop-editor');
+    await noImportDraft(dropIo, 'drop-editor-unanswered');
+    await answer(dropIo, 'cancel', 'drop-editor');
+    await waitFor(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-editor-closed');
+    await noImportDraft(dropIo, 'drop-editor-cancelled');
+
+    at('derivatives-drop-text');
+    // A file that is not DOCX, on the editor and on the management page, is answered in words and nothing is staged. The file is one
+    // word of text this Journey writes into its own run root.
+    const dropTextPath = resolve(runRoot, 'drop-note.txt');
+    await writeFile(dropTextPath, '稿', 'utf8');
+    const notDocx = `document.querySelector('#persistence-status')?.textContent === '请拖入 DOCX 格式的文件。'`;
+    await dropFile(dropIo, dropTextPath, '.editor-shell[data-manuscript-kind="derivative"]', 'drop-text-editor');
+    await waitFor(renderer, notDocx, 'drop-text-editor-sentence');
+    await assertRenderer(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-text-editor-no-question');
+    await noImportDraft(dropIo, 'drop-text-editor');
+    await reopenManagement('drop-text-reopen');
+    await waitFor(renderer, `document.querySelector('${managementPage} .derivatives-workspace')`, 'drop-text-management-ready');
+    await dropFile(dropIo, dropTextPath, managementPage, 'drop-text-management');
+    await waitFor(renderer, notDocx, 'drop-text-management-sentence');
+    await assertRenderer(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-text-management-no-question');
+    await noImportDraft(dropIo, 'drop-text-management');
 
     at('scoped-ai-edit');
     // 就选中部分让 AI 修改… (Issue #1412) on the writing Book's exact sample1 manuscript, on a launch whose adapter answers from the

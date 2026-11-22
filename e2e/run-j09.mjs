@@ -1792,7 +1792,20 @@ async function main() {
     await pointerClick(renderer, waitFor, filterTrigger, 'overview-filter-open');
     for (let step = 0; step < filterIndex; step += 1) await press(renderer, 'ArrowDown');
     await press(renderer, 'Enter');
-    await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === ${JSON.stringify(overviewBooks[3])} && document.activeElement?.matches('.task-overview-filters .ui-select-trigger') && document.querySelectorAll('.task-overview-card').length === 0`, 'overview-filter-chosen-by-key');
+    try {
+      await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === ${JSON.stringify(overviewBooks[3])} && document.activeElement?.matches('.task-overview-filters .ui-select-trigger') && document.querySelectorAll('.task-overview-card').length === 0`, 'overview-filter-chosen-by-key');
+    } catch (error) {
+      const diagnostic = await renderer.evaluate(`(async () => {
+        const selected = document.querySelector('.task-overview-filters select[aria-label="图书"]'), trigger = document.querySelector('.task-overview-filters select[aria-label="图书"] + .ui-select-trigger');
+        const cards = [...document.querySelectorAll('.task-overview-card')], projection = await window.ai7.inspectTaskOverview();
+        const items = projection.groups.flatMap(group => group.items), bounds = node => { if (!node) return null; const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height }; };
+        return { selectedMatches: selected?.value === ${JSON.stringify(overviewBooks[3])}, focusIsTrigger: document.activeElement?.matches('.task-overview-filters .ui-select-trigger') === true,
+          visibleCardCount: cards.length, popupOpen: trigger?.getAttribute('aria-expanded') === 'true', viewport: { width: innerWidth, height: innerHeight }, controlBounds: bounds(trigger),
+          cards: cards.map(card => { const item = items.find(item => item.itemId === card.dataset.taskItem); return { kind: item?.plan?.kind ?? card.dataset.taskKind ?? null, state: item?.state ?? null, attentionState: card.dataset.taskState ?? item?.attention.state ?? null, bookMatches: item === undefined ? null : item.bookId === selected?.value, expectedBookMatches: item === undefined ? null : item.bookId === ${JSON.stringify(overviewBooks[3])} }; }) };
+      })()`).catch(() => ({ unavailable: true }));
+      console.error('J-09/overview-filter-chosen-by-key/diagnostic', JSON.stringify(diagnostic));
+      throw error;
+    }
     await renderer.evaluate(`window.ai7.startQuickTasks({ tasks: [{ bookId: ${JSON.stringify(overviewBooks[3])}, procedureId: 'baseline-analysis' }] })`);
     await waitFor(renderer, `document.querySelectorAll('.task-overview-card').length === 1 && document.activeElement?.matches('.task-overview-filters .ui-select-trigger')`, 'overview-repaints-with-focus-on-the-filter', 60000);
     await press(renderer, 'ArrowDown');

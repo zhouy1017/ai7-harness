@@ -7,7 +7,7 @@ import type {
   LearningSignalStanding, LearningSourceReference, EditorialMemoryVersion, EditorialMemorySourceSnapshot,
   LearningCurationBundle, LearningCurationSource, QualifiedLearningExample, LearningExampleText,
   EnabledLearningEnvelope,
-  EditorialMemoryApplicability, EditorialMemoryAdmission, AcceptEditorialMemoryInput,
+  EditorialMemoryApplicability, EditorialMemoryAdmission, AcceptEditorialMemoryInput, LegacyEditorialMemoryVersion, ReviewPreferenceLifecycleInput, ReviewPreferenceRow,
   LearningReasonAskInput, LearningReasonAskProjection, LearningReasonAskFrequency, PreferenceAdoptionProjection, PreferenceAdoptionCursor, ReferencedRuleVersion,
 } from '../../shared/protocol/learning.js';
 import { LEARNING_REASON_OPTIONS } from '../../shared/protocol/learning.js';
@@ -29,7 +29,20 @@ import { readWordParentSourcePin, wordParentSourcePinRecord, requireWordRevision
 import { WORD_DOCX_PARSER_IDENTITY, type WordTrackedCompilation } from '../docx.js';
 import type { ManualCommandSourceCursor, ManualCommandSourcePage } from '../bounded-manuscript.js';
 import { boundedCurationExamples, CURATION_CONTRACT, validCurationBudget, type CuratedPreference } from './curation.js';
-import { SupervisionDirectives } from './supervision-directives.js';
+import { REVIEW_PREFERENCE_REENABLE_SENTENCES, refuseReviewPreference, SupervisionDirectives } from './supervision-directives.js';
+
+/**
+ * The state 重新启用 restores (Issue #1655): that of the newest version before the trailing 停用 / 冻结 steps, or `merged` when
+ * that version is a merge-away successor, which never comes back alone.
+ */
+function restoredState(versions: ReadonlyArray<GlobalEditorialMemoryVersion>): 'proposed' | 'active' | 'merged' {
+  let index = versions.length - 1;
+  while (index > 0 && ['deactivate', 'freeze'].includes((versions[index] as EditorialMemoryVersion).action)) index -= 1;
+  const reached = versions[index] as EditorialMemoryVersion;
+  if (reached.action === 'merge' && reached.ordinal > 1) return 'merged';
+  requireLearning(reached.schema === 'ai7.global-editorial-memory/2' && (reached.state === 'proposed' || reached.state === 'active'));
+  return reached.state;
+}
 
 type Row = Record<string, SQLOutputValue>;
 const PAGE_SIZE = 30;
@@ -1204,22 +1217,38 @@ export class EditorialLearningLedger {
     for (const row of this.db.prepare('SELECT signal_id FROM learning_signals WHERE book_id = ?').iterate(bookId)) {
       const signal = this.#signal(String(row.signal_id));
       if (signal.source.materialKey !== materialKey || signal.source.materialDigest !== materialDigest || this.#currentEligibility(signal, controls) !== 'house') continue;
-      if (signal.kind === 'manual-edit-journal') {
-        if (signal.operationalScope === scope) sourceKeys.push(sha256Hex(canonicalJson(signal.source)));
-        continue;
-      }
-      if (signal.kind === 'word-tracked-edit') {
-        // This proves local policy-2 retention only; it never constructs a review-memory source snapshot.
-        sourceKeys.push(sha256Hex(canonicalJson({ signalId: signal.signalId, materialDigest: signal.source.materialDigest,
-          sampleDigest: signal.source.sampleDigest })));
-        continue;
-      }
-      const origin = this.#reviewOrigin(signal, true);
-      if (origin?.operationalScope !== scope) continue;
-      const snapshot = this.sourceSnapshot(signal.signalId);
-      requireLearning(snapshot.admission.kind === 'automatic'); sourceKeys.push(snapshot.sourceKey);
+      const key = this.#automaticSourceKey(signal, scope);
+      if (key !== null) sourceKeys.push(key);
     }
     return sourceKeys.length === 0 ? null : { choice: 'house', sourceKeys: sourceKeys.sort() };
+  }
+
+  /** `automaticAdmissionFor` for every material of one Book in one walk, as `materialKey` + newline + digest (Issue #1655). */
+  automaticAdmissions(bookId: string, scope: TrustedOperationalScope): Set<string> {
+    const admitted = new Set<string>();
+    const controls = this.controls();
+    if (!controls.enabled || controls.excludedBooks.has(bookId)) return admitted;
+    const decided = new Map<string, boolean>();
+    for (const row of this.db.prepare('SELECT signal_id FROM learning_signals WHERE book_id = ?').iterate(bookId)) {
+      const signal = this.#signal(String(row.signal_id));
+      const material = signal.source.materialKey;
+      if (!decided.has(material)) decided.set(material, this.#eligibilityHistory(bookId, material).length > 0);
+      if (decided.get(material) || this.#currentEligibility(signal, controls) !== 'house') continue;
+      if (this.#automaticSourceKey(signal, scope) !== null) admitted.add(`${material}\n${signal.source.materialDigest}`);
+    }
+    return admitted;
+  }
+
+  #automaticSourceKey(signal: LearningSignal, scope: TrustedOperationalScope): string | null {
+    if (signal.kind === 'manual-edit-journal') return signal.operationalScope === scope ? sha256Hex(canonicalJson(signal.source)) : null;
+    // This proves local policy-2 retention only; it never constructs a review-memory source snapshot.
+    if (signal.kind === 'word-tracked-edit') return sha256Hex(canonicalJson({ signalId: signal.signalId, materialDigest: signal.source.materialDigest,
+      sampleDigest: signal.source.sampleDigest }));
+    const origin = this.#reviewOrigin(signal, true);
+    if (origin?.operationalScope !== scope) return null;
+    const snapshot = this.sourceSnapshot(signal.signalId);
+    requireLearning(snapshot.admission.kind === 'automatic');
+    return snapshot.sourceKey;
   }
 
   sourceSnapshot(signalId: string): EditorialMemorySourceSnapshot {
@@ -1347,7 +1376,7 @@ export class EditorialLearningLedger {
       typeof version.title === 'string' && version.title.trim().length > 0 && version.title.length <= 160 && version.title.isWellFormed() &&
       !/[\r\n\p{Cc}\p{Zl}\p{Zp}]/u.test(version.title) &&
       ['development-ci', 'developer-live', 'ordinary-production'].includes(version.operationalScope) &&
-      ['create', 'accept', 'merge', 'correct', 'deactivate', 'freeze'].includes(version.action) &&
+      ['create', 'accept', 'merge', 'correct', 'deactivate', 'freeze', 'reactivate', 'retire'].includes(version.action) &&
       isRecord(version.applicability) && (version.applicability.kind === 'house' && Object.keys(version.applicability).length === 1 ||
         version.applicability.kind === 'book' && Object.keys(version.applicability).length === 2 && UUID_PATTERN.test(version.applicability.bookId)) &&
       Array.isArray(version.signalIds) && version.signalIds.length <= 10 && new Set(version.signalIds).size === version.signalIds.length &&
@@ -1355,7 +1384,7 @@ export class EditorialLearningLedger {
       Array.isArray(version.parentVersions) && version.parentVersions.length <= 12 &&
       new Set(version.parentVersions.map((pin) => pin.itemId)).size === version.parentVersions.length &&
       Array.isArray(version.supervisionDirectiveRefs) && version.supervisionDirectiveRefs.length <= 1);
-    requireLearning(version.action === 'create' || version.action === 'accept' ? version.supervisionDirectiveRefs.length === 0
+    requireLearning(['create', 'accept', 'reactivate', 'retire'].includes(version.action) ? version.supervisionDirectiveRefs.length === 0
       : version.action === 'deactivate' || version.supervisionDirectiveRefs.length === 1);
     version.sources.forEach((source, index) => { requireLearning(source.signalId === version.signalIds[index]); this.#validateSource(source); });
     requireLearning(canonicalJson(version.positiveExamples) === canonicalJson(version.sources.filter((entry) => entry.sourceKind === undefined && this.#signal(entry.signalId).kind !== 'rejected').map((entry) => entry.source)) &&
@@ -1524,6 +1553,7 @@ export class EditorialLearningLedger {
         replay[0]!.parentVersions[0]?.versionId === input.expectedVersionId && (scope === undefined || replay[0]!.operationalScope === scope)); return;
     }
     const current = this.version(input.itemId);
+    if ((current.schema === 'ai7.global-editorial-memory/2' ? current.state : current.activation) === 'retired') refuseReviewPreference('DELETED');
     requireLearning(current.schema === 'ai7.global-editorial-memory/2' && current.versionId === input.expectedVersionId &&
       (scope === undefined || current.operationalScope === scope));
     if (action === 'accept') { requireLearning(current.state === 'proposed'); this.currentSources(current); }
@@ -1531,6 +1561,78 @@ export class EditorialLearningLedger {
   }
 
   accept(input: AcceptEditorialMemoryInput, scope: TrustedOperationalScope): void { this.#transition(input, 'accept', scope); }
+
+  /** Whether any memory version carries this action id (Issue #1655: one action id names one request across both owners). */
+  actionUsed(actionId: string): boolean { return this.#read(() => this.#action(actionId).length > 0); }
+
+  /** Whether an entry is 删除-ed (Issue #1655): any later request naming it is refused as deleted. */
+  retired(itemId: string): boolean {
+    const current = this.version(itemId);
+    return (current.schema === 'ai7.global-editorial-memory/2' ? current.state : current.activation) === 'retired';
+  }
+
+  /**
+   * 重新启用 / 删除 of one stopped entry by appending one successor (Issue #1655): the state it restores (`active` holds the house
+   * limit in the caller's refresh), `retired`, or `replayed` when this action id already acted. A legacy /1 entry has no action id,
+   * so its replay is the same pin answered again.
+   */
+  lifecycle(input: ReviewPreferenceLifecycleInput, action: 'reactivate' | 'retire', scope: TrustedOperationalScope): 'proposed' | 'active' | 'retired' | 'replayed' {
+    return this.#read(() => {
+      requireLearning(UUID_PATTERN.test(input.actionId));
+      const history = this.#versions(input.itemId);
+      const current = history.at(-1)!;
+      if (current.schema !== 'ai7.global-editorial-memory/2') return this.#legacyLifecycle(history as LegacyEditorialMemoryVersion[], input, action);
+      const replay = this.#action(input.actionId);
+      if (replay.length > 0) {
+        // The same request answers again; an action id another request already used names something that changed.
+        if (!(replay.length === 1 && replay[0]!.itemId === input.itemId && replay[0]!.action === action &&
+          replay[0]!.parentVersions[0]?.versionId === input.expectedRevisionId && replay[0]!.operationalScope === scope)) refuseReviewPreference('CHANGED');
+        return 'replayed';
+      }
+      requireLearning(current.operationalScope === scope);
+      if (current.state === 'retired') refuseReviewPreference('DELETED');
+      if (current.versionId !== input.expectedRevisionId) refuseReviewPreference(action === 'reactivate' && current.action === 'reactivate' ? 'ALREADY_REENABLED' : 'CHANGED');
+      if (current.state !== 'inactive' && current.state !== 'frozen') refuseReviewPreference('CHANGED');
+      let state: 'proposed' | 'active' | 'retired' = 'retired';
+      if (action === 'reactivate') {
+        const restored = restoredState(history);
+        if (restored === 'merged') refuseReviewPreference('MERGED');
+        if (this.#currentOrNone(current) === null) refuseReviewPreference('MATERIAL_STOPPED');
+        state = restored;
+      }
+      this.#append(this.#successor(current, input.actionId, action, state));
+      return state;
+    });
+  }
+
+  #legacyLifecycle(history: LegacyEditorialMemoryVersion[], input: ReviewPreferenceLifecycleInput, action: 'reactivate' | 'retire'): 'active' | 'retired' | 'replayed' {
+    const current = history.at(-1)!;
+    const activation = action === 'reactivate' ? 'active' : 'retired';
+    if (current.supersedes === input.expectedRevisionId && current.activation === activation && history.at(-2)?.activation === 'inactive') return 'replayed';
+    if (current.activation === 'retired') refuseReviewPreference('DELETED');
+    if (current.versionId !== input.expectedRevisionId || current.activation !== 'inactive') refuseReviewPreference('CHANGED');
+    if (action === 'reactivate' && !this.#legacyUsable(current)) refuseReviewPreference('MATERIAL_STOPPED');
+    this.#append({ ...current, versionId: randomUUID(), ordinal: current.ordinal + 1, supersedes: current.versionId, activation, recordedAt: new Date().toISOString() });
+    return activation;
+  }
+
+  #legacyUsable(version: LegacyEditorialMemoryVersion, controls = this.controls()): boolean {
+    return version.signalIds.every((id) => this.#currentEligibility(this.#signal(id), controls) === 'house');
+  }
+
+  /** 审阅偏好's row of one memory entry, from its whole chain; `null` for a retired one, which no list shows. */
+  #row(history: ReadonlyArray<GlobalEditorialMemoryVersion>, usable: boolean, controls: ReturnType<EditorialLearningLedger['controls']>): ReviewPreferenceRow | null {
+    const current = history.at(-1)!;
+    const state = current.schema === 'ai7.global-editorial-memory/2' ? current.state : current.activation;
+    if (state === 'retired') return null;
+    const group = state === 'proposed' ? 'pending' as const : state === 'active' ? 'enabled' as const : 'disabled' as const;
+    const standing = group !== 'disabled' ? null : current.schema !== 'ai7.global-editorial-memory/2'
+      ? this.#legacyUsable(current, controls) ? 'allowed' as const : 'material-stopped' as const
+      : restoredState(history) === 'merged' ? 'merged' as const : this.#currentOrNone(current) === null ? 'material-stopped' as const : 'allowed' as const;
+    return { group, changedAt: current.recordedAt, origin: history[0]!.actor === 'AI7' ? 'ai' : 'editor',
+      reenable: standing === null ? null : { standing, sentence: REVIEW_PREFERENCE_REENABLE_SENTENCES[standing] },
+      pin: current.versionId, pausedInUse: group === 'enabled' && !usable };
+  }
 
   /** Real memory targets are routed here once, inside the store's directive/publication transaction. */
   govern(directive: LearningSupervisionDirective, expected: ReadonlyArray<GlobalMemoryPin>): void {
@@ -1584,22 +1686,32 @@ export class EditorialLearningLedger {
       requireLearning(version.itemId === itemId && version.versionId === row.version_id && version.ordinal === versions.length + 1 &&
         version.ordinal === row.ordinal && version.supersedes === (versions.at(-1)?.versionId ?? null) && version.supersedes === row.supersedes && version.recordedAt === row.recorded_at &&
         (version.actor === 'editor' || version.schema === 'ai7.global-editorial-memory/2' && version.actor === 'AI7') && (version.schema === 'ai7.global-editorial-memory/2'
-          ? ['proposed', 'active', 'inactive', 'frozen'].includes(version.state)
-          : version.schema === 'ai7.global-editorial-memory/1' && (version.activation === 'active' || version.activation === 'inactive')) &&
+          ? ['proposed', 'active', 'inactive', 'frozen', 'retired'].includes(version.state)
+          : version.schema === 'ai7.global-editorial-memory/1' && ['active', 'inactive', 'retired'].includes(version.activation)) &&
         typeof version.title === 'string' && version.title.trim().length > 0 && version.title.length <= 160 &&
         typeof version.editorialDimension === 'string' && version.editorialDimension.trim().length > 0 && version.editorialDimension.length <= 80 &&
         Number.isFinite(version.confidence) && version.confidence >= 0 && version.confidence <= 1 && Number.isFinite(Date.parse(version.recordedAt)));
       versions.push(version);
+      // Nothing follows a retirement (Issue #1655).
+      const before = versions.at(-2);
+      requireLearning(before === undefined || (before.schema === 'ai7.global-editorial-memory/2' ? before.state : before.activation) !== 'retired');
+      if (version.schema !== 'ai7.global-editorial-memory/2' && version.activation === 'retired') {
+        requireLearning(before !== undefined && before.schema !== 'ai7.global-editorial-memory/2' && before.activation === 'inactive');
+      }
       if (version.schema === 'ai7.global-editorial-memory/2') {
         this.#validateMemory(version);
         const prior = versions.at(-2);
+        const stopped = prior?.schema === 'ai7.global-editorial-memory/2' && (prior.state === 'inactive' || prior.state === 'frozen');
         if (prior !== undefined) requireLearning(prior.schema === 'ai7.global-editorial-memory/2' &&
           version.operationalScope === prior.operationalScope && version.editorialDimension === prior.editorialDimension &&
           canonicalJson(version.applicability) === canonicalJson(prior.applicability) && version.confidence === prior.confidence &&
           canonicalJson(version.parentVersions) === canonicalJson([{ itemId, versionId: prior.versionId }]) && version.signalIds.length === 0 &&
           (version.action === 'accept' ? prior.state === 'proposed' && version.state === 'active'
             : version.action === 'correct' ? version.state === (prior.state === 'active' ? 'active' : 'proposed')
-              : version.action === 'freeze' ? version.state === 'frozen' : (version.action === 'merge' || version.action === 'deactivate') && version.state === 'inactive'));
+              : version.action === 'freeze' ? version.state === 'frozen'
+                : version.action === 'reactivate' ? stopped && version.state === restoredState(versions.slice(0, -1))
+                  : version.action === 'retire' ? stopped && version.state === 'retired'
+                    : (version.action === 'merge' || version.action === 'deactivate') && version.state === 'inactive'));
       }
     }
     requireLearning(versions.length > 0);
@@ -1651,6 +1763,7 @@ export class EditorialLearningLedger {
       this.#transition({ ...input, actionId: input.actionId }, 'deactivate', scope);
       return;
     }
+    if (current.activation === 'retired') refuseReviewPreference('DELETED');
     requireLearning(current.versionId === input.expectedVersionId);
     if (current.activation === 'inactive') return;
     this.#append({ ...current, versionId: randomUUID(), ordinal: current.ordinal + 1, supersedes: current.versionId,
@@ -1769,8 +1882,14 @@ export class EditorialLearningLedger {
     requireLearning(input.detailItemId === undefined || itemRows.length === 1);
     const items: EditorialLearningProjection['items'][number][] = [];
     let bytes = Buffer.byteLength(JSON.stringify(signals), 'utf8');
+    // A retired row is read and skipped; the next page starts after every row this one read (Issue #1655).
+    let read = 0;
     for (const row of itemRows.slice(0, PAGE_SIZE)) {
       const history = this.#versions(String(row.item_id)); const current = history.at(-1)!;
+      const usable = current.schema === 'ai7.global-editorial-memory/2' ? this.usable(current) : current.activation === 'active' && this.#legacyUsable(current, controls);
+      const facts = this.#row(history, usable, controls);
+      // A list skips a deleted entry; a read naming one is refused (Issue #1655).
+      if (facts === null) { if (input.detailItemId !== undefined) refuseReviewPreference('DELETED'); read += 1; continue; }
       const historyEnd = Math.max(0, history.length - (input.historyOffset ?? 0));
       const historyStart = Math.max(0, historyEnd - PAGE_SIZE);
       const sources = current.schema === 'ai7.global-editorial-memory/2' ? this.effectiveSources(current) : [];
@@ -1778,12 +1897,11 @@ export class EditorialLearningLedger {
       const entry = { current, history: history.slice(historyStart, historyEnd),
         nextHistoryOffset: historyStart > 0 ? (input.historyOffset ?? 0) + PAGE_SIZE : null,
         sources: sources.slice(sourceOffset, sourceOffset + PAGE_SIZE), nextSourceOffset: sources.length > sourceOffset + PAGE_SIZE ? sourceOffset + PAGE_SIZE : null,
-        usable: current.schema === 'ai7.global-editorial-memory/2' ? this.usable(current)
-          : current.activation === 'active' && current.signalIds.every((id) => this.#currentEligibility(this.#signal(id), controls) === 'house') };
+        usable, row: facts };
       const size = Buffer.byteLength(JSON.stringify(entry), 'utf8');
       requireLearning(size <= MAX_FRAME_BYTES / 2);
       if (bytes + size > MAX_FRAME_BYTES / 2 && items.length > 0) break;
-      items.push(entry); bytes += size;
+      items.push(entry); bytes += size; read += 1;
     }
     const exclusionOffset = input.exclusionOffset ?? 0;
     const excludedBooks = [...controls.excludedBooks].slice(exclusionOffset, exclusionOffset + PAGE_SIZE + 1);
@@ -1794,7 +1912,7 @@ export class EditorialLearningLedger {
     return { basis: LOCAL_LEARNING_POLICY_BASIS.text, enabled: controls.enabled, controlEntries: controls.entries,
       excludedBooks: excludedBooks.slice(0, PAGE_SIZE).map((bookId) => ({ bookId, title: String(this.db.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId)?.title ?? '') })),
       excludedMaterials, signals, items, nextSignalOffset: rows.length > PAGE_SIZE ? input.signalOffset + PAGE_SIZE : null,
-      nextItemOffset: input.detailItemId === undefined && itemRows.length > items.length ? input.itemOffset + items.length : null,
+      nextItemOffset: input.detailItemId === undefined && itemRows.length > read ? input.itemOffset + read : null,
       nextExclusionOffset: excludedBooks.length > PAGE_SIZE || materialRows.length > PAGE_SIZE ? exclusionOffset + PAGE_SIZE : null };
   }
 

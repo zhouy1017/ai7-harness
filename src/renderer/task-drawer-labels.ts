@@ -411,6 +411,11 @@ export function taskBarResumableStatement(reason: ResumableStopReason): string {
 export function taskBarResumableStatus(reason: ResumableStopReason): string {
   return `任务已中断 · ${resumableStopReasonLabel(reason)}`;
 }
+export const RESTART_PAUSED_REASON = 'AI7 关闭时这项任务还没有做完；已完成的部分都已保存，继续时接着处理，也可以取消它。';
+export const RESTART_QUEUED_REASON = 'AI7 关闭时这项任务还在排队，没有开始，也没有发送任何内容。';
+export function taskBarRestartStatement(state: TaskPlanProjection['state']): string | null {
+  return state.stopReason !== 'shutdown' ? null : state.key === 'paused' ? RESTART_PAUSED_REASON : state.key === 'blocked' ? RESTART_QUEUED_REASON : null;
+}
 export function taskBarResumeOutcome(reason: ResumableStopReason, repeated: boolean): { message: string; tone: 'success' | 'error' } {
   return repeated
     ? { message: `继续后仍然 ${resumableStopReasonLabel(reason)}；没有发送任何书稿内容`, tone: 'error' }
@@ -953,9 +958,9 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         return {
           readiness,
           summary,
-          statement: control.stopReason === undefined ? null : taskBarResumableStatement(control.stopReason),
+          statement: taskBarRestartStatement(plan.state) ?? (control.stopReason === undefined ? null : taskBarResumableStatement(control.stopReason)),
           note: [continuationNote, stopNote].filter((entry): entry is string => entry !== null).join('；') || null,
-          status: control.stopReason === undefined ? stateWords(plan.state) : taskBarResumableStatus(control.stopReason),
+          status: plan.state.key === 'paused' || control.stopReason === undefined ? stateWords(plan.state) : taskBarResumableStatus(control.stopReason),
           actions: [
             ...(control.stopReason === 'proxy-unreachable' || control.stopReason === 'model-service-unreachable'
               ? [{ name: 'connect', label: TASK_BAR_PROXY_SETTINGS, tone: 'secondary', disabledReason: null } as const] : []),
@@ -1012,7 +1017,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
       return {
         readiness,
         summary,
-        statement: null,
+        statement: taskBarRestartStatement(plan.state),
         note: TASK_BAR_BLOCKED_CANCEL_NOTE,
         status: stateWords(plan.state),
         actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
@@ -1037,7 +1042,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
     return {
       readiness,
       summary,
-      statement: null,
+      statement: taskBarRestartStatement(plan.state),
       note: null,
       status: plan.state.key === 'recorded' ? TASK_BAR_RECORDED : plan.state.key === 'cancelled' ? TASK_BAR_CANCELLED : stateWords(plan.state),
       // 改计划重做 (Issue #422, S76c): a Run the editor cancelled after it began can be redone as a new Task.

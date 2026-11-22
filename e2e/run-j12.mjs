@@ -1,4 +1,5 @@
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { pressKey, pressReachable, reachable, saveMenuActionsInOrder, tabTo } from './import-entry-stages.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -664,29 +665,36 @@ async function saveEdit(renderer, suffix) {
 async function saveMilestone(renderer) {
   const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
   requireJourney(before !== null, 'milestone-scope');
-  // Synchronized delta with Issue #409: the milestone form lives in the 导航 panel, which opens on demand.
-  await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); const panel=document.querySelector('#manuscript-navigation-panel'); if(!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if(entry.getAttribute('aria-expanded')!=='true') entry.click(); return entry.getAttribute('aria-expanded')==='true' && !panel.hidden; })()`, 'milestone-navigation');
-  await assertRenderer(renderer, `(() => { const menu=document.querySelector('[data-save-menu="manuscript"]'),details=document.querySelector('.milestone-section'); if(!(menu instanceof HTMLDetailsElement)||!(details instanceof HTMLDetailsElement))return false; menu.open=true; details.open=true; return true; })()`, 'milestone-open');
-  await fill(renderer, '#milestone-label', 'J12 后续修订版', 'milestone-label');
-  // Synchronized delta with Issue #414: a purpose is chosen from the unselected cards, not typed.
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('.milestone-section input[type="radio"][name="milestone-purpose"][value="stage-archive"]'); if(!(radio instanceof HTMLInputElement)||radio.disabled)return false; radio.click(); return radio.checked; })()`, 'milestone-purpose');
-  await fill(renderer, '#milestone-note', '本地且离线。', 'milestone-note');
-  // #1376 review F3: a valid, enabled save action must leave the arrow order when its subsection is collapsed.
-  await assertRenderer(renderer, `(() => {
-    const menu=document.querySelector('[data-save-menu="manuscript"]'),section=menu?.querySelector('.milestone-section'),outer=menu?.querySelector('summary'),summary=section?.querySelector('summary');
-    const save=section?.querySelector('button'),exportAction=menu?.querySelector('.editor-save-menu-body > button');
-    if(!section||!outer||!summary||!save||save.disabled||!exportAction)return false;
-    section.open=false; outer.focus();
-    const key=(value)=>document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true}));
-    key('ArrowDown');if(document.activeElement!==summary)return false;
-    key('ArrowDown');if(document.activeElement!==exportAction)return false;
-    key('ArrowDown');if(document.activeElement!==summary)return false;
-    key('End');if(document.activeElement!==exportAction)return false;
-    key('Home');if(document.activeElement!==summary)return false;
-    key('ArrowUp');if(document.activeElement!==exportAction)return false;
-    key('Home');summary.click();return section.open&&!save.disabled&&document.activeElement===summary;
-  })()`, 'milestone-collapsed-menu-keyboard');
-  await click(renderer, '保存里程碑版本', 'milestone-save');
+  const io = { renderer, waitFor, assertRenderer };
+  const outer = '[data-save-menu="manuscript"] > summary', section = '.milestone-section > summary';
+  const navigation = '[data-edge-entry="navigation"]';
+  if (!await renderer.evaluate(`document.querySelector('${navigation}')?.getAttribute('aria-expanded') === 'true'`)) {
+    await pressReachable(io, navigation, 'milestone-navigation');
+  }
+  await pressReachable(io, outer, 'milestone-open-menu');
+  await pressReachable(io, section, 'milestone-open-form');
+  await tabTo(io, '#milestone-label', 'milestone-label');
+  await renderer.send('Input.insertText', { text: 'J12 后续修订版' });
+  const purpose = '.milestone-section input[name="milestone-purpose"][value="stage-archive"]';
+  await tabTo(io, purpose, 'milestone-purpose');
+  await pressReachable(io, purpose, 'milestone-purpose');
+  await tabTo(io, '#milestone-note', 'milestone-note');
+  await renderer.send('Input.insertText', { text: '本地且离线。' });
+  await tabTo(io, section, 'milestone-return-to-summary', undefined, true);
+  await pressReachable(io, section, 'milestone-collapse-form');
+  await assertRenderer(renderer, saveMenuActionsInOrder(), 'milestone-menu-order');
+  await assertRenderer(renderer, reachable(outer), 'milestone-summary-in-window');
+  await renderer.evaluate(`document.querySelector('${outer}').focus({preventScroll:true})`);
+  const entry = '[data-import-new-version="manuscript"]', last = '.editor-save-menu-body > button:last-of-type';
+  for (const [key, selector] of [['ArrowDown',section],['ArrowDown',entry],['ArrowDown',last],['ArrowDown',section],['End',last],['Home',section],['ArrowUp',last],['Home',section]]) {
+    await pressKey(renderer, key);
+    await assertRenderer(renderer, `document.activeElement === document.querySelector('${selector}') && ${reachable(selector)}`, 'milestone-collapsed-menu-keyboard');
+  }
+  await pressKey(renderer, 'Enter');
+  await waitFor(renderer, `document.querySelector('.milestone-section')?.open && !document.querySelector('.milestone-section button')?.disabled`, 'milestone-form-reopened');
+  const save = '.milestone-section button[aria-label="保存里程碑版本"]';
+  await tabTo(io, save, 'milestone-save');
+  await pressReachable(io, save, 'milestone-save');
   await waitFor(renderer, milestonePersisted(before, 'r2'), 'milestone-saved', 120_000);
   await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订版 2')`, 'milestone-revision-caption');
   // #1483: persistence can precede the editor/outline reconciliation that releases the write guard.
@@ -1177,6 +1185,31 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-model-settings-hub');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'ordinary-model-settings-ready');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="use-model-for-both-roles"]') && document.querySelector('[data-action="select-fast-role-model"]') && !document.querySelector('[data-custom-model-id]') && document.querySelector('[data-model-summary]') && document.querySelectorAll('[data-search-backend]').length===5`, 'ordinary-model-single-view');
+    // Stage-2 rework (#1547): on the first opening, with no key saved, the one highlighted sentence names only what the editor can do now.
+    // Step 2's key field is the next thing: it is inside the window and its scroller's visible box, and the point at its centre is the field itself, with no scripted scroll before.
+    requireJourney(await primary.evaluate(`(async () => {
+      const settings = await window.ai7.getModelServiceSettings();
+      const pro = settings.modelRoles.find((role) => role.roleId === 'foreground-pro');
+      const flow = document.querySelector('[data-model-service-flow]');
+      const channel = settings.channels.find((entry) => entry.channelId === flow.dataset.flowChannel);
+      const keySaved = settings.routeChoice.routes.find((route) => route.route === channel.route)?.connection?.credentialOperationState === 'ready';
+      const sentence = document.querySelector('[data-model-summary]');
+      const field = document.querySelector('.model-credential-form input[type="password"]');
+      if (pro.binding !== null || keySaved || !(field instanceof HTMLInputElement)) return false;
+      const box = field.getBoundingClientRect(), hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      const header = document.querySelector('#context-header').getBoundingClientRect(), sidebar = document.querySelector('#app-sidebar').getBoundingClientRect();
+      let inScroller = true;
+      for (let parent = field.parentElement; parent !== null; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (/auto|scroll/.test(style.overflowY) && parent.scrollHeight > parent.clientHeight) { const visible = parent.getBoundingClientRect(); inScroller = inScroller && box.top >= visible.top && box.bottom <= visible.bottom; }
+      }
+      return sentence.textContent === '尚未选择模型。请先在上面的「2. 填写密钥并获取模型」里保存这个渠道的密钥，再选择模型并点击「使用这个模型」。' &&
+        document.querySelector('[data-flow-step="credential"] h4').textContent.startsWith('2. 填写密钥并获取模型') &&
+        !field.disabled && box.width > 0 && box.height > 0 && box.top >= header.bottom && box.bottom <= innerHeight && box.left >= sidebar.right && box.right <= innerWidth && inScroller &&
+        (hit === field || field.contains(hit)) &&
+        document.querySelector('[data-action="save-channel-credential"]').textContent === '保存并获取模型' &&
+        document.querySelector('[data-action="use-model-for-both-roles"]').disabled === true;
+    })()`) === true, 'ordinary-first-run-sentence-names-the-next-step');
     await assertOrdinaryModelReachability(primary);
     // #1370: both configuration sections are directly mounted in ordinary mode. CI has no search keys;
     // credential save/test success is covered by the ordinary-production renderer/service tests, never a live provider.
@@ -1186,6 +1219,14 @@ async function main() {
         search.textContent.includes('当前生效来源：') && !search.querySelector('h3[data-developer-only]');
     })()`, 'ordinary-search-proxy-visible');
     await assertRenderer(primary, `!/https?:[/][/]|配置摘要|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-technical-identifiers');
+    // Stage-2 rework (#1547): ordinary mode says 检索服务 on the engine's own text, never 后端, and never points the editor at the page it is on.
+    await assertRenderer(primary, `(() => {
+      const search=document.querySelector('[data-search-backends="true"]'); const text=search.textContent;
+      const always=search.querySelector('[data-action="always-use-selected-search-backend"]')?.parentElement?.textContent;
+      const source=text.slice(text.indexOf('当前生效来源：'));
+      return !text.includes('后端') && !text.includes('设置 › 联网检索') && always==='总是使用选定的检索服务' &&
+        (!source.startsWith('当前生效来源：暂不可用') || source.includes('请在下面的检索服务里，为其中一个保存密钥'));
+    })()`, 'ordinary-search-says-search-service');
     // The 未实测 disclosure names hit rates; detailed measurement labels and numeric values remain technical-only.
     await assertRenderer(primary, `!/评测参考|p50|中文命中率|国际命中率|命中率[ ：:]*[0-9]/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-detailed-measurements');
     await assertRenderer(primary, `document.querySelectorAll('[data-search-backends="true"] [data-action="probe-search-candidate"]').length===3`, 'ordinary-search-candidate-connection-controls');

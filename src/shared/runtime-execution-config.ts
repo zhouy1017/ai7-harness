@@ -2,6 +2,7 @@
  * Missing fields inherit the role default; `off` explicitly omits the effort control on the wire.
  * Effort identifiers are vendor data, not a model/level admission list.
  */
+import type { ServiceOperationMap, PrepareReviewRunInput, EvidenceAssuranceLevel } from './protocol.js';
 import type { PlanEditsProjection } from './protocol/analysis-plan.js';
 
 export interface RuntimeExecutionConfig {
@@ -25,9 +26,28 @@ export interface TaskExecutionLaunchInput {
   readonly executionConfig?: RuntimeExecutionConfig;
   /** A remembered catalogue choice may fall back; an explicit choice keeps upstream validation. */
   readonly rememberedChoice?: boolean;
+  /** A request read from a stopped Task is checked again before a new command launches it. */
+  readonly relaunchOf?: TaskRelaunchSource;
+}
+
+export interface TaskRelaunchSource {
+  readonly kind: 'baseline-analysis' | 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite' | 'writing' | 'review-run';
+  readonly ref: string;
+  readonly runRecordId: string;
+  readonly revision: string;
+  readonly cancelsFirst: boolean;
+}
+
+export function validTaskRelaunchSource(value: unknown): value is TaskRelaunchSource {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const source = value as Record<string, unknown>;
+  const uuid = (value: unknown): boolean => typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(value);
+  return Object.keys(source).length === 5 && ['baseline-analysis', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing', 'review-run'].includes(String(source.kind)) &&
+    uuid(source.ref) && uuid(source.runRecordId) && typeof source.revision === 'string' && (source.kind === 'review-run' ? /^\d+:\d+:\d+:[0-9a-f]{64}$/u : /^[0-9a-f]{64}$/u).test(source.revision) && typeof source.cancelsFirst === 'boolean';
 }
 
 export interface LedgerTaskExecutionLaunchInput extends TaskExecutionLaunchInput {
+  readonly redoOf?: string | null;
   /** Existing optional budget/retry controls, frozen in the first plan rather than a later plan revision. */
   readonly planEdits?: PlanEditsProjection;
   readonly startWhen?: 'now' | 'idle' | 'when-online';
@@ -40,6 +60,16 @@ export interface TaskExecutionLaunchResult {
   readonly waitingForNetwork?: boolean;
 }
 
+export type ReviewExecutionLaunchInput = PrepareReviewRunInput & TaskExecutionLaunchInput & {
+  readonly evidenceAssuranceLevel?: EvidenceAssuranceLevel;
+  readonly planEdits?: Omit<PlanEditsProjection, 'evidenceAssuranceLevel'>;
+  readonly startWhen?: 'now' | 'idle' | 'when-online';
+};
+export type TaskLaunchPreviewOperation = LedgerTaskLaunchOperation | 'launchReviewRun' | 'startScopedAiEdit';
+export type TaskLaunchPreviewInput = { bookId: string; launch: { [K in TaskLaunchPreviewOperation]: {
+  operation: K; input: Omit<ServiceOperationMap[K]['input'], 'bookId'>;
+} }[TaskLaunchPreviewOperation] };
+
 export interface TaskLaunchPreviewProjection {
   readonly steps: ReadonlyArray<string>;
   readonly scope: string;
@@ -48,6 +78,8 @@ export interface TaskLaunchPreviewProjection {
   readonly send: string;
   readonly usage: string;
   readonly adaptations: ReadonlyArray<string>;
+  /** 预计 (Issue #1670): the plan's estimate, with a duration only when measured. */
+  readonly estimate?: import('./protocol/task-plan.js').TaskEstimateProjection;
 }
 
 export function validReasoningEffort(value: unknown): value is string {

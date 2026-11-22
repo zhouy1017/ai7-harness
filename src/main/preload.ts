@@ -12,6 +12,9 @@ import {
   type PickerReselectResult,
   type PickerStageResult,
   type RendererApi,
+  type TaskOverviewCall,
+  type TaskOverviewCallResult,
+  type ServiceWireOutput,
   type RendererCallResult,
   type WireServiceOperationMap as ServiceOperationMap,
 } from '../shared/protocol.js';
@@ -262,7 +265,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   getBaselineAnalysisRangePlan: (input: Omit<ServiceOperationMap['getBaselineAnalysisRangePlan']['input'], 'bookId'>) => invoke<ServiceOperationMap['getBaselineAnalysisRangePlan']['output']>(IPC_CHANNELS.getBaselineAnalysisRangePlan, input),
   inspectBaselineAnalysis: (input?: Omit<ServiceOperationMap['inspectBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectBaselineAnalysis']['output']>(IPC_CHANNELS.inspectBaselineAnalysis, input ?? { revisionId: null }),
-  inspectBookFindings: (input?: { offset: number }) =>
+  inspectBookFindings: (input?: Parameters<RendererApi['inspectBookFindings']>[0]) =>
     invoke<ServiceOperationMap['inspectBookFindings']['output']>(IPC_CHANNELS.inspectBookFindings, input ?? { offset: 0 }),
   inspectParagraphAnalysis: (input: Omit<ServiceOperationMap['inspectParagraphAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectParagraphAnalysis']['output']>(IPC_CHANNELS.inspectParagraphAnalysis, input),
@@ -548,6 +551,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   createEditorialMemory: (input: ServiceOperationMap['createEditorialMemory']['input']) => invoke<ServiceOperationMap['createEditorialMemory']['output']>(IPC_CHANNELS.createEditorialMemory, input),
   acceptEditorialMemory: (input: ServiceOperationMap['acceptEditorialMemory']['input']) => invoke<ServiceOperationMap['acceptEditorialMemory']['output']>(IPC_CHANNELS.acceptEditorialMemory, input),
   deactivateEditorialMemory: (input: ServiceOperationMap['deactivateEditorialMemory']['input']) => invoke<ServiceOperationMap['deactivateEditorialMemory']['output']>(IPC_CHANNELS.deactivateEditorialMemory, input),
+  reenableReviewPreference: (input: ServiceOperationMap['reenableReviewPreference']['input']) => invoke<ServiceOperationMap['reenableReviewPreference']['output']>(IPC_CHANNELS.reenableReviewPreference, input),
+  deleteReviewPreference: (input: ServiceOperationMap['deleteReviewPreference']['input']) => invoke<ServiceOperationMap['deleteReviewPreference']['output']>(IPC_CHANNELS.deleteReviewPreference, input),
   inspectHouseReviewPreference: () => invoke<ServiceOperationMap['inspectHouseReviewPreference']['output']>(IPC_CHANNELS.inspectHouseReviewPreference, {}),
   rebuildHouseReviewPreference: () => invoke<ServiceOperationMap['rebuildHouseReviewPreference']['output']>(IPC_CHANNELS.rebuildHouseReviewPreference, {}),
   inspectEditQualitySignals: (input: ServiceOperationMap['inspectEditQualitySignals']['input']) => invoke<ServiceOperationMap['inspectEditQualitySignals']['output']>(IPC_CHANNELS.inspectEditQualitySignals, input),
@@ -810,7 +815,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   prepareGlobalAgentTurn: (input: ServiceOperationMap['prepareGlobalAgentTurn']['input']) => invoke<ServiceOperationMap['prepareGlobalAgentTurn']['output']>(IPC_CHANNELS.prepareGlobalAgentTurn, input),
   inspectGlobalAttention: () =>
     invoke<ServiceOperationMap['inspectGlobalAttention']['output']>(IPC_CHANNELS.inspectGlobalAttention, {}),
-  taskOverviewCall: (input: Parameters<RendererApi['taskOverviewCall']>[0]) => invoke<Awaited<ReturnType<RendererApi['taskOverviewCall']>>>(IPC_CHANNELS.taskOverviewCall, input),
+  taskOverviewCall: <C extends TaskOverviewCall>(input: C) => invoke<ServiceWireOutput<TaskOverviewCallResult<C>>>(IPC_CHANNELS.taskOverviewCall, input),
   controlAllTasks: (input: { action: 'pause' | 'resume' }) => invoke<ServiceOperationMap['controlAllTasks']['output']>(IPC_CHANNELS.controlAllTasks, input),
   inspectTaskOverview: () =>
     invoke<ServiceOperationMap['inspectTaskOverview']['output']>(IPC_CHANNELS.inspectTaskOverview, {}),

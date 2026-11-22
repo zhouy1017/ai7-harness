@@ -671,11 +671,11 @@ export function prepareCustomAnalysis(host: CustomAnalysisStoreHost, input: Prep
   return { taskIntentId: result.prepared.taskIntent!.taskIntentId, dimensions: result.dimensions };
 }
 
-export function launchCustomAnalysisTask(host: CustomAnalysisStoreHost, input: PrepareCustomAnalysisInput, launchPolicy: LaunchPolicyProjection, context: TaskLaunchContext): BaselineAnalysisProjection {
+export function launchCustomAnalysisTask(host: CustomAnalysisStoreHost, input: PrepareCustomAnalysisInput & import('../shared/runtime-execution-config.js').LedgerTaskExecutionLaunchInput, launchPolicy: LaunchPolicyProjection, context: TaskLaunchContext): BaselineAnalysisProjection {
   return buildCustomAnalysisTask(host, input, launchPolicy, launchedTaskPlan(context)).prepared;
 }
 
-function buildCustomAnalysisTask(host: CustomAnalysisStoreHost, input: PrepareCustomAnalysisInput, launchPolicy: LaunchPolicyProjection, createPlan: TaskPlanCreator): { prepared: BaselineAnalysisProjection; dimensions: CustomAnalysisDimensionsProjection } {
+function buildCustomAnalysisTask(host: CustomAnalysisStoreHost, input: PrepareCustomAnalysisInput & Partial<import('../shared/runtime-execution-config.js').LedgerTaskExecutionLaunchInput>, launchPolicy: LaunchPolicyProjection, createPlan: TaskPlanCreator): { prepared: BaselineAnalysisProjection; dimensions: CustomAnalysisDimensionsProjection } {
   host.assertAvailable();
   requireStore(typeof input === 'object' && input !== null && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
     isCustomAnalysisDimensionId(input.dimensionId) && (input.from == null || (typeof input.from === 'object' && UUID_PATTERN.test(input.from.taskIntentId) &&
@@ -683,7 +683,9 @@ function buildCustomAnalysisTask(host: CustomAnalysisStoreHost, input: PrepareCu
   const dimension = host.customAnalysisCall(() => host.customAnalysisDimensions.dimension(input.dimensionId));
   requireStore(dimension !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这个自定义分析维度不存在。');
   const from = input.from ?? null;
-  const version = from === null ? dimension.versions.find((entry) => entry.state === 'enabled') ?? null : frozenVersionOf(host, input, from.taskIntentId);
+  const redone = input.redoOf == null ? undefined : host.authority.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(input.redoOf);
+  const frozenRef = from?.taskIntentId ?? input.relaunchOf?.ref ?? (redone === undefined ? undefined : asString(redone.task_intent_id));
+  const version = frozenRef === undefined ? dimension.versions.find((entry) => entry.state === 'enabled') ?? null : frozenVersionOf(host, input, frozenRef);
   requireStore(version !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_ENABLED', '这个维度没有已启用的版本；已停用的版本不能再运行。');
   requireStore(!templateEchoesManuscript(host, version.document.questionTemplate, input.bookId), 'CUSTOM_ANALYSIS_TEMPLATE_MANUSCRIPT_TEXT', CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON);
   const definition = customAnalysisDefinition(host, version);
@@ -696,7 +698,7 @@ function buildCustomAnalysisTask(host: CustomAnalysisStoreHost, input: PrepareCu
   const update = again?.update ?? input.update ?? null;
   let progress = host.analysisCall(() => createPlan(ledger, {
     phase: 'start', bookId: input.bookId, goal: customAnalysisModeGoal(update?.mode ?? 'first-baseline'), update,
-    reconfirm: again?.reconfirm ?? false, redoOf: again?.redoOf ?? null, launchPolicy,
+    reconfirm: again?.reconfirm ?? false, redoOf: input.redoOf ?? again?.redoOf ?? null, launchPolicy,
   }, (projection, blocks, bookTitle) => customAnalysisPlan(baselineAnalysisPlan({ projection: projection as unknown as BaselineAnalysisProjection, bookTitle, blocks }), { ...customAnalysisVersionInput(version), version: version.version }, projection.providerResolutionPlan !== null && isRemoteExecutionRoute(projection.providerResolutionPlan.executionRoute))));
   while (!progress.done) {
     const workId = progress.workId;

@@ -287,7 +287,7 @@ body { padding-left: var(--sidebar-width); }
 .primary:hover:not(:disabled) { background: var(--action-primary-hover); }
 .secondary { border: 1px solid var(--boundary-strong); background: var(--action-secondary); color: var(--action-text); }
 .quiet { border: 0; background: transparent; color: var(--action-text); text-decoration: underline; }
-button:disabled { cursor: not-allowed; opacity: .5; }
+button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-allowed; opacity: .5; }
 .button-row { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; margin-top: 1.4rem; }
 
 .section-label { margin: 0 0 .35rem; color: var(--text-subdued); font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
@@ -479,7 +479,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-part-paging { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; margin: .45rem 0 0; font-size: .86rem; color: var(--text-subdued); }
 .review-page-failed { flex-basis: 100%; color: var(--status-blocked); font-weight: 700; }
 /* The same row above the 批注栏's cards when a window holds more marks than were loaded (Issue #1604). */
-.marks-paging { margin: .3rem 0; padding-inline: .55rem; }
+.marks-paging { line-height: 20px; flex: none; flex-wrap: nowrap; min-width: 0; margin: .3rem 0; padding-inline: .55rem; }
+.marks-paging > span:not(.review-page-failed) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.marks-paging > span:first-child { flex: 1; }
+.marks-paging > button { flex: none; white-space: nowrap; }
+.marks-paging:has(> .review-page-failed:not([hidden])) { flex-wrap: wrap; }
+.marks-paging:has(> .review-page-failed:not([hidden])) > span:first-child { flex: initial; overflow: visible; text-overflow: clip; white-space: normal; }
 .marks-paging[hidden] { display: none; }
 .review-chapter-page { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
 .review-report-part { margin-top: .8rem; }
@@ -1672,8 +1677,8 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .manuscript-comments-pane { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface-subdued); border-left: 1px solid var(--boundary); }
 .manuscript-comments-pane[hidden] { display: none; }
 .manuscript-comments-heading { height: 34px; min-height: 34px; box-sizing: border-box; flex-shrink: 0; display: flex; align-items: center; gap: .2rem; padding: .15rem .4rem; border-bottom: 1px solid var(--boundary); }
-.manuscript-comments-heading button { height: 28px; box-sizing: border-box; line-height: 20px; min-height: 28px; padding: .15rem .2rem; white-space: nowrap; font-size: .7rem; }
-.manuscript-comments-heading > strong { font-size: .8rem; white-space: nowrap; }
+.manuscript-comments-heading button.btn { flex: none; height: 28px; box-sizing: border-box; line-height: 20px; min-height: 28px; padding: .15rem .2rem; white-space: nowrap; font-size: .7rem; }
+.manuscript-comments-heading > strong { flex: none; font-size: .8rem; white-space: nowrap; }
 /* The Book's pending count and 上一条 / 下一条待处理 (Issue #1523). */
 .manuscript-comments-book-pending { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .7rem; color: var(--text-subdued); font-variant-numeric: tabular-nums; }
 .manuscript-comments-heading .manuscript-comments-step { min-width: 24px; width: 24px; padding: 0; }
@@ -2300,24 +2305,37 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 .research-evidence-translation figcaption { font-weight: 600; }
 .research-evidence-units ul { margin: 0; padding-left: 1.25rem; }
 /* 事实核查 · 核查结果 and the Evidence Workspace (Issue #901): three states apart, discrete-state source cards, 2–4 pinned. */
-.fact-lens { display: grid; gap: 8px; margin-top: .7rem; padding: .7rem .8rem; border: 1px solid var(--boundary); border-radius: 9px; background: var(--surface-subdued); }
+.fact-lens { display: grid; gap: 8px; margin-top: .7rem; }
 .fact-lens-rows { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.fact-lens-row { display: grid; gap: 6px; padding: .6rem .7rem; border: 1px solid var(--boundary); border-radius: 8px; background: var(--surface); min-width: 0; }
-.fact-lens-states, .evidence-states { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.fact-lens-state, .evidence-state { display: grid; gap: 2px; min-width: 0; }
-.fact-lens-anchor, .evidence-anchor-stale, .fact-lens-disclosure { font-weight: 700; }
+.fact-lens-row { display: grid; min-width: 0; }
+/* Issue #1683 (12.2): the fact card is the one frame between a source row and its category. */
+.fact-card { display: grid; gap: 6px; min-width: 0; }
+.fact-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; }
+.fact-card-head > [data-fact-action] { margin-left: auto; }
+.fact-card[data-fact-card="collapsed"] > .review-finding-quote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 0; }
+.fact-card-sentence { margin: 0; }
+.fact-card-actions { margin-top: 0; display: flex; flex-wrap: wrap; gap: .35rem; }
+.fact-section { display: grid; gap: 6px; min-width: 0; }
+.fact-section-heading { margin: .3rem 0 0; }
+.evidence-conclusion-line, .evidence-conclusion-lead { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; margin: 0; }
+.evidence-states, .evidence-card-detail { margin: 0; font-size: .86rem; opacity: .85; }
+.source-link { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; min-width: 0; }
+.source-link-domain { font-weight: 600; overflow-wrap: anywhere; }
+.source-link-refusal, .source-link-status { font-size: .86rem; }
+.evidence-decision-row { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
+.evidence-anchor-stale, .fact-lens-disclosure { font-weight: 700; }
 .evidence-term { font-size: .82rem; font-weight: 700; opacity: .8; }
 .evidence-pill-neutral { background: var(--surface-subdued); }
 .evidence-pill-positive { background: var(--status-good-surface); }
 .evidence-pill-warning { background: var(--status-attention-surface); }
 .evidence-pill-danger { background: var(--status-blocked-surface); }
-.evidence-workspace { display: grid; gap: 10px; margin-top: 6px; padding: .7rem .8rem; border-left: 3px solid var(--status-attention); background: var(--surface); min-width: 0; }
-.evidence-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 10px; }
+.evidence-workspace { display: grid; gap: 10px; min-width: 0; }
 .evidence-wording, .evidence-statement { display: grid; gap: 4px; min-width: 0; }
 .evidence-quote, .evidence-excerpt { margin: 0; padding-left: 10px; border-left: 3px solid currentColor; overflow-wrap: anywhere; }
-.evidence-sources { display: grid; gap: 8px; }
-.evidence-card { display: grid; gap: 6px; padding: .55rem .65rem; border: 1px solid var(--boundary); border-radius: 8px; min-width: 0; }
-.evidence-card[data-check-state="candidate"] { border-style: dashed; background: var(--surface-subdued); }
+.evidence-source-rows { display: grid; gap: 8px; }
+.evidence-card { display: grid; gap: 4px; padding: 0; border: 0; background: transparent; min-width: 0; }
+.evidence-card + .evidence-card { padding-top: 8px; }
+.evidence-card-head { margin: 0; }
 .evidence-card-url { overflow-wrap: anywhere; }
 .evidence-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 0; }
 .evidence-facts dt { font-weight: 700; }
@@ -2344,7 +2362,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 .task-plan-assurance-option { display: flex; gap: 8px; align-items: flex-start; }
 .task-plan-assurance-text { display: grid; gap: 2px; min-width: 0; }
 @media (max-width: 640px) {
-  .fact-lens-states, .evidence-states, .evidence-conflict { grid-template-columns: minmax(0, 1fr); }
+  .evidence-conflict { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Issue #902: bounded Proposal navigator and exact active-range comparison. */
@@ -2676,7 +2694,7 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .memory-composer > summary { width: fit-content; padding: .5rem .8rem; border: 1px solid var(--boundary-strong); border-radius: 8px; color: var(--action-text); cursor: pointer; font-weight: 700; }
 .memory-composer:not([open]) > :not(summary) { display: none; }
 .memory-create-form > button[type="submit"], .memory-candidate-form > button[type="submit"] { min-height: 34px; background: var(--action-primary); color: var(--action-primary-text); border: 1px solid var(--action-primary); border-radius: 8px; padding: .5rem 1rem; cursor: pointer; }
-.fact-lens-row > .review-finding { margin: 0; border: 0; padding: 0; }
+.fact-lens-row > .review-finding { margin: 0; }
 /* A4 shared controls — #1318 / Owner #1314 (additive integration boundary). */
 :root { --motion-fast: 120ms; --motion-base: 180ms; --motion-slow: 240ms; --motion-highlight: 1200ms; --motion-marker: 400ms; --motion-ease: cubic-bezier(.2,.8,.2,1); --motion-exit: ease-in; }
 .manuscript-jump-highlight { animation: manuscript-jump var(--motion-highlight) var(--motion-exit); }
@@ -3085,17 +3103,17 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .ProseMirror .editorial-mark-applied-badge[data-mark-category] { color: var(--category-text); background: var(--category-fill); }
 .ProseMirror .editorial-mark[data-mark-filtered-out="true"] { background-color: transparent; border-bottom-color: color-mix(in srgb, var(--category-accent) 20%, transparent); outline: none; }
 .ProseMirror :is(.editorial-mark-point, .editorial-mark-applied-badge)[data-mark-filtered-out="true"] { opacity: .25; }
-.editorial-mark-filters { flex: none; background: var(--surface); }
+.editorial-mark-filters { flex: none; display: flex; align-items: center; min-width: 0; box-sizing: border-box; background: var(--surface); }
 .editorial-mark-filter-popover { position: fixed; margin: 0; width: 280px; max-height: min(440px, 65vh); overflow: auto; box-sizing: border-box; padding: .7rem; color: var(--text); background: var(--surface); border: 1px solid var(--boundary); border-radius: 8px; box-shadow: 0 4px 16px var(--shadow); }
 .editorial-mark-filter-popover > strong { display: block; margin-bottom: .4rem; font-size: .8rem; }
 .editorial-mark-filter-popover .editorial-mark-search { width: 100%; box-sizing: border-box; }
-.editorial-mark-disclosure { line-height: 16px; margin: 0; padding: .15rem .55rem; font-size: .7rem; color: var(--text-subdued); }
-.editorial-mark-filter-summary { padding-inline: .55rem; line-height: 16px; }
+.editorial-mark-disclosure { flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 16px; margin: 0; padding: .15rem .55rem; font-size: .7rem; color: var(--text-subdued); }
+.editorial-mark-filter-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px .55rem; line-height: 16px; }
 .editorial-mark-filter-chips { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: .4rem; }
 .editorial-mark-filter-chips button { min-height: 28px; padding: .15rem .45rem; border: 1px solid var(--boundary); border-radius: 999px; font-size: .76rem; }
 .editorial-mark-filter-chips button[aria-pressed="true"] { background: var(--category-fill, var(--surface-subdued)); color: var(--category-text, var(--text)); border-color: var(--category-accent, var(--focus)); box-shadow: inset 0 0 0 1px var(--category-accent, var(--focus)); font-weight: 700; }
 .editorial-mark-search { width: 100%; box-sizing: border-box; min-height: 30px; }
-.editorial-mark-filter-summary { margin: .3rem 0 0; color: var(--text-subdued); font-size: .76rem; }
+.editorial-mark-filter-summary { margin: 0; color: var(--text-subdued); font-size: .76rem; }
 @media (forced-colors: active) {
   .editorial-mark-card[data-mark-category] { border-color: CanvasText; background: Canvas; }
   .editorial-mark-category-badge { background: Canvas; color: CanvasText; border: 1px solid CanvasText; }
@@ -3290,3 +3308,9 @@ button.danger:hover { box-shadow: inset 0 0 0 1px var(--status-blocked); }
   .house-row { grid-template-columns: minmax(0, 1fr); }
   .house-row-head { display: none; }
 }
+
+/* 要怎样导入？ (Issue #1682): the small question a dropped file asks. */
+.import-entry-sheet { width: min(460px, calc(100vw - 2rem)); }
+.import-entry-sheet .sheet-bar h3 { overflow-wrap: anywhere; }
+.import-entry-sheet .sheet-body:empty { display: none; }
+.import-entry-sheet .sheet-foot { display: flex; flex-wrap: wrap; gap: .5rem; }

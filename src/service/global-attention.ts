@@ -612,7 +612,7 @@ function analysisTaskItemWithoutAttribution(reading: AnalysisTaskAttentionReadin
           target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId }, technical,
         });
       }
-      return item('exceptions', 'analysis-blocked', { itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
+      return item('exceptions', 'analysis-blocked', { itemId, blocked: true, at: run.stateAt, book, object, facts: { ...(run.stopReason === undefined ? {} : { stopReason: run.stopReason }) }, nextStep: 'view-run', target, technical });
     // 结果待确认 (Issue #51, S16c; ATTN-002, NOTIF-004): a stopped Run that holds ranges whose sent requests' results cannot be
     // known is listed in 异常与结果待确认 whatever stopped it — unless an account limit needs the model service first — and
     // its next step is to see which ranges; never a repeat-shaped action.

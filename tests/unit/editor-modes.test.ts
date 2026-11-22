@@ -8,6 +8,7 @@ import {
   clampRegion,
   mountRegionSeparator,
   presetTypography,
+  renderViewSettings,
   steppedRegion,
   typographyProperties,
   type ViewState,
@@ -162,6 +163,60 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
     expect(view.current.typography).toEqual({ ...presetTypography('reading'), fontSize: 21, columnWidth: 30 });
     await Promise.all([view.setRegionWidth('supportingWidth', 400), view.setRegionWidth('drawerWidth', 500), view.setRegionHidden('position-rail', true)]);
     expect(view.current.regions).toEqual({ supportingWidth: 400, drawerWidth: 500, hidden: ['position-rail'] });
+  });
+
+});
+
+describe('reading size slider', () => {
+  let restore: () => void;
+  beforeEach(() => { restore = installMiniDom(); });
+  afterEach(() => restore());
+
+  function mountSlider(api: Pick<PreferencesRendererApi, 'savePreference'>) {
+    const root = new FakeRoot();
+    const status = vi.fn();
+    const view = new ViewPreferences(api, () => root);
+    const section = renderViewSettings(view, status).element as unknown as MiniElement;
+    const slider = section.querySelector('[data-view-typography="fontSize"]')!;
+    const change = (size: number) => {
+      slider.value = String(size);
+      slider.dispatchEvent({ type: 'input' });
+      slider.dispatchEvent({ type: 'change' });
+    };
+    return { root, status, slider, change };
+  }
+
+  it('keeps newer slider input under focus when an older save repaints', async () => {
+    const { api, values } = fakeApi();
+    const midpoint = Promise.withResolvers<void>(), home = Promise.withResolvers<void>();
+    const answers = [midpoint, home];
+    const { root, status, slider, change } = mountSlider({ savePreference: async request => {
+      await answers.shift()?.promise;
+      return api.savePreference(request);
+    } });
+    slider.focus();
+    change(19);
+    change(14);
+    midpoint.resolve();
+    await vi.waitFor(() => expect(root.properties.get('--manuscript-font-size')).toBe('19px'));
+    expect(slider.value).toBe('14');
+    change(Number(slider.value) + 1);
+    home.resolve();
+    await vi.waitFor(() => expect(status).toHaveBeenCalledTimes(3));
+    expect(values()['editor.typography']).toMatchObject({ fontSize: 15 });
+    expect([slider.value, root.properties.get('--manuscript-font-size')]).toEqual(['15', '15px']);
+    expect(miniDocument.activeElement).toBe(slider);
+  });
+
+  it('rolls back the slider when its final save fails', async () => {
+    const { api, savePreference } = fakeApi();
+    const { root, status, slider, change } = mountSlider(api);
+    change(15);
+    await vi.waitFor(() => expect(status).toHaveBeenCalledTimes(1));
+    savePreference.mockRejectedValueOnce(new Error('disk full'));
+    change(16);
+    await vi.waitFor(() => expect(status).toHaveBeenLastCalledWith(expect.any(String), 'error'));
+    expect([slider.value, root.properties.get('--manuscript-font-size')]).toEqual(['15', '15px']);
   });
 });
 
