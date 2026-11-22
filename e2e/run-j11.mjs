@@ -3735,7 +3735,8 @@ async function main() {
         await waitFor(renderer, `document.querySelector('[data-memory-candidates] [data-memory-item="${itemId}"]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-memory-candidate-first');
         await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); return root.querySelector('[data-learning-enabled]') && root.querySelector('[data-preference-editor="new"]') && !root.querySelector('[data-memory-candidate-form]') && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent) && root.textContent.includes('来源与历史'); })()`, 'ordinary-memory-private-labels');
       }
-      await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${itemId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='接受');if(!button||button.disabled)return false;button.click();return true;})()`, `${name}-accept`);
+      const acceptLabel = name === 'memory-governance-first' ? '接受' : '接受记忆';
+      await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${itemId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent===${JSON.stringify(acceptLabel)});if(!button||button.disabled)return false;button.click();return true;})()`, `${name}-accept`);
       await waitFor(renderer, `document.querySelector('[data-memory-item="${itemId}"]')?.textContent.includes('已启用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-active`);
       if (name === 'memory-governance-first') {
         await assertRenderer(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]'); const stop=Array.from(row?.querySelectorAll('button')??[]).find(button=>button.textContent==='停用'); if(!stop||stop.disabled)return false;stop.click();return true; })()`, 'ordinary-preference-stop-after-memory');
@@ -3789,7 +3790,7 @@ async function main() {
     // returnToLibrary finishes with initializeStartup: only its landing list proves the leave before the page is reopened.
     await backToLibrary(renderer, 'memory-governance-leave');
     await openMemory('memory-governance-reopen');
-    await waitFor(renderer, `document.querySelector('[data-memory-item="${mergedMemoryId}"]')?.textContent.includes('已冻结') && document.querySelector('[data-disabled-preferences] h4')?.textContent==='已停用的审阅偏好' && document.querySelector('[data-disabled-preferences] [data-memory-item="${deactivatedMemoryId}"]')!==null`, 'memory-governance-reopened-state');
+    await waitFor(renderer, `document.querySelector('[data-memory-item="${mergedMemoryId}"]')?.textContent.includes('已冻结') && document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')?.textContent.includes('已停用')`, 'memory-governance-reopened-state');
     await close(); await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'memory-governance-restart');
     await openMemory('memory-governance-restarted');

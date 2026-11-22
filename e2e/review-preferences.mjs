@@ -16,11 +16,12 @@ export async function reviewPreferenceLifecycle(renderer, waitFor, requireJourne
   await inWindowPress(renderer, waitFor, true)(reenable, 'lifecycle-reenable-focus');
   const beforeReenable = await renderer.evaluate('window.ai7.inspectGlobalAgent().then(p=>p.directives.length)');
   const enter = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
-  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...enter });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...enter, text: '\r', unmodifiedText: '\r' });
   await waitFor(renderer,`document.querySelector('[data-memory-preferences] ${row}')!==null`,'lifecycle-enabled-group');
   requireJourney((await renderer.evaluate(`window.ai7.inspectGlobalAgent().then(p=>p.items.some(i=>i.itemId===${JSON.stringify(itemId)}&&i.state==='active'))`))===true,'lifecycle-service-active');
-  for (let repeat=0;repeat<8;repeat++) await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...enter, autoRepeat: true });
+  for (let repeat=0;repeat<8;repeat++) await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...enter, text: '\r', unmodifiedText: '\r', autoRepeat: true });
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...enter });
+  await waitFor(renderer, `document.querySelector('[data-learning-enabled]')?.disabled===false`, 'lifecycle-repeat-settled');
   await renderer.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
   requireJourney((await renderer.evaluate(`window.ai7.inspectGlobalAgent().then(p=>p.directives.length===${beforeReenable + 1}&&p.items.some(i=>i.itemId===${JSON.stringify(itemId)}&&i.state==='active'))`))===true,'lifecycle-held-enter-once');
   await press(await button('停用'),'lifecycle-stop-again');
