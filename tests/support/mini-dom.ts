@@ -17,6 +17,7 @@ export interface MiniEvent {
   readonly metaKey?: boolean;
   readonly isComposing?: boolean;
   readonly keyCode?: number;
+  readonly relatedTarget?: EventTarget | MiniElement | null;
   target?: MiniElement;
   defaultPrevented?: boolean;
   preventDefault?(): void;
@@ -317,6 +318,7 @@ export const miniDocument = {
   removeEventListener(type: string, listener: Listener): void { miniDocument.body.removeEventListener(type, listener); },
   body: new MiniElement('body'),
   activeElement: null as MiniElement | null,
+  adoptedStyleSheets: [] as Array<{ cssRules: Array<{ cssText: string }>; replaceSync(text: string): void }>,
   querySelector(selector: string): MiniElement | null { return miniDocument.body.querySelector(selector); },
   createElementNS(_namespace: string, tag: string): MiniElement { return new MiniElement(tag); },
   createTextNode(data: string): MiniElement { const text = new MiniElement('#text'); text.textContent = data; return text; },
@@ -331,9 +333,11 @@ export const miniDocument = {
 /** Install the minimal DOM as the globals a renderer module reads; answers how to take them away again. */
 export function installMiniDom(): () => void {
   const globals = globalThis as Record<string, unknown>;
-  const saved = ['document', 'HTMLElement', 'HTMLButtonElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'CSS'].map((key) => [key, globals[key]] as const);
+  const saved = ['document', 'HTMLElement', 'HTMLButtonElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'CSS', 'CSSStyleSheet'].map((key) => [key, globals[key]] as const);
   miniDocument.body.replaceChildren();
   miniDocument.activeElement = null;
+  miniDocument.adoptedStyleSheets = [];
+  globals['CSSStyleSheet'] = class { cssRules: Array<{ cssText: string }> = []; replaceSync(text: string): void { this.cssRules = text ? [{ cssText: text }] : []; } };
   globals['document'] = miniDocument;
   globals['HTMLElement'] = MiniElement;
   globals['HTMLButtonElement'] = MiniButton;
