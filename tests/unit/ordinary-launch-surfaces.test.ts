@@ -72,6 +72,7 @@ function commit(store: EditorialStore, launch: TaskLaunchPreviewInput['launch'],
     case 'launchInitialEvaluation': return store.launchInitialEvaluation({ ...launch.input, bookId }, policy);
     case 'launchReadersReport': return store.launchReadersReport({ ...launch.input, bookId }, policy);
     case 'launchEvaluationRewrite': return store.launchEvaluationRewrite({ ...launch.input, bookId }, policy);
+    default: throw new Error('expected a ledger task launch');
   }
 }
 

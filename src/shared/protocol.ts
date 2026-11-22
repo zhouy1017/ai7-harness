@@ -9,7 +9,7 @@ export { type ManuscriptExportOptions, DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type M
 import type { BookFindingsReadProjection, InspectBookFindingsInput, InspectBookFindingsServiceInput } from './protocol/review.js';
 import type { TransportSettings } from './protocol/transport-settings.js';
 export type { TransportSettings } from './protocol/transport-settings.js';
-import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, LedgerTaskLaunchOperation } from './runtime-execution-config.js';
+import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, TaskLaunchPreviewInput, ReviewExecutionLaunchInput } from './runtime-execution-config.js';
 export type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
@@ -3370,9 +3370,7 @@ export type TaskOverviewOperation = (typeof TASK_OVERVIEW_OPERATIONS)[number];
 export type TaskOverviewCall = { [K in TaskOverviewOperation]: { operation: K; bookId: string; input: Omit<ServiceOperationMap[K]['input'], 'bookId'> } }[TaskOverviewOperation];
 export type TaskOverviewCallResult = ServiceOperationMap[TaskOverviewOperation]['output'];
 
-export type TaskLaunchPreviewInput = { bookId: string; launch: { [K in LedgerTaskLaunchOperation]: {
-  operation: K; input: Omit<ServiceOperationMap[K]['input'], 'bookId'>;
-} }[LedgerTaskLaunchOperation] };
+export type { TaskLaunchPreviewInput } from './runtime-execution-config.js';
 
 export interface StartQuickTasksInput {
   readonly tasks: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string;
@@ -4564,8 +4562,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * decisions other than 忽略并说明 go through the mark and Apply operations with the finding's `markId`.
    */
   inspectReviewWorkspace: { input: InspectReviewWorkspaceInput; output: ReviewWorkspaceProjection };
-  launchReviewRun: { input: PrepareReviewRunInput & TaskExecutionLaunchInput & {
-    evidenceAssuranceLevel?: EvidenceAssuranceLevel; startWhen?: 'now' | 'when-online' }; output: ReviewWorkspaceProjection };
+  launchReviewRun: { input: ReviewExecutionLaunchInput; output: ReviewWorkspaceProjection };
   prepareReviewRun: { input: PrepareReviewRunInput; output: ServiceJobProjection };
   authorizeReviewRun: { input: AuthorizeReviewRunInput; output: ReviewWorkspaceProjection };
   continueReviewRun: { input: ContinueReviewRunInput; output: ReviewWorkspaceProjection };
