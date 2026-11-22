@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { cp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -26,7 +26,7 @@ beforeAll(async () => {
   legacy = await createUpgradeSample1(roots.dataRoot, roots.codeRoot);
   const old = await legacy.openLegacy(roots.dataRoot);
   try {
-    old.saveModelServiceConnection('本地验证',randomUUID(),'ready','opencode-go');
+    // The captured SampleBook library already has this channel's opaque reference.
     old.selectBothRoleModels('opencode-go','glm-5.3-flash');
   } finally { old.markCleanShutdown(); old.close(); }
   const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
@@ -112,7 +112,12 @@ it('resumes each phase, imports the older package and recovers missing old files
   expect(existsSync(join(root,newKey))).toBe(true);
   await rm(join(root,original.find(member => member.path.startsWith('objects/'))!.path));
   await beginUpgradeRollback(root);
+  const interruptedCopy = join(root,'store','payloads');
+  await mkdir(interruptedCopy,{recursive:true});
+  await writeFile(join(interruptedCopy,'previous-copy.partial'),'');
   for (const stage of ['restore', 'save-new', 'save-new-renamed', 'publish-old', 'publish-old-renamed']) await expect(run()).rejects.toThrow('interrupted ' + stage);
+  // NTFS can retain the last new-only live entry after the old database rename is durable.
+  await cp(join(roots.inputRoot,'sample1-edited.docx'),join(root,newKey));
   expect(await run()).toMatchObject({ restored: true });
   expect(storeRevisionOnDisk(join(root, 'store', 'ai7.sqlite'))).toBe(116);
   expect((await readDataVersionMarker(root))?.dataVersion).toBe(1);
@@ -164,6 +169,15 @@ it('resumes each phase, imports the older package and recovers missing old files
   await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
   expect(existsSync(phase)).toBe(false);
   expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
+  await rename(away,join(root,kept));
+  await beginUpgradeRollback(root);
+  await expect(resumeUpgrade(root,'0.8.0',stage => { if(stage === 'publish-old') throw Error('power loss'); })).rejects.toThrow('power loss');
+  expect(existsSync(join(root,'store'))).toBe(false);
+  await rename(join(root,kept),away);
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+  expect(existsSync(phase)).toBe(false);
+  expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
+  expect((await fileDigest(join(root,newKey)))?.sha256).toBe(newObject);
   await rename(away,join(root,kept));
   await beginUpgradeRollback(root);
   expect(await resumeUpgrade(root, '0.8.0')).toMatchObject({ restored: true });
@@ -226,6 +240,32 @@ it('accepts only the unlink order authorized by an abandoned old import', async 
   await beginUpgrade(root);
   expect(await resumeUpgrade(root, '0.8.0')).toMatchObject({ restored: false });
   const opened = await EditorialStore.open(root, roots.codeRoot);
-  try { expect(opened.listBooks(null).items).toHaveLength(2); }
+  try {
+    expect(opened.listBooks(null).items).toHaveLength(2);
+    await opened.stageSelectedManuscript(randomUUID(),selected);
+  }
   finally { opened.markCleanShutdown(); opened.close(); }
+  expect((await fileDigest(join(root,'objects',source.key)))?.sha256).toBe(source.digest);
+  await rm(backupLocationFor(root),{recursive:true});
+  await beginUpgradeRollback(root);
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  const saved = (await readdir(join(root,'shell'))).find(name => name.startsWith('store-after-0.8.0-'))!;
+  expect((await fileDigest(join(root,'shell',saved,'payloads','objects',source.key)))?.sha256).toBe(source.digest);
+  expect(existsSync(join(root,'objects',source.key))).toBe(false);
 }, 180_000);
+
+it.each(['save-old','publish','record'] as const)('catches lost payloads at %s and preserves the old library and verified backup', async stage => {
+  const root = join(roots.inputRoot,'lost-payload-'+stage);
+  await cp(roots.dataRoot,root,{recursive:true});
+  await beginUpgrade(root);
+  await expect(resumeUpgrade(root,'0.8.0',phase => { if(phase === stage) throw Error('power loss'); })).rejects.toThrow('power loss');
+  const missing = (await databasePackageSources(root)).find(member => member.member.startsWith('objects/'))!;
+  await rm(missing.path);
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_FILES_INVALID'});
+  expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
+  expect(existsSync(join(root,'shell','storage-upgrade.json'))).toBe(false);
+  const location = backupLocationFor(root);
+  const archive = (await readdir(location)).find(name => name.endsWith('.ai7db'))!;
+  const {manifest} = await verifyDatabasePackage(join(location,archive),{dataRoot:root});
+  expect(manifest.members.some(member => member.path === missing.member)).toBe(true);
+},180_000);

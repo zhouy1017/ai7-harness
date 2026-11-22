@@ -1063,17 +1063,20 @@ async function main() {
           const [healthy] = await waitForRendererCount(recovery,1,'upgrade-no-source-opened');
           await settings(healthy);
           requireJourney(await healthy.evaluate(`window.ai7.inspectDataVersion().then(v=>!v.canRollbackUpgrade && v.dataVersion===2)`),'upgrade-no-source-healthy');
+          requireJourney(await healthy.evaluate(`!Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='回到升级前的数据' && !b.disabled)`),'upgrade-no-source-no-button');
           requireJourney(!existsSync(join(unavailable,'shell','storage-upgrade.json')),'upgrade-no-source-no-restart');
           await close();
           at('upgrade-retained-rollback');
           const back = await launch(undefined,undefined,root);
           const [home] = await waitForRendererCount(back,1,'upgrade-library-reopened');
           await settings(home);
+          await waitFor(home,`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='回到升级前的数据' && !b.disabled)`,'upgrade-rollback-available');
           await click(home,'回到升级前的数据','upgrade-rollback-button');
         } else {
           await settings(page);
           at('upgrade-backup-rollback');
           requireJourney(await marker(root) === 2,'upgrade-recorded');
+          await waitFor(page,`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='回到升级前的数据' && !b.disabled)`,'upgrade-backup-rollback-available');
           await rm(join(root,'objects'),{recursive:true});
           await click(page,'回到升级前的数据','upgrade-backup-rollback-button');
         }
