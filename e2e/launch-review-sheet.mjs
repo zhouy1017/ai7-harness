@@ -1,5 +1,6 @@
 import { pointerClick } from './dispatch-chooser.mjs';
 import { popoverShownInside } from './launch-task-bar.mjs';
+import { observeViewPlan } from './view-plan-observation.mjs';
 
 /** Start exactly as the editor does, then open the resulting run's read-only plan. */
 export async function launchReviewFromSheet(renderer, waitFor, viewport) {
@@ -27,8 +28,9 @@ export async function launchReviewFromSheet(renderer, waitFor, viewport) {
   const runId = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.run?.reviewRunId)`);
   if (typeof runId !== 'string') throw new Error('REVIEW_SHEET_RUN_MISSING');
   // The running review draws its card again as findings arrive above 查看计划; the pointer rests on it, then presses once.
-  await pointerClick(renderer, waitFor, '[data-review-action="view-plan"]', 'review-sheet-view-plan', { rest: true });
-  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef === ${JSON.stringify(runId)}`, 'review-sheet-run-plan');
+  const press = () => pointerClick(renderer, waitFor, '[data-review-action="view-plan"]', 'review-sheet-view-plan', { rest: true });
+  const awaitPlan = () => waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef === ${JSON.stringify(runId)}`, 'review-sheet-run-plan');
+  await observeViewPlan(renderer, runId, press, awaitPlan);
   if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanState==='waiting'`)) {
     try {
       for(const [width,height] of [[1280,800],[1008,681]]) {
