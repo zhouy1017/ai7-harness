@@ -519,7 +519,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const verifiedLineageSources = selectedChoice.reimportLineageSourceVersionIds;
       // The first verified source, else 来源关系未确认, and the exact same-Book source, else a new one, are chosen to begin with
       // (Issue #1410 item 32B); each stays changeable.
-      if (reimportLineageChoice === undefined) reimportLineageChoice = verifiedLineageSources[0] ?? 'unconfirmed';
+      if (reimportLineageChoice === undefined) reimportLineageChoice = verifiedLineageSources[0]?.sourceVersionId ?? 'unconfirmed';
       if (reuseSourceVersionId === undefined) reuseSourceVersionId = exactSameBookSources.length === 1 ? exactSameBookSources[0]! : null;
 
       const lineageChoices = element('fieldset');
@@ -547,7 +547,7 @@ export function createImportReview(options: ImportReviewOptions) {
         if (reimportLineageChoice === undefined) revealedControl = radio;
       };
       addLineageChoice('unconfirmed', technicalWords('来源关系未确认', '不确定是哪个原文件'), technicalWords('继续保守的两方比较；这不会被解释为来源确认或阻断导入。', '只对比这次导入与当前稿件。'));
-      verifiedLineageSources.forEach((sourceVersionId, index) => addLineageChoice(sourceVersionId,
+      verifiedLineageSources.forEach(({ sourceVersionId }, index) => addLineageChoice(sourceVersionId,
         verifiedLineageSources.length === 1 ? technicalWords('确认这个来源版本', '确认此文件') : technicalWords(`确认来源版本（第 ${index + 1} 个）`, `确认第 ${index + 1} 个文件`),
         technicalWords('使用该图书拥有且已关联主稿件结果修订版的精确来源，执行三方比较。', '按这份原文件对比变化，结果更准确。'), sourceVersionId));
       const loadLineagePage = async (after: string | null, control: HTMLButtonElement): Promise<void> => {
@@ -560,7 +560,10 @@ export function createImportReview(options: ImportReviewOptions) {
           });
           const pageItems = [...page.items];
           if (reimportLineageChoice !== undefined && reimportLineageChoice !== 'unconfirmed' &&
-            !pageItems.includes(reimportLineageChoice)) pageItems.push(reimportLineageChoice);
+            !pageItems.some((item) => item.sourceVersionId === reimportLineageChoice)) {
+            const selected = verifiedLineageSources.find((item) => item.sourceVersionId === reimportLineageChoice);
+            if (selected !== undefined) pageItems.push(selected);
+          }
           const targetChoices = staged.targetChoices.map((choice) =>
             choice.kind !== 'existing-book' || choice.id !== selectedChoice.id
             ? choice

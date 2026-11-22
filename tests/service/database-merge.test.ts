@@ -1609,6 +1609,38 @@ describe('what a merge refuses, puts back and brings forward', () => {
     }
   }, 180_000);
 
+  it('brings an item the editor marked 暂不使用 with its record, still not used and not waiting in 待我处理 (Issue #1671)', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let packagePath: string;
+    let itemId: string;
+    try {
+      const bookId = emptyBook(source, '甲书');
+      itemId = await libraryItem(source, '甲书参考', '甲书的参考资料');
+      attribute(source, itemId, 0, bookId);
+      setLibraryDecision(source, { materialId: itemId, expectedDecisions: 1, decision: { kind: 'not-used' } });
+      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
+    } finally {
+      source.close();
+    }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      const preview = await target.inspectDatabaseImport(packagePath);
+      expect([preview.mergeNotices, preview.mergeRefusal]).toEqual([[], null]);
+      await target.prepareDatabaseMerge(preview.previewId, T);
+    } finally {
+      target.close();
+    }
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      const item = target.inspectLibraryMaterial(itemId);
+      expect([item.notUsed !== undefined, item.decisionCount, item.reference]).toEqual([true, 4, { state: 'pending' }]);
+      expect(target.inspectGlobalAttention(() => null, false).groups.flatMap((group) => group.items).filter((entry) => entry.object.kind === 'library-material')).toEqual([]);
+      target.markCleanShutdown();
+    } finally {
+      target.close();
+    }
+  }, 180_000);
+
   it('merges the Book without source-machine translation attempts and preserves destination attempts exactly', async () => {
     let calls = 0;
     const failedAttempt = async (store: EditorialStore, title: string) => {

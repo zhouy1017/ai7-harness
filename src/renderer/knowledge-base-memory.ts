@@ -4,6 +4,9 @@ import type { EditorialLearningProjection, HouseReviewPreferenceProjection, Lear
 import { learningChoiceLabel, REVIEW_PREFERENCES_NOTE } from './quality-learning-labels.js';
 import { editorialPreferenceEditor, mountWordTrackedEditDetail } from './quality-learning.js';
 
+/** A retired entry (Issue #1655) is never listed, so its history never reaches these labels. */
+type ListedState = 'proposed' | 'active' | 'inactive' | 'frozen';
+
 /** Both entrances use the same controls and current preference/memory owners (#1377). */
 export async function mountReviewPreferences(root: HTMLElement, api: RendererApi,
   openSourceVersion: (bookId: string, sourceVersionId: string) => Promise<void>): Promise<void> {
@@ -116,7 +119,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         const titles = new Set((sources ?? []).map((source) => source.bookTitle));
         for (const source of [...current.positiveExamples, ...current.negativeExamples]) titles.add(bookTitle(source.bookId));
         for (const title of titles) lineage.append(el('p', `来自《${title}》`));
-        for (const version of history) lineage.append(el('p', `${localInstantLabel(version.recordedAt)} · ${{ proposed: '待确认', active: '已启用', inactive: '已停用', frozen: '已冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]}`));
+        for (const version of history) lineage.append(el('p', `${localInstantLabel(version.recordedAt)} · ${{ proposed: '待确认', active: '已启用', inactive: '已停用', frozen: '已冻结' }[(version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation) as ListedState]}`));
         if (history.length === 0) lineage.append(el('p', current.recordedAt));
         if (nextHistoryOffset != null) lineage.append(action('更早历史', () => {
           void api.inspectEditorialLearning({ signalOffset, itemOffset, detailItemId: current.itemId, historyOffset: nextHistoryOffset })
@@ -216,7 +219,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         lineage.append(el('p', technicalWords(`图书 ${source.bookId} · 标记 ${source.markId ?? '无'} · 决定 ${source.decisionId} · 修订 ${source.revisionId} · 日志 ${source.journalSequence} · 原因版本 ${source.reasonRevision}`)));
       }
       for (const source of sources ?? []) lineage.append(el('p', technicalWords(`来源 ${source.sourceKey} · 图书 ${source.source.bookId} · ${source.admission.kind === 'automatic' ? '默认本机准入' : `编辑准入 ${source.admission.decisionId}`} · ${source.sourceKind === undefined ? `决定 ${source.source.decisionId}` : source.sourceKind === 'manual-edit-journal' ? '手动修改观察' : 'Word 修改样本'}`)));
-      for (const version of history) lineage.append(el('p', `${technicalWords(`v${version.ordinal} · `)}${{ proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]} · ${localInstantLabel(version.recordedAt)}`));
+      for (const version of history) lineage.append(el('p', `${technicalWords(`v${version.ordinal} · `)}${{ proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[(version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation) as ListedState]} · ${localInstantLabel(version.recordedAt)}`));
       if (nextHistoryOffset != null) lineage.append(action('更早版本', () => {
         void api.inspectEditorialLearning({ signalOffset, itemOffset, detailItemId: current.itemId, historyOffset: nextHistoryOffset })
           .then((next) => { page = next; paint(); }).catch(() => { status.textContent = '无法读取更早版本。'; });

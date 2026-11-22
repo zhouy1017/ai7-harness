@@ -395,9 +395,11 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const included = el('h5', undefined, next.content.includedTruncated ? `${PACKAGE_INCLUDED_HEADING} · ${PACKAGE_INCLUDED_TRUNCATED}` : PACKAGE_INCLUDED_HEADING);
     block.append(included, itemList('package-included', next.content.included));
     if (next.content.excluded.length > 0) block.append(el('h5', undefined, PACKAGE_EXCLUDED_HEADING), itemList('package-excluded', next.content.excluded));
-    const limitations = el('ul', 'package-limitations');
-    for (const line of next.content.limitations) limitations.append(el('li', undefined, line));
-    block.append(el('h5', undefined, next.content.limitationsTruncated ? `${PACKAGE_LIMITATIONS_HEADING} · ${PACKAGE_LIMITATIONS_TRUNCATED}` : PACKAGE_LIMITATIONS_HEADING), limitations);
+    if (next.content.limitations.length > 0) {
+      const limitations = el('ul', 'package-limitations');
+      for (const line of next.content.limitations) limitations.append(el('li', undefined, line));
+      block.append(el('h5', undefined, next.content.limitationsTruncated ? `${PACKAGE_LIMITATIONS_HEADING} · ${PACKAGE_LIMITATIONS_TRUNCATED}` : PACKAGE_LIMITATIONS_HEADING), limitations);
+    }
     return block;
   }
 

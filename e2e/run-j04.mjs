@@ -1,4 +1,4 @@
-import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { capturePointerFailure, chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions } from './launch-task-bar.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
@@ -419,26 +419,102 @@ async function openAnalysisDestination(renderer, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis .baseline-analysis-card')`, `${name}-destination`);
 }
 
+// Opening the drawer also animates the page's reserved space (Issue #1664).
+async function waitForOfflineDrawerSettled(renderer, name) {
+  await waitFor(renderer, `new Promise(resolve => {
+    let previous;
+    const frame = () => {
+      const drawer=document.querySelector('#task-drawer');
+      const tab=document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]');
+      if(!drawer || !tab){resolve(false);return;}
+      const owners=[drawer,document.body];
+      const animating=owners.some(node=>node.getAnimations().some(animation=>animation.playState!=='finished'));
+      const rectangle=JSON.stringify([...owners,tab].map(node=>{
+        const r=node.getBoundingClientRect();return [r.x,r.y,r.width,r.height];
+      }));
+      if(!animating && rectangle===previous){resolve(true);return;}
+      if(previous!==undefined || animating){resolve(false);return;}
+      previous=rectangle;
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  })`, name);
+}
+
+async function assertOfflineControlReachable(renderer, selector, name) {
+  try {
+    await assertRenderer(renderer, `(() => {
+    const control=document.querySelector(${JSON.stringify(selector)});
+    if(!control)return false;
+    const r=control.getBoundingClientRect();
+    if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;
+    for(let parent=control.parentElement;parent;parent=parent.parentElement){
+      const style=getComputedStyle(parent),box=parent.getBoundingClientRect();
+      if(/auto|scroll|hidden|clip/.test(style.overflowX)&&(r.left<box.left||r.right>box.right))return false;
+      if(/auto|scroll|hidden|clip/.test(style.overflowY)&&(r.top<box.top||r.bottom>box.bottom))return false;
+    }
+    return control.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));
+    })()`, name);
+  } catch (error) {
+    Object.defineProperty(error, 'pointerFailure', { value: await capturePointerFailure(renderer, selector, { includeTargetAncestors: true }) });
+    throw error;
+  }
+}
+
+// The history panel is longer than the window. Reach its controls with real wheel
+// input before asserting visibility; pointerClick's scripted scroll is not evidence.
+async function scrollToOfflineControl(renderer, selector, name) {
+  for (let step=0;step<24;step++) {
+    const wheel=await renderer.evaluate(`(() => {
+      const control=document.querySelector(${JSON.stringify(selector)});
+      if(!control)return null;
+      const r=control.getBoundingClientRect();
+      if(r.top>=0&&r.bottom<=innerHeight)return null;
+      const page=document.querySelector('#screen').getBoundingClientRect();
+      return {x:Math.max(1,Math.min(innerWidth-1,page.left+Math.min(80,page.width/2))),
+        y:innerHeight/2,deltaY:Math.max(-500,Math.min(500,r.top+r.height/2-innerHeight/2))};
+    })()`);
+    if(wheel===null)break;
+    await renderer.send('Input.dispatchMouseEvent', {type:'mouseWheel',deltaX:0,...wheel});
+    await renderer.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+  }
+  await assertOfflineControlReachable(renderer, selector, name);
+}
+
 /**
  * Each ordinary update opens the execution chooser and starts from its bar. Its optional estimate is read-only;
  * after launch the frozen plan remains readable. Quick starts retain the Default Execution Rule owner.
  */
-async function startUpdate(renderer, mode, label, name, launch = true) {
+async function startUpdate(renderer, mode, label, name, launch = true, settleOfflineDrawer = false) {
   void label;
   // The previous Run's 查看结果 window may have opened over the page when it finished; the editor closes it first.
-  if (await renderer.evaluate(`!!document.querySelector('.task-result-window')`)) await pointerClick(renderer, waitFor, '.task-result-window [data-task-result-action="close"]', `${name}-result-close`);
+  if (await renderer.evaluate(`!!document.querySelector('.task-result-window')`)) {
+    if (settleOfflineDrawer) await assertOfflineControlReachable(renderer, '.task-result-window [data-task-result-action="close"]', `${name}-result-close-reachable`);
+    await pointerClick(renderer, waitFor, '.task-result-window [data-task-result-action="close"]', `${name}-result-close`);
+  }
+  if (settleOfflineDrawer) await waitForOfflineDrawerSettled(renderer, `${name}-drawer-settled`);
   // Below 1120 px the Task Drawer overlays the page: when it covers the history tab, the editor closes it first.
-  const tabCovered = `(() => { const tab=document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]'); if(!tab)return false; tab.scrollIntoView({block:'center',behavior:'instant'}); const r=tab.getBoundingClientRect(); return !tab.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)) && !!document.querySelector('#task-drawer:not([hidden])')?.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)); })()`;
+  const tabCovered = `(() => { const tab=document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]'); if(!tab)return false; ${settleOfflineDrawer ? '' : "tab.scrollIntoView({block:'center',behavior:'instant'});"} const r=tab.getBoundingClientRect(); return !tab.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)) && !!document.querySelector('#task-drawer:not([hidden])')?.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)); })()`;
   if (await renderer.evaluate(tabCovered)) {
     // Only the overlay form is closed away: a docked drawer (the page made room for it) over the tab is a defect of the page.
     requireJourney(await renderer.evaluate(`Number.parseFloat(getComputedStyle(document.body).paddingRight)===0`) === true, `${name}-docked-drawer-covers-tab`);
+    if (settleOfflineDrawer) await assertOfflineControlReachable(renderer, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close-reachable`);
     await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close`);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `${name}-drawer-closed`);
+  }
+  if (settleOfflineDrawer) {
+    await waitForOfflineDrawerSettled(renderer, `${name}-page-settled`);
+    await assertOfflineControlReachable(renderer, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab-reachable`);
   }
   await pointerClick(renderer, waitFor, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab`);
   const choice = `.baseline-analysis-card [data-analysis-action="${mode}"]`;
   await waitFor(renderer, `document.querySelector(${JSON.stringify(choice)})?.disabled===false`, `${name}-selected-plan-ready`);
+  if (settleOfflineDrawer) await scrollToOfflineControl(renderer, choice, `${name}-mode-reachable`);
   await pointerClick(renderer, waitFor, choice, `${name}-mode`);
+  if (settleOfflineDrawer) {
+    await waitForOfflineDrawerSettled(renderer, `${name}-launch-drawer-settled`);
+    await scrollToOfflineControl(renderer, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan-reachable`);
+  }
   await pointerClick(renderer, waitFor, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan`);
   if (!launch) return;
   await launchTaskFromBar(renderer, waitFor, name);
@@ -499,6 +575,48 @@ async function openReviewDestination(renderer, name) {
 async function reviewAction(renderer, selector, name) {
   await assertRenderer(renderer, `(() => { const button=document.querySelector(${JSON.stringify(selector)}); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; const more=button.closest('details.editorial-mark-more'); if(more&&!more.open)more.querySelector('summary').click(); button.click(); return true; })()`, name);
 }
+
+/**
+ * Issue #1683: a control a stage names is brought into view by real wheel input only, then required inside the window and topmost
+ * at its centre — read before the press, with no scripted scroll — and pressed by a real pointer. Each read waits two frames.
+ */
+function measureControl(node) {
+  if (!node) return null;
+  const r = node.getBoundingClientRect();
+  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  let inside = r.width > 0 && r.height > 0 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+  for (let parent = node.parentElement; inside && parent && parent !== document.scrollingElement; parent = parent.parentElement) {
+    const style = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
+    const left = bounds.left + parent.clientLeft, top = bounds.top + parent.clientTop;
+    if (style.overflowX !== 'visible') inside &&= r.left >= left && r.right <= left + parent.clientWidth;
+    if (style.overflowY !== 'visible') inside &&= r.top >= top && r.bottom <= top + parent.clientHeight;
+  }
+  return { x, y, top: r.top, left: r.left, width: innerWidth, height: innerHeight, inside: inside && node.contains(document.elementFromPoint(x, y)) };
+}
+const controlInWindow = (selector) => `new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve((${measureControl})(document.querySelector(${JSON.stringify(selector)}))))))`;
+async function wheelIntoWindow(renderer, selector, name) {
+  for (let move = 0; move < 16; move += 1) {
+    const state = await renderer.evaluate(controlInWindow(selector));
+    requireJourney(state !== null, `${name}-present`);
+    if (state.inside) return state;
+    const deltaY = Math.round(state.y - state.height / 2);
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(Math.min(state.width - 8, Math.max(8, state.x))), y: Math.round(state.height / 2), deltaX: 0, deltaY: deltaY === 0 ? 1 : deltaY });
+  }
+  requireJourney(false, `${name}-in-window`);
+}
+async function pressInWindow(renderer, selector, name) {
+  const { x, y } = await wheelIntoWindow(renderer, selector, name);
+  const point = { x, y, button: 'left', clickCount: 1 };
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, buttons: 1 });
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, buttons: 0 });
+}
+/** Between a source row and its category, the one element that draws a border or its own background (Issue #1683 item 7). */
+const SOURCE_ROW_FRAMES = `((row) => {const framed=(node)=>{const s=getComputedStyle(node);
+  const transparent=(color)=>color==='transparent'||color.startsWith('rgba(')&&parseFloat(color.slice(color.lastIndexOf(',')+1))===0;
+  const border=['Top','Right','Bottom','Left'].some(side=>parseFloat(s['border'+side+'Width'])>0&&s['border'+side+'Style']!=='none'&&!transparent(s['border'+side+'Color']));
+  return border||!transparent(s.backgroundColor)||s.backgroundImage!=='none';};
+  const ancestors=[];for(let node=row.parentElement;node&&!node.matches('section.review-group');node=node.parentElement)if(framed(node))ancestors.push(node.className);
+  return {row:framed(row),ancestors};})`;
 
 async function openMarkMore(renderer, markId, name) {
   await waitFor(renderer, `document.querySelector('[data-mark-card="'+CSS.escape(${JSON.stringify(markId)})+'"] .editorial-mark-more')`, `${name}-ready`, 30_000);
@@ -2468,7 +2586,7 @@ async function main() {
     at('sync-current-prepare');
     at('connectivity-offline-bar');
     await writeFile(connectivityPath, 'offline');
-    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'offline-sync-open', false);
+    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'offline-sync-open', false, true);
     // A new start has no prepared record; the optional timing choice and launch remain keyboard reachable.
     try {
       for(const [width,height] of [[1280,800],[1008,681]]) {
@@ -3437,7 +3555,7 @@ async function main() {
       ['待核查', '证据不足'].includes(result.states.factualVerification) && result.policyPin.document === 'docs/policies/factual-verification-policy.md') &&
       sourced?.states.factualVerification === '证据不足' && sourced.sourceCounts.checked === 0 && lens.run?.plannedLevel === 'standard' && lens.run.disclosure === null,
     'factual-lens-results', { total: lens?.total, counts: lens?.counts });
-    await assertRenderer(renderer, `(() => { const row=document.querySelector('.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]'); return row?.dataset.outcome==='证据不足' && JSON.stringify(Array.from(row.querySelectorAll('[data-state-term]')).map((cell)=>cell.dataset.stateTerm))===JSON.stringify(['引文完整性','断言支持','事实核查']); })()`, 'factual-lens-columns');
+    await assertRenderer(renderer, `(() => { const row=document.querySelector('.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]'); return row?.dataset.outcome==='证据不足' && row.querySelector('article.fact-card')?.dataset.factCard==='collapsed' && JSON.stringify(Array.from(row.querySelectorAll('[data-state-term]')).map((cell)=>[cell.dataset.stateTerm,cell.textContent]))===JSON.stringify([['事实核查','证据不足']]); })()`, 'factual-lens-columns');
     await assertRenderer(renderer, `(() => { const group=document.querySelector('section.review-group[data-review-category="factual-review"]'); const rows=Array.from(group.querySelectorAll('.fact-lens-row')); return rows.length>0 && group.querySelectorAll(':scope > details.review-category-fold > article.review-finding').length===0 && rows.every(row=>row.querySelectorAll('.review-finding-quote').length===1); })()`, 'factual-results-not-duplicated');
     at('factual-card-evidence');
     // Synchronized delta with Issue #1174 (ADR 0095 §5): the finding's card lists the sources the Evidence Workspace holds for its
@@ -3463,19 +3581,103 @@ async function main() {
 `, 'source-open-in-browser-unknown-refused', { unknownCard, unknownEvidence });
     const evidenceRows = (root) => `(() => { const list=${root}?.querySelector('.finding-evidence'); return list ? JSON.stringify(Array.from(list.querySelectorAll('li.finding-evidence-source')).map((item)=>[item.querySelector('.finding-evidence-note')?.textContent ?? '', item.querySelector('.finding-evidence-url')?.textContent ?? null, item.querySelector('.finding-evidence-snippet')!==null])) : null; })()`;
     const factualCard = `document.querySelector('article.review-finding[data-finding-id="${sourced.reviewFindingId}"]')`;
-    await waitFor(renderer, `${evidenceRows(factualCard)}===${JSON.stringify(expectedEvidence)}`, 'factual-card-evidence', 30_000);
+    // Issue #1683 item 11: collapsed, the fact card lists no source; its rows live in 为这句核对的来源 once it is expanded.
+    await waitFor(renderer, `${factualCard}?.dataset.factCard==='collapsed' && ${factualCard}.querySelector('.finding-evidence')===null`, 'factual-card-evidence', 30_000);
     await reviewAction(renderer, `article.review-finding[data-finding-id="${sourced.reviewFindingId}"] [data-review-action="go-to-text"]`, 'factual-card-go-to-text');
     await openMarkMore(renderer, sourced.markId, 'factual-mark-card-more');
     await waitFor(renderer, `${evidenceRows(`document.querySelector('[data-mark-card="${sourced.markId}"]')`)}===${JSON.stringify(expectedEvidence)}`, 'factual-mark-card-evidence', 30_000);
+    // The 批注栏 card keeps its list and gains each web source's 复制链接 and 在浏览器中打开 · <域名> (Issue #1683 item 12.1).
+    const expectedControls = JSON.stringify((attached?.sources ?? []).filter((source) => source.excluded !== true)
+      .map((source) => source.sourceKind === 'web' ? [true, `在浏览器中打开 · ${new URL(source.sourceRef).host}`] : [false, null]));
+    await assertRenderer(renderer, `JSON.stringify(Array.from(document.querySelectorAll('[data-mark-card="${sourced.markId}"] li.finding-evidence-source'), (item)=>[item.querySelector('[data-source-action="copy-link"]')!==null, item.querySelector('[data-source-action="open-in-browser"]')?.textContent ?? null]))===${JSON.stringify(expectedControls)}`, 'factual-mark-card-source-controls');
     await openReviewDestination(renderer, 'factual-card-evidence-back');
     await waitFor(renderer, `document.querySelectorAll('section.review-group[data-review-category="factual-review"] .fact-lens .fact-lens-row').length > 0`, 'factual-card-evidence-lens', 60_000);
+
+    at('factual-card-ordinary');
+    // Issue #1683 item 12.2, in ordinary mode and before any decision: the collapsed card is one badge with its place, the wording in
+    // two lines at most, one sentence and its row of controls, all in the window; 展开 shows 结论 → 来源 → 你的决定, and exactly one
+    // element frames a source row — the card. Every rectangle is read from this window's own innerWidth / innerHeight.
+    await setDeveloperMode(renderer, waitFor, false, 'factual-card-ordinary-mode', pressInWindow);
+    await pressInWindow(renderer, SIDEBAR.section('review'), 'factual-card-ordinary-review');
+    const factRow = `.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]`;
+    const factToggle = `${factRow} [data-fact-action="fact-workspace"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${factRow} article.fact-card`)})?.dataset.factCard==='collapsed'`, 'factual-card-ordinary-lens', 60_000);
+    await wheelIntoWindow(renderer, `${factRow} article.fact-card`, 'factual-card-ordinary-card');
+    const collapsed = await renderer.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>{const card=document.querySelector(${JSON.stringify(`${factRow} article.fact-card`)});
+      const box=(node)=>node.getBoundingClientRect(),style=getComputedStyle(card),px=(value)=>parseFloat(value)||0,line=(node)=>{const s=getComputedStyle(node);return px(s.lineHeight)||px(s.fontSize)*1.5;};
+      const quote=card.querySelector(':scope > .review-finding-quote'),q=getComputedStyle(quote),sentence=card.querySelector('.fact-card-sentence');
+      const parts=['.fact-card-head .fact-card-badge',':scope > .review-finding-quote','.fact-card-sentence','[data-fact-action="fact-workspace"]',
+        '.fact-card-actions [data-review-action="go-to-text"]','.fact-card-actions [data-review-action="ignore-now"]'].map(selector=>(${measureControl})(card.querySelector(selector))?.inside);
+      const vertical=(s)=>px(s.paddingTop)+px(s.paddingBottom)+px(s.borderTopWidth)+px(s.borderBottomWidth);
+      const bound=vertical(style)+box(card.querySelector('.fact-card-head')).height+2*line(quote)+vertical(q)+px(q.marginTop)+px(q.marginBottom)+line(sentence)+box(card.querySelector('.fact-card-actions')).height+3*px(style.rowGap)+2;
+      resolve({width:innerWidth,height:innerHeight,parts,card:box(card).height,bound,quote:box(quote).height,quoteBound:2*line(quote)+vertical(q)+1,
+        address:card.textContent.includes(${JSON.stringify(sourced.quote)}) && !card.textContent.includes('http://') && !card.textContent.includes('https://'),badges:card.querySelectorAll('[data-state-term]').length,
+        buttons:Array.from(card.querySelectorAll('button'),(button)=>button.textContent)});})))`);
+    requireJourney(collapsed.parts.every(Boolean) && collapsed.card <= collapsed.bound && collapsed.quote <= collapsed.quoteBound && collapsed.address && collapsed.badges === 1 &&
+      JSON.stringify(collapsed.buttons) === JSON.stringify(['展开', '回到原文', '忽略']), 'factual-card-ordinary-collapsed', collapsed);
+    // The Task Drawer beside or over the card: docked, 展开 stays topmost; overlaid, closing it by pointer gives the card its place back.
+    await pressInWindow(renderer, '.review-run > [data-review-action="view-plan"]', 'factual-card-ordinary-open-drawer');
+    await waitFor(renderer, `(async () => {const drawer=document.querySelector('#task-drawer');if(drawer?.dataset.taskDrawer!=='open')return false;const before=drawer.getBoundingClientRect().left;await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
+      const padding=parseFloat(getComputedStyle(document.body).paddingRight),target=innerWidth>=1120?drawer.getBoundingClientRect().width:0;return Math.abs(before-drawer.getBoundingClientRect().left)<.1&&Math.abs(padding-target)<1;})()`, 'factual-card-ordinary-drawer-settled');
+    const docked = await renderer.evaluate(`innerWidth>=1120`);
+    // Docked, the card keeps its 展开 topmost beside the drawer; overlaid, the drawer moves nothing, so closing it gives the card its place back.
+    const covered = docked ? await wheelIntoWindow(renderer, factToggle, 'factual-card-ordinary-docked-expand') : await renderer.evaluate(controlInWindow(factToggle));
+    await pressInWindow(renderer, '#task-drawer [data-task-drawer-control="close"]', 'factual-card-ordinary-close-drawer');
+    await waitFor(renderer, `(async () => {if(document.querySelector('#task-drawer')?.dataset.taskDrawer==='open')return false;const before=parseFloat(getComputedStyle(document.body).paddingRight);await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);return before===0&&parseFloat(getComputedStyle(document.body).paddingRight)===0;})()`, 'factual-card-ordinary-drawer-closed');
+    const uncovered = await renderer.evaluate(controlInWindow(factToggle));
+    requireJourney(docked ? covered?.inside === true : Math.abs(uncovered.top - covered.top) < 1 && Math.abs(uncovered.left - covered.left) < 1, `factual-card-ordinary-drawer-${docked ? 'docked' : 'overlay'}`, { covered, uncovered });
+    await pressInWindow(renderer, factToggle, 'factual-card-ordinary-expand');
+    const workspaceInRow = `${factRow} .evidence-workspace`;
+    await waitFor(renderer, `document.querySelectorAll(${JSON.stringify(`${workspaceInRow} .evidence-card`)}).length===3 && document.querySelector(${JSON.stringify(factToggle)})?.getAttribute('aria-expanded')==='true'`, 'factual-card-ordinary-expanded');
+    const expanded = await renderer.evaluate(`(() => {const card=document.querySelector(${JSON.stringify(`${factRow} article.fact-card`)}),sections=Array.from(card.querySelectorAll('[data-fact-section]'));
+      return {order:sections.map((node)=>node.dataset.factSection),headings:sections.map((node)=>node.querySelector('.fact-section-heading')?.textContent??''),tops:sections.map((node)=>node.getBoundingClientRect().top),
+        frames:Array.from(card.querySelectorAll('.evidence-card'),${SOURCE_ROW_FRAMES}),address:${JSON.stringify(attached.sources.map((source) => source.sourceRef))}.some((ref)=>card.textContent.includes(ref))};})()`);
+    requireJourney(JSON.stringify(expanded.order) === JSON.stringify(['conclusion', 'sources', 'decision']) && JSON.stringify(expanded.headings) === JSON.stringify(['结论', '为这句核对的来源', '你的决定']) &&
+      expanded.tops[0] < expanded.tops[1] && expanded.tops[1] < expanded.tops[2] && expanded.frames.length === 3 &&
+      expanded.frames.every(({ row, ancestors }) => !row && ancestors.length === 1 && ancestors[0].split(/\s+/u).includes('fact-card')) &&
+      !expanded.address, 'factual-card-ordinary-expanded-order', expanded);
+    cancellation.throwIfRequested();
+
+    at('factual-card-source-open');
+    // Issue #1683 item 12.1: 在浏览器中打开 on the web source's row by a real pointer press hands exactly the recorded address to the
+    // opener — the record file stands in for the system browser — once per press sequence, even for two presses before the answer;
+    // 复制链接 puts exactly that address on the clipboard. The label's host is the address's own.
+    const webRow = `${workspaceInRow} .evidence-card[data-card-id=${JSON.stringify(webCard.cardId)}]`;
+    const openControl = `${webRow} [data-source-action="open-in-browser"]`;
+    requireJourney(await renderer.evaluate(`document.querySelector(${JSON.stringify(openControl)})?.textContent`) === `在浏览器中打开 · ${new URL(webCard.sourceRef).host}`, 'factual-card-source-open-label');
+    const pressedBefore = await browserRecord();
+    await pressInWindow(renderer, openControl, 'factual-card-source-open-press');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(openControl)})?.disabled===false && document.querySelector(${JSON.stringify(`${webRow} .source-link-status`)})?.textContent==='已在浏览器中打开。'`, 'factual-card-source-opened');
+    requireJourney(await browserRecord() === `${pressedBefore}${webCard.sourceRef}\n`, 'factual-card-source-open-record');
+    const twiceBefore = await browserRecord();
+    const twice = await wheelIntoWindow(renderer, openControl, 'factual-card-source-open-twice');
+    requireJourney(twice.inside === true, 'factual-card-source-open-twice-in-window');
+    const point = { x: twice.x, y: twice.y, button: 'left' };
+    await Promise.all([
+      renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, buttons: 1, clickCount: 1 }),
+      renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, buttons: 0, clickCount: 1 }),
+      renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, buttons: 1, clickCount: 2 }),
+      renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, buttons: 0, clickCount: 2 }),
+    ]);
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(openControl)})?.disabled===false`, 'factual-card-source-open-twice-answered');
+    requireJourney(await browserRecord() === `${twiceBefore}${webCard.sourceRef}\n`, 'factual-card-source-open-twice-once');
+    await renderer.evaluate(`(() => {window.__j04Copied=[];window.__j04CopyListener=(event)=>{const field=event.target;window.__j04Copied.push(field instanceof HTMLTextAreaElement?field.value.slice(field.selectionStart,field.selectionEnd):String(getSelection()));};document.addEventListener('copy',window.__j04CopyListener,true);})()`);
+    try {
+      await pressInWindow(renderer, `${webRow} [data-source-action="copy-link"]`, 'factual-card-source-copy');
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${webRow} .source-link-status`)})?.textContent==='已复制链接。'`, 'factual-card-source-copied');
+      requireJourney(JSON.stringify(await renderer.evaluate(`window.__j04Copied`)) === JSON.stringify([webCard.sourceRef]), 'factual-card-source-copy-text');
+    } finally { await renderer.evaluate(`document.removeEventListener('copy',window.__j04CopyListener,true)`); }
+    await setDeveloperMode(renderer, waitFor, true, 'factual-card-developer-mode', pressInWindow);
+    await pressInWindow(renderer, SIDEBAR.section('review'), 'factual-card-developer-review');
+    await waitFor(renderer, `document.querySelectorAll('section.review-group[data-review-category="factual-review"] .fact-lens .fact-lens-row').length > 0`, 'factual-card-developer-lens', 60_000);
+    cancellation.throwIfRequested();
     at('factual-evidence-workspace');
     await reviewAction(renderer, `.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}] [data-fact-action="fact-workspace"]`, 'factual-workspace-open');
     await waitFor(renderer, `(() => { const row=document.querySelector('.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]'); return row.querySelector('.evidence-workspace')!==null && row.querySelector('.finding-evidence')===null; })()`, 'factual-evidence-not-duplicated');
     const workspaceSelector = `.evidence-workspace[data-result-id=${JSON.stringify(sourced.resultId)}]`;
     await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} .evidence-card').length===3`, 'factual-workspace-cards');
     // Candidates only: never quoted, never counted, each check a discrete state; the summary labelled 非证据 (EVID-003/004/010).
-    await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const cards=Array.from(ws.querySelectorAll('.evidence-card')); return cards.every((card)=>card.dataset.checkState==='candidate' && card.querySelector('.evidence-excerpt')===null && card.querySelector('dd')?.textContent==='候选来源 · 尚未核对') && JSON.stringify(cards.map((card)=>card.dataset.relation))===JSON.stringify(['支持','反驳','仅提供背景']) && ws.querySelector('.evidence-summary')?.dataset.label==='非证据' && ws.querySelector('.evidence-quote')?.textContent===${JSON.stringify(sourced.quote)} && ws.querySelector('.evidence-matrix')?.dataset.pinnedCount==='0'; })()`, 'factual-workspace-candidates');
+    await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const cards=Array.from(ws.querySelectorAll('.evidence-card')); return cards.every((card)=>card.dataset.checkState==='candidate' && card.querySelector('.evidence-excerpt')===null && card.querySelector('.evidence-card-check')?.textContent===' · 候选来源 · 尚未核对 · '+card.dataset.relation) && JSON.stringify(cards.map((card)=>card.dataset.relation))===JSON.stringify(['支持','反驳','仅提供背景']) && ws.querySelector('.evidence-sources > .evidence-summary:last-child')?.dataset.label==='非证据' && ws.querySelector('.evidence-summary h6')?.textContent==='AI7 小结 · 非证据' && ws.querySelector('.evidence-quote')?.textContent===${JSON.stringify(sourced.quote)} && ws.querySelector('.evidence-matrix')===null; })()`, 'factual-workspace-candidates');
     // Two cards pinned make the comparison; reading and comparing write nothing (EVID-006, EVID-012).
     for (const index of [0, 1]) {
       await assertRenderer(renderer, `(() => { const pin=document.querySelectorAll('${workspaceSelector} [data-evidence-pin]')[${index}]; if(!(pin instanceof HTMLInputElement)||pin.disabled)return false; pin.click(); return true; })()`, `factual-pin-${index}`);
@@ -3486,14 +3688,17 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('factual-review-decision');
-    // Five unselected choices directly after the result; 维持未决 with one reason taken as suggested is recorded once, bound to
-    // the version read (FREV-004, FREV-005, FREV-006, FREV-009).
-    await assertRenderer(renderer, `(() => { const radios=Array.from(document.querySelectorAll('${workspaceSelector} [data-decision-choice]')); return JSON.stringify(radios.map((radio)=>radio.dataset.decisionChoice))===JSON.stringify(['accept','request-evidence','keep-pending','decline','own-words']) && radios.every((radio)=>!radio.checked) && document.querySelector('${workspaceSelector} [data-evidence-action="record-decision"]')?.disabled===true; })()`, 'factual-decision-unselected');
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('${workspaceSelector} [data-decision-choice="keep-pending"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return true; })()`, 'factual-decision-choose');
-    await waitFor(renderer, `document.querySelector('${workspaceSelector} [data-evidence-action="record-decision"]')?.disabled===false`, 'factual-decision-ready');
-    await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="reason-suggestion"]`, 'factual-reason-suggestion');
+    // One decision row under 你的决定 (Issue #1683 item 10): 采纳结论 and 要补充证据 direct, the other three under ⋯, none preselected
+    // and no separate 记录 button; 维持未决 from ⋯ with one reason taken as suggested in 写理由 is recorded once, bound to the version
+    // read (FREV-004, FREV-005, FREV-006, FREV-009). Every named control is pressed by a real pointer once it is in the window.
+    await assertRenderer(renderer, `(() => { const row=document.querySelector('${workspaceSelector} .evidence-decision-row'); const choices=Array.from(row?.querySelectorAll('[data-decision-choice]') ?? []); return JSON.stringify(choices.map((choice)=>[choice.dataset.decisionChoice, choice.closest('.evidence-decision-more')!==null]))===JSON.stringify([['accept',false],['request-evidence',false],['decline',true],['keep-pending',true],['own-words',true]]) && document.querySelector('${workspaceSelector} [data-evidence-action="record-decision"]')===null; })()`, 'factual-decision-unselected');
+    await pressInWindow(renderer, `${workspaceSelector} .evidence-decision-reasons-fold > summary`, 'factual-reason-fold');
+    await waitFor(renderer, `document.querySelector('${workspaceSelector} .evidence-decision-reasons-fold')?.open===true`, 'factual-reason-fold-open');
+    await pressInWindow(renderer, `${workspaceSelector} [data-evidence-action="reason-suggestion"]`, 'factual-reason-suggestion');
     await waitFor(renderer, `document.querySelector('${workspaceSelector} [data-evidence-action="reason-suggestion"][aria-pressed="true"]') !== null`, 'factual-reason-selected');
-    await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="record-decision"]`, 'factual-decision-record');
+    await pressInWindow(renderer, `${workspaceSelector} .evidence-decision-more > summary`, 'factual-decision-more');
+    await waitFor(renderer, `document.querySelector('${workspaceSelector} .evidence-decision-more')?.open===true`, 'factual-decision-more-open');
+    await pressInWindow(renderer, `${workspaceSelector} [data-decision-choice="keep-pending"]`, 'factual-decision-record');
     await waitFor(renderer, `document.querySelector('${workspaceSelector} .evidence-decision-recorded')?.dataset.superseded==='false' && document.querySelector('${workspaceSelector} [data-decision-choice]')===null`, 'factual-decision-recorded');
     const decided = await renderer.evaluate(`window.ai7.inspectEvidenceWorkspace({ bookId: ${JSON.stringify(factualBook.bookId)}, resultId: ${JSON.stringify(sourced.resultId)}, sourcesAfter: null })`);
     requireJourney(decided?.decisions?.length === 1 && decided.decisions[0].disposition === 'keep-pending' && decided.decisions[0].boundVersion === 1 &&
@@ -3504,7 +3709,7 @@ async function main() {
     // 准备更正提案 on a result below the formal gate: the Run's two variants and 自行编辑, the first chosen (Issue #1410 item 18); the range set holds the
     // finding's own words, included; saving makes one ordinary 修改建议 whose card keeps 证据核查未完成 (CORR-001 to CORR-011,
     // EASSURE-012).
-    await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="prepare-correction"]`, 'factual-correction-prepare');
+    await pressInWindow(renderer, `${workspaceSelector} .evidence-decision-row [data-evidence-action="prepare-correction"]`, 'factual-correction-prepare');
     await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} [data-correction-variant]').length===3`, 'factual-correction-draft');
     await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const variants=Array.from(ws.querySelectorAll('[data-correction-variant]')); const ranges=Array.from(ws.querySelectorAll('[data-correction-range]')); return JSON.stringify(variants.map((input)=>input.dataset.correctionVariant))===JSON.stringify(['v1','v2','own-edit']) && variants.map((input)=>input.checked).join()==='true,false,false' && ws.querySelector('.correction-assurance-label')?.textContent.startsWith('证据核查未完成 · 尚缺：') && ranges.some((input)=>input.dataset.primary==='true' && input.checked) && ranges.filter((input)=>input.checked).length===1 && ws.querySelector('[data-evidence-action="save-correction"]')?.disabled===false; })()`, 'factual-correction-first-variant-chosen');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('${workspaceSelector} [data-correction-variant="v1"]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'factual-correction-choose');

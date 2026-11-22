@@ -15,7 +15,7 @@ import {
 import { RUN_LIVENESS_STAGE_LABELS, localInstantLabel } from './plan-preview-labels.js';
 import type { ReviewPill } from './review-labels.js';
 import { REVIEW_ACTION_LABELS } from './review-labels.js';
-import { RESUMABLE_STOP_REASON_LABELS, TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS, TASK_PLAN_OPEN_START, UNCONFIRMED_TASK_KIND_LABELS, unconfirmedWhat } from './task-drawer-labels.js';
+import { RESTART_PAUSED_REASON, RESTART_QUEUED_REASON, RESUMABLE_STOP_REASON_LABELS, TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS, TASK_PLAN_OPEN_START, UNCONFIRMED_TASK_KIND_LABELS, unconfirmedWhat } from './task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION } from './proposal-conflict-labels.js';
 import { MAINTENANCE_CLASSIFICATION_LABELS, MAINTENANCE_NEXT_STEP_LABELS } from '../shared/maintenance-wording.js';
@@ -443,7 +443,7 @@ function attentionReason(item: GlobalAttentionItemProjection): string {
     case 'analysis-outcome-unconfirmed':
       return '回答未完整传回，处理与计费结果待确认，AI7 没有自动重发。';
     case 'analysis-blocked':
-      return '模型服务当前不可用，任务尚未开始。';
+      return facts.stopReason === 'shutdown' ? RESTART_QUEUED_REASON : '模型服务当前不可用，任务尚未开始。';
     case 'analysis-orphaned':
       return 'AI7 在运行时关闭，已完成的结果与未完成的范围均已保留。';
     case 'review-failed':
@@ -481,7 +481,7 @@ function attentionReason(item: GlobalAttentionItemProjection): string {
     case 'analysis-pausing':
       return '当前步骤完成后暂停，已完成的结果会保留。';
     case 'analysis-paused':
-      return technicalWords('已暂停：已读完的阅读范围都已保存；续行时从下一个接着读，也可以取消它。', '已暂停：已完成的部分都已保存；继续时接着处理，也可以取消它。');
+      return facts.stopReason === 'shutdown' ? RESTART_PAUSED_REASON : technicalWords('已暂停：已读完的阅读范围都已保存；续行时从下一个接着读，也可以取消它。', '已暂停：已完成的部分都已保存；继续时接着处理，也可以取消它。');
     case 'analysis-resumable': {
       const reason = facts.stopReason;
       if (reason === 'proxy-unreachable') return '代理不可达：去 设置 › 模型服务 › 网络代理 检查代理后继续。';

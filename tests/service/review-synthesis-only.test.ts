@@ -146,6 +146,11 @@ it('counts every summary request in the Run’s usage: the stage’s and each �
     const book = await importBook(session, 'sample1 统合用量');
     const runId = await settledReview(session, book);
     const stage = run(session, book.bookId, runId).usage!.requests;
+    // 预计 of a whole-book review (#1670): one request per part (this category has no cross-chapter step); the synthesis, sent only
+    // when the findings span two parts, may add one, so 「至少」 holds.
+    const estimate = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: runId }).estimate!;
+    expect([estimate.fewestRequests, estimate.more]).toEqual([estimate.parts, ['retry', 'sampling', 'synthesis', 'reflection']]);
+    expect(stage).toBeGreaterThanOrEqual(estimate.fewestRequests);
     generate(session, book.bookId, runId);
     await session.driver.drive(runId);
     const first = run(session, book.bookId, runId);
@@ -157,6 +162,11 @@ it('counts every summary request in the Run’s usage: the stage’s and each �
     expect(second.synthesis?.state).toBe('completed');
     expect(second.usage!.requests).toBe(stage + 2);
     expect(synthesisRequests(session)).toHaveLength(3);
+    // The 任务 rows and the plan count the page's requests, every summary included (#1670).
+    const row = session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap((group) => group.items)
+      .find((entry) => (entry.item.target.kind === 'review' || entry.item.target.kind === 'review-plan') && entry.item.target.reviewRunId === runId)!;
+    expect(row.work?.finished?.requests).toBe(second.usage!.requests);
+    expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: runId }).work).toEqual(row.work);
   } finally { await closeSession(session); }
 });
 
@@ -174,6 +184,10 @@ it('refuses 生成统合总结 for a one-range chapter review and for a selectio
     expect(oneRange.findings.length).toBeGreaterThan(0);
     expect(oneRange.synthesis).toBeUndefined();
     expect(refusal(() => generate(session, book.bookId, oneRange.reviewRunId))).toBe('REVIEW_SYNTHESIS_UNAVAILABLE');
+    // The summary it never sent was never counted among the fewest requests (#1670).
+    const oneEstimate = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: oneRange.reviewRunId }).estimate!;
+    expect(oneEstimate.fewestRequests).toBe(oneEstimate.parts);
+    expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: oneRange.reviewRunId }).work!.finished!.requests).toBeGreaterThanOrEqual(oneEstimate.fewestRequests);
     const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
     await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS],
       scope: { kind: 'selection', fromChapterBlockId: blocks[0]!.blockId, toChapterBlockId: blocks[Math.min(blocks.length, 40) - 1]!.blockId } }, launchPolicy));
@@ -181,6 +195,7 @@ it('refuses 生成统合总结 for a one-range chapter review and for a selectio
     expect(selection.reviewRunId).not.toBe(oneRange.reviewRunId);
     expect(selection.scope.kind).toBe('selection');
     expect(selection.synthesis).toBeUndefined();
+    expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: selection.reviewRunId }).estimate!.more).not.toContain('synthesis');
     expect(refusal(() => generate(session, book.bookId, selection.reviewRunId))).toBe('REVIEW_SYNTHESIS_UNAVAILABLE');
     expect(synthesisRequests(session)).toHaveLength(0);
   } finally { await closeSession(session); }

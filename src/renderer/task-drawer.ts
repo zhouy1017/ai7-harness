@@ -2630,7 +2630,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const stopReason = current.runControl.stopReason;
       const repeated = stopReason !== undefined
         && result.runRecordId === current.runControl.runRecordId
-        && (result.stopReason === stopReason || await observeImmediateResumeStop(current, stopReason));
+        && (result.stopReason === stopReason || (current.state.key !== 'paused' && await observeImmediateResumeStop(current, stopReason)));
       const status = stopReason === undefined ? { message: '已继续，从已保存的进度接着读。', tone: 'success' as const }
         : taskBarResumeOutcome(stopReason, repeated);
       options.setStatus(status.message, status.tone);

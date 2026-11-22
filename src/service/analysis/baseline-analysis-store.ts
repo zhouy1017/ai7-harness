@@ -84,7 +84,6 @@ import {
   type BaselineAnalysisResultSetRevisionProjection,
   type BaselineAnalysisRevisionUpdateProjection,
   type BaselineAnalysisRunState,
-  type ResumableStopReason,
   type BaselineAnalysisSelectedRange,
   type BaselineAnalysisUnitProjection,
   type BaselineAnalysisUpdateControlsProjection,
@@ -108,11 +107,6 @@ import {
   MODEL_SERVICE_SETUP_REQUIRED_REASON,
 } from '../../shared/protocol.js';
 
-function resumableStopReasonOf(value: unknown): ResumableStopReason | undefined {
-  if (!isRecord(value)) return undefined;
-  return value.stopReason === 'proxy-unreachable' || value.stopReason === 'model-service-unreachable' || value.stopReason === 'outcome-unknown' || value.stopReason === 'shutdown'
-    ? value.stopReason : undefined;
-}
 import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
@@ -310,6 +304,8 @@ import {
   runBudgetCeilingStateOf,
   runIsActive,
   runStopOf,
+  runStopReasonOf,
+  validateTaskRedo,
   sameRange,
   transact,
   unconfirmedOutcomeKey,
@@ -1249,8 +1245,8 @@ export class BaselineAnalysisStore {
               const detail = parseCanonicalJson(asString(row.last_state_json)) as { resumeFailure?: string };
               return typeof detail.resumeFailure === 'string' ? { resumeFailure: detail.resumeFailure } : {};
             })()),
-            ...(state === 'resumable' && row.last_state_json !== null
-              ? (() => { const stopReason = resumableStopReasonOf(parseCanonicalJson(asString(row.last_state_json))); return stopReason === undefined ? {} : { stopReason }; })() : {}),
+            ...(row.last_state_json !== null
+              ? (() => { const stopReason = runStopReasonOf(this.#db, runRecordId, state, parseCanonicalJson(asString(row.last_state_json))); return stopReason === undefined ? {} : { stopReason }; })() : {}),
             // 需要重新确认计划 (Issue #536; OFF-008): a waiting Run blocked because its plan moved.
             planMoved: state === 'blocked-before-dispatch' && this.blockedByOf(runRecordId) === 'plan-moved',
           },
@@ -2152,7 +2148,7 @@ export class BaselineAnalysisStore {
    * What a redo's first plan version leaves out (Issue #422, S76c; CONT-013: a redo begins from a copyable prior plan):
    * the edits of the redone Task's last plan version; nothing for any other Task.
    */
-  #redoPlanEdits(intent: IntentFacts): PlanEdits {
+  #redoPlanEdits(intent: Pick<IntentFacts, 'record' | 'redoOfRunRecordId'>): PlanEdits {
     if (isRecord(intent.record.factualDecision)) return intent.record.factualDecision.level === 'strict'
       ? { ...NO_PLAN_EDITS, evidenceAssuranceLevel: 'strict' } : NO_PLAN_EDITS;
     if (intent.redoOfRunRecordId === null) return NO_PLAN_EDITS;
@@ -2247,7 +2243,7 @@ export class BaselineAnalysisStore {
     // exactly as a Result Set Revision keeps its own policy pin. Only a record written before those
     // reasons were durable falls back to the bound launch.
     const currentRecord = parseCanonicalJson(asString(states[states.length - 1]!.canonical_json)) as Record<string, unknown>;
-    const stopReason = current.state === 'resumable' ? resumableStopReasonOf(currentRecord) : undefined;
+    const stopReason = runStopReasonOf(this.#db, runRecordId, current.state, currentRecord);
     const recordedReasons = Array.isArray(currentRecord.reasons) && currentRecord.reasons.every((reason) => typeof reason === 'string')
       ? currentRecord.reasons as ReadonlyArray<string>
       : null;
@@ -3127,32 +3123,33 @@ export class BaselineAnalysisStore {
 
   /** Build the same frozen components in memory, then let the kind's editorial plan owner describe them. */
   previewLaunch(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, edits: PlanEditsProjection | undefined,
-    describe: (projection: AnalysisProjection, blocks: ReadonlyArray<ManifestBlockInput>) => never): never {
+    describe: (projection: AnalysisProjection, blocks: ReadonlyArray<ManifestBlockInput>, components: Readonly<Record<string, unknown>>) => never, afterCancellation = false): never {
     this.#requireDeniedPolicy(input.launchPolicy);
     requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
-    const existing = this.inspect(input.bookId);
+    const inspected = this.inspect(input.bookId), existing = afterCancellation && inspected.run !== null ? { ...inspected, run: { ...inspected.run, state: 'cancelled' as const } } : inspected;
     requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null, this.#definition.kind));
     const binding = this.#binding(input.bookId), head = this.#workingHead(binding.manuscriptId, input.bookId);
     const blocks = this.readWorkingBlocks(head.branchId), update = this.#resolveSelectedBlocks(input.bookId, input.update);
+    validateTaskRedo(existing, update, this.#definition.kind, input.redoOf ?? null, input.reconfirm);
     const mode = update?.mode ?? this.#definition.initialMode, modeDefinition = this.#definition.mode(mode);
     requireAnalysis(input.goal === modeDefinition.goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选方式不一致。');
     const predecessor = modeDefinition.initial ? null : existing.resultSetRevision;
     requireAnalysis(modeDefinition.initial || predecessor !== null, 'ANALYSIS_PREDECESSOR_ABSENT', '请先完成首次分析。');
     const selectedRange = modeDefinition.rangeBound ? requireSelectedRange(update?.selectedRange ?? null, blocks.length) : null;
-    const canonical = canonicalPlanEdits(edits ?? { removedSteps: [], disallowedAdaptations: [] }, this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
+    const canonical = canonicalPlanEdits(edits ?? this.#redoPlanEdits({ record: {}, redoOfRunRecordId: input.redoOf ?? null }), this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
     requireAnalysis(canonical !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
     const selected = selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind);
     const instant = new Date().toISOString(), taskIntentId = randomUUID();
     const record = { bookId: input.bookId, taskIntentId, mode, goal: input.goal, createdAt: instant,
       expectedOutcome: this.#definition.expectedOutcome, selectedRange, predecessorRevisionId: predecessor?.revisionId ?? null,
       ...(selected === null ? {} : { procedure: selected }) };
-    const intent: IntentFacts = { ...record, record, redoOfRunRecordId: null, preparedByEnrollmentVersionId: null,
+    const intent: IntentFacts = { ...record, record, redoOfRunRecordId: input.redoOf ?? null, preparedByEnrollmentVersionId: null,
       backgroundRunBudgetCeiling: null, intentDraftVersionId: null, intentDraftParagraphs: null };
     this.#writePlanVersion({ policy: input.launchPolicy, intent, checkpoint: { bookId: input.bookId, manuscriptId: binding.manuscriptId,
       branchId: head.branchId, revisionId: head.currentRevisionId, revisionLabel: head.currentRevisionLabel,
       revisionDigest: head.currentWorkingDigest, journalSequence: head.currentJournalSequence, createdForDirtyJournal: false },
       checkpointDigest: canonicalRecord(record).digest, ordinal: 1, selectedRange, planRevisionId: null, instant, edits: canonical,
-      preview: { blocks, consume: projection => describe(projection, blocks) } });
+      preview: { blocks, consume: (projection, components) => describe(projection, blocks, components) } });
     throw new AnalysisError('ANALYSIS_PREVIEW_INVALID', '这次计划暂时无法读取。');
   }
 
@@ -3193,6 +3190,7 @@ export class BaselineAnalysisStore {
     const existing = this.inspect(input.bookId);
     requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null, this.#definition.kind));
     const update = this.#resolveSelectedBlocks(input.bookId, input.update);
+    validateTaskRedo(existing, update, this.#definition.kind, input.redoOf ?? null, input.reconfirm);
     const mode = update?.mode ?? this.#definition.initialMode;
     const modeDefinition = this.#definition.mode(mode);
     requireAnalysis(input.goal === modeDefinition.goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选方式不一致。');
@@ -3333,23 +3331,7 @@ export class BaselineAnalysisStore {
     // wherever it is not closed (同步到当前稿件 reuses every closed range and re-reads every gap); a Run that kept
     // nothing is redone as the Task it was — the same way over the same range, or the first baseline again.
     const redoOf = input.redoOf ?? null;
-    if (redoOf !== null) {
-      const run = existing.run;
-      // 调整预算并重做 (Issue #51, S16a; V2-UX-MODEL-017): a Run the Run Budget Ceiling stopped is redone the same way — the
-      // ceiling is raised or removed in the new Task's plan, never on the stopped Run.
-      const budgetReached = run !== null && run.state === 'interrupted' && existing.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached';
-      requireAnalysis(run !== null && run.runRecordId === redoOf &&
-        ((run.state === 'cancelled' && run.transitions.some((transition) => transition.state === 'executing')) || budgetReached),
-      'ANALYSIS_REDO_STALE', '只有这本书最近一项任务里开始后取消、或因预算上限停止的运行可以改计划重做。');
-      const expected = latest !== null && latest.provenance.runRecordId === redoOf
-        ? { mode: 'sync-current', selectedRange: null }
-        : existing.update === null ? null : { mode: existing.update.mode, selectedRange: existing.update.selectedRange };
-      requireAnalysis(!input.reconfirm && (this.#definition.kind !== BASELINE_ANALYSIS_KIND || (expected === null
-        ? update === null
-        : update !== null && update.mode === expected.mode && update.selectedRange?.startPosition === expected.selectedRange?.startPosition &&
-          update.selectedRange?.endPosition === expected.selectedRange?.endPosition)),
-      'ANALYSIS_REDO_INVALID', '改计划重做沿用这次运行已读完的部分，接着读其余的；什么都没读完时，照原样从头再做。');
-    }
+    validateTaskRedo(existing, update, this.#definition.kind, redoOf, input.reconfirm);
     // The latest Task asked for again as it was — the same way over the same range, its predecessor still the latest
     // revision: 重新准备 (Issue #536; OFF-008) of a Task whose Run a moved plan blocked before it began, and 重新确认计划
     // of a Task prepared and not yet started (Issue #551). A way ②A's own controls do not offer now stays open to it: a
@@ -3623,7 +3605,7 @@ export class BaselineAnalysisStore {
      * material input, so an edit leaves the provider component as it froze. Absent, the connection is read now.
      */
     credentialReadiness?: ModelCredentialOperationState;
-    preview?: { blocks: ReadonlyArray<ManifestBlockInput>; consume: (projection: AnalysisProjection) => never };
+    preview?: { blocks: ReadonlyArray<ManifestBlockInput>; consume: (projection: AnalysisProjection, components: Readonly<Record<string, unknown>>) => never };
   }): { planVersionId: string; planEnvelopeDigest: string } {
     const { intent, checkpoint, ordinal, instant } = input;
     if (this.#definition.structuredOnly !== true && this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(intent.mode === 'review-first' &&
@@ -3942,7 +3924,7 @@ export class BaselineAnalysisStore {
         planVersion: { ...version, materialInputs: materialPlanInputsOfComponents(components, intent.record) }, planVersions: [version],
         update: this.#carriesPlan(intent.mode) ? this.#updateProjection(intent, reusePlan, records['reuse-plan']?.digest ?? null,
           this.inspect(checkpoint.bookId).resultSetRevision as BaselineAnalysisResultSetRevisionProjection | null) : null,
-        actions: { canPrepare: false, canAuthorize: dispatchAllowed, canReconfirmPlan: false } }));
+        actions: { canPrepare: false, canAuthorize: dispatchAllowed, canReconfirmPlan: false } }), components);
     }
     const insert = this.#db.prepare(
       'INSERT INTO analysis_plan_records(task_intent_id, plan_version, component, canonical_json, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -4088,7 +4070,7 @@ export class BaselineAnalysisStore {
     // 取消 on a Task of another kind whose Run never began: blocked before dispatch after it waited — its plan moved, or this
     // launch could not start it (Issue #764). Under developer-live 初评 cannot be prepared again, so nothing else would end it;
     // the item leaves 待我处理 once the Run is cancelled. A Run that began (so one holding a 结果待确认 range) is never here.
-    if (run.state === 'blocked-before-dispatch' && this.#definition.kind !== BASELINE_ANALYSIS_KIND && !runBegan(run.transitions)) {
+    if (run.state === 'blocked-before-dispatch' && !runBegan(run.transitions)) {
       this.recordRunState(run.runRecordId, 'cancelled', { detail: '编辑取消了这项没能开始的任务；没有发送任何内容，也没有产生用量。' });
       return this.inspect(bookId);
     }

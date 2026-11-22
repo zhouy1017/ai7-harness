@@ -230,10 +230,17 @@ export interface ReimportMappingPageProjection {
 }
 
 
+/** Source-version metadata from its first import; a blank legacy name is answered as null. */
+export interface ReimportLineageSourceVersionItemProjection {
+  sourceVersionId: string;
+  displayName: string | null;
+  importedAt: string;
+}
+
 export interface ReimportLineageSourceVersionPageProjection {
   bookId: string;
   after: string | null;
-  items: ReadonlyArray<string>;
+  items: ReadonlyArray<ReimportLineageSourceVersionItemProjection>;
   previousCursor: string | null;
   nextCursor: string | null;
 }

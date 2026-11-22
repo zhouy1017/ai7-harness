@@ -177,7 +177,7 @@ async function attachRenderer(browser) {
     send,
     evaluate: async (expression) => {
       const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-      requireJourney(!response.exceptionDetails, 'renderer-evaluate');
+      requireJourney(!response.exceptionDetails, 'renderer-evaluate', localDebugEnabled() ? response.exceptionDetails : undefined);
       return response.result.value;
     },
   };

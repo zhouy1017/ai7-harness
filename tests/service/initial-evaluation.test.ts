@@ -372,12 +372,18 @@ describe('AI7 初评 over the real store on exact sample1', () => {
         expect(stuck.prepare.allowed).toBe(false);
         expect(polled).toContain(stuck.task!.state);
 
+        const actionableBefore = second.inspectGlobalAttention(() => null, false, 'admitting').actionableCount;
         expect(second.reconcileStoppedInitialEvaluationRuns()).toEqual({ settled: 1 });
         const settled = second.inspectInitialEvaluation(bookId);
         if (planted === 'authorized') {
           // It never began: blocked before dispatch with why, no outcome.
           expect(settled.state).toBe('authorized-blocked');
-          expect(settled.run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
+          expect(settled.run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', stopReason: 'shutdown', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
+          const attention = second.inspectGlobalAttention(() => null, false, 'admitting');
+          expect(attention.actionableCount).toBe(actionableBefore + 1);
+          expect(attention.groups.flatMap((group) => group.items).find((item) => item.itemId === `task:${settled.taskIntent!.taskIntentId}`))
+            .toMatchObject({ state: 'analysis-blocked', facts: { stopReason: 'shutdown' } });
+          expect(second.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: settled.taskIntent!.taskIntentId }).state.stopReason).toBe('shutdown');
           expect(settled.taskOutcome).toBeNull();
         } else {
           expect(settled.state).toBe('resumable');

@@ -7,9 +7,18 @@ import type { EvidenceSourceCardProjection, ResearchEvidenceProjection, ReviewEv
  * re-export them; the service's report writer lays them out.
  */
 
+export const BOOK_FINDINGS_VERSION_CHANGED = '待办汇总已变化，请重新读取。';
+
 export const REVIEW_REPORT_HEADING = '审阅报告';
 export const REVIEW_REPORT_NO_MUST_ITEMS = '没有必须处理的事项。';
 export const REVIEW_REPORT_OVERVIEW_COLUMNS = ['类别', '状态', '发现'] as const;
+
+/** The findings page confirms a count, never hundreds of repeated quotation lines. */
+export function bookFindingsBatchSentence(count: number, filtered: boolean): string | null {
+  return count === 0 ? null : filtered
+    ? `将把当前筛选下的 ${count} 条修改建议写入稿件。`
+    : `将把所列 ${count} 条修改建议写入稿件。`;
+}
 
 /**
  * The Decision Layer's form of an instant (V2-UX-LAYER-004): absolute local date and time, 24-hour, to

@@ -30,8 +30,13 @@ const STORAGE_ERROR = 'a storage error of the 后台分析 records: an engineeri
 
 /** Sentences shown as written today, each named for Issue #1616. */
 export const KNOWN_RAW: ReadonlyArray<ServiceSentenceBucketEntry & { readonly issue: '#1616' }> = [
+  // Existing preparation refusals moved with their validator in #1656; #1616 still owns their wording.
+  ...['只有这本书最近一项任务里开始后取消、或因预算上限停止的运行可以改计划重做。', '改计划重做沿用这次运行已读完的部分，接着读其余的；什么都没读完时，照原样从头再做。']
+    .map(text => ({ file: 'analysis/run-state.ts', text, why: 'unchanged preparation refusal, shared by launch after #1656', issue: '#1616' as const })),
+  ...[
   '后台处理登记的预算上限无效。',
   '后台处理登记记录无效。', '后台处理登记记录与其摘要不一致。', '后台处理登记记录与其字段不一致。', '后台处理登记的参数无效。', '后台处理登记标识无效。', '这份后台处理登记不存在。',
   '后台处理登记版本标识无效。', '后台处理登记版本指向的登记不存在。', '后台处理登记状态无效。', '后台处理登记的起点无效。', '后台处理登记记录的绑定无效。', '后台处理登记缺少状态记录。',
   '后台处理登记种类不一致。', '后台处理登记状态指向的版本不存在。', '后台处理登记状态种类不一致。',
-].map((text) => ({ file: 'background-analysis-enrollments.ts', text, why: STORAGE_ERROR, issue: '#1616' as const }));
+  ].map((text) => ({ file: 'background-analysis-enrollments.ts', text, why: STORAGE_ERROR, issue: '#1616' as const })),
+];

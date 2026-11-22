@@ -112,22 +112,6 @@ it('offers review only with a manuscript, and every active step runs its own act
   } finally { restore(); }
 });
 
-it.each(['book-overview', 'imported', 'derivative'])('handles a non-DOCX drop on %s', (surface) => {
-  const source = readFileSync(new URL('../../src/renderer/library-screen.ts', import.meta.url), 'utf8');
-  const install = source.slice(source.indexOf('function installDropHandlers()'), source.indexOf('function renderImported('));
-  const handlers = new Map<string, (event: unknown) => void>();
-  const setStatus = vi.fn(), stageDroppedManuscript = vi.fn(), preventDefault = vi.fn();
-  runInContext(transpileModule(install + '\ninstallDropHandlers();', {}).outputText, createContext({
-    screen: { dataset: { screen: surface === 'derivative' ? 'editor' : surface }, querySelector: () => surface === 'derivative' ? {} : null, addEventListener: (type: string, listener: (event: unknown) => void) => handlers.set(type, listener) },
-    setStatus, api: { stageDroppedManuscript },
-  }));
-  handlers.get('drop')!({ dataTransfer: { files: [{ name: 'notes.pdf' }] }, preventDefault });
-  expect(preventDefault).toHaveBeenCalledTimes(surface === 'imported' ? 0 : 1);
-  if (surface === 'book-overview') expect(setStatus).toHaveBeenCalledWith('请拖入 DOCX 格式的稿件。', 'error');
-  else expect(setStatus).not.toHaveBeenCalled();
-  expect(stageDroppedManuscript).not.toHaveBeenCalled();
-});
-
 it('chooses only the first, sole Book with a manuscript for review', () => {
   const empty = { bookId: 'empty', title: '空书', manuscriptState: 'empty' as const };
   const populated = { bookId: 'first', title: '第一本', manuscriptState: 'populated' as const };

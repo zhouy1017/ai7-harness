@@ -229,6 +229,12 @@ export function registerLibraryLearningHandlers(context: {
     return serializeEffect(async () => { requireAuthority(); return service.call('deactivateEditorialMemory', input); });
   }));
 
+  for (const op of ['reenableReviewPreference', 'deleteReviewPreference'] as const) ipcMain.handle(IPC_CHANNELS[op], (event, input: ServiceOperationMap[typeof op]['input']) => envelope(async () => {
+    requireSender(event);
+    requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+    return serializeEffect(async () => { requireAuthority(); return service.call(op, input); });
+  }));
+
   ipcMain.handle(IPC_CHANNELS.acceptEditorialMemory, (event, input: ServiceOperationMap['acceptEditorialMemory']['input']) => envelope(async () => {
     requireSender(event);
     requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
