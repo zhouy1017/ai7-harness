@@ -703,7 +703,13 @@ async function main() {
     await draftClick(renderer,requireJourney,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${first}"]`,'annotation-menu','right');
     await waitFor(renderer,`window.__j05.menu()?.dataset.markMenu==='selection'`,'annotation-menu-ready');
     // Reach the kept menu action with real keys, never scripted menu scrolling.
-    await draftKey(renderer,'Home',36); for(let step=0;step<6;step++)await draftKey(renderer,'ArrowDown',40);
+    const annotationMenuFocused=`document.activeElement===document.querySelector('[data-mark-menu] [data-mark-action="add-annotation"]')`;
+    await draftKey(renderer,'Home',36);
+    for(let step=0;step<40&&!(await renderer.evaluate(annotationMenuFocused));step++)await draftKey(renderer,'ArrowDown',40);
+    requireJourney(await renderer.evaluate(annotationMenuFocused),'annotation-menu-focused');
+    // Passing the following item and returning avoids the browser's fractional bottom-edge scroll rounding.
+    await draftKey(renderer,'ArrowDown',40); await draftKey(renderer,'ArrowUp',38);
+    requireJourney(await renderer.evaluate(annotationMenuFocused),'annotation-menu-focus-returned');
     await draftClick(renderer,requireJourney,waitFor,'[data-mark-menu] [data-mark-action="add-annotation"]','annotation-choose');
     await assertRenderer(renderer,`globalThis.__annotationMenuPressed===true`,'annotation-menu-real-press');
     await waitFor(renderer, `window.__j05.composer()?.dataset.markComposer === 'create-annotation' && document.activeElement?.dataset.markField === 'body'`, 'annotation-composer');
