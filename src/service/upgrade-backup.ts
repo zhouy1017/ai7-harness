@@ -6,33 +6,15 @@ import { canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './anal
 import { DataVersionError, SOFTWARE_VERSION, breakingChanges, dataVersionAt, readUpgrade, type ClassifiedSchemaRevision, type DataVersionUpgrade } from './data-version.js';
 import { DATABASE_PACKAGE_EXTENSION, writeDatabasePackage } from './database-exports.js';
 import { readSmallFile, writeAtomic } from './database-replacement.js';
-import { takeFreeName } from './manuscript-export.js';
+import { fileDigest, takeFreeName } from './manuscript-export.js';
+import { ensureCanonicalDataDirectory, isStorageFullError } from '../shared/data-root.js';
 import { ensureBackupLocation } from './scheduled-backups.js';
 import { UPGRADE_BACKUP_EXISTS, UPGRADE_BACKUP_FAILED, UPGRADE_BACKUP_UNSUPPORTED } from '../shared/data-version-labels.js';
 
 /**
- * Not called since the storage baseline (#1634; ADR 0105 §4): an open no longer migrates, so nothing is backed up as a store
- * opens. Its next caller is the in-app upgrade tool (R5-6), whose back-up step writes today's pre-upgrade package into today's
- * backup location; if R5-6 does not use this module, R5-6 deletes it. What follows describes it as the open used it.
- *
- * 升级前备份 (Issue #433, plan slice S85b; V2-UX-DSTO-016; ADR 0079 §1.1, §1.3, §1.4). A software update that must move the data
- * to a later Data Version backs it up first: before anything migrates the store, the data as it is — the store and every file
- * beside it — is written as the database package of S86a into the backup location, named `AI7 升级前备份 <date time>.ai7db`
- * and kept until the editor deletes it. A backup that cannot be made opens nothing, so no data is ever upgraded without one.
- *
- * Which schema revisions change the Data Version is the classification in `data-version.ts`. Data Version 1 is frozen at the
- * 1.0.0 development milestone boundary (Issue #967; §1.2) and no later revision is classified breaking yet, so no store is
- * upgraded this way yet; the classification is what makes one do so from then on. This gate runs before any schema advance.
- *
- * The upgrade is noted beside the store before anything migrates it (Issue #433 review): `store/upgrade-pending.json` names the
- * backup, what changes, and the software, Data Version and schema revision it was bringing the store to. An open of that same
- * software stopped after its migration and before the store recorded the upgrade finds the note at the next open, records the
- * upgrade then with the backup it made, and makes no second one. A note another software left, whose migration had raised the
- * Data Version, is recorded as that software's upgrade before this open's own, as far as that migration took the data, and
- * never stands in for a backup this open must make. Every upgrade no open has recorded yet is carried on in the note, oldest
- * first, whatever becomes of the open that carries it, until the store records them all; one already recorded is never
- * recorded again (Issue #433 review). The store clears the note once the records are written. A note that does not read as
- * AI7's — or is larger than any note AI7 writes — refuses the open: its upgrade's backup could no longer be named.
+ * Before the in-app converter changes the Data Version, write a complete package to the editor's
+ * backup location. Its durable note binds the verified package to this upgrade, so a resumed
+ * attempt can reuse it. Notes from earlier open-driven upgrades retain their provenance.
  */
 
 type SqlRow = Record<string, SQLOutputValue>;
@@ -133,7 +115,7 @@ function pendingPath(dataRoot: string): string {
  * or is larger than any AI7 writes, is refused, never taken as none (Issue #433 review). It is read through the one handle it
  * is inspected by, never more of it than that bound, so a note that grows or is replaced as it is read takes no more.
  */
-async function readPendingUpgrade(dataRoot: string): Promise<PendingUpgrade | null> {
+export async function readPendingUpgrade(dataRoot: string): Promise<PendingUpgrade | null> {
   let text: string | null;
   try {
     text = await readSmallFile(pendingPath(dataRoot), MAX_NOTE_BYTES);
@@ -193,6 +175,27 @@ export interface UpgradeBackupOptions {
   readonly now: Date;
 }
 
+/** Recover only the work belonging to this consent on the backup volume, including publication before the data-volume note. */
+export async function prepareUpgradeBackupAttempt(dataRoot: string,note: string,id: string): Promise<string> {
+  const location = await ensureBackupLocation(dataRoot);
+  const area = await ensureCanonicalDataDirectory(location,'.upgrade-'+id);
+  const pending = await readPendingUpgrade(area);
+  if (pending) {
+    const backup = pending.upgrade.backup;
+    const destination = join(location,backup.fileName);
+    const staged = join(area,'package.ai7db.partial');
+    const matches = async (file: string) => {
+      const digest = await fileDigest(file);
+      return digest?.sha256 === backup.sha256 && digest.bytes === backup.byteLength;
+    };
+    if (await absent(destination) && await matches(staged)) await takeFreeName(staged,destination);
+    if (await matches(destination)) await writePendingUpgrade(note,pending.upgrade,pending.target,pending.earlier);
+  }
+  await rm(area,{recursive:true,force:true});
+  await ensureCanonicalDataDirectory(location,'.upgrade-'+id,'store');
+  return area;
+}
+
 /**
  * Before any migration of the store open on `db`: when this software must move it to a later Data Version, write the data as it
  * is into the backup location, note the upgrade beside the store, and answer it, for the store to record once it has opened —
@@ -203,12 +206,12 @@ export interface UpgradeBackupOptions {
 export async function backUpBeforeUpgrade(
   db: DatabaseSync,
   dataRoot: string,
-  options: UpgradeBackupOptions,
+  options: UpgradeBackupOptions & { noteRoot?: string; attemptArea?: string },
 ): Promise<{ upgrade: DataVersionUpgrade | null; earlier: ReadonlyArray<EarlierUpgrade> }> {
   const revision = Number((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
   const toDataVersion = dataVersionAt(options.terminalRevision, options.classes);
   const target: UpgradeTarget = { softwareVersion: options.softwareVersion, dataVersion: toDataVersion, schemaRevision: options.terminalRevision };
-  const pending = await readPendingUpgrade(dataRoot);
+  const pending = await readPendingUpgrade(options.noteRoot ?? dataRoot);
   // A new store carries nothing on: a note beside it was left by data no longer there.
   if (revision === 0) return { upgrade: null, earlier: [] };
   // An earlier open backed the data up and began its migration, then stopped before the store recorded the upgrade (Issue #433
@@ -245,7 +248,7 @@ export async function backUpBeforeUpgrade(
     const location = await ensureBackupLocation(dataRoot);
     const destination = join(location, fileName);
     if (!(await absent(destination))) throw new DataVersionError('UPGRADE_BACKUP_EXISTS', UPGRADE_BACKUP_EXISTS);
-    partial = join(location, `.${randomUUID()}${DATABASE_PACKAGE_EXTENSION}.partial`);
+    partial = options.attemptArea ? join(options.attemptArea,'package.ai7db.partial') : join(location, `.${randomUUID()}${DATABASE_PACKAGE_EXTENSION}.partial`);
     const written = await writeDatabasePackage(db, dataRoot, partial, () => ({
       dataVersion: fromDataVersion,
       // The software whose data this is. A predecessor whose migration stopped partway left a middle state that no AI7
@@ -257,6 +260,13 @@ export async function backUpBeforeUpgrade(
       createdAt: options.now.toISOString(),
       origin: 'pre-upgrade-backup',
     }));
+    const upgrade: DataVersionUpgrade = {
+      fromDataVersion, fromSchemaRevision: revision, fromSoftwareVersion,
+      changes: breakingChanges(revision, options.terminalRevision, options.classes),
+      backup: { fileName, byteLength: written.bytes, sha256: written.sha256 },
+      ...(previous.rollback === undefined ? {} : { rollback: previous.rollback }),
+    };
+    if (options.attemptArea) await writePendingUpgrade(options.attemptArea, upgrade, target, earlier);
     // Only ever a new file (Issue #433 review): the name is taken at the instant the backup is put there, as every export's, so
     // a file that appeared at it while the package was written is left as it is.
     const taken = await takeFreeName(partial, destination);
@@ -265,20 +275,13 @@ export async function backUpBeforeUpgrade(
       throw new DataVersionError('UPGRADE_BACKUP_UNSUPPORTED', UPGRADE_BACKUP_UNSUPPORTED);
     }
     if (taken !== 'taken') throw new Error('The backup could not be put in place.');
-    const upgrade: DataVersionUpgrade = {
-      fromDataVersion,
-      fromSchemaRevision: revision,
-      fromSoftwareVersion,
-      changes: breakingChanges(revision, options.terminalRevision, options.classes),
-      backup: { fileName, byteLength: written.bytes, sha256: written.sha256 },
-      ...(previous.rollback === undefined ? {} : { rollback: previous.rollback }),
-    };
     // Noted before anything migrates the store, with what it is for and the earlier upgrades it carries on: from here on, an
     // open that stops still records them the next time.
-    await writePendingUpgrade(dataRoot, upgrade, target, earlier);
+    await writePendingUpgrade(options.noteRoot ?? dataRoot, upgrade, target, earlier);
     return { upgrade, earlier };
   } catch (error) {
     if (error instanceof DataVersionError) throw error;
+    if (isStorageFullError(error)) throw new DataVersionError('UPGRADE_SPACE','备份磁盘空间不足。释放空间后重新打开 AI7 即可继续。');
     throw new DataVersionError('UPGRADE_BACKUP_FAILED', UPGRADE_BACKUP_FAILED);
   } finally {
     if (partial !== null) await rm(partial, { force: true }).catch(() => undefined);

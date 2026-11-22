@@ -3,6 +3,11 @@ import { lstat, mkdir, opendir, readFile, realpath, rename, stat, writeFile } fr
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
+export function isStorageFullError(error: unknown): boolean {
+  return error !== null && typeof error === 'object' &&
+    (('code' in error && error.code === 'ENOSPC') || ('errcode' in error && error.errcode === 13));
+}
+
 function requireBoundary(condition: unknown): asserts condition {
   if (!condition) throw new Error('AI7_DATA_ROOT_BOUNDARY_INVALID');
 }

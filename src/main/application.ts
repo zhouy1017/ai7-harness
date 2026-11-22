@@ -16,7 +16,8 @@ import { randomUUID } from 'node:crypto';
 import { registerModelConnectionTestHandler } from './model-connection-test-handler.js';
 import { MODEL_SELECTION_OPERATIONS, modelServiceSettingsProjection } from './model-service-settings-projection.js';
 import { readFile, writeFile } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, resolve } from 'node:path';
+import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 import {
   app,
   BrowserWindow,
@@ -179,6 +180,8 @@ async function announceProductReadiness(): Promise<void> {
   });
 }
 
+import { storageMaintenance } from './storage-maintenance.js';
+
 export function registerRendererHandlers(
   service: ServiceClient,
   getOwnedWindow: (event: IpcMainInvokeEvent | IpcMainEvent) => OwnedRendererWindow,
@@ -220,6 +223,7 @@ export function registerRendererHandlers(
   journalFaultArmed: boolean,
   navigationAnswerHoldPath?: string,
   sourceOpener: SourceOpener = (address) => shell.openExternal(address),
+  rollbackUpgrade?: () => Promise<boolean>,
 ): () => void {
   const notifier = createNotifier({
     preferences: () => preferences.read().values,
@@ -2823,7 +2827,7 @@ export function registerRendererHandlers(
   registerLibraryLearningHandlers({ chooseLibraryMaterialFile, requireSender, requireAuthority, service, serializeEffect, preferences });
   registerSourceBrowserHandler({ requireSender, requireAuthority, requireCurrentBookRoute, requireCurrentRouteGeneration, service, opener: sourceOpener });
   registerSeriesHandlers({ requireSender, requireAuthority, service, serializeEffect });
-  registerDataStorageHandlers({ chooseDatabaseExportFile, chooseUsageCsvFile, chooseDatabaseImportFile, requireSender, serializeEffect, requireAuthority, service, preferences, requireNothingUnsaved, quitApplication });
+  registerDataStorageHandlers({ chooseDatabaseExportFile, chooseUsageCsvFile, chooseDatabaseImportFile, requireSender, serializeEffect, requireAuthority, service, preferences, requireNothingUnsaved, quitApplication, rollbackUpgrade });
   registerSeriesKnowledgeHandlers({ requireSender, serializeEffect, requireAuthority, requireManuscriptCapability, service });
   registerDataVersionHandler({ requireSender, requireAuthority, service });
   registerLearningDecisionHandlers({ requireSender, requireAuthority, service, serializeEffect });
@@ -3499,6 +3503,7 @@ export async function runApplication(): Promise<void> {
   let serviceInterrupted = false;
   let productReady = false;
   let quitting = false;
+  let restoreOnShutdown: (() => Promise<unknown>) | undefined;
   let quitReady = false;
   let shutdown: Promise<void> | undefined;
   let unregisterHandlers: (() => void) | undefined;
@@ -3660,6 +3665,7 @@ export async function runApplication(): Promise<void> {
       unregisterHandlers?.();
       unregisterHandlers = undefined;
       await service?.stop();
+      await restoreOnShutdown?.();
       quitReady = true;
       journeyClose('stop-complete');
     })());
@@ -3842,7 +3848,7 @@ export async function runApplication(): Promise<void> {
     const exportStagingRoot = await ensureCanonicalDataDirectory(dataRoot, 'export-staging');
     startupLocation = reachStartup('service-ready');
     const serviceEntry = resolve(__dirname, '..', 'service', 'index.mjs');
-    service = await ServiceClient.start(
+    const startService = () => ServiceClient.start(
       process.execPath,
       serviceEntry,
       dataRoot,
@@ -3860,6 +3866,20 @@ export async function runApplication(): Promise<void> {
       launch.calibrationMinBooks,
       launch.journalFaultArmed,
     );
+    if (existsSync(join(shellRoot, 'storage-upgrade.json')) && !(await storageMaintenance(serviceEntry,dataRoot,'resume'))) {
+      app.quit();
+      return;
+    }
+    try { service = await startService(); }
+    catch (error) {
+      if (!(error instanceof ServiceCallError && error.code === 'DATA_VERSION_OLDER')) throw error;
+      if (!(await storageMaintenance(serviceEntry,dataRoot,'preflight'))) { app.quit(); return; }
+      const answer = await dialog.showMessageBox({ type:'question',title:'升级书库',
+        message:'AI7 将先备份，再整理为新格式。升级前的书库会保留，旧版 AI7 无法打开升级后的数据。',
+        buttons:['升级','关闭'],defaultId:1,cancelId:1 });
+      if (answer.response !== 0 || !(await storageMaintenance(serviceEntry,dataRoot,'upgrade'))) { app.quit(); return; }
+      service = await startService();
+    }
     service.onUnexpectedExit(() => {
       crashHook(crashes, 'service-exit', () => undefined)({ reason: 'abnormal-exit' });
       serviceInterrupted = true;
@@ -4401,6 +4421,15 @@ export async function runApplication(): Promise<void> {
       launch.journalFaultArmed,
       launch.navigationAnswerHoldPath,
       await createSourceOpener(dataRoot, launch.browserRecord),
+      async () => {
+        const answer = await dialog.showMessageBox({type:'warning',title:'回到升级前的数据',
+          message:'升级后所做的修改不在旧书库中。恢复后，请使用上一版 AI7 打开。',buttons:['回到升级前的数据','取消'],defaultId:1,cancelId:1});
+        if (answer.response !== 0) return false;
+        if (!(await storageMaintenance(serviceEntry, dataRoot, 'check-rollback'))) return false;
+        if ([...ownedWindows.values()].some(owned => owned.closeRisk && !owned.window.isDestroyed())) return false;
+        restoreOnShutdown = () => storageMaintenance(serviceEntry, dataRoot, 'rollback');
+        return true;
+      },
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

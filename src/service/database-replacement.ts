@@ -18,7 +18,7 @@ import {
   type DatabaseReplacementsProjection,
 } from '../shared/protocol.js';
 import { DIGEST_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
-import { DATABASE_PACKAGE_EXTENSION, DATABASE_PACKAGE_STORE_MEMBER, writeDatabasePackage, isProxyEnvironmentMember, type DatabasePackageMember } from './database-exports.js';
+import { DATABASE_PACKAGE_EXTENSION, DATABASE_PACKAGE_STORE_MEMBER, writeDatabasePackage, isProxyEnvironmentMember, isUpgradeDirectory, type DatabasePackageMember } from './database-exports.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { MAX_MANIFEST_BYTES, verifyDatabasePackage, type DatabasePackageManifest } from './database-package-reader.js';
 import {
@@ -405,7 +405,7 @@ async function stagedAsVerified(
     const found = new Set<string>();
     const visit = async (directory: string, prefix: string, kept: ReadonlySet<string>): Promise<boolean> => {
       for await (const entry of await opendir(directory)) {
-        if (prefix === '' && kept.has(entry.name.toLowerCase())) continue;
+        if (prefix === '' && (kept.has(entry.name.toLowerCase()) || (kept === REPLACEMENT_KEPT_ROOTS && isUpgradeDirectory(entry.name)))) continue;
         const member = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
         if (isProxyEnvironmentMember(member)) continue;
         const path = join(directory, entry.name);
@@ -480,7 +480,7 @@ async function moveEntries(from: string, to: string, keep: ReadonlySet<string>, 
   await mkdir(to, { recursive: true });
   if (!existsSync(from)) return;
   for (const entry of await readdir(from)) {
-    if (keep.has(entry.toLowerCase())) continue;
+    if (keep.has(entry.toLowerCase()) || (keep === REPLACEMENT_KEPT_ROOTS && isUpgradeDirectory(entry))) continue;
     const member = prefix === '' ? entry : `${prefix}/${entry}`;
     if (isProxyEnvironmentMember(member)) continue;
     if (prefix === '' && entry.toLowerCase() === 'settings' && (await lstat(join(from, entry))).isDirectory()) {
@@ -783,7 +783,24 @@ export interface DatabaseReplacementSources {
 
 const MERGE_RECORD_SCHEMA = 'ai7.database-merge/1' as const;
 
+async function convertIncoming(incoming: string, softwareVersion: string): Promise<void> {
+  // extractReplacement has verified the package, including every external payload, in staging.
+  const { convertUpgradeStore, verifyUpgradeStore } = await import('./upgrade-store.js');
+  const { DataVersionLedger, writeDataVersionMarker } = await import('./data-version.js');
+  const source = join(incoming, DATABASE_PACKAGE_STORE_MEMBER);
+  const converted = join(incoming, 'store', 'converted.sqlite');
+  convertUpgradeStore(source, converted);
+  verifyUpgradeStore(source, converted);
+  const db = new DatabaseSync(converted);
+  try { new DataVersionLedger(db).recordOpen({ dataVersion: 2, schemaRevision: 117, softwareVersion }); }
+  finally { db.close(); }
+  for (const suffix of ['-shm','-wal','-journal']) await rm(source + suffix, { force: true });
+  await rename(converted, source);
+  await writeDataVersionMarker(incoming, { dataVersion: 2, schemaRevision: 117, softwareVersion, writtenAt: new Date().toISOString() });
+}
+
 interface Preview {
+  readonly convertible: boolean;
   readonly previewId: string;
   readonly source: string;
   readonly sha256: string;
@@ -820,6 +837,7 @@ export class DatabaseReplacements {
     let handle: FileHandle | undefined;
     let plan: MergePlan;
     let verified: Awaited<ReturnType<typeof verifyDatabasePackage>>;
+    let convertible = false;
     try {
       verified = await verifyDatabasePackage(source, { dataRoot: this.#dataRoot }, {
         begin: async (member) => {
@@ -835,6 +853,11 @@ export class DatabaseReplacements {
       });
       // A store that does not read offers no Book to merge; 替换 finds out at the next open, as it would anyway.
       try {
+        if (verified.manifest.dataVersion === 1 && verified.manifest.schemaRevision === 116) {
+          const { requireUpgradeSource } = await import('./upgrade-store.js');
+          const db = new DatabaseSync(copy, { readOnly: true, defensive: true });
+          try { requireUpgradeSource(db); convertible = true; } finally { db.close(); }
+        }
         plan = this.#plan(copy);
       } catch {
         plan = { books: [], counts: { new: 0, present: 0, sameTitle: 0 }, notices: [], refusal: null };
@@ -845,7 +868,7 @@ export class DatabaseReplacements {
     }
     const facts = this.#sources.facts();
     const previewId = randomUUID();
-    this.#preview = { previewId, source, sha256: verified.sha256, manifest: verified.manifest };
+    this.#preview = { previewId, source, convertible, sha256: verified.sha256, manifest: verified.manifest };
     return {
       previewId,
       fileName: basename(source),
@@ -857,7 +880,7 @@ export class DatabaseReplacements {
       softwareVersion: verified.manifest.softwareVersion,
       schemaRevision: verified.manifest.schemaRevision,
       localDataVersion: facts.dataVersion,
-      compatibility: importCompatibility(verified.manifest, facts.dataVersion, facts.schemaRevision),
+      compatibility: convertible ? 'compatible' : importCompatibility(verified.manifest, facts.dataVersion, facts.schemaRevision),
       contents: verified.manifest.contents,
       members: verified.manifest.members.length,
       books: plan.books,
@@ -879,10 +902,11 @@ export class DatabaseReplacements {
     try {
       const { manifest, sha256 } = await extractReplacement(this.#dataRoot, preview.source, preview.sha256);
       const facts = this.#sources.facts();
-      requireReplacement(importCompatibility(manifest, facts.dataVersion, facts.schemaRevision) === 'compatible',
+      requireReplacement(preview.convertible || importCompatibility(manifest, facts.dataVersion, facts.schemaRevision) === 'compatible',
         'DATABASE_IMPORT_INCOMPATIBLE', '这个数据库文件与本机 AI7 的数据版本不兼容，不能合并。');
       const staging = replacementStagingFor(this.#dataRoot);
       const incoming = join(staging, 'incoming');
+      if (preview.convertible) await convertIncoming(incoming, facts.softwareVersion);
       await this.#sources.openPackage(incoming);
       // The package's store stands alone once it has been opened (Issue #434 review): a rollback journal, and nothing beside it
       // that the members verified below would not cover.
@@ -1157,10 +1181,13 @@ export class DatabaseReplacements {
   async #stage(kind: 'replace' | 'roll-back', source: string, expectedSha256: string, now: Date): Promise<void> {
     try {
       const { manifest, sha256 } = await extractReplacement(this.#dataRoot, source, expectedSha256);
-      const packageMembersSha256 = await writeReplacementMembers(this.#dataRoot, manifest.members);
       const facts = this.#sources.facts();
-      requireReplacement(importCompatibility(manifest, facts.dataVersion, facts.schemaRevision) === 'compatible',
+      const convertible = kind === 'replace' && this.#preview?.convertible && this.#preview.sha256 === sha256;
+      requireReplacement(convertible || importCompatibility(manifest, facts.dataVersion, facts.schemaRevision) === 'compatible',
         'DATABASE_IMPORT_INCOMPATIBLE', '这个数据库文件与本机 AI7 的数据版本不兼容，不能用来替换。');
+      const incoming = join(replacementStagingFor(this.#dataRoot), 'incoming');
+      if (convertible) await convertIncoming(incoming, facts.softwareVersion);
+      const packageMembersSha256 = await writeReplacementMembers(this.#dataRoot, convertible ? await stagedMembers(incoming) : manifest.members);
       const backup = await this.#backUp(now, 'pre-replace-backup');
       await writeReplacementIntent(this.#dataRoot, {
         replacementId: randomUUID(),

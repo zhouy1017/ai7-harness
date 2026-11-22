@@ -1826,6 +1826,7 @@ export class EditorialStore {
       throw error;
     });
     const dataRoot = await createCanonicalExternalDataRoot(dataRootInput, codeRoot);
+    requireStore(!existsSync(join(dataRoot, 'shell', 'storage-upgrade.json')), 'UPGRADE_PENDING', '请在应用内继续上次数据升级。');
     // Refuse before pending replacement recovery can remove staging, move data or merge into SQLite (#967 review).
     await EditorialStore.#checkDataVersionMarker(dataRoot, control);
     // 替换本机全部数据 (Issue #434, S86c; ADR 0079 §1.3): a replacement prepared in the last lifetime is applied before anything
@@ -8244,6 +8245,11 @@ export class EditorialStore {
   // ---- 设置 › 数据与存储 › 版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1) --------------------------------
 
   /** The software version and the Data Version apart, the latest software update, and the store's version records. A read. */
+  async hasLocalUpgradeSource(): Promise<boolean> {
+    const { hasLocalUpgradeSource } = await import('./in-app-upgrade.js');
+    return hasLocalUpgradeSource(this.#dataRoot);
+  }
+
   inspectDataVersion(): DataVersionProjection {
     return this.#dataVersionCall(() => {
       const { latest, recent, update, count, upgrades } = this.#dataVersions.standing();

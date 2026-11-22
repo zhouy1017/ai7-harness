@@ -619,7 +619,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['rollBackDatabaseReplacement']['output']>(IPC_CHANNELS.rollBackDatabaseReplacement, input),
   prepareDatabaseMerge: (input: Parameters<RendererApi['prepareDatabaseMerge']>[0]) =>
     invoke<ServiceOperationMap['prepareDatabaseMerge']['output']>(IPC_CHANNELS.prepareDatabaseMerge, input),
-  quitApplication: () => invoke<Awaited<ReturnType<RendererApi['quitApplication']>>>(IPC_CHANNELS.quitApplication, {}),
+  quitApplication: (action?: 'rollback-upgrade') => invoke<Awaited<ReturnType<RendererApi['quitApplication']>>>(IPC_CHANNELS.quitApplication, action === 'rollback-upgrade' ? { rollbackUpgrade:true } : {}),
   cancelDatabaseExport: (input: Parameters<RendererApi['cancelDatabaseExport']>[0]) =>
     invoke<ServiceOperationMap['cancelDatabaseExport']['output']>(IPC_CHANNELS.cancelDatabaseExport, input),
   proposeSeriesKnowledge: (input: ServiceOperationMap['proposeSeriesKnowledge']['input']) =>

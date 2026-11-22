@@ -4739,7 +4739,7 @@
    "type": "table",
    "name": "manuscript_revisions",
    "tbl_name": "manuscript_revisions",
-   "sql": "CREATE TABLE \"manuscript_revisions\" (\n      revision_id TEXT PRIMARY KEY,\n      manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),\n      branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),\n      ordinal INTEGER NOT NULL CHECK(ordinal > 0),\n      revision_label TEXT NOT NULL,\n      parent_revision_id TEXT REFERENCES manuscript_revisions(revision_id),\n      source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),\n      revision_digest TEXT NOT NULL CHECK(length(revision_digest) = 64),\n      created_at TEXT NOT NULL,\n      UNIQUE(manuscript_id, ordinal),\n      UNIQUE(manuscript_id, revision_label)\n    ) STRICT"
+   "sql": "CREATE TABLE \"manuscript_revisions\" (\n      revision_id TEXT PRIMARY KEY,\n      manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),\n      branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),\n      ordinal INTEGER NOT NULL CHECK(ordinal > 0),\n      revision_label TEXT NOT NULL,\n      parent_revision_id TEXT REFERENCES manuscript_revisions(revision_id),\n      source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),\n      revision_digest TEXT NOT NULL CHECK(length(revision_digest) = 64),\n      created_at TEXT NOT NULL,\n      upgrade_snapshot INTEGER NOT NULL DEFAULT 0 CHECK(upgrade_snapshot IN (0,1)),\n      UNIQUE(manuscript_id, ordinal),\n      UNIQUE(manuscript_id, revision_label)\n    ) STRICT"
   },
   {
    "type": "table",

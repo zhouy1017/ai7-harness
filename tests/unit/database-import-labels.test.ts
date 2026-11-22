@@ -116,7 +116,7 @@ describe('导入数据库\'s words', () => {
       databaseImportVersionLine({ ...preview, compatibility: 'newer-schema', softwareVersion: '0.2.0' }),
     ]).toEqual([
       '数据版本 2 · 比本机的数据版本 1 新，请先更新 AI7 · 软件 0.1.0',
-      '数据版本 1 · 比本机的数据版本 2 旧，暂不能导入 · 软件 0.1.0',
+      '数据版本 1 · 比本机的数据版本 2 旧，请先用 0.7.4 导入并重新导出 · 软件 0.1.0',
       '数据版本 1 · 由更新的 AI7 做成，请先更新 AI7 · 软件 0.2.0',
     ]);
     expect(databaseImportRefusalLine({ compatibility: 'newer-schema' })).toBe('这个文件的数据版本与本机 AI7 不兼容，不能导入。');

@@ -1,4 +1,6 @@
 import { appendBaselineUnitVariant } from '../support/synopsis-reuse.js';
+import { createUpgradeSample1 } from '../support/upgrade-sample1.js';
+import { beginUpgrade, resumeUpgrade } from '../../src/service/in-app-upgrade.js';
 import { randomUUID } from 'node:crypto';
 import { writeFile, cp } from 'node:fs/promises';
 import { basename } from 'node:path';
@@ -118,6 +120,22 @@ function synthesisOutcome(session: Session, book: Book): string {
     return JSON.stringify(events);
   } finally { db.close(); }
 }
+
+it('reads the archived SampleBook report and continues its paused review after an in-app upgrade', async () => {
+  await createUpgradeSample1(roots.dataRoot, roots.codeRoot);
+  await beginUpgrade(roots.dataRoot);
+  await resumeUpgrade(roots.dataRoot,'0.8.0');
+  const session = await openCapturedSession();
+  try {
+    const runs = session.store.listBooks(null).items.map(b => session.store.inspectReviewWorkspace(b.bookId,null).run!);
+    const archived = runs.find(r => r.report !== null && r.report !== undefined)!.report!;
+    expect(canonicalRecord(archived.record).digest).toBe(archived.digest);
+    const paused = runs.find(r => r.canContinue)!;
+    await session.driver.continue(paused.reviewRunId);
+    const book = session.store.listBooks(null).items.find(b => session.store.inspectReviewWorkspace(b.bookId,null).run?.reviewRunId === paused.reviewRunId)!;
+    expect(session.store.inspectReviewWorkspace(book.bookId,paused.reviewRunId).run?.state).toBe('settled');
+  } finally { await closeCapturedSession(session); }
+},180_000);
 
 it('sends one structured synthesis request in ordinary production, preserves findings, and replays without resending (#1433)', async () => {
   await withCapturedReviewBook(async (session, book) => {
