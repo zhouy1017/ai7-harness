@@ -2,7 +2,7 @@ import type { ManualCommandRequestPin, ManualCommandSource } from '../shared/pro
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { BoundedStoreError, BoundedStoreFatalError, requireBounded, one, asString, asNumber, canonicalJson, sha256, graphemes,
   transact, stagedBlockLength, UUID_PATTERN, DIGEST_PATTERN, BLOCK_PATTERN, HISTORY_BATCH, MIGRATION_BATCH } from './manuscript/bounded-kernel.js';
-import { openRestoreStep, recordStepAnchors, recordGroupPart, stepQuote, supersedeAllSteps, type EditorStepHost } from './manuscript/editor-steps.js';
+import { openRestoreStep, recordStepAnchors, recordGroupPart, RestoreConflict, stepQuote, supersedeAllSteps, type EditorStepHost } from './manuscript/editor-steps.js';
 import type { BookVersionScope, BookVersionRow, ServiceOperationMap } from '../shared/protocol.js';
 import {
   assignKeysAndPages, blockAtCharacter, keyAtParagraph, offsetBefore, paragraphAtKey, paragraphCount, placesOfKeys, positionsOfBlocks,
@@ -4514,8 +4514,12 @@ export class BoundedManuscriptStore {
         const current = this.#versionRow(binding, binding.revisionId);
         const mismatch = this.#db.prepare(`WITH working AS (SELECT row_number() OVER (ORDER BY order_key) position, block_id, kind, level, text, digest FROM working_blocks WHERE branch_id = ?),
           saved AS (SELECT position, block_id, kind, level, text, digest FROM manuscript_block_versions WHERE revision_id = ?)
-          SELECT 1 WHERE (SELECT count(*) FROM working) <> (SELECT count(*) FROM saved) OR EXISTS (SELECT * FROM working EXCEPT SELECT * FROM saved)`).get(branchId, expected);
-        requireBounded(current.source_version_id === expectedRevision.source_version_id && !mismatch, 'HISTORY_STALE', '恢复后的稿件还有生效的修改。');
+          SELECT coalesce(saved.position,working.position) position, working.block_id
+          FROM saved FULL JOIN working USING (block_id)
+          WHERE (saved.position,saved.kind,saved.level,saved.text,saved.digest) IS NOT (working.position,working.kind,working.level,working.text,working.digest)
+          ORDER BY position, working.block_id LIMIT 1`).get(branchId, expected);
+        if (mismatch) throw new RestoreConflict(asNumber(mismatch.position), mismatch.block_id === null ? null : asString(mismatch.block_id));
+        if (current.source_version_id !== expectedRevision.source_version_id) throw new RestoreConflict(null, null);
         this.#replaceFromVersion(binding, revisionId);
       },
       binding: () => {

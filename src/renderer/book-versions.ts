@@ -23,10 +23,12 @@ export function mountBookVersions(scope: BookVersionScope, options: {
   const fail = (error: unknown) => { if (root.isConnected) setStatus(options.errorMessage(error, '版本操作未完成，请刷新后再试。'), 'error'); };
   async function load(offset: number): Promise<void> {
     const current = ++request;
-    selection.replaceChildren();
+    selection.replaceChildren(element('p', undefined, '正在读取版本列表…'));
+    root.dataset['versionState'] = 'loading';
     try {
       const page = await api.listBookVersions({ ...scope, offset });
       if (!root.isConnected || current !== request) return;
+      selection.replaceChildren();
       list.replaceChildren(); pages.replaceChildren();
       for (const row of page.rows) {
         const item = element('li'); item.dataset['kind'] = row.kind; item.dataset['revisionId'] = row.revisionId;
@@ -52,18 +54,28 @@ export function mountBookVersions(scope: BookVersionScope, options: {
       }
       if (offset > 0) pages.append(button('上一页版本', 'quiet', () => void load(Math.max(0, offset - 30))));
       if (page.more) pages.append(button('下一页版本', 'quiet', () => void load(offset + page.rows.length)));
-    } catch (error) { if (current === request) fail(error); }
+      root.dataset['versionState'] = 'ready';
+    } catch (error) {
+      if (current !== request || !root.isConnected) return;
+      root.dataset['versionState'] = 'failed';
+      selection.replaceChildren(element('p', undefined, options.errorMessage(error, '版本列表未能打开。')),
+        button('重新读取版本列表', 'secondary', () => void load(offset)));
+      fail(error);
+    }
   }
   async function view(row: BookVersionRow, cursor: string | null): Promise<void> {
     const current = ++request;
     try {
       const page = await api.viewBookVersion({ ...scope, revisionId: row.revisionId, cursor });
       if (current !== request || !root.isConnected) return;
-      selection.replaceChildren(element('h4', undefined, `${row.label}（只读）`), element('p', undefined, page.position.label),
+      const heading = element('h4', undefined, `${row.label}（只读）`);
+      heading.tabIndex = -1;
+      selection.replaceChildren(heading, element('p', undefined, page.position.label),
         ...page.blocks.map(block => element('p', 'version-paragraph', block.text)));
       if (page.previousCursor) selection.append(button('上一页正文', 'quiet', () => void view(row, page.previousCursor)));
       if (page.nextCursor) selection.append(button('下一页正文', 'quiet', () => void view(row, page.nextCursor)));
       selection.scrollIntoView({ block: 'nearest' });
+      heading.focus({ preventScroll: true });
     } catch (error) { if (current === request) fail(error); }
   }
   root.addEventListener('toggle', () => { if (root.open) void load(0); else ++request; });

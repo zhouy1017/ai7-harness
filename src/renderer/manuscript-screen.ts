@@ -1,4 +1,5 @@
 import { reviewReturnButton } from './review-return.js';
+import { rendererErrorCode } from './error-words.js';
 import type { TaskLaunchRequest } from './task-drawer.js';
 import { BookOwnershipFailure, sendJournalEdit } from './navigation-generation.js';
 import { reviewReportExportButton } from './review-report-export.js';
@@ -1388,6 +1389,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       manuscriptId: binding.manuscriptId,
       branchId: binding.branchId,
       target,
+    }).catch((error: unknown) => {
+      if (!expected || target.kind !== 'window-start' || rendererErrorCode(error) !== 'WINDOW_NOT_FOUND') throw error;
+      return api.getManuscriptWindowAt({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, target: { kind: 'start' } });
     });
     if (!editor) throw new Error('稿件编辑器不可用。');
     if (expected && (

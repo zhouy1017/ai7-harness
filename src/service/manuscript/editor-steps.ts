@@ -288,6 +288,12 @@ function putStepAnchors(db: DatabaseSync, stepId: string, side: 'pre' | 'post', 
 export interface EditorStepBinding { manuscriptId: string; branchId: string; revisionId: string; revisionLabel: string; journalSequence: number; workingDigest: string }
 
 /** What the step owner needs of the manuscript and Apply owners, on the authority connection. */
+export class RestoreConflict extends BoundedStoreError {
+  constructor(readonly paragraph: number | null, readonly blockId: string | null) {
+    super('HISTORY_STALE', '恢复后的稿件还有生效的修改。');
+  }
+}
+
 export interface EditorStepHost {
   readonly db: DatabaseSync;
   /** The branch as it stands now (read afresh after every write), refusing a branch under recovery. */
@@ -491,7 +497,7 @@ function placeOf(db: DatabaseSync, branchId: string, step: StepRow): { blockId: 
 
 /** The answer for a step set aside: why (its words changed, or its suggestion was handled another way), and what the next press does. */
 function blockedSentence(action: 'undo' | 'redo', step: StepRow, paragraph: number | null, cause: 'text' | 'mark'): string {
-  if (step.kind === 'restore') return `稿件还有生效的修改，不能${action === 'undo' ? '撤销' : '重做'}这次恢复。原工作稿仍可在工作概览的版本列表中找到。`;
+  if (step.kind === 'restore') return `${paragraph === null ? '稿件来源有变化' : `第 ${paragraph.toLocaleString('zh-CN')} 段的位置或内容已变化`}，不能${action === 'undo' ? '撤销' : '重做'}这次恢复。原工作稿仍可在工作概览的版本列表中找到。`;
   const place = paragraph === null ? '这一处' : `第 ${paragraph.toLocaleString('zh-CN')} 段`;
   const next = action === 'undo' ? '再按 Ctrl+Z 撤销更早的一步。' : '再按重做会重做后面的一步。';
   if (cause === 'mark') return `${place}的修改建议${action === 'undo' ? '在接受后' : '在撤销后'}已另作处理，「${step.label}」不能${action === 'undo' ? '撤销' : '重做'}。${next}`;
@@ -550,6 +556,7 @@ export function replayEditorStep(host: EditorStepHost, action: 'undo' | 'redo', 
     let lastGroup: string | null = null;
     let cause: 'text' | 'mark' | null = null;
     let blockedAt: string | null = null;
+    let restoreConflict: RestoreConflict | null = null;
     let wrote = false;
     context.replay = { stepId: step.stepId, action, target: null, partBlockId: null, wrote: false };
     try {
@@ -558,6 +565,7 @@ export function replayEditorStep(host: EditorStepHost, action: 'undo' | 'redo', 
     } catch (error) {
       cause = refusal(error);
       if (cause === null) throw error;
+      if (error instanceof RestoreConflict) restoreConflict = error;
       blockedAt = (context.replay.target === null ? null : refusedTarget(db, context.replay.target)) ?? context.replay.partBlockId;
     } finally {
       context.replay = null;
@@ -570,7 +578,7 @@ export function replayEditorStep(host: EditorStepHost, action: 'undo' | 'redo', 
     const after = host.binding();
     // A step set aside is named where the part that refused stands now; a step taken back, where it stands now.
     const refused = blockedAt === null ? undefined : workingBlock(db, after.branchId, blockedAt);
-    const place = blocked && refused !== undefined ? { blockId: refused.blockId, paragraph: refused.position } : placeOf(db, after.branchId, step);
+    const place = restoreConflict ?? (blocked && refused !== undefined ? { blockId: refused.blockId, paragraph: refused.position } : placeOf(db, after.branchId, step));
     const done = `${action === 'undo' ? '已撤销' : '已重做'}：${step.label}${place.paragraph === null ? '' : `（第 ${place.paragraph.toLocaleString('zh-CN')} 段）`}`;
     return {
       action, branchId: after.branchId, revisionId: after.revisionId, revisionLabel: after.revisionLabel,

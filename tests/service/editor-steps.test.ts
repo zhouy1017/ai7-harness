@@ -143,7 +143,8 @@ describe('undo by editor step (ADR 0105 §1)', () => {
     expect(undo().blocked).toBe(true);
     const before = window();
     const count = versions().rows.length;
-    expect(undo()).toMatchObject({ blocked: true, stepLabel: '恢复稿件版本' });
+    expect(undo()).toMatchObject({ blocked: true, stepLabel: '恢复稿件版本', paragraph: target.position, anchorBlockId: target.blockId,
+      completionLabel: expect.stringContaining('第 ' + target.position + ' 段') });
     expect(window().workingDigest).toBe(before.workingDigest);
     expect(window().revisionId).toBe(before.revisionId);
     expect(versions().rows).toHaveLength(count);

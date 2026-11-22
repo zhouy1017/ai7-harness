@@ -2802,7 +2802,7 @@ async function main() {
       try { await waitFor(renderer, `document.querySelector('.book-versions li[data-kind="revision"]')`, `${name}-rows`); }
       catch {
         const facts = await renderer.evaluate(`(async()=>{const list=document.querySelector('.book-versions');const result=['open-'+Boolean(list?.open),'rows-'+(list?.querySelectorAll('li').length??0)];try{const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookId)},historyCursor:null});const anchor=overview.manuscriptAnchor;const page=await window.ai7.listBookVersions({bookId:overview.book.bookId,manuscriptId:anchor.manuscriptId,branchId:anchor.branchId,offset:0});result.push('saved-'+page.rows.filter(row=>row.kind==='revision').length);}catch(error){result.push(typeof error?.code==='string' && /^[A-Z0-9_]{1,72}$/.test(error.code)?error.code:'unclassified');}return result;})()`);
-        throw journeyCheckFailure('J-07', `${name}-rows`, { failed: facts });
+        throw journeyCheckFailure('J-07', `${name}-rows-${facts.join('-').toLowerCase().replaceAll('_','-')}`);
       }
     };
     await showVersions('version-list');
@@ -2818,6 +2818,23 @@ async function main() {
     const selectedDocx = await readExportedDocx(versionPath);
     requireJourney(selectedDocx.paragraphs.length === excerpt.length && selectedDocx.paragraphs.every((para, index) => para.digest === digestOf(excerpt[index])), 'version-list-selected-docx-content');
     await assertRenderer(renderer, `window.ai7.inspectDeliverables().then(result => result.exports.some(record => record.target.kind === 'revision' && record.target.revisionId === ${JSON.stringify(revisionId)} && record.outcome === 'created'))`, 'version-list-selected-receipt');
+    for (const [kind, label, edit] of [['milestone', '里程碑 · ' + SECOND.label, FIRST_EDIT], ['publication', '发稿版本 · 第 2 次', '']]) {
+      await close();
+      const destination = resolve(exportsRoot, kind + '.docx');
+      renderer = await launch({ save: destination });
+      await reopenDeliverables(renderer, 'version-' + kind);
+      await showVersions('version-' + kind);
+      const selected = await renderer.evaluate(`Array.from(document.querySelectorAll('.book-versions li[data-kind="${kind}"]')).find(row => row.querySelector('strong').textContent === ${JSON.stringify(label)})?.dataset.revisionId`);
+      requireJourney(typeof selected === 'string', 'version-' + kind + '-binding');
+      const row = `.book-versions li[data-kind="${kind}"][data-revision-id="${selected}"]`;
+      await clickSelector(renderer, row + ' .button-row > button:first-child', 'version-' + kind + '-select');
+      await waitFor(renderer, `document.activeElement?.matches('.version-selection h4') && document.activeElement.textContent.includes(${JSON.stringify(label)})`, 'version-' + kind + '-preview');
+      await clickSelector(renderer, row + ' [data-export-menu] > summary', 'version-' + kind + '-menu');
+      await clickSelector(renderer, row + ' [data-export-clean]', 'version-' + kind + '-docx');
+      await waitFor(renderer, `document.querySelector('.book-versions .export-receipt')?.dataset.exportOutcome === 'created'`, 'version-' + kind + '-receipt');
+      const output = await readExportedDocx(destination);
+      requireJourney(output.paragraphs.length === excerpt.length && output.paragraphs.every((para, index) => para.digest === digestOf(index === 0 ? excerpt[0] + edit : excerpt[index])), 'version-' + kind + '-contents');
+    }
     await clickSelector(renderer, `${versionRow} .button-row > button:last-child`, 'version-list-restore');
     await clickSelector(renderer, '.version-selection button.primary', 'version-list-confirm');
     const editorWords = `document.querySelector('[data-testid="manuscript-editor"]')`;
@@ -2837,6 +2854,32 @@ async function main() {
     requireJourney(typeof restoreId === 'string', 'version-list-restore-step');
     await acknowledgedEdit(renderer, FIRST_EDIT, 'version-list-later-edit');
     await assertRenderer(renderer, `(async () => { const scope=${JSON.stringify(versionBinding)}; const page=await window.ai7.getManuscriptWindow({...scope,cursor:null}); try { await window.ai7.undoManuscript({...scope,expectedWorkingDigest:page.workingDigest,expectedStepId:${JSON.stringify(restoreId)}}); } catch(error) { return error.code === 'HISTORY_STEP_CHANGED' && ${editorWords}.textContent.includes(${JSON.stringify(FIRST_EDIT)}); } return false; })()`, 'version-list-refused-after-edit');
+    await versionKey(false);
+    await waitFor(renderer, `!${editorWords}.textContent.includes(${JSON.stringify(FIRST_EDIT)})`, 'version-list-later-edit-undone');
+    const conflict = await renderer.evaluate(`(async () => {
+      const scope=${JSON.stringify(versionBinding)};
+      const read=()=>window.ai7.getManuscriptWindow({...scope,cursor:null});
+      const page=await read();
+      const block=page.blocks.find(row=>row.kind==='paragraph' && [...row.text].length>16);
+      const binding={...scope,windowStartBlockId:page.blocks[0].blockId};
+      const selectedText=[...new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(block.text)].slice(4,8).map(part=>part.segment).join('');
+      const {markId}=await window.ai7.createEditorialMark({...binding,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:block.blockId,baseBlockDigest:block.digest,fromGrapheme:4,toGrapheme:8,selectedText,kind:'change-suggestion',highlightColor:null,body:'',proposedText:'',rationale:null});
+      await window.ai7.applyChangeSuggestion({...binding,markId,clientEffectId:crypto.randomUUID(),interaction:'accept-and-apply',editedText:null,reason:null});
+      const applied=await read();
+      await window.ai7.flushJournalEdit({...binding,clientEditId:crypto.randomUUID(),baseRevisionId:applied.revisionId,expectedJournalSequence:applied.journalSequence,blockId:block.blockId,baseBlockDigest:applied.blocks.find(row=>row.blockId===block.blockId).digest,fromGrapheme:3,toGrapheme:5,insertText:'〔跨〕'});
+      return {position:block.position,markId,blockId:block.blockId};
+    })()`);
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'version-conflict-overview');
+    await waitFor(renderer, `document.querySelector('.book-versions')`, 'version-conflict-overview-visible');
+    await openManuscript(renderer, 'version-conflict');
+    await versionKey(false);
+    await waitFor(renderer, `window.ai7.inspectEditorHistory(${JSON.stringify(versionBinding)}).then(history=>history.undo?.kind==='accept')`, 'version-conflict-edit-undone');
+    await versionKey(false);
+    await waitFor(renderer, `window.ai7.inspectEditorHistory(${JSON.stringify(versionBinding)}).then(history=>history.undo?.kind==='restore')`, 'version-conflict-accept-kept');
+    const conflictDigest = await renderer.evaluate(`window.ai7.getManuscriptWindow({...${JSON.stringify(versionBinding)},cursor:null}).then(page=>page.workingDigest)`);
+    await versionKey(false);
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('不能撤销这次恢复') || document.querySelector('[data-toast]')?.textContent.includes('不能撤销这次恢复')`, 'version-conflict-whole-state-refusal');
+    await assertRenderer(renderer, `(async()=>{const scope=${JSON.stringify(versionBinding)}; const page=await window.ai7.getManuscriptWindow({...scope,cursor:null});const card=await window.ai7.getEditorialMarkCard({...scope,markId:${JSON.stringify(conflict.markId)}});return page.workingDigest===${JSON.stringify(conflictDigest)} && card.status==='applied';})()`, 'version-conflict-decision-and-text-kept');
     await showVersions('version-list-find-autosave');
     await assertRenderer(renderer, `(() => { const row=Array.from(document.querySelectorAll('.book-versions li')).find(item=>item.querySelector('strong').textContent.startsWith('恢复前自动保存')); if(!row)return false; row.querySelector('button').click(); return true; })()`, 'version-list-open-autosave');
     await waitFor(renderer, `document.querySelector('.version-selection h4')?.textContent.includes('恢复前自动保存') && document.querySelector('.version-selection').textContent.includes(${JSON.stringify(SECOND_EDIT)})`, 'version-list-autosave-retrievable');
