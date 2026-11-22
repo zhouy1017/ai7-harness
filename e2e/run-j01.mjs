@@ -1641,8 +1641,9 @@ async function runJourney(
     at('fidelity-one-sentence');
     await assertRenderer(renderer, `document.querySelector('[data-text-box-choice]')?.closest('details')===null`, 'text-box-outside-fold');
     await reachImportControl(renderer, waitFor, '[data-text-box-choice]', 'text-box-choice-reachable');
+    await assertRenderer(renderer, `(() => { const retain=document.querySelector('#text-box-disposition-retain'); const merge=document.querySelector('#text-box-disposition-merge'); const summary=document.querySelector('.fidelity-summary')?.textContent ?? ''; return retain instanceof HTMLInputElement && merge instanceof HTMLInputElement && retain.checked && !merge.checked && !retain.disabled && !merge.disabled && summary.includes('文本框 · 1 项随文件保留'); })()`, 'text-box-choice-default-enabled');
     if (textBoxDisposition === 'merge') await pressImportControl(renderer, waitFor, '#text-box-disposition-merge', 'text-box-merge');
-    await assertRenderer(renderer, `document.querySelector('#text-box-disposition-${textBoxDisposition}')?.checked===true && document.querySelector('.fidelity-summary')?.textContent.includes(${JSON.stringify(textBoxDisposition === 'merge' ? '并入正文' : '随文件保留')})`, 'text-box-choice-offered');
+    await assertRenderer(renderer, `(() => { const retain=document.querySelector('#text-box-disposition-retain'); const merge=document.querySelector('#text-box-disposition-merge'); const summary=document.querySelector('.fidelity-summary')?.textContent ?? ''; return ${JSON.stringify(textBoxDisposition)} === 'merge' ? merge.checked && !retain.checked && summary.includes('文本框 · 1 项并入正文') && !summary.includes('文本框 · 1 项随文件保留') : retain.checked && !merge.checked && summary.includes('文本框 · 1 项随文件保留'); })()`, 'text-box-choice-offered');
     at('review');
   }
   if (structure !== null) {

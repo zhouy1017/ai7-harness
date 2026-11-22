@@ -9,7 +9,7 @@ export async function chooseImportTarget(renderer, waitFor, value, name) {
   await waitFor(renderer, `${index}>=0`, `${name}-option`);
   const custom=await renderer.evaluate(`document.querySelector('#import-book + .ui-select-trigger')!==null`);
   const selector=custom?'#import-book + .ui-select-trigger':'#import-book';
-  await waitFor(renderer, inside(selector), `${name}-visible`);
+  await reachImportControl(renderer, waitFor, selector, `${name}-visible`);
   await pointerClick(renderer, waitFor, selector, `${name}-open`);
   if (custom) {
     const option=`#import-book ~ .ui-select-popover .ui-select-option[data-index="${index}"]`;

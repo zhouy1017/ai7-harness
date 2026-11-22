@@ -161,6 +161,7 @@ export function createImportReview(options: ImportReviewOptions) {
   }
 
   // The currently drawn form owns unsent choices; paging and valid target changes keep them.
+  let chosenRelationship: ImportRelationshipChoice | null = null;
   let currentForm: { key: string; content: HTMLElement } | undefined;
   const formControls = '[data-structure-candidate], [data-structure-level], [data-long-paragraph-choice], [data-text-box-disposition]';
   let savedForm: { title?: string; controls: Array<{ key: string; value: string; checked: boolean }>; fidelityOpen?: boolean } = { controls: [] };
@@ -184,7 +185,7 @@ export function createImportReview(options: ImportReviewOptions) {
       }));
       const fold = currentForm.content.querySelector<HTMLDetailsElement>('.fidelity-details');
       if (fold) savedForm.fidelityOpen = fold.open;
-    } else savedForm = { controls: [] };
+    } else { savedForm = { controls: [] }; chosenRelationship = null; }
     if (selectedChoiceId === null) {
       const currentBookId = document.querySelector<HTMLElement>('#screen > [data-book-id]')?.dataset['bookId'];
       const origin = document.querySelector('#screen')?.firstElementChild;
@@ -243,7 +244,8 @@ export function createImportReview(options: ImportReviewOptions) {
       if (target.kind === 'existing-book') option.dataset['bookId'] = target.bookId;
       bookSelect.append(option);
     }
-    bookSelect.addEventListener('change', () => renderTargetChoice(staged, bookSelect.value, recoveryNotice, recoveryReturn, relationshipSelection));
+    bookSelect.addEventListener('change', () => renderTargetChoice(staged, bookSelect.value, recoveryNotice, recoveryReturn,
+      chosenRelationship ?? (relationshipSelection === 'reimport' ? 'reimport' : null)));
     choices.append(bookLabel, bookSelect);
     if (defaultTarget?.kind === 'existing-book') choices.append(identityDisclosure('图书 ID', defaultTarget.bookId));
     content.append(choices);
@@ -347,8 +349,10 @@ export function createImportReview(options: ImportReviewOptions) {
         }
         relationshipChoice.append(radio, copy);
         relationship.append(relationshipChoice);
-        radio.addEventListener('change', () =>
-          renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, relationshipKind));
+        radio.addEventListener('change', () => {
+          chosenRelationship = relationshipKind;
+          renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, relationshipKind);
+        });
         if (!revealedControl) revealedControl = radio;
       }
       content.append(relationship);
@@ -566,6 +570,7 @@ export function createImportReview(options: ImportReviewOptions) {
       };
       if (verifiedLineageSources.length === 0) {
         lineageChoices.removeAttribute('role');
+        lineageChoices.querySelector('legend')!.textContent = '来源关系';
         lineageChoices.append(element('p', undefined, '没有找到这本书的原文件，将对比这次导入与当前稿件。'));
         lineageChoices.dataset['reimportLineage'] = 'unconfirmed';
       } else {
@@ -625,7 +630,7 @@ export function createImportReview(options: ImportReviewOptions) {
       sourceChoices.setAttribute('role', 'radiogroup');
       sourceChoices.setAttribute('aria-label', technicalWords('稿件重新导入来源版本结果', '选择来源文件'));
       sourceChoices.dataset['reimportSourceVersionChoices'] = 'unselected-by-default';
-      sourceChoices.append(element('legend', undefined, technicalWords('来源版本结果（必须另行明确选择）', '选择来源文件')));
+      sourceChoices.append(element('legend', undefined, technicalWords('来源版本结果', '来源文件')));
       const exactSourceVersionId = exactSameBookSources.length === 1 ? exactSameBookSources[0]! : null;
       sourceChoices.removeAttribute('role');
       sourceChoices.append(element('p', undefined, exactSourceVersionId

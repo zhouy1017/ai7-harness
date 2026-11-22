@@ -17,6 +17,7 @@ let staged: StagedImportProjection;
 let bookId: string;
 let root: HTMLElement;
 let view: ReturnType<typeof createImportReview>;
+const status = vi.fn();
 const record = vi.fn(async (_request: unknown) => { throw new Error('recorded'); });
 const listBooks = vi.fn();
 const lineagePage = vi.fn();
@@ -29,7 +30,7 @@ const draw = (relationship: 'source-only' | 'reimport' = 'source-only', projecti
   view.renderTargetChoice(projection, `existing-book:${bookId}`, undefined, undefined, relationship);
 
 beforeEach(async () => {
-  restore = installMiniDom(); setTechnicalLayerVisible(false); record.mockClear(); listBooks.mockReset(); lineagePage.mockReset();
+  restore = installMiniDom(); setTechnicalLayerVisible(false); record.mockClear(); status.mockClear(); listBooks.mockReset(); lineagePage.mockReset();
   vi.stubGlobal('Event', class { constructor(public type: string) {} });
   vi.stubGlobal('window', { ai7: { prepareSourceImportReview: record, prepareManuscriptReimport: record,
     listBooks, getReimportLineageSourceVersionPage: lineagePage }, setTimeout, clearTimeout });
@@ -43,7 +44,7 @@ beforeEach(async () => {
   }, replaceScreen: (_state, content) => root.replaceChildren(content), rendererErrorMessage: (_error, fallback) => fallback,
     abandonAndContinue: vi.fn(), awaitServiceJob: vi.fn(), hasErrorCode: () => false,
     identityFindingDisclosure: () => document.createElement('div'), initializeStartup: vi.fn(), instantValue: () => document.createElement('span'),
-    renderError: vi.fn(), renderImported: vi.fn(), setStatus: vi.fn(), sourceCard: () => document.createElement('div') });
+    renderError: vi.fn(), renderImported: vi.fn(), setStatus: status, sourceCard: () => document.createElement('div') });
 });
 afterEach(async () => { store.close(); await roots.dispose(); setTechnicalLayerVisible(true); restore(); vi.unstubAllGlobals(); });
 
@@ -184,4 +185,38 @@ it('keeps Word mode and structure choices across loading more and valid target c
   view.renderTargetChoice(expanded,`existing-book:${emptyId}`,undefined,undefined,'first-manuscript');
   expect(control('[data-word-import-mode="accepted-baseline"]').checked).toBe(true);
   expect(control('[data-long-paragraph-choice="blocks"]').checked).toBe(true);
+});
+
+it('uses first-manuscript defaults when leaving a populated Book for a new or empty Book', () => {
+  const emptyId=randomUUID(); const existing=target(); if(existing.kind!=='existing-book') throw new Error('missing book');
+  const projection={...staged,targetChoices:[...staged.targetChoices,{...existing,id:`existing-book:${emptyId}`,bookId:emptyId,manuscriptState:'empty' as const}]};
+  for(const id of [newBook().id,`existing-book:${emptyId}`]) {
+    view.renderTargetChoice(projection,`existing-book:${bookId}`);
+    expect(control('[data-import-relationship="source-only"]').checked).toBe(true);
+    control('[id="import-book"]').value=id; change('[id="import-book"]');
+    expect(control('[data-import-relationship="first-manuscript"]').checked).toBe(true);
+    expect(control('[data-import-relationship="source-only"]').checked).toBe(false);
+  }
+});
+
+it('keeps an editor-selected source relationship when it is valid for another Book', () => {
+  view.renderTargetChoice(staged,`existing-book:${bookId}`);
+  control('[data-import-relationship="source-only"]').checked=true; change('[data-import-relationship="source-only"]');
+  control('[id="import-book"]').value=newBook().id; change('[id="import-book"]');
+  expect(control('[data-import-relationship="source-only"]').checked).toBe(true);
+  expect(control('[data-import-relationship="first-manuscript"]').checked).toBe(false);
+});
+
+it('forces source-only for a noneditable file even if the caller requests manuscript update', async () => {
+  draw('reimport',{...staged,editableImport:{available:false,code:'FORMAT_UNSUPPORTED_FOR_EDITABLE_IMPORT',reason:'不支持编辑'}});
+  expect(root.querySelector('[data-prepare-manuscript-reimport]')).toBeNull();
+  control('[data-prepare-source-import-review]').click(); await settle();
+  expect(record.mock.calls[0]![0]).toMatchObject({target:{relationship:'source-only'}});
+});
+
+it('keeps compact actions and the current update status words', async () => {
+  draw('reimport'); await settle();
+  expect(root.querySelector('.import-page-actions .compact-actions')).not.toBeNull();
+  expect(status.mock.calls.at(-1)![0]).toContain('更新稿件的选择已确认');
+  expect(status.mock.calls.at(-1)![0]).not.toContain('逐块比较');
 });
