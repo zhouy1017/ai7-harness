@@ -1,3 +1,4 @@
+import { draftClick, draftKey, markDraftKept } from './mark-drafts.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { commentsPaneForms, commentsSelectMark, commentsTriageForms } from './comments-pane.mjs';
 import { commentsMarksPaging, railJump } from './marks-paging.mjs';
@@ -628,8 +629,20 @@ async function main() {
     await press(renderer, 'End');
     await assertRenderer(renderer, `document.activeElement === window.__j05.item('ai-lock-selection')`, 'menu-end-skips-disabled');
 
+    at('selection-menu-swatches');
+    await draftKey(renderer,'Escape',27);
+    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},${RANGES.highlight[0]},${RANGES.highlight[1]})`);
+    await draftClick(renderer,requireJourney,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${first}"]`,'swatches-real-menu','right');
+    await waitFor(renderer,`window.__j05.menu()?.dataset.markMenu==='selection'`,'swatches-real-open');
+    await assertRenderer(renderer, `(() => {const items=[1,2,3].map(color=>window.__j05.item('add-highlight-'+color)),rects=items.map(node=>node.getBoundingClientRect()),menu=window.__j05.menu().getBoundingClientRect();return rects.every(r=>Math.abs(r.top-rects[0].top)<=1&&r.left>=menu.left&&r.right<=menu.right&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth)&&Array.from(window.__j05.menu().querySelector('[aria-label="AI7 任务"]').querySelectorAll('[role="menuitem"]')).map(node=>node.dataset.markAction).join('|')==='task-on-selection|ask-on-selection|preset-polish|scoped-ai-edit|ai-lock-selection';})()`, 'selection-swatches-row');
+    await draftKey(renderer,'Home',36);
+    for(let step=0;step<7;step++) await draftKey(renderer,'ArrowDown',40);
+    await assertRenderer(renderer, `document.activeElement===window.__j05.item('add-editor-note')`, 'swatches-before-yellow');
+    for(const color of [1,2,3]) { await draftKey(renderer,'ArrowDown',40); await assertRenderer(renderer, `document.activeElement===window.__j05.item('add-highlight-${color}')`, 'swatches-down-order'); }
+    await draftKey(renderer,'ArrowLeft',37);
+    await assertRenderer(renderer, `document.activeElement===window.__j05.item('add-highlight-2')`, 'swatches-left');
     at('mark-highlight');
-    await chooseMenuItem(renderer, 'add-highlight-2', 'highlight-choose');
+    await draftClick(renderer,requireJourney,waitFor,'[data-mark-action="add-highlight-2"]','highlight-choose');
     await waitFor(renderer, `window.__j05.mark('personal-highlight', ${JSON.stringify(first)}).length > 0 && window.__j05.notice().includes('已加高亮')`, 'highlight-drawn');
     await assertRenderer(renderer, `(() => { const mark = window.__j05.mark('personal-highlight', ${JSON.stringify(first)})[0]; const block = window.__j05.block(${JSON.stringify(first)}); return mark.dataset.markColor === '2' && mark.dataset.markSource === 'editor' && mark.dataset.markAnchor === 'exact' && window.__j05.markText('personal-highlight', ${JSON.stringify(first)}) === window.__j05Original.first.slice(${RANGES.highlight[0]}, ${RANGES.highlight[1]}) && block.dataset.markLine === 'personal-highlight' && getComputedStyle(block).borderLeftWidth === '3px' && getComputedStyle(mark).backgroundColor === 'rgb(255, 224, 194)' && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first; })()`, 'highlight-exact-and-colored');
     // A highlight has no card: a click on it opens nothing.
@@ -639,16 +652,31 @@ async function main() {
     await new Promise((resolveWait) => setTimeout(resolveWait, 250));
     await assertRenderer(renderer, `window.__j05.card() === null`, 'highlight-has-no-card');
 
+    await markDraftKept(renderer,requireJourney,waitFor,at,first);
+    at('comments-header-add');
+    await draftClick(renderer,requireJourney,waitFor,'[data-edge-entry="comments"]','header-pane-open');
+    await waitFor(renderer, `!document.querySelector('.manuscript-comments-pane').hidden`, 'header-pane-ready');
+    await assertRenderer(renderer, `(() => {const row=document.querySelector('.manuscript-comments-heading'),r=row.getBoundingClientRect(),controls=Array.from(row.querySelectorAll('button')),boxes=controls.map(node=>node.getBoundingClientRect());return row.offsetHeight<=35&&boxes.every((b,i)=>b.top>=r.top&&b.bottom<=r.bottom&&b.left>=r.left&&b.right<=r.right&&b.left>=0&&b.right<=innerWidth&&boxes.every((other,j)=>j===i||b.right<=other.left||b.left>=other.right));})()`, 'header-add-one-line');
+    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},0,0)`);
+    await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="editor-note"]','header-no-selection');
+    await waitFor(renderer, `window.__j05.notice().includes('先选中一段文字，再添加备注。')&&!window.__j05.composer()`, 'header-no-selection-reason');
+    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},${RANGES.note[0]},${RANGES.note[1]})`);
+    await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="editor-note"]','header-note-open');
+    await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-composer="create-editor-note"] textarea')`, 'header-note-focused');
+    await draftClick(renderer,requireJourney,waitFor,'[data-mark-composer] [data-mark-action="cancel"]','header-note-cancel');
+    await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},${RANGES.annotation[0]},${RANGES.annotation[1]})`);
+    await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="annotation"]','annotation-choose');
     at('mark-annotation');
-    await openSelectionMenu(renderer, first, RANGES.annotation[0], RANGES.annotation[1], 'annotation-menu');
-    await chooseMenuItem(renderer, 'add-annotation', 'annotation-choose');
     await waitFor(renderer, `window.__j05.composer()?.dataset.markComposer === 'create-annotation' && document.activeElement?.dataset.markField === 'body'`, 'annotation-composer');
     await assertRenderer(renderer, `window.__j05.composer().querySelector('[data-mark-quote]')?.textContent === window.__j05Original.first.slice(${RANGES.annotation[0]}, ${RANGES.annotation[1]}) && window.__j05.composer().textContent.includes('批注随稿件导出')`, 'annotation-composer-quotes-selection');
     await assertRenderer(renderer, `window.__j05.act('submit')`, 'annotation-empty-submit');
     await waitFor(renderer, `window.__j05.composer()?.querySelector('[role="alert"]')?.hidden === false && window.__j05.mark('annotation', ${JSON.stringify(first)}).length === 0`, 'annotation-empty-refused');
-    await assertRenderer(renderer, `window.__j05.write('body', ${JSON.stringify(ANNOTATION_BODY)}) && window.__j05.act('submit')`, 'annotation-submit');
+    await renderer.send('Input.insertText',{text:ANNOTATION_BODY});
+    await draftKey(renderer,'Enter',13,2);
+    await draftKey(renderer,'Enter',13,2);
     await waitFor(renderer, `window.__j05.composer() === null && window.__j05.mark('annotation', ${JSON.stringify(first)}).length > 0`, 'annotation-drawn');
     await assertRenderer(renderer, `window.__j05.block(${JSON.stringify(first)}).dataset.markLine === 'annotation' && window.__j05.markText('annotation', ${JSON.stringify(first)}) === window.__j05Original.first.slice(${RANGES.annotation[0]}, ${RANGES.annotation[1]})`, 'annotation-line-outranks-highlight');
+    await draftClick(renderer,requireJourney,waitFor,'.manuscript-comments-heading [aria-label="关闭批注栏"]','header-pane-reset');
     await openMarkCard(renderer, 'annotation', first, 'annotation-open');
     await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.getAttribute('role') === 'dialog' && card.querySelector('[data-mark-source]')?.dataset.markSource === 'editor' && card.querySelector('[data-mark-source]').textContent.startsWith('你 · ') && card.querySelector('[data-mark-body]')?.textContent === ${JSON.stringify(ANNOTATION_BODY)} && card.querySelector('[data-mark-state]')?.textContent === '待处理' && card.textContent.includes('批注随稿件导出') && !card.querySelector('details.technical-details')?.textContent && window.__j05.mark('annotation', ${JSON.stringify(first)})[0].classList.contains('editorial-mark-active'); })()`, 'annotation-card-decision-layer');
     // The card sits below its paragraph and keeps to the text column.

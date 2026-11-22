@@ -126,18 +126,18 @@ it('retains the shown count and full failure sentence after a refused page, and 
   paging.paint();
   const line = paging.row.querySelector('span')!;
   const button = paging.row.querySelector('button')!;
-  expect(line.textContent).toBe('已显示 400 / 1234 条。');
-  expect(line.title).toBe(line.textContent);
+  expect(line.textContent).toBe('已显示 400 · 本段共 1234 条');
+  expect(line.title).toBe('已显示 400 条 · 这一段共 1234 条');
   expect(await paging.more()).toBe(false);
   const failed = paging.row.querySelector<HTMLElement>('.review-page-failed')!;
   expect(failed.hidden).toBe(false);
   expect(failed.textContent).toBe('没能读取更多批注；已显示的保持原样，可以再试。');
-  expect(line.textContent).toBe('已显示 400 / 1234 条。');
+  expect(line.textContent).toBe('已显示 400 · 本段共 1234 条');
   expect(button.getAttribute('aria-disabled')).toBe('false');
   expect(await paging.more()).toBe(true);
   expect(current().marks).toHaveLength(800);
   expect(failed.hidden).toBe(true);
-  expect(line.title).toBe('已显示 800 / 1234 条。');
+  expect(line.title).toBe('已显示 800 条 · 这一段共 1234 条');
 });
 
 

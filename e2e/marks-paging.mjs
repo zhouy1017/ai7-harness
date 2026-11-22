@@ -46,7 +46,9 @@ export async function assertCardActionReachable(renderer, check, waitFor, select
     const inside=r=>r.width>0 && r.height>0 && r.left>=view.left && r.right<=view.right && r.top>=view.top && r.bottom<=view.bottom;
     const hit=document.elementFromPoint(b.left+b.width/2,b.top+b.height/2);
     const line=parseFloat(getComputedStyle(card).lineHeight)||parseFloat(getComputedStyle(card).fontSize)*1.2;
-    return {branch:c.height<=view.bottom-view.top?'fits':'tall',cardHeight:c.height,paneHeight:view.bottom-view.top,whole:inside(c),head:c.left>=p.left-1 && c.right<=p.right+1 && c.left>=0 && c.right<=innerWidth && c.top<=innerHeight-80 && c.top>=view.top && c.top+line<=view.bottom,
+    const ordered=Array.from(pane.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)),next=ordered[ordered.indexOf(card)+1];
+    const successorGap=next?next.getBoundingClientRect().top-c.bottom:null;
+    return {successorGap,branch:c.height<=view.bottom-view.top?'fits':'tall',cardHeight:c.height,paneHeight:view.bottom-view.top,whole:inside(c),head:c.left>=p.left-1 && c.right<=p.right+1 && c.left>=0 && c.right<=innerWidth && c.top<=innerHeight-80 && c.top>=view.top && c.top+line<=view.bottom,
       action:inside(b) && (hit===button || button.contains(hit)),focusRoom:b.top>=view.top+5 && b.bottom<=view.bottom-5,card:[c.left,c.top,c.right,c.bottom],button:[b.left,b.top,b.right,b.bottom],pane:view,window:[innerWidth,innerHeight],scrollTop:pane.scrollTop};
   })()`;
   await waitFor(renderer, `new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`, name+'-rest');
@@ -75,7 +77,7 @@ export async function assertCardActionReachable(renderer, check, waitFor, select
     await waitFor(renderer,`document.querySelector('.editor-window').scrollTop!==${text.top}`,name+'-text-wheel');
     await waitFor(renderer,`new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`,name+'-layout-rest');
     const held=await renderer.evaluate(facts);
-    check(held?.action===true,name+'-held-through-layout',held);
+    check(held?.action===true && (held.successorGap===null || Math.abs(held.successorGap-10)<=1),name+'-held-through-layout',held);
     await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:text.x,y:text.y,deltaX:0,deltaY:-text.delta});
     await waitFor(renderer,`document.querySelector('.editor-window').scrollTop===${text.top}`,name+'-text-restored');
     await waitFor(renderer,`new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`,name+'-restored-layout-rest');
@@ -193,10 +195,12 @@ const COMMENTS_TOP_GEOMETRY = `(() => {
     const r=row.getBoundingClientRect(),visible=!row.hidden,button=row.querySelector('button'),b=button?.getBoundingClientRect(),style=getComputedStyle(row),line=parseFloat(style.lineHeight),padding=parseFloat(style.paddingTop)+parseFloat(style.paddingBottom),controls=Array.from(row.children).filter(node=>!node.hidden),failure=row.querySelector('.review-page-failed:not([hidden])'),failed=failure!==null,count=row.querySelector('span:first-child'),c=count?.getBoundingClientRect(),f=failure?.getBoundingClientRect(),hit=b?document.elementFromPoint(b.left+b.width/2,b.top+b.height/2):null;
     const whole=!failed||(controls.every(node=>node.scrollWidth<=node.clientWidth&&node.scrollHeight<=node.clientHeight)&&!!b&&!!c&&f.top>=Math.max(b.bottom,c.bottom)&&c.top<b.bottom&&c.bottom>b.top);
     const oneLine=!visible?r.height===0:r.height<=Math.max(line,b?.height??0)+padding+1&&controls.every(node=>getComputedStyle(node).whiteSpace==='nowrap');
-    return {kind:row.classList.contains('marks-paging')?'paging':'disclosure',box:box(row),visible,failed,whole,oneLine,inside:!visible||(r.left>=p.left&&r.right<=p.right&&r.top>=p.top&&r.bottom<=v.top+1&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight),button:!visible||!b||(b.left>=r.left&&b.right<=r.right&&b.top>=r.top&&b.bottom<=r.bottom),buttonOnTop:!visible||!b||button.contains(hit),coveredByFilter:!!b&&visible&&popoverOpen&&filterPopover.contains(hit)};
+    return {commonCountFits:!visible||failed||innerWidth!==1008||!/^已显示 [0-9]{3} · 本段共 [0-9]{3} 条$/.test(count?.textContent??'')||count.scrollWidth<=count.clientWidth,kind:row.classList.contains('marks-paging')?'paging':'disclosure',box:box(row),visible,failed,whole,oneLine,inside:!visible||(r.left>=p.left&&r.right<=p.right&&r.top>=p.top&&r.bottom<=v.top+1&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight),button:!visible||!b||(b.left>=r.left&&b.right<=r.right&&b.top>=r.top&&b.bottom<=r.bottom),buttonOnTop:!visible||!b||button.contains(hit),coveredByFilter:!!b&&visible&&popoverOpen&&filterPopover.contains(hit)};
   });
   const summary=pane.querySelector('.editorial-mark-filter-summary'),summaryStyle=getComputedStyle(summary),summaryVisible=!summary.hidden,summaryOneLine=summary.hidden||summary.getBoundingClientRect().height<=parseFloat(summaryStyle.lineHeight)+parseFloat(summaryStyle.paddingTop)+parseFloat(summaryStyle.paddingBottom)+1,filterRowFits=summaryVisible?Math.abs(filters.getBoundingClientRect().height-24)<=1:filters.getBoundingClientRect().height===0;
-  const fullTitles=[pane.querySelector('[data-comments-book-pending]'),summary,pane.querySelector('.marks-paging > span:first-child'),pane.querySelector('.editorial-mark-disclosure')].every(node=>!node.textContent||node.title.includes(node.textContent));
+  const pending=pane.querySelector('[data-comments-book-pending]'),pagingCount=pane.querySelector('.marks-paging > span:first-child'),disclosure=pane.querySelector('.editorial-mark-disclosure');
+  const pendingCount=/全书待处理 ([0-9]+)/.exec(pending.textContent),shown=/已显示 ([0-9]+) · 本段共 ([0-9]+) 条/.exec(pagingCount.textContent);
+  const fullTitles=(!pendingCount||pending.title==='全书还有 '+pendingCount[1]+' 条修改建议、批注和备注待处理')&&(!shown||pagingCount.title==='已显示 '+shown[1]+' 条 · 这一段共 '+shown[2]+' 条')&&(!summary.textContent||summary.title===summary.textContent)&&(!disclosure.textContent||disclosure.title.includes(disclosure.textContent));
   return {viewport:[innerWidth,innerHeight],popoverOpen,rows,notices,summaryVisible,summaryOneLine,filterRowFits,fullTitles,heading:rows[0].box[3],filters:rows[1].box[3],topArea:v.top-p.top,paged:!pane.querySelector('.marks-paging').hidden};
 })()`;
 const headerBeforePaging = new Map();
@@ -221,7 +225,7 @@ export async function assertCommentsHeader(renderer,check,waitFor,name,{remember
     const facts=await renderer.evaluate(COMMENTS_TOP_GEOMETRY),key=facts.viewport.join('x'),before=headerBeforePaging.get(key);
     const unchanged=before===undefined||(Math.abs(facts.heading-before.heading)<=1&&(facts.summaryVisible!==before.summaryVisible||Math.abs(facts.filters-before.filters)<=1));
     const visibleNoticeRows=facts.notices.filter(row=>row.visible).map(row=>row.kind),failureShown=facts.notices.some(row=>row.visible&&row.kind==='paging'&&row.failed),topAreaLimit=84+28*visibleNoticeRows.length+(failureShown?56:0);
-    const valid=facts.topArea<=topAreaLimit&&facts.heading+facts.filters<=84&&facts.heading<=35&&facts.filters<=25&&facts.summaryOneLine&&facts.filterRowFits&&facts.fullTitles&&facts.rows.every(row=>row.aligned&&row.inside)&&facts.notices.every(row=>(row.failed?row.whole:row.oneLine)&&row.inside&&row.button&&(row.buttonOnTop||(!row.failed&&row.coveredByFilter)))&&unchanged;
+    const valid=facts.topArea<=topAreaLimit&&facts.heading+facts.filters<=84&&facts.heading<=35&&facts.filters<=25&&facts.summaryOneLine&&facts.filterRowFits&&facts.fullTitles&&facts.rows.every(row=>row.aligned&&row.inside)&&facts.notices.every(row=>(row.failed?row.whole:row.oneLine)&&row.commonCountFits!==false&&row.inside&&row.button&&(row.buttonOnTop||(!row.failed&&row.coveredByFilter)))&&unchanged;
     console.log('COMMENTS_TOP/'+JSON.stringify({...facts,visibleNoticeRows,failureShown,topAreaLimit,before:before??null}));
     check(valid,name,{...facts,visibleNoticeRows,failureShown,topAreaLimit,before:before??null});
     if(remember)headerBeforePaging.set(key,{heading:facts.heading,filters:facts.filters,summaryVisible:facts.summaryVisible});
@@ -260,7 +264,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   await waitFor(renderer, `(async () => { try { globalThis.__marksFacts=await (${READ_WINDOW}); return true; } catch { return false; } })()`, 'marks-paging-window-read', 60_000);
   const facts = await renderer.evaluate('globalThis.__marksFacts');
   check(facts.total > 400 && facts.shown === 400, 'marks-paging-dense-window', { shown: facts.shown, total: facts.total });
-  const sentence = `已显示 400 / ${facts.total} 条。`;
+  const sentence = `已显示 400 · 本段共 ${facts.total} 条`;
   await waitFor(renderer, `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(sentence)}`, 'marks-paging-sentence');
   // Wait for the pane to rest, then measure: the sentence and 显示更多 are inside the pane and the window, and 显示更多 is topmost.
   await waitFor(renderer, `new Promise((resolve)=>{const box=()=>JSON.stringify(document.querySelector('[data-marks-paging]')?.getBoundingClientRect());const first=box();requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(box()===first)));})`, 'marks-paging-sentence-rest');
@@ -275,7 +279,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
     console.log('COMMENTS_MORE_BUSY_STYLE/'+JSON.stringify(busyStyle));
     check(busyStyle.opacity===(busyStyle.busy?'0.5':'1'),'marks-paging-more-busy-style',busyStyle);
     const now = Math.min(facts.total, shown + 400);
-    await waitFor(renderer, now >= facts.total ? `document.querySelector('[data-marks-paging]')?.hidden===true` : `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(`已显示 ${now} / ${facts.total} 条。`)} && document.querySelector('[data-marks-more]').getAttribute('aria-disabled')==='false'`, 'marks-paging-page-loaded', 60_000);
+    await waitFor(renderer, now >= facts.total ? `document.querySelector('[data-marks-paging]')?.hidden===true` : `document.querySelector('[data-marks-paging]')?.hidden===false && document.querySelector('[data-marks-paging] span')?.textContent===${JSON.stringify(`已显示 ${now} · 本段共 ${facts.total} 条`)} && document.querySelector('[data-marks-more]').getAttribute('aria-disabled')==='false'`, 'marks-paging-page-loaded', 60_000);
     await waitFor(renderer, `document.querySelector('[data-marks-paging]').hidden ? document.activeElement===document.querySelector('[data-mark-filter-toggle]') : document.activeElement===document.querySelector('[data-marks-more]')`, 'marks-paging-more-focus');
     check(await renderer.evaluate(`document.querySelector('[data-marks-paging]').hidden ? document.activeElement===document.querySelector('[data-mark-filter-toggle]') : document.activeElement===document.querySelector('[data-marks-more]')`),'marks-paging-more-focus');
   }
@@ -333,7 +337,7 @@ export async function commentsMarksPaging(renderer, check, waitFor, at, wide) {
   // the pages up to that mark (all of them, and no sentence, when it stands on the last page).
   const held = Math.min(expected.total, Math.ceil((expected.ordinal + 1) / 400) * 400);
   const rowNow = `(() => { const row=document.querySelector('[data-marks-paging]'); return row===null || row.hidden ? 'none' : row.querySelector('span')?.textContent; })()`;
-  const rowWant = held >= expected.total ? 'none' : `已显示 ${held} / ${expected.total} 条。`;
+  const rowWant = held >= expected.total ? 'none' : `已显示 ${held} · 本段共 ${expected.total} 条`;
   const card = `[data-comment-card="${expected.markId}"]`;
   try {
     await waitFor(renderer, `(() => { const node=document.querySelector(${JSON.stringify(card)}); return node?.dataset.selected==='true' && node.dataset.revalidating==='false' && document.activeElement===node; })()`, 'marks-paging-card-selected', 60_000);
