@@ -1,4 +1,4 @@
-import type { RendererApi, TaskOverviewProjection } from '../shared/protocol.js';
+import type { TaskOverviewProjection } from '../shared/protocol.js';
 import type { GlobalAttentionReader } from './global-attention.js';
 import { taskInProgress } from './task-card-view.js';
 
@@ -7,8 +7,8 @@ import { taskInProgress } from './task-card-view.js';
  * so a failed analysis is never counted twice. One function for the two places that draw it: the shell's own reading and the
  * 任务 page's projection.
  */
-export function taskNavigationCount(projection: Pick<TaskOverviewProjection, 'groups'>): number {
-  return projection.groups.flatMap((group) => group.items).filter((item) => taskInProgress(item.attention.state)).length;
+export function taskNavigationCount(projection: Pick<TaskOverviewProjection, 'groups'>, bookId?: string | null): number {
+  return projection.groups.flatMap((group) => group.items).filter((item) => (bookId === undefined || item.bookId === bookId) && taskInProgress(item.attention.state)).length;
 }
 
 export function taskNavigationName(count: number): string {
@@ -26,7 +26,7 @@ export function paintTaskNavigationBadge(badge: HTMLElement, projection: Pick<Ta
 }
 
 /** The badge on the sidebar's 任务, read again on every attention reading (Issue #1328). */
-export function mountTaskNavigationBadge(link: HTMLElement | null, api: Pick<RendererApi, 'inspectTaskOverview'>, reader: GlobalAttentionReader, make: () => HTMLSpanElement): HTMLSpanElement {
+export function mountTaskNavigationBadge(link: HTMLElement | null, reader: GlobalAttentionReader, make: () => HTMLSpanElement): HTMLSpanElement {
   const badge = make();
   badge.classList.add('task-navigation-badge');
   badge.setAttribute('aria-hidden', 'true');
@@ -34,7 +34,7 @@ export function mountTaskNavigationBadge(link: HTMLElement | null, api: Pick<Ren
   if (link === null) return badge;
   link.append(badge);
   reader.subscribe((reading) => {
-    if (reading.kind === 'projection') void api.inspectTaskOverview().then((projection) => paintTaskNavigationBadge(badge, projection), () => undefined);
+    if (reading.kind === 'projection') paintTaskNavigationBadge(badge, reading.tasks);
   });
   return badge;
 }

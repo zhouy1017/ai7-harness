@@ -2,10 +2,9 @@ import { navigation, type NavigationCheckpoint } from './navigation-generation.j
 
 import { technicalLayerVisible, technicalDisclosure, technicalWords } from './technical-layer.js';
 
-import type { BookTaskItemProjection, BookWorkbenchRoute, BookWorkOverviewProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, GlobalAttentionTarget, ImportCommitProjection, ManuscriptReimportCommitProjection, ImportStartupProjection, ManuscriptWindowProjection, ResolvedBookWorkbenchRoute, TaskPlanKind } from '../shared/protocol.js';
+import type { BookTaskItemProjection, BookWorkbenchRoute, BookWorkOverviewProjection, GlobalAttentionItemProjection, GlobalAttentionTarget, ImportCommitProjection, ManuscriptReimportCommitProjection, ImportStartupProjection, ManuscriptWindowProjection, ResolvedBookWorkbenchRoute, TaskPlanKind } from '../shared/protocol.js';
 
 import { NOTIFICATION_BOOK_LIST_LINE } from './notification-labels.js';
-import { GLOBAL_ATTENTION_COUNTED_GROUPS } from '../shared/protocol.js';
 
 import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 
@@ -109,23 +108,12 @@ function renderGlobalAttention(bookId?: string | null): void {
   const content = panel();
   content.classList.add('global-attention');
   // A notice for several events of one Book opens the list of that Book alone (NOTIF-008), its own count beside it.
-  const bookOnly = (projection: GlobalAttentionProjection): GlobalAttentionProjection => {
-    const groups = projection.groups.map((group) => {
-      const items = group.items.filter((item) => item.book.bookId === bookId);
-      return { ...group, items, total: items.length };
-    });
-    const actionableCount = groups.reduce((count, group) => count + (GLOBAL_ATTENTION_COUNTED_GROUPS.includes(group.key) ? group.total : 0), 0);
-    return { ...projection, groups, actionableCount };
-  };
   const surface = mountGlobalAttention({
     openTasks: () => renderTaskOverview(),
     startTask: () => { renderTaskOverview(); state.taskOverviewSurface?.showStart(); },
     root: content,
-    reader: bookId === undefined ? globalAttentionReader : {
-      ...globalAttentionReader,
-      subscribe: (listener) => globalAttentionReader.subscribe((reading) =>
-        listener(reading.kind === 'projection' ? { kind: 'projection', projection: bookOnly(reading.projection) } : reading)),
-    },
+    ...(bookId === undefined ? {} : { bookId }),
+    reader: globalAttentionReader,
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,

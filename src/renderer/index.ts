@@ -819,7 +819,7 @@ const shell = mountShell({
 });
 
 // 任务's sidebar badge: the tasks in progress, from the same read-only projection as the page (Issue #1328, #1680).
-const taskNavigationBadge = mountTaskNavigationBadge(document.querySelector<HTMLElement>('[data-nav-destination="tasks"]'), api, globalAttentionReader, () => element('span'));
+const taskNavigationBadge = mountTaskNavigationBadge(document.querySelector<HTMLElement>('[data-nav-destination="tasks"]'), globalAttentionReader, () => element('span'));
 
 // Another window may have pinned or opened a Book: the list is read again whenever this one gains focus.
 window.addEventListener('focus', () => void shellPreferences.load().catch(() => undefined));
