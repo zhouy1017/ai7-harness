@@ -2527,6 +2527,22 @@ export function collectJourneyPointerFailure(result, journey, failure) {
   catch { return null; }
 }
 
+export function collectReadingSizeFailure(result, journey, check) {
+  if (journey !== 'J-08' && journey !== 'J-05') return null;
+  const leg = /^comments-reading-size-(set|restore)-(?:saved|editor-size)$/u.exec(check)?.[1];
+  if (!leg) return null;
+  const prefix = `COMMENTS_READING_SIZE_FAILURE/${leg}/`;
+  const lines = result.stderr.split(/\r?\n/u).filter(line => line.startsWith(prefix));
+  if (lines.length !== 1 || lines[0].length > 256) return null;
+  try {
+    const {target, control, root, focus, width, height, editor} = JSON.parse(lines[0].slice(prefix.length));
+    const pixel = value => Number.isFinite(value) && value >= 0 && value <= 16384;
+    if (![target,width,height].every(pixel) || ![control,root,editor].every(value => value === null || pixel(value)) ||
+        !['slider','body','other'].includes(focus)) return null;
+    return JSON.stringify({target,control,root,focus,width,height,editor});
+  } catch { return null; }
+}
+
 /** Classify a finished journey process the same way the payload-safe diagnostic does. */
 export function classifyJourneyResult(result, journey) {
   if (result.spawnError) return { location: 'controller', errorClass: 'controller-spawn' };

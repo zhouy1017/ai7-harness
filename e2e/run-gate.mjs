@@ -3,6 +3,7 @@ import {
   classifyJourneyResult,
   collectJourneyCheck,
   collectJourneyPointerFailure,
+  collectReadingSizeFailure,
   collectReadinessTrace,
   collectJourneyDisclosures,
   normalizePnpmArgs,
@@ -40,6 +41,8 @@ if (args.length !== 0) {
       console.error(`GATE_COMPLETION/${journey}/fail/${failure.location}/${failure.errorClass}`);
       const check = collectJourneyCheck(result, journey, failure);
       if (check !== null) console.error(`GATE_COMPLETION/${journey}/fail/${failure.location}/check/${check}`);
+      const readingSize = collectReadingSizeFailure(result, journey, check);
+      if (readingSize !== null) console.error(`READING_SIZE_FAILURE/${journey}/${check}/${readingSize}`);
       const pointer = collectJourneyPointerFailure(result, journey, failure);
       if (pointer !== null) console.error(`POINTER_FAILURE/${journey}/${failure.location}/${pointer}`);
       const readiness = collectReadinessTrace(result, journey);
