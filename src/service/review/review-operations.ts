@@ -15,6 +15,7 @@ import { houseReviewPreferenceKindDefinition } from '../house-review-preference.
 import { TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialKindDefinition, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from '../task-material-references.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { StoreError, StoreFatalError, UUID_PATTERN, asString, canonicalJson, requireStore, sha256, type SqlRow } from '../store-records.js';
+import { BASELINE_ANALYSIS_KIND } from '../analysis/identity.js';
 import { liveKindRule, kindLocalTools } from '../analysis/live-kind-admission.js';
 import { type AnalysisKindDefinition } from '../analysis/kind-definition.js';
 import { frozenSeriesScopes, seriesScopeKindDefinition, seriesConsistencyKindDefinition, procedureOffersSeries } from './series-consistency.js';
@@ -523,6 +524,36 @@ export function finishCancelledReviewRun(host: ReviewOperationsHost, runRecordId
     host.reviewCall(() => host.reviewRuns.finishCancelled(asString(row.book_id), asString(row.review_run_id)));
     host.materializeFactualVerification(asString(row.review_run_id));
   }
+}
+
+/** The execution owner's two moves that finish a cancellation. */
+export interface CancellationOwner {
+  cancelRun(runRecordId: string, ledger: BaselineAnalysisStore): unknown;
+  whenDone(runRecordId: string): Promise<void>;
+}
+
+/** Once a Run's cancellation has been recorded and handed to the owner, settle its review category when the Run is done. */
+export function finishCancelledReviewRunWhenDone(host: ReviewOperationsHost, owner: CancellationOwner, runRecordId: string): Promise<void> {
+  return owner.whenDone(runRecordId).then(() => finishCancelledReviewRun(host, runRecordId)).catch(() => undefined);
+}
+
+/**
+ * Startup: every non-baseline Run a stopped service left `cancelling` is finished as a live cancellation finishes — through
+ * the owner, sending nothing — and its review category settles. A Run whose frozen contract cannot be read stays
+ * 正在取消, and the drawer keeps offering 取消任务. Resolves once the settling is done.
+ */
+export function finishStoppedReviewCancellations(host: ReviewOperationsHost, owner: CancellationOwner): Promise<void> {
+  const finishing: Array<Promise<void>> = [];
+  for (const row of host.authority.prepare(`SELECT r.run_record_id FROM analysis_run_records r JOIN analysis_task_intents t
+      ON t.task_intent_id = r.task_intent_id WHERE t.kind <> ? AND (SELECT s.state FROM analysis_run_states s
+      WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) = 'cancelling'`).all(BASELINE_ANALYSIS_KIND) as SqlRow[]) {
+    const runRecordId = asString(row.run_record_id);
+    try {
+      owner.cancelRun(runRecordId, host.executionLedgerForRun(runRecordId));
+      finishing.push(finishCancelledReviewRunWhenDone(host, owner, runRecordId));
+    } catch { /* The drawer keeps offering cancellation when the frozen contract cannot be read. */ }
+  }
+  return Promise.all(finishing).then(() => undefined);
 }
 
 /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */

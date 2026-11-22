@@ -1564,7 +1564,7 @@ async function main() {
     // Run has left (V2-UX-LIVE-004).
     const startedDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'settled', 'analysis-bar-started-drawer');
     requireJourney(startedDrawer?.bar?.state === 'started' && startedDrawer.bar.start === 'started' && startedDrawer.bar.status === '已完成' &&
-      startedDrawer.bar.statement === null && barActions(startedDrawer) === 'run-link:查看运行:enabled' && startedDrawer.actions === 0,
+      startedDrawer.bar.statement === null && barActions(startedDrawer) === 'redo:重新开始…:enabled|run-link:查看运行:enabled' && startedDrawer.actions === 0,
     'analysis-bar-started', startedDrawer?.bar);
     await assertRenderer(renderer, `!['正在开始任务…','已进入调度器'].some((text)=>(document.querySelector('#persistence-status')?.textContent??'').includes(text))`, 'analysis-bar-status-settled');
 
@@ -2504,7 +2504,9 @@ async function main() {
     } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
     await reviewAction(renderer,'#task-drawer [data-task-drawer-control="cancel-wait"]','offline-launch-cancel');
     const cancelledDrawer = await drawerShowing(renderer,offlineIntent,'cancelled','offline-launch-cancelled');
-    requireJourney(cancelledDrawer.pill==='已取消' && cancelledDrawer.bar.status==='已取消 · 未发送任何内容' && barActions(cancelledDrawer)==='run-link:查看运行:enabled','offline-launch-cancelled-no-send',cancelledDrawer.bar);
+    const waitingSource = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'baseline-analysis',ref:${JSON.stringify(offlineIntent)}})`);
+    const waitingActions = waitingSource.relaunch ? 'redo:重新开始…:enabled|run-link:查看运行:enabled' : 'run-link:查看运行:enabled';
+    requireJourney(cancelledDrawer.pill==='已取消' && cancelledDrawer.bar.status==='已取消 · 未发送任何内容' && barActions(cancelledDrawer)===waitingActions,'offline-launch-cancelled-no-send',cancelledDrawer.bar);
     const cancelledAnalysis=await readBaseline(renderer);
     requireJourney(cancelledAnalysis.run.state==='cancelled'&&cancelledAnalysis.run.stateLabel==='已取消 · 未启动'&&cancelledAnalysis.run.attempt===null&&cancelledAnalysis.taskOutcome===null&&
       sameValue(cancelledAnalysis.run.transitions.map(transition=>transition.state),['authorized','awaiting-connectivity','cancelled']),'offline-launch-cancelled-record');

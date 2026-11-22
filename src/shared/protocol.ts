@@ -18,7 +18,7 @@ import type { JournalEditInput } from './protocol/manuscript-structure.js';
 import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js';
 import type { AiEditLocksProjection, InspectAiEditLocksInput, InspectScopedAiEditInput, ScopedAiEditProjection, SetAiEditLocksInput, StartScopedAiEditInput } from './protocol/scoped-edit.js';
 import type { GlobalAttentionProjection } from './protocol/global-attention.js';
-import type { BookTasksProjection, TaskOverviewProjection } from './protocol/task-overview.js';
+import type { BookTasksProjection, TaskOverviewProjection, TaskOverviewCall, TaskOverviewCallResult } from './protocol/task-overview.js';
 import type { BothRoleModelSelectionInput, FastModelSelectionInput, ModelConnectionTestStatus, ModelCredentialOperationState, ModelRoleCardProjection, ModelRoleResolutionProjection, ModelRoleStatus, ModelRoleStatusLabel, ModelServiceConnectionProjection, ModelTierSelectionInput } from './protocol/model-roles.js';
 import type {
   ModelServiceBindingProjection,
@@ -3249,22 +3249,6 @@ export interface GlobalAttentionGroupProjection {
   total: number;
 }
 
-/** Existing Book-owned drawer commands reachable from the cross-Book task page. */
-export const TASK_OVERVIEW_OPERATIONS = ['inspectTaskPlan', 'getTaskPlanPage', 'controlTaskRun', 'redoTaskPlan',
-  'cancelWaitingTask', 'cancelWaitingBaselineAnalysis', 'cancelReviewRun', 'answerBaselineAnalysisClarification',
-  'inspectDialogue', 'stopDialogueAnswer', 'continueDialogueAnswer', 'regenerateDialogueAnswer',
-  'convertDialogueToChangeSuggestion', 'authorizeBaselineAnalysis', 'authorizeReviewRun', 'authorizeInitialEvaluation',
-  'authorizeReadersReport', 'authorizeEvaluationRewrite', 'authorizeWritingTask', 'authorizeTaskAuthorization',
-  'editTaskPlan', 'editBaselineAnalysisPlan', 'resolveUnconfirmedOutcomes', 'startTaskWhenOnline', 'startTaskWhenIdle',
-  'startBaselineAnalysisWhenOnline', 'setDefaultExecutionRule', 'inspectBookTasks', 'inspectBaselineAnalysis',
-  'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun', 'cancelBaselineAnalysisRun',
-  'getAnalysisRevisionUnits', 'getAnalysisRevisionOverview', 'inspectReviewWorkspace', 'prepareBaselineAnalysis', 'prepareCustomAnalysis',
-  'inspectTaskIntentDrafts', 'saveTaskIntentDraft', 'promoteTaskIntentDraft', 'promoteAnswerToTaskIntentDraft',
-  'previewTaskLaunch', 'launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite', 'launchReviewRun', 'prepareReviewRun', 'searchReferableMaterials', 'inspectBookSeries'] as const;
-export type TaskOverviewOperation = (typeof TASK_OVERVIEW_OPERATIONS)[number];
-export type TaskOverviewCall = { [K in TaskOverviewOperation]: { operation: K; bookId: string; input: Omit<ServiceOperationMap[K]['input'], 'bookId'> } }[TaskOverviewOperation];
-export type TaskOverviewCallResult = ServiceOperationMap[TaskOverviewOperation]['output'];
-
 export type { TaskLaunchPreviewInput } from './runtime-execution-config.js';
 
 export interface StartQuickTasksInput {
@@ -5315,7 +5299,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi, R
   transitionProductionDocumentPhase(input: Omit<TransitionProductionDocumentPhaseInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
-  taskOverviewCall(input: TaskOverviewCall): Promise<ServiceWireOutput<TaskOverviewCallResult>>;
+  taskOverviewCall<C extends TaskOverviewCall>(input: C): Promise<ServiceWireOutput<TaskOverviewCallResult<C>>>;
   controlAllTasks(input: { action: 'pause' | 'resume' }): Promise<TaskOverviewProjection>;
   inspectTaskOverview(): Promise<TaskOverviewProjection>;
   reorderQueuedRun(input: { runRecordId: string; position: number }): Promise<TaskOverviewProjection>;

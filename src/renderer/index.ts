@@ -141,7 +141,7 @@ const overviewApi = taskOverviewApi(api, () => overviewDrawerBookId);
 const taskDrawer = mountTaskDrawer({
   root: requiredElement('#task-drawer'),
   shell: document.body,
-  api: overviewApi,
+  api: overviewApi, overviewApiForBook: bookId => overviewDrawerBookId === null ? undefined : taskOverviewApi(api, () => bookId),
   openTaskOverview: () => void leaveThen(async () => renderTaskOverview()),
   technicalDetails,
   errorMessage: rendererErrorMessage,

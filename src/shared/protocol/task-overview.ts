@@ -1,4 +1,5 @@
-import type { GlobalAttentionItemProjection, GlobalAttentionNextStep, GlobalAttentionTarget } from '../protocol.js';
+import type { EvaluationWorkspaceProjection, EvaluationMarketProjection } from './evaluation.js';
+import type { GlobalAttentionItemProjection, GlobalAttentionNextStep, GlobalAttentionTarget, ServiceOperationMap } from '../protocol.js';
 import type { TaskPlanKind, TaskPlanProjection, TaskWorkProjection } from './task-plan.js';
 
 // ---- ① 任务面 (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044, TASK-045) --------------------
@@ -111,3 +112,30 @@ export interface TaskOverviewProjection {
   readonly queuedCount: number;
   readonly actionableCount: number;
 }
+
+/** Existing Book-owned drawer commands reachable from the cross-Book task page. */
+export const TASK_OVERVIEW_OPERATIONS = ['inspectTaskPlan', 'getTaskPlanPage', 'controlTaskRun', 'redoTaskPlan',
+  'cancelWaitingTask', 'cancelWaitingBaselineAnalysis', 'cancelReviewRun', 'answerBaselineAnalysisClarification',
+  'inspectDialogue', 'stopDialogueAnswer', 'continueDialogueAnswer', 'regenerateDialogueAnswer',
+  'convertDialogueToChangeSuggestion', 'authorizeBaselineAnalysis', 'authorizeReviewRun', 'authorizeInitialEvaluation',
+  'authorizeReadersReport', 'authorizeEvaluationRewrite', 'authorizeWritingTask', 'authorizeTaskAuthorization',
+  'editTaskPlan', 'editBaselineAnalysisPlan', 'resolveUnconfirmedOutcomes', 'startTaskWhenOnline', 'startTaskWhenIdle',
+  'startBaselineAnalysisWhenOnline', 'setDefaultExecutionRule', 'inspectBookTasks', 'inspectBaselineAnalysis',
+  'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun', 'cancelBaselineAnalysisRun',
+  'getAnalysisRevisionUnits', 'getAnalysisRevisionOverview', 'inspectReviewWorkspace', 'prepareBaselineAnalysis', 'prepareCustomAnalysis',
+  'inspectTaskIntentDrafts', 'saveTaskIntentDraft', 'promoteTaskIntentDraft', 'promoteAnswerToTaskIntentDraft',
+  'previewTaskLaunch', 'launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite', 'launchReviewRun', 'prepareReviewRun', 'searchReferableMaterials', 'inspectBookSeries', 'inspectEvaluationReferences'] as const;
+export type TaskOverviewOperation = (typeof TASK_OVERVIEW_OPERATIONS)[number];
+type OverviewServiceOperation = Exclude<TaskOverviewOperation, 'inspectEvaluationReferences'>;
+type EvaluationReferencesCall = { operation: 'inspectEvaluationReferences'; bookId: string; input: { recordId: null } };
+
+export type TaskOverviewCall = EvaluationReferencesCall | {
+  [K in OverviewServiceOperation]: { operation: K; bookId: string; input: Omit<ServiceOperationMap[K]['input'], 'bookId'> }
+}[OverviewServiceOperation];
+
+export interface EvaluationReferencesProjection extends Pick<EvaluationWorkspaceProjection, 'bookId' | 'materials'> {
+  readonly market: Pick<EvaluationMarketProjection, 'series'>;
+}
+
+export type TaskOverviewCallResult<C extends TaskOverviewCall = TaskOverviewCall> =
+  C extends EvaluationReferencesCall ? EvaluationReferencesProjection : ServiceOperationMap[OverviewServiceOperation]['output'];

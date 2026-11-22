@@ -410,6 +410,7 @@ const READ_PANEL = `(() => {
         title: text(card.querySelector('.task-overview-card-title strong')),
         pill: text(card.querySelector('.task-overview-state')),
         reason: text(card.querySelector('.task-overview-card-line')),
+        usage: text(card.querySelector('.task-overview-usage')),
         actions: Array.from(card.querySelectorAll('[data-task-action]')).filter(button => !button.closest('details')).map((button) => [button.dataset.taskAction, button.textContent, button.disabled ? 'disabled' : 'enabled']),
       })),
     }])),
@@ -1127,9 +1128,9 @@ async function main() {
     await openManuscriptOf(renderer,bookId,'poll-attention-return-book');
     await openPanel(renderer,'poll-attention-return-pane');
     await writeHold(SAMPLE1_UNITS);
-    const done = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-completed' && statesOf(panel, 'active').length === 0, 'panel-completed', 180_000);
+    const done = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-completed' && statesOf(panel, 'active').length === 0 && cardsOf(panel, 'recent')[0]?.actions.some(([key]) => key === 'redo'), 'panel-completed', 180_000);
     const doneCard = cardsOf(done, 'recent')[0];
-    requireJourney(doneCard.pill === '已完成' && doneCard.reason.startsWith('已有结果 · 用时 ') && JSON.stringify(doneCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['redo', '重新开始…', 'enabled']]),
+    requireJourney(doneCard.pill === '已完成' && /^(已形成第 .+ 份基线分析。|分析结果已生成。)$/u.test(doneCard.reason) && doneCard.usage.startsWith('用时 ') && JSON.stringify(doneCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['redo', '重新开始…', 'enabled']]),
     'panel-completed-card', done);
 
     at('panel-compose-update');
@@ -1153,11 +1154,12 @@ async function main() {
     await waitFor(renderer, `document.activeElement !== null && document.activeElement === document.querySelector('#task-drawer-cancel-impact h4') && document.querySelector('#task-drawer-cancel-impact [data-task-drawer-control="keep-running"]')?.textContent === '不取消'`, 'panel-cancel-summary');
     await pressTab(renderer);
     await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl === 'confirm-cancel-run' && document.activeElement.matches(':focus-visible')`, 'panel-cancel-confirm-reached');
+    await assertReachable(renderer, waitFor, requireJourney, '#task-drawer [data-task-drawer-control="confirm-cancel-run"]', 'panel-cancel-confirm');
     await pressEnter(renderer);
     await waitFor(renderer, `['cancelling', 'cancelled-after-start'].includes(document.querySelector('#task-drawer')?.dataset.taskPlanState)`, 'panel-cancel-recorded', 30_000);
     await writeHold(SAMPLE1_UNITS);
     await pressReachable(renderer, waitFor, requireJourney, '#task-drawer [data-task-drawer-control="tasks"]', 'panel-cancel-back');
-    const cancelled = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-cancelled,analysis-completed' && statesOf(panel, 'active').length === 0, 'panel-cancelled-card', 60_000);
+    const cancelled = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-cancelled,analysis-completed' && statesOf(panel, 'active').length === 0 && cardsOf(panel, 'recent')[0]?.actions.some(([key]) => key === 'redo'), 'panel-cancelled-card', 60_000);
     const cancelledCard = cardsOf(cancelled, 'recent')[0];
     requireJourney(cancelledCard.pill === '已取消' && cancelledCard.reason.startsWith('已取消 · 保留已有结果') &&
       JSON.stringify(cancelledCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['redo', '重新开始…', 'enabled']]) && cancelled.scope === '这本书 · 2 项',

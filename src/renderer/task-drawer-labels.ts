@@ -428,10 +428,10 @@ export const TASK_BAR_RECONFIRM_AND_START = '确认新计划并开始';
  * 需要重新确认计划 after Connectivity Wait (Issue #536; OFF-008): the way on for a Run whose plan moved before it could
  * start — a new plan for the same goal and range, which starts only once the editor starts it.
  */
-export const TASK_BAR_REPREPARE = '重新开始…';
+export const TASK_BAR_REPREPARE = '另做一份计划';
 export const TASK_BAR_REPREPARE_FAILED = '无法另做一份计划。';
-export function taskBarReprepareNote(reason: string): string {
-  return `${reason}「重新开始…」按同样的目标和范围开始一项新任务。`;
+export function taskBarReprepareNote(reason: string, relaunch = false): string {
+  return relaunch ? `${reason}「重新开始…」按同样的目标和范围开始一项新任务。` : `${reason}可以另做一份计划。`;
 }
 /** Every place of the governor taken (S74a A2; Issue #49, S14): a Review Run's approval is refused with this reason. */
 export const TASK_BAR_SLOT_BUSY = '现在不能开始：正在运行的任务结束后再开始';
@@ -459,7 +459,8 @@ function blockedRunCancellable(plan: TaskPlanProjection): boolean {
 }
 /** 重新开始… wherever the plan offers a relaunch (Issue #1680), or — without one — the legacy redo it still offers; else nothing. */
 function relaunchActions(plan: TaskPlanProjection, tone: TaskBarAction['tone'] = 'secondary'): TaskBarAction[] {
-  return plan.relaunch != null || plan.redo !== null ? [{ name: 'redo', label: TASK_BAR_REDO, tone, disabledReason: null }] : [];
+  return plan.relaunch != null ? [{ name: 'redo', label: TASK_BAR_REDO, tone, disabledReason: null }]
+    : plan.redo != null ? [{ name: 'redo', label: '调整原计划', tone, disabledReason: null }] : [];
 }
 /** The fallback when 取消 is refused for a reason the service does not word. */
 export const TASK_BAR_CANCEL_FAILED = '无法取消这项任务。';
@@ -804,6 +805,11 @@ function openQuestions(plan: TaskPlanProjection): { count: number; more: boolean
   return { count, more: plan.listPages?.['clarifications']?.nextOrdinal != null && count === plan.clarifications.length };
 }
 
+/** Superseded reviews can still continue or be cancelled. This plan state is the service's canContinue result. */
+export function betweenReviewCategories(plan: TaskPlanProjection): boolean {
+  return plan.kind === 'review-run' && plan.runControl === null && plan.state.key === 'stopped' && plan.state.label === '中途停止 · 可继续审阅';
+}
+
 export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBarView {
   const readiness = plan.start.readiness;
   const summary = taskBarSummary(plan);
@@ -998,9 +1004,9 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: taskBarReprepareNote(plan.reprepare.reason),
+        note: taskBarReprepareNote(plan.reprepare.reason, plan.relaunch != null),
         status: stateWords(plan.state),
-        actions: [plan.relaunch != null ? { name: 'redo', label: TASK_BAR_REDO, tone: 'primary', disabledReason: null } : { name: 'reprepare', label: TASK_BAR_REPREPARE, tone: 'primary', disabledReason: null }, runLink],
+        actions: [plan.relaunch != null ? { name: 'redo', label: TASK_BAR_REDO, tone: 'primary', disabledReason: null } : { name: 'reprepare', label: TASK_BAR_REPREPARE, tone: 'primary', disabledReason: null }, { name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
       };
     }
     // The same for a kind whose drawer prepares nothing (Issue #760, S74c): what moved, and where its own surface prepares it
@@ -1047,7 +1053,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
       note: null,
       status: plan.state.key === 'recorded' ? TASK_BAR_RECORDED : plan.state.key === 'cancelled' ? TASK_BAR_CANCELLED : stateWords(plan.state),
       // 改计划重做 (Issue #422, S76c): a Run the editor cancelled after it began can be redone as a new Task.
-      actions: [...relaunchActions(plan), runLink],
+      actions: [...relaunchActions(plan), ...(betweenReviewCategories(plan) ? [{ name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: null } as const] : []), runLink],
     };
   }
   if (readiness === 'offline') {
