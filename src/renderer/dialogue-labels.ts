@@ -134,12 +134,12 @@ export function dialogueResultTaskLine(dialogue: Pick<DialogueProjection, 'quest
   return dialogueQuestionLine(dialogue.question);
 }
 
-/** 转为任务意图草稿 on a completed dialogue answer (Issue #52, S17b; DIALOG-016). */
-export const DIALOGUE_PROMOTE_LABEL = '转为任务意图草稿';
+/** 转为任务草稿 on a completed dialogue answer (Issue #52, S17b; DIALOG-016). */
+export const DIALOGUE_PROMOTE_LABEL = '转为任务草稿';
 export const DIALOGUE_PROMOTE_STATUS = {
-  promoting: '正在转为任务意图草稿…',
-  promoted: '已转为任务意图草稿：它带着这次回答和所选文字，不会发送，也不会开始任务。',
-  failed: '无法转为任务意图草稿。',
+  promoting: '正在转为任务草稿…',
+  promoted: '已转为任务草稿：它带着这次回答和所选文字，不会发送，也不会开始任务。',
+  failed: '无法转为任务草稿。',
 } as const;
 /**
  * The Live Reasoning Summary (UI ADR 0014; DIALOG-005, 009): while the foreground answer has not begun, what the dialogue is doing
