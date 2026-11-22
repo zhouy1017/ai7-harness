@@ -182,3 +182,40 @@ it.each([{ top: 122.4, count: 2, failed: false, passes: true }, { top: 150, coun
     expect(methods.filter(method => method === 'Emulation.setDeviceMetricsOverride')).toHaveLength(passes ? 3 : 2);
   } finally { log.mockRestore(); }
 });
+
+
+it('attaches sanitized geometry when a draft control disappears after the stable-frame wait (#1678)', async () => {
+  const { draftClick } = await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  const primary = new Error('reply-draft-late-open-hit');
+  const metadata = { viewport: [1008, 681], target: { tag: 'button', classes: ['btn'], data: ['data-mark-action'], textContent: 'private-draft' },
+    frames: [{ rect: [700, 400, 80, 28], point: [740, 414], hit: null, contains: false }],
+    coveringAncestors: [{ tag: 'div', classes: ['manuscript-comments-scroll'], data: [], rect: [690, 200, 300, 210], title: 'private-draft' }], body: 'private-draft' };
+  const renderer = { evaluate: vi.fn(async (expression: string) => expression.includes('const describe=') ? metadata : null), send: vi.fn() };
+  let failure: unknown;
+  try { await draftClick(renderer, () => { throw primary; }, async () => {}, '[data-mark-action="reply"]', 'reply-draft-late-open'); }
+  catch (error) { failure = error; }
+  expect(failure).toBe(primary);
+  expect(failure).toHaveProperty('pointerFailure', pointerFailureDetail(metadata));
+  expect(JSON.stringify(failure)).not.toContain('private-draft');
+  expect(renderer.send).not.toHaveBeenCalled();
+});
+
+
+it('samples a draft control on two consecutive animation frames after its reply layout changes (#1678)', async () => {
+  const { draftClick } = await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  let frame = 0; const presses: number[] = [];
+  const pane = { parentElement: null, getBoundingClientRect: () => ({ top: 100, bottom: 500 }) };
+  const node = { parentElement: pane, matches: () => false,
+    getBoundingClientRect: () => ({ left: frame === 1 ? 715 : 700, top: 300, right: frame === 1 ? 795 : 780, bottom: 328, width: 80, height: 28 }), contains: (hit: unknown) => hit === node,
+    get scrollIntoView(): never { throw new Error('No scripted scroll is allowed'); } };
+  const document = { createRange: () => ({ selectNodeContents() {} }), querySelector: () => node, elementFromPoint: () => node };
+  const renderer = { evaluate: async (expression: string) => Function('document', 'requestAnimationFrame', 'innerWidth', 'innerHeight', 'getComputedStyle', 'setTimeout', `return (${expression})`)(document,
+    (callback: () => void) => queueMicrotask(() => { frame++; callback(); }), 1008, 681, () => ({ overflowY: 'auto' }), (callback: () => void) => callback()),
+    send: async (_method: string, event: { type: string }) => { if (event.type === 'mousePressed') presses.push(frame); } };
+  const wait = async (_renderer: unknown, expression: string) => {
+    for (let attempt = 0; attempt < 10; attempt++) if (await renderer.evaluate(expression)) return;
+    throw new Error('draft-layout-never-stable');
+  };
+  await draftClick(renderer, (condition: boolean, name: string) => { if (!condition) throw new Error(name); }, wait, 'button', 'late-reply');
+  expect(presses).toEqual([4]);
+});

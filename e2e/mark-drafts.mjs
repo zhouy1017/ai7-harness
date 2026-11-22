@@ -1,20 +1,38 @@
+import { capturePointerFailure, pointerFailureDetail } from './dispatch-chooser.mjs';
 import { SIDEBAR } from './controller.mjs';
 import { railJump } from './marks-paging.mjs';
 
+/** Preserve the original failure and use the existing closed, text-free hosted geometry channel. */
+export async function draftGeometry(renderer, selector, assertion, { waitFor, name = 'draft-geometry' } = {}) {
+  try {
+    if (waitFor) {
+      const boxes=`(() => {const node=document.querySelector(${JSON.stringify(selector)});if(!node)return null;return [node,...node.querySelectorAll('button,input,textarea')].map(item=>{const r=item.getBoundingClientRect();return [r.left,r.top,r.width,r.height];});})()`;
+      await waitFor(renderer,`new Promise(resolve=>requestAnimationFrame(()=>{const before=JSON.stringify(${boxes});requestAnimationFrame(()=>resolve(before!=='null'&&before===JSON.stringify(${boxes})));}))`,name+'-stable');
+    }
+    return await assertion();
+  } catch (error) {
+    const detail=pointerFailureDetail(await capturePointerFailure(renderer,selector,{includeTargetAncestors:true}))??{unavailable:true};
+    if(error&&typeof error==='object')Object.defineProperty(error,'pointerFailure',{value:detail,configurable:true});
+    throw error;
+  }
+}
+
 /** A named control must already be reachable before the real press. Never scroll it by script. */
 export async function draftClick(renderer, check, waitFor, selector, name, button = 'left') {
+  return draftGeometry(renderer, selector, async () => {
   const point = `(() => {const node=document.querySelector(${JSON.stringify(selector)});if(!node)return null;
     let range=document.createRange();range.selectNodeContents(node);if(${button === 'right'}&&node.matches('[data-block-id]')&&getSelection()?.rangeCount&&!getSelection().isCollapsed)range=getSelection().getRangeAt(0);const rects=node.matches('[data-block-id]')?Array.from(range.getClientRects()):[node.getBoundingClientRect()];
     for(const r of rects){if(r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)continue;
       let visible=true;for(let parent=node.parentElement;parent;parent=parent.parentElement){if(/auto|scroll|hidden/.test(getComputedStyle(parent).overflowY)){const p=parent.getBoundingClientRect();if(r.top<p.top||r.bottom>p.bottom){visible=false;break;}}}
       const x=r.left+r.width/2,y=r.top+r.height/2;if(visible&&node.contains(document.elementFromPoint(x,y)))return {x,y};}return null;})()`;
-  await waitFor(renderer, `new Promise(resolve=>{const before=JSON.stringify(${point});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before!=='null'&&before===JSON.stringify(${point}))));})`, name+'-visible');
+  await waitFor(renderer, `new Promise(resolve=>requestAnimationFrame(()=>{const before=JSON.stringify(${point});requestAnimationFrame(()=>resolve(before!=='null'&&before===JSON.stringify(${point})));}))`, name+'-visible');
   const at = await renderer.evaluate(point); check(at!==null,name+'-hit');
   await renderer.send('Input.dispatchMouseEvent',{type:'mouseMoved',...at,buttons:0});
   check(JSON.stringify(await renderer.evaluate(point))===JSON.stringify(at),name+'-before-press');
   await renderer.send('Input.dispatchMouseEvent',{type:'mousePressed',...at,button,buttons:button==='left'?1:2,clickCount:1});
   await renderer.send('Input.dispatchMouseEvent',{type:'mouseReleased',...at,button,buttons:0,clickCount:1});
   await renderer.evaluate('new Promise(resolve=>setTimeout(()=>resolve(true),280))');
+  });
 }
 
 export async function draftKey(renderer, key, code, modifiers=0) {
@@ -83,7 +101,7 @@ export async function markDraftKept(renderer,check,waitFor,at,blockId) {
   await draftKey(renderer,'Escape',27);
   const kept=`document.querySelector('${row}') && !document.querySelector('[data-mark-composer]') && !document.querySelector('${row}').contains(document.activeElement)`;
   await waitFor(renderer,kept,'draft-folded');
-  check(await renderer.evaluate(`(() => {const row=document.querySelector('${row}'),block=document.querySelector('[data-block-id="${blockId}"]'),next=block.nextElementSibling;if(!next)return false;const a=row.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(next);const b=range.getClientRects()[0];return b&&a.bottom<=b.top&&document.querySelector('.editor-window').scrollTop===${before};})()`),'draft-fold-gap-scroll');
+  await draftGeometry(renderer,row,async()=>{ check(await renderer.evaluate(`(() => {const row=document.querySelector('${row}'),block=document.querySelector('[data-block-id="${blockId}"]'),next=block.nextElementSibling;if(!next)return false;const a=row.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(next);const b=range.getClientRects()[0];return b&&a.bottom<=b.top&&document.querySelector('.editor-window').scrollTop===${before};})()`),'draft-fold-gap-scroll'); }, {waitFor,name:'draft-fold-gap-scroll'});
   await draftClick(renderer,check,waitFor,row,'draft-expand');
   check(await renderer.evaluate(`document.querySelector('${field}').value==='公开合成未发送批注' && document.activeElement===document.querySelector('${field}')`),'draft-expanded-words');
   // A real press on the paragraph folds the form, retaining the text without sending it.

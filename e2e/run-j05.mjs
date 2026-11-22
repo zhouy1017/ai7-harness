@@ -1,4 +1,4 @@
-import { draftClick, draftKey, markDraftKept } from './mark-drafts.mjs';
+import { draftClick, draftKey, draftGeometry, markDraftKept } from './mark-drafts.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { commentsPaneForms, commentsSelectMark, commentsTriageForms } from './comments-pane.mjs';
 import { commentsMarksPaging, railJump } from './marks-paging.mjs';
@@ -634,7 +634,7 @@ async function main() {
     await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},${RANGES.highlight[0]},${RANGES.highlight[1]})`);
     await draftClick(renderer,requireJourney,waitFor,`[data-testid="manuscript-editor"] [data-block-id="${first}"]`,'swatches-real-menu','right');
     await waitFor(renderer,`window.__j05.menu()?.dataset.markMenu==='selection'`,'swatches-real-open');
-    await assertRenderer(renderer, `(() => {const items=[1,2,3].map(color=>window.__j05.item('add-highlight-'+color)),rects=items.map(node=>node.getBoundingClientRect()),menu=window.__j05.menu().getBoundingClientRect();return rects.every(r=>Math.abs(r.top-rects[0].top)<=1&&r.left>=menu.left&&r.right<=menu.right&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth)&&Array.from(window.__j05.menu().querySelector('[aria-label="AI7 任务"]').querySelectorAll('[role="menuitem"]')).map(node=>node.dataset.markAction).join('|')==='task-on-selection|ask-on-selection|preset-polish|scoped-ai-edit|ai-lock-selection';})()`, 'selection-swatches-row');
+    await draftGeometry(renderer, '[data-mark-action="add-highlight-2"]', () => assertRenderer(renderer, `(() => {const items=[1,2,3].map(color=>window.__j05.item('add-highlight-'+color)),rects=items.map(node=>node.getBoundingClientRect()),menu=window.__j05.menu().getBoundingClientRect();return rects.every(r=>Math.abs(r.top-rects[0].top)<=1&&r.left>=menu.left&&r.right<=menu.right&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth)&&Array.from(window.__j05.menu().querySelector('[aria-label="AI7 任务"]').querySelectorAll('[role="menuitem"]')).map(node=>node.dataset.markAction).join('|')==='task-on-selection|ask-on-selection|preset-polish|scoped-ai-edit|ai-lock-selection';})()`, 'selection-swatches-row'), {waitFor,name:'selection-swatches-row'});
     await draftKey(renderer,'Home',36);
     for(let step=0;step<7;step++) await draftKey(renderer,'ArrowDown',40);
     await assertRenderer(renderer, `document.activeElement===window.__j05.item('add-editor-note')`, 'swatches-before-yellow');
@@ -656,7 +656,7 @@ async function main() {
     at('comments-header-add');
     await draftClick(renderer,requireJourney,waitFor,'[data-edge-entry="comments"]','header-pane-open');
     await waitFor(renderer, `!document.querySelector('.manuscript-comments-pane').hidden`, 'header-pane-ready');
-    await assertRenderer(renderer, `(() => {const row=document.querySelector('.manuscript-comments-heading'),r=row.getBoundingClientRect(),controls=Array.from(row.querySelectorAll('button')),boxes=controls.map(node=>node.getBoundingClientRect());return row.offsetHeight<=35&&boxes.every((b,i)=>b.top>=r.top&&b.bottom<=r.bottom&&b.left>=r.left&&b.right<=r.right&&b.left>=0&&b.right<=innerWidth&&boxes.every((other,j)=>j===i||b.right<=other.left||b.left>=other.right));})()`, 'header-add-one-line');
+    await draftGeometry(renderer, '.manuscript-comments-heading', () => assertRenderer(renderer, `(() => {const row=document.querySelector('.manuscript-comments-heading'),r=row.getBoundingClientRect(),controls=Array.from(row.querySelectorAll('button')),boxes=controls.map(node=>node.getBoundingClientRect());return row.offsetHeight<=35&&boxes.every((b,i)=>b.top>=r.top&&b.bottom<=r.bottom&&b.left>=r.left&&b.right<=r.right&&b.left>=0&&b.right<=innerWidth&&boxes.every((other,j)=>j===i||b.right<=other.left||b.left>=other.right));})()`, 'header-add-one-line'), {waitFor,name:'header-add-one-line'});
     await renderer.evaluate(`window.__j05.place(${JSON.stringify(first)},0,0)`);
     await draftClick(renderer,requireJourney,waitFor,'[data-comments-add="editor-note"]','header-no-selection');
     await waitFor(renderer, `window.__j05.notice().includes('先选中一段文字，再添加备注。')&&!window.__j05.composer()`, 'header-no-selection-reason');
