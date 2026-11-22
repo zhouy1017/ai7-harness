@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { createUpgradeSample1 } from '../support/upgrade-sample1.js';
+import { createUpgradeSample1, legacySampleService } from '../support/upgrade-sample1.js';
 import { reimportVersion } from '../support/reimport-version.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { readDataVersionMarker, storeRevisionOnDisk } from '../../src/service/data-version.js';
-import { beginUpgrade, beginUpgradeRollback, resumeUpgrade, upgradePreflight } from '../../src/service/in-app-upgrade.js';
+import { beginUpgrade, beginUpgradeRollback, resumeUpgrade, rollbackDataPeak, upgradePreflight } from '../../src/service/in-app-upgrade.js';
+import { replacementStagingFor } from '../../src/service/database-replacement.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { backupLocationFor } from '../../src/service/scheduled-backups.js';
 import { databasePackageSources, verifyCopiedPayloads } from '../../src/service/database-exports.js';
@@ -110,6 +113,12 @@ it('resumes each phase, imports the older package and recovers missing old files
   const newObject = (await fileDigest(join(roots.inputRoot,'sample1-edited.docx')))!.sha256;
   const newKey = join('objects','sha256',newObject.slice(0,2),newObject+'.docx');
   expect(existsSync(join(root,newKey))).toBe(true);
+  await rm(join(root,newKey));
+  await beginUpgradeRollback(root);
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'DATABASE_PACKAGE_INCOMPLETE'});
+  expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
+  expect(existsSync(join(root,'shell','storage-upgrade.json'))).toBe(false);
+  await cp(join(roots.inputRoot,'sample1-edited.docx'),join(root,newKey));
   await rm(join(root,original.find(member => member.path.startsWith('objects/'))!.path));
   await beginUpgradeRollback(root);
   const interruptedCopy = join(root,'store','payloads');
@@ -267,5 +276,84 @@ it.each(['save-old','publish','record'] as const)('catches lost payloads at %s a
   const location = backupLocationFor(root);
   const archive = (await readdir(location)).find(name => name.endsWith('.ai7db'))!;
   const {manifest} = await verifyDatabasePackage(join(location,archive),{dataRoot:root});
-  expect(manifest.members.some(member => member.path === missing.member)).toBe(true);
+  const repaired = await fileDigest(missing.path);
+  expect(repaired?.sha256).toBe(manifest.members.find(member => member.path === missing.member)!.sha256);
+  const old = await legacy.openLegacy(root);
+  try { expect(old.listBooks(null).items).toHaveLength(2); } finally { old.markCleanShutdown(); old.close(); }
 },180_000);
+
+it('refuses an altered revision 117 store before final publication',async () => {
+  const root = join(roots.inputRoot,'altered-conversion');
+  await cp(roots.dataRoot,root,{recursive:true});
+  await beginUpgrade(root);
+  await expect(resumeUpgrade(root,'0.8.0',phase => { if (phase === 'record') throw Error('interrupted'); })).rejects.toThrow('interrupted');
+  const db = new DatabaseSync(join(root,'store','ai7.sqlite'));
+  try { db.exec('CREATE TABLE unexpected_change(id INTEGER)'); } finally { db.close(); }
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toMatchObject({code:'UPGRADE_MISMATCH'});
+  expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(116);
+});
+
+it.runIf(process.platform === 'win32')('recovers from a locked fallback directory and a subsequently damaged published old store',async () => {
+  const root = join(roots.inputRoot,'locked-fallback');
+  await cp(roots.dataRoot,root,{recursive:true});
+  await beginUpgrade(root);
+  await resumeUpgrade(root,'0.8.0');
+  const phase = join(root,'shell','storage-upgrade.json');
+  const kept = (await readdir(root)).find(name => name.startsWith('store-before-0.8.0-'))!;
+  const away = join(roots.inputRoot,'locked-fallback-original');
+  await rename(join(root,kept),away);
+  const missing = (await databasePackageSources(root)).find(member => member.member.startsWith('objects/'))!;
+  const digest = await fileDigest(missing.path);
+  await rm(missing.path);
+  await beginUpgradeRollback(root);
+  const stop = (point: string, after = false) => resumeUpgrade(root,'0.8.0',(stage,renamed) => {
+    if (stage === point && Boolean(renamed) === after) throw Error('interrupted');
+  });
+  await expect(stop('publish-old')).rejects.toThrow('interrupted');
+  const {id} = JSON.parse(await readFile(phase,'utf8'));
+  const incoming = join(replacementStagingFor(join(root,'shell','upgrade-'+id,'restore')),'incoming','store');
+  // A Windows process holds its working directory against rename until it exits.
+  const lock = spawn(process.execPath,['-e',"process.stdout.write('ready');process.stdin.resume()"],{cwd:incoming,windowsHide:true,stdio:['pipe','pipe','ignore']});
+  try {
+    await once(lock.stdout,'data');
+    await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+    expect(storeRevisionOnDisk(join(root,'store','ai7.sqlite'))).toBe(117);
+    expect(await fileDigest(missing.path)).toEqual(digest);
+    expect(existsSync(phase)).toBe(false);
+    expect(existsSync(join(root,'store.upgrading'))).toBe(false);
+  } finally {
+    const ended = once(lock,'exit');
+    lock.stdin.end();
+    await ended;
+  }
+  await rename(away,join(root,kept));
+  await beginUpgradeRollback(root);
+  await expect(stop('publish-old',true)).rejects.toThrow('interrupted');
+  await rm(join(root,'store','ai7.sqlite'));
+  await expect(resumeUpgrade(root,'0.8.0')).rejects.toBeDefined();
+  const healthy = await EditorialStore.open(root,roots.codeRoot);
+  try { expect(healthy.listBooks(null).items).toHaveLength(2); } finally { healthy.markCleanShutdown(); healthy.close(); }
+  await beginUpgradeRollback(root);
+  await expect(stop('publish-old',true)).rejects.toThrow('interrupted');
+  const savedJournal = await readFile(phase);
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  // Simulate a stale journal deletion after temporary extraction files disappeared.
+  await writeFile(phase,savedJournal);
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:true});
+  const openPrevious = await legacySampleService(root,roots.codeRoot,'da44971a048719e18cbaa7f59436f3ea477d8309');
+  const previous = await openPrevious(root);
+  const archive = join(roots.inputRoot,'rollback-integration-074.ai7db');
+  try {
+    const prep = await previous.prepareDatabaseExport(archive,true);
+    await previous.approveDatabaseExport(prep.preparationId,true);
+  } finally { previous.markCleanShutdown(); previous.close(); }
+  const members = (await verifyDatabasePackage(archive,{dataRoot:root})).manifest.members;
+  expect(members.filter(member => member.path.endsWith('ai7.sqlite')).map(member => member.path)).toEqual(['store/ai7.sqlite']);
+  await beginUpgrade(root);
+  expect(await resumeUpgrade(root,'0.8.0')).toMatchObject({restored:false});
+},180_000);
+
+it('reserves the peak on the writing volume during backup fallback',() => {
+  expect(rollbackDataPeak(100,{archive:900,store:400,files:300})-rollbackDataPeak(0)).toBe(2000);
+  expect(rollbackDataPeak(2000,{archive:50,store:100,files:300})-rollbackDataPeak(0)).toBe(3000);
+});

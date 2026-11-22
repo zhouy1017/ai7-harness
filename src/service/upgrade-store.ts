@@ -138,7 +138,7 @@ export function convertUpgradeStore(oldPath: string, newPath: string): void {
   } finally { source.close(); }
 }
 
-export function verifyUpgradeStore(oldPath: string, newPath: string): string {
+export function verifyUpgradeStore(oldPath: string, newPath: string, recordedUpgrade = false): string {
   const before = JSON.parse(inventoryStore(oldPath));
   const after = JSON.parse(inventoryStore(newPath));
   const source = openPackageStore(oldPath);
@@ -158,6 +158,7 @@ export function verifyUpgradeStore(oldPath: string, newPath: string): string {
       }
       const expected = {
         ...before.tables, standard_tables: 4, standard_table_versions: 4, standard_table_entries: 68507,
+        store_versions: before.tables.store_versions + Number(recordedUpgrade),
         manuscript_revisions: before.tables.manuscript_revisions + before.tables.manuscripts,
         manuscript_block_versions: before.tables.manuscript_block_versions + before.tables.working_blocks,
         model_role_choices: roleChoices.length,

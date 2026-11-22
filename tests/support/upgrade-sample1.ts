@@ -13,10 +13,10 @@ const run = promisify(execFile);
 const release = '790acbcbde8ca268217b152194f83241d1f13d10';
 
 /** Build the released service outside the checkout, using only its committed source and installed dependencies. */
-export async function legacySampleService(root: string, codeRoot: string) {
+export async function legacySampleService(root: string, codeRoot: string, revision = release) {
   const checkout = await mkdtemp(join(dirname(root), 'released-service-'));
   const archive = join(checkout, 'release.tar');
-  await run('git', ['-C', codeRoot, 'archive', '--format=tar', '-o', archive, release, 'src', 'config', 'package.json']);
+  await run('git', ['-C', codeRoot, 'archive', '--format=tar', '-o', archive, revision, 'src', 'config', 'package.json']);
   await run('tar', ['-xf', archive, '-C', checkout]);
   await symlink(join(codeRoot, 'node_modules'), join(checkout, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
   const entry = join(checkout, 'service.mjs');

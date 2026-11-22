@@ -11,6 +11,8 @@ Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class UpgradeDialogMouse {
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
 }
@@ -21,22 +23,28 @@ $descendants = [System.Windows.Automation.TreeScope]::Descendants
 $nameProperty = [System.Windows.Automation.AutomationElement]::NameProperty
 $windowName = [System.Windows.Automation.PropertyCondition]::new($nameProperty, $Title)
 $buttonName = [System.Windows.Automation.PropertyCondition]::new($nameProperty, $Button)
-$buttonType = [System.Windows.Automation.PropertyCondition]::new(
-  [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
-$buttonMatch = [System.Windows.Automation.AndCondition]::new($buttonName, $buttonType)
 $deadline = [DateTime]::UtcNow.AddSeconds(50)
+$matchedDialogs = 0
+$matchedControls = 0
 while ([DateTime]::UtcNow -lt $deadline) {
   foreach ($window in $desktop.FindAll($children, $windowName)) {
     $owner = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $window.Current.ProcessId)
     if (!$owner -or $owner.ExecutablePath -ne $Executable -or !$owner.CommandLine.Contains($DataRoot)) { continue }
-    foreach ($control in $window.FindAll($descendants, $buttonMatch)) {
+    $matchedDialogs++
+    $hwnd = [IntPtr]$window.Current.NativeWindowHandle
+    [void][UpgradeDialogMouse]::SetForegroundWindow($hwnd)
+    foreach ($control in $window.FindAll($descendants, $buttonName)) {
+      $matchedControls++
       if (!$control.Current.IsEnabled -or $control.Current.IsOffscreen) { continue }
       $action = $null
       if ($control.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$action)) {
         $action.Invoke()
         exit 0
       }
-      $point = $control.GetClickablePoint()
+      # Task Dialog may expose the visible caption as a Text child of a push button.
+      $rect = $control.Current.BoundingRectangle
+      if ($rect.IsEmpty -or $rect.Width -le 0 -or $rect.Height -le 0) { continue }
+      $point = [System.Windows.Point]::new($rect.Left + $rect.Width / 2, $rect.Top + $rect.Height / 2)
       $hit = [System.Windows.Automation.AutomationElement]::FromPoint($point)
       if ($hit.Current.ProcessId -ne $window.Current.ProcessId) { continue }
       if ([UpgradeDialogMouse]::SetCursorPos([int]$point.X,[int]$point.Y)) {
@@ -45,7 +53,10 @@ while ([DateTime]::UtcNow -lt $deadline) {
         exit 0
       }
     }
+    if ($Button -eq ([string][char]0x5173 + [char]0x95ed) -and $hwnd -ne [IntPtr]::Zero) {
+      if ([UpgradeDialogMouse]::PostMessage($hwnd,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)) { exit 0 }
+    }
   }
   Start-Sleep -Milliseconds 150
 }
-exit 1
+throw "Expected dialog action was unavailable (owned windows=$matchedDialogs, matching controls=$matchedControls)."
