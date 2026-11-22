@@ -7,6 +7,8 @@ export function setLibraryDecision(store: EditorialStore, input: Parameters<Edit
   const same = decision.kind === 'attribution'
     ? current.attribution?.scope === decision.attribution.scope && (decision.attribution.scope === 'house' ||
       (current.attribution?.scope === 'book' && current.attribution.bookId === decision.attribution.bookId))
-    : current.eligibility?.choice === decision.choice && current.eligibility.reason === decision.reason;
+    : decision.kind === 'not-used'
+      ? current.notUsed !== undefined
+      : current.eligibility?.choice === decision.choice && current.eligibility.reason === decision.reason && current.notUsed === undefined;
   return same ? current : store.decideLibraryMaterial({ ...input, expectedDecisions: current.decisionCount });
 }
