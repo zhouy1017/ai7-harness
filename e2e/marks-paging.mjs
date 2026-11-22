@@ -47,7 +47,7 @@ export async function assertCardActionReachable(renderer, check, waitFor, select
     const hit=document.elementFromPoint(b.left+b.width/2,b.top+b.height/2);
     const line=parseFloat(getComputedStyle(card).lineHeight)||parseFloat(getComputedStyle(card).fontSize)*1.2;
     return {branch:c.height<=view.bottom-view.top?'fits':'tall',cardHeight:c.height,paneHeight:view.bottom-view.top,whole:inside(c),head:c.left>=p.left-1 && c.right<=p.right+1 && c.left>=0 && c.right<=innerWidth && c.top<=innerHeight-80 && c.top>=view.top && c.top+line<=view.bottom,
-      action:inside(b) && (hit===button || button.contains(hit)),card:[c.left,c.top,c.right,c.bottom],button:[b.left,b.top,b.right,b.bottom],pane:view,window:[innerWidth,innerHeight],scrollTop:pane.scrollTop};
+      action:inside(b) && (hit===button || button.contains(hit)),focusRoom:b.top>=view.top+5 && b.bottom<=view.bottom-5,card:[c.left,c.top,c.right,c.bottom],button:[b.left,b.top,b.right,b.bottom],pane:view,window:[innerWidth,innerHeight],scrollTop:pane.scrollTop};
   })()`;
   await waitFor(renderer, `new Promise(resolve=>{const before=JSON.stringify(${facts});requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(before===JSON.stringify(${facts}))));})`, name+'-rest');
   const before=await renderer.evaluate(facts);
@@ -68,7 +68,7 @@ export async function assertCardActionReachable(renderer, check, waitFor, select
   }
   const after=await renderer.evaluate(facts);
   console.log('COMMENTS_ACTION/'+name+'/'+JSON.stringify({arrival:before,after}));
-  check(after?.action===true,name+'-action',{...after,branch:before.branch,arrival:before});
+  check(after?.action===true && (before.branch!=='tall'||after.focusRoom),name+'-action',{...after,branch:before.branch,arrival:before});
   if (before.branch==='tall') {
     const text=await renderer.evaluate(`(() => {const node=document.querySelector('.editor-window'),r=node.getBoundingClientRect();return {x:r.left+16,y:(Math.max(0,r.top)+Math.min(innerHeight,r.bottom))/2,top:node.scrollTop,delta:node.scrollTop+node.clientHeight<node.scrollHeight?1:-1};})()`);
     await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:text.x,y:text.y,deltaX:0,deltaY:text.delta});

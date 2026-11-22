@@ -516,7 +516,7 @@ describe('comments command parity and refresh continuity', () => {
     button.focus(); (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true });
     pane.scrollTop += 78; (pane as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
     expect(node.style.top).toBe(top);
-    expect(button.getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+    expect(button.getBoundingClientRect().bottom).toBeLessThanOrEqual(395);
   });
   it('keeps the focused tall card in place when a preceding card grows by a fractional pixel (#1661)', async () => {
     const next = { ...suggestion, markId: 'next', fromGrapheme: 3, toGrapheme: 5 };

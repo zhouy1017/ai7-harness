@@ -1269,8 +1269,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         const pane = commentsScroll.getBoundingClientRect();
         const box = (holdingControl ? document.activeElement! : active.node).getBoundingClientRect();
         if (box.height <= commentsScroll.clientHeight) {
-          const visibleBottom = pane.top + commentsScroll.clientHeight;
-          const delta = box.bottom > visibleBottom ? box.bottom - visibleBottom : box.top < pane.top ? box.top - pane.top : 0;
+          const focusRoom = holdingControl ? 5 : 0;
+          const visibleTop = pane.top + focusRoom;
+          const visibleBottom = pane.top + commentsScroll.clientHeight - focusRoom;
+          const delta = box.bottom > visibleBottom ? box.bottom - visibleBottom : box.top < visibleTop ? box.top - visibleTop : 0;
           // Browser scroll offsets can round fractional pixels back outside the visible box.
           if (delta) {
             const step = delta > 0 ? Math.ceil(delta) : Math.floor(delta);
