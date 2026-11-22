@@ -502,14 +502,18 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 
 
 .review-sheet h3 { margin: 0 0 .4rem; font-family: var(--font-serif); font-size: 1.35rem; }
-.review-sheet fieldset { margin-top: 1rem; }
+.review-sheet fieldset { margin-top: .75rem; }
 .review-category-options { display: grid; gap: 0; min-width: 0; border: 0; padding: 0; }
+.review-category-options[hidden], .review-local-only-line[hidden] { display: none; }
 .review-scope-options { display: flex; flex-wrap: wrap; gap: .4rem; min-width: 0; border: 0; padding: 0; }
-.review-category-option { display: grid; grid-template-columns: 18px minmax(0, 1.25fr) minmax(0, 1fr) max-content; align-items: start; gap: .65rem; padding: .7rem 0; border-bottom: 1px solid var(--boundary); cursor: pointer; }
-.review-category-option[data-unavailable-reason] { opacity: .55; }
-.review-category-description, .review-category-reason { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; }
+.review-category-option, .review-local-switch { display: grid; grid-template-columns: 18px minmax(0, 1.35fr) minmax(0, 1fr) max-content; align-items: center; gap: .65rem; padding: .22rem 0; border-bottom: 1px solid var(--boundary); cursor: pointer; }
+.review-category-option[data-unavailable-reason], .review-local-switch[data-unavailable-reason] { opacity: .55; }
+/* A category takes one line: what is too long for it ends in an ellipsis, and the whole text is on hover and in the page for assistive technology. */
+.review-category-name, .review-category-reason, .review-category-basis { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .review-category-calls { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.review-category-basis { align-self: center; -webkit-line-clamp: 1; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.review-category-basis { align-self: center; }
+.review-category-basis-detail { grid-column: 1 / -1; margin: 0 0 .1rem calc(18px + .65rem); color: var(--text-subdued); font-size: .9rem; }
+.review-category-basis-detail[hidden] { display: none; }
 .review-scope-option { position: relative; display: inline-flex; align-items: center; padding: .3rem .65rem; border: 1px solid var(--boundary); border-radius: 999px; cursor: pointer; }
 .review-scope-option input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .review-scope-option:focus-within { outline: 2px solid var(--selection-boundary); outline-offset: 2px; }
@@ -523,17 +527,29 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .task-reference-chips > button { border-radius: 999px; }
 .task-reference-chips details { flex-basis: 100%; }
 .task-reference-chips details > label { display: flex; gap: .5rem; margin: .4rem 0; }
-@media (max-width: 620px) { .review-category-option { grid-template-columns: 18px minmax(0, 1fr) max-content; } .review-category-basis { grid-column: 2; } .review-category-calls { grid-column: 3; grid-row: 1; } }
+@media (max-width: 620px) { .review-category-option, .review-local-switch { grid-template-columns: 18px minmax(0, 1fr) max-content; } .review-category-basis { grid-column: 2; } .review-category-calls { grid-column: 3; grid-row: 1; } }
 .review-category-option:has(input:checked), .review-scope-option:has(input:checked) { border-color: var(--selection-boundary); box-shadow: inset 0 0 0 1px var(--selection-boundary); background: var(--surface-subdued); }
-.review-category-option:has(input:disabled), .review-scope-option:has(input:disabled) { background: var(--surface-subdued); cursor: not-allowed; }
-.review-category-option input { flex: none; width: 18px; height: 18px; margin-top: .25rem; }
+.review-category-option:has(input:disabled), .review-local-switch:has(input:disabled), .review-scope-option:has(input:disabled) { background: var(--surface-subdued); cursor: not-allowed; }
+.review-category-option input { flex: none; width: 18px; height: 18px; }
 .review-scope-option small { display: block; }
-.review-category-text { display: grid; gap: .2rem; min-width: 0; }
-.review-category-description[hidden] { display: none; }
-.review-category-description { color: var(--text-subdued); font-size: .9rem; }
-.review-category-option .review-category-basis { margin: 0; font-size: .86rem; }
-.review-category-reason { color: var(--status-attention); font-size: .86rem; font-weight: 700; }
+.review-category-text { display: flex; align-items: baseline; gap: .6rem; min-width: 0; }
+.review-category-name { flex: 0 1 auto; }
+.review-category-option .review-category-basis, .review-local-switch .review-category-basis { margin: 0; font-size: .86rem; }
+.review-category-reason { flex: 1 1 0; color: var(--status-attention); font-size: .86rem; font-weight: 700; }
 .review-category-reason[hidden] { display: none; }
+/* 本地文字检查 is a switch above the categories, with its sentence under its name. */
+.review-local-switch { padding: .3rem 0; }
+.review-local-switch .review-category-name { flex: 0 0 auto; }
+.review-local-switch .review-category-description { flex: 1 1 0; display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-subdued); font-size: .9rem; }
+.review-local-switch input[role="switch"] { appearance: none; position: relative; flex: none; width: 2.1rem; height: 1.2rem; margin: 0; border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface-subdued); }
+.review-local-switch input[role="switch"]::after { content: ""; position: absolute; top: 2px; left: 2px; width: calc(1.2rem - 6px); height: calc(1.2rem - 6px); border-radius: 50%; background: var(--text-subdued); transition: transform .12s; }
+.review-local-switch input[role="switch"]:checked { border-color: var(--selection-boundary); background: var(--selection-boundary); }
+.review-local-switch input[role="switch"]:checked::after { background: var(--surface); transform: translateX(.9rem); }
+.review-local-switch input[role="switch"]:focus-visible { outline: 2px solid var(--selection-boundary); outline-offset: 2px; }
+.review-local-only-line { margin: .5rem 0 0; color: var(--text-subdued); }
+/* 核查力度 sits directly under the 事实核查 row, indented to its name. */
+.review-evidence-assurance { margin: .1rem 0 .3rem calc(18px + .65rem); padding-bottom: .3rem; border-bottom: 1px solid var(--boundary); }
+.review-evidence-assurance .field-note { margin: .25rem 0 0; }
 .review-chapter-range { display: flex; flex-wrap: wrap; gap: .6rem 1rem; }
 .review-chapter-range[hidden] { display: none; }
 .review-chapter-range > .review-field { min-width: 0; max-width: 100%; }
@@ -2098,7 +2114,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
   .editorial-mark-menu, .editorial-mark-card, .editorial-mark-composer, .editorial-mark-drifted, .editorial-mark-quote,
   .editor-edge, .edge-entries,
   .review-workspace-card, .review-runs > li, .review-plan, .review-group, .review-finding, .review-finding-quote, .review-risk-point,
-  .review-inline-form, .review-batch-strip, .review-report-summary, .review-sheet, .review-category-option, .review-scope-option,
+  .review-inline-form, .review-batch-strip, .review-report-summary, .review-sheet, .review-category-option, .review-local-switch, .review-scope-option,
   .review-consequences, .book-review-summary,
   .deliverables-publication, .milestone-list > li, .publication-versions > li, .publication-change-notice, .publication-actuals-prompt,
   .publication-designate, .publication-milestone-option, .publication-designate-summary, .publication-statement,
