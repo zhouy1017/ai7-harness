@@ -66,7 +66,9 @@ const INTENDED_DELTA: ReadonlyArray<{ readonly object: string; readonly change: 
   { object: 'index:sqlite_autoindex_editor_step_effects_2', change: 'added', slice: 'R5-3+R5-4' },
   { object: 'table:editor_step_mark_anchors', change: 'added', slice: 'R5-3+R5-4' },
   { object: 'index:sqlite_autoindex_editor_step_mark_anchors_1', change: 'added', slice: 'R5-3+R5-4' },
-  { object: 'index:editor_steps_walk', change: 'added', slice: 'R5-3+R5-4' },
+  // The write-lock plan (#1654 profile): the Effect ledger's reversal and item lookups.
+  { object: 'index:manuscript_effect_intents_reversal', change: 'added', slice: 'R5-3+R5-4' },
+  { object: 'index:manuscript_effect_targets_item', change: 'added', slice: 'R5-3+R5-4' },
 ];
 
 const reference = JSON.parse(readFileSync('tests/fixtures/database/revision-116-schema.json', 'utf8')) as { userVersion: number; rows: DumpRow[] };

@@ -60,6 +60,7 @@ import {
 import { DecisionFeedbackLedger } from './decision-feedback.js';
 import { aiLocksOfWindow } from './ai-edit-locks.js';
 import { requireBounded } from './manuscript/bounded-kernel.js';
+import { schemaHas } from './statement-cache.js';
 
 /**
  * Editorial Marks and the Proposal Change Items behind 修改建议 (Issue #407, schema revision 22).
@@ -564,7 +565,7 @@ export function appliedWordsReach(db: DatabaseSync, branchId: string, markId: st
 }
 
 export function applicationOfItem(db: DatabaseSync, itemId: string): ManuscriptApplyProjection | null {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_effect_receipts'").get() === undefined) return null;
+  if (!schemaHas(db, 'manuscript_effect_receipts')) return null;
   const row = db.prepare(
     `SELECT i.effect_id, i.kind, i.payload_digest, i.target_count, i.base_revision_id, i.base_journal_sequence, i.base_working_digest,
             i.reverses_effect_id, a.approval_id, a.interaction, d.dispatch_id, r.receipt_id, r.receipt_digest, r.committed_at,
@@ -685,7 +686,7 @@ export function marksOfWindow(
   page?: { afterOrdinal: number; digest: string },
 ): Pick<EditorialMarkCommandProjection, 'marks' | 'marksTruncated' | 'marksPage'> {
   if (!marksRelationExists(db)) return { marks: [], marksTruncated: false };
-  const select = anchorSelect(proposalConflictRelationsExist(db), db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() !== undefined);
+  const select = anchorSelect(proposalConflictRelationsExist(db), schemaHas(db, 'editor_inline_revision_marks'));
   const where = `WHERE em.branch_id = ? AND em.status IN ${LIVE_STATUSES} AND em.anchor_state IN ('exact', 'drifted')
        AND wb.order_key >= ? AND wb.order_key < ?`;
   const order = 'ORDER BY wb.order_key, em.from_grapheme, em.to_grapheme DESC, em.created_at, em.mark_id';
@@ -919,7 +920,7 @@ export class EditorialMarkStore {
       LEFT JOIN working_blocks w ON w.branch_id = m.branch_id AND w.block_id = m.block_id
       LEFT JOIN proposal_atomic_groups g ON g.group_id = i.atomic_group_id
       WHERE m.manuscript_id = ? AND m.branch_id = ? AND m.status IN ('open', 'resolved', 'applied')
-      AND ${this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() ? 'NOT EXISTS(SELECT 1 FROM editor_inline_revision_marks r WHERE r.mark_id = m.mark_id)' : '1=1'}
+      AND ${schemaHas(this.#db, 'editor_inline_revision_marks') ? 'NOT EXISTS(SELECT 1 FROM editor_inline_revision_marks r WHERE r.mark_id = m.mark_id)' : '1=1'}
       AND (? IS NULL OR m.source_task_id = ? OR EXISTS(SELECT 1 FROM review_findings f WHERE f.mark_id = m.mark_id AND f.review_run_id = ?))
       ORDER BY COALESCE(w.order_key, 9223372036854775807), m.from_grapheme, m.mark_id LIMIT 10001`)
       .all(input.manuscriptId, input.branchId, input.resultId, input.resultId, input.resultId) as SqlRow[];
@@ -1219,7 +1220,7 @@ export class EditorialMarkStore {
       markId,
       categoryKey: category.key,
       categoryLabel: category.label,
-      ...(this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() && this.#db.prepare('SELECT 1 FROM editor_inline_revision_marks WHERE mark_id = ?').get(markId) ? { inlineRevision: true } : {}),
+      ...(schemaHas(this.#db, 'editor_inline_revision_marks') && this.#db.prepare('SELECT 1 FROM editor_inline_revision_marks WHERE mark_id = ?').get(markId) ? { inlineRevision: true } : {}),
       kind,
       status: text(row.status) as EditorialMarkStatus,
       anchorState,
@@ -1311,7 +1312,7 @@ export class EditorialMarkStore {
       'MARK_INVALID',
       '处理方式无效。',
     );
-    requireMark(!this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() ||
+    requireMark(!schemaHas(this.#db, 'editor_inline_revision_marks') ||
       !this.#db.prepare('SELECT 1 FROM editor_inline_revision_marks WHERE mark_id = ?').get(input.markId),
       'MARK_ACTION_INVALID', '请在编辑修订卡片上应用或还原这处修改。');
     const prior = this.#db.prepare('SELECT 1 FROM proposal_item_decisions WHERE client_decision_id = ?').get(input.clientDecisionId);
@@ -1522,7 +1523,7 @@ export class EditorialMarkStore {
       ...this.#decisionFeedback.standing(text(row.decision_id), firstReasonOf(row)),
       recordedAt: text(row.recorded_at),
     };
-    const inline = this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get()
+    const inline = schemaHas(this.#db, 'editor_inline_revision_marks')
       ? this.#db.prepare('SELECT before_text, after_text FROM editor_inline_revision_marks WHERE mark_id = ?').get(markId) : undefined;
     return {
       itemId: text(item.item_id),
@@ -1547,7 +1548,7 @@ export class EditorialMarkStore {
     decision: { decisionId: string; disposition: string; editedText: string | null } | null;
   } {
     const mark = this.#liveMark(binding);
-    requireMark(!this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() ||
+    requireMark(!schemaHas(this.#db, 'editor_inline_revision_marks') ||
       !this.#db.prepare('SELECT 1 FROM editor_inline_revision_marks WHERE mark_id = ?').get(binding.markId),
       'MARK_ACTION_INVALID', '请在编辑修订卡片上应用或还原这处修改。');
     requireMark(mark.kind === 'change-suggestion', 'MARK_ACTION_INVALID', '只有修改建议可以应用。');

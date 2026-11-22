@@ -219,11 +219,15 @@ export function neighbours(db: DatabaseSync, branchId: string, key: number): { p
 
 // ---- writes -----------------------------------------------------------------------------------------------------------
 
-function refreshDerived(db: DatabaseSync, branchId: string, blockId: string, key: number, content: BlockContent | null): void {
+/**
+ * A block's outline row and search row, written again. A search row's rowid is its working block's rowid (Issue #1654): the
+ * trigram table indexes only its text, so a row is found and deleted by rowid, never by scanning the table for its block.
+ */
+function refreshDerived(db: DatabaseSync, branchId: string, blockId: string, rowid: number, key: number, content: BlockContent | null): void {
   db.prepare('DELETE FROM manuscript_outline WHERE branch_id = ? AND block_id = ?').run(branchId, blockId);
-  db.prepare('DELETE FROM working_block_search WHERE branch_id = ? AND block_id = ?').run(branchId, blockId);
+  db.prepare('DELETE FROM working_block_search WHERE rowid = ?').run(rowid);
   if (content === null) return;
-  db.prepare('INSERT INTO working_block_search(branch_id, block_id, text) VALUES (?, ?, ?)').run(branchId, blockId, content.text);
+  db.prepare('INSERT INTO working_block_search(rowid, branch_id, block_id, text) VALUES (?, ?, ?, ?)').run(rowid, branchId, blockId, content.text);
   if (content.kind === 'title' || content.kind === 'heading') {
     db.prepare('INSERT INTO manuscript_outline(branch_id, block_id, order_key, kind, level, text, digest) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(branchId, blockId, key, content.kind, content.level ?? 1, content.text, content.digest);
@@ -340,9 +344,9 @@ export function insertBlockAfter(db: DatabaseSync, branchId: string, afterBlockI
   requireBounded(after !== undefined, 'EDIT_BLOCK_CHANGED', '稳定内容块不存在。');
   const key = keyAfter(db, branchId, asNumber(after.order_key), spacing);
   const length = stagedBlockLength(content.text, 'EDIT_TOO_LARGE', '内容块超出安全范围。');
-  db.prepare(`INSERT INTO working_blocks(branch_id, block_id, order_key, kind, level, text, digest, grapheme_length) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+  const inserted = db.prepare(`INSERT INTO working_blocks(branch_id, block_id, order_key, kind, level, text, digest, grapheme_length) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(branchId, blockId, key, content.kind, content.level, content.text, content.digest, length);
-  refreshDerived(db, branchId, blockId, key, content);
+  refreshDerived(db, branchId, blockId, Number(inserted.lastInsertRowid), key, content);
   const page = pageOf(db, branchId, key);
   if (page.count + 1 > PAGE_MAX) settlePage(db, branchId, page.first);
   else {
@@ -354,12 +358,12 @@ export function insertBlockAfter(db: DatabaseSync, branchId: string, afterBlockI
 
 /** `blockId` leaves the working state (a join): one row deleted, one page row counted, merged into a neighbour when small. */
 export function removeBlock(db: DatabaseSync, branchId: string, blockId: string): void {
-  const row = db.prepare('SELECT order_key, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(branchId, blockId) as SqlRow | undefined;
+  const row = db.prepare('SELECT rowid, order_key, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(branchId, blockId) as SqlRow | undefined;
   requireBounded(row !== undefined, 'EDIT_BLOCK_CHANGED', '稳定内容块不存在。');
   const key = asNumber(row.order_key);
   const page = pageOf(db, branchId, key);
   db.prepare('DELETE FROM working_blocks WHERE branch_id = ? AND block_id = ?').run(branchId, blockId);
-  refreshDerived(db, branchId, blockId, key, null);
+  refreshDerived(db, branchId, blockId, asNumber(row.rowid), key, null);
   const count = page.count - 1;
   let first = page.first;
   if (count === 0) {
@@ -382,7 +386,7 @@ export function removeBlock(db: DatabaseSync, branchId: string, blockId: string)
  * digest differs, so each caller refuses in its own words; otherwise its key, paragraph-free, and the grapheme change.
  */
 export function rewriteBlock(db: DatabaseSync, branchId: string, blockId: string, content: BlockContent, expectedDigest: string): { key: number; delta: number } | null {
-  const row = db.prepare('SELECT order_key, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ? AND digest = ?').get(branchId, blockId, expectedDigest) as SqlRow | undefined;
+  const row = db.prepare('SELECT rowid, order_key, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ? AND digest = ?').get(branchId, blockId, expectedDigest) as SqlRow | undefined;
   if (row === undefined) return null;
   const key = asNumber(row.order_key);
   const length = stagedBlockLength(content.text, 'EDIT_TOO_LARGE', '内容块超出安全范围。');
@@ -392,7 +396,7 @@ export function rewriteBlock(db: DatabaseSync, branchId: string, blockId: string
   if (delta !== 0) {
     db.prepare('UPDATE working_pages SET grapheme_total = grapheme_total + ? WHERE branch_id = ? AND first_order_key = ?').run(delta, branchId, pageOf(db, branchId, key).first);
   }
-  refreshDerived(db, branchId, blockId, key, content);
+  refreshDerived(db, branchId, blockId, asNumber(row.rowid), key, content);
   return { key, delta };
 }
 
@@ -418,7 +422,7 @@ export function assignKeysAndPages(db: DatabaseSync, branchId: string, spacing =
     SELECT branch_id, block_id, order_key, kind, coalesce(level, 1), text, digest FROM working_blocks
     WHERE branch_id = ? AND kind IN ('title', 'heading')`);
   outline.run(branchId);
-  db.prepare('INSERT INTO working_block_search(branch_id, block_id, text) SELECT branch_id, block_id, text FROM working_blocks WHERE branch_id = ? ORDER BY order_key').run(branchId);
+  db.prepare('INSERT INTO working_block_search(rowid, branch_id, block_id, text) SELECT rowid, branch_id, block_id, text FROM working_blocks WHERE branch_id = ? ORDER BY order_key').run(branchId);
   const insertPage = db.prepare('INSERT INTO working_pages(branch_id, first_order_key, block_count, grapheme_total) VALUES (?, ?, ?, ?)');
   let total = 0;
   for (let start = 0; start < rows.length; start += PAGE_BUILD) {

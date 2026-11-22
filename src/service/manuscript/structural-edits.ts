@@ -5,6 +5,7 @@ import {
   BLOCK_PATTERN, BoundedStoreError, HISTORY_BATCH, MIGRATION_BATCH, asNumber, asString, graphemes, one, requireBounded, stagedBlockLength, type SqlRow,
 } from './bounded-kernel.js';
 import { blockDigest, blockShapeFromDigest, memberPresenceColumns, recoveryCommandEvidenceDigest, recoveryWorkingDigest } from './command-history.js';
+import { schemaHas } from '../statement-cache.js';
 import { recordGroupPart, recordStepAnchors } from './editor-steps.js';
 import { insertBlockAfter, neighbours, paragraphCount, removeBlock, rewriteBlock, workingBlock, type WorkingRow } from './working-positions.js';
 
@@ -82,7 +83,7 @@ function caretMarks(db: DatabaseSync, branchId: string, blockId: string, from: n
  * The marks of a 就地编辑修订 session (Issue #1428) are bound to their paragraph's text as the session began, by offsets in it; a
  * split or join that moves one of them drifts it, so its decision is never matched against another paragraph's words.
  */
-const inlineRevisionMark = (db: DatabaseSync): string => db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() === undefined
+const inlineRevisionMark = (db: DatabaseSync): string => !schemaHas(db, 'editor_inline_revision_marks')
   ? '0' : 'mark_id IN (SELECT mark_id FROM editor_inline_revision_marks)';
 
 /**

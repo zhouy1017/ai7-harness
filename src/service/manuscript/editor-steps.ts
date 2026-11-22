@@ -40,6 +40,7 @@ export const EDITOR_STEP_SCHEMA_SQL = {
     anchor_block_id TEXT REFERENCES manuscript_blocks(block_id),
     change_count INTEGER NOT NULL CHECK(change_count >= 1),
     created_at TEXT NOT NULL,
+    command_group_id TEXT REFERENCES manuscript_command_groups(command_group_id),
     UNIQUE(branch_id, ordinal)
   ) STRICT`,
   editor_step_parts: `CREATE TABLE editor_step_parts (
@@ -75,9 +76,12 @@ export const EDITOR_STEP_SCHEMA_SQL = {
   ) STRICT`,
 } as const;
 
-export const EDITOR_STEP_INDEX_SQL = {
-  editor_steps_walk: `CREATE INDEX editor_steps_walk ON editor_steps(branch_id, status, ordinal)`,
-} as const;
+/**
+ * No index beyond the key and `UNIQUE(branch_id, ordinal)` (Issue #1654, the typing write): every undone step stands above the
+ * newest applied one — undo walks down from the top, redo puts back the oldest undone, a new step supersedes them all — so
+ * the walk reads the ordinal index from the top, past only the steps the editor has just undone or set aside.
+ */
+export const EDITOR_STEP_INDEX_SQL = {} as const;
 
 export type EditorStepKind = 'typing' | 'style' | 'split' | 'merge' | 'replace' | 'accept' | 'accept-batch' | 'replace-all' | 'ai-edit'
   | 'reverse-card' | 'inline-decision' | 'restore';
@@ -110,14 +114,24 @@ export function stepQuote(text: string): string {
   return parts.length <= 12 ? text : `${parts.slice(0, 12).join('')}…`;
 }
 
-/** A new step of `branchId`: every undone step, and its command groups, is superseded first (only a new step does that). */
-function openStep(db: DatabaseSync, branchId: string, kind: EditorStepKind, label: string, anchorBlockId: string | null, changes: number): string {
+/** The ordinal of the newest applied step of `branchId` (0 when none): every undone step stands above it. */
+function topApplied(db: DatabaseSync, branchId: string): number {
+  const row = db.prepare("SELECT ordinal FROM editor_steps WHERE branch_id = ? AND status = 'applied' ORDER BY ordinal DESC LIMIT 1").get(branchId) as SqlRow | undefined;
+  return row === undefined ? 0 : asNumber(row.ordinal);
+}
+
+/**
+ * A new step of `branchId`: every undone step, and its command groups, is superseded first (only a new step does that). A
+ * one-part text step names its command group on its own row (no part row: the typing write, Issue #1654).
+ */
+function openStep(db: DatabaseSync, branchId: string, kind: EditorStepKind, label: string, anchorBlockId: string | null, changes: number,
+  commandGroupId: string | null = null): string {
   db.prepare("UPDATE manuscript_command_groups SET status = 'superseded' WHERE branch_id = ? AND status = 'undone'").run(branchId);
-  db.prepare("UPDATE editor_steps SET status = 'superseded' WHERE branch_id = ? AND status = 'undone'").run(branchId);
+  db.prepare("UPDATE editor_steps SET status = 'superseded' WHERE branch_id = ? AND ordinal > ? AND status = 'undone'").run(branchId, topApplied(db, branchId));
   const ordinal = asNumber((db.prepare('SELECT coalesce(max(ordinal), 0) + 1 n FROM editor_steps WHERE branch_id = ?').get(branchId) as SqlRow).n);
   const stepId = randomUUID();
-  db.prepare(`INSERT INTO editor_steps(step_id, branch_id, ordinal, kind, status, label, anchor_block_id, change_count, created_at)
-    VALUES (?, ?, ?, ?, 'applied', ?, ?, ?, ?)`).run(stepId, branchId, ordinal, kind, label, anchorBlockId, changes, new Date().toISOString());
+  db.prepare(`INSERT INTO editor_steps(step_id, branch_id, ordinal, kind, status, label, anchor_block_id, change_count, created_at, command_group_id)
+    VALUES (?, ?, ?, ?, 'applied', ?, ?, ?, ?, ?)`).run(stepId, branchId, ordinal, kind, label, anchorBlockId, changes, new Date().toISOString(), commandGroupId);
   return stepId;
 }
 
@@ -163,7 +177,10 @@ export function withEditorStep<T>(db: DatabaseSync, branchId: string, spec: Edit
 /** A text command's group as a part: typing, a style, a split, a merge, a replacement. Returns its step, or `null` in a replay. */
 export function recordGroupPart(db: DatabaseSync, branchId: string, groupId: string, kind: 'typing' | 'style' | 'split' | 'merge' | 'replace',
   anchorBlockId: string | null, label: string = LABELS[kind]): string | null {
-  if (contextOf(db).replay !== null) return null;
+  const context = contextOf(db);
+  if (context.replay !== null) return null;
+  // Outside a composite action the step is this one group: it is named on the step's own row.
+  if (!context.ambient.some((open) => open.branchId === branchId)) return openStep(db, branchId, kind, label, anchorBlockId, 1, groupId);
   const step = stepFor(db, branchId, kind, label, anchorBlockId, 1);
   addPart(db, step, { group: groupId });
   return step.stepId;
@@ -332,17 +349,18 @@ function replayGroup(host: EditorStepHost, groupId: string, action: 'undo' | 're
   syncInlineEditorRevision(db, groupId);
 }
 
-interface StepRow { stepId: string; kind: EditorStepKind; label: string; anchorBlockId: string | null; changes: number }
+interface StepRow { stepId: string; kind: EditorStepKind; label: string; anchorBlockId: string | null; changes: number; commandGroupId: string | null }
 
 const stepRow = (row: SqlRow): StepRow => ({
   stepId: asString(row.step_id), kind: asString(row.kind) as EditorStepKind, label: asString(row.label),
   anchorBlockId: row.anchor_block_id === null ? null : asString(row.anchor_block_id), changes: asNumber(row.change_count),
+  commandGroupId: row.command_group_id === null ? null : asString(row.command_group_id),
 });
 
 function nextStep(db: DatabaseSync, branchId: string, action: 'undo' | 'redo'): StepRow | null {
-  const row = db.prepare(action === 'undo'
-    ? "SELECT * FROM editor_steps WHERE branch_id = ? AND status = 'applied' ORDER BY ordinal DESC LIMIT 1"
-    : "SELECT * FROM editor_steps WHERE branch_id = ? AND status = 'undone' ORDER BY ordinal ASC LIMIT 1").get(branchId) as SqlRow | undefined;
+  const row = (action === 'undo'
+    ? db.prepare("SELECT * FROM editor_steps WHERE branch_id = ? AND status = 'applied' ORDER BY ordinal DESC LIMIT 1").get(branchId)
+    : db.prepare("SELECT * FROM editor_steps WHERE branch_id = ? AND ordinal > ? AND status = 'undone' ORDER BY ordinal LIMIT 1").get(branchId, topApplied(db, branchId))) as SqlRow | undefined;
   return row === undefined ? null : stepRow(row);
 }
 
@@ -362,7 +380,9 @@ function slotState(db: DatabaseSync, stepId: string, slot: number): { effectId: 
 /** Every part of `step`, newest first for an undo, oldest first for a redo, written through its owner. */
 function replayStep(host: EditorStepHost, step: StepRow, action: 'undo' | 'redo'): string | null {
   const db = host.db;
-  const parts = db.prepare(`SELECT * FROM editor_step_parts WHERE step_id = ? ORDER BY seq ${action === 'undo' ? 'DESC' : 'ASC'}`).all(step.stepId) as SqlRow[];
+  const parts = step.commandGroupId !== null
+    ? [{ command_group_id: step.commandGroupId, slot_step_id: null, slot: null, inline_mark_id: null }] as SqlRow[]
+    : db.prepare(`SELECT * FROM editor_step_parts WHERE step_id = ? ORDER BY seq ${action === 'undo' ? 'DESC' : 'ASC'}`).all(step.stepId) as SqlRow[];
   const replay = contextOf(db).replay!;
   const interaction = action === 'undo' ? 'undo-step' : 'redo-step';
   let lastGroup: string | null = null;

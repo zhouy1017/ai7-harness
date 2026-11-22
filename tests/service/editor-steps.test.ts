@@ -435,6 +435,23 @@ describe('undo by editor step (ADR 0105 §1)', () => {
     expect(texts()).toEqual(original);
   });
 
+  it('keeps each search row under its working block\'s rowid through typing, a split, a join, undo and redo (#1654)', () => {
+    const [a, b] = paragraphs() as [ManuscriptWindowProjection['blocks'][number], ManuscriptWindowProjection['blocks'][number]];
+    const created = `blk_${randomBytes(12).toString('hex')}`;
+    journal(a.blockId, 1, '〔甲〕');
+    journal(b.blockId, 6, '', 6, { kind: 'split', newBlockId: created });
+    const now = window();
+    journal(b.blockId, 6, '', 6, { kind: 'merge', mergedBlockId: created, mergedBlockDigest: now.blocks.find((block) => block.blockId === created)!.digest });
+    undo(); undo(); redo();
+    // Every working block has exactly one search row, under its own rowid and with its text; nothing else is indexed.
+    const mismatched = ledger((db) => db.prepare(`SELECT
+        (SELECT count(*) FROM working_blocks w WHERE w.branch_id = ? AND NOT EXISTS(SELECT 1 FROM working_block_search s
+          WHERE s.rowid = w.rowid AND s.block_id = w.block_id AND s.branch_id = w.branch_id AND s.text = w.text)) missing,
+        (SELECT count(*) FROM working_block_search s WHERE NOT EXISTS(SELECT 1 FROM working_blocks w WHERE w.rowid = s.rowid AND w.block_id = s.block_id)) stray`)
+      .get(book.branchId) as { missing: number; stray: number });
+    expect(mismatched).toEqual({ missing: 0, stray: 0 });
+  });
+
   it('undo and redo of a split keep the new block\'s identity', () => {
     const x = paragraphs()[0]!;
     const created = `blk_${randomBytes(12).toString('hex')}`;

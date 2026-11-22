@@ -63,7 +63,7 @@ interface SizeResult {
   importSeconds: number;
   pageBytes: number;
   lineagePlan: string[];
-  rows: Array<{ operation: string; position: string; ms: number[]; bytes: number[]; frames: number[]; frameCrossCheck: boolean }>;
+  rows: Array<{ operation: string; position: string; ms: number[]; bytes: number[]; frames: number[]; frameCrossCheck: boolean; first: number | null }>;
 }
 
 const median = (values: number[]): number => {
@@ -184,6 +184,8 @@ async function measureSize(size: number, blocks: readonly ParsedDocxBlock[]): Pr
 
     // ---- measuring -----------------------------------------------------------------------------------------------------
     const rows = new Map<string, { operation: string; position: string } & Timing & { crossOk: boolean }>();
+    /** Each operation's discarded warm-up round: the first on this store, before any round of it left history behind. */
+    const firsts = new Map<string, number>();
     const clearWal = (): void => {
       for (let attempt = 0; attempt < 5; attempt += 1) {
         store.checkpointAfterResponse(true);
@@ -201,6 +203,7 @@ async function measureSize(size: number, blocks: readonly ParsedDocxBlock[]): Pr
     const finish = <T>(operation: string, position: string, round: number, elapsed: number, result: T): T => {
       const bytes = walBytes(roots.dataRoot);
       const frames = Number((probe!.prepare('PRAGMA wal_checkpoint(NOOP)').get() as { log: number }).log);
+      if (round < 0 && operation !== '') firsts.set(`${operation}@${position}`, elapsed);
       if (round >= 0) {
         const key = `${operation}@${position}`;
         const row = rows.get(key) ?? { operation, position, ms: [], bytes: [], frames: [], crossOk: true };
@@ -319,7 +322,7 @@ async function measureSize(size: number, blocks: readonly ParsedDocxBlock[]): Pr
       size, counts,
       graphemes: { total: totals.g, meanPerBlock: totals.g / totals.n, meanPerBody: body.g / body.n },
       marks: spread + DENSE_MARKS, importSeconds, pageBytes: pageSize, lineagePlan: [],
-      rows: [...rows.values()].map((row) => ({ operation: row.operation, position: row.position, ms: row.ms, bytes: row.bytes, frames: row.frames, frameCrossCheck: row.crossOk })),
+      rows: [...rows.values()].map((row) => ({ operation: row.operation, position: row.position, ms: row.ms, bytes: row.bytes, frames: row.frames, frameCrossCheck: row.crossOk, first: firsts.get(`${row.operation}@${row.position}`) ?? null })),
     });
     if (ONLY === 'mark-list') {
       for (let round = -1; round < REPS; round += 1) measure(listRow, '-', round, () => store.inspectProposalWorkspace({ manuscriptId: book.manuscriptId, branchId: book.branchId, resultId: null }));
@@ -416,7 +419,7 @@ async function measureSize(size: number, blocks: readonly ParsedDocxBlock[]): Pr
       graphemes: { total: totals.g, meanPerBlock: totals.g / totals.n, meanPerBody: body.g / body.n },
       marks: spread + DENSE_MARKS, importSeconds, pageBytes: pageSize,
       lineagePlan: plan,
-      rows: [...rows.values()].map((row) => ({ operation: row.operation, position: row.position, ms: row.ms, bytes: row.bytes, frames: row.frames, frameCrossCheck: row.crossOk })),
+      rows: [...rows.values()].map((row) => ({ operation: row.operation, position: row.position, ms: row.ms, bytes: row.bytes, frames: row.frames, frameCrossCheck: row.crossOk, first: firsts.get(`${row.operation}@${row.position}`) ?? null })),
     };
   } finally {
     probe?.close();
@@ -431,10 +434,10 @@ function report(result: SizeResult): void {
   console.log(`\n### ${result.size} blocks — ${Object.entries(result.counts).map(([kind, n]) => `${kind} ${n}`).join(', ')}; ` +
     `${result.graphemes.total} graphemes, mean ${fmt(result.graphemes.meanPerBlock)} per block / ${fmt(result.graphemes.meanPerBody)} per body paragraph; ` +
     `${result.marks} marks; lineage plan ${JSON.stringify(result.lineagePlan)}; import ${fmt(result.importSeconds)} s; page ${result.pageBytes} B`);
-  console.log('| operation | position | reps | time median ms | min | max | WAL median MiB | min | max | WAL frames median | frame check |');
-  console.log('| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |');
+  console.log('| operation | position | reps | time median ms | min | max | first round ms (fresh store) | WAL median MiB | min | max | WAL frames median | frame check |');
+  console.log('| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |');
   for (const row of result.rows) {
-    console.log(`| ${row.operation} | ${row.position} | ${row.ms.length} | ${fmt(median(row.ms), 2)} | ${fmt(Math.min(...row.ms), 2)} | ${fmt(Math.max(...row.ms), 2)} | ` +
+    console.log(`| ${row.operation} | ${row.position} | ${row.ms.length} | ${fmt(median(row.ms), 2)} | ${fmt(Math.min(...row.ms), 2)} | ${fmt(Math.max(...row.ms), 2)} | ${row.first === null ? '-' : fmt(row.first, 2)} | ` +
       `${fmt(median(row.bytes) / MIB, 3)} | ${fmt(Math.min(...row.bytes) / MIB, 3)} | ${fmt(Math.max(...row.bytes) / MIB, 3)} | ${median(row.frames)} | ${row.frameCrossCheck ? 'ok' : 'MISMATCH'} |`);
   }
   console.log(`AI7_BASELINE_RESULT ${JSON.stringify(result)}`);

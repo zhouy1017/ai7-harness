@@ -103,6 +103,15 @@ export const MANUSCRIPT_EFFECT_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
+/**
+ * The Effect ledger's two lookups that grew with history (Issue #1654 lock profile): whether an Effect was reversed, and the
+ * Effects that wrote an item. Without them each Apply, reversal and card read scanned every Effect or every target.
+ */
+export const MANUSCRIPT_EFFECT_INDEX_SQL = {
+  manuscript_effect_intents_reversal: `CREATE INDEX manuscript_effect_intents_reversal ON manuscript_effect_intents(reverses_effect_id) WHERE reverses_effect_id IS NOT NULL`,
+  manuscript_effect_targets_item: `CREATE INDEX manuscript_effect_targets_item ON manuscript_effect_targets(item_id)`,
+} as const;
+
 export const MANUSCRIPT_EFFECT_TRIGGER_SQL: Readonly<Record<string, string>> = appendOnly({
   manuscript_effect_intents: 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE',
   manuscript_effect_targets: 'MANUSCRIPT_EFFECT_LEDGER_IMMUTABLE',

@@ -57,6 +57,7 @@ import { readWordImportChoiceRecord, readWordParentSourcePin, requireWordRevisio
   requireWordManuscriptSourceSegments, wordCompilationForReadings, WORD_EXTRACTOR_IDENTITY } from './import-retention.js';
 import { REPORT_EXPORT_WRITER_IDENTITIES, renderReportExport, type ReportExportInput } from './report-export.js';
 import { MARKDOWN_EXPORT_WRITER_IDENTITY, PDF_EXPORT_WRITER_IDENTITY, renderMarkdownExport, renderPdfHtmlExport } from './text-export.js';
+import { schemaHas } from './statement-cache.js';
 
 /**
  * Local export of a Manuscript version to DOCX (Issue #413, plan slice S64; External Export Policy v2; ADR 0038,
@@ -1866,7 +1867,7 @@ export class ManuscriptExportStore {
        WHERE em.branch_id = ? AND em.status IN ('open', 'resolved', 'applied') AND em.kind <> 'personal-highlight'
        ORDER BY em.created_at, em.mark_id`,
     ).all(branchId) as SqlRow[];
-    const inlineRevisions = this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'editor_inline_revision_marks'").get() !== undefined;
+    const inlineRevisions = schemaHas(this.#db, 'editor_inline_revision_marks');
     const item = this.#db.prepare(inlineRevisions
       ? `SELECT i.item_id, coalesce(r.before_text, i.current_text) current_text, coalesce(r.after_text, i.proposed_text) proposed_text
          FROM proposal_change_items i LEFT JOIN editor_inline_revision_marks r ON r.mark_id = i.mark_id WHERE i.mark_id = ?`

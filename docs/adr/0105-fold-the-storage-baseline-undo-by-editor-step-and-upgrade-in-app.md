@@ -188,6 +188,10 @@ This narrows the R5 row of the #1458 plan, 「移除阻碍正常更新的过程�
 - a split or join at 46,000 paragraphs writes under 1 % of today's write-ahead bytes, and grows less than 2× from the smallest size to the largest;
 - typing, window, outline, offset and whole-book mark-list reads stay within 10 % of the baseline.
 
+> Clarification, 2026-11-22 (Commander decision; R5-3 + R5-4, #1654; reported to the Owner): two targets are revised after the measurements on the test guests.
+> - **Consecutive Enters.** "20 consecutive Enters write under 5 % of one base split" becomes: one Enter costs the same at any manuscript size and position, and at 46,000 paragraphs it writes under 1 % of one base split. Each Enter must write its journal, command-history and lineage rows, about 30 pages, so the old target sat below that floor. Measured: one Enter writes 0.43 % of a base split at 46,000 paragraphs.
+> - **The write lock of a large undo** (§1). "At most 2 s for a 2,000-place 全部替换" becomes: at most the time the 全部替换 itself takes, flat as the history grows, with the 「正在撤销 N 处修改…」 line. A scoped AI edit holds the lock for at most 2 s. Two ways to reach 2 s were declined, because each breaks a guarantee of §1: one Effect per step (each card's own 撤销本次修改) and undo in chunks (one Ctrl+Z, all or nothing).
+
 ### 7 · Delivery
 
 R5 builds on `codex/integration-0.8.0` after 0.7.3 is delivered (#1540).

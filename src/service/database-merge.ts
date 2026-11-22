@@ -1161,10 +1161,11 @@ function mergeListedBooks(
     }
     const selectedBook = db.prepare('SELECT 1 FROM temp.merge_books WHERE book_id = ?');
     rows += importBookLearningControls(db, (bookId) => selectedBook.get(bookId) !== undefined);
-    // The search index over the working text the Book brought.
+    // The search index over the working text the Book brought, each row under its block's rowid here (Issue #1654).
     db.prepare(
-      `INSERT INTO main.working_block_search (branch_id, block_id, text)
-       SELECT x.branch_id, x.block_id, x.text FROM src.working_blocks x ${owned('working_blocks', 'x')}`,
+      `INSERT INTO main.working_block_search (rowid, branch_id, block_id, text)
+       SELECT w.rowid, w.branch_id, w.block_id, w.text FROM src.working_blocks x ${owned('working_blocks', 'x')}
+       JOIN main.working_blocks w ON w.branch_id = x.branch_id AND w.block_id = x.block_id`,
     ).run();
     db.exec('DROP TABLE temp.merge_rows');
     receipt?.(db);

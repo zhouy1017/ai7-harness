@@ -32,3 +32,19 @@ export function cacheStatements(db: DatabaseSync): void {
     });
   };
 }
+
+const present = new WeakMap<DatabaseSync, Set<string>>();
+
+/**
+ * Whether the schema holds an object named `name`, asked once per connection (Issue #1654 lock plan: the probes ran per place
+ * of a 全部替换). Only a positive answer is kept: a baseline store holds every relation, and a stub schema that lacks one keeps
+ * asking, as before.
+ */
+export function schemaHas(db: DatabaseSync, name: string): boolean {
+  let names = present.get(db);
+  if (names === undefined) present.set(db, names = new Set());
+  if (names.has(name)) return true;
+  const found = db.prepare('SELECT 1 FROM sqlite_schema WHERE name = ?').get(name) !== undefined;
+  if (found) names.add(name);
+  return found;
+}
