@@ -2333,6 +2333,7 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 1, decision: { kind: 'attribution', attribution: { scope: 'house' } } } },
       { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } } },
       { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'excluded', reason: '版权未清' } } },
+      { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 4, decision: { kind: 'not-used' } } },
     ]);
     expectRejectedInputs([
       ['decideLibraryMaterial', { materialId, expectedDecisions: -1, decision: house }],
@@ -2344,6 +2345,9 @@ describe('decodeRequest rejects malformed frames', () => {
       ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'eligibility', choice: 'series', reason: null } }],
       ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'eligibility', choice: 'house' } }],
       ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'eligibility', choice: 'house', reason: null, inferred: true } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'not-used', reason: null } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'not-used', choice: 'deferred' } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'unused' } }],
     ]);
   });
 

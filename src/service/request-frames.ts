@@ -251,6 +251,7 @@ function validLibraryDecision(value: unknown): boolean {
       : attribution.scope === 'book' && hasExactKeys(attribution, ['scope', 'bookId']) &&
         isBoundedString(attribution.bookId, 36) && UUID_PATTERN.test(attribution.bookId);
   }
+  if (value.kind === 'not-used') return hasExactKeys(value, ['kind']);
   return value.kind === 'eligibility' && hasExactKeys(value, ['kind', 'choice', 'reason']) &&
     (value.choice === 'book' || value.choice === 'house' || value.choice === 'excluded' || value.choice === 'deferred') &&
     (value.reason === null || isBoundedString(value.reason, MAX_FRAME_BYTES, true));
