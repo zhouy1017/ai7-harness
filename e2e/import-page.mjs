@@ -38,9 +38,26 @@ export async function assertImportPrimary(renderer, waitFor, name) {
   }
 }
 
+/** Move the actual scroller with wheel input, then hit-test before any pointer press. */
+export async function reachImportControl(renderer, waitFor, selector, name) {
+  for (let attempt=0;attempt<80 && !(await renderer.evaluate(inside(selector)));attempt++) {
+    const point=await renderer.evaluate(`(() => {const node=document.querySelector(${JSON.stringify(selector)});if(!node)return null;const r=node.getBoundingClientRect();let parent=node.parentElement;while(parent&&!(parent.scrollHeight>parent.clientHeight&&/auto|scroll/.test(getComputedStyle(parent).overflowY)))parent=parent.parentElement;const box=parent?.getBoundingClientRect()??{left:0,right:innerWidth,top:0,bottom:innerHeight};const top=Math.max(0,box.top)+70;const bottom=Math.min(innerHeight,box.bottom)-100;return {x:Math.max(1,Math.min(innerWidth-1,(box.left+box.right)/2)),y:(top+bottom)/2,deltaY:r.top<top?-100:100};})()`);
+    await waitFor(renderer, `${point!==null}`, `${name}-exists`);
+    await renderer.send('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0});
+    await renderer.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+  }
+  await waitFor(renderer, inside(selector), `${name}-inside`);
+}
+
+export async function pressImportControl(renderer, waitFor, selector, name) {
+  await reachImportControl(renderer, waitFor, selector, name);
+  await pointerClick(renderer, waitFor, selector, name);
+}
+
 export async function assertFidelityFold(renderer, waitFor, name, selector='.fidelity-details') {
   await waitFor(renderer, `(() => {const fold=document.querySelector(${JSON.stringify(selector)});return fold instanceof HTMLDetailsElement&&!fold.open&&!document.querySelector('#screen').textContent.includes('后续提供');})()`, `${name}-closed`);
-  await pointerClick(renderer, waitFor, `${selector} > summary`, `${name}-expand`);
-  await waitFor(renderer, `!document.querySelector('#screen').textContent.includes('后续提供')`, `${name}-current-export`);
-  await pointerClick(renderer, waitFor, `${selector} > summary`, `${name}-collapse`);
+  await reachImportControl(renderer, waitFor, '.fidelity-summary', `${name}-sentence-visible`);
+  await pressImportControl(renderer, waitFor, `${selector} > summary`, `${name}-expand`);
+  await waitFor(renderer, `!document.querySelector('#screen').textContent.includes('后续提供') && document.querySelector('.roundtrip-card')?.textContent.includes('导出 DOCX 时')`, `${name}-current-export`);
+  await pressImportControl(renderer, waitFor, `${selector} > summary`, `${name}-collapse`);
 }

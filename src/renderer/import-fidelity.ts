@@ -15,6 +15,7 @@ import {
   fidelitySummaryLine,
   fidelitySurfaceDetail,
   offersTextBoxChoice,
+  needsDegradationDecision,
   roundTripCard,
 } from './import-fidelity-labels.js';
 
@@ -125,7 +126,7 @@ export function renderFidelityReview(
     elements.push(note);
   }
   summary = el('p', 'fidelity-summary', fidelitySummaryLine(fidelity, offered || stated ? chosen : null));
-  summary.dataset['fidelitySummary'] = 'no-decision';
+  summary.dataset['fidelitySummary'] = needsDegradationDecision(fidelity) ? 'decision' : 'no-decision';
   elements.push(summary);
   if (offered || stated) elements.push(textBoxChoice(offered ? 'offer' : 'stated', chosen, (disposition) => {
     chosen = disposition;

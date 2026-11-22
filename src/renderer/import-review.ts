@@ -160,6 +160,11 @@ export function createImportReview(options: ImportReviewOptions) {
       bind: (control) => { buttons.push(control); paint(); }, setBusy: (value) => { busy = value; paint(); } };
   }
 
+  // The currently drawn form owns unsent choices; paging and valid target changes keep them.
+  let currentForm: { key: string; content: HTMLElement } | undefined;
+  const formControls = '[data-structure-candidate], [data-structure-level], [data-long-paragraph-choice], [data-text-box-disposition]';
+  let savedForm: { title?: string; controls: Array<{ key: string; value: string; checked: boolean }>; fidelityOpen?: boolean } = { controls: [] };
+
   function renderTargetChoice(
     staged: StagedImportProjection,
     selectedChoiceId: StagedImportProjection['targetChoices'][number]['id'] | null,
@@ -169,6 +174,17 @@ export function createImportReview(options: ImportReviewOptions) {
     reuseSourceVersionId: string | null | undefined = undefined,
     reimportLineageChoice: ReimportLineageChoice | undefined = undefined,
   ): void {
+    const formKey = `${staged.draftId}:${staged.draftVersion}`;
+    if (currentForm?.key === formKey) {
+      const title = currentForm.content.querySelector<HTMLInputElement>('[id="book-title"]');
+      if (title) savedForm.title = title.value;
+      const controls = Array.from(currentForm.content.querySelectorAll<HTMLInputElement | HTMLSelectElement>(formControls));
+      if (controls.length > 0) savedForm.controls = controls.map((control) => ({
+        key: JSON.stringify(control.dataset), value: control.value, checked: 'checked' in control && control.checked,
+      }));
+      const fold = currentForm.content.querySelector<HTMLDetailsElement>('.fidelity-details');
+      if (fold) savedForm.fidelityOpen = fold.open;
+    } else savedForm = { controls: [] };
     if (selectedChoiceId === null) {
       const currentBookId = document.querySelector<HTMLElement>('#screen > [data-book-id]')?.dataset['bookId'];
       const origin = document.querySelector('#screen')?.firstElementChild;
@@ -197,6 +213,9 @@ export function createImportReview(options: ImportReviewOptions) {
       const preview = button('查看导入详情', 'quiet', () => { previewOnly = true; confirm.click(); });
       controls?.bind(preview); return preview;
     };
+    if (relationshipSelection === 'reimport' && (defaultTarget?.kind !== 'existing-book' || defaultTarget.manuscriptState !== 'populated') ||
+      relationshipSelection === 'first-manuscript' && defaultTarget?.kind === 'existing-book' && defaultTarget.manuscriptState === 'populated') relationshipSelection = null;
+    if (!staged.editableImport.available) relationshipSelection = 'source-only';
     relationshipSelection ??= !staged.editableImport.available || defaultTarget?.kind === 'existing-book' && defaultTarget.manuscriptState === 'populated' ? 'source-only' : 'first-manuscript';
     const content = panel();
     content.append(
@@ -216,22 +235,24 @@ export function createImportReview(options: ImportReviewOptions) {
     bookSelect.name = 'import-target';
     bookSelect.setAttribute('aria-label', '图书');
     for (const target of [...staged.targetChoices].sort((a, b) => Number(b.kind === 'new-book') - Number(a.kind === 'new-book'))) {
-      const option = element('option', undefined, target.kind === 'new-book' ? '新建图书' :
-        `${bookChoiceWords(target.label, target.bookId)}${target.internalNumber ? ` · 内部编号 ${target.internalNumber}` : ''}`);
+      const option = element('option', undefined, target.kind === 'new-book' ? target.label :
+        `${bookChoiceWords(target.label, target.bookId)}${target.internalNumber && !target.label.includes(`内部编号 ${target.internalNumber}`) ? ` · 内部编号 ${target.internalNumber}` : ''}`);
       option.value = target.id;
       option.selected = target.id === selectedChoiceId;
       option.dataset['importTargetChoice'] = target.kind;
       if (target.kind === 'existing-book') option.dataset['bookId'] = target.bookId;
       bookSelect.append(option);
     }
-    bookSelect.addEventListener('change', () => renderTargetChoice(staged, bookSelect.value, recoveryNotice, recoveryReturn));
+    bookSelect.addEventListener('change', () => renderTargetChoice(staged, bookSelect.value, recoveryNotice, recoveryReturn, relationshipSelection));
     choices.append(bookLabel, bookSelect);
-    if (technicalLayerVisible && defaultTarget?.kind === 'existing-book') choices.append(identityDisclosure('图书 ID', defaultTarget.bookId));
+    if (defaultTarget?.kind === 'existing-book') choices.append(identityDisclosure('图书 ID', defaultTarget.bookId));
     content.append(choices);
+    if (defaultTarget?.kind === 'existing-book') content.append(element('p', 'field-note',
+      defaultTarget.manuscriptState === 'empty' ? '尚无稿件' : '已有主稿件；仍可导入来源材料'));
     if (staged.nextBookCursor) {
       const moreTargets = button('加载更多图书', 'secondary', async () => {
         moreTargets.disabled = true;
-        setStatus('正在读取下一页图书目标…', 'busy');
+        setStatus('正在读取下一页图书…', 'busy');
         try {
           const page = await rendererApi.listBooks({ after: staged.nextBookCursor });
           const knownBookIds = new Set(staged.targetChoices.flatMap((choice) =>
@@ -253,12 +274,12 @@ export function createImportReview(options: ImportReviewOptions) {
             { ...staged, targetChoices: [...staged.targetChoices, ...additional], nextBookCursor: page.nextCursor },
             selectedChoiceId,
             recoveryNotice,
-            recoveryReturn,
+            recoveryReturn, relationshipSelection, reuseSourceVersionId, reimportLineageChoice,
           );
-          setStatus('已加载更多图书目标', 'success');
+          setStatus('已加载更多图书', 'success');
         } catch (error) {
           moreTargets.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法读取下一页图书目标。'), 'error');
+          setStatus(rendererErrorMessage(error, '无法读取下一页图书。'), 'error');
         }
       });
       const moreTargetActions = element('div', 'button-row');
@@ -293,6 +314,7 @@ export function createImportReview(options: ImportReviewOptions) {
       if (allowedRelationships.length === 1) {
         const sentence = element('p', undefined, '这个文件只能存为来源材料。');
         sentence.dataset['importRelationship'] = 'source-only';
+        relationship.removeAttribute('role');
         relationship.append(sentence);
       }
       for (const relationshipKind of allowedRelationships.length === 1 ? [] : allowedRelationships) {
@@ -394,7 +416,7 @@ export function createImportReview(options: ImportReviewOptions) {
       });
       const actions = element('div', 'button-row');
       actions.append(confirm, previewAction(confirm, wordControls ?? undefined), cancelImport);
-      form.append(label, title);
+      form.append(label, title, element('p', 'field-note', '用文件名作为书名。'));
       if (relationshipSelection === 'first-manuscript') {
         if (wordControls !== null) { form.append(...wordControls.elements); wordControls.bind(confirm); }
         form.append(...fidelityView.elements, ...structureView.elements);
@@ -449,7 +471,7 @@ export function createImportReview(options: ImportReviewOptions) {
         const sentence = element('p', undefined, '这本书已导入过同一个文件，将沿用那一份。');
         sentence.dataset['sourceVersionReuseChoices'] = 'single-answer';
         sentence.dataset['reuseSourceVersionId'] = sameBookMatches[0]!;
-        content.append(sentence);
+        content.append(sentence, identityDisclosure('来源版本', sameBookMatches[0]!));
       }
       if (sameBookMatches.length > 1) {
         const reuseChoices = element('fieldset');
@@ -544,12 +566,12 @@ export function createImportReview(options: ImportReviewOptions) {
       };
       if (verifiedLineageSources.length === 0) {
         lineageChoices.removeAttribute('role');
-        lineageChoices.replaceChildren(element('p', undefined, '没有找到这本书的原文件，将对比这次导入与当前稿件。'));
+        lineageChoices.append(element('p', undefined, '没有找到这本书的原文件，将对比这次导入与当前稿件。'));
         lineageChoices.dataset['reimportLineage'] = 'unconfirmed';
       } else {
-        addLineageChoice('unconfirmed', '不确定是哪个原文件', '只对比这次导入与当前稿件。');
+        addLineageChoice('unconfirmed', technicalWords('来源关系未确认', '不确定是哪个原文件'), technicalWords('继续保守的两方比较；这不会被解释为来源确认或阻断导入。', '只对比这次导入与当前稿件。'));
         verifiedLineageSources.forEach((item) => addLineageChoice(item.sourceVersionId, importFileLabel(item),
-          '按这份原文件对比变化，结果更准确。', item.sourceVersionId));
+          technicalWords('使用该图书拥有且已关联主稿件结果修订版的精确来源，执行三方比较。', '按这份原文件对比变化，结果更准确。'), item.sourceVersionId));
       }
       const loadLineagePage = async (after: string | null, control: HTMLButtonElement): Promise<void> => {
         control.disabled = true;
@@ -606,10 +628,11 @@ export function createImportReview(options: ImportReviewOptions) {
       sourceChoices.append(element('legend', undefined, technicalWords('来源版本结果（必须另行明确选择）', '选择来源文件')));
       const exactSourceVersionId = exactSameBookSources.length === 1 ? exactSameBookSources[0]! : null;
       sourceChoices.removeAttribute('role');
-      sourceChoices.replaceChildren(element('p', undefined, exactSourceVersionId
+      sourceChoices.append(element('p', undefined, exactSourceVersionId
         ? '这个文件之前导入过，将沿用那一份。' : '这个文件将作为新的原文件保存。'));
       if (exactSourceVersionId) sourceChoices.dataset['reuseSourceVersionId'] = exactSourceVersionId;
       else sourceChoices.dataset['createSourceVersion'] = 'true';
+      sourceChoices.append(exactSourceVersionId ? identityDisclosure('来源版本', exactSourceVersionId) : identityDisclosure('来源 SHA-256', staged.source.sourceSha256));
       content.append(sourceChoices);
 
       const actions = element('div', 'button-row');
@@ -699,9 +722,21 @@ export function createImportReview(options: ImportReviewOptions) {
     }));
     const actionBar = element('section', 'commit-bar import-page-actions');
     for (const row of content.querySelectorAll<HTMLElement>('.button-row')) {
-      if (row.contains(cancelImport)) actionBar.append(row);
+      if (row.contains(cancelImport)) { row.classList.add('compact-actions'); actionBar.append(row); }
     }
     content.append(actionBar);
+    const titleControl = content.querySelector<HTMLInputElement>('[id="book-title"]');
+    if (titleControl && savedForm.title !== undefined) titleControl.value = savedForm.title;
+    for (const control of content.querySelectorAll<HTMLInputElement | HTMLSelectElement>(formControls)) {
+      const saved = savedForm.controls.find((item) => item.key === JSON.stringify(control.dataset));
+      if (!saved) continue;
+      control.value = saved.value;
+      if ('checked' in control) control.checked = saved.checked;
+      control.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    const fold = content.querySelector<HTMLDetailsElement>('.fidelity-details');
+    if (fold && savedForm.fidelityOpen !== undefined) fold.open = savedForm.fidelityOpen;
+    currentForm = { key: formKey, content };
     content.addEventListener('focusin', (event) => {
       const target = event.target as HTMLElement;
       const current = target.closest('.fidelity-list, .import-structure') ? '3' : target.closest('[data-import-target-choices], [data-import-title-for-relationship]') ? '2' : null;
@@ -715,8 +750,8 @@ export function createImportReview(options: ImportReviewOptions) {
     replaceScreen(selectedChoiceId === null ? 'target' : relationshipSelection === null ? 'relationship' : 'title', content);
     queueMicrotask(() => {
       revealedControl?.focus();
-      if (!selectedChoice) setStatus(technicalWords('请选择精确图书目标。', '请选择要导入到哪本书。'));
-      else if (relationshipSelection === null) setStatus('图书目标已选择；请另行选择导入关系。');
+      if (!selectedChoice) setStatus(technicalWords('请选择精确图书。', '请选择要导入到哪本书。'));
+      else if (relationshipSelection === null) setStatus('图书已选择；请另行选择导入关系。');
       else if (relationshipSelection === 'source-only' && reuseSourceVersionId === undefined &&
         selectedChoice.kind === 'existing-book' && staged.identityFindings.some((finding) =>
           finding.bookId === selectedChoice.bookId && finding.identityClass.kind === 'immutable-original')) {
@@ -731,7 +766,7 @@ export function createImportReview(options: ImportReviewOptions) {
                 ? '已选择“更新稿件”；请明确来源关系。'
                 : reuseSourceVersionId === undefined
                   ? technicalWords('来源关系已选择；请另行明确来源版本结果。', '请选择来源文件。')
-                  : `重新导入决定已明确；可以准备目标图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」的逐块比较。`,
+                  : `更新稿件的选择已确认；可以准备图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」的新旧稿比较。`,
         );
       }
     });

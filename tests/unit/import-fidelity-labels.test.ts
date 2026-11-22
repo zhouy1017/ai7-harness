@@ -175,3 +175,8 @@ it('summarizes one and two reduced-fidelity classes (#1681)', () => {
   const two = WITH_FIELD.map((row) => row.key === 'text-boxes' ? { ...row, status: 'unsupported' as const, count: 3 } : row);
   expect(fidelitySummaryLine(two)).toBe('2 类内容无法完整保留：文本框 3 项、域（目录等） 2 项；其余完整保留。');
 });
+
+it('states merged text boxes truthfully alongside reduced fidelity (#1681)', () => {
+  const mixed=WITH_FIELD.map(row=>row.key==='text-boxes'?{...row,count:1,status:'retained' as const}:row);
+  expect(fidelitySummaryLine(mixed,'merge')).toBe('1 类内容无法完整保留：域（目录等） 2 项；文本框并入正文，其余完整保留。');
+});

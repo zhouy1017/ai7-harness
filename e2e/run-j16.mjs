@@ -290,7 +290,6 @@ async function importSample1(renderer, title, distinct, name) {
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', `${name}-start`);
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
-  const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
   await chooseImportTarget(renderer, waitFor, 'new-book', `${name}-target-explicit`);
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
@@ -1894,7 +1893,7 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'selection-task-gone-ready');
     await click(renderer, '导入稿件', 'selection-task-gone-import');
     await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'selection-task-gone-target');
-  await chooseImportTarget(renderer, waitFor, `existing-book:${bookId}`, 'selection-task-gone-target-book');
+    await chooseImportTarget(renderer, waitFor, `existing-book:${bookId}`, 'selection-task-gone-target-book');
     await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'selection-task-gone-relationship');
     await assertRenderer(renderer, `(() => { const reimport = document.querySelector('[data-import-relationship="reimport"]'); if (!reimport) return false; reimport.click(); return true; })()`, 'selection-task-gone-reimport');
     await waitFor(renderer, `document.querySelector('[data-reimport-lineage="unconfirmed"]')`, 'selection-task-gone-lineage-choices');

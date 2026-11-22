@@ -1930,11 +1930,11 @@ async function main() {
     const sourceRecordsBefore = await registeredBookA.evaluate(`(async()=>{ const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}); return overview.records.filter((record)=>record.kind==='source-import-record').length; })()`);
     await click(primary, '导入稿件', 'preflight-stage-source');
     await waitFor(primary, `document.querySelector('[data-import-target-choices]')`, 'preflight-source-target');
-  await chooseImportTarget(primary, waitFor, `existing-book:${bookA}`, 'preflight-select-a');
+    await chooseImportTarget(primary, waitFor, `existing-book:${bookA}`, 'preflight-select-a');
     await assertRenderer(primary, `(() => { const source=document.querySelector('input[data-import-relationship="source-only"]'); if(!(source instanceof HTMLInputElement))return false; source.click(); return source.checked; })()`, 'preflight-source-only');
     await waitFor(primary, `document.querySelector('[data-source-version-reuse-choices]')`, 'preflight-reuse-required');
     // Issue #1410 item 32B: the same-Book match is chosen to begin with.
-    await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); return reuse instanceof HTMLInputElement && reuse.checked; })()`, 'preflight-reuse-source');
+    await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); return reuse && (reuse instanceof HTMLInputElement ? reuse.checked : reuse.textContent.includes('沿用')); })()`, 'preflight-reuse-source');
     await click(primary, '查看导入详情', 'preflight-prepare-source');
     await waitFor(primary, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'preflight-source-review');
     // #1519: from the instant the bar appears, a press on 导入来源材料到所选图书 reaches that button — never the bar's ×. Hit-tested

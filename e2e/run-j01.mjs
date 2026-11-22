@@ -1,4 +1,4 @@
-import { chooseImportTarget, assertImportPrimary, assertFidelityFold } from './import-page.mjs';
+import { chooseImportTarget, assertImportPrimary, assertFidelityFold, reachImportControl, pressImportControl } from './import-page.mjs';
 import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -754,7 +754,7 @@ async function prepareSourceImportReview(renderer, expectation) {
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${scenario}-target`);
   await assertRenderer(
     renderer,
-    `document.querySelectorAll('select[name="import-target"]').length === 1 && Boolean(document.querySelector('[data-import-relationship]'))`,
+    `document.querySelectorAll('select[name="import-target"]').length === 1 && (Boolean(document.querySelector('input[name="import-relationship"]:checked')) || Boolean(document.querySelector('[data-import-relationship="source-only"]:not(input)')))`,
     'source-target-unselected',
   );
   await chooseImportTarget(renderer, waitFor, targetBookId === null ? 'new-book' : `existing-book:${targetBookId}`, 'source-target-select');
@@ -949,7 +949,7 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
   await assertRenderer(
     renderer,
     // Issue #1410 item 32B: a lineage and a source result are chosen to begin with, so the prepare action shows at once.
-    `document.querySelector('[data-reimport-lineage-choices]') !== null && document.querySelector('[data-reimport-source-version-choices]') !== null && document.querySelector('[data-prepare-manuscript-reimport]') !== null`,
+    `(document.querySelector('input[name="reimport-lineage"]:checked') !== null || document.querySelector('[data-reimport-lineage-choices][data-reimport-lineage="unconfirmed"]') !== null) && document.querySelector('[data-reimport-source-version-choices]') !== null && document.querySelector('[data-prepare-manuscript-reimport]') !== null`,
     `${scenario}-choices-preselected`,
   );
   const lineageSelector = lineageStatus === 'verified'
@@ -973,6 +973,7 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
   await assertRenderer(renderer, `document.querySelector('[data-reimport-source-version-choices]')?.textContent.includes('这个文件') && !document.querySelector('[data-reimport-source-version-choices] input')`, 'reimport-source-sentence');
   at('import-page-primary-visible');
   await assertImportPrimary(renderer, waitFor, 'reimport-primary');
+  at('reimport-pre-review');
   const stagedSourceIdentity = await renderer.evaluate(`(() => ({
     sha256: document.querySelector('[data-source-sha256]')?.textContent,
     bytes: document.querySelector('[data-source-bytes]')?.textContent,
@@ -1592,22 +1593,27 @@ async function runJourney(
     at('review');
   }
   if (start !== 'accepted-review') await assertRenderer(renderer, `document.querySelectorAll('.import-steps [data-import-step]').length===4 && document.querySelector('.import-file-card') && !/来源字节数|本机文件选择器|工作流程实例/.test(document.querySelector('#screen').textContent)`, 'import-pills-and-file-summary');
+  if (quickImport) {
+    at('fidelity-one-sentence');
+    await assertFidelityFold(renderer, waitFor, 'quick-import-fidelity');
+    at('review');
+  }
   if (quickImport) await assertRenderer(renderer, `(() => { const steps=document.querySelector('.import-steps'); const button=steps?.querySelector('[data-import-step="3"] button'); if(!button||button.disabled)return false; button.click(); return steps.querySelector('[data-import-step="3"]').getAttribute('aria-current')==='step' && document.activeElement?.matches('.fidelity-list, .import-structure'); })()`, 'import-fidelity-step-navigation');
-  await chooseImportTarget(renderer, waitFor, 'new-book', 'import-return-target-step-navigation');
+  if (quickImport) await assertRenderer(renderer, `(() => {const steps=document.querySelector('.import-steps');steps.querySelector('[data-import-step="2"] button').click();return steps.querySelector('[data-import-step="2"]').getAttribute('aria-current')==='step' && document.activeElement?.matches('[data-import-target-choices]');})()`, 'import-return-target-step-navigation');
   if (quickImport) {
     await assertRenderer(renderer, `document.querySelector('select[name="import-target"]') && document.querySelector('input[aria-label="作为首份稿件导入"]')?.checked && document.querySelector('#book-title')?.value.length > 0 && !document.querySelector('[data-screen="review"]')`, 'quick-import-defaults-one-page');
   } else if (start !== 'accepted-review') {
     if (hasIdentityFinding) {
       await assertRenderer(
         renderer,
-        `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const disclosure = document.querySelector('.identity-finding-disclosure'); const radio = document.querySelector('#import-book option[data-import-target-choice="new-book"]'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && disclosure?.textContent.includes('匹配图书') && disclosure.textContent.includes('来源材料版本') && disclosure.textContent.includes('稿件导入记录') && disclosure.textContent.includes('不会选择目标或关系') && disclosure.textContent.includes('不授予去重、覆盖或重新导入权限') && radio; })()`,
+        `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const disclosure = document.querySelector('.identity-finding-disclosure'); const radio = document.querySelector('#import-book option[data-import-target-choice="new-book"]'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && disclosure?.textContent.includes('匹配图书') && disclosure.textContent.includes('来源材料版本') && disclosure.textContent.includes('稿件导入记录') && disclosure.textContent.includes('不会选择目标或关系') && disclosure.textContent.includes('不授予去重、覆盖或重新导入权限') && radio?.textContent === '新建图书（作为不同作品）'; })()`,
         'identity-finding-disclosed-and-distinct-work-unselected',
       );
     }
   const targetLabel = hasIdentityFinding ? '新建图书（作为不同作品）' : '新建图书';
   await assertRenderer(
     renderer,
-    `Boolean(document.querySelector('#import-book option[data-import-target-choice="new-book"]')) && Boolean(document.querySelector('select[name="import-target"]'))`,
+    `document.querySelector('#import-book option[data-import-target-choice="new-book"]')?.textContent === ${JSON.stringify(targetLabel)} && Boolean(document.querySelector('select[name="import-target"]'))`,
     'no-preselection',
   );
   await chooseImportTarget(renderer, waitFor, 'new-book', 'target-select');
@@ -1632,11 +1638,12 @@ async function runJourney(
   }
   if (textBoxDisposition !== null) {
     // ADR 0086 §2: the text-box row offers 保留为文本框 preselected and 并入正文; the choice goes with the review.
-    await assertRenderer(
-      renderer,
-      `(() => { const retain = document.querySelector('#text-box-disposition-retain'); const merge = document.querySelector('#text-box-disposition-merge'); const summary = () => document.querySelector('[data-fidelity-summary="no-decision"]')?.textContent ?? ''; if (!(retain instanceof HTMLInputElement) || !(merge instanceof HTMLInputElement) || !retain.checked || merge.checked || retain.disabled || merge.disabled || !summary().includes('文本框 · 1 项随文件保留')) return false; if (${JSON.stringify(textBoxDisposition)} === 'merge') merge.click(); return ${JSON.stringify(textBoxDisposition)} === 'merge' ? merge.checked && !retain.checked && summary().includes('文本框 · 1 项并入正文') && !summary().includes('文本框 · 1 项随文件保留') : retain.checked && summary().includes('文本框 · 1 项随文件保留'); })()`,
-      'text-box-choice-offered',
-    );
+    at('fidelity-one-sentence');
+    await assertRenderer(renderer, `document.querySelector('[data-text-box-choice]')?.closest('details')===null`, 'text-box-outside-fold');
+    await reachImportControl(renderer, waitFor, '[data-text-box-choice]', 'text-box-choice-reachable');
+    if (textBoxDisposition === 'merge') await pressImportControl(renderer, waitFor, '#text-box-disposition-merge', 'text-box-merge');
+    await assertRenderer(renderer, `document.querySelector('#text-box-disposition-${textBoxDisposition}')?.checked===true && document.querySelector('.fidelity-summary')?.textContent.includes(${JSON.stringify(textBoxDisposition === 'merge' ? '并入正文' : '随文件保留')})`, 'text-box-choice-offered');
+    at('review');
   }
   if (structure !== null) {
     // Issue #1205 (ADR 0096 §2): a heading-less file lists its candidate headings unchecked and the paragraph cut at the block
@@ -1652,10 +1659,15 @@ async function runJourney(
       'structure-chosen',
     );
   }
-  at('import-page-primary-visible');
-  await assertImportPrimary(renderer, waitFor, 'import-primary');
-  at('fidelity-one-sentence');
-  await assertFidelityFold(renderer, waitFor, 'import-fidelity');
+  if (start !== 'accepted-review') {
+    at('import-page-primary-visible');
+    await assertImportPrimary(renderer, waitFor, 'import-primary');
+    if (!quickImport) {
+      at('fidelity-one-sentence');
+      await assertFidelityFold(renderer, waitFor, 'import-fidelity');
+    }
+    at('review');
+  }
   await clickExactButton(renderer, '查看导入详情', 'review-click');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'review-screen');
   at(diagnosticReviewLocation);
@@ -1772,7 +1784,11 @@ async function runJourney(
   if (!editAfterCommit) return;
   await clickExactButton(renderer, '稿件导入记录', 'record-open');
   at('fidelity-one-sentence');
-  await assertRenderer(renderer, `!document.querySelector('#screen').textContent.includes('后续提供')`, 'record-current-export');
+  await assertRenderer(renderer, `!document.querySelector('#screen').textContent.includes('后续提供') && document.querySelector('.record-detail').textContent.includes('导出 DOCX 时从原文件恢复')`, 'record-current-export');
+  await pressImportControl(renderer, waitFor, '.record-detail details.degradation-disclosure > summary', 'record-fidelity-expand');
+  await assertRenderer(renderer, `!document.querySelector('.record-detail').textContent.includes('后续提供') && document.querySelector('.record-detail details.degradation-disclosure').open`, 'record-current-export-expanded');
+  await pressImportControl(renderer, waitFor, '.record-detail details.degradation-disclosure > summary', 'record-fidelity-collapse');
+  at('review');
   await assertRenderer(
     renderer,
     `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); const buttons = Array.from(document.querySelectorAll('.record-navigation button'), (button) => button.textContent); const exact = ['图书','主稿件','修订版 r1','来源版本与来源记录','工作流实例与精确 Profile 绑定','稿件导入记录']; const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); const values = Object.fromEntries(Array.from(record?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); return record?.textContent.includes('稿件导入记录 ID') && record.textContent.includes('导入保真审阅 ID') && values['导入降级决定 ID'] === '—' && values['保真结果'] === '完整保留 · 原文件随来源版本保留' && record.textContent.includes('查看导入保真审阅 · 9 类与预计往返') && record.textContent.includes('完整保留（随文件保留）') && !record.textContent.includes('查看受影响类别、示例与导出后果') && items.length === 0 && buttons.length === exact.length && buttons.every((label, index) => label === exact[index]); })()`,
@@ -1888,12 +1904,13 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
   } else {
     await clickExactButton(renderer, '导入稿件', 'word-new-book-stage');
     await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'word-new-book-target');
-  await chooseImportTarget(renderer, waitFor, 'new-book', 'word-new-book-select');
+    await chooseImportTarget(renderer, waitFor, 'new-book', 'word-new-book-select');
   }
   await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-relationship');
   await assertRenderer(renderer, `(() => { const relationship = document.querySelector('[data-import-relationship="first-manuscript"]'); if (!relationship) return false; relationship.click(); return true; })()`, 'word-first-manuscript');
   at('import-page-primary-visible');
   await assertImportPrimary(renderer, waitFor, 'word-import-primary');
+  at('review');
   const prepareLabel = existingBook ? '查看导入详情' : '查看导入详情';
   await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"]')`, 'word-controls-before-prepare');
   await assertRenderer(renderer, `(() => {
@@ -2099,7 +2116,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'existing-book-target-selected');
   await assertRenderer(
     renderer,
-    `(() => { const target = document.querySelector('#import-book'); const label = target?.selectedOptions[0]?.textContent ?? ''; return target?.value === ${JSON.stringify(`existing-book:${bookId}`)} && label.includes(${JSON.stringify(title)}) && label.includes(${JSON.stringify(internalNumber)}) && !label.includes(${JSON.stringify(bookId)}) && document.querySelector('[data-import-relationship="first-manuscript"]')?.checked; })()`,
+    `(() => { const target = document.querySelector('#import-book'); const label = target?.selectedOptions[0]?.textContent ?? ''; return target?.value === ${JSON.stringify(`existing-book:${bookId}`)} && label.includes(${JSON.stringify(title)}) && label.includes(${JSON.stringify(internalNumber)}) && !label.includes(${JSON.stringify(bookId)}) && document.querySelector('[data-import-relationship="first-manuscript"]')?.checked && Array.from(document.querySelectorAll('.import-page-actions button')).some(button=>button.textContent==='导入') && (()=>{const detail=document.querySelector('.import-book-choice .technical-details');return document.documentElement.dataset.technicalLayerVisible!=='true'||detail instanceof HTMLDetailsElement && (!detail.open || detail.hidden) && Array.from(detail.querySelectorAll('dt')).map(node=>node.textContent).join()==='图书 ID' && detail.querySelector('dd')?.textContent===${JSON.stringify(bookId)};})(); })()`,
     'existing-target-and-relationship-independent',
   );
   await assertRenderer(

@@ -482,7 +482,7 @@ async function main() {
     await click(renderer, '继续导入', 'continue-lower-import');
     await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'lower-import-target');
     await assertRenderer(renderer, `document.querySelector('[data-recovery-return]')`, 'return-route-target');
-  await chooseImportTarget(renderer, waitFor, 'new-book', 'lower-import-target-select');
+    await chooseImportTarget(renderer, waitFor, 'new-book', 'lower-import-target-select');
     await selectFirstManuscriptRelationship(renderer, 'lower-import-relationship-select');
     await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'lower-import-title');
     await assertRenderer(renderer, `document.querySelector('[data-recovery-return]')`, 'return-route-title');

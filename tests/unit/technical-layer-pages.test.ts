@@ -102,6 +102,8 @@ it('keeps fidelity details closed and the text-box choice outside them (#1681)',
     const root = document.createElement('section'); root.append(...view.elements);
     expect(Boolean((root.querySelector('.fidelity-details') as HTMLDetailsElement).open)).toBe(false);
     expect(root.querySelector('.fidelity-details [data-text-box-choice]')).toBeNull();
+    expect(root.querySelector('.fidelity-details .fidelity-summary')).toBeNull();
+    expect(root.querySelector('.fidelity-summary')!.getAttribute('data-fidelity-summary')).toBe(fields ? 'decision' : 'no-decision');
     expect(root.querySelector('.fidelity-details .roundtrip-card')).not.toBeNull();
     expect(root.querySelectorAll('.fidelity-details .fidelity-row').length).toBe(9);
     const merge = root.querySelector('[data-text-box-disposition="merge"]') as HTMLInputElement;

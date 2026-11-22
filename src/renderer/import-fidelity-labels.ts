@@ -126,7 +126,7 @@ function fidelityClassFound(category: FidelityCategoryProjection): boolean {
 export function fidelitySummaryLine(fidelity: ReadonlyArray<FidelityCategoryProjection>, textBoxes: TextBoxDisposition | null = null): string {
   const rows = fidelityRows(fidelity);
   const losses = rows.filter((category) => category.count > 0 && (category.status === 'degraded' || category.status === 'unsupported'));
-  if (losses.length > 0) return `${losses.length} 类内容无法完整保留：${losses.map((category) => `${category.label} ${category.count} 项`).join('、')}；其余完整保留。`;
+  if (losses.length > 0) return `${losses.length} 类内容无法完整保留：${losses.map((category) => `${category.label} ${category.count} 项`).join('、')}；${textBoxes === 'merge' ? '文本框并入正文，其余完整保留' : '其余完整保留'}。`;
   const found = rows.filter(fidelityClassFound);
   const absent = rows.length - found.length;
   if (found.length === 0) return `${rows.length} 类内容都未检测到，稿件完整保留，${noDecisionWords()}。`;

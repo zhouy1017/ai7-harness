@@ -353,7 +353,7 @@ async function attachRendererTarget(browser, launchScenario) {
 async function waitFor(renderer, expression, location, timeout = 60_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`)) return;
+    if (await renderer.evaluate(`(async()=>Boolean(await (${expression})))()`) === true) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-02', location);
