@@ -136,6 +136,12 @@ export interface ModelServiceConnectionProjection {
   /** Independent Fast choice; Main's legacy selected column keeps its meaning. */
   fastSelected?: boolean;
   connectionTest?: ModelConnectionTestStatus | null;
+  /**
+   * The newest test result of each model tested on this connection since the service started — the main model, the lighter
+   * model, a model tested before it was chosen — newest first; `connectionTest` is the first of them. The lighter model's
+   * result is held in memory only, so after a restart it is gone until tested again.
+   */
+  connectionTests?: ModelConnectionTestStatus[];
 }
 
 /** Exact-binding public text-probe result; only its bounded reply and provenance are retained. */
