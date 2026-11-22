@@ -292,3 +292,13 @@ it.each([0,7])('selects with native Home and shift arrows, rejecting a clipped f
   if(home===0){await expect(result).resolves.toBeUndefined();expect([anchor,head]).toEqual([2,5]);expect(keys).toEqual([['Home',0],['ArrowRight',0],['ArrowRight',0],['ArrowRight',8],['ArrowRight',8],['ArrowRight',8]]);}
   else {await expect(result).rejects.toThrow('range-start');expect(keys).toEqual([['Home',0]]);}
 });
+
+it('reaches Reply backwards from its appended textarea without tabbing out and hiding the card (#1689 guest diagnosis)', async () => {
+  const { draftTabTo }=await import(pathToFileURL(resolve('e2e/mark-drafts.mjs')).href);
+  let leftCard=false; const modifiers:number[]=[];
+  const reply={closest:()=>({dataset:{selected:String(!leftCard)}}),getBoundingClientRect:()=>({width:leftCard?0:80,height:leftCard?0:28})},resolveButton={},input={},send={},cancel={},other={};
+  const order=[reply,resolveButton,input,send,cancel,other];const document={activeElement:input,querySelector:()=>reply};
+  const renderer={evaluate:async(expression:string)=>expression.includes('const describe=')?null:Function('document','requestAnimationFrame',`return (${expression})`)(document,(callback:()=>void)=>queueMicrotask(callback)),send:async(_method:string,event:{type:string;key:string;modifiers:number})=>{if(event.type!=='keyDown'||event.key!=='Tab')return;modifiers.push(event.modifiers);document.activeElement=order[(order.indexOf(document.activeElement)+(event.modifiers===8?-1:1)+order.length)%order.length]!;if(document.activeElement===other)leftCard=true;}};
+  await draftTabTo(renderer,'reply',(ok:boolean,name:string)=>{if(!ok)throw Error(name);},'late-reply',{backwards:true});
+  expect(document.activeElement).toBe(reply);expect(leftCard).toBe(false);expect(modifiers).toEqual([8,8]);
+});

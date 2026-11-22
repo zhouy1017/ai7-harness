@@ -56,18 +56,18 @@ export async function draftSelect(renderer, check, waitFor, blockId, from, to, n
 /** Guest-debug only: structural focus/list context, never field values, words, ids or attribute payloads. */
 async function recordDraftSeek(renderer,selector,name,turn) {
   if(!localDebugEnabled())return;
-  const facts=await renderer.evaluate(`(() => {const node=document.querySelector(${JSON.stringify(selector)}),card=node?.closest('[data-comment-card]'),id=card?.dataset.commentCard,ids=globalThis.__comments?.ids??[],focus=document.activeElement,text=document.querySelector('.editor-window'),pane=document.querySelector('.manuscript-comments-scroll'),anchor=id?document.querySelector('.editor-window [data-mark-id="'+id+'"]'):null,box=n=>{const r=n?.getBoundingClientRect();return r?[r.left,r.top,r.width,r.height]:null;},hidden=n=>!!n?.closest('[hidden]');return {turn:${turn},target:!!node,card:ids.indexOf(id),hidden:hidden(card),expanded:card?.dataset.expanded==='true',selected:card?.dataset.selected==='true',updating:card?.dataset.revalidating==='true',anchor:box(anchor),targetBox:box(node),textBox:box(text),paneBox:box(pane),textScroll:text?.scrollTop,paneScroll:pane?.scrollTop,seedBlockLoaded:!!document.querySelector('.editor-window [data-block-id="'+globalThis.__comments?.blockId+'"]'),visibleCards:Array.from(document.querySelectorAll('[data-comment-card]')).filter(n=>!n.hidden).map(n=>ids.indexOf(n.dataset.commentCard)),focusTag:focus?.tagName,focusClasses:typeof focus?.className==='string'?focus.className.split(/\s+/).slice(0,6):[],focusCard:ids.indexOf(focus?.closest('[data-comment-card]')?.dataset.commentCard),statusFilter:document.querySelector('[data-mark-status-filter][aria-pressed="true"]')?.dataset.markStatusFilter,searchEmpty:!document.querySelector('[data-mark-search-input]')?.value};})()`);
+  const facts=await renderer.evaluate(`(() => {const node=document.querySelector(${JSON.stringify(selector)}),card=node?.closest('[data-comment-card]'),id=card?.dataset.commentCard,ids=globalThis.__comments?.ids??[],focus=document.activeElement,text=document.querySelector('.editor-window'),pane=document.querySelector('.manuscript-comments-scroll'),anchor=id?document.querySelector('.editor-window [data-mark-id="'+id+'"]'):null,box=n=>{const r=n?.getBoundingClientRect();return r?[r.left,r.top,r.width,r.height]:null;},hidden=n=>!!n?.closest('[hidden]');return {turn:${turn},target:!!node,card:ids.indexOf(id),hidden:hidden(card),expanded:card?.dataset.expanded==='true',selected:card?.dataset.selected==='true',updating:card?.dataset.revalidating==='true',anchor:box(anchor),targetBox:box(node),textBox:box(text),paneBox:box(pane),textScroll:text?.scrollTop,paneScroll:pane?.scrollTop,seedBlockLoaded:!!document.querySelector('.editor-window [data-block-id="'+globalThis.__comments?.blockId+'"]'),visibleCards:Array.from(document.querySelectorAll('[data-comment-card]')).filter(n=>!n.hidden).map(n=>ids.indexOf(n.dataset.commentCard)),focusTag:focus?.tagName,focusClasses:typeof focus?.className==='string'?focus.className.split(/\\s+/).slice(0,6):[],focusCard:ids.indexOf(focus?.closest('[data-comment-card]')?.dataset.commentCard),statusFilter:document.querySelector('[data-mark-status-filter][aria-pressed="true"]')?.dataset.markStatusFilter,searchEmpty:!document.querySelector('[data-mark-search-input]')?.value};})()`);
   recordDebugDetail('J-08','draft-seek/'+name+'/'+JSON.stringify(facts));
 }
 
-export async function draftTabTo(renderer,selector,check,name) {
+export async function draftTabTo(renderer,selector,check,name,{ backwards=false }={}) {
   return draftGeometry(renderer,selector,async()=>{
     for(let turn=0;turn<100;turn++) {
       await renderer.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))');
       await recordDraftSeek(renderer,selector,name,turn);
       const ready=await renderer.evaluate(`(() => {const node=document.querySelector(${JSON.stringify(selector)}),card=node?.closest('[data-comment-card]'),r=node?.getBoundingClientRect();return !!node&&document.activeElement===node&&r.width>0&&r.height>0&&(!card||card.dataset.selected==='true');})()`);
       if(ready)return;
-      await draftKey(renderer,'Tab',9);
+      await draftKey(renderer,'Tab',9,backwards?8:0);
     }
     await recordDraftSeek(renderer,selector,name,100);
     check(false,name);
@@ -115,7 +115,7 @@ export async function replyDraftKept(renderer,check,waitFor,at) {
   await draftKey(renderer,'Enter',13); await draftKey(renderer,'Enter',13);
   await waitFor(renderer,`document.querySelector(${JSON.stringify(card+' [data-mark-region="replies"]')})?.textContent.includes('公开合成会话回复 · 浮卡补充')&&!document.querySelector(${JSON.stringify(input)})?.value`,'reply-draft-sent');
   check(await renderer.evaluate(`(async()=>{const c=await window.ai7.getEditorialMarkCard({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,markId:${JSON.stringify(id)}});return c.replies.filter(reply=>reply.body==='公开合成会话回复 · 浮卡补充').length===1;})()`),'reply-draft-sent-once');
-  await draftTabTo(renderer,reply,check,'reply-draft-tab-late-reply');
+  await draftTabTo(renderer,reply,check,'reply-draft-tab-late-reply',{backwards:true});
   await draftClick(renderer,check,waitFor,reply,'reply-draft-late-open');
   await renderer.send('Input.insertText',{text:'公开合成离页回复'});
   await draftKey(renderer,'Enter',13);
