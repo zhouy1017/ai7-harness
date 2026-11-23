@@ -1,4 +1,4 @@
-import { guidelineClauses } from './fast-role/flash-task-contract.js';
+import { guidelineClauses, standardsTable } from './fast-role/flash-task-contract.js';
 import { bookFindingsChunk } from './book-findings-wire.js';
 import { driveLaunchedLedgerRun } from './analysis/execution.js';
 import { prepareQuickTask } from './quick-tasks.js';
@@ -771,6 +771,22 @@ async function dispatch(
     case 'inspectDefaultExecutionRules':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDefaultExecutionRules() };
     // 知识库 › 审阅规范文件 (Issue #427, S79a).
+    case 'inspectStandardTables':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.inspectStandardTables(request.input) };
+    case 'inspectStandardTable':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.inspectStandardTable(request.input) };
+    case 'previewStandardTableImport':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.previewStandardTableImport(request.input) };
+    case 'commitStandardTableImport':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.commitStandardTableImport(request.input) };
+    case 'saveStandardTable':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.saveStandardTable(request.input) };
+    case 'setStandardTableEnabled':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.setStandardTableEnabled(request.input) };
+    case 'deleteStandardTable':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.deleteStandardTable(request.input) };
+    case 'restorePreinstalledStandardTables':
+      return { id: request.id, ok: true, op: request.op, result: await store.standardTables.restorePreinstalledStandardTables(request.input) };
     case 'inspectReviewGuidelines':
       return { id: request.id, ok: true, op: request.op, result: store.inspectReviewGuidelines(request.input.page) };
     case 'previewReviewGuidelineVersion':
@@ -2504,6 +2520,10 @@ async function run(): Promise<void> {
         (reference, route) => { const now = underlyingFlash(); return now?.credentialReference === reference && now.route === route.profile.route && now.model === route.modelProfile.model; },
         () => openedStore.getModelServiceConnections().find(entry => entry.credentialReference === underlyingFlash()?.credentialReference)?.credentialUpdatedAt ?? null,
         () => underlyingFlash()?.reasoningEffort));
+    if (production !== null) store.useStandardTableFormatter({
+      model: () => { const selected = underlyingFlash(); return selected && underlyingOwner.refusal('standards-table-formatting') === null ? selected.route + ' / ' + selected.model : null; },
+      format: paragraphs => underlyingOwner.execute(standardsTable, paragraphs, 'standard-table-preview'),
+    });
     if (production !== null) store.useGuidelineFormatter({
       model: () => { const selected = underlyingFlash(); return selected && underlyingOwner.refusal('guideline-clause-formatting') === null ? selected.route + ' / ' + selected.model : null; },
       format: paragraphs => underlyingOwner.execute(guidelineClauses, paragraphs, 'guideline-preview'),

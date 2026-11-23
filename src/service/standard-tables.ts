@@ -1,3 +1,5 @@
+import type { StandardTableKind, StandardStrength, StandardEntryStatus, PreinstalledTableKey } from '../shared/protocol/standard-tables.js';
+export type { StandardTableKind, StandardStrength, StandardEntryStatus, PreinstalledTableKey } from '../shared/protocol/standard-tables.js';
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { readSeedRows } from './standard-table-seed.cjs';
@@ -72,11 +74,6 @@ export const STANDARD_TABLE_SCHEMA_SQL = {
 ) STRICT, WITHOUT ROWID`,
 } as const;
 
-export type StandardTableKind = 'standard-characters' | 'character-forms' | 'word-forms' | 'common-words';
-/** 国家规范（应改） · 辞书推荐（建议改） · 本社要求（按本社体例改). */
-export type StandardStrength = 'national' | 'dictionary' | 'house';
-/** 已应用 · 待确认 · 未识别. */
-export type StandardEntryStatus = 'applied' | 'to-confirm' | 'unrecognized';
 
 /**
  * One entry in the form its digest is taken over, in this order: recommended form, discouraged forms, rank, condition / note,
@@ -117,7 +114,6 @@ export function requireStandardTableEntries(db: DatabaseSync): void {
   requireStore(standardTableEntryOrphans(db) === 0, 'STANDARD_TABLE_INVALID', '字表与词表里有条目找不到所属的版本，数据已损坏。');
 }
 
-export type PreinstalledTableKey = 'tgh-2013' | 'tgh-2013-annex-1' | 'gf-1001-2001' | 'cycb-2';
 
 interface Preinstalled {
   readonly name: string;

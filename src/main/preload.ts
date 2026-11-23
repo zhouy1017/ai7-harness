@@ -333,6 +333,22 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['revokeBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.revokeBackgroundAnalysisEnrollment, input),
   holdBackgroundAnalysisEnrollment: (input: Omit<ServiceOperationMap['holdBackgroundAnalysisEnrollment']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['holdBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.holdBackgroundAnalysisEnrollment, input),
+  inspectStandardTables: (input: Parameters<RendererApi['inspectStandardTables']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['inspectStandardTables']>>>(IPC_CHANNELS.inspectStandardTables, input),
+  inspectStandardTable: (input: Parameters<RendererApi['inspectStandardTable']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['inspectStandardTable']>>>(IPC_CHANNELS.inspectStandardTable, input),
+  previewStandardTableImport: (input: Parameters<RendererApi['previewStandardTableImport']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['previewStandardTableImport']>>>(IPC_CHANNELS.previewStandardTableImport, input),
+  commitStandardTableImport: (input: Parameters<RendererApi['commitStandardTableImport']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['commitStandardTableImport']>>>(IPC_CHANNELS.commitStandardTableImport, input),
+  saveStandardTable: (input: Parameters<RendererApi['saveStandardTable']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['saveStandardTable']>>>(IPC_CHANNELS.saveStandardTable, input),
+  setStandardTableEnabled: (input: Parameters<RendererApi['setStandardTableEnabled']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['setStandardTableEnabled']>>>(IPC_CHANNELS.setStandardTableEnabled, input),
+  deleteStandardTable: (input: Parameters<RendererApi['deleteStandardTable']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['deleteStandardTable']>>>(IPC_CHANNELS.deleteStandardTable, input),
+  restorePreinstalledStandardTables: (input: Parameters<RendererApi['restorePreinstalledStandardTables']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['restorePreinstalledStandardTables']>>>(IPC_CHANNELS.restorePreinstalledStandardTables, input),
   inspectReviewGuidelines: (input?: ServiceOperationMap['inspectReviewGuidelines']['input']) =>
     invoke<ServiceOperationMap['inspectReviewGuidelines']['output']>(IPC_CHANNELS.inspectReviewGuidelines, input ?? {}),
   previewReviewGuidelineVersion: (input: { documentId: string; previewId?: string; clausePage?: number }) =>

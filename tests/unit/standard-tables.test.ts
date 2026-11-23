@@ -5,11 +5,58 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { createBaselineSchema } from '../../src/service/baseline-schema.js';
+import { strToU8, zipSync } from 'fflate';
+import { convertTable } from '../../src/service/standard-tables/conversion.js';
+import { formattingParts } from '../../src/service/standard-tables/library.js';
+import { standardsTable } from '../../src/service/fast-role/flash-task-contract.js';
 import {
   installPreinstalledStandardTables, PREINSTALLED_TABLE_KEYS, preinstalledEntries, preinstalledKind, requireStandardTableEntries, standardTableDigest, standardTableEntryOrphans,
   STANDARD_TABLE_SCHEMA_SQL,
   type PreinstalledTableKey,
 } from '../../src/service/standard-tables.js';
+
+describe('R5-L2 direct standard-table conversion', () => {
+  it.each(['csv', 'tsv'])('reads %s headers, quoted cells, ranks, source and strength directly', async extension => {
+    const separator = extension === 'csv' ? ',' : '\t';
+    const text = [['推荐写法', '不推荐写法', '频序', '条件', '来源', '效力'], ['甲词', '乙词/丙词', '3', '限标题', '公开合成表', '辞书推荐']].map(r => r.join(separator)).join('\n');
+    const converted = await convertTable(Buffer.from(text), `table.${extension}`, 'house');
+    expect(converted.rows?.[0]).toMatchObject({ recommended: '甲词', discouraged: ['乙词', '丙词'], rank: 3, condition: '限标题', source: '公开合成表', strength: 'dictionary', status: 'applied' });
+  });
+  it('reads XLSX inline and shared strings, and DOCX table cells without a model', async () => {
+    const sheet = '<worksheet><sheetData><row><c r="A1" t="s"><v>0</v></c><c r="B1" t="inlineStr"><is><t>不推荐写法</t></is></c></row><row><c r="A2" t="inlineStr"><is><t>甲词</t></is></c><c r="B2" t="s"><v>1</v></c></row></sheetData></worksheet>';
+    const xlsx = zipSync({ 'xl/sharedStrings.xml': strToU8('<sst><si><t>推荐写法</t></si><si><t>乙词</t></si></sst>'), 'xl/worksheets/sheet1.xml': strToU8(sheet) });
+    const cell = (text: string) => `<w:tc><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
+    const docx = zipSync({ 'word/document.xml': strToU8(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:tbl><w:tr>${cell('规范字')}${cell('异体字')}</w:tr><w:tr>${cell('甲词')}${cell('乙词')}</w:tr></w:tbl></w:body></w:document>`) });
+    for (const [name, bytes] of [['table.xlsx', xlsx], ['table.docx', docx]] as const) {
+      expect((await convertTable(bytes, name, 'national')).rows?.[0]).toMatchObject({ recommended: '甲词', discouraged: ['乙词'], strength: 'national', status: 'applied' });
+    }
+  });
+  it('reads the GF dash layout with appendix and notes, and holds conflicting recommendations', async () => {
+    const text = '公开合成词表\n甲词——乙词\n附录：仅供参照\n丙词—丁词（限旧称）\n注：旧文引述保留。';
+    const read = await convertTable(Buffer.from(text), 'gf.txt', 'national');
+    expect(read.rows).toHaveLength(2); expect(read.rows?.[1]).toMatchObject({ recommended: '丙词', discouraged: ['丁词'], source: '附录：仅供参照' });
+    expect(read.rows?.[1]?.condition).toContain('旧文引述保留');
+    const conflict = await convertTable(Buffer.from('推荐写法\t不推荐写法\n甲词\t乙词\n丙词\t乙词'), 'conflict.tsv', 'house');
+    expect(conflict.rows?.map(r => r.status)).toEqual(['to-confirm', 'to-confirm']); expect(conflict.rows?.[0]?.reviewNote).toContain('不同的推荐写法');
+  });
+  it('reads native entry objects and tuples and rejects malformed native rows', async () => {
+    const input = { schema: 'ai7.standard-table/1', name: '公开合成表', kind: 'word-forms', entries: [{ recommended: '甲词', discouraged: ['乙词'] }] };
+    expect((await convertTable(Buffer.from(JSON.stringify(input)), 'table.json', 'house')).rows?.[0]?.status).toBe('applied');
+    const tuple = ['甲词', ['乙词'], null, null, null, 'national', 'applied', null, null];
+    expect((await convertTable(Buffer.from(JSON.stringify({ ...input, entries: [tuple] })), 'table.json', 'house')).rows?.[0]?.strength).toBe('national');
+    await expect(convertTable(Buffer.from(JSON.stringify({ ...input, entries: [{ recommended: '甲词', rank: -1 }] })), 'table.json', 'house')).rejects.toThrow(/条目/u);
+  });
+  it('leaves HTML, DOCX prose and unrecognised spreadsheets for Flash and bounds every part', async () => {
+    const text = '公开说明中推荐甲词而不采用乙词。';
+    const docx = zipSync({ 'word/document.xml': strToU8(`<document><body><p><r><t>${text}</t></r></p></body></document>`) });
+    const xlsx = zipSync({ 'xl/worksheets/sheet1.xml': strToU8(`<worksheet><sheetData><row><c t="inlineStr"><is><t>${text}</t></is></c></row></sheetData></worksheet>`) });
+    for (const [name, bytes] of [['text.html', Buffer.from(`<html><body><p>${text}</p></body></html>`)], ['text.docx', docx], ['text.xlsx', xlsx]] as const) {
+      const read = await convertTable(bytes, name, 'house'); expect(read.rows).toBeNull(); expect(read.paragraphs).toContain(text);
+    }
+    const paragraphs = ['字𠀀'.repeat(20000)]; const parts = formattingParts(paragraphs);
+    expect(parts.flat().join('')).toBe(paragraphs[0]); expect(parts.every(p => Buffer.byteLength(standardsTable.message(p)) <= standardsTable.budget.maxInputBytes)).toBe(true);
+  });
+});
 
 // R5-L1 (ADR 0106 §2, §5, §9, §10): the library's relations and its four pre-installed tables.
 

@@ -118,7 +118,7 @@ describe('provider-free local ReviewRun', () => {
       db.prepare('UPDATE standard_tables SET current_version_id = ? WHERE table_id = ?').run(edition, tableId);
       db.exec('COMMIT');
       const prepared = prepare(book,policy,options,scope);
-      db.exec("UPDATE standard_tables SET enabled = 0 WHERE kind = 'common-words'");
+      store.standardTables.setStandardTableEnabled({ tableId, enabled: false });
       authorize(book,prepared);
       const driver = new ReviewRunDriver(store.reviewRunDriveSteps,noModel());
       await driver.drive(prepared.run.reviewRunId); await driver.dispose();
@@ -132,18 +132,14 @@ describe('provider-free local ReviewRun', () => {
       const second = new ReviewRunDriver(store.reviewRunDriveSteps,noModel());
       await second.drive(disabled.run.reviewRunId); await second.dispose();
       expect(store.inspectReviewWorkspace(book.bookId,disabled.run.reviewRunId).run!.findings.some(f => f.quote === '苹裹')).toBe(false);
-      db.exec("UPDATE standard_tables SET enabled = 1 WHERE kind = 'common-words'");
+      store.standardTables.setStandardTableEnabled({ tableId, enabled: true });
       const deleted = prepare(book,policy,options,scope);
-      db.exec(`BEGIN;
-        DELETE FROM standard_table_entries WHERE version_id IN (SELECT version_id FROM standard_table_versions WHERE table_id IN (SELECT table_id FROM standard_tables WHERE kind='common-words'));
-        DELETE FROM standard_table_versions WHERE table_id IN (SELECT table_id FROM standard_tables WHERE kind='common-words');
-        DELETE FROM standard_tables WHERE kind='common-words'; COMMIT`);
+      expect(store.standardTables.inspectStandardTables().tables.find(t => t.tableId === tableId)?.recentChecksCount).toBe(2);
+      await store.standardTables.deleteStandardTable({ tableId });
       expect(() => authorize(book,deleted)).toThrow(/字表已删除/);
       expect(findings().find(f => f.quote === '苹裹')?.note).toBe(advisory!.note + ' · 依据的字表已删除');
       expect(findings().find(f => f.quote === '按纳')?.note).not.toContain('已删除');
-      db.exec('BEGIN');
-      installPreinstalledStandardTables(db, ['cycb-2']);
-      db.exec('COMMIT');
+      store.standardTables.restorePreinstalledStandardTables({ keys: ['cycb-2'] });
       expect(findings().find(f => f.quote === '苹裹')?.note).toBe(advisory!.note + ' · 依据的字表已删除');
     } finally { db.close(); }
   });

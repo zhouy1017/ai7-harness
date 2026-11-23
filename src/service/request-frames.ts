@@ -1,3 +1,4 @@
+import { standardTableInputs } from '../shared/protocol/standard-tables.js';
 import { validBookFindingsFilters } from './book-findings.js';
 import { EVIDENCE_ASSURANCE_LEVELS } from '../shared/protocol/factual-verification.js';
 import { validLocalOptions } from './review/deterministic/plan.js';
@@ -1039,6 +1040,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectStandardTables':
+    case 'inspectStandardTable':
+    case 'previewStandardTableImport':
+    case 'commitStandardTableImport':
+    case 'saveStandardTable':
+    case 'setStandardTableEnabled':
+    case 'deleteStandardTable':
+    case 'restorePreinstalledStandardTables':
+      if (!standardTableInputs[value.op as keyof typeof standardTableInputs].safeParse(value.input).success) throw new ProtocolError(tentativeId);
+      break;
     case 'inspectReviewGuidelines': {
       const input = requireInputWithOptional(value.input, [], ['page'], tentativeId);
       if (Object.hasOwn(input, 'page')) {

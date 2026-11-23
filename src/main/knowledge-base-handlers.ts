@@ -1,3 +1,4 @@
+import { registerStandardTableHandlers } from './standard-table-handlers.js';
 import type { NativeFilePickers } from './file-pickers.js';
 import { basename, isAbsolute } from 'node:path';
 import { dialog, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
@@ -22,6 +23,7 @@ export function registerKnowledgeBaseHandlers(context: {
   requireCurrentRouteReadEpoch: (owned: OwnedRendererWindow, routeGeneration: number, routeRequestSequence: number) => void;
   requireCurrentRouteGeneration: (owned: OwnedRendererWindow, routeGeneration: number) => void;
 }) {
+  registerStandardTableHandlers(context);
   const { chooseDeveloperProposalFile, requireSender, requireAuthority, service, serializeEffect, requireCurrentBookRoute, requireCurrentRouteReadEpoch, requireCurrentRouteGeneration } = context;
   // 知识库 › 审阅规范文件 (Issue #427, S79a) names no Book: it reads every Book's Review Runs. 导入新版本 opens the picker and
   // hands the service the path it returned; confirming records the version, serialized with every other effect.
