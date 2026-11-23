@@ -1,11 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import { readSeedRows } from './standard-table-seed.cjs';
 import { canonicalJson, sha256Hex } from './analysis/canonical.js';
 import { requireStore } from './store-records.js';
-import { cycb2SeedText } from './standard-tables/seed/cycb-2.js';
-import { gf10012001SeedText } from './standard-tables/seed/gf-1001-2001.js';
-import { tgh2013Annex1SeedText } from './standard-tables/seed/tgh-2013-annex-1.js';
-import { tgh2013SeedText } from './standard-tables/seed/tgh-2013.js';
 
 /**
  * The 字表与词表 library's relations (R5-L1; ADR 0106 §2, §9), final shape in the revision-117 baseline.
@@ -130,41 +127,37 @@ interface Preinstalled {
   /** Version 1's digest, pinned: installing never computes it, and a test proves it equals `standardTableDigest` of the seed. */
   readonly digest: string;
   readonly entryCount: number;
-  /** Parses the seed's text. Called only by an install (or a test); the text is read from the seed module then and kept nowhere. */
+  /** Projects the shipped edition's rows into canonical library entries. */
   readonly entries: () => StandardEntry[];
 }
 
 const NATIONAL = 'national';
-
-function lines(text: string): string[][] {
-  return text.split('\n').map((line) => line.split('\t'));
-}
 
 const PREINSTALLED: Readonly<Record<PreinstalledTableKey, Preinstalled>> = {
   'tgh-2013': {
     name: '《通用规范汉字表》', kind: 'standard-characters', versionLabel: '2013', entryCount: 8105,
     sourceDescription: '教育部、国家语委《通用规范汉字表》（2013年）：8,105个规范字，字集与序号取自 Unicode 17.0.0 Unihan 的 kTGH 属性。',
     digest: 'ae309fdc6fda9affd5965cff1276305a002662afc417b656a0918fbc4f58b241',
-    entries: () => lines(tgh2013SeedText()).map(([character], index) => [character!, [], null, null, `第${index + 1}号`, NATIONAL, 'applied', null, null]),
+    entries: () => readSeedRows('tgh-2013').map(([character], index) => [character!, [], null, null, `第${index + 1}号`, NATIONAL, 'applied', null, null]),
   },
   'tgh-2013-annex-1': {
     name: '《通用规范汉字表》 附表1', kind: 'character-forms', versionLabel: '2013', entryCount: 3558,
     sourceDescription: '《通用规范汉字表》附表1（规范字与繁体字、异体字对照）：对照形取自公开表的编码字形，并以 Unihan kSimplifiedVariant 补充；仅供参考，不是无条件转换。',
     digest: 'b67f3b918aecd7b3d6372f166e0a657ecb8b32d7ad50cbec84b078bb6ad369df',
-    entries: () => lines(tgh2013Annex1SeedText()).map(([form, targets, note]) => [targets!, [form!], null, note || null, null, NATIONAL, 'applied', null, null]),
+    entries: () => readSeedRows('tgh-2013-annex-1').map(([form, targets, note]) => [targets!, [form!], null, note || null, null, NATIONAL, 'applied', null, null]),
   },
   'gf-1001-2001': {
     name: 'GF 1001-2001《第一批异形词整理表》', kind: 'word-forms', versionLabel: '2001', entryCount: 382,
     sourceDescription: '教育部、国家语委 GF 1001-2001《第一批异形词整理表》（2001年）：正表338组异形词，另有附录44组。',
     digest: '265c376ab6b64437930b5ebbc569239d3ebc1b4ca2290d7cc7cac9464d466d33',
-    entries: () => lines(gf10012001SeedText()).map(([preferred, variants, note, appendix]) =>
+    entries: () => readSeedRows('gf-1001-2001').map(([preferred, variants, note, appendix]) =>
       [preferred!, variants!.split('/'), null, note || null, appendix || null, NATIONAL, 'applied', null, null]),
   },
   'cycb-2': {
     name: '《现代汉语常用词表（第2版）》', kind: 'common-words', versionLabel: '2021 第2版', entryCount: 56462,
     sourceDescription: '《现代汉语常用词表（第2版）》，李行健、苏新春主编，教育部语言文字信息管理司组编，商务印书馆2021年出版；文字版取自 zispace/hanzi-words-cycb 仓库的提交 712fb0f0c420f6ceca0778ca46eb3cc3cbc5a9d8（文件「现代汉语常用词表（第2版）.tsv」），仅取词语与频序号。',
     digest: '95279be022dc555b207a5a4828963e930c1fdb1e448ff9cde4eef1bdd326c01f',
-    entries: () => lines(cycb2SeedText()).map(([rank, word]) => [word!, [], Number(rank), null, null, 'dictionary', 'applied', null, null]),
+    entries: () => readSeedRows('cycb-2').map(([rank, word]) => [word!, [], Number(rank), null, null, 'dictionary', 'applied', null, null]),
   },
 };
 

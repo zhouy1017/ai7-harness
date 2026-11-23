@@ -9,7 +9,6 @@ import { checkLocalPlan, candidateHasExactAnchor, exactLocalCandidateIds, houseC
   type HouseCandidate, type LocalStageArtifactV2 } from '../../src/service/review/deterministic/checker.js';
 import { freezeLocalPlan, freezeLocalPlanV2, freezeLocalPlanV3, freezeLocalPlanV5, validateLocalPlan, validateLocalPlanV2 } from '../../src/service/review/deterministic/plan.js';
 import { localCheckProcedureDefinition, localCheckProcedureDefinitionV2, localCheckProcedureDefinitionV3 } from '../../src/service/procedures/preinstalled.js';
-import { STANDARD_CHARACTERS, VARIANT_WORDS, APPENDIX_WORDS } from '../../src/service/review/deterministic/tables.js';
 import { mechanicalReplacement, validateLocalResultV3, versionedLocalCounts } from '../../src/service/review/deterministic/checker.js';
 import { parseBookTerms } from '../../src/shared/protocol/deterministic.js';
 import { HouseWordLists, HOUSE_WORD_LIST_SCHEMA_SQL } from '../../src/service/review/house-word-list.js';
@@ -35,10 +34,9 @@ function tablePlan(texts: string[], options: Partial<LocalCheckOptions> = {}) {
 }
 describe('offline standard and Book tables', () => {
   it('ships the complete character membership and word groups, with conditional forms left for judgment', async () => {
-    expect(STANDARD_CHARACTERS.size).toBe(8105); expect(VARIANT_WORDS).toHaveLength(338); expect(APPENDIX_WORDS).toHaveLength(44);
-    expect(STANDARD_CHARACTERS.has('𬭎')).toBe(true);
-    const frozen = tablePlan(['按纳 双𨱑 帐本 乾隆 龍 𠮷']); const result = await checkLocalPlan(frozen); validateLocalResultV3(result, frozen);
+    const frozen = tablePlan(['按纳 双𨱑 帐本 乾隆 龍 𠮷 𬭎']); const result = await checkLocalPlan(frozen); validateLocalResultV3(result, frozen);
     expect(versionedLocalCounts(frozen, result)).toMatchObject({ C01: { version: 1 }, C02: { version: 1 }, V01: { version: 1 } });
+    expect(result.candidates.some(candidate => candidate.quote === '𬭎')).toBe(false);
     const word = result.candidates.find((candidate) => candidate.quote === '按纳' && candidate.ruleId === 'V01')!;
     expect(mechanicalReplacement(word)).toBe('按捺');
     expect(mechanicalReplacement(result.candidates.find((candidate) => candidate.quote === '帐本' && candidate.ruleId === 'V01')!)).toBeNull();

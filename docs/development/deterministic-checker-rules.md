@@ -42,7 +42,7 @@ Cards use the existing disposition, explicit annotation-to-suggestion conversion
 
 ## Selected offline tables and mechanical Apply
 
-Local plans prepared with table options use `ai7.review.local-plan/5`. Each selected, enabled library table contributes its current immutable version ID, digest, name and edition. The check reads only applied entries of those versions. Deletion refuses execution of a prepared check. Each result keeps its entry evidence and identifies a deleted table on the finding. Saved version 3 and 4 plans retain their pre-installed version 1 meanings.
+Local plans prepared with table options use `ai7.review.local-plan/5`. Each selected, enabled library table contributes its current immutable version ID, digest, name and edition. The check reads only applied entries of those versions. Deletion refuses execution of a prepared check. Each result keeps its entry evidence and identifies a deleted table on the finding. Saved version 3 and 4 plans resolve the national tables from the shipped version-one seed files. Their result validation uses the same edition, including its conditions and appendix notes.
 
 C01/v2 checks membership across the selected character lists. C02/v2 annotates mapped character forms. V01/v2 offers the recommended word form for an unconditional agreement. Conditions and disagreements produce annotations with each entry’s strength, forms and source. A Book term takes priority at its occurrence.
 

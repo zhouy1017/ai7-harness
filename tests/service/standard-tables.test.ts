@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PreinstalledTableKey } from '../../src/service/standard-tables.js';
 import { mergeBooks } from '../../src/service/database-merge.js';
 import { inventoryStore } from '../../src/service/store-inventory.js';
 import { EditorialStore } from '../../src/service/store.js';
@@ -10,23 +11,13 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 // R5-L1 (ADR 0106 §9, §10) over the real store: a new Agent Data Root starts with the four pre-installed tables and an ordinary
 // open reads no seed; export + replace-all carry the library; a Book merge never takes or changes it; the inventory counts it.
 
-/** The seed modules, wrapped to say when their text is read: only an install may read it. */
 const seedReads = vi.hoisted(() => ({ names: [] as string[] }));
-vi.mock('../../src/service/standard-tables/seed/cycb-2.js', async (original) => {
-  const actual = await original<typeof import('../../src/service/standard-tables/seed/cycb-2.js')>();
-  return { ...actual, cycb2SeedText: () => { seedReads.names.push('cycb-2'); return actual.cycb2SeedText(); } };
-});
-vi.mock('../../src/service/standard-tables/seed/gf-1001-2001.js', async (original) => {
-  const actual = await original<typeof import('../../src/service/standard-tables/seed/gf-1001-2001.js')>();
-  return { ...actual, gf10012001SeedText: () => { seedReads.names.push('gf-1001-2001'); return actual.gf10012001SeedText(); } };
-});
-vi.mock('../../src/service/standard-tables/seed/tgh-2013-annex-1.js', async (original) => {
-  const actual = await original<typeof import('../../src/service/standard-tables/seed/tgh-2013-annex-1.js')>();
-  return { ...actual, tgh2013Annex1SeedText: () => { seedReads.names.push('tgh-2013-annex-1'); return actual.tgh2013Annex1SeedText(); } };
-});
-vi.mock('../../src/service/standard-tables/seed/tgh-2013.js', async (original) => {
-  const actual = await original<typeof import('../../src/service/standard-tables/seed/tgh-2013.js')>();
-  return { ...actual, tgh2013SeedText: () => { seedReads.names.push('tgh-2013'); return actual.tgh2013SeedText(); } };
+vi.mock('../../src/service/standard-table-seed.cjs', async (original) => {
+  const actual = await original<typeof import('../../src/service/standard-table-seed.cjs')>();
+  return { readSeedRows: (key: PreinstalledTableKey) => {
+    seedReads.names.push(key);
+    return actual.readSeedRows(key);
+  } };
 });
 
 const DIGESTS = {

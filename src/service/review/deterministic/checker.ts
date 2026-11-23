@@ -2,8 +2,8 @@ import { setImmediate } from 'node:timers/promises';
 import { BLOCK_ID_PATTERN, canonicalJson, DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex, UUID_PATTERN } from '../../analysis/canonical.js';
 import { graphemeCount, sliceGraphemes } from '../../analysis/factual-review-contract.js';
 import { LocalCheckError, isLocalTablePlan, numeralBasis, validateAnyLocalPlan, validateLocalPlan, validateLocalPlanV2, type AnyLocalCheckPlan, type LocalCheckBlock, type LocalCheckPlan, type LocalCheckPlanV2, type LocalCheckTablePlan } from './plan.js';
-import { APPENDIX_WORDS, CHARACTER_FORMS, STANDARD_CHARACTERS, TABLE_RULE_IDS, VARIANT_WORDS, type TableRuleId } from './tables.js';
-import { HOUSE_RULE, LOCAL_RULE_IDS, LOCAL_RULE_IDS_V2, LOCAL_RULES, type LocalRuleId, type LocalRuleIdV2 } from './rules.js';
+import { preinstalledEntries } from '../../standard-tables.js';
+import { HOUSE_RULE, LOCAL_RULE_IDS, LOCAL_RULE_IDS_V2, LOCAL_RULES, TABLE_RULE_IDS, type TableRuleId, type LocalRuleId, type LocalRuleIdV2 } from './rules.js';
 import { houseAnnotationDetail, type HouseWordListPin } from '../../../shared/protocol/house-word-list.js';
 
 import { libraryDetail, type EntryEvidence, type LibraryHit } from './library-check.js';
@@ -60,7 +60,18 @@ const IDENTIFIER_CHARACTER = /^(?!\p{Script=Han})[\p{L}\p{N}\p{M}_]$/u;
 // Sign glyphs other than the ASCII pair N01 spells: a token they start is signed, so it stays outside both grammars.
 const OTHER_SIGN = /[＋－±∓﹢﹣]/u;
 const emptyCounts = (): LocalRuleCounts => ({ checked: 0, exempt: 0, skipped: 0, error: 0, findings: 0, disabled: 0, outOfApplicability: 0, notRecognized: 0, noFinding: 0 });
-const WORD_FORMS = new Map([...VARIANT_WORDS, ...APPENDIX_WORDS].flatMap((entry) => entry.variants.map((literal) => [literal, entry] as const)));
+// Local plans 3 and 4 froze the shipped first edition. Derive their lookup once, only on historical use.
+function indexFirstEdition() {
+  const characters = new Set(preinstalledEntries('tgh-2013').map(([character]) => character));
+  const forms = new Map(preinstalledEntries('tgh-2013-annex-1').map(([targets, [form], , note]) =>
+    [form!, { targets, note: note ?? '' }] as const));
+  const words = new Map(preinstalledEntries('gf-1001-2001').flatMap(([preferred, variants, , note]) =>
+    variants.map(literal => [literal, { preferred, note: note ?? '' }] as const)));
+  return { characters, forms, words };
+}
+let firstEdition: ReturnType<typeof indexFirstEdition>;
+function legacyTables() { return firstEdition ??= indexFirstEdition(); }
+
 function tableCandidateId(plan: LocalCheckTablePlan, rule: TableRuleId, blockId: string, from: number, to: number): string {
   return sha256Hex(canonicalJson({ source: plan.source, planDigest: plan.digest, rule, version: tableVersion(plan, rule), blockId, from, to }));
 }
@@ -75,16 +86,16 @@ function tableMatch(plan: LocalCheckTablePlan, rule: TableRuleId, quote: string,
   }
   if (plan.schema === 'ai7.review.local-plan/5') return libraryDetail(plan.standardTables, rule, quote, entries);
   if (rule === 'V01' && tables.variantWords) {
-    const entry = WORD_FORMS.get(quote);
+    const entry = legacyTables().words.get(quote);
     if (entry === undefined) return null;
     // Explicit Book terminology takes precedence over a general word-form recommendation.
     const bookChoice = tables.bookTerms.some((term) => term.preferred.includes(quote) || term.variants.includes(quote));
     return { basis: 'standard-table', observation: `GF 1001-2001 推荐词形“${entry.preferred}”。${entry.note}`, replacement: entry.note || bookChoice ? null : entry.preferred };
   }
   if ((rule === 'C01' || rule === 'C02') && tables.characters && Array.from(quote).length === 1 && /\p{Unified_Ideograph}/u.test(quote)) {
-    const form = CHARACTER_FORMS.get(quote);
+    const form = legacyTables().forms.get(quote);
     if (rule === 'C02' && form !== undefined) return { basis: 'standard-table', observation: `字形对照参考：${form.targets}。${form.note} 需结合姓氏、地名、专名及引用语境判断；不自动转简。`, replacement: null };
-    if (rule === 'C01' && !STANDARD_CHARACTERS.has(quote) && form === undefined) return { basis: 'standard-table', observation: '未列入2013年《通用规范汉字表》8105字；专名、古籍及专业用字须由编辑判断，表外不等于错字。', replacement: null };
+    if (rule === 'C01' && !legacyTables().characters.has(quote) && form === undefined) return { basis: 'standard-table', observation: '未列入2013年《通用规范汉字表》8105字；专名、古籍及专业用字须由编辑判断，表外不等于错字。', replacement: null };
   }
   return null;
 }
@@ -458,11 +469,11 @@ export async function checkLocalPlan(plan: AnyLocalCheckPlan, options: LocalChec
         if (index % 2048 === 0) await checkpoint('matches');
         const char = graphemes[index]!;
         if (Array.from(char).length !== 1 || !/\p{Unified_Ideograph}/u.test(char)) continue;
-        if (CHARACTER_FORMS.has(char)) emitTable('C02', index, index + 1);
-        else if (!STANDARD_CHARACTERS.has(char)) emitTable('C01', index, index + 1);
+        if (legacyTables().forms.has(char)) emitTable('C02', index, index + 1);
+        else if (!legacyTables().characters.has(char)) emitTable('C01', index, index + 1);
       }
       const literals: Array<{ id: 'V01' | 'T01'; literal: string }> = [
-        ...(!library && tables.variantWords ? [...VARIANT_WORDS, ...APPENDIX_WORDS].flatMap((entry) => entry.variants.map((literal) => ({ id: 'V01' as const, literal }))) : []),
+        ...(!library && tables.variantWords ? [...legacyTables().words.keys()].map(literal => ({ id: 'V01' as const, literal })) : []),
         ...tables.bookTerms.flatMap((entry) => entry.variants.map((literal) => ({ id: 'T01' as const, literal }))),
       ];
       let work = 0;
