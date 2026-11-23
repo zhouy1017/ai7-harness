@@ -1490,13 +1490,16 @@ async function main() {
     const bookName = 'J-04 sample1 基线稿件分析';
     const wholeCount = groupedCount(manifest.totalGraphemes);
     const firstDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'settled', 'analysis-drawer-opened');
+    const firstPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'baseline-analysis',ref:${JSON.stringify(prepared.taskIntent.taskIntentId)}})`);
     requireJourney(firstDrawer?.hidden === false && firstDrawer.kind === 'baseline-analysis' && firstDrawer.version === '1' && firstDrawer.mode === 'compact' &&
       firstDrawer.stored === null && firstDrawer.pill === '已完成 · 1/8 个单元未读成' && firstDrawer.sentence === '为这本书做基线分析：梗概、人物与名称、事件、关系、设定和各章' &&
       JSON.stringify(firstDrawer.chips) === JSON.stringify({ book: bookName, position: '全书', selected: `已选 ${wholeCount} 字`, revision: '任务输入修订版 r1', procedure: '工序「基线分析」' }) &&
       firstDrawer.saved === null && firstDrawer.drift === null &&
+      firstPlan.estimate?.parts === SAMPLE1_UNITS && firstPlan.estimate.fewestRequests === SAMPLE1_UNITS + 1 &&
       JSON.stringify(firstDrawer.rows) === JSON.stringify({
         处理: '只处理任务卡所列范围，不参考其他材料。',
         发送: '不发送，无模型用量。',
+        预计: firstPlan.estimate.sentence,
         会得到: '一份基线分析。',
         不会: '不改稿、导出发布、存里程碑、读书外内容、作事实判定。',
         中途: '预计无需参与，可随时暂停或取消。',
