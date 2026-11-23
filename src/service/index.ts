@@ -1,4 +1,4 @@
-import { guidelineClauses, standardsTable } from './fast-role/flash-task-contract.js';
+import { guidelineClauses, standardsTable, queryExpansion, retrievalRerank } from './fast-role/flash-task-contract.js';
 import { bookFindingsChunk } from './book-findings-wire.js';
 import { driveLaunchedLedgerRun } from './analysis/execution.js';
 import { prepareQuickTask } from './quick-tasks.js';
@@ -2527,6 +2527,14 @@ async function run(): Promise<void> {
     if (production !== null) store.useGuidelineFormatter({
       model: () => { const selected = underlyingFlash(); return selected && underlyingOwner.refusal('guideline-clause-formatting') === null ? selected.route + ' / ' + selected.model : null; },
       format: paragraphs => underlyingOwner.execute(guidelineClauses, paragraphs, 'guideline-preview'),
+    });
+    store.useRetrievalAssist({
+      expand: async query => underlyingFlash() && underlyingOwner.refusal('retrieval-query-expansion') === null
+        ? underlyingOwner.execute(queryExpansion, query, 'material-search-expansion')
+        : { state: 'fallback', value: null, reason: '底层 Flash 检索词扩展不可用。' },
+      rerank: async input => underlyingFlash() && underlyingOwner.refusal('retrieval-rerank') === null
+        ? underlyingOwner.execute(retrievalRerank, input, 'material-search-rerank')
+        : { state: 'fallback', value: null, reason: '底层 Flash 候选整理不可用。' },
     });
     store.useMaterialTranslator(materialTranslator(
       underlyingOwner,

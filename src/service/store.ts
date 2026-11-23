@@ -532,6 +532,7 @@ import {
   type RetrievalSource,
 } from './retrieval/index.js';
 import { materialRetrievalSources } from './retrieval/source-readers.js';
+import { searchReferableMaterials, type RetrievalAssist } from './retrieval/flash-assist.js';
 import {
   TASK_MATERIALS_NONE,
   TASK_MATERIALS_STATEMENT,
@@ -5728,11 +5729,11 @@ export class EditorialStore {
 
   /**
    * 相似段落检索 in an item's 查看索引 (Issue #892; since R5-F2c on R5-F2a's local lexical ranking, ADR 0107 §4 point 5): its
-   * paragraphs that best match the editor's words, as soon as its index is built; read-only, on this machine, nothing built or
-   * written. The ranking finds candidates; the words are read where each anchor points (ADR 0026).
+   * paragraphs that best match the editor's words, as soon as its index is built; optional Flash expansion/rerank falls back
+   * to the local ranking. The search writes nothing; the words are read where each anchor points (ADR 0026).
    */
   async searchLibraryMaterialVectors(input: ServiceOperationMap['queryMaterialVectors']['input']): Promise<MaterialVectorSearchProjection> {
-    return materialIndexOperations.searchLibraryMaterialVectors(this.#materialIndexOperationsHost, input);
+    return materialIndexOperations.searchLibraryMaterialVectors(this.#materialIndexOperationsHost, input, this.#retrievalAssist);
   }
 
   /**
@@ -5800,16 +5801,12 @@ export class EditorialStore {
     return new RetrievalIndex(this.dialogueRetrievalSources(dialogueId));
   }
 
-  /** Editor-side discovery: no Run, no model, no persisted projection or implicit reference selection. */
+  #retrievalAssist: RetrievalAssist | null = null;
+  useRetrievalAssist(assist: RetrievalAssist | null): void { this.#retrievalAssist = assist; }
+
+  /** Editor-side discovery with optional Flash assistance; no persisted projection or implicit reference selection. */
   async searchReferableMaterials(input: ServiceOperationMap['searchReferableMaterials']['input']): Promise<ServiceOperationMap['searchReferableMaterials']['output']> {
-    requireStore(UUID_PATTERN.test(input.bookId) && input.query.trim().length > 0 && input.query.length <= 1_000 && Number.isSafeInteger(input.k) && input.k >= 1 && input.k <= 8,
-      'RETRIEVAL_ARGUMENTS_INVALID', '检索文字须在 1 至 1,000 字符之间，最多显示 8 项。');
-    const references = this.#libraryMaterials.referable(input.bookId).flatMap((item) => {
-      try { return [this.pinMaterialReference(input.bookId, item.materialId)]; } catch { return []; }
-    });
-    const boundary = { bookId: input.bookId, references };
-    const index = new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => this.readMaterialIndexForTask(scope, id, from)));
-    try { return { candidates: await index.retrieve(input.query, input.k, ['material']) }; } finally { index.dispose(); }
+    return searchReferableMaterials(input, this.#libraryMaterials, this, this.#retrievalAssist);
   }
 
   /** 定归属 or 定学习准入 (KB-007, LEARN-007): one decision appended to the item's chain, and the item as it now reads. */

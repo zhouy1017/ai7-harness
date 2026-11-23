@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { guidelineClauses, queryExpansion, retrievalRerank, standardsTable } from '../../src/service/fast-role/flash-task-contract.js';
+import { guidelineClauses, queryExpansion, retrievalRerank, runStructuredFlashTask, standardsTable } from '../../src/service/fast-role/flash-task-contract.js';
 import { FLASH_TASK_REGISTRY } from '../../src/service/fast-role/flash-task-registry.js';
 import { UnderlyingFlashService } from '../../src/service/fast-role/fast-role-execution.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
@@ -39,4 +39,23 @@ describe('underlying Flash contracts', () => {
     expect(guidelineClauses.validateAndTrace('["丁"]', source)).toBeNull();
     expect(guidelineClauses.validateAndTrace('["甲：乙、丙","添加"]', source)).toBeNull();
   });
+
+  it('checks ordered subsets and accepts an empty rerank when every candidate is a negation counterexample', async () => {
+    const source = { query: '违约责任', candidates: [{ id: 'Q09', preview: '双方并没有违约，无须承担违约责任。' }] };
+    expect(retrievalRerank.validateAndTrace('{"items":[]}', source)).toEqual([]);
+    expect(await runStructuredFlashTask(retrievalRerank, source, async () => '{"items":[]}'))
+      .toEqual({ state: 'checked', value: [] });
+    const pool = { ...source, candidates: [...source.candidates, { id: 'relevant', preview: '违约应承担赔偿责任。' }] };
+    expect(retrievalRerank.validateAndTrace('{"items":["relevant","Q09"]}', pool)).toEqual(['relevant', 'Q09']);
+    expect(retrievalRerank.validateAndTrace('{"items":["relevant"]}', pool)).toEqual(['relevant']);
+  });
+
+  it.each(['{"items":["unknown"]}', '{"items":["c1","c1"]}', '{"items":', '{"items":"c1"}'])(
+    'rejects invalid rerank output and retains the local order: %s', async raw => {
+      const source = { query: '书目', candidates: [{ id: 'c1', preview: '书目' }, { id: 'c2', preview: '目录' }] };
+      expect(retrievalRerank.validateAndTrace(raw, source)).toBeNull();
+      expect(await runStructuredFlashTask(retrievalRerank, source, async () => raw))
+        .toMatchObject({ state: 'fallback', value: ['c1', 'c2'] });
+    },
+  );
 });

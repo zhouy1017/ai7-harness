@@ -4,7 +4,7 @@ import { mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strToU8, zipSync, type Zippable } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LIBRARY_OBJECT_DIRECTORY } from '../../src/service/library-materials.js';
 import { MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEX_TRIGGER_SQL, MATERIAL_INDEX_WORK_DIRECTORY } from '../../src/service/material-index.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
@@ -18,6 +18,10 @@ import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
 import { RetrievalIndex } from '../../src/service/retrieval/index.js';
 import { materialRetrievalSources } from '../../src/service/retrieval/source-readers.js';
+import { retrieveWithFlash } from '../../src/service/retrieval/flash-assist.js';
+import { queryExpansion, retrievalRerank, runStructuredFlashTask } from '../../src/service/fast-role/flash-task-contract.js';
+import { UnderlyingFlashService } from '../../src/service/fast-role/fast-role-execution.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { existsSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 
@@ -97,6 +101,141 @@ function dataRootFiles(): string[] {
 }
 
 const CHINESE = '第一章 春\n\n她推开窗。风从河上吹来，带着潮湿的气味！他问：“你还记得吗？”\n\n第二段只有一句话\n\n圆周率约等于3.14。最后一句……';
+
+async function withSearchMaterial(paragraphs: readonly string[], run: (store: EditorialStore, bookId: string, materialId: string) => Promise<void>): Promise<void> {
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const bookId = emptyBook(store, '合成检索回归');
+    const item = await put(store, file('flash-search.txt', paragraphs.join('\n\n')), '合成检索词表');
+    setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+    setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+    store.startMaterialIndexing(); await store.settleMaterialIndexing();
+    await run(store, bookId, item.materialId);
+    store.markCleanShutdown();
+  } finally { store.close(); }
+}
+
+describe('optional underlying Flash material search (R5-F2b)', () => {
+  it('finds a synonym with no shared surface word, bounds the expansion, and assists the library search too', async () => {
+    await withSearchMaterial(['愉悦。', '舒畅。'], async (store, bookId, materialId) => {
+      const input = { bookId, query: '快乐', k: 8 };
+      expect((await store.searchReferableMaterials(input)).candidates).toEqual([]);
+      const expand = vi.fn((query: string) => runStructuredFlashTask(queryExpansion, query,
+        async () => '{"items":["喜悦","欢欣","愉悦","高兴","舒畅"]}'));
+      store.useRetrievalAssist({ expand });
+      const found = (await store.searchReferableMaterials(input)).candidates;
+      expect(found.map(candidate => candidate.preview)).toEqual(['愉悦。']);
+      expect(found[0]!.revisionOrIndexDigest).toBe(store.pinMaterialReference(bookId, materialId).indexDigest);
+      const library = await store.searchLibraryMaterialVectors({ materialId, text: input.query, k: 8 });
+      expect(library.candidates.map(candidate => candidate.preview)).toEqual(['愉悦。']);
+      expect(expand).toHaveBeenCalledTimes(2);
+      expect(expand).toHaveBeenCalledWith(input.query);
+    });
+  });
+
+  it('reranks a bounded pool before slicing k and filters Q09 without changing pinned candidates', async () => {
+    await withSearchMaterial(['违约责任。', 'Q09：双方并没有违约，无须承担违约责任。', '甲方违约责任及赔偿。', '乙方违约责任及补救。'], async (store, bookId) => {
+      const local = (await store.searchReferableMaterials({ bookId, query: '违约责任', k: 8 })).candidates;
+      const pool = local.slice(0, 4);
+      expect(pool).toHaveLength(4);
+      expect(pool.some(candidate => candidate.preview.includes('Q09'))).toBe(true);
+      const expected = pool.filter(candidate => !candidate.preview.includes('Q09')).reverse();
+      const rerank = vi.fn((source: Parameters<typeof retrievalRerank.message>[0]) => runStructuredFlashTask(retrievalRerank, source,
+        async () => JSON.stringify({ items: expected.map(candidate => candidate.candidateId) })));
+      store.useRetrievalAssist({ rerank });
+      const result = await store.searchReferableMaterials({ bookId, query: '违约责任', k: 2 });
+      expect(result.candidates).toEqual(expected.slice(0, 2));
+      expect(rerank).toHaveBeenCalledExactlyOnceWith({ query: '违约责任', candidates: pool.map(candidate => ({ id: candidate.candidateId, preview: candidate.preview })) });
+    });
+  });
+
+  it('honors checked empty reranks in both searches and skips reranking an empty local pool', async () => {
+    await withSearchMaterial(['Q09：双方并没有违约，无须承担违约责任。'], async (store, bookId, materialId) => {
+      const rerank = vi.fn((source: Parameters<typeof retrievalRerank.message>[0]) => runStructuredFlashTask(retrievalRerank, source, async () => '{"items":[]}'));
+      store.useRetrievalAssist({ rerank });
+      expect((await store.searchReferableMaterials({ bookId, query: '违约责任', k: 1 })).candidates).toEqual([]);
+      expect((await store.searchLibraryMaterialVectors({ materialId, text: '违约责任', k: 1 })).candidates).toEqual([]);
+      expect((await store.searchReferableMaterials({ bookId, query: 'astronomy', k: 1 })).candidates).toEqual([]);
+      expect(rerank).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it.each(['{"items":["unknown"]}', '{"items":', '{"items":["duplicate","duplicate"]}'])(
+    'falls back to exact local candidates after rejected model output: %s', async raw => {
+      await withSearchMaterial(['alpha beta', 'alpha gamma'], async (store, bookId, materialId) => {
+        const input = { bookId, query: 'alpha', k: 1 };
+        const local = await store.searchReferableMaterials(input);
+        const libraryInput = { materialId, text: input.query, k: input.k };
+        const libraryLocal = await store.searchLibraryMaterialVectors(libraryInput);
+        store.useRetrievalAssist({
+          expand: query => runStructuredFlashTask(queryExpansion, query, async () => raw),
+          rerank: source => runStructuredFlashTask(retrievalRerank, source, async () => raw),
+        });
+        expect(await store.searchReferableMaterials(input)).toEqual(local);
+        expect(await store.searchLibraryMaterialVectors(libraryInput)).toEqual(libraryLocal);
+      });
+    },
+  );
+
+  it.each(['fallback', 'outcome-unknown', 'throw'] as const)('uses lexical results without retry when Flash returns %s', async state => {
+    await withSearchMaterial(['alpha beta', 'alpha gamma'], async (store, bookId) => {
+      const input = { bookId, query: 'alpha', k: 1 };
+      const local = await store.searchReferableMaterials(input);
+      const unavailable = vi.fn(async () => {
+        if (state === 'throw') throw new Error('synthetic offline transport');
+        return { state, value: [], reason: 'synthetic unavailable' };
+      });
+      store.useRetrievalAssist({ expand: unavailable, rerank: unavailable });
+      expect(await store.searchReferableMaterials(input)).toEqual(local);
+      expect(unavailable).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('keeps supplementary-plane Han searchable with no configured Flash model or after removing the assistant', async () => {
+    await withSearchMaterial(['𠮷姓。', '吉姓。'], async (store, bookId) => {
+      const input = { bookId, query: '𠮷', k: 8 };
+      const local = await store.searchReferableMaterials(input);
+      expect(local.candidates.map(candidate => candidate.preview)).toEqual(['𠮷姓。']);
+      const governor = new ModelRequestGovernor();
+      const owner = new UnderlyingFlashService({ fixture: null, live: null, requestGovernor: governor });
+      try {
+        store.useRetrievalAssist({ expand: query => owner.execute(queryExpansion, query, 'search'), rerank: source => owner.execute(retrievalRerank, source, 'search') });
+        expect(await store.searchReferableMaterials(input)).toEqual(local);
+        store.useRetrievalAssist(null);
+        expect(await store.searchReferableMaterials(input)).toEqual(local);
+      } finally { owner.dispose(); governor.close(); await governor.whenIdle(); }
+    });
+  });
+
+  it('retains pinned entity aliases and Exact Fetch anchors when Flash is offline', async () => {
+    await withSearchMaterial(['长妈妈。'], async (store, bookId, materialId) => {
+      const pin = store.pinMaterialReference(bookId, materialId);
+      const boundary = { bookId, references: [pin] };
+      const index = new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => store.readMaterialIndexForTask(scope, id, from)), {
+        baseline: { revisionId: 'fixed', digest: 'b'.repeat(64), entities: [{ name: '长妈妈', aliases: ['阿长'] }], events: [], settingClaims: [] }, guidelines: [], terms: [],
+      });
+      try {
+        const local = await index.retrieve('阿长');
+        const offline = async (): Promise<never> => { throw new Error('synthetic offline'); };
+        const found = await retrieveWithFlash(index, '阿长', 8, { expand: offline, rerank: offline });
+        expect(found).toEqual(local);
+        expect(found.map(candidate => candidate.preview)).toEqual(['长妈妈。']);
+        expect(index.exactFetch(found[0]!.candidateId).text).toBe('长妈妈。');
+      } finally { index.dispose(); }
+    });
+  });
+
+  it('drops a source withdrawn while the checked rerank was in flight', async () => {
+    await withSearchMaterial(['alpha beta'], async (store, bookId, materialId) => {
+      store.useRetrievalAssist({ rerank: source => runStructuredFlashTask(retrievalRerank, source, async () => {
+        await Promise.resolve();
+        setLibraryDecision(store, { materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+        return JSON.stringify({ items: source.candidates.map(candidate => candidate.id) });
+      }) });
+      expect((await store.searchReferableMaterials({ bookId, query: 'alpha', k: 1 })).candidates).toEqual([]);
+    });
+  });
+});
 
 describe('资料索引 over the real store', () => {
   it('searches only referable materials without writes, bounds previews, and refuses withdrawal mid-Run (#893)', async () => {
