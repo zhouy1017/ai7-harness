@@ -1,6 +1,7 @@
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
 import { assertReachable, pressReachable, wheelIntoView } from './task-card-reach.mjs';
+import { observeCompletion } from './completion-diagnostic.mjs';
 import { attentionNoticeClearsMenu, attentionNoticeHolds, closeTaskDrawer, pressQuietResult, READ_CARET } from './attention-notice.mjs';
 import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1118,14 +1119,22 @@ async function main() {
     async function openCompletedTask(item, name) {
       const { itemId, revisionId } = item;
       requireJourney(typeof revisionId === 'string', `${name}-revision-ref`);
-      // The global attention route releases the current Book. A different Book opened from a bound workbench belongs in a separate window.
-      await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('attention'), `${name}-attention`);
-      await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && window.ai7.getBookWorkbenchRoute().then(route => route === null)`, `${name}-global-route`);
-      await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), `${name}-page`);
       const selector = `[data-task-group="recent"] [data-task-item=${JSON.stringify(itemId)}] [data-task-action="result"]`;
-      await pressReachable(renderer, waitFor, requireJourney, selector, `${name}-result`);
       const card = `[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card`;
-      await waitFor(renderer, `(() => { const record = document.querySelector(${JSON.stringify(card)})?.dataset; return (record?.inspectedRevisionId ?? record?.resultRevisionId) === ${JSON.stringify(revisionId)}; })()`, `${name}-record`, 30_000);
+      const observation = await observeCompletion(renderer, { bookId: bookB, itemId, revisionId, selector, card });
+      try {
+        await observation.sample('before-attention');
+        // The global attention route releases the current Book. A different Book opened from a bound workbench belongs in a separate window.
+        await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('attention'), `${name}-attention`);
+        await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && window.ai7.getBookWorkbenchRoute().then(route => route === null)`, `${name}-global-route`);
+        await observation.sample('after-attention');
+        await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), `${name}-page`);
+        await observation.sample('after-tasks');
+        await pressReachable(renderer, waitFor, requireJourney, selector, `${name}-result`);
+        await observation.sample('after-result');
+        await waitFor(renderer, `(() => { const record = document.querySelector(${JSON.stringify(card)})?.dataset; return (record?.inspectedRevisionId ?? record?.resultRevisionId) === ${JSON.stringify(revisionId)}; })()`, `${name}-record`, 30_000);
+      } catch(error) { await observation.failed(); throw error; }
+      finally { await observation.dispose(); }
     }
     await openCompletedTask(completionItem, 'completion');
 
