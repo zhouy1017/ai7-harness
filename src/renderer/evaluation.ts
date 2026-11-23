@@ -2,7 +2,8 @@ import type { TaskLaunchRequest } from './task-drawer.js';
 import { serviceWords } from './service-wording.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { filterChoices, menuPanel, stateTerm } from './components/controls.js';
-import { identityWords } from './technical-layer.js';
+import { identityWords, technicalWords } from './technical-layer.js';
+import { copyPlainText } from './clipboard-text.js';
 import type {
   EvaluationAdjustment,
   EvaluationAdjustmentReasonId,
@@ -156,7 +157,7 @@ import { localInstantLabel } from './plan-preview-labels.js';
 export interface MountEvaluationOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi, 'searchReferableMaterials' | 'inspectEvaluation' | 'startEvaluation' | 'saveEvaluation' | 'prepareInitialEvaluation' | 'prepareReadersReport' |
-    'createReadersReportDraft' | 'prepareEvaluationRewrite' | 'decideEvaluationRewrite' | 'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport'>;
+    'createReadersReportDraft' | 'prepareEvaluationRewrite' | 'decideEvaluationRewrite' | 'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' | 'runEditorClipboardCommand'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly technicalDetails: (key: string, ...rows: HTMLElement[]) => HTMLElement;
@@ -367,6 +368,54 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   let pickedOver: string | null = null;
   const pick = (): void => { pickedOver = workspace?.initial.latest?.revisionId ?? 'none'; };
 
+  /** Copy the report on show, including unsaved form values, through the editor's existing clipboard path. */
+  const copyReportButton = (page: EvaluationWorkspaceProjection, record: EvaluationRecordProjection | null): HTMLButtonElement => {
+    const copy = action('复制评估报告', 'secondary', 'copy-report', () => {
+      const form = root.querySelector<HTMLElement>('.evaluation-record');
+      const content = record === null ? null : form === null ? record.content : collect(form, record);
+      const initial = record === null ? page.initial.latest : record.initial;
+      const profile = record?.profile ?? page.initial.latest?.profile ?? page.profile;
+      const total = content === null ? initial!.total : evaluationTotal(profile.items.map((item, index) => ({
+        fullMarks: item.fullMarks, score: content.items[index]!.score !== null && validEvaluationScore(content.items[index]!.score!, item.fullMarks) ? content.items[index]!.score : null,
+        notRated: content.items[index]!.notRated !== null,
+      })));
+      const lines = [`${page.bookTitle} · 评估报告`, evaluationTotalLine(profile, total)];
+      if (initial?.modelLabel) lines.push(`模型 ${initial.modelLabel}`);
+      const unread = initial === null ? null : evaluationAi7UnreadLine(initial);
+      if (unread !== null) lines.push(unread);
+      if (record !== null && unsaved()) lines.push('包含尚未保存的修改');
+      for (const item of profile.items) {
+        const entry = content?.items.find(value => value.itemId === item.itemId) ?? initial?.items.find(value => value.itemId === item.itemId);
+        if (entry === undefined) continue;
+        lines.push('', `${item.label}：${entry.score ?? EVALUATION_NOT_RATED}${entry.score === null ? '' : ` / ${item.fullMarks}`}`, entry.comment ?? '');
+        if ('notRated' in entry && entry.notRated !== null) lines.push(`${EVALUATION_NOT_RATED_REASON}：${entry.notRated}`);
+        for (const evidence of initial?.items.find(value => value.itemId === item.itemId)?.evidence ?? []) lines.push(`原文依据：${evidence.note}`);
+      }
+      for (const risk of content?.risks ?? []) {
+        const label = profile.risks.find(value => value.riskId === risk.riskId)!.label;
+        lines.push('', `${label}：${risk.level === null ? '尚未评定' : EVALUATION_RISK_LEVELS[risk.level]}`, risk.statement ?? '', risk.reviewed ? EVALUATION_RISK_REVIEWED : '');
+      }
+      for (const [label, values] of [
+        [EVALUATION_READINESS, content?.readiness ?? []],
+        [EVALUATION_STRENGTHS, content?.strengths ?? initial?.strengths ?? []],
+        [EVALUATION_WEAKNESSES, content?.weaknesses ?? initial?.weaknesses ?? []],
+        [EVALUATION_VERDICT, content?.verdict ? [content.verdict] : []],
+        [EVALUATION_REPORT_NEXT_STEP, initial?.nextStep ? [initial.nextStep] : []],
+      ] as const) if (values.length > 0) lines.push('', label, ...values);
+      const conclusion = content === null ? initial?.suggestedConclusion : content.conclusion;
+      lines.push('', `${content === null ? 'AI7 建议结论' : EVALUATION_CONCLUSION_LEGEND}：${profile.conclusions.find(value => value.conclusion === conclusion)?.label ?? '尚未选择'}`);
+      const market = marketNode(page, initial);
+      for (const part of market.querySelectorAll('h3, h4, p, dt, li')) if (part.textContent) lines.push(part.textContent);
+      copy.disabled = true;
+      void copyPlainText(api, lines.filter(line => line.length > 0).join('\n')).then(
+        () => setStatus('评估报告已复制。', 'success'),
+        (error: unknown) => setStatus(errorMessage(error, '无法复制评估报告。'), 'error'),
+      ).finally(() => { copy.disabled = busy; });
+    });
+    copy.disabled = busy;
+    return copy;
+  };
+
   // 审稿意见's DOCX export (Issue #429, S81c): ④ 导出's own card, drawn into one slot every paint of the 审稿意见 block takes
   // back, so a card open across a repaint keeps its state.
   const exportSlot = el('div', 'readers-report-export-slot');
@@ -566,7 +615,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     // The report on show was 定稿 or the page shows another version: 修改报告 begins the next version from AI7's latest report.
     if (offerEdit) {
-      const edit = action(EVALUATION_REPORT_EDIT, 'secondary', 'edit-report', () => void begin_(true));
+      const edit = action(technicalWords(EVALUATION_REPORT_EDIT, '修改评估报告'), 'secondary', 'edit-report', () => void begin_(true));
       edit.disabled = busy;
       row.append(edit);
     }
@@ -603,7 +652,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const profile = latest.profile ?? page.profile;
     const node = el('article', 'evaluation-report');
     node.dataset['initialRevision'] = latest.revisionId;
-    const heading = el('h3', undefined, EVALUATION_REPORT_HEADING);
+    const heading = el('h3', undefined, technicalWords(EVALUATION_REPORT_HEADING, '评估报告'));
     heading.tabIndex = -1;
     node.append(heading, el('p', 'evaluation-report-line', evaluationAi7LatestLine(profile, latest)));
     if (latest.modelLabel) node.append(el('p', 'evaluation-report-model', `模型 ${latest.modelLabel}`));
@@ -639,13 +688,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     if (lists.childElementCount > 0) node.append(lists);
     const reason = evaluationReportEditReason(page.start, latest);
+    const row = el('div', 'button-row evaluation-report-actions evaluation-action-bar');
     if (reason === null) {
-      const row = el('div', 'button-row evaluation-report-actions');
-      const edit = action(EVALUATION_REPORT_EDIT, 'primary', 'edit-report', () => void begin_(true));
+      const edit = action(technicalWords(EVALUATION_REPORT_EDIT, '修改评估报告'), 'primary', 'edit-report', () => void begin_(true));
       edit.disabled = busy;
       row.append(edit);
-      node.append(row);
     } else node.append(el('p', 'field-note evaluation-report-reason', reason));
+    row.append(copyReportButton(page, null));
+    node.append(row);
     return node;
   };
 
@@ -732,11 +782,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
    * latest rewrite Task, and the rewrite waiting for the editor: each item's 评语 and the 总评 as they stand beside AI7's rewritten
    * words, with 采用重写 and 放弃. Nothing is written into the version until the editor 采用 it, and no score ever moves.
    */
-  const rewriteNode = (page: EvaluationWorkspaceProjection, record: EvaluationRecordProjection): HTMLElement => {
+  const rewriteNode = (page: EvaluationWorkspaceProjection, record: EvaluationRecordProjection, actionBar: HTMLElement): HTMLElement => {
     const rewrite = page.rewrite;
     const section = el('section', 'evaluation-rewrite');
     section.dataset['rewriteState'] = rewrite.task?.state ?? 'none';
-    const heading = el('h3', undefined, EVALUATION_REWRITE_HEADING);
+    const heading = el('h3', undefined, technicalWords(EVALUATION_REWRITE_HEADING, '重新生成评估报告'));
     heading.tabIndex = -1;
     section.append(heading);
     const task = rewrite.task !== null && rewrite.task.recordId === record.recordId ? rewrite.task : null;
@@ -788,7 +838,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         card.append(warnings);
       }
       const actions = el('div', 'button-row evaluation-rewrite-actions');
-      const accept = action(EVALUATION_REWRITE_ACTIONS.accept, 'primary', 'rewrite-accept', () => void decideRewrite(proposal.revisionId, 'accept'));
+      const accept = action(technicalWords(EVALUATION_REWRITE_ACTIONS.accept, '采用新版评估报告'), 'primary', 'rewrite-accept', () => void decideRewrite(proposal.revisionId, 'accept'));
       accept.disabled = busy || !proposal.current || (proposal.items.length === 0 && proposal.verdict === null && proposal.strengths === null && proposal.weaknesses === null);
       const discard = action(EVALUATION_REWRITE_ACTIONS.discard, 'secondary', 'rewrite-discard', () => void decideRewrite(proposal.revisionId, 'discard'));
       discard.disabled = busy;
@@ -801,7 +851,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     const row = el('div', 'button-row evaluation-rewrite-start');
     if (rewrite.prepare.allowed || task?.state === 'prepared') {
-      options.openLaunch({ bookId: page.bookId, operation: 'launchEvaluationRewrite', title: '按我的修改重新生成', mount: row, inputEvents: root, startLabel: EVALUATION_REWRITE_ACTIONS.prepare,
+      options.openLaunch({ bookId: page.bookId, operation: 'launchEvaluationRewrite', title: '评估报告', mount: row, inputEvents: root, startLabel: technicalWords(EVALUATION_REWRITE_ACTIONS.prepare, '按我的修改重新生成评估报告'),
         startDisabled: busy, input: { recordId: record.recordId }, beforeLaunch: async () => !unsaved() || await save(record, false) });
       row.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-evaluation-action', 'prepare-rewrite');
       row.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-evaluation-action', 'preview-rewrite');
@@ -814,7 +864,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       open.disabled = busy;
       row.append(open);
     }
-    section.append(row);
+    actionBar.append(row);
     return section;
   };
 
@@ -895,7 +945,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     // The versions, newest first; each opens as it was recorded.
     if (workspace.records.length > 0) {
       const versions = el('section', 'evaluation-versions');
-      const heading = el('h3', undefined, EVALUATION_VERSIONS_HEADING);
+      const heading = el('h3', undefined, technicalWords(EVALUATION_VERSIONS_HEADING, '评估报告历史'));
       heading.tabIndex = -1;
       versions.append(heading);
       const list = el('ol', 'evaluation-version-list');
@@ -951,7 +1001,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     // Filling a form in alone is the secondary way, folded under 更多 (Issue #1407); AI7's report is the main one.
     if (workspace.start.allowed && workspace.start.blankReason === undefined) {
       // While the latest version cannot be read (Issue #726), the start names the 定稿 it will seed from and says what it skips.
-      const begin = action(workspace.start.kind === 'first' ? EVALUATION_MANUAL_START : evaluationStartLabel(workspace.start), 'quiet', 'start', () => void begin_(false));
+      const begin = action(workspace.start.kind === 'first' ? technicalWords(EVALUATION_MANUAL_START, '自行填写评估报告') : evaluationStartLabel(workspace.start), 'quiet', 'start', () => void begin_(false));
       begin.disabled = busy;
       if (workspace.start.skipDamaged !== null) begin.append(' · ', el('span', 'evaluation-skip-damaged', evaluationSkipDamagedLine(workspace.start.skipDamaged)));
       start.append(begin);
@@ -962,27 +1012,26 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     more.append(el('summary', undefined, '更多 ▾'), menuPanel(start));
     parts[0]!.append(more);
     if (workspace.readersReport.basis !== null) parts.push(readersReportNode(workspace));
-    // 按我的修改重新生成 sits just above the report version it regenerates (Issue #429, S81b2; EVAL-008; Issue #1407).
+    const form = record === null ? null : keptForm ?? recordNode(record);
+    // Keep the same form attached during polling; only its task launch controls are refreshed.
+    form?.querySelector('.evaluation-rewrite-start')?.remove();
+    const after: HTMLElement[] = reportFirst ? [marketNode(workspace, latest)] : record === null ? [] : [marketNode(workspace, record.initial)];
     if (record !== null && (record.initial !== null || workspace.rewrite.proposal !== null || workspace.rewrite.task?.recordId === record.recordId)) {
-      parts.push(rewriteNode(workspace, record));
+      after.push(rewriteNode(workspace, record, form!.querySelector<HTMLElement>('.evaluation-action-bar')!));
     }
     if (refusal !== null) {
       const note = el('p', 'attention-note evaluation-refusal', refusal);
       note.setAttribute('role', 'alert');
-      parts.push(note);
+      after.unshift(note);
     }
-    if (reportFirst) parts.push(reportNode(workspace, latest!));
-    // The market section follows the report or version it belongs to (Issue #429, S81b2; EVAL-009, EVAL-010; Issue #1406).
-    const after: HTMLElement[] = reportFirst ? [marketNode(workspace, latest)] : record === null ? [] : [marketNode(workspace, record.initial)];
+    // The report and its market section lead; setup, history and derived documents follow.
     if (keptForm !== null && record !== null && keptForm.parentElement === root) {
       // The form the editor is filling in never leaves the page — a 初评 read again while they type keeps their focus and
       // their place — and everything around it is drawn anew.
       for (const child of Array.from(root.children)) if (child !== keptForm && child !== pageHeading) child.remove();
-      keptForm.before(...parts);
-      keptForm.after(...after);
+      keptForm.after(...after, ...parts);
     } else {
-      if (record !== null) parts.push(keptForm ?? recordNode(record));
-      root.replaceChildren(pageHeading, ...parts, ...after);
+      root.replaceChildren(pageHeading, ...(reportFirst ? [reportNode(workspace, latest!)] : form === null ? [] : [form]), ...after, ...parts);
     }
     if (keptForm !== null && record !== null) refresh(keptForm, record);
     restoreInteraction();
@@ -1061,7 +1110,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const dated = { ...record, ...(row === undefined ? {} : { createdAt: row.createdAt }), finalizedAt: record.finalized?.at ?? null };
     // The open record says what its row says (review N8): its time and order when the list needs them.
     const tell = evaluationDayTells(workspace?.records ?? []).get(record.recordId);
-    const heading = el('h3', undefined, record.initial === null ? evaluationHeading(dated, tell) : `${EVALUATION_REPORT_HEADING} · ${record.state === 'draft' ? evaluationReportDay(dated, tell) : evaluationHeading(dated, tell)}`);
+    const heading = el('h3', undefined, technicalWords(record.initial === null ? evaluationHeading(dated, tell) : `${EVALUATION_REPORT_HEADING} · ${record.state === 'draft' ? evaluationReportDay(dated, tell) : evaluationHeading(dated, tell)}`,
+      `评估报告 · ${record.state === 'draft' ? evaluationReportDay(dated, tell) : evaluationHeading(dated, tell)}`));
     heading.tabIndex = -1;
     heading.append(' · ', el('span', 'evaluation-revision', evaluationRevisionLine(record)));
     node.append(heading);
@@ -1278,6 +1328,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       conclusion.append(choice);
     }
     node.append(conclusion);
+    const actionBar = el('footer', 'evaluation-action-bar button-row');
+    actionBar.setAttribute('aria-label', '评估报告操作');
     if (record.state !== 'finalized') {
       const row = el('div', 'button-row evaluation-actions');
       const saveButton = action(EVALUATION_SAVE, 'secondary', 'save', () => void save(record, false));
@@ -1288,12 +1340,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       needsScore.id = `evaluation-finalize-blocked-${record.recordId}`;
       needsScore.hidden = true;
       row.append(saveButton, finalize, needsScore);
-      node.append(row);
+      actionBar.append(row);
     }
+    actionBar.append(copyReportButton(workspace!, record));
     node.append(technicalDetails('evaluation-facts',
       el('dt', undefined, '评估版本'), el('dd', 'technical-identity', record.recordId),
       el('dt', undefined, '修订版'), el('dd', 'technical-identity', record.revisionId),
       el('dt', undefined, '评估方案摘要'), el('dd', 'technical-identity', record.profile.sha256)));
+    node.append(actionBar);
     refresh(node, record);
     drawn.set(node, JSON.stringify(collect(node, record)));
     return node;
