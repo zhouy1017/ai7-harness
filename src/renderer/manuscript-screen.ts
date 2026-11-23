@@ -439,6 +439,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   toolbarActions.classList.add('editor-edit-actions');
   // Present the existing mode and auto-apply settings as one choice.
   let autoApplyRevisions = getAutoApplyEditorRevisions();
+  const directEditKey = 'ai7.editor.directEditMode';
+  let initialInputMode: EditorInputMode = DEFAULT_EDITOR_INPUT_MODE;
+  try { if (globalThis.localStorage?.getItem(directEditKey) === 'true') initialInputMode = 'direct-edit'; } catch { /* Use the default when storage is unavailable. */ }
   const inputMenu = element('details', 'edit-method-menu');
   const inputModeToggle = element('summary', 'btn secondary editor-input-mode-toggle');
   inputModeToggle.dataset['editorInputModeToggle'] = 'true';
@@ -467,6 +470,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
           setAutoApplyEditorRevisions(autoApplyRevisions);
         }
         editor.setInputMode(choice.mode);
+        try { globalThis.localStorage?.setItem(directEditKey, String(choice.mode === 'direct-edit')); } catch { /* The choice still applies to this editor. */ }
         paintInputMode(editor.inputMode());
         setStatus(choice.value === 'confirm' ? INPUT_MODE_CONFIRM_CHANGED : INPUT_MODE_CHANGED[choice.mode], 'success');
         close();
@@ -483,7 +487,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   methodPanel.setAttribute('role', 'menu');
   methodPanel.setAttribute('aria-label', '改稿方式');
   inputMenu.append(inputModeToggle, methodPanel);
-  paintInputMode(DEFAULT_EDITOR_INPUT_MODE);
+  paintInputMode(initialInputMode);
   const scopedAiEditEntry = button('让 AI 修改…', 'secondary', () => editorialMarks?.composeScopedAiEdit());
   scopedAiEditEntry.dataset['scopedAiEditEntry'] = 'true';
   toolbarActions.append(inputMenu, paragraphStyle, scopedAiEditEntry, ...(isDocument ? [saveVersion, taskOnDocument] : []), undo, redo, retryAuthoritativeRefreshButton);
@@ -2505,6 +2509,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   }
 
   editor = mountBoundedEditor({
+    initialInputMode,
     host: editorHost,
     scrollContainer: editorWindow,
     platform: api.platform,
@@ -2595,6 +2600,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     'view.previousPending': () => editorialMarks?.stepPending('previous'),
     'view.nextPending': () => editorialMarks?.stepPending('next'),
   });
+  paintInputMode(editor.inputMode());
   // Typing moves every place behind the caret a little; the rail is read again once the typing rests,
   // never per keystroke, and its cost follows the chapters and marks, not the manuscript's length.
   const scheduleRailRefresh = (): void => {

@@ -1,4 +1,4 @@
-import { identityWords, technicalWords } from './technical-layer.js';
+import { identityWords, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { reportResult } from './notifications.js';
 import {
   draftText,
@@ -204,6 +204,8 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
       orderingUnit = null;
       editingUnit = null;
       bulkSummary = null;
+      // Ordinary mode opens the comparison and choices together; opening alone records no decision.
+      if (!technicalLayerVisible && path === null && next.newVersion.available) path = 'edit-draft';
       render();
       if (rebased || next.draftOnEarlierBasis) reportResult(options.setStatus, CONFLICT_REBASED_NOTICE);
       else options.setStatus(CONFLICT_STATUS_LINES.opened);
@@ -405,7 +407,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     // Its classification, said in words (interaction spec › Proposal conflict resolution).
     const classification = el('div', 'proposal-conflict-classification');
     classification.dataset['conflictClassification'] = next.conflictKind;
-    classification.append(el('strong', undefined, PROPOSAL_CONFLICT_CLASSIFICATION));
+    classification.append(el('strong', undefined, technicalWords(PROPOSAL_CONFLICT_CLASSIFICATION, '这处文字已改过，请选择保留哪种写法。')));
     if (next.conflictKind === 'reversal') classification.append(el('p', undefined, REVERSAL_CONFLICT_LINE));
     const source = el('p', 'muted proposal-conflict-source', `修改建议 · ${markSourceLine({ source: next.suggestion.source, convertedFrom: null })}`);
     classification.append(source);
@@ -421,7 +423,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
       classification.append(rebased);
     }
 
-    section.append(header, classification, comparison(next, labels), paths(next), returnRow(), technical(next));
+    section.append(header, classification, ...(technicalLayerVisible ? [comparison(next, labels)] : []), paths(next), returnRow(), ...(technicalLayerVisible ? [technical(next)] : []));
     if (page?.isConnected === true) page.replaceWith(section);
     else host.replaceChildren(section);
     page = section;
@@ -487,13 +489,35 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     return region;
   }
 
-  /** The four paths, unselected (V2-UX-CONFLICT-005). */
+  /** Direct editorial choices; developer mode also retains the detailed path controls. */
   function paths(next: ProposalConflictProjection): HTMLElement {
     const fieldset = el('fieldset', 'proposal-conflict-paths');
     // A pending answer will reload this draft. Keep local edits and resolution commands from racing that reload.
     fieldset.disabled = regenerating;
     fieldset.dataset['conflictPaths'] = 'true';
-    fieldset.append(el('legend', undefined, CONFLICT_PATH_HEADING));
+    fieldset.append(el('legend', undefined, technicalWords(CONFLICT_PATH_HEADING, '对比与处理')));
+    if (!technicalLayerVisible) {
+      const actions = el('div', 'button-row');
+      const keep = button('confirm-keep-current', '保留当前稿件', 'secondary', () => void resolve('keep-current'));
+      keep.title = next.conflictKind === 'reversal' ? '保留现在的文字，结束这次撤销。' : '保留现在的文字，拒绝这条修改建议。';
+      actions.append(keep, button('confirm-defer', '稍后处理', 'quiet', () => void resolve('defer')));
+      const more = el('details');
+      more.append(el('summary', undefined, '其他处理方式'));
+      for (const choice of ['edit-draft', 'regenerate'] as const) {
+        const control = button(choice, choice === 'edit-draft' ? '自己修改' : '让 AI 重新建议', 'quiet', () => {
+          if (working || regenerating) return;
+          path = choice;
+          renderPathDetail(null);
+        });
+        control.disabled = choice === 'edit-draft' ? !next.newVersion.available : regenerateRoute?.available !== true;
+        if (control.disabled) control.title = choice === 'edit-draft' ? conflictSaveReason('target-deleted', 0) ?? '' : regenerateRoute?.reason ?? CONFLICT_REGENERATE_READING;
+        more.append(control);
+      }
+      pathDetail = el('div', 'proposal-conflict-path-detail');
+      fieldset.append(actions, pathDetail, more);
+      if (!next.newVersion.available) fieldset.append(el('p', 'muted', '原文已被删去，可保留当前稿件或稍后处理。'));
+      return fieldset;
+    }
     const group = uid('path');
     for (const choice of CONFLICT_PATHS) {
       const option = el('label', 'proposal-conflict-path');
@@ -569,7 +593,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
         control.disabled = regenerating || working;
         actions.append(control);
       });
-      pathDetail.replaceChildren(el('p', 'proposal-conflict-consequence', conflictPathNote('regenerate', next.conflictKind)), actions);
+      pathDetail.replaceChildren(el('p', 'proposal-conflict-consequence', technicalWords(conflictPathNote('regenerate', next.conflictKind), '把这一处的文字和修改理由交给 AI，生成后在这里查看。')), actions);
     } else {
       pathDetail.replaceChildren();
     }
@@ -620,8 +644,8 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     const keep = focus ?? (active instanceof HTMLElement && draftHost.contains(active) ? focusKeyOf(active) : null);
     const section = el('section', 'proposal-conflict-draft');
     section.dataset['conflictDraft'] = 'true';
-    section.setAttribute('aria-label', CONFLICT_DRAFT_HEADING);
-    section.append(el('h3', undefined, CONFLICT_DRAFT_HEADING), el('p', 'muted', CONFLICT_DRAFT_NOTE));
+    section.setAttribute('aria-label', technicalWords(CONFLICT_DRAFT_HEADING, '选择写法'));
+    section.append(el('h3', undefined, technicalWords(CONFLICT_DRAFT_HEADING, '选择写法')), el('p', 'muted', technicalWords(CONFLICT_DRAFT_NOTE, '逐处选择或修改，保存后回到稿件中应用。')));
 
     const toolbar = el('div', 'button-row proposal-conflict-draft-toolbar');
     toolbar.dataset['draftToolbar'] = 'true';
@@ -637,7 +661,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     toolbar.append(undoButton, redoButton, previousUnresolved, nextUnresolved);
     // Offered only when there is something to include; it never touches a conflicting unit (CONFLICT-010).
     if (hasNonConflictingChanges(next.units, resolutions)) {
-      toolbar.append(button('include-non-conflicting', CONFLICT_QUICK_ACTIONS.includeNonConflicting, 'secondary', () => {
+      toolbar.append(button('include-non-conflicting', technicalWords(CONFLICT_QUICK_ACTIONS.includeNonConflicting, '采用其余无冲突修改'), 'secondary', () => {
         const bulk = includeNonConflictingChanges(next.units, resolutions);
         bulkSummary = conflictBulkSummary(bulk.included, bulk.conflictsLeft);
         orderingUnit = null;
@@ -646,7 +670,8 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
         options.setStatus(bulkSummary, 'success');
       }));
     }
-    section.append(toolbar, el('small', 'muted proposal-conflict-keyboard', conflictKeyboardHint(options.platform)));
+    section.append(toolbar);
+    if (technicalLayerVisible) section.append(el('small', 'muted proposal-conflict-keyboard', conflictKeyboardHint(options.platform)));
     if (bulkSummary !== null) {
       const summary = el('p', 'muted', bulkSummary);
       summary.dataset['draftBulkSummary'] = 'true';
@@ -663,7 +688,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     section.append(list);
 
     const whole = el('div', 'proposal-conflict-draft-text');
-    whole.append(el('h4', undefined, CONFLICT_DRAFT_TEXT_LABEL));
+    whole.append(el('h4', undefined, technicalWords(CONFLICT_DRAFT_TEXT_LABEL, '修改后')));
     draftTextNode = el('p', 'proposal-conflict-words');
     draftTextNode.dataset['conflictDraftText'] = 'true';
     whole.append(draftTextNode);
@@ -671,7 +696,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     draftStatus.setAttribute('role', 'status');
     draftStatus.dataset['conflictDraftStatus'] = 'true';
     const saveRow = el('div', 'button-row');
-    saveButton = button('save-version', CONFLICT_QUICK_ACTIONS.saveVersion, 'primary', () => void saveVersion());
+    saveButton = button('save-version', technicalWords(CONFLICT_QUICK_ACTIONS.saveVersion, '保存修改建议'), 'primary', () => void saveVersion());
     saveReason = el('span', 'proposal-conflict-save-reason');
     saveReason.id = uid('save-reason');
     saveReason.dataset['conflictSaveReason'] = 'true';
@@ -698,10 +723,17 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     item.dataset['draftUnit'] = String(unitIndex);
     item.dataset['unitKind'] = unit.kind;
     item.dataset['unitResolution'] = resolution;
-    const heading = el('p', 'proposal-conflict-unit-label', conflictUnitHeading(ordinal, unit.kind, resolution));
+    const heading = el('p', 'proposal-conflict-unit-label', technicalWords(conflictUnitHeading(ordinal, unit.kind, resolution), `第 ${ordinal} 处 · ${resolution === 'unresolved' ? '请选择写法' : '已选择'}`));
     heading.tabIndex = -1;
     heading.dataset['draftUnitHeading'] = 'true';
     item.append(heading);
+    if (!technicalLayerVisible) {
+      const words = el('dl', 'proposal-conflict-reference');
+      for (const [label, text] of [['原文', unit.base], ['当前稿件', unit.current], ['修改建议', unit.proposed]] as const) {
+        words.append(el('dt', undefined, label), el('dd', 'proposal-conflict-words', wordsOf(text)));
+      }
+      item.append(words);
+    }
     // Words AI7 regenerated for this unit, said so while they stand as they were saved (Issue #842; V2-UX-CONFLICT-011).
     const regenerated = projection?.draft?.regeneration ?? null;
     const saved = projection?.draft?.resolutions[unitIndex];
@@ -724,7 +756,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
       button('take-current', CONFLICT_QUICK_ACTIONS.takeCurrent, 'secondary', () => setUnit(unitIndex, { resolution: 'current', text: null }, `${unitIndex}:take-current`)),
       button('take-proposed', CONFLICT_QUICK_ACTIONS.takeProposed, 'secondary', () => setUnit(unitIndex, { resolution: 'proposed', text: null }, `${unitIndex}:take-proposed`)),
       keepBoth,
-      button('edit-unit', CONFLICT_QUICK_ACTIONS.edit, 'secondary', () => {
+      button('edit-unit', technicalWords(CONFLICT_QUICK_ACTIONS.edit, '自己修改'), 'secondary', () => {
         // Choosing to edit resolves the unit as edited, starting from what it reads now.
         const next = copyOf(resolutions);
         next[unitIndex] = { resolution: 'edited', text: resolution === 'unresolved' ? unit.current : resolvedUnitText(unit, entry) };
@@ -742,9 +774,9 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
       order.setAttribute('aria-label', CONFLICT_KEEP_BOTH_PROMPT);
       order.append(
         el('span', 'muted', CONFLICT_KEEP_BOTH_PROMPT),
-        button('keep-both-current-first', CONFLICT_QUICK_ACTIONS.currentFirst, 'secondary', () =>
+        button('keep-both-current-first', technicalWords(CONFLICT_QUICK_ACTIONS.currentFirst, '当前文字在前'), 'secondary', () =>
           setUnit(unitIndex, { resolution: 'both-current-first', text: null }, `${unitIndex}:keep-both`)),
-        button('keep-both-proposed-first', CONFLICT_QUICK_ACTIONS.proposedFirst, 'secondary', () =>
+        button('keep-both-proposed-first', technicalWords(CONFLICT_QUICK_ACTIONS.proposedFirst, '建议文字在前'), 'secondary', () =>
           setUnit(unitIndex, { resolution: 'both-proposed-first', text: null }, `${unitIndex}:keep-both`)),
       );
       item.append(order);

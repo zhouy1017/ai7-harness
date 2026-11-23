@@ -193,15 +193,19 @@ export function mountProposalWorkspace(options: {
     if (draftUndo) controls.append(button('撤销上次草稿处理', 'draft-undo', () => void act(async () => {
       for (const undo of draftUndo!) workspace = await api.saveProposalDecisionDraft({ ...input, markIds: undo.ids, disposition: undo.disposition, atomicGroupId: undo.group, expectedScopeDigest: workspace!.scopeDigest }); draftUndo = null; await refresh();
     })));
+    const more = el('details'); more.dataset['proposalBatchMore'] = 'true';
+    more.append(el('summary', '更多批量处理'));
     for (const [scope, label] of [['selection', '已选修改'], ['chapter', '当前章节'], ['change-type', '当前修改类型'], ['filter', '当前筛选']] as const) {
+      const group = scope === 'selection' ? controls : el('div', undefined, 'button-row');
+      if (scope !== 'selection') { more.append(el('h4', label), group); }
       for (const disposition of ['accepted', 'rejected', 'deferred'] as const) {
-        controls.append(button(`${dispositions[disposition]} · ${label}`, `batch-${scope}-${disposition}`, () => void act(() => saveBatch(scope, disposition))));
+        group.append(button(`${dispositions[disposition]} · ${label}`, `batch-${scope}-${disposition}`, () => void act(() => saveBatch(scope, disposition))));
       }
     }
-    controls.append(button('采纳全部无冲突项', 'accept-conflict-free', () => void act(() => saveBatch('filter', 'accepted', []))));
+    more.append(button('采纳全部无冲突项', 'accept-conflict-free', () => void act(() => saveBatch('filter', 'accepted', []))));
     const summary = el('details'); summary.append(el('summary', `决定范围 · ${workspace.items.filter((item) => item.draft !== null).length} 项草稿 · ${workspace.items.filter((item) => item.draft === null || item.draft === 'deferred' || item.conflict).length} 项未解决`));
     const rows = el('ul'); for (const item of workspace.items) rows.append(el('li', `第 ${item.position} 段 · ${item.draft === null ? '未决定' : dispositions[item.draft]}${item.conflict ? ' · 冲突' : ''}`)); summary.append(rows);
-    controls.append(summary, button('应用已采纳修改', 'apply-accepted', () => void act(applyAccepted)));
+    controls.append(button('应用已采纳修改', 'apply-accepted', () => void act(applyAccepted)), more, summary);
   }
   /**
    * A batch button saves its drafts at once (Issue #1410 item 8): the scope is frozen and confirmed in the same step, what was
