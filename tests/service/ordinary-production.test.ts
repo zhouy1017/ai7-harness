@@ -65,6 +65,7 @@ import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../src/shared/p
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
 import { sample1Seed } from '../support/sample1-seed.js';
+import { legacySampleService } from '../support/upgrade-sample1.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // One explicit model-request capability per test application.
@@ -283,6 +284,57 @@ async function run(store: EditorialStore, execution: BaselineAnalysisExecutionOw
   await execution.whenIdle();
   return store.inspectBaselineAnalysis(bookId, (runRecordId) => execution.progressFor(runRecordId));
 }
+
+it.each(['v35', 'v36'] as const)('keeps the authorized %s policy through reopening, command replay and first dispatch', async (version) => {
+  // The integration predecessor runs its own launch command and policy resolver against an empty store.
+  const writer = version === 'v35'
+    ? await (await legacySampleService(roots.dataRoot, roots.codeRoot, '3b18a7512a6010e5f208db8f3396f158d763e71c'))(roots.dataRoot)
+    : await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  opened.push(writer);
+  const launch = await productionLaunch();
+  writer.baselineAnalysisLedger.bindLaunch(launch.launch);
+  await configure(writer, launch, 'opencode-go');
+  const bookId = await sample1Book(writer, '合成样书');
+  const command = { bookId, clientCommandId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null };
+  const first = writer.launchBaselineAnalysis(command, launch.policy);
+  const consent = first.ledger.loadExecutionPlan(first.runRecordId);
+  expect(consent.selectedPolicyIdentity?.providerProcessingVersion).toBe(version);
+  expect(first.ledger.executionBindingOf(first.runRecordId)).toBeNull();
+  writer.markCleanShutdown();
+  writer.close();
+
+  const reopened = await openProductionStore();
+  reopened.store.reconcileStoppedBaselineAnalysisRuns();
+  const replay = reopened.store.launchBaselineAnalysis(command, reopened.production.policy);
+  expect(replay).toMatchObject({ repeated: true, runRecordId: first.runRecordId, taskIntentId: first.taskIntentId });
+  const pin = { operationalScope: 'ordinary-production', providerProcessingVersion: version,
+    activePolicySetVersion: consent.selectedPolicyIdentity!.activePolicySetVersion, liveTransmissions: 'bounded-by-run' };
+  const assertConsent = (facts: ReturnType<typeof replay.ledger.loadExecutionPlan>) => {
+    expect(facts).toMatchObject({ retainedPolicyPin: pin, selectedPolicyIdentity: consent.selectedPolicyIdentity,
+      planEnvelopeDigest: consent.planEnvelopeDigest, providerResolutionPlanDigest: consent.providerResolutionPlanDigest,
+      credentialReference: consent.credentialReference, planVersionId: consent.planVersionId });
+  };
+  assertConsent(replay.ledger.loadExecutionPlan(replay.runRecordId));
+  const prepared = reopened.store.inspectBaselineAnalysis(bookId);
+  const calls: StubCall[] = [];
+  const execution = owner(reopened.store, reopened.production, stubTransport(calls, await chainAnswers(prepared)));
+  execution.admitAndDispatch(replay.runRecordId, replay.ledger);
+  await execution.whenIdle();
+  const binding = replay.ledger.executionBindingOf(replay.runRecordId)!;
+  expect(binding.binding.policyPin).toEqual(pin);
+  expect(calls.length).toBeGreaterThan(0);
+  expect(reopened.store.inspectBaselineAnalysis(bookId).resultSetRevision?.policyPin).toEqual(pin);
+  await execution.dispose();
+  reopened.store.markCleanShutdown();
+  reopened.store.close();
+
+  const bound = await openProductionStore();
+  bound.store.reconcileStoppedBaselineAnalysisRuns();
+  const repeated = bound.store.launchBaselineAnalysis(command, bound.production.policy);
+  expect(repeated).toMatchObject({ repeated: true, runRecordId: first.runRecordId });
+  assertConsent(repeated.ledger.loadExecutionPlan(repeated.runRecordId));
+  expect(repeated.ledger.executionBindingOf(repeated.runRecordId)).toEqual(binding);
+}, 120_000);
 
 it('keeps launch fields enumerable across retained-reader fallback without freezing getters or changing their receiver (#1161)', async () => {
   const { store, production } = await openProductionStore();
@@ -1545,7 +1597,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       const body = JSON.parse(String(init.body));
       calls.push({ url, model: body.model, cap: body.max_output_tokens });
       expect(body.tools).toBeUndefined(); expect(body.stream).toBeUndefined();
-      return { status: 200, json: async () => ({ status: 'completed', output: [{ type: 'reasoning', id: 'rs_public_synthetic', summary: [], encrypted_content: 'public-synthetic-opaque-reasoning' }, { type: 'message', role: 'assistant',
+      return { status: 200, json: async () => ({ model: body.model, status: 'completed', output: [{ type: 'reasoning', id: 'rs_public_synthetic', summary: [], encrypted_content: 'public-synthetic-opaque-reasoning' }, { type: 'message', role: 'assistant',
         content: [{ type: 'output_text', text: answer }] }], usage: { input_tokens: 12, output_tokens: 7, output_tokens_details: { reasoning_tokens: 2 } } }) };
     }) as unknown as typeof fetch;
   }
@@ -1657,7 +1709,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const transport = vi.fn(async () => {
       if (failure === 'unknown') throw new Error('synthetic transport failure after submission');
       return { status: failure === 'invalid-key' ? 401 : failure === 'account-limit' ? 429 : 200,
-        json: async () => failure === 'unexpected-text' ? { status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'unexpected public synthetic answer' }] }], usage: { input_tokens: 12, output_tokens: 1 } }
+        json: async () => failure === 'unexpected-text' ? { model: 'gpt-5.6-luna', status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'unexpected public synthetic answer' }] }], usage: { input_tokens: 12, output_tokens: 1 } }
           : failure === 'refusal' ? { output: [{ type: 'message', role: 'assistant', content: [{ type: 'refusal', refusal: 'synthetic refusal' }] }], usage: { input_tokens: 12, output_tokens: 1 } }
           : failure === 'malformed' ? { invalid: true, usage: { input_tokens: 12, output_tokens: 0 } } : { error: { message: 'never retain synthetic provider body' } } };
     });

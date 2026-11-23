@@ -23,10 +23,12 @@ async function saved(route: ModelServiceRouteId): Promise<EditorialStore> {
 }
 
 /** A family fixture case's recorded response, served once for the one request the test sends. */
-function fixtureTransport(family: string, name: string, answer?: string, returnedModel?: string): ReturnType<typeof vi.fn> {
+function fixtureTransport(family: string, name: string, answer?: string, returnedModel?: string | null): ReturnType<typeof vi.fn> {
   const response = JSON.parse(readFileSync(`tests/fixtures/model/provider-families/${family}.json`, 'utf8')).cases.find((entry: { name: string }) => entry.name === name).response;
   const body = answer === undefined ? response.body : JSON.parse(JSON.stringify(response.body).replace('合成回答。', answer));
-  if (returnedModel !== undefined) body[family === 'google-generate-content' ? 'modelVersion' : 'model'] = returnedModel;
+  const modelField = family === 'google-generate-content' ? 'modelVersion' : 'model';
+  if (returnedModel === null) delete body[modelField];
+  else if (returnedModel !== undefined) body[modelField] = returnedModel;
   return vi.fn(async () => ({ status: response.status, headers: new Headers(), json: async () => body, text: async () => JSON.stringify(body) }));
 }
 
@@ -112,14 +114,17 @@ describe('the connection test on the admitted channels', () => {
     ['openai-responses', 'openai-platform', 'requested', 'unrelated', 'failed'],
     ['openai-responses', 'openai-platform', 'requested', 'requested-2026-11-20', 'passed'],
     ['anthropic-messages', 'anthropic-claude', 'claude-haiku-4-5', 'claude-haiku-4-5-20251001', 'passed'],
+    ['openai-chat-completions', 'opencode-go', 'requested', null, 'failed'],
+    ['openai-chat-completions', 'opencode-go', 'requested', 'requested', 'passed'],
     ['openai-chat-completions', 'opencode-go', 'requested', 'unrelated', 'failed']] as const)(
     'checks %s response identity %s/%s against %s', async (family, route, modelId, returned, outcome) => {
       const target = await saved(route);
       const nativeFetch = fixtureTransport(family, 'text', 'AI7_OK', returned);
       const result = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as typeof fetch },
         { route, modelId }, { resolve: async () => 'synthetic-placeholder' }, { requestGovernor });
-      expect(result.outcome).toBe(outcome);
-      expect(target.getModelServiceRouteConnection(route)?.connectionTest?.outcome).toBe(outcome);
+      expect(result).toMatchObject({ outcome, code: outcome === 'failed' ? 'MODEL_CONNECTION_TEST_RESPONSE_INVALID' : null });
+      if (outcome === 'failed') expect(result.responseText).toBeUndefined();
+      expect(target.getModelServiceRouteConnection(route)?.connectionTest).toEqual(result);
       expect(nativeFetch).toHaveBeenCalledTimes(1);
     });
 

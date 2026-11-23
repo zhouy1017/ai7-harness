@@ -39,7 +39,7 @@ import { FastRoleError } from './fast-role-error.js';
 import { MATERIAL_TRANSLATION_KIND } from './material-translation-contract.js';
 import { EDITORIAL_POLISH_KIND, EDITORIAL_POLISH_PROMPT_CONTRACT, EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST } from './polish-contract.js';
 
-import { FLASH_TASK_REGISTRY, connectionProbe } from './flash-task-registry.js';
+import { FLASH_TASK_REGISTRY, connectionProbe, type ProbeModelEvidence } from './flash-task-registry.js';
 import { runStructuredFlashTask, STRUCTURED_FLASH_TASKS, type FlashTaskContract, type FlashTaskResult } from './flash-task-contract.js';
 
 export { FastRoleError };
@@ -227,7 +227,7 @@ export interface FastRoleBindingFacts {
 export type FastRoleProvenance = ModelTextAttemptProvenance;
 
 export type FastRoleAnswer =
-  | { readonly kind: 'answered'; readonly text: string; readonly binding: FastRoleBindingFacts }
+  | { readonly kind: 'answered'; readonly text: string; readonly binding: FastRoleBindingFacts; readonly probeModel?: ProbeModelEvidence }
   /**
    * Nothing usable came back. `outcomeUnknown`: the request may have been sent and billed and its answer never arrived whole
    * (结果待确认); it is never sent again on its own.
@@ -378,6 +378,7 @@ export class UnderlyingFlashService {
     };
     // Ordinary production has no development validation, so no request ever reaches the developer cache or ledger (Issue #811).
     const validation = live === null || isOrdinaryProductionRuntime(live.runtime) ? null : live.runtime.launch.validation;
+    let probeModel: ProbeModelEvidence | undefined;
     let adapter: DeepSeekOpenAiCompatibleAdapter | null = null;
     const provenance = (failureCode: string | null): FastRoleProvenance | undefined => route === null ? undefined : ({
       role: 'Fast Interaction Role', route: executionRoute, model, credentialSlot: route.profile.credentialSlot, endpoint: route.profile.endpoint, credentialReference,
@@ -444,7 +445,7 @@ export class UnderlyingFlashService {
             codes,
             profile,
             modelProfile: route.modelProfile,
-            verifyResponseModel: kind.kindId === CONNECTION_TEST_KIND,
+            ...(kind.kindId === CONNECTION_TEST_KIND ? { onProbeModel: (model, family) => { probeModel = model === undefined ? undefined : { model, family }; } } : {}),
             signal,
             beforeSend: () => requireRunning(signal),
             ...(kind.kindId === CONNECTION_TEST_KIND ? { transportSettings: connectionTestTransport(live.transportSettings) }
@@ -526,6 +527,7 @@ export class UnderlyingFlashService {
         return {
           kind: 'answered',
           text,
+          ...(probeModel === undefined ? {} : { probeModel }),
           binding: {
             kindId: kind.kindId,
             promptContractDigest,
@@ -622,7 +624,8 @@ export async function testModelServiceConnection(
   const facts = answer.kind === 'answered' ? answer.binding.provenance : answer.provenance;
   const passed = answer.kind === 'answered' && facts?.role === 'Fast Interaction Role' && facts.failureCode === null &&
     facts.route === allowed.route && facts.credentialReference === connection.credentialReference &&
-    connectionProbe.validateAndTrace(answer.text, { model: input.modelId, actualModel: answer.binding.model }) !== null;
+    answer.binding.model === input.modelId &&
+    connectionProbe.validateAndTrace(answer.text, { model: input.modelId, reported: answer.probeModel }) !== null;
   const code = passed ? null : answer.kind === 'failed' ? answer.code : facts?.failureCode ?? 'MODEL_CONNECTION_TEST_RESPONSE_INVALID';
   const uncertain = answer.kind === 'failed' ? answer.outcomeUnknown : code !== null && OUTCOME_UNKNOWN_CODES.has(code);
   const status: ModelConnectionTestStatus = {
@@ -630,7 +633,7 @@ export async function testModelServiceConnection(
     outcome: passed ? 'passed' : uncertain ? 'outcome-unknown' : cancelled() ? 'cancelled' : 'failed',
     code,
     verified: 'buffered-text-only',
-    ...(answer.kind === 'answered' ? { responseText: answer.text } : {}),
+    ...(answer.kind === 'answered' && code !== 'MODEL_CONNECTION_TEST_RESPONSE_INVALID' ? { responseText: answer.text } : {}),
     ...(facts === undefined ? {} : { provenance: { ...facts, failureCode: code } }),
   };
   await settle(() => store.recordModelConnectionTest(connection, status));

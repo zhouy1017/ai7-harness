@@ -464,18 +464,6 @@ export function modelRequestNotSent(request: object, cause: unknown): Error {
   return refusal;
 }
 
-/** Buffered probes accept the requested name or the family's versioned spelling of that same name. */
-function matchesResponseModel(requested: string, value: unknown, family: ProviderModelProfile['capabilities']['requestShape']): boolean {
-  if (typeof value !== 'string') return false;
-  const actual = family === 'google-generate-content' ? value.replace(/^models\//u, '') : value;
-  if (actual === requested) return true;
-  if (!actual.startsWith(requested + '-')) return false;
-  const suffix = actual.slice(requested.length + 1);
-  if (family === 'google-generate-content') return /^\d{3}$/u.test(suffix);
-  if (family === 'anthropic-messages') return /^\d{8}$/u.test(suffix);
-  return /^\d{4}-\d{2}-\d{2}$/u.test(suffix);
-}
-
 /** After transport admission, names/codes and caller requestSent hints cannot prove no send. */
 export function classifyTransportError(error: unknown, sent = false, request?: object): { code: string; message: string } {
   const proof = error instanceof Error ? MODEL_REQUEST_NO_SEND.get(error) : undefined;
@@ -548,8 +536,9 @@ export interface DeepSeekAdapterDependencies extends Pick<import('../../shared/r
   readonly transport?: DeepSeekTransport;
   /** Recheck the consumer/source generation inside the broker callback, before transport admission. */
   readonly beforeSend?: () => void;
+  /** Observe the buffered response's own model identity during an explicit connection probe. */
+  readonly onProbeModel?: (model: string | undefined, family: ProviderModelProfile['capabilities']['requestShape']) => void;
   /** Exact-call observation from inside the adapter, before any native sender was entered. */
-  readonly verifyResponseModel?: boolean;
   readonly onRequestNotSent?: (error?: unknown) => void;
   /** The route this adapter serves; the unchanged production route when absent. */
   readonly profile?: ProviderRouteProfile;
@@ -764,12 +753,9 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       }
       // Tool calls are read only for a request that offered tools (Issue #473); to any other the response reads as before.
       const shape = this.#modelProfile.capabilities.requestShape;
-      if (this.#deps.verifyResponseModel && bodyStatus >= 200 && bodyStatus < 300 && isRecord(body)) {
-        const field = shape === 'google-generate-content' ? 'modelVersion' : 'model';
-        if (Object.hasOwn(body, field) && !matchesResponseModel(options.model, body[field], shape)) {
-          yield fail('MODEL_CONNECTION_TEST_RESPONSE_INVALID', '模型服务返回的模型标识与所测试的模型不一致。');
-          return;
-        }
+      if (this.#deps.onProbeModel) {
+        const reported = isRecord(body) ? body[shape === 'google-generate-content' ? 'modelVersion' : 'model'] : undefined;
+        this.#deps.onProbeModel(typeof reported === 'string' ? reported : undefined, shape);
       }
       const parsed = parseProviderResponse(bodyStatus, body, this.#deps.codes, this.#profile, this.#modelProfile,
         { toolCallsOffered: (options.tools ?? []).length > 0,
