@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mountProposalConflict } from '../../src/renderer/proposal-conflict.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type { ProposalConflictProjection, ProposalConflictRegenerationProjection } from '../../src/shared/protocol.js';
+import { installMiniDom } from '../support/mini-dom.js';
 
 // A minimal element tree for this renderer's event boundary. No browser or Electron is started by L1.
 class Element extends EventTarget {
@@ -40,7 +42,7 @@ const conflict: ProposalConflictProjection = {
   navigator: { entries: [{ markId: 'mark', blockId: 'block', conflictKind: 'suggestion', deferred: false }], truncated: false },
 };
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { setTechnicalLayerVisible(false); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('the conflict surface while regeneration is pending', () => {
   it.each(['drafted', 'failed'] as const)('protects the draft until the %s answer settles, then restores the controls', async (outcome) => {
@@ -48,6 +50,7 @@ describe('the conflict surface while regeneration is pending', () => {
     vi.stubGlobal('document', { createElement: (tag: string) => new Element(tag), activeElement: null });
     vi.stubGlobal('HTMLElement', Element);
     vi.stubGlobal('window', { setTimeout, clearTimeout });
+    setTechnicalLayerVisible(true);
     const root = new Element('main');
     const find = (predicate: (node: Element) => boolean): Element => {
       const found = root.all().find(predicate);
@@ -100,4 +103,35 @@ describe('the conflict surface while regeneration is pending', () => {
     expect(status).toHaveBeenLastCalledWith('完成', outcome === 'drafted' ? 'success' : 'error');
     surface.destroy();
   });
+});
+
+it('opens ordinary conflicts at the text choices and saves the chosen writing without a path-selection ceremony', async () => {
+  const restore = installMiniDom();
+  vi.stubGlobal('window', { setTimeout, clearTimeout });
+  const root = document.createElement('main'); document.body.append(root);
+  const save = vi.fn().mockResolvedValue({ markId: 'mark', basisDigest: conflict.basisDigest, draft: { ordinal: 1 } });
+  const resolve = vi.fn().mockResolvedValue({ markId: 'mark', blockId: 'block', newMarkId: 'new-mark' });
+  const returnToManuscript = vi.fn();
+  const surface = mountProposalConflict({ root, manuscriptId: 'manuscript', branchId: 'branch', markId: 'mark', bookTitle: '合成测试', platform: 'win32',
+    api: { inspectProposalConflict: vi.fn().mockResolvedValue(conflict), inspectFastInteractionRoutes: vi.fn().mockResolvedValue({ conflictRegenerate: { available: false, reason: '尚未配置模型' } }),
+      saveProposalConflictDraft: save, resolveProposalConflict: resolve, regenerateProposalConflictUnit: vi.fn(), inspectFastInteractionRequest: vi.fn() },
+    technicalDetails: () => document.createElement('details'), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback, errorCode: () => null,
+    returnToManuscript, openConflict: vi.fn() });
+  try {
+    surface.start();
+    await vi.waitFor(() => expect(root.querySelector('[data-conflict-draft]')).not.toBeNull());
+    expect(root.querySelector('input[type="radio"]')).toBeNull();
+    expect(root.textContent).not.toMatch(/解决草稿|提案|权威|三方|合并结果/u);
+    expect([...root.querySelectorAll('.proposal-conflict-reference dt')].map((node) => node.textContent)).toEqual(['原文', '当前稿件', '修改建议']);
+    expect(save).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    root.querySelector<HTMLElement>('[data-conflict-action="take-proposed"]')!.click();
+    const finish = root.querySelector<HTMLButtonElement>('[data-conflict-action="save-version"]')!;
+    expect(finish.textContent).toBe('保存修改建议');
+    expect(finish.disabled).toBe(false);
+    finish.click();
+    await vi.waitFor(() => expect(returnToManuscript).toHaveBeenCalledWith({ blockId: 'block', markId: 'new-mark' }, expect.any(String)));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ units: [{ resolution: 'proposed', text: null }] }));
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'new-version', draftOrdinal: 1, basisDigest: conflict.basisDigest }));
+  } finally { surface.destroy(); restore(); }
 });
