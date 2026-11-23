@@ -1163,6 +1163,7 @@ async function main() {
       JSON.stringify(compact.rows) === JSON.stringify({
         处理: '只处理任务卡所列范围，不参考其他材料。',
         发送: '不发送，无模型用量。',
+        预计: '只记录这次运行，不调用模型。',
         会得到: '一条运行记录（不派发）。',
         不会: '不运行、改稿、导出发布、存里程碑、读书外内容。',
         中途: '只记录本次授权，无需中途参与。',
@@ -1181,7 +1182,7 @@ async function main() {
       const rows=Array.from(drawer.querySelectorAll('[data-task-plan-row]'));
       return head?.children.length===3 && head.children[0].contains(drawer.querySelector('h2')) && head.children[0].contains(drawer.querySelector('.task-drawer-pill')) &&
         head.children[1].classList.contains('task-drawer-modes') && head.children[2].getAttribute('aria-label')==='关闭' && head.children[2].textContent==='' &&
-        rows.length===5 && rows.every(row=>[...row.textContent].length<=36 && (row.textContent.match(/[。！？]/gu)??[]).length===1) &&
+        rows.length===6 && rows.every(row=>[...row.textContent].length<=36 && (row.textContent.match(/[。！？]/gu)??[]).length===1) &&
         [...drawer.querySelector('.task-bar-summary').textContent].length<=40;
     })()`, 'drawer-prototype-density');
 
@@ -1264,7 +1265,7 @@ async function main() {
     await pressKey(renderer, TAB_KEY);
     await assertRenderer(renderer, `document.activeElement?.dataset.taskDrawerControl==='mode-compact' && document.activeElement.matches(':focus-visible')`, 'drawer-tab-compact');
     await pressKey(renderer, ENTER_KEY);
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='compact' && document.querySelectorAll('#task-drawer [data-task-plan-row]').length===5 && document.activeElement?.dataset.taskDrawerControl==='mode-compact' && document.activeElement.getAttribute('aria-pressed')==='true'`, 'drawer-enter-compact');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='compact' && document.querySelectorAll('#task-drawer [data-task-plan-row]').length===6 && document.activeElement?.dataset.taskDrawerControl==='mode-compact' && document.activeElement.getAttribute('aria-pressed')==='true'`, 'drawer-enter-compact');
     await pressKey(renderer, TAB_KEY);
     await assertRenderer(renderer, `document.activeElement?.dataset.taskDrawerControl==='mode-full'`, 'drawer-tab-full');
     await pressKey(renderer, ENTER_KEY);

@@ -1421,7 +1421,8 @@ async function main() {
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await assertRenderer(renderer, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && getComputedStyle(document.querySelector('.baseline-analysis-card')).overflowX!=='scroll'`, 'zoom-reflow');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
-    await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.baseline-analysis-card')).boxShadow==='none' && getComputedStyle(document.querySelector('.baseline-analysis-card .analysis-state')).borderStyle!=='none'`, 'forced-colors');
+    // The first-analysis form has no state heading; its card and start control retain their outlines without colour.
+    await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.baseline-analysis-card')).boxShadow==='none' && getComputedStyle(document.querySelector('.baseline-analysis-card')).borderStyle!=='none' && !document.querySelector('.baseline-analysis-card .analysis-state') && getComputedStyle(document.querySelector('.baseline-analysis-card [data-analysis-action="start"]')).borderStyle!=='none'`, 'forced-colors');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
@@ -1431,6 +1432,10 @@ async function main() {
     await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', 'prepare-click');
     await launchTaskFromBar(renderer, waitFor, 'baseline');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'prepared', 120_000);
+    // A result still has a state pill, whose outline must survive forced colours as before.
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.baseline-analysis-card .analysis-state')).borderStyle!=='none'`, 'result-forced-colors');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     cancellation.throwIfRequested();
     const prepared = await readBaseline(renderer);
     const manifest = prepared?.coverageManifest;
@@ -3026,7 +3031,7 @@ async function main() {
     at('review-bar-ready');
     // The former prepared-plan bar cannot occur on a sheet start: its estimate is read-only and Start is the launch.
     requireJourney(await renderer.evaluate(`window.ai7.inspectReviewWorkspace().then(page=>page.run===null)`), 'review-estimate-no-prepared-record');
-    await assertRenderer(renderer, `document.querySelector('dialog.review-sheet [data-review-action="start"]')?.disabled===false && !!document.querySelector('.review-estimate')?.textContent && !document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, 'review-one-step-ready');
+    await assertRenderer(renderer, `document.querySelector('dialog.review-sheet [data-review-action="start"]')?.disabled===false && /^预计.+；(?:用时暂无可靠估计|按最近同类任务，.+)。$/u.test(document.querySelector('dialog.review-sheet .review-consequences [data-consequence="cost"]')?.textContent ?? '') && !document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, 'review-one-step-ready');
     at('review-offline-bar');
     await writeFile(connectivityPath, 'offline');
     await closeOwnedBrowser(); await launchForCleanup();
