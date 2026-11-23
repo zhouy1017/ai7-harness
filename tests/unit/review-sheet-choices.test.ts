@@ -227,12 +227,33 @@ async function openSheet(launch: (input: unknown) => Promise<unknown> = async ()
   const dialog = () => root.querySelector('dialog')!;
   const press = async (selector: string) => { root.querySelector(selector)!.click(); await flush(); };
   const box = (id: string) => root.querySelector(id === 'local-text-check' ? '[data-review-local-switch] input' : `[data-review-category-option="${id}"] input`)!;
-  const change = async (node: MiniElement, value: boolean | string) => { if (typeof value === 'boolean') node.checked = value; else node.value = value; node.dispatchEvent({ type: 'change', bubbles: true }); await flush(); };
+  const change = async (node: MiniElement, value: boolean | string) => {
+    if (typeof value === 'boolean') node.checked = value; else node.value = value;
+    // A native selection emits input before change; a redraw in between must not restore the old tick.
+    node.dispatchEvent({ type: 'input', bubbles: true });
+    node.dispatchEvent({ type: 'change', bubbles: true }); await flush();
+  };
   const level = () => root.querySelector('[data-review-field="evidenceAssuranceLevel"]') as MiniElement | null;
   return { root, surface, dialog, press, box, change, level, launchReviewRun, previewTaskLaunch, open: () => press('[data-review-action="new-review"]') };
 }
 
 describe('the mounted new-review form', () => {
+  it('keeps category selections through input and change and launches the displayed set', async () => {
+    const view = await openSheet(); await view.open();
+    await view.press('[data-review-action="prepare"]');
+    const estimated = view.root.querySelector('[data-consequence="cost"]')!.textContent;
+    await view.change(view.box('style-and-format'), true);
+    await view.change(view.box('factual-review'), true);
+    await view.change(view.box('typos-and-usage'), false);
+    expect(view.box('style-and-format').checked).toBe(true);
+    expect(view.box('factual-review').checked).toBe(true);
+    expect(view.box('typos-and-usage').checked).toBe(false);
+    expect(view.root.querySelector('[data-review-action="open-search-settings"]')!.hidden).toBe(false);
+    expect(view.root.querySelector('[data-consequence="cost"]')!.textContent).not.toBe(estimated);
+    await view.press('[data-review-action="start"]');
+    expect(view.launchReviewRun.mock.calls[0]![0]).toMatchObject({ categoryIds: ['style-and-format', 'factual-review'], scope: WHOLE });
+  });
+
   it.each([false, true])('shows the service estimate for the selected launch request (local check: %s)', async local => {
     const sentence = local ? '只在本机检查，不调用模型。' : '预计读 12 个部分，至少 13 次模型调用（重试时会更多）；按最近同类任务，约 6 分钟。';
     const view = await openSheet(undefined, async () => ({ steps: [], scope: '', units: 12, reference: [], send: '', usage: '50000 tokens', adaptations: [],
