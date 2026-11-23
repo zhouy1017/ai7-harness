@@ -3397,7 +3397,19 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
     form.append(choices.element, localOptions, scopes, networkNotice, networkSettings, problem, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());
-    for (const event of ['input', 'change']) form.addEventListener(event, () => { estimateGeneration += 1; delete state.clientCommandId; delete state.estimate; sheetUpdate(); });
+    // Input precedes a checkbox's change handler: invalidate the estimate without repainting its not-yet-stored tick.
+    for (const event of ['input', 'change']) form.addEventListener(event, () => { estimateGeneration += 1; delete state.clientCommandId; delete state.estimate; updateConsequences(); });
+
+    function updateConsequences(): typeof offeredCategories {
+      const effective = effectiveCategories(workspace, state);
+      const from = chapterOptions.find((chapter) => chapter.blockId === state.from) ?? null;
+      const to = chapterOptions.find((chapter) => chapter.blockId === state.to) ?? null;
+      const selected = offeredCategories.filter((entry) => effective.includes(entry.categoryId));
+      const estimate = reviewConsequenceEstimate(selected, state.scope, workspace, { from, to });
+      readValue.textContent = estimate.read; sendValue.textContent = estimate.send;
+      notDoValue.textContent = estimate.notDo; costValue.textContent = state.estimate ?? estimate.cost;
+      return selected;
+    }
 
     // Everything that follows from the choices, redrawn in place so a choice never moves the focus.
     function updateSheet(): void {
@@ -3421,12 +3433,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       range.hidden = state.scope !== 'chapters';
       fromSelect.disabled = state.scope !== 'chapters' || preparing;
       toSelect.disabled = state.scope !== 'chapters' || preparing;
-      const from = chapterOptions.find((chapter) => chapter.blockId === state.from) ?? null;
-      const to = chapterOptions.find((chapter) => chapter.blockId === state.to) ?? null;
-      const selected = offeredCategories.filter((entry) => effective.includes(entry.categoryId));
-      const estimate = reviewConsequenceEstimate(selected, state.scope, workspace, { from, to });
-      readValue.textContent = estimate.read; sendValue.textContent = estimate.send;
-      notDoValue.textContent = estimate.notDo; costValue.textContent = state.estimate ?? estimate.cost;
+      const selected = updateConsequences();
       const networkBlocked = selected.some((entry) => entry.networkUnavailable === true);
       networkNotice.hidden = !networkBlocked;
       networkSettings.hidden = !selected.some((entry) => entry.searchEngine) || options.openSearchSettings === undefined;
