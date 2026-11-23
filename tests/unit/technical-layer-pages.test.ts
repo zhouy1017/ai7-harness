@@ -3,6 +3,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { baselineAnalysisWire } from '../../src/service/analysis/baseline-analysis-wire.js';
+import { renderFidelityReview } from '../../src/renderer/import-fidelity.js';
+import { buildFidelityReport } from '../../src/service/docx.js';
+import { IMPORT_RELATIONSHIP_LABELS } from '../../src/renderer/import-review-labels.js';
 import { createImportReview } from '../../src/renderer/import-review.js';
 import { createBaselineAnalysisCard } from '../../src/renderer/baseline-analysis-card.js';
 import { mountSeries } from '../../src/renderer/series.js';
@@ -45,6 +48,17 @@ it('scans the Journey import review, prepared review plan and populated Series u
     view.renderReview(reviewed);
     expect(root.querySelector('h2')!.textContent).toBe('导入前复核'); scan(root);
     const book = await importSample1Book(store, roots.codeRoot, '公开样书');
+    view.renderTargetChoice(staged, 'new-book');
+    expect(root.querySelector('[id="import-book"] option')!.textContent).toBe('新建图书');
+    expect(root.querySelector('.commit-bar button.primary')).not.toBeNull(); scan(root);
+    const again = await store.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
+    for (const relationship of ['source-only', 'reimport'] as const) {
+      view.renderTargetChoice(again, `existing-book:${book.bookId}`, undefined, undefined, relationship);
+      expect((root.querySelector('[id="import-book"]') as HTMLSelectElement).querySelector(`option[data-book-id="${book.bookId}"]`)).not.toBeNull();
+      expect((root.querySelector(`[data-import-relationship="${relationship}"]`) as HTMLInputElement).checked).toBe(true);
+      expect(root.querySelector('.commit-bar button.primary')).not.toBeNull(); scan(root);
+    }
+    expect(root.querySelector('[data-reimport-source-version-choices] input')).toBeNull();
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
     let prepared = store.createReviewRunPreparationWork(book.bookId, ['local-text-check'],
       { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy, null, [], null, null, null,
@@ -79,4 +93,22 @@ it('scans the settled baseline, historical revision, plan versions and update co
   expect(root.querySelector('.baseline-analysis-card')).not.toBeNull();
   expect(root.textContent).toContain('历史记录（稿件已有更新）');
   scan(root);
+});
+
+it('keeps fidelity details closed and the text-box choice outside them (#1681)', () => {
+  const signals = { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0, textBoxes: 1, fields: 0 };
+  for (const fields of [0, 2]) {
+    const view = renderFidelityReview(buildFidelityReport({ ...signals, fields }, 0), null, { kind: 'offer' });
+    const root = document.createElement('section'); root.append(...view.elements);
+    expect(Boolean((root.querySelector('.fidelity-details') as HTMLDetailsElement).open)).toBe(false);
+    expect(root.querySelector('.fidelity-details [data-text-box-choice]')).toBeNull();
+    expect(root.querySelector('.fidelity-details .fidelity-summary')).toBeNull();
+    expect(root.querySelector('.fidelity-summary')!.getAttribute('data-fidelity-summary')).toBe(fields ? 'decision' : 'no-decision');
+    expect(root.querySelector('.fidelity-details .roundtrip-card')).not.toBeNull();
+    expect(root.querySelectorAll('.fidelity-details .fidelity-row').length).toBe(9);
+    const merge = root.querySelector('[data-text-box-disposition="merge"]') as HTMLInputElement;
+    merge.checked = true; (merge as unknown as MiniElement).dispatchEvent({ type: 'change' });
+    expect(view.textBoxDisposition()).toBe('merge');
+  }
+  expect(IMPORT_RELATIONSHIP_LABELS).toEqual({ 'first-manuscript': '作为首份稿件导入', 'source-only': '存为来源材料', reimport: '更新稿件' });
 });

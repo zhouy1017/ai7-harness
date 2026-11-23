@@ -3325,6 +3325,14 @@ button.danger:hover { box-shadow: inset 0 0 0 1px var(--status-blocked); }
   .house-row-head { display: none; }
 }
 
+/* Import target selection and its persistent primary action (#1681). */
+.import-book-choice { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.import-book-choice select { min-width: 12rem; max-width: 100%; }
+.import-page-actions { z-index: 3; flex-shrink: 0; }
+.import-page-actions .button-row { margin: 0; }
+/* On the import page the developer disclosure follows the page, clear of its sticky actions. */
+body:has(#screen .import-page-actions) > .technical-layer-control { position: static; align-self: flex-end; margin: .75rem 1rem; }
+
 /* Session drafts: only folded rows make room below their paragraph. */
 .editorial-mark-draft-row { position: absolute; height: 28px; box-sizing: border-box; padding: 0 .6rem; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 1; }
 
