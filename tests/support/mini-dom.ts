@@ -35,6 +35,7 @@ export class MiniElement {
   #text = '';
   #listeners = new Map<string, Listener[]>();
   getClientRects(): Array<object> { return this.hidden ? [] : [{}]; }
+  hasChildNodes(): boolean { return this.children.length > 0 || this.#text.length > 0; }
   open = false;
   show(): void { this.open = true; }
   close(): void { this.open = false; this.dispatchEvent({ type: 'close' }); }

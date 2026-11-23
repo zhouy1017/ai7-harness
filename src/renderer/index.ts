@@ -18,7 +18,7 @@ import { createDataStorage } from './data-storage.js';
 import { mountManuscriptScreen, documentContextOf, type ManuscriptScreen } from './manuscript-screen.js';
 import { mountGlobalAgent } from './global-agent.js';
 import { createAppearance, initializeReducedMotion } from './appearance.js';
-import { mountFindingsCenter } from './findings-center.js';
+import { mountFindingsCenter, type FindingTextTarget } from './findings-center.js';
 import { createCommandPalette } from './command-palette.js';
 import { commandUsable, goBack, refreshCommandEntries, type UsableScreen } from './command-usable.js';
 import { applyFindingBatches } from './manuscript-apply.js';
@@ -2403,7 +2403,7 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
   content.append(host);
   replaceScreen('book-findings', content, { bookId, title: bookTitle, section: 'findings' });
   agentWorkspaceReturns.set(content, () => renderBookFindings(bookId, bookTitle));
-  mountFindingsCenter(host, (offset) => api.inspectBookFindings({ offset }), (item: BookFindingProjection) => {
+  mountFindingsCenter(host, (input) => api.inspectBookFindings(input), (item: BookFindingProjection) => {
     const target = item.target;
     if (target.kind === 'review') renderBookReview(bookId, bookTitle, { reviewRunId: target.reviewRunId, findingId: target.findingId });
     else if (target.kind === 'risk') renderBookEvaluation(bookId, bookTitle, target);
@@ -2413,7 +2413,7 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
     if (!suggestions.length) return;
     try { return await applyFindingBatches(suggestions, api); }
     catch (error) { setStatus(rendererErrorMessage(error, '未能应用修改建议。'), 'error'); }
-  }, () => { renderBookReview(bookId, bookTitle); reviewWorkspace?.openNew(); });
+  }, () => { renderBookReview(bookId, bookTitle); reviewWorkspace?.openNew(); }, (target) => goToReviewText(bookId, bookTitle, target));
   setStatus(FINDINGS_CENTER_WORDS.opened);
 }
 
@@ -2497,6 +2497,18 @@ function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
   focusAfterLoad(item, { preventScroll: true });
 }
 
+async function goToReviewText(bookId: string, bookTitle: string, target: FindingTextTarget): Promise<void> {
+  const current = navigation.begin();
+  const origin = screen.firstElementChild;
+  const opened = await api.getManuscriptWindowAt({
+    manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId },
+  });
+  if (!current.isCurrent()) return;
+  leaveReviewReturn(bookId, target, () => { void leaveThen(async () => renderBookReview(bookId, bookTitle)); });
+  if (!current.isCurrent() || screen.firstElementChild !== origin) return;
+  await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined, undefined, current);
+}
+
 /**
  * ②B 审阅 as its own Book destination under 工作 (editor-surfaces §4, V2-UX-REV-001). The surface is
  * `review-workspace.ts`; the sidebar provides the destination routes. `focus` opens a named Review Run with one finding in
@@ -2533,19 +2545,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
         if (navigation.errorIsCurrent(error, current)) setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
       }
     },
-    goToText: async (target) => {
-      const current = navigation.begin();
-      const origin = screen.firstElementChild;
-      const opened = await api.getManuscriptWindowAt({
-        manuscriptId: target.manuscriptId,
-        branchId: target.branchId,
-        target: { kind: 'block', blockId: target.blockId },
-      });
-      if (!current.isCurrent()) return;
-      leaveReviewReturn(bookId, target, () => { void leaveThen(async () => renderBookReview(bookId, bookTitle)); });
-      if (!current.isCurrent() || screen.firstElementChild !== origin) return;
-      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined, undefined, current);
-    },
+    goToText: (target) => goToReviewText(bookId, bookTitle, target),
     openProposalWorkspace: (input) => renderProposalWorkspace(input, bookId, bookTitle),
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
     openRules: () => void renderKnowledgeBase('guidelines'),

@@ -151,6 +151,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   };
   let poll: number | null = null;
   const section = el('section', 'writing-task');
+  section.hidden = options.embedded === true;
+  if (options.embedded === true) section.classList.add('writing-task-embedded');
   root.append(section);
 
   const follow = (): void => {
@@ -195,27 +197,32 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     section.dataset['writingState'] = page.task?.state ?? 'none';
     const draftedCount = page.types.filter((type) => type.drafted !== null).length;
     options.onState?.({ underWay: UNDER_WAY.has(page.task?.state ?? ''), drafted: draftedCount });
-    // An embedded surface with nothing under way and nothing written says nothing (Issue #1403): its sheet opens from 新建.
-    section.hidden = options.embedded === true && page.task === null && draftedCount === 0 && sheet === null;
+    const task = page.task;
+    // Keep unfinished tasks and failures reachable; a completed task without drafts no longer occupies the editor (#1539, 10.2).
+    const needsAttention = task !== null && (!['available', 'settled', 'cancelled'].includes(task.state) || task.refusal !== null);
+    section.hidden = options.embedded === true && !needsAttention && draftedCount === 0 && sheet === null;
+    const summary = options.embedded === true ? el('div', 'writing-task-summary') : section;
+    if (summary !== section) section.append(summary);
     const heading = el('h3', undefined, options.embedded === true ? 'AI 写作' : WRITING_HEADING);
     heading.tabIndex = -1;
-    section.append(heading);
+    summary.append(heading);
     if (page.unavailable !== null) heading.append(' · ', el('span', 'writing-unavailable', page.unavailable));
-    else section.append(el('p', 'field-note', WRITING_LEDE));
-    const task = page.task;
+    else if (options.embedded !== true) section.append(el('p', 'field-note', WRITING_LEDE));
+    else if (task === null) summary.append(el('span', 'field-note', draftedCount > 0 ? `草稿已写好 ${draftedCount} 篇` : '参考资料起草衍生稿件'));
     if (task !== null) {
       const line = el('p', 'writing-task-line', writingTaskLine(task));
       if (task.modelLabel) line.append(` · ${task.modelLabel}`);
       line.dataset['writingTypeId'] = task.typeId;
       // Why the Task wrote no draft — a copy of an exemplar refused — said beside its line, with nothing offered to open.
-      if (task.refusal !== null) line.append(' · ', el('span', 'writing-task-refusal', task.refusal));
+      if (task.refusal !== null) line.append(' · ', el('span', 'writing-task-refusal', serviceWords(task.refusal)));
+      line.title = line.textContent ?? '';
       const row = el('div', 'button-row');
       // The next step only for a Task that can start: one whose 范例 is gone, or that wrote no draft, is looked at, not started (#698).
       const open = action(WRITING_ACTIONS.openTask, writingOpenTaskTone(task), 'open-task', () => options.openPlan(task.taskIntentId));
       open.setAttribute('aria-controls', 'task-drawer');
       open.disabled = busy;
       row.append(open);
-      section.append(line, row);
+      summary.append(line, row);
     }
     // Each drafted result not yet made its type's document.
     const drafted = page.types.filter((type): type is WritingTaskTypeProjection & { drafted: NonNullable<WritingTaskTypeProjection['drafted']> } => type.drafted !== null);
@@ -340,7 +347,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     const [synopsisTerm, evaluationTerm, exemplarTerm, materialTerm, bookTerm] = WRITING_REFERENCE_TERMS;
     references.append(
       el('dt', undefined, synopsisTerm), el('dd', undefined, page.references.synopsis),
-      el('dt', undefined, evaluationTerm), el('dd', undefined, page.references.evaluation),
+      el('dt', undefined, evaluationTerm), el('dd', undefined, serviceWords(page.references.evaluation)),
       el('dt', undefined, exemplarTerm), el('dd', 'writing-exemplars', chosen === null ? WRITING_EXEMPLAR_PICK_TYPE : chosen.exemplars.statement),
       el('dt', undefined, materialTerm), materialsNode(page, state),
       el('dt', undefined, bookTerm), el('dd', undefined, page.references.book),
@@ -429,7 +436,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     if (!busy && api.searchReferableMaterials !== undefined) node.append(similarMaterialsField({ searchReferableMaterials: api.searchReferableMaterials }, page.bookId, offer.items, new Set(state.materialIds), (id) => {
       state.materialIds.push(id); state.problem = null; paint(null);
     }));
-    const statement = el('p', 'writing-materials-statement', offer.statement.replace(/。$/u, offer.more > 0 ? '' : '。'));
+    const statement = el('p', 'writing-materials-statement', serviceWords(offer.statement).replace(/。$/u, offer.more > 0 ? '' : '。'));
     if (offer.more > 0) statement.append(el('span', 'writing-materials-more', `；${writingMaterialsMore(offer.more)}`));
     node.append(statement);
     // An item no longer offered, or no longer one that may be ticked, leaves the selection with its reason (Issue #759).
@@ -470,7 +477,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         label.htmlFor = id;
         row.append(box, label);
         if (reasonText !== null) {
-          const reason = el('span', 'writing-material-reason', reasonText);
+          const reason = el('span', 'writing-material-reason', serviceWords(reasonText));
           reason.id = uid('material-reason');
           box.setAttribute('aria-describedby', reason.id);
           label.append(reason);

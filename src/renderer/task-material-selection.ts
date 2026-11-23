@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import { createButton } from './components/controls.js';
 import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES, type WritingTaskMaterialProjection, type RendererApi } from '../shared/protocol.js';
 
@@ -44,7 +45,7 @@ export function reconcileTaskMaterialSelection(owner: object, items: ReadonlyArr
     const name = item?.title ?? memory.titles.get(id);
     const label = name === undefined ? '已选的一份资料' : `《${name}》`;
     memory.removals.set(id, item === undefined ? `${label}已不在清单，已移除。`
-      : !item.selectable ? `${label}已移除：${item.reason ?? '现在不能选'}`
+      : !item.selectable ? `${label}已移除：${serviceWords(item.reason) ?? '现在不能选'}`
         : `${label}已移除：最多参考 4 份资料，合计不超过 6,000 字。`);
   }
   for (const id of keptIds) memory.removals.delete(id);
@@ -71,7 +72,7 @@ export function taskMaterialSendLine(items: ReadonlyArray<WritingTaskMaterialPro
 }
 
 export function taskMaterialSelectionReason(item: WritingTaskMaterialProjection, items: ReadonlyArray<WritingTaskMaterialProjection>, selected: ReadonlySet<string>): string | null {
-  if (!item.selectable) return item.reason;
+  if (!item.selectable) return serviceWords(item.reason);
   if (selected.has(item.materialId)) return null;
   const chosen = items.filter((entry) => selected.has(entry.materialId));
   if (chosen.length >= MAX_WRITING_MATERIALS) return '最多参考 4 份资料；可以先去掉一份。';

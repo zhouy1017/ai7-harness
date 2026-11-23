@@ -1,4 +1,5 @@
 import { chooseImportTarget } from './import-page.mjs';
+import { checkRetainedFindingSources } from './retained-finding-sources.mjs';
 import { pressReachable } from './task-card-reach.mjs';
 import { capturePointerFailure, chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { ORDINARY_VIEWPORTS, atBothSizes, buttonRowsAtOneEdge, setDeveloperMode, typeInto } from './ordinary-pages.mjs';
@@ -3672,6 +3673,9 @@ async function main() {
     const factualCard = `document.querySelector('article.review-finding[data-finding-id="${sourced.reviewFindingId}"]')`;
     // Issue #1683 item 11: collapsed, the fact card lists no source; its rows live in 为这句核对的来源 once it is expanded.
     await waitFor(renderer, `${factualCard}?.dataset.factCard==='collapsed' && ${factualCard}.querySelector('.finding-evidence')===null`, 'factual-card-evidence', 30_000);
+    // The ordinary successful fixture belongs to the fact lens. Retention without a verification result is exercised
+    // separately at retained-finding-sources, through the real retained-before-verification write ordering.
+    await assertRenderer(renderer, `!!${factualCard}?.closest('.fact-lens')`, 'factual-source-list-fixture-in-fact-lens');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${sourced.reviewFindingId}"] [data-review-action="go-to-text"]`, 'factual-card-go-to-text');
     await openMarkMore(renderer, sourced.markId, 'factual-mark-card-more');
     await waitFor(renderer, `${evidenceRows(`document.querySelector('[data-mark-card="${sourced.markId}"]')`)}===${JSON.stringify(expectedEvidence)}`, 'factual-mark-card-evidence', 30_000);
@@ -4486,6 +4490,8 @@ async function main() {
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
+    at('retained-finding-sources');
+    await checkRetainedFindingSources({ renderer, waitFor, assertRenderer, requireJourney, press: pressInWindow }, dataRoot, ROOT, runRoot, browserRecord);
   } finally {
     finalCleanupRequested = true;
     try { await cancellation.cleanup(); } finally { cancellation.dispose(); }

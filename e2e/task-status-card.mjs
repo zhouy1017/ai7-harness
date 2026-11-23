@@ -8,8 +8,8 @@
  * window's own `innerWidth` and `innerHeight`, so the same stage runs at the wide window and at the Gate's.
  *
  * `ended` reads a Task that has finished (`model` is the frozen 模型@思考强度 it ran on, when the Journey knows it); otherwise a Run under
- * way, whose line is its stage alone (no fact the plan or the overview carries is the start of the stretch it is executing now). A finished
- * Task's figure is 处理用时, from its Run Report: `processed` requires it, and without it a Task that formed no report shows none.
+ * way, whose line is its stage and accumulated 用时. A finished Task keeps that same figure and its recorded request count;
+ * `processed` requires a working-time reading, while tasks without a Run show none.
  */
 export function statusCardExpression({ ended, model = null, processed = false }) {
   return `(() => {
@@ -36,10 +36,10 @@ export function statusCardExpression({ ended, model = null, processed = false })
     const lineWords = line('.task-status-line');
     const kindOk = ${ended ? 'true' : 'false'}
       ? line('.task-status-sentence')?.startsWith('已完成，得到') === true &&
-        (new RegExp('^处理用时 (' + duration + ')$', 'u').test(lineWords ?? '') || (${processed ? 'false' : 'true'} && lineWords === null)) &&
+        (new RegExp('^用时 (' + duration + ')( · [0-9,]+ 次模型调用)?$', 'u').test(lineWords ?? '') || (${processed ? 'false' : 'true'} && lineWords === null)) &&
         control('view-result') && control('full-link') && (${JSON.stringify(model)} === null || line('.task-status-model') === '模型 ' + ${JSON.stringify(model)})
       : shown(progress) && progress.getAttribute('role') === 'progressbar' && Number(progress.getAttribute('aria-valuenow')) <= Number(progress.getAttribute('aria-valuemax')) &&
-        (lineWords ?? '').length > 0 && !/已运行|用时/u.test(lineWords ?? '') && control('pause') && control('cancel-run') && control('full-link');
+        new RegExp(' · 用时 (' + duration + ')$', 'u').test(lineWords ?? '') && control('pause') && control('cancel-run') && control('full-link');
     return kindOk && title.length > 0 && title !== '任务计划' &&
       Array.from(drawer.querySelectorAll('.task-drawer-mode'), (node) => node.textContent).join('|') === '运行|计划' &&
       ['.task-plan-stage-chain', '.task-plan-goal', '.task-plan-chips', '.task-plan-compact', '.task-plan-activity', '.task-bar-summary', '.task-bar-status',

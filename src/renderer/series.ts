@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import type {
   BookSeriesProjection,
   RendererApi,
@@ -113,12 +114,12 @@ export function renderImpactGroup(group: SeriesImpactGroupProjection, heading: '
   changes.append(el('p', 'series-impact-label', group.changes.length === 0 ? `${SERIES_CHANGES_LABEL} · ${SERIES_NO_CHANGE}` : SERIES_CHANGES_LABEL));
   if (group.changes.length > 0) {
     const list = el('ul');
-    for (const line of group.changes) list.append(el('li', undefined, line));
+    for (const line of group.changes) list.append(el('li', undefined, serviceWords(line)));
     changes.append(list);
   }
   const unchanged = el('div', 'series-impact-unchanged');
   const list = el('ul');
-  for (const line of group.unchanged) list.append(el('li', undefined, line));
+  for (const line of group.unchanged) list.append(el('li', undefined, serviceWords(line)));
   unchanged.append(el('p', 'series-impact-label', SERIES_UNCHANGED_LABEL), list);
   box.append(changes, unchanged);
   return box;

@@ -107,6 +107,13 @@ type SqlRow = Record<string, SQLOutputValue>;
 
 const RECORD_SCHEMA = 'ai7.book-people/1';
 const ACTOR = '本机编辑';
+/** Latest persisted editorial activity, including reading/edits that create no revision. No library read records activity. */
+export const BOOK_LAST_WORKED_SQL = `max(b.created_at,
+  coalesce((SELECT max(p.recorded_at) FROM manuscript_entry_positions p WHERE p.book_id = b.book_id), b.created_at),
+  coalesce((SELECT max(e.durable_at) FROM edit_journal_entries e JOIN manuscripts m ON m.manuscript_id = e.manuscript_id WHERE m.book_id = b.book_id), b.created_at),
+  coalesce((SELECT max(r.created_at) FROM manuscript_revisions r JOIN manuscripts m ON m.manuscript_id = r.manuscript_id WHERE m.book_id = b.book_id), b.created_at),
+  coalesce((SELECT max(p.recorded_at) FROM book_people_versions p WHERE p.book_id = b.book_id), b.created_at),
+  coalesce((SELECT max(c.recorded_at) FROM series_membership_changes c WHERE c.book_id = b.book_id), b.created_at))`;
 /** A name never holds a separator, a list comma or a line break: each field is read back as its names. */
 const NAME_FORBIDDEN = /[、,，;；\r\n]/u;
 
@@ -212,6 +219,17 @@ export class BookPeople {
     return { authors: people.authors, editors: people.editors, related: people.related.map((person) => ({ roleLabel: person.roleLabel, name: person.name })) };
   }
 
+  /** Metadata shared by the catalog page and recently worked Books outside that page. */
+  libraryFacts(bookId: string): NonNullable<import('../shared/protocol.js').PriorWorkItemProjection['library']> {
+    const book = this.#db.prepare(`SELECT b.internal_number, ${BOOK_LAST_WORKED_SQL} last_worked_at FROM books b WHERE b.book_id = ?`).get(bookId)!;
+    const series = this.#db.prepare(`SELECT s.title FROM series_membership_changes c JOIN series s ON s.series_id = c.series_id
+      WHERE c.book_id = ? AND c.kind = 'add' AND c.ordinal = (
+        SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id)
+      ORDER BY s.title, s.series_id`).all(bookId);
+    return { internalNumber: book.internal_number === null ? null : String(book.internal_number), people: this.summary(bookId),
+      lastWorkedAt: String(book.last_worked_at), seriesNames: series.map(row => String(row.title)) };
+  }
+
   /**
    * `保存人员`: the whole set, against the version the editor read. The same set as the newest version records nothing and
    * says so; any other appends the next version. The caller holds the transaction.
@@ -278,7 +296,7 @@ export class BookPeople {
     if (filter.field === 'editor') return { where: newest('editors_text'), parameters: [text] };
     // 书系 (Issue #63, S28a): a Series the Book is in now, by its name.
     if (filter.field === 'series') return { where: SERIES_TITLE_FILTER_SQL, parameters: [text] };
-    return { where: `(${title} OR ${newest('authors_text')} OR ${newest('editors_text')} OR ${SERIES_TITLE_FILTER_SQL})`, parameters: [text, text, text, text] };
+    return { where: `(${title} OR ${newest('authors_text')} OR ${newest('editors_text')} OR ${SERIES_TITLE_FILTER_SQL} OR instr(lower(b.internal_number), lower(?)) > 0)`, parameters: [text, text, text, text, text] };
   }
 
   /** The Book's newest version. */

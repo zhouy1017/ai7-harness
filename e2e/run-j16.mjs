@@ -1,9 +1,12 @@
 import { chooseImportTarget } from './import-page.mjs';
+import { withReturnArrival } from './return-arrival.mjs';
 import { rightColumnGeometry } from './comments-pane.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
 import { assertReachable, pressReachable } from './task-card-reach.mjs';
 import { spawn } from 'node:child_process';
+import { setDeveloperMode } from './ordinary-pages.mjs';
+import { tabTo, pressKey, pressReachable as pressWithoutFrames } from './import-entry-stages.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -462,9 +465,39 @@ async function openManuscriptOf(renderer, bookId, name) {
 }
 
 /** 任务 on the manuscript's right edge: the Book's panel in the side slot, read once it is ready. */
-async function openPanel(renderer, name) {
-  await clickSelector(renderer, '[data-edge-entry="tasks"]', `${name}-entry`);
-  return waitForPanel(renderer, (panel) => panel.state === 'ready', `${name}-panel`);
+async function openPanel(renderer, name, { heldFrames = false } = {}) {
+  if (heldFrames) await assertRenderer(renderer, `Array.isArray(globalThis.__ai7HeldCompletionFrames)`, `${name}-held-frame-contract`);
+  const press = (selector, label) => heldFrames
+    ? pressWithoutFrames({ renderer, waitFor, assertRenderer }, selector, label)
+    : pressReachable(renderer, waitFor, requireJourney, selector, label);
+  const view = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer && !drawer.hidden ? drawer.dataset.taskDrawerView : null; })()`);
+  if (view !== null && view !== 'panel') {
+    await press('#task-drawer [data-task-drawer-control="close"]', `${name}-close-covering-drawer`);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true && document.getAnimations().every(a=>a.playState!=='running')`, `${name}-drawer-closed`);
+  }
+  if (view !== 'panel') await press('[data-edge-entry="tasks"]', `${name}-entry`);
+  const panel = await waitForPanel(renderer, (panel) => panel.state === 'ready', `${name}-panel`);
+  await waitFor(renderer, `document.getAnimations().every(a=>a.playState!=='running')`, `${name}-panel-settled`);
+  await assertRenderer(renderer, `document.querySelectorAll('#task-drawer .task-panel-launch > summary').length===1 && !document.querySelector('#task-drawer [data-task-overview-start]')`, `${name}-one-launcher`);
+  return panel;
+}
+
+/** Empty and populated Book panels have one launch entry in each mode, reachable by the keyboard too. */
+async function panelLauncherModes(renderer, name) {
+  const original = await renderer.evaluate(`document.documentElement.dataset.technicalLayerVisible==='true'`);
+  for (const developer of [!original, original]) {
+    const label = `${name}-${developer ? 'developer' : 'ordinary'}`;
+    await setDeveloperMode(renderer, waitFor, developer, label, (page, selector, check) => pressReachable(page, waitFor, requireJourney, selector, check));
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.section('manuscript'), `${label}-manuscript`);
+    await waitFor(renderer, `document.querySelector('.editor-shell .ProseMirror')`, `${name}-${developer ? 'developer' : 'ordinary'}-editor`);
+    await openPanel(renderer, label);
+    await waitFor(renderer, `document.getAnimations().every(a=>a.playState!=='running')`, `${label}-settled`);
+    const summary = '#task-drawer .task-panel-launch > summary';
+    await tabTo({renderer, waitFor, assertRenderer}, summary, label);
+    await pressKey(renderer, 'Enter');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-panel-launch')?.open===true`, `${label}-keyboard-open`);
+    await pressReachable(renderer, waitFor, requireJourney, summary, `${label}-close-menu`);
+  }
 }
 
 /** One card's action, named by the Task's state and the action's key. */
@@ -1093,6 +1126,7 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === true && document.body.dataset.taskDrawer === 'open'`, 'panel-one-slot');
 
     at('panel-launch-menu');
+    await panelLauncherModes(renderer, 'panel-empty-launcher');
     const menu = '#task-drawer .task-panel-launch';
     await waitFor(renderer, `document.getAnimations().every(animation => animation.playState !== 'running')`, 'panel-transition-settled');
     await pressReachable(renderer, waitFor, requireJourney, menu + ' > summary', 'panel-menu-open');
@@ -1116,6 +1150,7 @@ async function main() {
       cardsOf(running, 'active')[0].time.startsWith('记录于 ') && cardsOf(running, 'active')[0].reason.length <= 60 &&
       JSON.stringify(cardsOf(running, 'active')[0].actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['cancel', '取消任务', 'enabled']]),
     'panel-running-card', running);
+    await panelLauncherModes(renderer, 'panel-populated-launcher');
 
     at('panel-pause');
     // 暂停 on the card, as the drawer's bar would: 正在暂停 while the range in flight finishes, then 已暂停 with 续行.
@@ -1272,24 +1307,26 @@ async function main() {
       ${manuscriptRailJump('0.5')};
     })()`);
     // The real navigation sets its guard synchronously, before awaiting the window read.
-    await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'chip-use');
-    await renderer.evaluate(`globalThis.__j16ReleaseFrames()`);
-    try {
-      await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
-    } catch (error) {
-      // Failure-only closed state: never emit manuscript text, identifiers or arbitrary status words.
-      const state = await renderer.evaluate(`(() => { const chip = ${CHIP}; return {
-        present: chip !== null, disabled: chip?.disabled === true, target: ${blockInView(chip.blockId)},
-        arrived: (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已回到'),
-      }; })()`).catch(() => null);
-      if (state === null) at('chip-return-state-unavailable');
-      else if (state.present && state.disabled) at('chip-return-retained-busy');
-      else if (state.present) at('chip-return-retained-ready');
-      else if (!state.target) at('chip-return-target-missing');
-      else if (!state.arrived) at('chip-return-status-replaced');
-      else at('chip-return-late-completion');
-      throw error;
-    }
+    await withReturnArrival(renderer, CHIP, async () => {
+      await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'chip-use');
+      await renderer.evaluate(`globalThis.__j16ReleaseFrames()`);
+      try {
+        await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && globalThis.__j16ReturnArrival.arrived()`, 'chip-returned', 60_000);
+      } catch (error) {
+        // Failure-only closed state: never emit manuscript text, identifiers or arbitrary status words.
+        const state = await renderer.evaluate(`(() => { const chip = ${CHIP}; return {
+          present: chip !== null, disabled: chip?.disabled === true, target: ${blockInView(chip.blockId)},
+          arrived: globalThis.__j16ReturnArrival.arrived(),
+        }; })()`).catch(() => null);
+        if (state === null) at('chip-return-state-unavailable');
+        else if (state.present && state.disabled) at('chip-return-retained-busy');
+        else if (state.present) at('chip-return-retained-ready');
+        else if (!state.target) at('chip-return-target-missing');
+        else if (!state.arrived) at('chip-return-arrival-unobserved');
+        else at('chip-return-late-completion');
+        throw error;
+      }
+    });
     await waitForRailMarker(renderer, 'annotation', 'mark-rail-ready');
     // A storage failure must refuse the jump, rather than lose the editor's way back.
     await renderer.evaluate(`(() => {
@@ -1680,12 +1717,10 @@ async function main() {
     const paragraphText = () => renderer.evaluate(`window.__j16.block(${JSON.stringify(taskBlock)})?.textContent ?? null`);
     const paragraphBefore = await paragraphText();
     const windowLoads = () => renderer.evaluate(`document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? ''`);
-    // On a selection of that paragraph the menu's 就这段发起任务… acts; the house's 可复用工序 would be listed here (S77 deferred item a,
-    // J-13's) — this house has none, which the group says once its read answers — 润色这段 is enabled, this launch binding a model
-    // fixture (Issue #842), the other two prototype presets are gone, and 再选一段加入 is refused in words.
+    // I-1b: three explained AI entries; 审阅选中内容 keeps the existing selection task composer and its saved-procedure route.
     await openSelectionMenu(renderer, taskBlock, 0, wordsTo, 'selection-task-open-menu');
-    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && polish instanceof HTMLButtonElement && !polish.disabled && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().textContent.includes('要再选一段加入，请在任务草稿中操作。'); })()`, 'selection-task-menu-items');
-    await waitFor(renderer, `window.__j16.menu()?.textContent.includes('本社还没有启用的可复用工序。') && window.__j16.menu().querySelectorAll('[data-mark-action^="procedure:"]').length === 0 && window.__j16.item('task-on-selection') instanceof HTMLButtonElement`, 'selection-task-menu-procedures-none', 15_000);
+    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('审阅选中内容') && polish === null && window.__j16.item('scoped-ai-edit')?.disabled === false && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().querySelectorAll('[aria-label="AI7 任务"] .menu-caption small').length === 3; })()`, 'selection-task-menu-items');
+    await waitFor(renderer, `window.__j16.menu().querySelectorAll('[data-mark-action^="procedure:"]').length === 0 && window.__j16.item('task-on-selection') instanceof HTMLButtonElement`, 'selection-task-menu-procedures-none', 15_000);
     await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-choose');
     // Synchronized delta (Issue #423, slice 7a): 就这段发起任务… hands the words to the Context-bound Task Composer in the side slot;
     // its 按现成工序准备… closes it and opens the composer below the paragraph that prepares one of the house's 工序 at once.
@@ -1953,15 +1988,9 @@ async function main() {
     for (let round = 0; round < 80; round += 1) {
       await waitFor(renderer, `document.querySelector('[data-reimport-mappings="failed"]') || (document.querySelector('[data-reimport-mappings="ready"]') && (document.querySelector('[data-accept-reimport-degradation]:not(:disabled)') || document.querySelector('[data-reimport-verb-choice]:not(:disabled)') || document.querySelector('[data-reimport-next-page]:not(:disabled)') || document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'))`, 'selection-task-gone-mapping-page', 120_000);
       requireJourney(await renderer.evaluate(`document.querySelector('[data-reimport-mappings="failed"]') === null`), 'selection-task-gone-mappings-valid');
-      if (await renderer.evaluate(`Boolean(document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'))`)) {
-        const before = await reviewVersion();
-        await clickSelector(renderer, '[data-accept-reimport-degradation]', 'selection-task-gone-degradation');
-        await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(before)}`, 'selection-task-gone-degradation-persisted', 60_000);
-        continue;
-      }
       const row = await renderer.evaluate(`(() => { const row = document.querySelector('article.reimport-group[data-reimport-group-verb=""]'); return row ? { groupId: row.dataset.reimportGroupId, verbs: Array.from(row.querySelectorAll('[data-reimport-verb-choice]'), (choice) => choice.dataset.reimportVerbChoice) } : null; })()`);
       if (row === null) {
-        if (await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`)) break;
+        if (await renderer.evaluate(`Boolean(document.querySelector('[data-commit-manuscript-reimport]:not(:disabled)'))`)) break;
         const firstGroup = await renderer.evaluate(`document.querySelector('article.reimport-group')?.dataset.reimportGroupId ?? null`);
         await assertRenderer(renderer, `(() => { const next = document.querySelector('[data-reimport-next-page]:not(:disabled)'); if (!next) return false; next.click(); return true; })()`, 'selection-task-gone-next-page');
         await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]') && document.querySelector('article.reimport-group')?.dataset.reimportGroupId !== ${JSON.stringify(firstGroup)}`, 'selection-task-gone-next-page-ready', 60_000);
@@ -1974,7 +2003,7 @@ async function main() {
       await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(before)} || document.querySelector('#persistence-status')?.dataset.tone === 'error'`, 'selection-task-gone-resolution-persisted', 60_000);
       requireJourney(await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone !== 'error'`), 'selection-task-gone-resolution-valid');
     }
-    await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`, 'selection-task-gone-commit-ready', 60_000);
+    await waitFor(renderer, `Boolean(document.querySelector('[data-commit-manuscript-reimport]:not(:disabled)'))`, 'selection-task-gone-commit-ready', 60_000);
     // Force the reimport acknowledgement to finish after the refused jump by holding its presentation frames, as J-01 does.
     // This reproduces a stale status overwrite consistent with Issue #807's failure marker; the hosted macOS ordering was
     // not observed. Releasing the frames below proves the refusal survives that late acknowledgement on any platform.
@@ -1995,7 +2024,7 @@ async function main() {
     const returnBefore = await renderer.evaluate(READ_RETURN_ENTRY);
     requireJourney(returnBefore === null, 'selection-task-gone-no-return-before', returnBefore);
     const goneLoadsBefore = await windowLoads();
-    const gonePanel = await openPanel(renderer, 'selection-task-gone');
+    const gonePanel = await openPanel(renderer, 'selection-task-gone', { heldFrames: true });
     const goneCard = cardsOf(gonePanel, 'recent').find((card) => card.state === 'review-completed');
     requireJourney(goneCard !== undefined && goneCard.title === '审阅 · 第 1 次 · 所选段落' && goneCard.actions.some(([key, label, state]) => key === 'jump' && label === '跳到所选文字' && state === 'enabled'), 'selection-task-gone-card', gonePanel);
     await cardAction(renderer, 'review-completed', 'jump', 'selection-task-gone-jump');
@@ -2035,7 +2064,7 @@ async function main() {
     const workspaceRouteBefore = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then((route) => JSON.stringify(route))`);
     await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-entry-row');
     await waitFor(renderer, `document.querySelector('[data-screen="agent-workspace"] .agent-workspace[data-agent-workspace-state="available"]')?.dataset.bookId === ${JSON.stringify(bookId)}`, 'workspace-entry-screen');
-    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="agent-workspace"] .agent-workspace'); const back = root.querySelector('[data-agent-workspace-action="back"]'); return root.querySelector('h2')?.textContent === 'Agent 工作区' && root.querySelector('header .section-label') === null && root.querySelector('[data-agent-workspace-safety]')?.textContent === ${JSON.stringify(WORKSPACE_SAFETY)} && back instanceof HTMLButtonElement && back.textContent === '返回' && back.dataset.shortcutCommand === 'nav.back' && document.querySelector('#context-title')?.textContent === ${JSON.stringify(BOOK.title)} && document.querySelector(${JSON.stringify(AGENT_ROW)})?.getAttribute('aria-current') === 'page'; })()`, 'workspace-entry-words');
+    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="agent-workspace"] .agent-workspace'); const back = root.querySelector('[data-agent-workspace-action="back"]'); return root.querySelector('h2')?.textContent === 'Agent 工作区 · 多轮协作改稿' && root.querySelector('header .section-label') === null && root.querySelector('[data-agent-workspace-safety]')?.textContent === ${JSON.stringify(WORKSPACE_SAFETY)} && back instanceof HTMLButtonElement && back.textContent === '返回' && back.dataset.shortcutCommand === 'nav.back' && document.querySelector('#context-title')?.textContent === ${JSON.stringify(BOOK.title)} && document.querySelector(${JSON.stringify(AGENT_ROW)})?.getAttribute('aria-current') === 'page'; })()`, 'workspace-entry-words');
     requireJourney(await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`) === workspaceTasksBefore &&
       await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then((route) => JSON.stringify(route))`) === workspaceRouteBefore, 'workspace-entry-records-nothing');
     // Re-selecting the active row must not replace the original manuscript return with the overview fallback (#90 review).

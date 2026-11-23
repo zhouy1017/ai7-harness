@@ -5,7 +5,7 @@ import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { unzipSync } from 'fflate';
-import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx, addReadOnlySourceObjects } from './composed-docx.mjs';
 import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { openArchivePackageExport, openRemainingPackageExport } from './package-export-readiness.mjs';
-import { answer, dropFile, noImportDraft, pressReachable, questionOffers, reachable } from './import-entry-stages.mjs';
+import { answer, dropFile, holdEarlierNotice, noImportDraft, pressReachable, questionOffers, questionOutlastsNotice, reachable } from './import-entry-stages.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -845,9 +845,9 @@ async function openManuscript(renderer, name) {
  * before the type, so choosing the type keeps it, and the way of making the document is chosen last.
  */
 async function openDerivativePanel(renderer, { title, typeId, mode }, name) {
-  await waitFor(renderer, `document.querySelector('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="new"]:not(:disabled)') !== null`, `${name}-switcher`, 120_000);
+  await waitFor(renderer, `document.querySelector('[data-screen="editor"] .editor-toolbar [data-manuscript-switch="new"]:not(:disabled)') !== null`, `${name}-switcher`, 120_000);
   await clickSelector(renderer, '[data-derivative-menu]', `${name}-menu`);
-  await clickSelector(renderer, '[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="new"]', `${name}-open`);
+  await clickSelector(renderer, '[data-screen="editor"] .editor-toolbar [data-manuscript-switch="new"]', `${name}-open`);
   await waitFor(renderer, `(() => { const form = document.querySelector('.derivative-create-form'); const first = form?.querySelector('[data-document-field]'); return first?.dataset.documentField === 'title' && document.activeElement === first; })()`, `${name}-title-first`);
   if (title !== undefined) await fill(renderer, '.derivative-create-form [data-document-field="title"]', title, `${name}-title`);
   await assertRenderer(renderer, `(() => { const type = document.querySelector('.derivative-create-form select[data-document-field="type"]'); if (!(type instanceof HTMLSelectElement)) return false; type.value = ${JSON.stringify(typeId)}; type.dispatchEvent(new Event('change', { bubbles: true })); const mode = document.querySelector('.derivative-create-form input[name="derivative-mode"][value=${JSON.stringify(mode)}]'); if (!(mode instanceof HTMLInputElement)) return false; mode.click(); return type.value === ${JSON.stringify(typeId)} && mode.checked; })()`, `${name}-type-and-mode`);
@@ -1858,7 +1858,7 @@ async function main() {
         noAnalysis: shell?.querySelector('[data-records-destination="analysis"]') === null,
         edge: JSON.stringify(edge) === '["navigation","comments"]',
         // It is one of the Book's 稿件 (Issue #1403): the switcher marks it current, beside the manuscript.
-        switcher: JSON.stringify(Array.from(shell?.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]') ?? [], (item) => [item.dataset.manuscriptSwitch, item.getAttribute('aria-current')])) === '[["primary",null],["document","page"],["new",null],["manage",null]]' &&
+        switcher: JSON.stringify(Array.from(shell?.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch], .editor-toolbar [data-manuscript-switch]') ?? [], (item) => [item.dataset.manuscriptSwitch, item.getAttribute('aria-current')])) === '[["primary",null],["document","page"],["new",null],["manage",null]]' &&
           shell?.querySelector('.manuscript-switcher-bar [data-manuscript-switch="document"]')?.textContent === '[新闻稿] 新闻稿',
         noMilestone: shell?.querySelector('details.milestone-section') === null,
         saveVersion: shell?.querySelector('[data-document-action="saveVersion"]')?.textContent === '保存为版本',
@@ -3297,7 +3297,7 @@ async function main() {
     // Issue #1403: in ordinary mode 稿件 lists the manuscript and every derivative document by type and title, and makes new ones.
     await openManuscript(renderer, 'multi-manuscript');
     await waitFor(renderer, `document.querySelectorAll('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="document"]').length === 2`, 'multi-switcher-listed');
-    const multiSwitches = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]'), (item) => [item.dataset.manuscriptSwitch, item.textContent, item.getAttribute('aria-current')]))`);
+    const multiSwitches = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch], .editor-toolbar [data-manuscript-switch]'), (item) => [item.dataset.manuscriptSwitch, item.textContent, item.getAttribute('aria-current')]))`);
     requireJourney(multiSwitches === JSON.stringify([['primary', `主稿件（《${WRITING_TITLE}》）`, 'page'], ['document', '[宣传文章] 宣传文章', null], ['document', '[评论文章] 评论文章', null], ['new', '新建 / 导入衍生稿件…', null], ['manage', '管理全部衍生稿件（2）', null]]), 'multi-switcher-words', multiSwitches);
     at('multi-documents-ordinary-blank');
     const primaryBefore = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)},historyCursor:null}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
@@ -3357,9 +3357,9 @@ async function main() {
     const managementPage = '[data-screen="book-derivatives"]';
     const managementForm = `${managementPage} .derivative-create-form`;
     const openManagement = async (name) => {
-      await waitFor(renderer, `document.querySelector('.manuscript-switcher-bar [data-manuscript-switch="manage"]:not(:disabled)') !== null`, `${name}-switcher`, 60_000);
+      await waitFor(renderer, `document.querySelector('.editor-toolbar [data-manuscript-switch="manage"]:not(:disabled)') !== null`, `${name}-switcher`, 60_000);
       await pointerClick(renderer, waitFor, '[data-derivative-menu]', `${name}-menu`);
-      await pointerClick(renderer, waitFor, '.manuscript-switcher-bar [data-manuscript-switch="manage"]', `${name}-open`);
+      await pointerClick(renderer, waitFor, '.editor-toolbar [data-manuscript-switch="manage"]', `${name}-open`);
       await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} [data-derivative-action="new"]`)}) !== null`, `${name}-ready`, 60_000);
     };
     const openCreateForm = async (name) => {
@@ -3581,8 +3581,12 @@ async function main() {
       await pressReachable(dropIo, SIDEBAR.section('derivatives'), `${name}-management`);
     };
     // The page is where 删除类别 left it: 衍生稿件管理.
-    await dropFile(dropIo, SAMPLE1_PATH, managementPage, 'drop-management');
+    const longDropPath = resolve(runRoot, 'public-sample-import-question-with-a-long-filename-that-wraps-across-the-question-heading.docx');
+    await copyFile(SAMPLE1_PATH, longDropPath);
+    await holdEarlierNotice(dropIo, 'drop-management');
+    await dropFile(dropIo, longDropPath, managementPage, 'drop-management');
     await questionOffers(dropIo, ['update', 'derivative', 'cancel'], 'drop-management');
+    await questionOutlastsNotice(dropIo, 'drop-management');
     await noImportDraft(dropIo, 'drop-management-unanswered');
     await answer(dropIo, 'cancel', 'drop-management');
     await waitFor(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-management-closed');

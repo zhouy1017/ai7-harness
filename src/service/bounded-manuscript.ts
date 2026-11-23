@@ -1,3 +1,4 @@
+import { BOOK_LAST_WORKED_SQL } from './book-people.js';
 import type { ManualCommandRequestPin, ManualCommandSource } from '../shared/protocol/learning.js';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { BoundedStoreError, BoundedStoreFatalError, requireBounded, one, asString, asNumber, canonicalJson, sha256, graphemes,
@@ -2645,7 +2646,7 @@ export class BoundedManuscriptStore {
          ORDER BY created_at, attention_id LIMIT 1
        )
        WHERE m.role = 'primary' OR ra.attention_id IS NOT NULL
-       ORDER BY b.created_at DESC, b.book_id DESC LIMIT 20`,
+       ORDER BY ${BOOK_LAST_WORKED_SQL} DESC, b.book_id DESC LIMIT 20`,
     ).all() as SqlRow[];
     return rows.map((row) => ({
       bookId: asString(row.book_id),

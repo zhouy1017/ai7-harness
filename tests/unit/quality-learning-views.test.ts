@@ -195,16 +195,16 @@ it('ignores a late refusal after leaving the preference page', async () => {
 });
 
 it.each([
-  ['reenable', 'GLOBAL_AGENT_MEMORY_LIMIT', '本社审阅偏好最多 64 条，合计最多 6,000 字；请先合并或停用已有条目。'],
-  ['stop', 'LEARNING_SUPERVISION_STALE', '这条审阅偏好刚在别处改过，请重新查看后再操作。'],
-])('shows a %s refusal and reads both owners', async (operation, code, message) => {
+  ['reenable', 'GLOBAL_AGENT_MEMORY_LIMIT', '本社审阅偏好最多 64 条，合计最多 6,000 字；请先合并或停用已有条目。', '审阅偏好最多 64 条，合计最多 6,000 字；请先合并或停用已有条目。'],
+  ['stop', 'LEARNING_SUPERVISION_STALE', '这条审阅偏好刚在别处改过，请重新查看后再操作。', '这条审阅偏好刚在别处改过，请重新查看后再操作。'],
+])('shows a %s refusal and reads both owners', async (operation, code, message, displayed) => {
   const setup = learning(); const root = host(); await mountEditorialMemory(root, setup.renderer, vi.fn());
   const row = () => root.querySelector('[data-memory-item="active"]')!;
   if (operation === 'reenable') { click(row(), '停用'); await settle(); setup.api.reenableReviewPreference.mockRejectedValueOnce({ code, message }); }
   else setup.api.deactivateEditorialMemory.mockRejectedValueOnce({ code, message });
   const reads = setup.api.inspectGlobalAgent.mock.calls.length;
   click(row(), operation === 'reenable' ? '重新启用' : '停用'); await settle();
-  expect(root.querySelector('[role="status"]')!.textContent).toBe(message);
+  expect(root.querySelector('[role="status"]')!.textContent).toBe(displayed);
   expect(setup.api.inspectGlobalAgent.mock.calls.length).toBe(reads + 1);
   expect(setup.api.inspectEditorialLearning).toHaveBeenCalledTimes(2);
 });

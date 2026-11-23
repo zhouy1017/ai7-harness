@@ -1180,6 +1180,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'custom-dimension-define',
     'custom-dimension-run',
     'custom-dimension-tab',
+    'retained-finding-sources',
   ]),
   // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
@@ -1768,7 +1769,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'chip-return-retained-busy',
     'chip-return-retained-ready',
     'chip-return-target-missing',
-    'chip-return-status-replaced',
+    'chip-return-arrival-unobserved',
     'chip-return-late-completion',
     'analysis-jump-chip',
     'j14-panel-keyboard',
@@ -1861,6 +1862,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-credential-saved',
     'model-credential-removed',
     'consistency-offered',
+    'review-plan-rapid-reopen',
     'consistency-review-run',
     'series-scope-review-run',
     'consistency-marks-on-manuscript',

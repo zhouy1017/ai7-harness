@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import type {
   PreviewSeriesExclusionInput,
   RendererApi,
@@ -88,14 +89,14 @@ function impactGroup(group: SeriesExclusionImpactGroupProjection, heading: 'h5' 
   changes.append(el('p', 'series-impact-label', group.changes.length === 0 ? `${SERIES_CHANGES_LABEL} · ${SERIES_NO_CHANGE}` : SERIES_CHANGES_LABEL));
   if (group.changes.length > 0) {
     const list = el('ul');
-    for (const line of group.changes) list.append(el('li', undefined, line));
+    for (const line of group.changes) list.append(el('li', undefined, serviceWords(line)));
     changes.append(list);
   }
   const unchanged = el('div', 'series-impact-unchanged');
   unchanged.append(el('p', 'series-impact-label', group.unchanged.length === 0 ? `${SERIES_UNCHANGED_LABEL} · ${SERIES_NO_CHANGE}` : SERIES_UNCHANGED_LABEL));
   if (group.unchanged.length > 0) {
     const list = el('ul');
-    for (const line of group.unchanged) list.append(el('li', undefined, line));
+    for (const line of group.unchanged) list.append(el('li', undefined, serviceWords(line)));
     unchanged.append(list);
   }
   box.append(changes, unchanged);

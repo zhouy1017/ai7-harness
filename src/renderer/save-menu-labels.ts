@@ -13,5 +13,5 @@ export const SAVE_MENU_WORDS = {
   milestoneUnavailable: '里程碑版本状态暂不可用',
   milestone: `${MILESTONE_FORM_WORDS.summary}…`,
   importNewVersion: IMPORT_ENTRY_WORDS.newVersion,
-  exportManuscript: '导出…',
+  exportDeliverables: '导出交付物…',
 } as const;

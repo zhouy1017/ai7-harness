@@ -612,7 +612,7 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .task-overview-group-heading { margin: 0; font-size: 1.08rem; }
 .task-overview-empty, .task-overview-none { margin: .6rem 0 0; color: var(--text-subdued); }
 .task-overview-items { display: grid; gap: .6rem; margin-top: .7rem; }
-.task-overview-card { display:flex; align-items:center; gap:16px; position:relative; padding:14px 16px; border:1px solid var(--boundary); border-radius:10px; background:var(--surface); cursor:pointer; min-width:0; width:100%; max-width:100%; box-sizing:border-box; }
+.task-overview-card { display:flex; flex-wrap:wrap; align-items:center; gap:16px; position:relative; padding:14px 16px; border:1px solid var(--boundary); border-radius:10px; background:var(--surface); cursor:pointer; min-width:0; width:100%; max-width:100%; box-sizing:border-box; }
 .task-overview-card:hover { border-color: var(--action-text); }
 .task-overview-book { font-family: var(--font-serif); }
 .task-overview-separator { color: var(--text-subdued); }
@@ -998,6 +998,7 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .evaluation-version-list button[aria-current="true"] { font-weight: 800; }
 .evaluation-record { display: grid; gap: .6rem; min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); }
 .evaluation-record h3, .evaluation-record h4, .evaluation-record p { margin: 0; overflow-wrap: anywhere; }
+.evaluation-action-bar { position: sticky; bottom: 0; z-index: 2; align-self: end; padding: .65rem; border-top: 1px solid var(--boundary); background: var(--surface); box-shadow: 0 -4px 12px var(--shadow); }
 .evaluation-total { font-size: 1.1rem; font-weight: 800; }
 .evaluation-items, .evaluation-risks, .evaluation-lists { display: grid; gap: .6rem; min-width: 0; }
 .evaluation-item, .evaluation-risk, .evaluation-conclusion { display: grid; gap: .4rem; min-width: 0; margin: 0; padding: .6rem .8rem; border: 1px solid var(--boundary); border-radius: 8px; }
@@ -1273,6 +1274,12 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .writing-task { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); overflow-wrap: anywhere; }
 .writing-task h3, .writing-task h4 { margin: 0; }
 .writing-task > p, .writing-task > .button-row { margin: .45rem 0 0; }
+.writing-task-embedded { padding: .3rem .65rem; }
+.writing-task-summary { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.writing-task-summary h3 { flex: 0 0 auto; font-size: .9rem; }
+.writing-task-summary > :is(p, .field-note) { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.writing-task-summary > .button-row { flex: 0 0 auto; margin: 0; }
+.writing-task-summary .btn { min-height: 28px; padding: .1rem .55rem; }
 .writing-drafted { margin: .6rem 0 0; padding: 0; list-style: none; }
 .writing-drafted > li { padding: .55rem .7rem; border: 1px solid var(--boundary); border-radius: 9px; background: var(--surface); }
 .writing-sheet { margin-top: .6rem; display: grid; gap: .55rem; }
@@ -1651,6 +1658,8 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 /* 本书稿件 (Issue #1403): the manuscript and its derivative documents, one row above the editor, and 新建 / 导入衍生稿件 in place. */
 .manuscript-switcher { flex: 0 0 auto; border-bottom: 1px solid var(--boundary); background: var(--surface); }
 .manuscript-switcher-bar { display: flex; align-items: center; gap: .4rem .6rem; padding: .35rem 1rem; min-width: 0; }
+.manuscript-switcher-bar[hidden] { display: none; }
+.manuscript-switcher:has(> .manuscript-switcher-bar[hidden]) { border-bottom: 0; }
 .manuscript-switcher-list { display: flex; flex: 1 1 auto; gap: .3rem; min-width: 0; margin: 0; padding: 0; list-style: none; overflow-x: auto; scrollbar-width: thin; }
 .manuscript-switcher-list > li { flex: 0 0 auto; }
 .manuscript-switch { max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1662,7 +1671,7 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .derivative-create-form h3 { margin: 0; font-size: 1rem; }
 .derivative-field { display: grid; gap: .25rem; }
 .derivative-modes, .derivative-sources { display: grid; gap: .3rem; margin: 0; padding: .5rem .7rem; border: 1px solid var(--boundary); border-radius: 9px; }
-.derivative-writing-host .writing-task { margin: 0 1rem .75rem; }
+.derivative-writing-host .writing-task { margin: .25rem .75rem; }
 .document-title-row { display: flex; align-items: center; gap: .45rem; min-width: 0; }
 .document-title-row h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .document-type-badge { flex: 0 0 auto; color: var(--text-subdued); font-size: .85rem; }
@@ -2804,11 +2813,12 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 body[data-task-drawer="open"] .technical-layer-control { right: calc(min(var(--task-drawer-width), 100vw - 1rem) + 1rem); }
 
 /* T1 task cards and shared in-Book pane (Issue #1328). */
-.task-overview-card-body { min-width:0; flex:1; }
+/* Wrap actions below the body when the card, including beside a docked drawer, is narrow. */
+.task-overview-card-body { min-width:0; flex:1 1 20rem; }
 .task-overview-card-title, .task-overview-card-line { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .task-overview-card-title { display:flex; gap:6px; align-items:center; flex-wrap:nowrap; }
 .task-overview-card-title strong { overflow:hidden; text-overflow:ellipsis; }
-.task-overview-card-actions { position:static; display:flex; align-items:center; gap:4px; flex-shrink:0; flex-wrap:wrap; max-width:100%; justify-content:flex-end; }
+.task-overview-card-actions { position:static; display:flex; align-items:center; gap:4px; flex-shrink:0; flex-wrap:wrap; max-width:100%; margin-left:auto; justify-content:flex-end; }
 .task-overview-card:focus { outline:2px solid var(--focus); outline-offset:2px; }
 .task-overview-more { position:relative; }
 .task-overview-more > summary { cursor:pointer; }
@@ -3176,8 +3186,8 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .editor-toolbar .editor-history-icon { padding: .1rem .3rem; flex: 0 0 28px; }
 .editor-toolbar .editor-edit-actions { flex: 1 0 auto; }
 .editor-history-undo { margin-left: auto; }
-/* Widest derivative controls measure up to 627px; reserve 53px for gaps and browser text metrics. */
-@container (max-width: 680px) {
+/* Keep the derivative menu reachable beside the editing controls when the toolbar narrows. */
+@container (max-width: 800px) {
   .editor-toolbar { flex-wrap: wrap; }
   .editor-toolbar .editor-edit-actions { flex: 1 1 100%; flex-wrap: wrap; min-width: 0; }
   .editor-toolbar .editor-edit-actions > * { max-width: 100%; }
@@ -3348,6 +3358,8 @@ body:has(#screen .import-page-actions) > .technical-layer-control { position: st
 
 /* 要怎样导入？ (Issue #1682): the small question a dropped file asks. */
 .import-entry-sheet { width: min(460px, calc(100vw - 2rem)); }
+/* The new file decision takes priority over an earlier transient notice; its timer and action remain intact. */
+body:has(.import-entry-sheet[open]) .toast { z-index: 50; }
 .import-entry-sheet .sheet-bar h3 { overflow-wrap: anywhere; }
 .import-entry-sheet .sheet-body:empty { display: none; }
 .import-entry-sheet .sheet-foot { display: flex; flex-wrap: wrap; gap: .5rem; }

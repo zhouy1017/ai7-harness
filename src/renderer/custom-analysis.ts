@@ -1,3 +1,4 @@
+import { serviceWords } from './service-wording.js';
 import type { TaskLaunchRequest } from './task-drawer.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
@@ -226,7 +227,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     section.dataset['coverage'] = latest.coverage.state;
     const revision = el('p', 'custom-revision-line', customTabVersionLine(latest.dimensionVersion.version, latest.manuscriptRevisionLabel, latest.ordinal));
     const freshness = { current: '与当前稿件一致', stale: '稿件已更新，分析待更新', superseded: '已有更新结果' }[latest.freshness.state];
-    revision.append(' · ', el('span', 'custom-axis', latest.coverage.label), ' · ', el('span', 'custom-axis', technicalWords(latest.freshness.label, freshness)));
+    revision.append(' · ', el('span', 'custom-axis', serviceWords(latest.coverage.label)), ' · ', el('span', 'custom-axis', technicalWords(latest.freshness.label, freshness)));
     const counts = el('p', 'custom-counts', customTabCountsLine(latest.rowCounts));
     if (latest.rowsTruncated) counts.append(' · ', el('span', 'custom-more', customTabMoreRows(latest.rows.length)));
     section.append(revision, counts);

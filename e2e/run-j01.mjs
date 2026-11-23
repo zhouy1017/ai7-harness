@@ -8,7 +8,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { pointerClick } from './dispatch-chooser.mjs';
-import { answer, cancelImportPage, dropFile, newVersionFromSaveMenu, noImportDraft, pressReachable, questionOffers, reachable, tabTo } from './import-entry-stages.mjs';
+import { answer, cancelImportPage, dropFile, holdEarlierNotice, newVersionFromSaveMenu, noImportDraft, pressReachable, questionOffers, questionOutlastsNotice, reachable, tabTo } from './import-entry-stages.mjs';
 import {
   admittedParagraphs,
   admittedSpanText,
@@ -1163,18 +1163,6 @@ async function resolveAndCommitManuscriptReimport(renderer, expectation) {
     );
     const mappingFailure = await renderer.evaluate(`document.querySelector('[data-reimport-mappings="failed"]')?.textContent ?? null`);
     requireJourney(mappingFailure === null, `${scenario}-mapping-page-valid`);
-    const degradationRequired = await renderer.evaluate(`Boolean(document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'))`);
-    if (degradationRequired) {
-      const acceptingVersion = await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion`);
-      // Issue #1410 item 32C: accepting the listed degradations commits too once the review is ready; here rows still wait.
-      await assertRenderer(renderer, `(() => { const accept = document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'); if (!(accept instanceof HTMLButtonElement)) return false; accept.click(); return true; })()`, `${scenario}-accept-degradation`);
-      await waitFor(
-        renderer,
-        `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(acceptingVersion)} || document.querySelector('#persistence-status')?.dataset.tone === 'error'`,
-        `${scenario}-degradation-persisted`,
-      );
-      continue;
-    }
     const row = await renderer.evaluate(`(() => { const row = document.querySelector('article.reimport-group[data-reimport-group-verb=""]'); return row ? { groupId: row.dataset.reimportGroupId, ordinal: Number(row.dataset.reimportGroupOrdinal), verbs: Array.from(row.querySelectorAll('[data-reimport-verb-choice]'), (choice) => choice.dataset.reimportVerbChoice) } : null; })()`);
     if (row === null) {
       const nextPage = await renderer.evaluate(`document.querySelector('[data-reimport-next-page]')?.dataset.reimportNextPage ?? null`);
@@ -1204,7 +1192,7 @@ async function resolveAndCommitManuscriptReimport(renderer, expectation) {
   }
   await assertRenderer(
     renderer,
-    `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`,
+    `Boolean(document.querySelector('[data-commit-manuscript-reimport]:not(:disabled)'))`,
     `${scenario}-commit-ready`,
   );
   at('reimport-commit');
@@ -1212,7 +1200,8 @@ async function resolveAndCommitManuscriptReimport(renderer, expectation) {
   const beforeCommitCancellationProof = cancelCommitOnce
     ? await manuscriptReimportReviewProof(renderer, `${scenario}-commit-cancel-before`)
     : null;
-  await clickExactButton(renderer, changed ? '提交稿件重新导入' : '记录未发现稿件变化', `${scenario}-commit`);
+  const acceptsDegradation = await renderer.evaluate(`Boolean(document.querySelector('[data-accept-reimport-degradation]'))`);
+  await assertRenderer(renderer, `(() => { const submit = document.querySelector('[data-commit-manuscript-reimport]:not(:disabled)'); if (!submit) return false; submit.click(); return true; })()`, `${scenario}-commit`);
   if (cancelCommitOnce) {
     await waitForTransientControl(
       renderer,
@@ -1250,6 +1239,7 @@ async function resolveAndCommitManuscriptReimport(renderer, expectation) {
       expectedDraftVersion: Number(commitProof.draftVersion),
       reviewDigest: commitProof.reviewDigest,
       commitAttemptId: committed.commitId,
+      ...(acceptsDegradation ? { acceptDegradation: true } : {}),
     },
   };
 }
@@ -1399,7 +1389,7 @@ async function resolveAmbiguousIdentitiesAsNoChange(renderer, currentIdentities,
   await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]')`, `${scenario}-row-reloaded`);
   await assertRenderer(
     renderer,
-    `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); return review?.dataset.reimportCommitReady === 'true' && review.textContent.includes('未发现稿件变化') && review.querySelector('article.reimport-group')?.dataset.reimportGroupVerb === 'rewrite' && !review.querySelector('[data-reimport-verb-choice]') && Array.from(review.querySelectorAll('button')).some((button) => button.textContent === '记录未发现稿件变化'); })()`,
+    `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); return review?.dataset.reimportCommitReady === 'true' && review.textContent.includes('未发现稿件变化') && review.querySelector('article.reimport-group')?.dataset.reimportGroupVerb === 'rewrite' && review.querySelector('[data-reimport-verb-choice="rewrite"][aria-pressed="true"]') && Array.from(review.querySelectorAll('button')).some((button) => button.textContent === '记录未发现稿件变化'); })()`,
     `${scenario}-resolved-final-state-no-change`,
   );
 }
@@ -3772,12 +3762,16 @@ async function main() {
     }
 
     renderer = await launchProduct({ dataRoot: reimportRoot, launchScenario: 'new-version-drop-question' });
+    const longDropPath = resolve(runRoot, 'public-sample-import-question-with-a-long-filename-that-wraps-across-the-question-heading.docx');
+    await copyFile(syntheticCPath, longDropPath);
     const dropQuestionStage = async (stage, section, root) => {
       const io = entryButtonIo();
       // The question, nothing staged before an answer, 取消, then 更新稿件 and 存为来源材料 each on a drop of its own.
       await openEntryBook(stage, section);
-      await dropFile(io, syntheticCPath, root, stage);
+      await holdEarlierNotice(io, stage);
+      await dropFile(io, longDropPath, root, stage);
       await questionOffers(io, ['update', 'source', 'cancel'], stage);
+      await questionOutlastsNotice(io, stage);
       await noImportDraft(io, `${stage}-unanswered`);
       await answer(io, 'cancel', `${stage}-cancel`);
       await waitFor(renderer, `document.querySelector('[data-import-question]') === null`, `${stage}-cancel-closed`);
@@ -3825,14 +3819,8 @@ async function main() {
     await clickExactButton(renderer, '继续导入', 'reimport-degraded-restart-required-continue');
     await waitFor(renderer, `document.querySelector('[data-accept-reimport-degradation]')`, 'reimport-degraded-required-restored');
     await assertRenderer(renderer, `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const values = Object.fromEntries(Array.from(review?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); return /^[0-9a-f-]{36}$/i.test(values['当前固定点修订版 ID'] ?? '') && /^[0-9a-f]{64}$/.test(values['当前固定点修订版摘要'] ?? '') && review?.querySelector('[data-reimport-source-sha256]')?.dataset.reimportSourceSha256 === ${JSON.stringify(composedDegradedSha256)} && review.querySelector('[data-reimport-source-sha256]').dataset.reimportSourceBytes === ${JSON.stringify(String(composedDegradedInfo.size))}; })()`, 'reimport-degraded-restart-exact-authorities');
-    const degradationVersion = await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion`);
-    await assertRenderer(renderer, `(() => { const accept = document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'); if (!(accept instanceof HTMLButtonElement)) return false; accept.click(); return true; })()`, 'reimport-degraded-accept');
-    await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(degradationVersion)} && document.querySelector('[data-import-review-kind="reimport"]')?.textContent.includes('已明确接受完整降级集合')`, 'reimport-degraded-accept-persisted');
-    await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportDegradedRoot, launchScenario: 'reimport-degraded-restart-accepted' });
-    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-degraded-restart-accepted');
-    await clickExactButton(renderer, '继续导入', 'reimport-degraded-restart-accepted-continue');
-    await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.textContent.includes('已明确接受完整降级集合') && !document.querySelector('[data-accept-reimport-degradation]')`, 'reimport-degraded-acceptance-restored');
+    // Acceptance now belongs to the final submission, after every comparison row is chosen.
+    await assertRenderer(renderer, `document.querySelector('[data-accept-reimport-degradation]')?.disabled === true`, 'reimport-degraded-awaits-choices');
     await resolveAndCommitManuscriptReimport(renderer, {
       changed: true,
       lineageStatus: 'unconfirmed',

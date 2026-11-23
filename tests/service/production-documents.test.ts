@@ -140,7 +140,8 @@ function switcherSurface(store: EditorialStore, book: Book, pickerPath?: string)
     abandonImportDraft: vi.fn(async (input) => store.abandonImportDraft(input.draftId, input.expectedDraftVersion)),
     createProductionDocument: async (input) => store.createProductionDocument({ ...input, bookId: book.bookId }),
   };
-  const surface = mountManuscriptSwitcher({ bookId: book.bookId, bookTitle: '交付物测试', api: api as Parameters<typeof mountManuscriptSwitcher>[0]['api'],
+  const toolbar = document.createElement('header'); root.append(toolbar);
+  const surface = mountManuscriptSwitcher({ bookId: book.bookId, bookTitle: '交付物测试', toolbar, api: api as Parameters<typeof mountManuscriptSwitcher>[0]['api'],
     currentDocumentId: null, setStatus: status, errorMessage: (error) => error instanceof Error ? error.message : '读取失败',
     awaitServiceJob: async (job) => job, openPrimary: async () => {}, openDocument: opened, openLaunch: vi.fn(), openWritingPlan: () => {} });
   root.append(surface.element);

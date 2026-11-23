@@ -3,6 +3,7 @@ import { createContext, runInContext } from 'node:vm';
 import { createSourceFile, forEachChild, isFunctionDeclaration, ModuleKind, ScriptTarget, transpileModule, type Node } from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { acknowledgeTaskMaterialRemovals, reconcileTaskMaterialSelection } from '../../src/renderer/task-material-selection.js';
+import { serviceWords } from '../../src/renderer/service-wording.js';
 import { WRITING_MATERIALS_AT_LIMIT, writingMaterialLabel, writingMaterialsMore, writingMaterialsOverTotalNote } from '../../src/renderer/writing-task-labels.js';
 import { WRITING_MATERIALS_TOO_MANY, writingMaterialsOverTotal } from '../../src/service/writing-tasks.js';
 import { MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES, type WritingTaskProjection } from '../../src/shared/protocol.js';
@@ -48,7 +49,7 @@ function harness(items: Item[]) {
   const context = createContext({
     api: {},
     busy: false, CSS: { escape: (value: string) => value }, writingMaterialLabel, writingMaterialsMore, WRITING_MATERIALS_AT_LIMIT, writingMaterialsOverTotalNote,
-    reconcileTaskMaterialSelection, acknowledgeTaskMaterialRemovals,
+    reconcileTaskMaterialSelection, acknowledgeTaskMaterialRemovals, serviceWords,
     el: (tag: string, className?: string, text?: string) => new Element(tag, className, text),
     uid: () => `control-${++identities}`,
     paint: () => { paints += 1; draw(); },

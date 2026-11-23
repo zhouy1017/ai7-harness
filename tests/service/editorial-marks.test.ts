@@ -391,6 +391,34 @@ describe('Editorial Marks on a manuscript', () => {
 
 
 describe('inline editor revision journal (#1428)', () => {
+  it.each([true, false])('keeps a half-clause rewrite in one reversible card (auto apply %s, #1539 N.1)', async (autoApply) => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store), initial = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = markableBlock(initial), sessionId = randomUUID();
+      const baseline = '他昨天在书房里仔细核对了第三章的引文，其他文字不变。';
+      const current = '他昨晚在案头认真查核了这一章的全部引文，其他文字不变。';
+      const prepared = edit(store, book, initial, block.blockId, 0, graphemesOf(block.text).length, baseline);
+      const written = store.flushJournalEdit({
+        ...book, clientEditId: randomUUID(), baseRevisionId: prepared.revisionId, blockId: block.blockId,
+        windowStartBlockId: prepared.blocks[0]!.blockId, baseBlockDigest: prepared.blocks.find((b) => b.blockId === block.blockId)!.digest,
+        expectedJournalSequence: prepared.journalSequence, fromGrapheme: 0, toGrapheme: graphemesOf(baseline).length,
+        insertText: current, editorRevision: { sessionId, autoApply },
+      }).window;
+      const revisions = written.marks.filter((mark) => mark.inlineRevision);
+      expect(revisions).toMatchObject([{ fromGrapheme: 2, toGrapheme: 17, anchorState: 'exact', status: autoApply ? 'applied' : 'open',
+        inlineRevision: { beforeText: '天在书房里仔细核对了第三章的', afterText: '晚在案头认真查核了这一章的全部', sessionId } }]);
+      const markId = revisions[0]!.markId;
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId)).toMatchObject({
+        inlineRevision: true, suggestion: { currentText: '天在书房里仔细核对了第三章的', proposedText: '晚在案头认真查核了这一章的全部' },
+      });
+      const reverted = store.updateEditorialMark({ ...book, windowStartBlockId: initial.blocks[0]!.blockId,
+        markId, action: 'revert-inline-revision', body: null, highlightColor: null, status: null, targetKind: null, proposedText: null, rationale: null });
+      expect(reverted.window?.blocks.find((b) => b.blockId === block.blockId)?.text).toBe(baseline);
+      expect(reverted.window?.marks.filter((mark) => mark.inlineRevision)).toEqual([]);
+    } finally { store.close(); }
+  });
+
   it.each([true, false])('coalesces an edit, follows undo/redo and restores the baseline (auto apply %s)', async (autoApply) => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

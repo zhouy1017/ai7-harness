@@ -42,6 +42,15 @@ function mount(relaunch: NonNullable<TaskPlanProjection['relaunch']>, api: Parti
 const start = () => miniDocument.querySelector('[data-task-drawer-control="launch"]')!;
 
 describe('重新开始… (Issue #1680)', () => {
+  it.each([WRITING, REVIEW])('uses the same plain estimate for $operation relaunch previews', async relaunch => {
+    const sentence = '预计读 2 个部分，至少 3 次模型调用（重试时会更多）；用时暂无可靠估计。';
+    const { mounted, host } = mount(relaunch, { previewTaskLaunch: vi.fn(async () => ({ steps: [], scope: '', reference: [], send: '', usage: '50000 tokens', adaptations: [],
+      estimate: { parts: 2, fewestRequests: 3, more: ['retry'], ceiling: true, durationMs: null, sentence } })) });
+    await mounted.bar.openPlan();
+    expect(host.querySelector('.task-launch-estimate-sentence')?.textContent).toBe(sentence);
+    expect(host.querySelector('.task-launch-estimate')?.textContent).not.toContain('tokens');
+    mounted.bar.dispose();
+  });
   it('says what is kept, cancels only when 开始 is pressed, once, and launches the copied recipe once with a new command', async () => {
     let refuse = true;
     const launchWritingTask = vi.fn(async (_input: unknown) => { if (refuse) { refuse = false; throw new Error('网络中断'); } return { taskIntentId: 'new', runRecordId: 'run' }; });

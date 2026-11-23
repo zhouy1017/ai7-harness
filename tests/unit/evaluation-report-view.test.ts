@@ -7,6 +7,12 @@ import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js'
 import { BUILTIN_EVALUATION_PROFILE, emptyEvaluationContent } from '../../src/service/evaluation-records.js';
 import type { EvaluationWorkspaceProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
+import { copyPlainText } from '../../src/renderer/clipboard-text.js';
+import { readFileSync } from 'node:fs';
+import { activeRunReason } from '../../src/service/analysis/run-state.js';
+import { INITIAL_EVALUATION_KIND } from '../../src/shared/protocol.js';
+
+vi.mock('../../src/renderer/clipboard-text.js', () => ({ copyPlainText: vi.fn(async () => undefined) }));
 
 // 评估 leads with AI7's full report (Issue #1406, #1407) in ordinary mode: an unfinished empty version never hides it, and
 // 修改报告 hands it to the editor as their version. Public synthetic words only.
@@ -19,7 +25,7 @@ function mountLaunch(request: TaskLaunchRequest, launch = vi.fn(async () => ({ t
   const bar = mountLaunchBar({ api: api as never, request, errorMessage: (_error, fallback) => fallback, setStatus: vi.fn(), settle: async () => true, onRecorded: vi.fn(), openRun: vi.fn(), interrupted: false });
   bars.push(bar); request.mount!.append(...bar.bar);
 }
-beforeEach(() => { uninstall = installMiniDom(); setTechnicalLayerVisible(false); vi.stubGlobal('window', { setTimeout, clearTimeout }); });
+beforeEach(() => { vi.clearAllMocks(); uninstall = installMiniDom(); setTechnicalLayerVisible(false); vi.stubGlobal('window', { setTimeout, clearTimeout }); });
 afterEach(() => { for (const bar of bars.splice(0)) bar.dispose(); vi.unstubAllGlobals(); setTechnicalLayerVisible(true); uninstall(); });
 vi.mock('../../src/renderer/task-panel.js', () => ({ mountTaskPanel: () => ({ element: document.createElement('div'), stop: vi.fn() }), mountTaskComposer: () => ({ element: document.createElement('div'), stop: vi.fn() }) }));
 vi.mock('../../src/renderer/dialogue.js', () => ({ mountDialogue: () => ({ element: document.createElement('div'), stop: vi.fn() }) }));
@@ -61,6 +67,9 @@ it('shows the newest report past an unfinished empty version, and 修改报告 o
   expect(root.dataset['evaluationView']).toBe('report');
   expect(root.querySelector('.evaluation-record')).toBeNull();
   const report = root.querySelector('.evaluation-report')!;
+  expect(root.children[1]).toBe(report);
+  expect(report.querySelector('h3')!.textContent).toBe('评估报告');
+  expect(report.querySelector('[data-evaluation-action="edit-report"]')!.textContent).toBe('修改评估报告');
   expect(report.querySelector('.evaluation-report-model')!.textContent).toBe('模型 chosen-model@high');
   expect(report.querySelectorAll('.evaluation-report-comment')).toHaveLength(profile.items.length);
   expect(report.querySelector('.evaluation-report-comment')!.textContent).toBe('第 1 项的评语。');
@@ -75,7 +84,8 @@ it('shows the newest report past an unfinished empty version, and 修改报告 o
   await vi.waitFor(() => expect(root.dataset['evaluationView']).toBe('record'));
   expect(startEvaluation).toHaveBeenCalledWith({ fromInitial: true, skipDamaged: false });
   expect(root.querySelector('.evaluation-report')).toBeNull();
-  expect(root.querySelector('.evaluation-record h3')!.textContent).toContain('详细评估报告');
+  expect(root.children[1]).toBe(root.querySelector('.evaluation-record'));
+  expect(root.querySelector('.evaluation-record h3')!.textContent).toMatch(/^评估报告 · /u);
   expect(root.querySelector('.evaluation-record .evaluation-report-model')!.textContent).toBe('评估报告模型 chosen-model@high');
   expect(root.querySelector('.evaluation-record .evaluation-report-next-step')!.textContent).toBe('下一步建议：压缩中段。');
   // The 评语 field holds AI7's words until the editor changes them; they are not repeated beside it.
@@ -154,6 +164,12 @@ it('saves the edits still in the form before opening the regeneration start bar'
   view = rewriting(async (input) => ({ ...view.editing, record: { ...record, entries: 2, content: { ...record.content, verdict: input.content.verdict ?? null } } }));
   await view.surface.load();
   await typeVerdict(view.root, '按编辑意见收紧中段。');
+  const bar = view.root.querySelector('.evaluation-record .evaluation-action-bar')!;
+  expect(bar.querySelector('[data-evaluation-action="save"]')).not.toBeNull();
+  expect(bar.querySelector('[data-evaluation-action="copy-report"]')).not.toBeNull();
+  expect(bar.querySelector('[data-evaluation-action="prepare-rewrite"]')!.textContent).toBe('按我的修改重新生成评估报告');
+  const css = readFileSync(new URL('../../src/renderer/styles.css', import.meta.url), 'utf8');
+  expect(css).toMatch(/\.evaluation-action-bar\s*\{[^}]*position:\s*sticky;[^}]*bottom:\s*0;/u);
   await vi.waitFor(() => expect(view.root.querySelector('[data-evaluation-action="prepare-rewrite"]')!.disabled).toBe(false));
   view.root.querySelector('[data-evaluation-action="prepare-rewrite"]')!.click();
   await vi.waitFor(() => expect(view.launch).toHaveBeenCalledWith(expect.objectContaining({ recordId: 'report' })));
@@ -162,6 +178,29 @@ it('saves the edits still in the form before opening the regeneration start bar'
   expect(view.api.prepareEvaluationRewrite).not.toHaveBeenCalled();
   expect(view.api.authorizeEvaluationRewrite).not.toHaveBeenCalled();
   expect(view.openRewritePlan).not.toHaveBeenCalled();
+});
+
+it('copies the report including its evidence and market section directly from the page', async () => {
+  const view = rewriting(async () => view.editing);
+  await view.surface.load();
+  view.root.querySelector('[data-evaluation-action="copy-report"]')!.click();
+  await vi.waitFor(() => expect(copyPlainText).toHaveBeenCalledOnce());
+  const text = vi.mocked(copyPlainText).mock.calls[0]![1];
+  for (const line of ['公开合成书 · 评估报告', '模型 chosen-model@high', '第 1 项的评语。', '原文依据：第 1 项的依据。', '悬疑读者', '双线叙事', '线上书店']) expect(text).toContain(line);
+  expect(text).not.toContain('复制评估报告');
+  expect(view.api.saveEvaluation).not.toHaveBeenCalled();
+});
+
+it('copies current edits without saving or starting a regeneration', async () => {
+  const view = rewriting(async () => view.editing);
+  await view.surface.load();
+  await typeVerdict(view.root, '当前编辑总评。');
+  view.root.querySelector('.evaluation-action-bar [data-evaluation-action="copy-report"]')!.click();
+  await vi.waitFor(() => expect(copyPlainText).toHaveBeenCalledOnce());
+  expect(vi.mocked(copyPlainText).mock.calls[0]![1]).toContain('包含尚未保存的修改');
+  expect(vi.mocked(copyPlainText).mock.calls[0]![1]).toContain('当前编辑总评。');
+  expect(view.api.saveEvaluation).not.toHaveBeenCalled();
+  expect(view.launch).not.toHaveBeenCalled();
 });
 
 it('starts nothing when the save before regenerating is refused, and keeps the typed words', async () => {
@@ -180,7 +219,7 @@ it('starts nothing when the save before regenerating is refused, and keeps the t
 
 it('says why a new 评估报告 cannot be prepared in the words of the editor (Issue #1531, review B1)', async () => {
   const root = miniDocument.createElement('section'); miniDocument.body.append(root);
-  const blocked = { ...page, initial: { ...page.initial, prepare: { allowed: false, reason: '有一项评估任务在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的评估任务。' } } } as unknown as EvaluationWorkspaceProjection;
+  const blocked = { ...page, initial: { ...page.initial, prepare: { allowed: false, reason: activeRunReason('authorized', INITIAL_EVALUATION_KIND) } } } as unknown as EvaluationWorkspaceProjection;
   const surface = mountEvaluation({ root: root as unknown as HTMLElement, api: { inspectEvaluation: async () => blocked }, bookId: 'book',
     technicalDetails: details, setStatus: vi.fn(), errorMessage: () => '' } as unknown as MountEvaluationOptions);
   await surface.load();

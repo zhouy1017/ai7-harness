@@ -3,10 +3,12 @@ import { styleInput } from './components/controls.js';
 
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { technicalWords, technicalLayerVisible } from './technical-layer.js';
-import type { BookRecordPresentation, BookSummaryFilter, BookSummaryPageProjection, BookWorkbenchRoute, BookWorkOverviewProjection, ImportCommitProjection, ManuscriptReimportCommitProjection, ReimportUnfollowedMarkProjection, ManuscriptWindowProjection, PriorWorkItemProjection, ResolvedBookWorkbenchRoute, StagedImportProjection } from '../shared/protocol.js';
+import type { BookRecordPresentation, BookSummaryProjection, BookSummaryFilter, BookSummaryPageProjection, BookWorkbenchRoute, BookWorkOverviewProjection, ImportCommitProjection, ManuscriptReimportCommitProjection, ReimportUnfollowedMarkProjection, ManuscriptWindowProjection, PriorWorkItemProjection, ResolvedBookWorkbenchRoute, StagedImportProjection } from '../shared/protocol.js';
 import { MAX_BOOK_SUMMARY_FILTER_CHARACTERS } from '../shared/protocol.js';
+import { localDayTimeLabel } from '../shared/report-wording.js';
+import { visibleGlobalAttention } from './global-attention.js';
 import { MARK_KIND_LABELS } from './editorial-mark-labels.js';
-import { BOOK_FILTER_ACTIONS, BOOK_FILTER_FIELD_LABEL, BOOK_FILTER_FIELDS, BOOK_FILTER_LEGEND, BOOK_FILTER_NONE, BOOK_FILTER_STATUS_LINES, BOOK_FILTER_TEXT_LABEL, bookCardPeopleLine, bookCardRelatedLine, bookFilterLine } from './book-people-labels.js';
+import { BOOK_FILTER_ACTIONS, BOOK_FILTER_FIELD_LABEL, BOOK_FILTER_FIELDS, BOOK_FILTER_NONE, BOOK_FILTER_STATUS_LINES, bookCardPeopleLine, bookCardRelatedLine, bookFilterLine } from './book-people-labels.js';
 import type { ProductionDocumentContext } from './production-document-lens.js';
 import { showOnboardingCard } from '../shared/preferences.js';
 import { appendFirstRunSteps, firstReviewBook, firstRunModelConnected } from './onboarding-steps.js';
@@ -55,19 +57,23 @@ export function createLibraryScreen(state: Options) {
   const { element, button, setStatus, api, rendererErrorMessage, panel, renderBookCreationForm, renderTargetChoice, renderError, renderModelServiceSettings, leaveThen, renderHelp, bookCardOpen, requestBookWorkbenchRoute, bookCardAction, bookIdentityDisclosure, returnToRecoveryComparison, appendRecoveryReturnAction, replaceScreen, screen, settleScreen, renderEditorWindow, acknowledgeCompletionAfterPaint, renderBookOverview, recordPresentation } = state;
 
 
-/**
- * 书库's search (Issue #431, S83; IA-008, BOOK-006): one field — or 书名, 作者 and 责编 together — and the words, read by
- * the service over every Book, paged as the list is. 显示全部图书 goes back to the whole list.
- */
+/** Typing filters in place; explicit 查找 and the scope selector remain compatible with existing Journeys. */
 function renderBookFilter(
-  priorWork: ReadonlyArray<PriorWorkItemProjection>,
-  recoveryReturn: RecoveryReturnContext | undefined,
   filter: BookSummaryFilter | null,
-  refresh = { request: 0 },
+  apply: (next: BookSummaryFilter | null, explicit: boolean) => void,
 ): HTMLElement {
   const form = element('form', 'book-filter');
   form.noValidate = true;
-  const legend = element('p', 'book-filter-legend', BOOK_FILTER_LEGEND);
+  const textLabel = element('label', undefined, '筛选图书');
+  const text = element('input');
+  text.id = 'book-filter-text';
+  text.type = 'search'; styleInput(text);
+  text.placeholder = '书名、作者、责编、书系或内部编号';
+  text.maxLength = MAX_BOOK_SUMMARY_FILTER_CHARACTERS;
+  text.value = filter?.text ?? '';
+  textLabel.append(text);
+  const scope = element('details');
+  scope.append(element('summary', undefined, '限定范围'));
   const fieldLabel = element('label', undefined, BOOK_FILTER_FIELD_LABEL);
   const field = element('select');
   field.id = 'book-filter-field';
@@ -77,80 +83,33 @@ function renderBookFilter(
     field.append(option);
   }
   field.value = filter?.field ?? 'all';
-  fieldLabel.append(field);
-  const textLabel = element('label', undefined, BOOK_FILTER_TEXT_LABEL);
-  const text = element('input');
-  text.id = 'book-filter-text';
-  text.type = 'search'; styleInput(text);
-  // The service reads at most this many characters; a longer paste is cut here rather than refused as a bad request.
-  text.maxLength = MAX_BOOK_SUMMARY_FILTER_CHARACTERS;
-  text.value = filter?.text ?? '';
-  textLabel.append(text);
+  fieldLabel.append(field); scope.append(fieldLabel);
   const find = button(BOOK_FILTER_ACTIONS.find, 'secondary', () => undefined);
   find.type = 'submit';
   find.dataset['bookFilterAction'] = 'find';
-  let clearControl: HTMLButtonElement | null = null;
-  const sync = (): void => { find.disabled = text.value.trim().length === 0; };
-  const restoreControls = (): void => {
-    sync();
-    if (clearControl !== null) clearControl.disabled = false;
+  const clear = button(BOOK_FILTER_ACTIONS.clear, 'quiet', () => {
+    text.value = ''; field.value = 'all'; sync(); apply(null, true); text.focus();
+  });
+  clear.dataset['bookFilterAction'] = 'clear';
+  const sync = (): void => {
+    find.disabled = text.value.trim().length === 0;
+    clear.hidden = find.disabled;
   };
-  text.addEventListener('input', sync);
-  sync();
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const words = text.value.trim();
-    if (words.length === 0 || find.disabled) return;
-    const next: BookSummaryFilter = {
+  const run = (explicit: boolean): void => {
+    sync();
+    const words = text.value.trim().normalize('NFC');
+    apply(words.length === 0 ? null : {
       field: field.value === 'title' || field.value === 'author' || field.value === 'editor' || field.value === 'series' ? field.value : 'all',
       text: words,
-    };
-    find.disabled = true;
-    const current = ++refresh.request;
-    setStatus(BOOK_FILTER_STATUS_LINES.finding, 'busy');
-    void api.listBooks({ after: null, filter: next }).then(
-      async (page) => {
-        if (!form.isConnected || current !== refresh.request) return;
-        const paint = navigation.route();
-        await renderLanding(priorWork, recoveryReturn, page, next, () => current === refresh.request);
-        if (!paint.isCurrent() || current !== refresh.request) return;
-        setStatus(BOOK_FILTER_STATUS_LINES.found, 'success');
-        document.querySelector<HTMLElement>('#book-filter-text')?.focus();
-      },
-      (error) => {
-        if (!form.isConnected || current !== refresh.request) return;
-        restoreControls();
-        setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
-      },
-    );
-  });
-  const row = element('div', 'button-row compact-actions');
-  row.append(find);
-  if (filter !== null) {
-    const clear = button(BOOK_FILTER_ACTIONS.clear, 'quiet', () => {
-      clear.disabled = true;
-      const current = ++refresh.request;
-      void api.listBooks({ after: null }).then(
-        async (page) => {
-          if (!form.isConnected || current !== refresh.request) return;
-          const paint = navigation.route();
-          await renderLanding(priorWork, recoveryReturn, page, null, () => current === refresh.request);
-          if (!paint.isCurrent() || current !== refresh.request) return;
-          setStatus(BOOK_FILTER_STATUS_LINES.cleared, 'success');
-          document.querySelector<HTMLElement>('#book-filter-text')?.focus();
-        },
-        (error) => {
-          if (!form.isConnected || current !== refresh.request) return;
-          restoreControls();
-          setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
-        },
-      );
-    });
-    clear.dataset['bookFilterAction'] = 'clear';
-    clearControl = clear;
-    row.append(clear);
-  }
-  form.append(legend, fieldLabel, textLabel, row);
+    }, explicit);
+  };
+  text.addEventListener('input', () => run(false));
+  field.addEventListener('change', () => run(false));
+  form.addEventListener('submit', event => { event.preventDefault(); if (!find.disabled) run(true); });
+  sync();
+  const actions = element('div', 'button-row compact-actions');
+  actions.append(find, clear);
+  form.append(textLabel, scope, actions);
   return form;
 }
 
@@ -268,110 +227,136 @@ async function renderLanding(
       onboarding.append(note);
     }
   }
-  if (books.items.length > 0 || filter !== null) {
-    const library = element('section', 'recent-work');
-    library.dataset['bookFilter'] = filter === null ? 'none' : filter.field;
-    library.append(element('h3', undefined, SHELL_LABELS.allBooks));
-    library.append(renderBookFilter(priorWork, activeRecoveryReturn, filter, refresh));
-    if (filter !== null) {
-      const result = element('p', 'field-note');
-      result.append(element('span', 'book-filter-line', bookFilterLine(filter)));
-      if (books.items.length === 0) result.append('；', element('span', 'book-filter-none', BOOK_FILTER_NONE));
-      library.append(result);
-    }
-    const list = element('div', 'recent-work-list');
-    for (const summary of books.items) {
-      const open = bookCardOpen(summary.title, summary.manuscriptStateLabel, async () => {
-        const navigationRoute = navigation.begin();
-        open.disabled = true;
-        setStatus('正在打开图书…', 'busy');
-        try {
-          await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId }, undefined, activeRecoveryReturn, navigationRoute);
-        } catch (error) {
-          if (navigation.errorIsCurrent(error, navigationRoute)) setStatus(rendererErrorMessage(error, '无法打开图书。'), 'error');
-        } finally { open.disabled = false; }
-      });
-      open.dataset['bookId'] = summary.bookId;
-      const row = element('article', 'book-summary-item');
-      row.append(open, bookCardAction('打开图书'));
-      // 作者, 责编 and 相关人 on the card (Issue #431, S83; BOOK-006).
-      const peopleLine = bookCardPeopleLine(summary.people);
-      const relatedLine = bookCardRelatedLine(summary.people);
-      const facts = element('p', 'book-people-line field-note');
-      if (peopleLine !== null) facts.append(peopleLine);
-      if (relatedLine !== null) facts.append(peopleLine === null ? '' : ' · ', element('span', 'book-related-line', relatedLine));
-      if (summary.internalNumber !== null) facts.append(facts.childNodes.length === 0 ? '' : ' · ', `内部编号 ${summary.internalNumber}`);
-      if (facts.childNodes.length > 0) row.append(facts);
-      row.append(bookIdentityDisclosure(summary));
-      list.append(row);
-    }
-    library.append(list);
-    if (books.nextCursor) {
-      const loadMore = button('加载更多图书', 'secondary', async () => {
-        const current = navigation.begin();
-        const request = ++refresh.request;
-        loadMore.disabled = true;
-        setStatus('正在读取下一页图书摘要…', 'busy');
-        try {
-          const page = await api.listBooks({ after: books.nextCursor, ...(filter === null ? {} : { filter }) });
-          if (!current.isCurrent() || request !== refresh.request) return;
-          await renderLanding(
-            priorWork,
-            activeRecoveryReturn,
-            { items: [...books.items, ...page.items], nextCursor: page.nextCursor },
-            filter,
-            () => request === refresh.request,
-          );
-          if (!current.isCurrent() || request !== refresh.request) return;
-          setStatus('已加载更多图书摘要', 'success');
-        } catch (error) {
-          loadMore.disabled = false;
-          if (navigation.errorIsCurrent(error, current) && request === refresh.request) setStatus(rendererErrorMessage(error, '无法读取下一页图书摘要。'), 'error');
-        } finally { loadMore.disabled = false; }
-      });
-      const loadMoreActions = element('div', 'button-row');
-      loadMoreActions.append(loadMore);
-      library.append(loadMoreActions);
-    }
-    content.append(library);
-  }
-  if (priorWork.length > 0) {
-    const recent = element('section', 'recent-work');
-    recent.append(element('h3', undefined, '最近稿件'));
-    const list = element('div', 'recent-work-list');
+  if (books.items.length > 0 || priorWork.length > 0 || filter !== null) {
+    type Card = Pick<BookSummaryProjection, 'bookId' | 'stableIdentity' | 'title' | 'manuscriptStateLabel' | 'internalNumber' | 'people' | 'lastWorkedAt' | 'seriesNames'>;
+    const recent = new Map<string, PriorWorkItemProjection>();
     for (const item of priorWork) {
-      const state = item.recoveryAttention ? '恢复待确认状态' : `当前稿件${technicalWords(` ${item.revisionLabel}`)}`;
-      const context = `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''}`;
-      const open = bookCardOpen(item.bookTitle, state, async () => {
-        const current = navigation.begin();
-        open.disabled = true;
-        setStatus(item.recoveryAttention ? '正在打开稿件恢复比较…' : '正在重新打开本地稿件…', 'busy');
-        try {
-          if (item.recoveryAttention) {
-            await returnToRecoveryComparison(item.recoveryAttention.attentionId, current);
-            return;
-          }
-          // The startup return takes the Book route like 书库 does, rather than opening this
-          // manuscript at its start: V2-UX-RET-002 asks both ways in to arrive at the same place, the
-          // position the editor left, and one route is what keeps them from drifting apart.
-          await requestBookWorkbenchRoute({ kind: 'book', bookId: item.bookId }, undefined, activeRecoveryReturn, current);
-        } catch (error) {
-          open.disabled = false;
-          if (navigation.errorIsCurrent(error, current)) setStatus(rendererErrorMessage(error, '无法重新打开稿件。'), 'error');
-        } finally { open.disabled = false; }
-      });
-      open.dataset['manuscriptId'] = item.manuscriptId;
-      const row = element('article', 'recent-work-item');
-      row.append(
-        open,
-        bookCardAction(item.recoveryAttention ? '返回恢复比较' : '继续编辑'),
-        element('p', 'field-note book-card-facts', context),
-        ...(item.recoveryAttention ? [element('p', 'attention-note', '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。')] : []),
-      );
-      list.append(row);
+      // Prefer the recovery entry when several branches of one Book need attention.
+      if (!recent.has(item.bookId) || item.recoveryAttention) recent.set(item.bookId, item);
     }
-    recent.append(list);
-    content.append(recent);
+    const known = new Map<string, Card>();
+    for (const item of recent.values()) known.set(item.bookId, {
+      bookId: item.bookId, stableIdentity: `book:${item.bookId}`, title: item.bookTitle, manuscriptStateLabel: '已有主稿件',
+      internalNumber: null, people: { authors: [], editors: [], related: [] }, ...item.library,
+    });
+    for (const book of books.items) known.set(book.bookId, book);
+    let page = books;
+    let activeFilter = filter;
+    let pending: Map<string, Set<string>> | null = null;
+    let pendingIncomplete = false;
+    let pendingFailed = false;
+    const library = element('section', 'recent-work');
+    library.append(element('h3', undefined, '图书 · 最近工作在前'));
+    const result = element('p', 'field-note');
+    result.setAttribute('aria-live', 'polite');
+    const list = element('div', 'recent-work-list');
+    const matches = (book: Card): boolean => {
+      if (activeFilter === null) return true;
+      const fields = { title: [book.title], author: book.people.authors, editor: book.people.editors, series: book.seriesNames ?? [] };
+      const words = activeFilter.field === 'all' ? [...Object.values(fields).flat(), book.internalNumber ?? ''] : fields[activeFilter.field];
+      const query = activeFilter.text.normalize('NFC').toLowerCase();
+      return words.some(word => word.normalize('NFC').toLowerCase().includes(query));
+    };
+    const paint = (): void => {
+      library.dataset['bookFilter'] = activeFilter?.field ?? 'none';
+      onboarding.hidden = activeFilter !== null;
+      const shown = [...known.values()].filter(matches).sort((a, b) =>
+        (Date.parse(b.lastWorkedAt ?? '') || 0) - (Date.parse(a.lastWorkedAt ?? '') || 0));
+      list.replaceChildren();
+      for (const summary of shown) {
+        const item = recent.get(summary.bookId);
+        const recovery = item?.recoveryAttention;
+        const open = bookCardOpen(summary.title, recovery ? '恢复待确认状态' : summary.manuscriptStateLabel, async () => {
+          const navigationRoute = navigation.begin();
+          open.disabled = true;
+          setStatus('正在打开图书…', 'busy');
+          try {
+            if (recovery) await returnToRecoveryComparison(recovery.attentionId, navigationRoute);
+            else await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId }, undefined, activeRecoveryReturn, navigationRoute);
+          } catch (error) {
+            if (navigation.errorIsCurrent(error, navigationRoute)) setStatus(rendererErrorMessage(error, '无法打开图书。'), 'error');
+          } finally { open.disabled = false; }
+        });
+        open.dataset['bookId'] = summary.bookId;
+        if (item) open.dataset['manuscriptId'] = item.manuscriptId;
+        const row = element('article', `book-summary-item${item ? ' recent-work-item' : ''}`);
+        row.append(open, bookCardAction(recovery ? '返回恢复比较' : item ? '继续编辑' : '打开图书'));
+        const peopleLine = bookCardPeopleLine(summary.people);
+        const relatedLine = bookCardRelatedLine(summary.people);
+        const facts = element('p', 'book-people-line field-note');
+        if (peopleLine !== null) facts.append(peopleLine);
+        if (relatedLine !== null) facts.append(peopleLine === null ? '' : ' · ', element('span', 'book-related-line', relatedLine));
+        if (summary.internalNumber !== null) facts.append(facts.childNodes.length === 0 ? '' : ' · ', `内部编号 ${summary.internalNumber}`);
+        if (facts.childNodes.length > 0) row.append(facts);
+        const time = summary.lastWorkedAt && Number.isFinite(Date.parse(summary.lastWorkedAt)) ? localDayTimeLabel(summary.lastWorkedAt) : '暂无记录';
+        const count = pending?.get(summary.bookId)?.size ?? 0;
+        const pendingLine = pending === null ? pendingFailed ? '待处理数暂不可用' : '正在读取待处理数…'
+          : pendingIncomplete ? `${count}+ 项待处理` : count > 0 ? `${count} 项待处理` : '暂无待处理';
+        row.append(element('p', 'field-note book-card-facts', `上次工作：${time} · ${pendingLine}`));
+        if (item) row.append(element('p', 'field-note', `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''}`));
+        if (recovery) row.append(element('p', 'attention-note', '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。'));
+        row.append(bookIdentityDisclosure(summary));
+        list.append(row);
+      }
+      result.replaceChildren();
+      if (activeFilter !== null) result.append(element('span', 'book-filter-line', bookFilterLine(activeFilter)));
+      if (shown.length === 0) result.append(element('span', 'book-filter-none', BOOK_FILTER_NONE));
+      result.hidden = activeFilter === null && shown.length > 0;
+      loadMore.hidden = page.nextCursor === null;
+    };
+    const form = renderBookFilter(filter, (next, explicit) => {
+      activeFilter = next;
+      page = { items: [], nextCursor: null };
+      const request = ++refresh.request;
+      paint();
+      const route = navigation.route();
+      if (explicit) setStatus(next === null ? '正在读取图书…' : BOOK_FILTER_STATUS_LINES.finding, 'busy');
+      // The service searches the entire catalog, including Books outside the pages already loaded here.
+      void api.listBooks({ after: null, ...(next === null ? {} : { filter: next }) }).then(answer => {
+        if (!form.isConnected || !route.isCurrent() || request !== refresh.request) return;
+        page = answer;
+        for (const book of answer.items) known.set(book.bookId, book);
+        paint();
+        if (explicit) {
+          setStatus(next === null ? BOOK_FILTER_STATUS_LINES.cleared : BOOK_FILTER_STATUS_LINES.found, 'success');
+          form.querySelector<HTMLInputElement>('#book-filter-text')?.focus();
+        }
+      }, error => {
+        if (form.isConnected && route.isCurrent() && request === refresh.request) setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
+      });
+    });
+    const loadMore = button('加载更多图书', 'secondary', async () => {
+      const route = navigation.route();
+      const request = ++refresh.request;
+      loadMore.disabled = true;
+      try {
+        const answer = await api.listBooks({ after: page.nextCursor, ...(activeFilter === null ? {} : { filter: activeFilter }) });
+        if (!form.isConnected || !route.isCurrent() || request !== refresh.request) return;
+        page = answer;
+        for (const book of answer.items) known.set(book.bookId, book);
+        paint();
+        setStatus('已加载更多图书摘要', 'success');
+      } catch (error) {
+        if (form.isConnected && route.isCurrent() && request === refresh.request) setStatus(rendererErrorMessage(error, '无法读取下一页图书。'), 'error');
+      } finally { loadMore.disabled = false; }
+    });
+    const more = element('div', 'button-row'); more.append(loadMore);
+    library.append(form, result, list, more);
+    content.append(library);
+    paint();
+    // Reuse the same attention rules as 待我处理; reading a library card never acquires a Book route.
+    void Promise.all([api.inspectGlobalAttention(), api.inspectTaskOverview()]).then(([attention, tasks]) => {
+      if (!form.isConnected) return;
+      const visible = visibleGlobalAttention(attention, tasks, technicalLayerVisible);
+      pending = new Map();
+      pendingIncomplete = attention.groups.some(group => (group.key === 'exceptions' || group.key === 'decisions') && group.total > group.items.length);
+      for (const group of visible.groups) for (const item of group.items) {
+        const bookId = item.book.bookId;
+        if (bookId === null) continue;
+        const ids = pending.get(bookId) ?? new Set<string>(); ids.add(item.itemId); pending.set(bookId, ids);
+      }
+      paint();
+    }, () => { if (form.isConnected) { pendingFailed = true; paint(); } });
   }
   appendRecoveryReturnAction(content, activeRecoveryReturn);
   replaceScreen('landing', content);

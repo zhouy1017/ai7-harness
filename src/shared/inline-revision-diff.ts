@@ -8,7 +8,26 @@ export interface InlineRevisionDiff {
   afterText: string;
 }
 
-/** Grapheme diff, keeping separated edits separate and bounding work for a fully rewritten paragraph. */
+/** Keep nearby edits in one clause together, including their shared words in both versions. */
+function coalesceInlineRevisionDiffs(diffs: InlineRevisionDiff[], before: string[]): InlineRevisionDiff[] {
+  const result: InlineRevisionDiff[] = [];
+  for (const diff of diffs) {
+    const previous = result.at(-1);
+    if (previous && diff.fromGrapheme - previous.toGrapheme <= 6) {
+      const gap = before.slice(previous.toGrapheme, diff.fromGrapheme).join('');
+      if (!/[\r\n，。！？；：、,.;:!?]/u.test(gap)) {
+        previous.toGrapheme = diff.toGrapheme;
+        previous.beforeText += gap + diff.beforeText;
+        previous.afterText += gap + diff.afterText;
+        continue;
+      }
+    }
+    result.push(diff);
+  }
+  return result;
+}
+
+/** Grapheme diff, grouping short clause rewrites while keeping distant edits separate. */
 export function computeInlineRevisionDiff(baselineText: string, currentText: string): InlineRevisionDiff[] {
   const before = graphemesOf(baselineText), after = graphemesOf(currentText);
   const outer = deriveSpanEdit(before, after);
@@ -50,7 +69,7 @@ export function computeInlineRevisionDiff(baselineText: string, currentText: str
     let from = 0, currentFrom = 0;
     for (const [x, y] of matches) { emit(from, x, currentFrom, y); from = x + 1; currentFrom = y + 1; }
     emit(from, a.length, currentFrom, b.length);
-    return result;
+    return coalesceInlineRevisionDiffs(result, before);
   }
   const width = b.length + 1;
   const lengths = new Uint16Array((a.length + 1) * width);
@@ -66,5 +85,5 @@ export function computeInlineRevisionDiff(baselineText: string, currentText: str
     else i++;
   }
   emit(from, i, currentFrom, j);
-  return result;
+  return coalesceInlineRevisionDiffs(result, before);
 }
