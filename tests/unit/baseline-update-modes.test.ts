@@ -4,6 +4,8 @@ import { createBaselineAnalysisCard } from '../../src/renderer/baseline-analysis
 import { mountTaskDrawer } from '../../src/renderer/task-drawer.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { preferenceDefaults } from '../../src/shared/preferences.js';
+import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisWireProjection } from '../../src/shared/protocol.js';
+import type { TaskLaunchRequest } from '../../src/renderer/task-drawer.js';
 import { longPreparedAnalysis, longSettledAnalysis } from '../support/long-baseline-analysis.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 
@@ -156,4 +158,67 @@ it('restores a prepared 重新分析所选范围 Task’s range with its mode', 
   const checked = view.root.querySelectorAll('.analysis-range-option input').filter(radio => radio.checked);
   expect(checked.map(radio => radio.value)).toEqual([`${option.startPosition}-${option.endPosition}`]);
   expect(view.root.querySelector('.analysis-update-action [data-analysis-action="reanalyze-range"]')!.disabled).toBe(false);
+});
+
+function renderCard(projection: BaselineAnalysisWireProjection, ai7: Record<string, unknown> = {}) {
+  vi.stubGlobal('window', { setTimeout, clearTimeout, ai7: {
+    inspectCustomAnalysisDimensions: vi.fn(async () => { throw new Error('unused custom dimensions'); }),
+    inspectAnalysisFeedback: vi.fn(async () => { throw new Error('unused feedback'); }), ...ai7,
+  } });
+  const root = miniDocument.createElement('main'); miniDocument.body.append(root);
+  root.dataset['analysisBookId'] = projection.bookId;
+  const openLaunch = vi.fn((request: TaskLaunchRequest) => {
+    const start = document.createElement('button'); start.textContent = request.startLabel ?? '开始';
+    start.setAttribute('data-task-drawer-control', 'launch'); request.mount!.append(start);
+  });
+  const card = createBaselineAnalysisCard({ screen: root, technicalDetails: () => document.createElement('details'),
+    rendererErrorMessage: (_error: unknown, fallback: string) => fallback, setStatus: vi.fn(),
+    taskDrawer: { refresh: vi.fn(), openLaunch }, taskPlanOpenButton: () => document.createElement('button') } as never);
+  card.renderBaselineAnalysis(root as unknown as HTMLElement, projection, '公开样书');
+  return { root, openLaunch };
+}
+
+it('explains when to use each update mode in ordinary mode', () => {
+  const projection = baselineAnalysisWire(longSettledAnalysis(longPreparedAnalysis(3), 2, false));
+  const { root } = renderCard(projection);
+  const explanations = root.querySelectorAll('.analysis-update-explanation').map(node => node.textContent);
+  expect(explanations).toEqual([
+    '改过稿件后使用：只分析有变化的部分，保留其余分析。',
+    '想重点重看某一章时使用：重新分析所选范围，保留其他部分的分析。',
+    '想从头重看全稿时使用：重新分析全书，不沿用之前的分析。',
+  ]);
+});
+
+it('names chapter ranges, distinguishes chapter parts and falls back for unnamed sections, including later pages', async () => {
+  const projection = baselineAnalysisWire(longSettledAnalysis(longPreparedAnalysis(3), 2, false));
+  const first = { unitOrdinal: 1, sectionOrdinal: 1, startPosition: 1, endPosition: 3,
+    label: '结构段 1「第一章 起点」 · 单元 1/3（1/2）· 段落 1–3 · 240 字素' };
+  Object.assign(projection.updateControls!.actions['reanalyze-range'], { options: [first] });
+  Object.assign(projection, { listPages: { ...projection.listPages, 'updateControls.actions.reanalyze-range.options': { total: 3, shown: 1, nextOrdinal: 1 } } });
+  const getBaselineAnalysisPage = vi.fn(async () => ({ path: 'updateControls.actions.reanalyze-range.options', nextOrdinal: null, items: [
+    { ...first, unitOrdinal: 2, startPosition: 4, endPosition: 6, label: '结构段 1「第一章 起点」 · 单元 2/3（2/2）· 段落 4–6 · 240 字素' },
+    { unitOrdinal: 3, sectionOrdinal: 2, startPosition: 7, endPosition: 9, label: '结构段 2 · 单元 3/3（1/1）· 段落 7–9 · 240 字素' },
+  ] }));
+  const { root } = renderCard(projection, { getBaselineAnalysisPage });
+  expect(root.querySelector('.analysis-range-option label')!.textContent).toBe('「第一章 起点」（第 1/2 部分）');
+  root.querySelector('.analysis-range-options button')!.click();
+  await vi.waitFor(() => expect(root.querySelectorAll('.analysis-range-option')).toHaveLength(3));
+  expect(root.querySelectorAll('.analysis-range-option label').map(node => node.textContent)).toEqual([
+    '「第一章 起点」（第 1/2 部分）', '「第一章 起点」（第 2/2 部分）', '第 2 部分 · 第 7–9 段',
+  ]);
+  expect(root.querySelectorAll('.analysis-range-option input').map(node => node.value)).toEqual(['1-3', '4-6', '7-9']);
+});
+
+it.each(['available', 'cancelled'] as const)('offers one friendly first-analysis card when %s, keeping custom analysis accessible', state => {
+  const projection = baselineAnalysisWire(longPreparedAnalysis(3));
+  Object.assign(projection, { state, history: null, taskIntent: null, coverageManifest: null });
+  Object.assign(projection.actions, { canPrepare: true });
+  const { root, openLaunch } = renderCard(projection);
+  expect(root.querySelectorAll('.analysis-empty')).toHaveLength(1);
+  expect(root.querySelector('.analysis-empty h3')!.textContent).toBe('先了解这本稿件');
+  expect(root.querySelector('.analysis-empty [data-analysis-action="start"]')!.textContent).toBe('开始分析');
+  expect(root.querySelector('.analysis-empty input')!.type).toBe('hidden');
+  expect(root.textContent).not.toMatch(/固定任务目标|尚无基线分析结果|任务目标/u);
+  expect(root.querySelectorAll('[role="tab"]').map(node => node.textContent)).toEqual(['稿件分析', '自定义']);
+  expect(openLaunch).toHaveBeenCalledWith(expect.objectContaining({ bookId: projection.bookId, input: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } }), expect.any(Function));
 });

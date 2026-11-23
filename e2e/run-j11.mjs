@@ -431,8 +431,8 @@ const READ_EVALUATION = `(() => {
   const record = host.querySelector('.evaluation-record');
   const report = host.querySelector('.evaluation-report');
   const active = document.activeElement;
-  const REPORT_PREFIX = '详细评估报告 · ';
   const recordHeading = record?.querySelector('h3')?.firstChild?.textContent ?? null;
+  const REPORT_PREFIX = recordHeading?.startsWith('详细评估报告 · ') ? '详细评估报告 · ' : '评估报告 · ';
   return {
     state: host.dataset.evaluation ?? null,
     // Which leads the page (Issue #1406): AI7's report, a version's form, or neither.
@@ -476,7 +476,7 @@ const READ_EVALUATION = `(() => {
       state: record.dataset.evaluationState,
       entries: record.dataset.entries,
       // A version begun from AI7's report is headed as the report (Issue #1407); \`heading\` names the version either way.
-      report: recordHeading?.startsWith(REPORT_PREFIX) ?? false,
+      report: record.dataset.initial === 'true',
       heading: recordHeading?.startsWith(REPORT_PREFIX) ? recordHeading.slice(REPORT_PREFIX.length) : recordHeading,
       reportConclusion: record.querySelector('.evaluation-report-conclusion')?.textContent ?? null,
       nextStep: record.querySelector('.evaluation-report-next-step')?.textContent ?? null,
@@ -542,7 +542,7 @@ const READ_EVALUATION = `(() => {
         state: section.dataset.rewriteState ?? null,
         task: section.querySelector('.evaluation-rewrite-task')?.textContent ?? null,
         reason: section.querySelector('.evaluation-rewrite-reason')?.textContent ?? null,
-        actions: Array.from(section.querySelectorAll('.evaluation-rewrite-start button[data-evaluation-action]'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
+        actions: Array.from(record.querySelectorAll('.evaluation-action-bar .evaluation-rewrite-start button[data-evaluation-action]'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
         proposal: card === null ? null : {
           current: card.dataset.current ?? null,
           line: card.querySelector('.evaluation-rewrite-proposal-line')?.firstChild?.textContent ?? null,
@@ -2054,11 +2054,11 @@ async function main() {
       ['next-step', page.initial.latest.nextStep === null ? [] : [page.initial.latest.nextStep]]].filter(([, lines]) => lines.length > 0)))`);
     const nextStep = JSON.parse(latestWords).find(([key]) => key === 'next-step')?.[1][0] ?? null;
     requireJourney(JSON.parse(latestWords).length >= 2, 'initial-evaluation-report-lists-present', latestWords.length);
-    const readReportView = (page, items = AI7_ITEM_LINES) => page.view === 'report' && page.record === null && page.report !== null &&
+    const readReportView = (page, items = AI7_ITEM_LINES, editLabel = '修改报告') => page.view === 'report' && page.record === null && page.report !== null &&
       JSON.stringify(page.report.items) === JSON.stringify(items) && JSON.stringify(page.report.comments) === JSON.stringify(AI7_COMMENTS) &&
       JSON.stringify(page.report.evidence) === JSON.stringify(['AI7 的依据（9 条）', 'AI7 的依据（3 条）', 'AI7 的依据（8 条）', 'AI7 的依据（7 条）', null]) &&
       JSON.stringify(page.report.lists) === latestWords && page.report.conclusion === 'AI7 建议的结论：修改后再议' &&
-      JSON.stringify(page.report.actions) === JSON.stringify([['edit-report', '修改报告', false]]) && page.report.reason === null &&
+      JSON.stringify(page.report.actions) === JSON.stringify([['edit-report', editLabel, false], ['copy-report', '复制评估报告', false]]) && page.report.reason === null &&
       page.market !== null && page.market.ai7 === 'true' && JSON.stringify(page.market.lists) === JSON.stringify(MARKET_LISTS) &&
       page.startReason === '第 13 版还没有定稿；定稿后才能重新评估。' && page.start === null;
     const reportPage = await readEvaluation(renderer, (page) => page.view === 'report', 'initial-evaluation-report');
@@ -2087,7 +2087,7 @@ async function main() {
     const ordinaryReport = await evaluationMode(false, 'initial-evaluation-ordinary');
     // Ordinary mode cites paragraphs without the reading ranges they fall in (#1431 item 71).
     const ordinaryItems = AI7_ITEM_LINES.map(([itemId, sufficiency, line]) => [itemId, sufficiency, line.replace(/，分布在 \d+ 个阅读范围/u, '')]);
-    requireJourney(readReportView(ordinaryReport, ordinaryItems) && ordinaryReport.report.line === '最近一份评估报告 · 总分 73 / 100 · 优秀' && ordinaryReport.report.technical === 0,
+    requireJourney(readReportView(ordinaryReport, ordinaryItems, '修改评估报告') && ordinaryReport.report.line === '最近一份评估报告 · 总分 73 / 100 · 优秀' && ordinaryReport.report.technical === 0,
       'initial-evaluation-ordinary-report', ordinaryReport);
     // 修改报告: the report becomes 第 14 版, begun from it past the unfinished 第 13 版, which stays as it was.
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'initial-evaluation-begin');
@@ -2300,7 +2300,7 @@ async function main() {
     // The whole loop in ordinary mode (technicalLayerVisible=false): 修改报告 on the 定稿 report begins 第 15 版 from it; nothing is
     // changed yet, so there is nothing to regenerate from.
     const reportClosed = await evaluationMode(false, 'evaluation-rewrite-ordinary');
-    requireJourney(reportClosed.view === 'record' && reportClosed.record.heading.startsWith(`定稿 · ${todayLabel()} `) && reportClosed.editReport === '修改报告',
+    requireJourney(reportClosed.view === 'record' && reportClosed.record.heading.startsWith(`定稿 · ${todayLabel()} `) && reportClosed.editReport === '修改评估报告',
       'evaluation-rewrite-edit-offered', reportClosed);
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'evaluation-rewrite-begin');
     const fifteenth = await readEvaluation(renderer, (page) => ofToday(page.record?.heading) && page.rewrite !== null, 'evaluation-rewrite-begun');
@@ -2316,7 +2316,7 @@ async function main() {
     await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-rewrite-save');
     await waitFor(renderer, `document.querySelector('[data-evaluation-action="prepare-rewrite"]')?.disabled===false`, 'evaluation-rewrite-model-ready');
     const rewriteOffered = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.rewrite?.actions.length === 2, 'evaluation-rewrite-offered-read');
-    requireJourney(JSON.stringify(rewriteOffered.rewrite.actions) === JSON.stringify([['prepare-rewrite', '按我的修改重新生成', false], ['preview-rewrite', '先看计划', false]]) && rewriteOffered.rewrite.reason === null &&
+    requireJourney(JSON.stringify(rewriteOffered.rewrite.actions) === JSON.stringify([['prepare-rewrite', '按我的修改重新生成评估报告', false], ['preview-rewrite', '先看计划', false]]) && rewriteOffered.rewrite.reason === null &&
       JSON.stringify(rewriteOffered.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '13', '14', '10']), 'evaluation-rewrite-offered-words', rewriteOffered.rewrite);
     // A rewrite reads only what is saved; edits still in the form are saved first by the same click (Issue #1410 item 12).
 
@@ -2358,7 +2358,7 @@ async function main() {
         [null, `现在：${waiting.record.strengths.join('；')}`, `重新生成：${REWRITTEN_STRENGTHS.join('；')}`],
         [null, `现在：${waiting.record.weaknesses.join('；')}`, `重新生成：${REWRITTEN_WEAKNESSES.join('；')}`],
       ]) && JSON.stringify(waiting.rewrite.proposal.lists) === JSON.stringify(['strengths', 'weaknesses']) && waiting.record.strengths.length > 0 &&
-      JSON.stringify(waiting.rewrite.proposal.actions) === JSON.stringify([['rewrite-accept', '采用新版报告', false], ['rewrite-discard', '放弃', false]]) &&
+      JSON.stringify(waiting.rewrite.proposal.actions) === JSON.stringify([['rewrite-accept', '采用新版评估报告', false], ['rewrite-discard', '放弃', false]]) &&
       waiting.record.entries === '2' && JSON.stringify(waiting.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)),
     'evaluation-rewrite-proposal-words', waiting.rewrite);
 
@@ -3508,7 +3508,7 @@ async function main() {
       await clickSelector(renderer, '#task-drawer [data-task-drawer-control="run-link"]', `${name}-return`);
       await waitFor(renderer, `(() => { const host=document.querySelector('[data-screen="book-evaluation"] .evaluation'); return host instanceof HTMLElement && host!==globalThis.__j11EvaluationBeforeReturn && host.dataset.evaluation==='ready'; })()`, `${name}-returned`, 60_000);
       const reportRead = await readEvaluation(renderer, (page) => page.view === 'report', `${name}-report`);
-      requireJourney(reportRead.editReport === '修改报告' && reportRead.record === null && reportRead.report.technical === 0 &&
+      requireJourney(reportRead.editReport === '修改评估报告' && reportRead.record === null && reportRead.report.technical === 0 &&
         JSON.stringify(reportRead.report.comments) === JSON.stringify(AI7_COMMENTS) &&
         JSON.stringify(reportRead.report.evidence) === JSON.stringify(['AI7 的依据（9 条）', 'AI7 的依据（3 条）', 'AI7 的依据（8 条）', 'AI7 的依据（7 条）', null]) &&
         reportRead.market.ai7 === 'true' && JSON.stringify(reportRead.market.lists) === JSON.stringify(MARKET_LISTS),

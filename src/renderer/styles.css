@@ -998,6 +998,7 @@ button:disabled, .marks-paging > .secondary[aria-disabled="true"] { cursor: not-
 .evaluation-version-list button[aria-current="true"] { font-weight: 800; }
 .evaluation-record { display: grid; gap: .6rem; min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); }
 .evaluation-record h3, .evaluation-record h4, .evaluation-record p { margin: 0; overflow-wrap: anywhere; }
+.evaluation-action-bar { position: sticky; bottom: 0; z-index: 2; align-self: end; padding: .65rem; border-top: 1px solid var(--boundary); background: var(--surface); box-shadow: 0 -4px 12px var(--shadow); }
 .evaluation-total { font-size: 1.1rem; font-weight: 800; }
 .evaluation-items, .evaluation-risks, .evaluation-lists { display: grid; gap: .6rem; min-width: 0; }
 .evaluation-item, .evaluation-risk, .evaluation-conclusion { display: grid; gap: .4rem; min-width: 0; margin: 0; padding: .6rem .8rem; border: 1px solid var(--boundary); border-radius: 8px; }
