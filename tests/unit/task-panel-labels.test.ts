@@ -40,11 +40,6 @@ function entry(state: GlobalAttentionStateKey, overrides: Partial<GlobalAttentio
 
 describe('发起全书任务', () => {
   it('names the procedures and their actions', () => {
-    expect(labels.TASK_PANEL_COMPOSE_HEADING).toBe('发起全书任务');
-    expect(labels.TASK_PANEL_COMPOSE_LEDE).toBe('选择工序即可开始，任务计划可随时查看。');
-    expect(labels.TASK_PANEL_COMPOSE_FIELD).toBe('全书工序');
-    expect(labels.TASK_PANEL_COMPOSE_ACTIONS).toEqual({ quick: '快速开始', prepare: '准备任务' });
-    expect(labels.TASK_PANEL_COMPOSE_NONE).toBe('导入稿件后即可开始分析。');
     expect(labels.TASK_PANEL_COMPOSE_FIRST).toEqual({ label: '首次基线分析', meaning: '梳理全书的人物、事件、关系与设定，作为其他任务的底稿。' });
     expect(labels.TASK_PANEL_COMPOSE_MEANINGS).toEqual({
       'sync-current': '更新改动涉及的分析，沿用仍适用的结果。',

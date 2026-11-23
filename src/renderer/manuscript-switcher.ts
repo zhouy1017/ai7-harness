@@ -60,6 +60,7 @@ export interface ManuscriptSwitcher {
   readonly element: HTMLElement;
   /** A rename on the editor's own title (Issue #1404): the switcher's entry says it at once, then the Book is read again. */
   renamed(documents: ProductionDocumentsProjection): void;
+  openWriting(): void;
   refreshWriting(): void;
   /** A file dropped on a 衍生稿件 (Issue #1682): the form open in 导入文件, the file named and the title taken from it. */
   openImportedFile(file: File): boolean;
@@ -343,6 +344,7 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
       projection = documents;
       paintBar();
     },
+    openWriting: () => writing.open(null),
     refreshWriting: () => writing.refresh(),
     destroy: () => {
       destroyed = true;

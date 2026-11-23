@@ -1,5 +1,5 @@
 import type { EditorialMarkAnchorProjection, ManuscriptMarksPage, ManuscriptWindowAtInput, ManuscriptWindowProjection } from '../shared/protocol.js';
-import { MARKS_MORE, MARKS_MORE_NAME, MARKS_PAGE_FAILED, marksShownLine } from './editorial-mark-labels.js';
+import { MARKS_MORE, MARKS_MORE_NAME, MARKS_PAGE_FAILED, marksShownLine, marksShownFullLine } from './editorial-mark-labels.js';
 import { rendererErrorCode } from './error-words.js';
 
 /**
@@ -201,7 +201,9 @@ export function createMarksPaging(host: MarksPagingHost): MarksPaging {
     row.hidden = false;
     const text = marksShownLine(window.marks.length, page.total);
     if (line.textContent !== text) line.textContent = text;
-    line.title = text;
+    line.title = marksShownFullLine(window.marks.length, page.total);
+    line.setAttribute('role', 'note');
+    line.setAttribute('aria-label', line.title);
     button.setAttribute('aria-disabled', String(reading !== null));
     row.setAttribute('aria-busy', String(reading !== null));
     failed.hidden = failure === null;

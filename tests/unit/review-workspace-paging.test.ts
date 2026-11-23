@@ -7,7 +7,7 @@ import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.j
 import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
 import { createStatusSurface, type StatusSetter } from '../../src/renderer/notifications.js';
 
-vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({ ...DEFAULT_QUICK_ACTIONS }), rememberActionDefaults: async () => undefined }));
+vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({ ...DEFAULT_QUICK_ACTIONS }), rememberActionDefaults: async () => undefined, readEvidenceAssuranceLevel: async () => 'standard', rememberEvidenceAssuranceLevel: async () => undefined }));
 
 // #1592, renderer half: the 审阅 page reads a review workspace the service paged (its report's lists and the local check's
 // 未生成批注) to the end, in order and exactly once, and a refused read is said instead of leaving the last workspace as current.

@@ -14,8 +14,8 @@ import {
   fidelityRows,
   fidelitySummaryLine,
   fidelitySurfaceDetail,
-  needsDegradationDecision,
   offersTextBoxChoice,
+  needsDegradationDecision,
   roundTripCard,
 } from './import-fidelity-labels.js';
 
@@ -115,13 +115,7 @@ export function renderFidelityReview(
   // The summary says what the choice does as the editor makes it, not only once the review states it (Issue #532).
   let summary: HTMLElement | null = null;
   for (const category of fidelityRows(fidelity)) {
-    const choice = category.key === 'text-boxes' && category.count > 0 && (offered || stated)
-      ? textBoxChoice(offered ? 'offer' : 'stated', chosen, (disposition) => {
-          chosen = disposition;
-          if (summary !== null) summary.textContent = fidelitySummaryLine(fidelity, chosen);
-        })
-      : null;
-    list.append(fidelityRow(category, choice));
+    list.append(fidelityRow(category, null));
   }
   const card = roundTripCard(fidelity);
   const body: HTMLElement[] = card === undefined ? [list] : [list, roundTripCardElement(card)];
@@ -131,16 +125,15 @@ export function renderFidelityReview(
     note.dataset['importConversionNote'] = conversion.sourceFormat;
     elements.push(note);
   }
-  if (needsDegradationDecision(fidelity)) {
-    elements.push(...body);
-  } else {
-    summary = el('p', 'fidelity-summary', fidelitySummaryLine(fidelity, offered || stated ? chosen : null));
-    summary.dataset['fidelitySummary'] = 'no-decision';
-    const details = el('details', 'fidelity-details');
-    // The rows stay folded unless the editor has a choice to make in them.
-    details.open = offered;
-    details.append(el('summary', undefined, FIDELITY_DETAILS_SUMMARY), ...body);
-    elements.push(summary, details);
-  }
+  summary = el('p', 'fidelity-summary', fidelitySummaryLine(fidelity, offered || stated ? chosen : null));
+  summary.dataset['fidelitySummary'] = needsDegradationDecision(fidelity) ? 'decision' : 'no-decision';
+  elements.push(summary);
+  if (offered || stated) elements.push(textBoxChoice(offered ? 'offer' : 'stated', chosen, (disposition) => {
+    chosen = disposition;
+    summary!.textContent = fidelitySummaryLine(fidelity, chosen);
+  }));
+  const details = el('details', 'fidelity-details');
+  details.append(el('summary', undefined, FIDELITY_DETAILS_SUMMARY), ...body);
+  elements.push(details);
   return { elements, textBoxDisposition: () => chosen };
 }

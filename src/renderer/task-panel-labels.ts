@@ -36,11 +36,6 @@ export const TASK_PANEL_JUMP_GONE = '所选文字所在的段落已不在当前�
 
 // ---- 发起全书任务 -----------------------------------------------------------------------------------------
 
-export const TASK_PANEL_COMPOSE_HEADING = '发起全书任务';
-export const TASK_PANEL_COMPOSE_LEDE = '选择工序即可开始，任务计划可随时查看。';
-export const TASK_PANEL_COMPOSE_FIELD = '全书工序';
-export const TASK_PANEL_COMPOSE_ACTIONS = { quick: '快速开始', prepare: '准备任务' } as const;
-export const TASK_PANEL_COMPOSE_NONE = '导入稿件后即可开始分析。';
 /** The first baseline, before the Book has one: the one whole-Book procedure it can start. */
 export const TASK_PANEL_COMPOSE_FIRST = { label: '首次基线分析', meaning: '梳理全书的人物、事件、关系与设定，作为其他任务的底稿。' } as const;
 export const TASK_PANEL_COMPOSE_MEANINGS = {
@@ -147,13 +142,13 @@ export function returnChipArrived(place: string): string {
 
 /** A draft's card in 等你处理 (TASK-004): no Task yet, nothing started by itself. */
 /** 发起全书任务's own way to the composer (TASK-001): the editor says what AI7 should do; the procedures below stay for 快速开始. */
-export const TASK_PANEL_COMPOSE_OPEN = '发起全书任务…';
+export const TASK_PANEL_COMPOSE_OPEN = '描述要做的事…';
 export const TASK_PANEL_COMPOSE_OPEN_NOTE = '用自己的话说明要做的编辑工作。';
 
 export const TASK_COMPOSER_TITLES = {
   selection: '就这段发起任务',
-  book: '发起全书任务',
-  draft: '任务意图草稿',
+  book: '发起任务',
+  draft: '任务草稿',
 } as const;
 /** The composer's one field, in editorial words (TASK-001): never a chat box. */
 export const TASK_COMPOSER_GOAL_LABEL = '描述希望 AI7 完成的编辑工作';
@@ -214,7 +209,7 @@ export const TASK_COMPOSER_ACTIONS = {
 /** What 准备任务 does (TASK-004): a durable draft, and nothing else. */
 export const TASK_COMPOSER_NOTE = '保存草稿不会读取稿件、调用模型或发送内容；准备计划后由你开始任务。';
 export function taskComposerDraftHeading(ordinal: number): string {
-  return `任务意图草稿${technicalWords(` · 第 ${ordinal} 版`)}`;
+  return `任务草稿${technicalWords(` · 第 ${ordinal} 版`)}`;
 }
 export const TASK_COMPOSER_UNSAVED = '有未保存的修改。';
 export const TASK_COMPOSER_PROMOTE_SAVE_FIRST = '先保存修改，再准备计划。';
@@ -228,7 +223,7 @@ export const TASK_COMPOSER_WRITING_CHANNEL = '渠道';
 export const TASK_COMPOSER_PICK_CHOICE = '请先选一种任务。';
 export const TASK_COMPOSER_WRITING_FIELDS = '请写下这份衍生稿件的受众和渠道。';
 /** A promoted draft is final: its Task is a normal prepared Task (AUTH-002). */
-export const TASK_COMPOSER_PROMOTED = '这份草稿已准备成任务：在任务计划里查看并开始。要改要求，请另起一份草稿。';
+export const TASK_COMPOSER_PROMOTED = '任务已准备好，还没有开始：在计划里查看并开始。';
 export const TASK_COMPOSER_OPEN_PLAN = '查看计划';
 export const TASK_COMPOSER_COPY_RANGES_DROPPED = '另起的草稿不带原来的所选文字；需要时请在稿件里重新选择后「再选一段加入」。';
 /** A draft made from a dialogue answer (DIALOG-016): generated content, with where it came from. */

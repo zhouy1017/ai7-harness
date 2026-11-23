@@ -46,6 +46,7 @@ import {
   learningLineageOrdinarySignalLine,
   learningLineageOrdinaryTaskLine,
   LEARNING_AUDIT_BATCH_MISMATCH,
+  LEARNING_AUDIT_ORDINARY_BATCH_MISMATCH,
   LEARNING_AUDIT_CLEAR_SELECTION,
   LEARNING_AUDIT_EMPTY,
   LEARNING_AUDIT_FILTERS,
@@ -151,6 +152,10 @@ function action(label: string, tone: 'primary' | 'secondary' | 'quiet', name: st
 }
 
 type Filter = keyof typeof LEARNING_AUDIT_FILTERS;
+function selectable(material: LearningAuditMaterialProjection): boolean {
+  return material.standing === 'book' || material.standing === 'house' || material.kind === 'word-tracked-edit' && material.automaticAdmission?.choice === 'house';
+}
+
 interface Selected { readonly bookId: string; readonly material: LearningAuditMaterialProjection }
 type Panel =
   | null
@@ -253,7 +258,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       selection.clear();
       for (const entry of ticked) {
         const again = page.books.find((book) => book.bookId === entry.bookId)?.materials.find((candidate) => candidate.materialKey === entry.material.materialKey);
-        if (again !== undefined && again.digest === entry.material.digest) selection.set(again.materialKey, { bookId: entry.bookId, material: again });
+        if (again !== undefined && again.digest === entry.material.digest && again.standing === entry.material.standing && selectable(again)) selection.set(again.materialKey, { bookId: entry.bookId, material: again });
       }
       batch = null;
       listRefusal = refusal;
@@ -382,7 +387,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     clear.disabled = busy;
     row.append(stop, clear);
     section.append(row);
-    if (!homogeneous()) section.append(el('p', 'field-note learning-audit-mismatch', LEARNING_AUDIT_BATCH_MISMATCH));
+    if (!homogeneous()) section.append(el('p', 'field-note learning-audit-mismatch', ordinary() ? LEARNING_AUDIT_ORDINARY_BATCH_MISMATCH : LEARNING_AUDIT_BATCH_MISMATCH));
     if (batch !== null && !ordinary()) section.append(previewNode(batch, null, (materialKey) => {
       const entry = selection.get(materialKey);
       return entry === undefined ? null : nameOf(entry.material);
@@ -397,13 +402,14 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     if (projection === null) return;
     const parts: HTMLElement[] = [el('p', 'field-note learning-audit-note', ordinary() ? LEARNING_AUDIT_ORDINARY_NOTE : LEARNING_AUDIT_NOTE)];
     const filters = el('div', 'feedback-filters learning-audit-filters');
+    const dates = el('div', 'learning-audit-dates'); dates.append(dateFilter('from'), dateFilter('to'));
     filters.append(
       searchFilter(),
       select('book', [...knownBooks].sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0)).map(([bookId, title]) => [bookId, `《${title}》`] as const)),
       select('series', filterChoices.series.map((entry) => [entry.seriesId, entry.title] as const)),
       select('kind', LEARNING_MATERIAL_KINDS.map((kind) => [kind, LEARNING_AUDIT_KIND_LABELS[kind]] as const)),
       select('standing', LEARNING_AUDIT_STANDINGS.map((standing) => [standing, standingLabels()[standing]] as const)),
-      dateFilter('from'), dateFilter('to'),
+      dates,
     );
     parts.push(filters);
     // A house with more Books or Series than the filters list says so beside them (Issue #677).
@@ -467,7 +473,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     item.dataset['materialKey'] = material.materialKey;
     item.dataset['learningStanding'] = material.standing;
     const head = el('div', 'learning-material-head');
-    if (material.standing === 'book' || material.standing === 'house' || material.kind === 'word-tracked-edit' && material.automaticAdmission?.choice === 'house') {
+    if (selectable(material)) {
       const check = el('input', 'learning-audit-select');
       check.type = 'checkbox';
       check.checked = selection.has(material.materialKey);

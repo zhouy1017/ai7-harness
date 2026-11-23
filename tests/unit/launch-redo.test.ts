@@ -36,7 +36,8 @@ it('keeps an ordinary budget redo startable after authorization fails, revising 
   await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-drawer-control="redo"]')).not.toBeNull());
   miniDocument.querySelector('[data-task-drawer-control="redo"]')!.click();
   await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-launch-option="budget"]')?.disabled).toBe(false));
-  expect(root.textContent).toContain('本次模型@high');
+  // The fixed 「沿用本次计划的模型与思考强度」 line is retired (Issue #1680): the send line is not shown as a model.
+  expect(root.textContent).not.toContain('本次模型@high');
   const budget = miniDocument.querySelector('[data-task-launch-option="budget"]')!;
   budget.value = '100000'; budget.dispatchEvent({ type: 'change', bubbles: true });
   miniDocument.querySelector('[data-task-drawer-control="start"]')!.click();
