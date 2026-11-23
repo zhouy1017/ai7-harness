@@ -3672,6 +3672,9 @@ async function main() {
     const factualCard = `document.querySelector('article.review-finding[data-finding-id="${sourced.reviewFindingId}"]')`;
     // Issue #1683 item 11: collapsed, the fact card lists no source; its rows live in 为这句核对的来源 once it is expanded.
     await waitFor(renderer, `${factualCard}?.dataset.factCard==='collapsed' && ${factualCard}.querySelector('.finding-evidence')===null`, 'factual-card-evidence', 30_000);
+    // This admitted fixture's sourced finding has a verification result and therefore belongs to the fact lens. The legacy
+    // standalone fallback is for findings without a result; it cannot supply another source-row press for this fixture.
+    await assertRenderer(renderer, `!!${factualCard}?.closest('.fact-lens')`, 'factual-source-list-fixture-in-fact-lens');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${sourced.reviewFindingId}"] [data-review-action="go-to-text"]`, 'factual-card-go-to-text');
     await openMarkMore(renderer, sourced.markId, 'factual-mark-card-more');
     await waitFor(renderer, `${evidenceRows(`document.querySelector('[data-mark-card="${sourced.markId}"]')`)}===${JSON.stringify(expectedEvidence)}`, 'factual-mark-card-evidence', 30_000);

@@ -21,6 +21,40 @@ function hitPoint(selector, words) {
 
 export function reachable(selector, words) { return `(${hitPoint(selector, words)} !== null)`; }
 
+/** Keep the previous, real product notice alive until the next file question is drawn. */
+export async function holdEarlierNotice(io, name) {
+  await io.waitFor(io.renderer, `document.querySelector('.toast:not([hidden])')`, `${name}-earlier-notice`);
+  const point = await io.renderer.evaluate(`(() => { const n=document.querySelector('.toast:not([hidden])'), r=n.getBoundingClientRect(); return n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)) ? {x:r.x+r.width/2,y:r.y+r.height/2} : null; })()`);
+  if (!point) throw new Error(`${name}-earlier-notice-not-reachable`);
+  await io.renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+}
+
+/** Every rendered title line, including a wrapped long filename, is readable and topmost. */
+export async function questionHeadingVisible(io, name) {
+  await io.assertRenderer(io.renderer, `(() => {
+    const heading=document.querySelector('[data-import-question] h3');
+    if (!heading) return false;
+    const range=document.createRange(); range.selectNodeContents(heading);
+    const lines=Array.from(range.getClientRects());
+    return lines.length>0 && lines.every(r => r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight &&
+      [r.left+1,r.left+r.width/2,r.right-1].every(x=>heading.contains(document.elementFromPoint(x,r.top+r.height/2))));
+  })()`, `${name}-heading-visible`);
+}
+
+/** Hover the formerly covered title past the toast lifetime, then move away; the question stays readable. */
+export async function questionOutlastsNotice(io, name) {
+  await io.assertRenderer(io.renderer, `!!document.querySelector('.toast:not([hidden])')`, `${name}-notice-retained`);
+  const point=await io.renderer.evaluate(`(() => { const range=document.createRange(); range.selectNodeContents(document.querySelector('[data-import-question] h3')); const r=range.getClientRects()[0]; return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+  await io.renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+  await new Promise(resolve => setTimeout(resolve, 2800));
+  await questionHeadingVisible(io, `${name}-hover`);
+  const away=await io.renderer.evaluate(`({x:innerWidth-2,y:innerHeight-2})`);
+  await io.renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...away });
+  await new Promise(resolve => setTimeout(resolve, 2700));
+  await questionHeadingVisible(io, `${name}-away`);
+  await io.assertRenderer(io.renderer, `!document.querySelector('.toast:not([hidden])')`, `${name}-notice-expired`);
+}
+
 export async function pressReachable(io, selector, name, words) {
   await io.waitFor(io.renderer, reachable(selector, words), `${name}-in-window`);
   const point = await io.renderer.evaluate(hitPoint(selector, words));
@@ -68,6 +102,7 @@ const ANSWER_WORDS = Object.freeze({ update: '更新稿件', source: '存为来�
 /** The question stands, offers exactly these answers in this order, and each button is inside the window. */
 export async function questionOffers(io, answers, name) {
   await io.waitFor(io.renderer, `document.querySelector('[data-import-question]')?.open === true`, `${name}-question`);
+  await questionHeadingVisible(io, name);
   const expected = JSON.stringify(answers.map((answer) => [answer, ANSWER_WORDS[answer]]));
   await io.assertRenderer(io.renderer, `JSON.stringify(Array.from(document.querySelectorAll('[data-import-question] [data-import-answer]'), (node) => [node.dataset.importAnswer, node.textContent])) === ${JSON.stringify(expected)}`, `${name}-answers`);
   for (const answer of answers) {

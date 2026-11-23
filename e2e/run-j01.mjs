@@ -8,7 +8,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { pointerClick } from './dispatch-chooser.mjs';
-import { answer, cancelImportPage, dropFile, newVersionFromSaveMenu, noImportDraft, pressReachable, questionOffers, reachable, tabTo } from './import-entry-stages.mjs';
+import { answer, cancelImportPage, dropFile, holdEarlierNotice, newVersionFromSaveMenu, noImportDraft, pressReachable, questionOffers, questionOutlastsNotice, reachable, tabTo } from './import-entry-stages.mjs';
 import {
   admittedParagraphs,
   admittedSpanText,
@@ -3774,12 +3774,16 @@ async function main() {
     }
 
     renderer = await launchProduct({ dataRoot: reimportRoot, launchScenario: 'new-version-drop-question' });
+    const longDropPath = resolve(runRoot, 'public-sample-import-question-with-a-long-filename-that-wraps-across-the-question-heading.docx');
+    await copyFile(syntheticCPath, longDropPath);
     const dropQuestionStage = async (stage, section, root) => {
       const io = entryButtonIo();
       // The question, nothing staged before an answer, 取消, then 更新稿件 and 存为来源材料 each on a drop of its own.
       await openEntryBook(stage, section);
-      await dropFile(io, syntheticCPath, root, stage);
+      await holdEarlierNotice(io, stage);
+      await dropFile(io, longDropPath, root, stage);
       await questionOffers(io, ['update', 'source', 'cancel'], stage);
+      await questionOutlastsNotice(io, stage);
       await noImportDraft(io, `${stage}-unanswered`);
       await answer(io, 'cancel', `${stage}-cancel`);
       await waitFor(renderer, `document.querySelector('[data-import-question]') === null`, `${stage}-cancel-closed`);
