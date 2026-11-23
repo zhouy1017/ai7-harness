@@ -845,9 +845,9 @@ async function openManuscript(renderer, name) {
  * before the type, so choosing the type keeps it, and the way of making the document is chosen last.
  */
 async function openDerivativePanel(renderer, { title, typeId, mode }, name) {
-  await waitFor(renderer, `document.querySelector('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="new"]:not(:disabled)') !== null`, `${name}-switcher`, 120_000);
+  await waitFor(renderer, `document.querySelector('[data-screen="editor"] .editor-toolbar [data-manuscript-switch="new"]:not(:disabled)') !== null`, `${name}-switcher`, 120_000);
   await clickSelector(renderer, '[data-derivative-menu]', `${name}-menu`);
-  await clickSelector(renderer, '[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="new"]', `${name}-open`);
+  await clickSelector(renderer, '[data-screen="editor"] .editor-toolbar [data-manuscript-switch="new"]', `${name}-open`);
   await waitFor(renderer, `(() => { const form = document.querySelector('.derivative-create-form'); const first = form?.querySelector('[data-document-field]'); return first?.dataset.documentField === 'title' && document.activeElement === first; })()`, `${name}-title-first`);
   if (title !== undefined) await fill(renderer, '.derivative-create-form [data-document-field="title"]', title, `${name}-title`);
   await assertRenderer(renderer, `(() => { const type = document.querySelector('.derivative-create-form select[data-document-field="type"]'); if (!(type instanceof HTMLSelectElement)) return false; type.value = ${JSON.stringify(typeId)}; type.dispatchEvent(new Event('change', { bubbles: true })); const mode = document.querySelector('.derivative-create-form input[name="derivative-mode"][value=${JSON.stringify(mode)}]'); if (!(mode instanceof HTMLInputElement)) return false; mode.click(); return type.value === ${JSON.stringify(typeId)} && mode.checked; })()`, `${name}-type-and-mode`);
@@ -1858,7 +1858,7 @@ async function main() {
         noAnalysis: shell?.querySelector('[data-records-destination="analysis"]') === null,
         edge: JSON.stringify(edge) === '["navigation","comments"]',
         // It is one of the Book's 稿件 (Issue #1403): the switcher marks it current, beside the manuscript.
-        switcher: JSON.stringify(Array.from(shell?.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]') ?? [], (item) => [item.dataset.manuscriptSwitch, item.getAttribute('aria-current')])) === '[["primary",null],["document","page"],["new",null],["manage",null]]' &&
+        switcher: JSON.stringify(Array.from(shell?.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch], .editor-toolbar [data-manuscript-switch]') ?? [], (item) => [item.dataset.manuscriptSwitch, item.getAttribute('aria-current')])) === '[["primary",null],["document","page"],["new",null],["manage",null]]' &&
           shell?.querySelector('.manuscript-switcher-bar [data-manuscript-switch="document"]')?.textContent === '[新闻稿] 新闻稿',
         noMilestone: shell?.querySelector('details.milestone-section') === null,
         saveVersion: shell?.querySelector('[data-document-action="saveVersion"]')?.textContent === '保存为版本',
@@ -3166,7 +3166,7 @@ async function main() {
     // Issue #1403: in ordinary mode 稿件 lists the manuscript and every derivative document by type and title, and makes new ones.
     await openManuscript(renderer, 'multi-manuscript');
     await waitFor(renderer, `document.querySelectorAll('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="document"]').length === 2`, 'multi-switcher-listed');
-    const multiSwitches = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]'), (item) => [item.dataset.manuscriptSwitch, item.textContent, item.getAttribute('aria-current')]))`);
+    const multiSwitches = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch], .editor-toolbar [data-manuscript-switch]'), (item) => [item.dataset.manuscriptSwitch, item.textContent, item.getAttribute('aria-current')]))`);
     requireJourney(multiSwitches === JSON.stringify([['primary', `主稿件（《${WRITING_TITLE}》）`, 'page'], ['document', '[宣传文章] 宣传文章', null], ['document', '[评论文章] 评论文章', null], ['new', '新建 / 导入衍生稿件…', null], ['manage', '管理全部衍生稿件（2）', null]]), 'multi-switcher-words', multiSwitches);
     at('multi-documents-ordinary-blank');
     const primaryBefore = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)},historyCursor:null}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
@@ -3226,9 +3226,9 @@ async function main() {
     const managementPage = '[data-screen="book-derivatives"]';
     const managementForm = `${managementPage} .derivative-create-form`;
     const openManagement = async (name) => {
-      await waitFor(renderer, `document.querySelector('.manuscript-switcher-bar [data-manuscript-switch="manage"]:not(:disabled)') !== null`, `${name}-switcher`, 60_000);
+      await waitFor(renderer, `document.querySelector('.editor-toolbar [data-manuscript-switch="manage"]:not(:disabled)') !== null`, `${name}-switcher`, 60_000);
       await pointerClick(renderer, waitFor, '[data-derivative-menu]', `${name}-menu`);
-      await pointerClick(renderer, waitFor, '.manuscript-switcher-bar [data-manuscript-switch="manage"]', `${name}-open`);
+      await pointerClick(renderer, waitFor, '.editor-toolbar [data-manuscript-switch="manage"]', `${name}-open`);
       await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} [data-derivative-action="new"]`)}) !== null`, `${name}-ready`, 60_000);
     };
     const openCreateForm = async (name) => {

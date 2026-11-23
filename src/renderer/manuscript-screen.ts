@@ -946,7 +946,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   identities.append(identityGrid, journal);
   switcher = mountManuscriptSwitcher({
     bookId: initialWindow.bookId,
-    bookTitle,
+    bookTitle, toolbar: toolbarActions,
     api,
     currentDocumentId: productionDocument?.document.documentId ?? null,
     setStatus,
