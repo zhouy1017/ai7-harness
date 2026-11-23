@@ -1,4 +1,5 @@
 import { chooseImportTarget } from './import-page.mjs';
+import { watchReturnArrival } from './return-arrival.mjs';
 import { rightColumnGeometry } from './comments-pane.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
@@ -1240,23 +1241,26 @@ async function main() {
       ${manuscriptRailJump('0.5')};
     })()`);
     // The real navigation sets its guard synchronously, before awaiting the window read.
+    await renderer.evaluate(`globalThis.__j16ReturnArrival = (${watchReturnArrival.toString()})(${CHIP})`);
     await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'chip-use');
     await renderer.evaluate(`globalThis.__j16ReleaseFrames()`);
     try {
-      await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
+      await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && globalThis.__j16ReturnArrival.arrived()`, 'chip-returned', 60_000);
     } catch (error) {
       // Failure-only closed state: never emit manuscript text, identifiers or arbitrary status words.
       const state = await renderer.evaluate(`(() => { const chip = ${CHIP}; return {
         present: chip !== null, disabled: chip?.disabled === true, target: ${blockInView(chip.blockId)},
-        arrived: (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已回到'),
+        arrived: globalThis.__j16ReturnArrival.arrived(),
       }; })()`).catch(() => null);
       if (state === null) at('chip-return-state-unavailable');
       else if (state.present && state.disabled) at('chip-return-retained-busy');
       else if (state.present) at('chip-return-retained-ready');
       else if (!state.target) at('chip-return-target-missing');
-      else if (!state.arrived) at('chip-return-status-replaced');
+      else if (!state.arrived) at('chip-return-arrival-unobserved');
       else at('chip-return-late-completion');
       throw error;
+    } finally {
+      await renderer.evaluate(`globalThis.__j16ReturnArrival.disconnect(); delete globalThis.__j16ReturnArrival; true`);
     }
     await waitForRailMarker(renderer, 'annotation', 'mark-rail-ready');
     // A storage failure must refuse the jump, rather than lose the editor's way back.

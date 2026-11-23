@@ -1755,7 +1755,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'chip-return-retained-busy',
     'chip-return-retained-ready',
     'chip-return-target-missing',
-    'chip-return-status-replaced',
+    'chip-return-arrival-unobserved',
     'chip-return-late-completion',
     'analysis-jump-chip',
     'j14-panel-keyboard',
