@@ -56,7 +56,8 @@ const paused = (): TaskPlanRunControlProjection => running({ activity: null, res
   continuation: { unitsSettled: 3, unitsTotal: 8, pendingAnswerUnits: [] } });
 const runningPlan = (overrides: Partial<TaskPlanProjection> = {}, control: TaskPlanRunControlProjection = running()) =>
   taskPlanFixture({ state: { key: 'running', label: '运行中' }, start: STARTED, runControl: control, ...overrides });
-const finishedPlan = (overrides: Partial<TaskPlanProjection> = {}) => taskPlanFixture({ state: { key: 'settled', label: '已完成' }, start: STARTED, ...overrides });
+const finishedPlan = (overrides: Partial<TaskPlanProjection> = {}) => taskPlanFixture({ state: { key: 'settled', label: '已完成' }, start: STARTED,
+  work: { workedMs: 192_000, workingSince: null, finished: { requests: 9, modelLabel: 'synthetic-model@high' } }, ...overrides });
 
 /** One Task of the Book as the 任务总览 reads it: its model and thinking effort, how long its Run worked, and the result 查看结果 opens. */
 const row = (state: 'running' | 'completed', overrides: Record<string, unknown> = {}) => ({
@@ -307,7 +308,7 @@ describe('the status card of a started Task in ordinary mode', () => {
 
   it('keeps the Run Budget Ceiling on the card of a task that has one, in the plan\'s own words (ADR 0096 §4.2)', async () => {
     const bounded = { service: { ...taskPlanFixture().service, usage: '达到 20,000 tokens 后不再发送新的请求（8 个阅读范围）', usageIsCeiling: true } };
-    expect(text((await openDrawer(runningPlan(bounded))).root, '.task-status-ceiling')).toBe('用量达到 20,000 后不再发送');
+    expect(text((await openDrawer(runningPlan(bounded))).root, '.task-status-ceiling')).toBe('已设用量上限，用到上限时任务会暂停');
     expect(text((await openDrawer(runningPlan())).root, '.task-status-ceiling')).toBeUndefined();
   });
 
@@ -326,11 +327,11 @@ describe('the status card of a started Task in ordinary mode', () => {
     expect(root.querySelector('.task-plan-stage-chain')).toBeNull();
   });
 
-  it('shows a finished task as what it came to, its processing time, its model and 查看结果, which opens the result', async () => {
+  it('shows a finished task as what it came to, its working time and call count, its model and 查看结果, which opens the result', async () => {
     const { root, openTaskResult } = await openDrawer(finishedPlan());
     await model(root);
     expect(text(root, '.task-status-sentence')).toBe('已完成，得到一份基线分析。');
-    expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
+    expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒 · 9 次模型调用');
     expect(lines(root).length).toBeLessThanOrEqual(8);
     root.querySelector('[data-task-drawer-control="view-result"]')!.click();
     expect(openTaskResult).toHaveBeenCalledOnce();
@@ -408,6 +409,56 @@ function composedRunningRow() {
 describe('the running card and the times of a Task', () => {
   const line = (root: MiniElement) => text(root, '.task-status-line');
 
+  it.each(['baseline-analysis', 'review-run'] as const)('ticks %s work in place, stops at a pause, and keeps accumulated time after resume', async kind => {
+    const clock = vi.spyOn(window, 'setInterval');
+    const work = { workedMs: 60_000, workingSince: '2026-11-17T08:03:00.000Z', finished: null };
+    const opened = await openDrawer(runningPlan({ kind, work, ...(kind === 'review-run' ? { runControl: null } : {}) }));
+    const node = opened.root.querySelector('.task-status-line');
+    expect(line(opened.root)).toContain('用时 1 分 12 秒');
+    vi.setSystemTime(new Date(Date.parse(NOW) + 1000));
+    const tick = clock.mock.calls.at(-1)![0] as () => void;
+    tick();
+    expect(opened.root.querySelector('.task-status-line')).toBe(node);
+    expect(line(opened.root)).toContain('用时 1 分 13 秒');
+    opened.inspectTaskPlan.mockImplementation(async () => runningPlan({ kind, state: { key: 'paused', label: '已暂停' },
+      work: { ...work, workedMs: 73_000, workingSince: null } }, paused()));
+    opened.drawer.refresh(kind);
+    await vi.waitFor(() => expect(opened.root.dataset['taskPlanState']).toBe('paused'));
+    vi.setSystemTime(new Date(Date.parse(NOW) + 60_000)); tick();
+    expect(line(opened.root)).toBe('用时 1 分 13 秒');
+    opened.inspectTaskPlan.mockImplementation(async () => runningPlan({ kind, work: { ...work, workedMs: 73_000, workingSince: new Date().toISOString() } }));
+    opened.drawer.refresh(kind);
+    await vi.waitFor(() => expect(opened.root.dataset['taskPlanState']).toBe('running'));
+    vi.setSystemTime(new Date(Date.parse(NOW) + 61_000));
+    (clock.mock.calls.at(-1)![0] as () => void)();
+    expect(line(opened.root)).toContain('用时 1 分 14 秒');
+    opened.drawer.close(false); clock.mockRestore();
+  });
+
+  it.each(['settled', 'stopped', 'resumable', 'cancelled-after-start'] as const)('uses the recorded summary for %s even without an overview answer', async key => {
+    const { root } = await openDrawer(finishedPlan({ state: { key, label: '已结束' },
+      work: { workedMs: 45000, workingSince: null, finished: { requests: 0, modelLabel: 'recorded-model@high' } } }),
+    { overview: async () => overviewOf(row('completed', { usage: { elapsed: 999999, calls: 500 }, attention: { modelLabel: 'other-model' } })) });
+    expect(text(root, '.task-status-line')).toBe('用时 45 秒 · 0 次模型调用');
+    expect(text(root, '.task-status-model')).toBe('模型 recorded-model@high');
+    expect(lines(root).join(' ')).not.toMatch(/tokens|处理用时|约 .*次调用|500/u);
+  });
+
+  it('omits unknown completion counts and models without guessing from usage', async () => {
+    const { root } = await openDrawer(finishedPlan({ work: { workedMs: 45000, workingSince: null, finished: { requests: null, modelLabel: null } } }));
+    expect(text(root, '.task-status-line')).toBe('用时 45 秒');
+    expect(text(root, '.task-status-model')).toBeUndefined();
+  });
+
+  it('shows the service estimate unchanged in compact and full plans before launch', async () => {
+    const sentence = '预计读 12 个部分，至少 13 次模型调用（重试时会更多）；用时暂无可靠估计。';
+    const { root } = await openDrawer(taskPlanFixture({ estimate: { parts: 12, fewestRequests: 13, more: ['retry'], ceiling: true, durationMs: null, sentence } }));
+    expect(text(root, '[data-task-plan-row="预计"]')).toBe(sentence);
+    root.querySelector('[data-task-drawer-control="full-link"]')!.click();
+    expect(text(root, '[data-task-plan-term="预计"]')).toBe(sentence);
+    expect(lines(root).join(' ')).not.toMatch(/预计用时|tokens/u);
+  });
+
   it('shows the stage alone while a Run executes, for the row the real composition gives — whose `at` is when the Run was recorded, an hour before the resume', async () => {
     const real = composedRunningRow();
     expect(real.at).toBe('2026-11-17T07:00:00.000Z');
@@ -435,14 +486,14 @@ describe('the running card and the times of a Task', () => {
     expect(root.textContent).not.toMatch(/已运行|用时/u);
   });
 
-  it('on completion shows 处理用时 from the Run Report — and no figure for a Task without one', async () => {
+  it('on completion keeps the work figure and count, without falling back to the report when work is absent', async () => {
     const opened = await openDrawer(runningPlan());
     await model(opened.root);
     opened.inspectTaskOverview.mockImplementation(async () => overviewOf(row('completed')));
     opened.inspectTaskPlan.mockImplementation(async () => finishedPlan());
     opened.drawer.refresh('baseline-analysis');
-    await vi.waitFor(() => expect(line(opened.root)).toBe('处理用时 3 分 12 秒'));
-    const bare = await openDrawer(finishedPlan(), { overview: async () => overviewOf(row('completed', { usage: null })) });
+    await vi.waitFor(() => expect(line(opened.root)).toBe('用时 3 分 12 秒 · 9 次模型调用'));
+    const bare = await openDrawer(finishedPlan({ work: null }), { overview: async () => overviewOf(row('completed')) });
     await vi.waitFor(() => expect(text(bare.root, '.task-status-sentence')).toBe('已完成，得到一份基线分析。'));
     expect(line(bare.root)).toBeUndefined();
   });
@@ -452,7 +503,7 @@ describe('where the card gets the Task\'s model, duration and result', () => {
   it('uses the row its opener handed in and asks for no other', async () => {
     const { root, inspectTaskOverview } = await openDrawer(finishedPlan(), { how: { view: 'run', row: row('completed') as never } });
     await model(root);
-    expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
+    expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒 · 9 次模型调用');
     expect(controls(root)).toContain('view-result');
     expect(inspectTaskOverview).not.toHaveBeenCalled();
   });
@@ -474,7 +525,7 @@ describe('where the card gets the Task\'s model, duration and result', () => {
     drawer.refresh('baseline-analysis');
     await vi.waitFor(() => expect(root.dataset['taskPlanState']).toBe('settled'));
     expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@high');
-    await vi.waitFor(() => expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒'));
+    await vi.waitFor(() => expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒 · 9 次模型调用'));
     expect(inspectTaskOverview).toHaveBeenCalledTimes(2);
   });
 
@@ -482,17 +533,17 @@ describe('where the card gets the Task\'s model, duration and result', () => {
     const failing = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockResolvedValue(overviewOf(row('completed')));
     const { root, drawer, open, inspectTaskOverview } = await openDrawer(finishedPlan(), { overview: failing });
     await vi.waitFor(() => expect(inspectTaskOverview).toHaveBeenCalledTimes(1));
-    expect(text(root, '.task-status-model')).toBeUndefined();
+    expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@high');
     expect(controls(root)).not.toContain('view-result');
     drawer.close(false);
     await open();
     await model(root);
-    expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
+    expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒 · 9 次模型调用');
     expect(controls(root)).toContain('view-result');
     expect(inspectTaskOverview).toHaveBeenCalledTimes(2);
   });
 
-  it('does not remember a read that found no row for the Task: closed and opened again with the row present, the model, 处理用时 and 查看结果 appear', async () => {
+  it('does not remember a read that found no row for the Task: closed and opened again with the row present, the model, 用时 and 查看结果 appear', async () => {
     const overview = vi.fn().mockResolvedValueOnce(overviewOf()).mockResolvedValue(overviewOf(row('completed')));
     const { root, drawer, open } = await openDrawer(finishedPlan(), { overview });
     await vi.waitFor(() => expect(overview).toHaveBeenCalledTimes(1));
@@ -501,7 +552,7 @@ describe('where the card gets the Task\'s model, duration and result', () => {
     drawer.close(false);
     await open();
     await model(root);
-    expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
+    expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒 · 9 次模型调用');
     expect(controls(root)).toContain('view-result');
     expect(overview).toHaveBeenCalledTimes(2);
   });

@@ -1,5 +1,5 @@
 import { styleInput } from './controls.js';
-import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation, type RuntimeExecutionConfig, type TaskExecutionLaunchResult } from '../../shared/runtime-execution-config.js';
+import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation, type RuntimeExecutionConfig, type TaskExecutionLaunchResult, type TaskLaunchPreviewProjection } from '../../shared/runtime-execution-config.js';
 import type { EvaluationReferencesProjection, ServiceOperationMap, TaskLaunchPreviewInput, TaskPlanKind, RendererApi } from '../../shared/protocol.js';
 import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
 import type { PreferencesRendererApi } from '../../shared/preferences.js';
@@ -8,6 +8,12 @@ import { evaluationMaterialsField } from '../evaluation.js';
 import { similarMaterialsField } from '../task-material-selection.js';
 import { technicalLayerVisible, identityWords } from '../technical-layer.js';
 import { parseBudgetCeiling, TASK_PLAN_BUDGET_INVALID } from '../task-drawer-labels.js';
+
+/** New starts and relaunches read the same estimate; raw ceilings remain in developer mode. */
+export function launchEstimateLines(preview: TaskLaunchPreviewProjection): HTMLElement[] {
+  return [el('p', 'task-launch-estimate-sentence', preview.estimate?.sentence ?? '用时暂无可靠估计。'),
+    ...(technicalLayerVisible ? [el('p', undefined, preview.usage)] : [])];
+}
 
 /** A launch operation as the launch bar dispatches it (Issue #1545). */
 export type TaskLaunchOperation = LedgerTaskLaunchOperation;
@@ -328,7 +334,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
       if (stopped || version !== previewVersion) return;
       const steps = el('ol'); for (const step of preview.steps) steps.append(el('li', undefined, step));
       usage.replaceChildren(el('p', undefined, `处理范围：${preview.scope}`), steps,
-        ...preview.reference.map(line => el('p', undefined, `允许参考：${line}`)), el('p', undefined, `会发送：${preview.send}`), el('p', undefined, preview.usage),
+        ...preview.reference.map(line => el('p', undefined, `允许参考：${line}`)), el('p', undefined, `会发送：${preview.send}`), ...launchEstimateLines(preview),
         ...preview.adaptations.map(line => el('p', undefined, line)));
     } catch (error) { if (!stopped && version === previewVersion) usage.textContent = errorMessage(error, '计划暂时无法读取；仍可直接开始任务。'); }
     finally { refreshPreview.disabled = false; }

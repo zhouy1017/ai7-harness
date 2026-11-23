@@ -19,7 +19,7 @@ it('restores review choice focus after its native popover has reopened', async (
   class Control { focus(): void { if (popoverOpen) active = this; } }
   const control = new Control(); active = control;
   const state = { chooser: { element: { contains: (node: object) => node === control } } };
-  const context = createContext({ sheetState: state, destroyed: false, HTMLElement: Control, queueMicrotask,
+  const context = createContext({ sheetState: state, estimateGeneration: 0, destroyed: false, HTMLElement: Control, queueMicrotask,
     document: { body, get activeElement() { return active; } }, api: { inspectReviewWorkspace: async () => ({}) },
     query: {}, sheetUpdate: () => {}, projection: null, retainTaskPlanPages: (next: unknown) => next,
     renderSheet: () => {

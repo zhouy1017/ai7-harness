@@ -124,7 +124,7 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
       loadNavigationWindow: vi.fn((next: ManuscriptWindowProjection) => { currentWindow = next; return true; }),
       selectRange: vi.fn((blockId: string) => currentWindow.blocks.some((block) => block.blockId === blockId)),
       highlightJump: vi.fn(), highlightAppliedRange: vi.fn(),
-      inputModeValue: 'reading-revision' as 'reading-revision' | 'direct-edit',
+      inputModeValue: options.initialInputMode ?? 'reading-revision',
       inputMode() { return this.inputModeValue; },
       setInputMode: vi.fn(function (this: { inputModeValue: string }, mode: string) { this.inputModeValue = mode; }),
       selectedRange: vi.fn(() => ({ kind: 'none' })),
@@ -508,7 +508,7 @@ describe('the Manuscript screen lifecycle', () => {
     expect(toolbar.textContent).not.toMatch(/分支|%|查看技术详情|保存当前编辑/u);
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
-      .toEqual(['修订 · 自动应用改动留痕，停笔后自动写入稿件，可逐条撤销。', '修订 · 待我确认改动留痕为待处理的修订卡，由你逐条应用。', '直接改稿 · 不留痕直接改动正文，不生成修订卡。', '让 AI 修改…', '', '', '重试权威刷新']);
+      .toEqual(['修订 · 自动应用改动留痕，停笔后自动写入稿件，可逐条撤销。', '修订 · 待我确认改动留痕为待处理的修订卡，由你逐条应用。', '直接改稿 · 不留痕直接改动正文，不生成修订卡。', '让 AI 修改…', '', '', '重试权威刷新', '新建 / 导入衍生稿件…', '管理全部衍生稿件（0）']);
     app.showing?.destroy();
   });
 
@@ -531,6 +531,29 @@ describe('the Manuscript screen lifecycle', () => {
     await Promise.resolve();
     expect(getAutoApplyEditorRevisions()).toBe(false);
     expect(trigger.textContent).toBe('修订 · 待我确认 ▾');
+    app.showing?.destroy();
+    setAutoApplyEditorRevisions(true);
+  });
+
+  it('keeps the default with empty storage and remembers direct editing across books until changed back', async () => {
+    const saved = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => saved.set(key, value) });
+    setAutoApplyEditorRevisions(true);
+    const app = shell();
+    app.open(windowOf('book-one'));
+    expect((children.editors.at(-1) as EditorOptions).initialInputMode).toBe('reading-revision');
+    expect(saved.has('ai7.editor.directEditMode')).toBe(false);
+    app.screen.querySelector<HTMLElement>('[data-edit-method="direct"]')!.click();
+    expect(saved.get('ai7.editor.directEditMode')).toBe('true');
+    app.open(windowOf('book-two'));
+    expect((children.editors.at(-1) as EditorOptions).initialInputMode).toBe('direct-edit');
+    expect(app.screen.querySelector('[data-editor-input-mode-toggle]')!.textContent).toBe('直接改稿 · 不留痕 ▾');
+    app.screen.querySelector<HTMLElement>('[data-edit-method="confirm"]')!.click();
+    await Promise.resolve();
+    expect(saved.get('ai7.editor.directEditMode')).toBe('false');
+    app.open(windowOf('book-one'));
+    expect((children.editors.at(-1) as EditorOptions).initialInputMode).toBe('reading-revision');
+    expect(app.screen.querySelector('[data-editor-input-mode-toggle]')!.textContent).toBe('修订 · 待我确认 ▾');
     app.showing?.destroy();
     setAutoApplyEditorRevisions(true);
   });

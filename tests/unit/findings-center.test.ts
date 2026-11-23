@@ -1,17 +1,24 @@
 import { expect, it, vi } from 'vitest';
 import { mountFindingsCenter } from '../../src/renderer/findings-center.js';
-import type { BookFindingProjection, BookFindingsProjection } from '../../src/shared/protocol.js';
+import type { BookFindingProjection, BookFindingsProjection, BookFindingsReadProjection, InspectBookFindingsInput } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { applyFindingBatches } from '../../src/renderer/manuscript-apply.js';
 import type { RendererApi } from '../../src/shared/protocol.js';
+
+function wholePage(page: BookFindingsProjection, { filters = {} }: InspectBookFindingsInput = {}): BookFindingsReadProjection {
+  const items = page.items.filter((item) => (!filters.category || item.category === filters.category) && (!filters.severity || item.severity === filters.severity) && (!filters.status || item.status === filters.status));
+  const count = items.filter((item) => item.suggestion?.batchAllowed).length;
+  return { ...page, items, total: items.length, offset: 0, next: null, version: 'a'.repeat(64), unchanged: false,
+    batch: { count, sentence: count ? `将把${Object.values(filters).some(Boolean) ? '当前筛选下的' : '所列'} ${count} 条修改建议写入稿件。` : null } };
+}
 
 it('clamps a shrinking final page to its page start after a changed poll (#1383 F3)', async () => {
   const restore = installMiniDom(); vi.useFakeTimers(); vi.stubGlobal('window', { setInterval, clearInterval });
   const root = miniDocument.createElement('section'); miniDocument.body.append(root); let total = 81;
   const items = Array.from({ length: total }, (_, index) => ({ id: String(index), category: 'review', categoryLabel: '审阅', severity: '提示', status: '待处理', summary: '公开合成发现', target: { kind: 'review' as const, reviewRunId: 'run', findingId: String(index), blockId: 'block' } }));
   try {
-    mountFindingsCenter(root as unknown as HTMLElement, async (offset) => ({ bookId: 'book', total, offset, pageSize: 40, next: offset + 40 < total ? offset + 40 : null, groups: [{ category: 'review', label: '审阅', count: total, bySeverity: {}, byStatus: {} }], items: items.slice(offset, Math.min(total, offset + 40)) }), vi.fn());
+    mountFindingsCenter(root as unknown as HTMLElement, async () => wholePage({ bookId: 'book', total, offset: 0, pageSize: 40, next: null, groups: [{ category: 'review', label: '审阅', count: total, bySeverity: {}, byStatus: {} }], items: items.slice(0, total) }), vi.fn());
     await vi.advanceTimersByTimeAsync(0);
     const rail = root.querySelector('[data-list-position]')!; rail.value = '2'; rail.dispatchEvent({ type: 'change' });
     total = 79; await vi.advanceTimersByTimeAsync(2000);
@@ -44,7 +51,7 @@ it('keeps confirmed counts and reversal visible after a later chunk refusal (#13
   let available = true;
   const read = async (): Promise<BookFindingsProjection> => ({ bookId: 'book', offset: 0, total: available ? 1 : 0, pageSize: 40, next: null, groups: available ? [{ category: 'review', label: '审阅', count: 1, bySeverity: {}, byStatus: {} }] : [], items: available ? [{ id: 'finding', category: 'review', categoryLabel: '审阅', severity: '提示', status: '待处理', summary: '合成', suggestion: suggestions[0]!, target: { kind: 'review', reviewRunId: 'run', findingId: 'finding', blockId: 'block' } }] : [] });
   try {
-    mountFindingsCenter(root as unknown as HTMLElement, read, vi.fn(), async () => { available = false; return applyFindingBatches(suggestions, api as unknown as RendererApi); });
+    mountFindingsCenter(root as unknown as HTMLElement, async () => wholePage(await read()), vi.fn(), async () => { available = false; return applyFindingBatches(suggestions, api as unknown as RendererApi); });
     await vi.waitFor(() => expect(root.querySelector('[data-finding-apply]')).not.toBeNull()); root.querySelector('[data-finding-apply]')!.click();
     await vi.waitFor(() => expect(root.querySelector('.findings-apply-feedback')?.textContent).toContain('已接受并应用 500 条；未应用 1 条'));
     expect(root.querySelector('.findings-apply-feedback')!.textContent).not.toContain('current Apply wrote nothing');
@@ -89,9 +96,9 @@ function mountUncertainBatch(kind: 'apply' | 'reversal') {
   const root = miniDocument.createElement('section'); miniDocument.body.append(root);
   let operations = 0;
   const all: BookFindingsProjection['items'] = suggestions.map((suggestion) => ({ id: suggestion.markId, category: 'review', categoryLabel: '审阅', severity: '提示', status: '待处理', summary: '合成发现', suggestion, target: { kind: 'review', reviewRunId: 'run', findingId: suggestion.markId, blockId: 'block' } }));
-  const read = async (offset: number): Promise<BookFindingsProjection> => {
+  const read = async (): Promise<BookFindingsReadProjection> => {
     const items = operations === 0 ? all : kind === 'apply' || api.reverseAppliedChangeSuggestion.mock.calls.length > 0 ? all.slice(-1) : [];
-    return { bookId: 'book', offset, total: items.length, pageSize: 40, next: offset + 40 < items.length ? offset + 40 : null, items: items.slice(offset, offset + 40), groups: items.length ? [{ category: 'review', label: '审阅', count: items.length, bySeverity: {}, byStatus: {} }] : [] };
+    return wholePage({ bookId: 'book', offset: 0, total: items.length, pageSize: 40, next: null, items, groups: items.length ? [{ category: 'review', label: '审阅', count: items.length, bySeverity: {}, byStatus: {} }] : [] });
   };
   const apply = vi.fn(async (items: BookFindingProjection[]) => { operations++; return applyFindingBatches(items.map((item) => item.suggestion!), api); });
   mountFindingsCenter(root as unknown as HTMLElement, read, vi.fn(), apply);
@@ -136,8 +143,8 @@ it('filters the whole book beyond 500, resets position, and retains focus and sc
   let tick = 0;
   const items: BookFindingsProjection['items'] = Array.from({ length: 541 }, (_, index) => ({ id: String(index), category: index < 500 ? 'early' : 'late', categoryLabel: '合成类别', severity: index < 500 ? '提示' : '必须处理', status: '待处理', summary: '公开合成发现',
     target: { kind: 'review', reviewRunId: 'run', findingId: String(index), blockId: 'block' }, suggestion: { manuscriptId: 'manuscript', branchId: 'branch', markId: `mark-${index}`, blockId: 'block', batchAllowed: true, quote: '合成', replacement: '修订' } }));
-  const read = vi.fn(async (offset: number): Promise<BookFindingsProjection> => ({ bookId: 'book', total: items.length, offset, next: offset + 40 < items.length ? offset + 40 : null, pageSize: 40,
-    items: items.slice(offset, offset + 40).map((item) => ({ ...item, summary: `${item.summary}${tick}` })), groups: ['early', 'late'].map((category) => ({ category, label: category, count: category === 'early' ? 500 : 41, bySeverity: { '提示': 500, '必须处理': 41 }, byStatus: { '待处理': 541 } })) }));
+  const read = vi.fn(async (input: InspectBookFindingsInput) => wholePage({ bookId: 'book', total: items.length, offset: 0, next: null, pageSize: 40,
+    items: items.map((item) => ({ ...item, summary: `${item.summary}${tick}` })), groups: ['early', 'late'].map((category) => ({ category, label: category, count: category === 'early' ? 500 : 41, bySeverity: { '提示': 500, '必须处理': 41 }, byStatus: { '待处理': 541 } })) }, input));
   try {
     mountFindingsCenter(root as unknown as HTMLElement, read, vi.fn(), vi.fn()); await vi.advanceTimersByTimeAsync(0);
     expect(root.textContent).toContain('接受并应用全部 541 条');
@@ -184,7 +191,7 @@ it('renders each finding status with its actual tone, defaulting unknown statuse
     };
     const root = miniDocument.createElement('div');
     miniDocument.body.append(root);
-    mountFindingsCenter(root as unknown as HTMLElement, async () => page, vi.fn());
+    mountFindingsCenter(root as unknown as HTMLElement, async () => wholePage(page), vi.fn());
     await Promise.resolve();
     expect(root.dataset['findingsState']).toBe('ready');
     expect(root.querySelectorAll('.state-term').filter((pill) => statuses.includes(pill.textContent)).map((pill) => [pill.textContent, pill.dataset['pillTone']])).toEqual([
@@ -207,15 +214,15 @@ it('confirms all eligible findings in the selected category across list windows'
   });
   try {
     const items: BookFindingsProjection['items'] = Array.from({ length: 41 }, (_, index) => ({
-      id: String(index), category: index === 0 || index === 40 ? 'a' : 'b', categoryLabel: '合成类别', severity: index === 40 ? '必须处理' : '提示', status: index === 40 ? '待复核' : '待处理', summary: '合成发现',
+      id: String(index), category: index === 0 || index === 40 ? 'a' : 'b', categoryLabel: '合成类别', severity: index === 40 ? '必须处理' : '提示', status: index === 40 ? '已处理' : '待处理', summary: '合成发现',
       target: { kind: 'review', reviewRunId: 'run', findingId: String(index), blockId: 'block' },
       ...([0, 1, 40].includes(index) ? { suggestion: { manuscriptId: 'manuscript', branchId: 'branch', markId: `mark-${index}`, blockId: 'block', batchAllowed: true, quote: '原文', replacement: '修订' } } : {}),
     }));
-    const read = vi.fn(async (offset: number): Promise<BookFindingsProjection> => ({
-      bookId: 'book', total: 41, offset, next: offset === 0 ? 40 : null, pageSize: 40,
-      groups: ['a', 'b'].map((category) => ({ category, label: category, count: category === 'a' ? 2 : 39, bySeverity: { '提示': 40, '必须处理': 1 }, byStatus: { '待处理': 40, '待复核': 1 } })),
-      items: items.slice(offset, offset + 40),
-    }));
+    const read = vi.fn(async (input: InspectBookFindingsInput) => wholePage({
+      bookId: 'book', total: 41, offset: 0, next: null, pageSize: 40,
+      groups: ['a', 'b'].map((category) => ({ category, label: category, count: category === 'a' ? 2 : 39, bySeverity: { '提示': 40, '必须处理': 1 }, byStatus: { '待处理': 40, '已处理': 1 } })),
+      items,
+    }, input));
     const apply = vi.fn(async () => undefined);
     const root = miniDocument.createElement('div'); miniDocument.body.append(root);
     mountFindingsCenter(root as unknown as HTMLElement, read, vi.fn(), apply);
@@ -229,11 +236,14 @@ it('confirms all eligible findings in the selected category across list windows'
     expect(batch()?.hidden).toBe(true);
     root.querySelector('[data-findings-filter="status"] [data-filter-value=""]')!.click();
     root.querySelector('[data-findings-filter="severity"] [data-filter-value=""]')!.click();
+    await vi.waitFor(() => expect(batch()?.disabled).toBe(false));
 
     expect(root.querySelector('.list-position-rail')?.disabled).toBe(true);
     expect(root.querySelectorAll('[data-finding-id]').map((row) => row.dataset['findingId'])).toEqual(['0', '40']);
     expect(batch()?.textContent).toBe('接受并应用全部 2 条');
     batch()!.click();
+    expect(root.querySelectorAll('.findings-confirm p')).toHaveLength(1);
+    expect(root.querySelector('.findings-confirm p')?.textContent).toBe('将把当前筛选下的 2 条修改建议写入稿件。');
     expect(apply).not.toHaveBeenCalled();
     root.querySelectorAll('button').find((button) => button.textContent === '确认应用')!.click();
     expect(apply).toHaveBeenCalledWith([items[0], items[40]]);
@@ -249,7 +259,7 @@ it('offers one review action in the empty card without filters or pagination', a
   try {
     const root = miniDocument.createElement('div'); miniDocument.body.append(root);
     const start = vi.fn();
-    mountFindingsCenter(root as unknown as HTMLElement, async () => ({ bookId: 'book', total: 0, offset: 0, next: null, pageSize: 40, groups: [], items: [] }), vi.fn(), undefined, start);
+    mountFindingsCenter(root as unknown as HTMLElement, async () => wholePage({ bookId: 'book', total: 0, offset: 0, next: null, pageSize: 40, groups: [], items: [] }), vi.fn(), undefined, start);
     await Promise.resolve();
     expect(root.querySelectorAll('.findings-empty')).toHaveLength(1);
     expect(root.querySelectorAll('select, table, [data-list-position], [data-findings-filter]')).toHaveLength(0);

@@ -198,11 +198,12 @@ describe('the card\'s actions (Issue #1680)', () => {
 
   it('keeps the recorded reason and usage and puts the selection jump in More during cancellation', () => {
     const original = card(attention('analysis-completed-with-gaps', 'recent', { completion: { reason: '读到一处尚待确认。', total: 3, gaps: 1 } }));
-    const done = taskOverviewCard({ ...original, usage: { elapsed: 120000, calls: 3 } }, vi.fn());
+    const work = { workedMs: 120000, workingSince: null, finished: { requests: 3, modelLabel: 'model@high' } };
+    const done = taskOverviewCard({ ...original, work, usage: { elapsed: 999000, calls: 30 } }, vi.fn());
     expect(done.querySelector('.task-overview-card-line')?.textContent).toBe('读到一处尚待确认。');
-    expect(done.querySelector('.task-overview-usage')?.textContent).toBe('用时 2 分钟 · 约 3 次调用');
-    const stopped = taskOverviewCard({ ...card(attention('dialogue-failed', 'recent')), usage: original.usage ?? { elapsed: 120000, calls: 3 } }, vi.fn());
-    expect(stopped.querySelector('.task-overview-usage')?.textContent).toContain('约 3 次调用');
+    expect(done.querySelector('.task-overview-usage')?.textContent).toBe('用时 2 分 0 秒 · 3 次模型调用');
+    const stopped = taskOverviewCard({ ...card(attention('dialogue-failed', 'recent')), work }, vi.fn());
+    expect(stopped.querySelector('.task-overview-usage')?.textContent).toBe('用时 2 分 0 秒 · 3 次模型调用');
     const selection = { ...card(attention('analysis-cancelling', 'active')), selection: { manuscriptId: 'revision', fromBlockId: 'start', toBlockId: 'end' } };
     expect(taskCardView(selection).actions).toEqual([]);
     expect(taskOverviewCard(selection, vi.fn()).querySelector('[data-task-action="jump"]')?.closest('details')).not.toBeNull();

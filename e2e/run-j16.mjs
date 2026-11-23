@@ -1685,12 +1685,10 @@ async function main() {
     const paragraphText = () => renderer.evaluate(`window.__j16.block(${JSON.stringify(taskBlock)})?.textContent ?? null`);
     const paragraphBefore = await paragraphText();
     const windowLoads = () => renderer.evaluate(`document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? ''`);
-    // On a selection of that paragraph the menu's 就这段发起任务… acts; the house's 可复用工序 would be listed here (S77 deferred item a,
-    // J-13's) — this house has none, which the group says once its read answers — 润色这段 is enabled, this launch binding a model
-    // fixture (Issue #842), the other two prototype presets are gone, and 再选一段加入 is refused in words.
+    // I-1b: three explained AI entries; 审阅选中内容 keeps the existing selection task composer and its saved-procedure route.
     await openSelectionMenu(renderer, taskBlock, 0, wordsTo, 'selection-task-open-menu');
-    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && polish instanceof HTMLButtonElement && !polish.disabled && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().textContent.includes('要再选一段加入，请在任务草稿中操作。'); })()`, 'selection-task-menu-items');
-    await waitFor(renderer, `window.__j16.menu()?.textContent.includes('本社还没有启用的可复用工序。') && window.__j16.menu().querySelectorAll('[data-mark-action^="procedure:"]').length === 0 && window.__j16.item('task-on-selection') instanceof HTMLButtonElement`, 'selection-task-menu-procedures-none', 15_000);
+    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('审阅选中内容') && polish === null && window.__j16.item('scoped-ai-edit')?.disabled === false && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().querySelectorAll('[aria-label="AI7 任务"] .menu-caption small').length === 3; })()`, 'selection-task-menu-items');
+    await waitFor(renderer, `window.__j16.menu().querySelectorAll('[data-mark-action^="procedure:"]').length === 0 && window.__j16.item('task-on-selection') instanceof HTMLButtonElement`, 'selection-task-menu-procedures-none', 15_000);
     await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-choose');
     // Synchronized delta (Issue #423, slice 7a): 就这段发起任务… hands the words to the Context-bound Task Composer in the side slot;
     // its 按现成工序准备… closes it and opens the composer below the paragraph that prepares one of the house's 工序 at once.
@@ -1958,15 +1956,9 @@ async function main() {
     for (let round = 0; round < 80; round += 1) {
       await waitFor(renderer, `document.querySelector('[data-reimport-mappings="failed"]') || (document.querySelector('[data-reimport-mappings="ready"]') && (document.querySelector('[data-accept-reimport-degradation]:not(:disabled)') || document.querySelector('[data-reimport-verb-choice]:not(:disabled)') || document.querySelector('[data-reimport-next-page]:not(:disabled)') || document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'))`, 'selection-task-gone-mapping-page', 120_000);
       requireJourney(await renderer.evaluate(`document.querySelector('[data-reimport-mappings="failed"]') === null`), 'selection-task-gone-mappings-valid');
-      if (await renderer.evaluate(`Boolean(document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'))`)) {
-        const before = await reviewVersion();
-        await clickSelector(renderer, '[data-accept-reimport-degradation]', 'selection-task-gone-degradation');
-        await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(before)}`, 'selection-task-gone-degradation-persisted', 60_000);
-        continue;
-      }
       const row = await renderer.evaluate(`(() => { const row = document.querySelector('article.reimport-group[data-reimport-group-verb=""]'); return row ? { groupId: row.dataset.reimportGroupId, verbs: Array.from(row.querySelectorAll('[data-reimport-verb-choice]'), (choice) => choice.dataset.reimportVerbChoice) } : null; })()`);
       if (row === null) {
-        if (await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`)) break;
+        if (await renderer.evaluate(`Boolean(document.querySelector('[data-commit-manuscript-reimport]:not(:disabled)'))`)) break;
         const firstGroup = await renderer.evaluate(`document.querySelector('article.reimport-group')?.dataset.reimportGroupId ?? null`);
         await assertRenderer(renderer, `(() => { const next = document.querySelector('[data-reimport-next-page]:not(:disabled)'); if (!next) return false; next.click(); return true; })()`, 'selection-task-gone-next-page');
         await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]') && document.querySelector('article.reimport-group')?.dataset.reimportGroupId !== ${JSON.stringify(firstGroup)}`, 'selection-task-gone-next-page-ready', 60_000);
@@ -1979,7 +1971,7 @@ async function main() {
       await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(before)} || document.querySelector('#persistence-status')?.dataset.tone === 'error'`, 'selection-task-gone-resolution-persisted', 60_000);
       requireJourney(await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone !== 'error'`), 'selection-task-gone-resolution-valid');
     }
-    await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`, 'selection-task-gone-commit-ready', 60_000);
+    await waitFor(renderer, `Boolean(document.querySelector('[data-commit-manuscript-reimport]:not(:disabled)'))`, 'selection-task-gone-commit-ready', 60_000);
     // Force the reimport acknowledgement to finish after the refused jump by holding its presentation frames, as J-01 does.
     // This reproduces a stale status overwrite consistent with Issue #807's failure marker; the hosted macOS ordering was
     // not observed. Releasing the frames below proves the refusal survives that late acknowledgement on any platform.
@@ -2040,7 +2032,7 @@ async function main() {
     const workspaceRouteBefore = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then((route) => JSON.stringify(route))`);
     await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-entry-row');
     await waitFor(renderer, `document.querySelector('[data-screen="agent-workspace"] .agent-workspace[data-agent-workspace-state="available"]')?.dataset.bookId === ${JSON.stringify(bookId)}`, 'workspace-entry-screen');
-    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="agent-workspace"] .agent-workspace'); const back = root.querySelector('[data-agent-workspace-action="back"]'); return root.querySelector('h2')?.textContent === 'Agent 工作区' && root.querySelector('header .section-label') === null && root.querySelector('[data-agent-workspace-safety]')?.textContent === ${JSON.stringify(WORKSPACE_SAFETY)} && back instanceof HTMLButtonElement && back.textContent === '返回' && back.dataset.shortcutCommand === 'nav.back' && document.querySelector('#context-title')?.textContent === ${JSON.stringify(BOOK.title)} && document.querySelector(${JSON.stringify(AGENT_ROW)})?.getAttribute('aria-current') === 'page'; })()`, 'workspace-entry-words');
+    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="agent-workspace"] .agent-workspace'); const back = root.querySelector('[data-agent-workspace-action="back"]'); return root.querySelector('h2')?.textContent === 'Agent 工作区 · 多轮协作改稿' && root.querySelector('header .section-label') === null && root.querySelector('[data-agent-workspace-safety]')?.textContent === ${JSON.stringify(WORKSPACE_SAFETY)} && back instanceof HTMLButtonElement && back.textContent === '返回' && back.dataset.shortcutCommand === 'nav.back' && document.querySelector('#context-title')?.textContent === ${JSON.stringify(BOOK.title)} && document.querySelector(${JSON.stringify(AGENT_ROW)})?.getAttribute('aria-current') === 'page'; })()`, 'workspace-entry-words');
     requireJourney(await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`) === workspaceTasksBefore &&
       await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then((route) => JSON.stringify(route))`) === workspaceRouteBefore, 'workspace-entry-records-nothing');
     // Re-selecting the active row must not replace the original manuscript return with the overview fallback (#90 review).

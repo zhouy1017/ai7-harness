@@ -1242,12 +1242,12 @@ export interface BookSummaryProjection {
   internalNumber: string | null;
   /** 作者, 责编 and 相关人 for the card (Issue #431, S83). */
   people: { authors: ReadonlyArray<string>; editors: ReadonlyArray<string>; related: ReadonlyArray<{ roleLabel: string; name: string }> };
+  lastWorkedAt?: string; seriesNames?: ReadonlyArray<string>;
   manuscriptState: 'empty' | 'populated';
   manuscriptStateLabel: '尚无稿件' | '已有主稿件';
   reimportLineageSourceVersionIds: ReimportLineageSourceVersionPageProjection['items'];
   reimportLineageNextCursor: string | null;
 }
-
 export interface BookSummaryCursor {
   title: string;
   bookId: string;

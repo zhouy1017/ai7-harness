@@ -68,6 +68,20 @@ import type { mountTaskDrawer } from './task-drawer.js';
 const ANALYSIS_UPDATE_START_LABELS: Readonly<Record<BaselineAnalysisUpdateMode, string>> = {
   'sync-current': '开始同步', 'reanalyze-range': '开始重新分析', 'reanalyze-book': '开始全部重来',
 };
+const ANALYSIS_UPDATE_EXPLANATIONS: Readonly<Record<BaselineAnalysisUpdateMode, string>> = {
+  'sync-current': '改过稿件后使用：只分析有变化的部分，保留其余分析。',
+  'reanalyze-range': '想重点重看某一章时使用：重新分析所选范围，保留其他部分的分析。',
+  'reanalyze-book': '想从头重看全稿时使用：重新分析全书，不沿用之前的分析。',
+};
+
+/** The bounded wire reply already carries the heading and split within its display label. */
+function analysisRangeLabel(option: { label: string; sectionOrdinal: number; startPosition: number; endPosition: number }): string {
+  const heading = /^结构段 \d+「(.*)」 · 单元 \d+\/\d+（(\d+)\/(\d+)）/u.exec(option.label);
+  if (heading !== null && heading[1]!.trim().length > 0) {
+    return `「${heading[1]}」${Number(heading[3]) > 1 ? `（第 ${heading[2]}/${heading[3]} 部分）` : ''}`;
+  }
+  return `第 ${option.sectionOrdinal} 部分 · 第 ${option.startPosition}–${option.endPosition} 段`;
+}
 
 /**
  * ②A's seven tabs (editor-surfaces §3). The first six are what the baseline is for; the last holds
@@ -197,7 +211,8 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
    * record on an unselected tab is still there to be read, searched and asserted (V2-UX-LAYER-007). Arrow
    * keys move between tabs and only the selected tab is in the Tab order, the pattern a tab list is read by.
    */
-  function analysisTabs(card: HTMLElement, bookId: string, initial: AnalysisTabId): { panels: Record<AnalysisTabId, HTMLElement>; select: (tab: AnalysisTabId) => void } {
+  function analysisTabs(card: HTMLElement, bookId: string, initial: AnalysisTabId, empty = false): { panels: Record<AnalysisTabId, HTMLElement>; select: (tab: AnalysisTabId) => void } {
+    const choices = empty ? ANALYSIS_TABS.filter(([id]) => id === 'history' || id === 'custom').toReversed() : ANALYSIS_TABS;
     const list = element('div', 'analysis-tabs');
     list.setAttribute('role', 'tablist');
     list.setAttribute('aria-label', '基线分析');
@@ -205,15 +220,15 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const panels = {} as Record<AnalysisTabId, HTMLElement>;
     const select = (chosen: AnalysisTabId): void => {
       card.dataset['analysisTab'] = chosen;
-      for (const [id] of ANALYSIS_TABS) {
+      for (const [id] of choices) {
         const selected = id === chosen;
         tabs[id].setAttribute('aria-selected', selected ? 'true' : 'false');
         tabs[id].tabIndex = selected ? 0 : -1;
         panels[id].hidden = !selected;
       }
     };
-    ANALYSIS_TABS.forEach(([id, label], index) => {
-      const tab = element('button', 'analysis-tab', label);
+    choices.forEach(([id, label], index) => {
+      const tab = element('button', 'analysis-tab', empty && id === 'history' ? '稿件分析' : label);
       tab.type = 'button';
       tab.id = `analysis-tab-${id}`;
       tab.dataset['analysisTab'] = id;
@@ -227,11 +242,11 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       });
       tab.addEventListener('keydown', (event) => {
         const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-        const target = event.key === 'Home' ? 0 : event.key === 'End' ? ANALYSIS_TABS.length - 1
-          : step === 0 ? null : (index + step + ANALYSIS_TABS.length) % ANALYSIS_TABS.length;
+        const target = event.key === 'Home' ? 0 : event.key === 'End' ? choices.length - 1
+          : step === 0 ? null : (index + step + choices.length) % choices.length;
         if (target === null) return;
         event.preventDefault();
-        const next = ANALYSIS_TABS[target]![0];
+        const next = choices[target]![0];
         analysisTabChoice.set(bookId, next);
         select(next);
         panels[next].dispatchEvent(new Event(ANALYSIS_TAB_SHOWN_EVENT));
@@ -246,8 +261,9 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       panels[id] = panel;
       list.append(tab);
     });
-    card.append(list, ...ANALYSIS_TABS.map(([id]) => panels[id]));
-    select(analysisTabChoice.get(bookId) ?? initial);
+    card.append(list, ...choices.map(([id]) => panels[id]));
+    const remembered = analysisTabChoice.get(bookId) ?? initial;
+    select(choices.some(([id]) => id === remembered) ? remembered : initial);
     return { panels, select };
   }
 
@@ -961,6 +977,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       // What each mode keeps and what it reads again is the decision (ADR 0076 §5): one sentence in the
       // editor's words at full rank, the four exact lineage counts and the fixed goal one step away.
       block.append(element('h5', undefined, action.label));
+      block.append(element('p', 'analysis-update-explanation', ANALYSIS_UPDATE_EXPLANATIONS[mode]));
       if (technicalLayerVisible) block.append(element('p', undefined, action.meaning.replaceAll('内容块', '段落')));
       const expected = element('p', 'analysis-update-expected', updateReuseReading(action.expected, mode));
       const expectedExact = element('dd', 'technical-identity', action.expected === null ? '由所选范围决定' : reuseCountsText(action.expected));
@@ -1005,7 +1022,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
                 block.dataset['expectedRecomputed'] = String(picked.expected.recomputed);
                 block.dataset['expectedInvalidated'] = String(picked.expected.invalidated);
                 block.dataset['expectedBypassed'] = String(picked.expected.bypassed);
-                expected.textContent = `所选段落 ${option.startPosition}–${option.endPosition}：${updateReuseReading(picked.expected, mode)}`;
+                expected.textContent = `${analysisRangeLabel(option)}：${updateReuseReading(picked.expected, mode)}`;
                 expectedExact.textContent = reuseCountsText(picked.expected);
               } catch {
                 if (!radio.checked || !block.isConnected) return;
@@ -1016,8 +1033,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
                 setStatus(ANALYSIS_READ_FAILED, 'error');
               }
             });
-            // Ordinary choices name paragraphs, never the structure-section and grapheme label (Issue #1431 item 61).
-            const label = element('label', undefined, technicalWords(option.label, `段落 ${option.startPosition}–${option.endPosition}`));
+            const label = element('label', undefined, technicalWords(option.label, analysisRangeLabel(option)));
             label.htmlFor = radio.id;
             row.append(radio, label);
             fieldset.append(row);
@@ -1232,6 +1248,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       card.dataset['taskOutcomeId'] = projection.taskOutcome.outcomeId;
       card.dataset['taskOutcomeClassification'] = projection.taskOutcome.classification;
     }
+    const empty = (projection.state === 'available' || projection.state === 'cancelled' && projection.actions.canPrepare) && projection.history === null;
     const heading = element('div', 'baseline-analysis-heading');
     heading.append(
       element('h3', undefined, technicalWords('基线稿件分析 · 不修改稿件', '稿件分析')),
@@ -1239,8 +1256,10 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     );
     // The binding clause reads the launch this Book actually bound: the frozen plan's pin first, then the
     // pin the latest Revision recorded, and before either exists there is no launch to state.
-    card.append(heading);
-    card.append(element('p', 'research-status', researchPlanLine(projection.providerResolutionPlan?.webToolsBackend)));
+    if (!empty) {
+      card.append(heading);
+      card.append(element('p', 'research-status', researchPlanLine(projection.providerResolutionPlan?.webToolsBackend)));
+    }
     if (projection.taskOutcome?.report && ['failed', 'completed-with-gaps'].includes(projection.taskOutcome.classification)) {
       const report = projection.taskOutcome.report;
       const reason = report.classification === 'failed'
@@ -1273,12 +1292,12 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing' || projection.state === 'cancelling' ||
       projection.state === 'pausing' || projection.state === 'paused' || projection.state === 'resumable' ||
       projection.state === 'awaiting-clarification';
-    const { panels, select } = analysisTabs(card, projection.bookId, revision === null || taskInFlight ? 'history' : 'synopsis');
+    const { panels, select } = analysisTabs(card, projection.bookId, revision === null || taskInFlight ? 'history' : 'synopsis', empty);
     if (revision !== null) {
       renderBaselineAnalysisOverview(card, panels, select, projection, revision as BaselineAnalysisResultSetRevisionProjection, bookTitle, projection.inspectedRevision !== null
         ? { historical: true, current: projection.inspectedRevision.current }
         : { historical: false, current: true });
-    } else {
+    } else if (!empty) {
       for (const [id] of ANALYSIS_TABS) {
         if (id !== 'custom' && id !== 'history') panels[id].append(element('p', 'field-note', '尚无基线分析结果。'));
       }
@@ -1298,22 +1317,23 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     // The first-baseline form exists only while the Book holds no Result Set Revision; afterwards every
     // new Task is one of the three Analysis Update Controls below the Overview. A first baseline cancelled while
     // it waited to start leaves no revision either, so the form is offered again (Issue #502, OFF-010).
-    if ((projection.state === 'available' || (projection.state === 'cancelled' && projection.actions.canPrepare)) && projection.history === null) {
-      const form = element('section', 'form-row analysis-form');
-      const label = element('label', undefined, '任务目标');
-      label.htmlFor = 'j04-analysis-goal';
+    if (empty) {
+      const form = element('section', 'form-row analysis-form analysis-empty');
+      form.append(element('h3', undefined, '先了解这本稿件'),
+        element('p', 'lede', '开始分析，梳理全稿的梗概、人物、事件与各章内容，为后续审阅提供参考。'));
       const goal = element('input');
+      goal.type = 'hidden';
       goal.id = 'j04-analysis-goal';
       goal.value = serviceWords(BASELINE_ANALYSIS_TASK_GOAL);
       goal.readOnly = true;
       const actions = element('div', 'button-row analysis-actions');
       const cancel = analysisCancelButton();
       taskDrawer.openLaunch({ bookId: host.dataset['analysisBookId']!, operation: 'launchBaselineAnalysis', title: '分析', mount: actions,
-        input: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } }, () => actions.querySelector('button'));
+        startLabel: '开始分析', input: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } }, () => actions.querySelector('button'));
       actions.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-analysis-action', 'start');
       actions.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-analysis-action', 'prepare');
       actions.append(cancel);
-      form.append(label, goal, actions);
+      form.append(goal, actions);
       records.append(form);
       host.replaceChildren(card);
       return;

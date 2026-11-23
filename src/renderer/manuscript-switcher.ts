@@ -41,6 +41,7 @@ type SwitcherApi = Pick<RendererApi, 'inspectProductionDocuments' | 'createProdu
 export interface MountManuscriptSwitcherOptions {
   bookId: string;
   bookTitle: string;
+  toolbar: HTMLElement;
   api: SwitcherApi;
   /** The document on screen, or `null` for the manuscript. */
   currentDocumentId: string | null;
@@ -124,7 +125,8 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
   menuBody.setAttribute('aria-label', '衍生稿件');
   menu.append(trigger, menuBody);
   const state = el('span', 'manuscript-switcher-state');
-  bar.append(list, menu, state);
+  bar.append(list, state);
+  options.toolbar.append(menu);
 
 
   const documentsOf = (next: ProductionDocumentsProjection): Array<{ type: ProductionDocumentTypeProjection; document: ProductionDocumentProjection }> =>
@@ -191,6 +193,7 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
     };
     entry(SWITCHER_WORDS.primary(bookTitle), 'primary', () => void leave(() => options.openPrimary()));
     const all = projection === null ? [] : documentsOf(projection);
+    bar.hidden = all.length === 0;
     const compact = all.length <= 3 ? all : [...all].sort((a, b) => Number(b.document.documentId === options.currentDocumentId) - Number(a.document.documentId === options.currentDocumentId) ||
       (b.document.updatedAt ?? b.document.createdAt).localeCompare(a.document.updatedAt ?? a.document.createdAt)).slice(0, 3);
     for (const { type, document: documentNow } of compact) {
@@ -204,7 +207,7 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
     manage.disabled = working || options.openWorkspace === undefined;
     state.textContent = writingState.drafted > 0 ? SWITCHER_WORDS.draftReady(writingState.drafted) : writingState.underWay ? SWITCHER_WORDS.writing : '';
     state.hidden = state.textContent === '';
-    bar.dataset['documentCount'] = String(projection === null ? 0 : documentsOf(projection).length);
+    bar.dataset['documentCount'] = String(all.length);
     if (focused !== null) {
       const again = Array.from(bar.querySelectorAll<HTMLElement>('[data-manuscript-switch]'))
         .find((node) => node.dataset['manuscriptSwitch'] === focused && (node.dataset['documentId'] ?? null) === focusedId);
@@ -240,7 +243,7 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
     panel.hidden = true;
     panel.replaceChildren();
     paintBar();
-    bar.querySelector<HTMLElement>('[data-derivative-menu]')?.focus();
+    trigger.focus();
   }
 
   function paintPanel(focus: DerivativeCreateFocus): void {
@@ -351,6 +354,7 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
       ticket += 1;
       unregister();
       writing.destroy();
+      menu.remove();
     },
   };
 }

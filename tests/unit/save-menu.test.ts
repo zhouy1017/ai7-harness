@@ -45,7 +45,7 @@ describe('the manuscript save menu persistence facts', () => {
     expect(menu.element.querySelector('summary')?.textContent).toBe('修订日志写入待确认 ▾');
     expect(menu.element.dataset['persistence']).toBe('unconfirmed');
     const actions = [...menu.element.querySelectorAll<HTMLButtonElement>('.editor-save-menu-body button')];
-    expect(actions.map((action) => action.textContent)).toEqual(['导入新版本…', '导出…']);
+    expect(actions.map((action) => action.textContent)).toEqual(['导入新版本…', '导出交付物…']);
     actions[0]!.click(); expect(importer).toHaveBeenCalledTimes(1); expect(exporter).not.toHaveBeenCalled();
     actions[1]!.click(); expect(exporter).toHaveBeenCalledTimes(1); expect(importer).toHaveBeenCalledTimes(1);
     menu.destroy(); expect(observers[0]!.disconnect).toHaveBeenCalledTimes(1);

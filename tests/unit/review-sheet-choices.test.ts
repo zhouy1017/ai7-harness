@@ -207,13 +207,16 @@ afterEach(() => {
 const flush = async (): Promise<void> => { for (let count = 0; count < 25; count += 1) await Promise.resolve(); };
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 
-async function openSheet(launch: (input: unknown) => Promise<unknown> = async () => { throw new Error('synthetic refusal keeps the sheet'); }) {
+async function openSheet(launch: (input: unknown) => Promise<unknown> = async () => { throw new Error('synthetic refusal keeps the sheet'); },
+  preview: RendererApi['previewTaskLaunch'] = async () => ({ steps: [], scope: '', units: 1, reference: [], send: '', usage: '', adaptations: [],
+    estimate: { parts: 1, fewestRequests: 1, more: [], ceiling: false, durationMs: null, sentence: '预计读 1 个部分，至少 1 次模型调用；用时暂无可靠估计。' } })) {
   const root = new MiniElement('main');
   miniDocument.body.append(root);
   const ws = workspace({}, ['typos-and-usage', 'style-and-format', 'factual-review'].map((id) => category(id)));
   const launchReviewRun = vi.fn(launch);
   const unexpected = vi.fn(async () => { throw new Error('unexpected API operation'); });
-  const calls = { inspectReviewWorkspace: vi.fn(async () => ws), launchReviewRun };
+  const previewTaskLaunch = vi.fn(preview);
+  const calls = { inspectReviewWorkspace: vi.fn(async () => ws), launchReviewRun, previewTaskLaunch };
   const api = new Proxy(calls, { get: (target, key) => Reflect.get(target, key) ?? unexpected }) as unknown as MountReviewWorkspaceOptions['api'];
   const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: null, api, procedureId: null,
     awaitServiceJob: async (initial) => initial, technicalDetails: () => miniDocument.createElement('div') as unknown as HTMLElement,
@@ -226,10 +229,37 @@ async function openSheet(launch: (input: unknown) => Promise<unknown> = async ()
   const box = (id: string) => root.querySelector(id === 'local-text-check' ? '[data-review-local-switch] input' : `[data-review-category-option="${id}"] input`)!;
   const change = async (node: MiniElement, value: boolean | string) => { if (typeof value === 'boolean') node.checked = value; else node.value = value; node.dispatchEvent({ type: 'change', bubbles: true }); await flush(); };
   const level = () => root.querySelector('[data-review-field="evidenceAssuranceLevel"]') as MiniElement | null;
-  return { root, surface, dialog, press, box, change, level, launchReviewRun, open: () => press('[data-review-action="new-review"]') };
+  return { root, surface, dialog, press, box, change, level, launchReviewRun, previewTaskLaunch, open: () => press('[data-review-action="new-review"]') };
 }
 
 describe('the mounted new-review form', () => {
+  it.each([false, true])('shows the service estimate for the selected launch request (local check: %s)', async local => {
+    const sentence = local ? '只在本机检查，不调用模型。' : '预计读 12 个部分，至少 13 次模型调用（重试时会更多）；按最近同类任务，约 6 分钟。';
+    const view = await openSheet(undefined, async () => ({ steps: [], scope: '', units: 12, reference: [], send: '', usage: '50000 tokens', adaptations: [],
+      estimate: { parts: 12, fewestRequests: 13, more: ['retry'], ceiling: true, durationMs: 360000, sentence } }));
+    await view.open();
+    if (local) await view.change(view.box('local-text-check'), true);
+    await view.press('[data-review-action="prepare"]');
+    expect(view.root.querySelector('[data-consequence="cost"]')?.textContent).toBe(sentence);
+    expect(view.previewTaskLaunch).toHaveBeenCalledWith({ launch: { operation: 'launchReviewRun', input: expect.objectContaining({
+      categoryIds: [local ? 'local-text-check' : 'typos-and-usage'], scope: WHOLE, clientCommandId: expect.any(String),
+    }) } });
+    expect(view.launchReviewRun).not.toHaveBeenCalled();
+    expect(view.dialog().textContent).not.toContain('tokens');
+  });
+
+  it('discards a slow estimate after the choices change', async () => {
+    const pending = deferred<Awaited<ReturnType<RendererApi['previewTaskLaunch']>>>();
+    const view = await openSheet(undefined, () => pending.promise); await view.open();
+    await view.press('[data-review-action="prepare"]');
+    await view.change(view.box('style-and-format'), true);
+    pending.resolve({ steps: [], scope: '', units: 1, reference: [], send: '', usage: '', adaptations: [],
+      estimate: { parts: 1, fewestRequests: 1, more: [], ceiling: false, durationMs: null, sentence: '过期预计' } });
+    await flush();
+    expect(view.root.querySelector('[data-consequence="cost"]')?.textContent).not.toBe('过期预计');
+    expect(view.launchReviewRun).not.toHaveBeenCalled();
+  });
+
   it('puts the local check in a switch above the categories and brings the earlier ticks back when it is switched off', async () => {
     const view = await openSheet(); await view.open();
     const body = view.dialog();

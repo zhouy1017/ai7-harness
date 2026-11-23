@@ -2089,9 +2089,7 @@ async function main() {
     await leaveReviewToLibrary(renderer, 'series-sheet-leave');
 
     at('procedure-selection-run');
-    // The house's 可复用工序 on a selection (Issue #423, S77 deferred item a): in the member's manuscript the selection menu's AI7 任务
-    // group lists 《书系复核》 — 《体例复核》, every version stopped, is listed nowhere — while 润色这段 is enabled, this launch binding
-    // a model fixture (Issue #842), and 再选一段加入 is refused in words. Its entry opens the 就这段发起任务 composer with it held; 书系一致性 is unticked and
+    // The house's saved procedures remain reachable through 审阅选中内容 (#1539 I-1b). Stopped procedures are absent; 书系一致性 is unticked and
     // the editor's (S31b's reading, ruling 3): left unticked, 准备任务 prepares nothing and says so; ticked, it prepares a 当前选区
     // Run pinned to version 1 with nothing left out, whose plan opens beside the manuscript. Its card in 任务 names the paragraph
     // and offers 跳到所选文字 (deferred item d), which puts the caret back on it. Under the matching retained Series fixture,
@@ -2107,10 +2105,13 @@ async function main() {
     requireJourney(/^blk_[0-9a-f]{24}$/.test(selectionBlock ?? ''), 'selection-procedure-paragraph');
     const procedureAction = `procedure:${seriesProcedureId}`;
     await openSelectionMenu(renderer, selectionBlock, 2, 8, 'selection-procedure-menu');
-    // The group lists the house's procedures once the editor's read of them answers, and is drawn again then: wait for it.
-    await waitFor(renderer, `(() => { const item = window.__j13.item(${JSON.stringify(procedureAction)}); const polish = window.__j13.item('preset-polish'); const note = window.__j13.menu()?.textContent ?? ''; return item instanceof HTMLButtonElement && !item.disabled && item.textContent.includes(${JSON.stringify(`按《${SERIES_PROCEDURE_TITLE}》审阅这段`)}) && item.textContent.includes('可复用工序 · 第 1 版 · 1 步 · 「书系一致性」另行勾选') && window.__j13.item(${JSON.stringify(`procedure:${procedureId}`)}) === null && polish instanceof HTMLButtonElement && !polish.disabled && window.__j13.item('preset-names') === null && window.__j13.item('preset-continuity') === null && note.includes('要再选一段加入，请在任务草稿中操作。') && !note.includes('本社还没有启用的可复用工序'); })()`, 'selection-procedure-menu-words', 15_000);
-    await assertRenderer(renderer, `(() => { window.__j13.item(${JSON.stringify(procedureAction)}).click(); return true; })()`, 'selection-procedure-choose');
-    await waitFor(renderer, `window.__j13.composer()?.dataset.markComposer === 'task-on-selection' && window.__j13.composer().querySelector('select[data-mark-field="procedure"]')?.value === ${JSON.stringify(procedureAction)}`, 'selection-procedure-composer', 30_000);
+    // I-1b: saved procedures are chosen after 审阅选中内容, keeping the selection and its opt-in Series steps.
+    await waitFor(renderer, `window.__j13.item('task-on-selection')?.disabled === false && window.__j13.item('preset-polish') === null && window.__j13.menu().querySelectorAll('[aria-label="AI7 任务"] [role="menuitem"]').length === 3`, 'selection-procedure-menu-words', 15_000);
+    await assertRenderer(renderer, `(() => { window.__j13.item('task-on-selection').click(); return true; })()`, 'selection-procedure-choose');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'composer' && document.querySelector('#task-drawer .task-composer [data-task-composer-action="procedures"]') instanceof HTMLButtonElement`, 'selection-procedure-route', 30_000);
+    await clickSelector(renderer, '#task-drawer .task-composer [data-task-composer-action="procedures"]', 'selection-procedure-open-choices');
+    await waitFor(renderer, `window.__j13.composer()?.dataset.markComposer === 'task-on-selection' && Array.from(window.__j13.composer().querySelectorAll('select[data-mark-field="procedure"] option')).some(option => option.value === ${JSON.stringify(procedureAction)})`, 'selection-procedure-composer', 30_000);
+    await assertRenderer(renderer, `(() => { const select = window.__j13.composer().querySelector('select[data-mark-field="procedure"]'); select.value = ${JSON.stringify(procedureAction)}; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value === ${JSON.stringify(procedureAction)}; })()`, 'selection-procedure-pick-saved');
     const READ_APART = `(() => { const composer = window.__j13.composer(); const set = composer?.querySelector('fieldset[data-mark-field="chosenApart"]'); const box = set?.querySelector('input[data-mark-checkbox="series-consistency"]'); if (!(set instanceof HTMLElement) || !(box instanceof HTMLInputElement)) return null; return { legend: set.querySelector('legend')?.textContent ?? null, shown: !set.hidden && box.closest('label')?.hidden === false, checked: box.checked, words: box.nextElementSibling?.textContent ?? null, hint: box.closest('label')?.querySelector('small')?.textContent ?? null, options: Array.from(composer.querySelectorAll('select[data-mark-field="procedure"] option'), (option) => option.value) }; })()`;
     const apart = await renderer.evaluate(READ_APART);
     // The box carries the step's category as its value and its label as its words (review P3-3).

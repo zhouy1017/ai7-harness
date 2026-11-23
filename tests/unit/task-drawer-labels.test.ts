@@ -249,12 +249,12 @@ describe('精简 and 完整 (D6)', () => {
     setTechnicalLayerVisible(false);
     expect(taskPlanCompactRows(plan())).toEqual([
       ['处理', '只处理任务卡所列范围，不参考其他材料。'],
-      ['发送', '不发送，无模型用量。'],
+      ['发送', '只在本机处理。'],
       ['会得到', '一份基线分析。'],
       ['中途', '预计无需参与，可随时暂停或取消。'],
     ]);
     const sending = plan({ service: { ...plan().service, send: '范围内正文发往已选模型', usage: '达到 80,000 tokens 后不再发送新的请求（8 个阅读范围）' } });
-    expect(Object.fromEntries(taskPlanCompactRows(sending))['发送']).toBe('发往模型，用量达到 80,000 后不再发送。');
+    expect(Object.fromEntries(taskPlanCompactRows(sending))['发送']).toBe('发往本次选择的模型。');
     expect(taskPlanCompactRows(sending).some(([term]) => term === '不会')).toBe(false);
   });
 

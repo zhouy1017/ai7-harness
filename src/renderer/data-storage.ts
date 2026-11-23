@@ -24,7 +24,7 @@ export interface DataStorageOptions {
   readonly replaceScreen: (state: string, content: HTMLElement, place?: ShellPlace | null) => void;
 }
 
-/** 数据与存储, moved verbatim from the shell (Issue #1235). */
+/** 数据与存储: a compact overview with the existing operation surfaces on demand. */
 export function createDataStorage(options: DataStorageOptions) {
   const {
     setStatus, panel, element, button, rendererErrorMessage, initializeStartup, technicalDetails, replaceScreen,
@@ -44,8 +44,8 @@ export function createDataStorage(options: DataStorageOptions) {
       content.dataset['footprintComplete'] = String(projection.footprint.complete);
       content.dataset['footprintMaximumEntries'] = String(projection.footprint.maximumEntries);
       content.append(
-        element('h2', undefined, '数据与存储摘要'),
-        element('p', 'lede', '查看位置不会更改存储、导出内容或授予文件系统权限。'),
+        element('h2', undefined, '数据与存储'),
+        element('p', 'lede', '稿件和工作记录保存在本机；可自动备份、导出留存，或从已有数据库导入。密钥由系统单独保管。'),
       );
       const summary = element('section', 'source-card');
       const values = element('dl');
@@ -54,11 +54,13 @@ export function createDataStorage(options: DataStorageOptions) {
       // the screen whose whole purpose is to give it, so it reads at full rank, not as technical identity.
       const root = element('dd', undefined, projection.canonicalRoot);
       root.dataset['productDataRoot'] = projection.canonicalRoot;
-      values.append(
+      if (technicalLayerVisible) values.append(
         element('dt', undefined, '当前平台'), element('dd', undefined, projection.platformLabel),
         element('dt', undefined, '运行方式'), element('dd', undefined, projection.runtimeFormLabel),
         element('dt', undefined, DISTRIBUTION_CHANNEL_ROW), element('dd', undefined, projection.channelLabel),
         element('dt', undefined, '数据保存在'), element('dd', undefined, projection.locationLabel),
+      );
+      values.append(
         element('dt', undefined, '实际位置'), root,
         element('dt', undefined, '本机占用'), element('dd', undefined, projection.footprint.label),
       );
@@ -68,7 +70,8 @@ export function createDataStorage(options: DataStorageOptions) {
         : `${projection.channelDescription.replace(/。$/u, '')}；${projection.syncWarning}`;
       const locationContext = element('p', 'field-note');
       locationContext.append(element('span', 'preferences-local-line', PREFERENCES_LOCAL_LINE.replace('（侧栏收起状态、置顶与最近打开的图书等）', '').replace(/。$/u, '')), '；', locationNote);
-      summary.append(locationContext);
+      if (technicalLayerVisible) summary.append(locationContext);
+      else if (projection.syncWarning !== null) summary.append(element('p', 'attention-note', projection.syncWarning));
       if (projection.dataLocationException !== null) summary.dataset['dataLocationException'] = projection.dataLocationException;
       const credentials = element('section', 'review-section');
       credentials.append(
@@ -103,7 +106,19 @@ export function createDataStorage(options: DataStorageOptions) {
       const databaseImport = element('section', 'source-card');
       // 定期自动备份 (Issue #434, S86b; DSTO-018): the switch, off by default, and the backups kept beside the data.
       const scheduledBackup = element('section', 'source-card');
-      content.append(summary, credentials, ...(technicalLayerVisible ? [versions] : []), databaseExport, databaseImport, scheduledBackup);
+      content.append(summary);
+      if (technicalLayerVisible) content.append(credentials, versions, databaseExport, databaseImport, scheduledBackup);
+      else {
+        // Keep each existing operation intact, with its details opened only when needed.
+        for (const [name, label, body] of [
+          ['backup', '自动备份', scheduledBackup], ['export', '导出数据库…', databaseExport], ['import', '导入数据库…', databaseImport],
+        ] as const) {
+          const operation = element('details', 'data-storage-operation');
+          operation.dataset['storageOperation'] = name;
+          operation.append(element('summary', 'settings-row', label), body);
+          content.append(operation);
+        }
+      }
       mountDatabaseExport({ root: databaseExport, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
       mountDatabaseImport({ root: databaseImport, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
       mountScheduledBackup({ root: scheduledBackup, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });

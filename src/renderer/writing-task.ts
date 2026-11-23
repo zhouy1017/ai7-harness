@@ -151,6 +151,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   };
   let poll: number | null = null;
   const section = el('section', 'writing-task');
+  section.hidden = options.embedded === true;
+  if (options.embedded === true) section.classList.add('writing-task-embedded');
   root.append(section);
 
   const follow = (): void => {
@@ -195,27 +197,32 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     section.dataset['writingState'] = page.task?.state ?? 'none';
     const draftedCount = page.types.filter((type) => type.drafted !== null).length;
     options.onState?.({ underWay: UNDER_WAY.has(page.task?.state ?? ''), drafted: draftedCount });
-    // An embedded surface with nothing under way and nothing written says nothing (Issue #1403): its sheet opens from 新建.
-    section.hidden = options.embedded === true && page.task === null && draftedCount === 0 && sheet === null;
+    const task = page.task;
+    // Keep unfinished tasks and failures reachable; a completed task without drafts no longer occupies the editor (#1539, 10.2).
+    const needsAttention = task !== null && (!['available', 'settled', 'cancelled'].includes(task.state) || task.refusal !== null);
+    section.hidden = options.embedded === true && !needsAttention && draftedCount === 0 && sheet === null;
+    const summary = options.embedded === true ? el('div', 'writing-task-summary') : section;
+    if (summary !== section) section.append(summary);
     const heading = el('h3', undefined, options.embedded === true ? 'AI 写作' : WRITING_HEADING);
     heading.tabIndex = -1;
-    section.append(heading);
+    summary.append(heading);
     if (page.unavailable !== null) heading.append(' · ', el('span', 'writing-unavailable', page.unavailable));
-    else section.append(el('p', 'field-note', WRITING_LEDE));
-    const task = page.task;
+    else if (options.embedded !== true) section.append(el('p', 'field-note', WRITING_LEDE));
+    else if (task === null) summary.append(el('span', 'field-note', draftedCount > 0 ? `草稿已写好 ${draftedCount} 篇` : '参考资料起草衍生稿件'));
     if (task !== null) {
       const line = el('p', 'writing-task-line', writingTaskLine(task));
       if (task.modelLabel) line.append(` · ${task.modelLabel}`);
       line.dataset['writingTypeId'] = task.typeId;
       // Why the Task wrote no draft — a copy of an exemplar refused — said beside its line, with nothing offered to open.
       if (task.refusal !== null) line.append(' · ', el('span', 'writing-task-refusal', serviceWords(task.refusal)));
+      line.title = line.textContent ?? '';
       const row = el('div', 'button-row');
       // The next step only for a Task that can start: one whose 范例 is gone, or that wrote no draft, is looked at, not started (#698).
       const open = action(WRITING_ACTIONS.openTask, writingOpenTaskTone(task), 'open-task', () => options.openPlan(task.taskIntentId));
       open.setAttribute('aria-controls', 'task-drawer');
       open.disabled = busy;
       row.append(open);
-      section.append(line, row);
+      summary.append(line, row);
     }
     // Each drafted result not yet made its type's document.
     const drafted = page.types.filter((type): type is WritingTaskTypeProjection & { drafted: NonNullable<WritingTaskTypeProjection['drafted']> } => type.drafted !== null);
