@@ -86,6 +86,7 @@ describe('task overview', () => {
     const entry = (id: string) => panel.element.querySelector<HTMLButtonElement>(`[data-task-compose-action="${id}"]`);
     try {
       panel.show('book'); await vi.advanceTimersByTimeAsync(0);
+      expect(panel.element.querySelector('[data-task-overview-start]') === null).toBe(true);
       expect(entry('other')).toBeNull();
       for (const id of ['compose', 'review', 'writing', 'initial-evaluation', 'rule:sync', 'first-baseline']) {
         entry(id)!.click(); await vi.advanceTimersByTimeAsync(0);

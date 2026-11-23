@@ -2,6 +2,8 @@ import { chooseImportTarget } from './import-page.mjs';
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget, popoverShownInside } from './launch-task-bar.mjs';
 import { assertReachable, pressReachable, wheelIntoView } from './task-card-reach.mjs';
+import { tabTo, pressKey } from './import-entry-stages.mjs';
+import { setDeveloperMode } from './ordinary-pages.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -2004,15 +2006,49 @@ async function main() {
     await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), 'review-interrupted-tasks');
     const interruptedCard = `[data-screen="task-overview"] .task-overview-card[data-task-item*=${JSON.stringify(secondReviewRef)}]`;
     await waitFor(renderer, `document.querySelector(${JSON.stringify(interruptedCard)})`, 'review-interrupted-source-card');
+    const sourceReadable = `(() => {
+      const card=document.querySelector(${JSON.stringify(interruptedCard)}), body=card?.querySelector('.task-overview-card-body'), pill=body?.querySelector('.state-term'), line=body?.querySelector('.task-overview-card-line'), actions=card?.querySelector('.task-overview-card-actions');
+      if (!(card && body && pill && line && actions)) return false;
+      const c=card.getBoundingClientRect(), b=body.getBoundingClientRect(), p=pill.getBoundingClientRect(), l=line.getBoundingClientRect(), a=actions.getBoundingClientRect();
+      const inset=parseFloat(getComputedStyle(card).paddingLeft)+parseFloat(getComputedStyle(card).paddingRight), gap=parseFloat(getComputedStyle(card).columnGap);
+      const narrow=c.width < parseFloat(getComputedStyle(body).flexBasis)+a.width+inset+gap;
+      return p.width>0 && pill.scrollWidth<=pill.clientWidth+1 && p.left>=b.left && p.right<=b.right+1 &&
+        l.width>=Math.min(20*parseFloat(getComputedStyle(document.documentElement).fontSize),c.width-inset-2)-1 &&
+        (!narrow || a.top>=b.bottom-1);
+    })()`;
+    await assertRenderer(renderer, sourceReadable, 'review-interrupted-source-readable');
     const inspectReviewSource = `window.ai7.taskOverviewCall({operation:'inspectTaskPlan',bookId:${JSON.stringify(cancelledReview.bookId)},input:{kind:'review-run',ref:${JSON.stringify(secondReviewRef)}}})`;
     const interruptedPlan = await renderer.evaluate(inspectReviewSource);
     requireJourney(interruptedPlan?.relaunch?.operation === 'launchReviewRun' && interruptedPlan.relaunch.cancelsFirst !== null, 'review-interrupted-recipe', { state: interruptedPlan?.state ?? null, relaunch: interruptedPlan?.relaunch ?? null });
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${interruptedCard} [data-task-action="redo"]`)})`, 'review-interrupted-card', 30_000);
     const sourceModel = await renderer.evaluate(`document.querySelector(${JSON.stringify(interruptedCard + ' .task-overview-model')})?.textContent`);
     requireJourney(typeof sourceModel === 'string' && sourceModel.length > 0, 'review-interrupted-source-model');
-    await pressReachable(renderer, waitFor, requireJourney, `${interruptedCard} [data-task-action="redo"]`, 'review-interrupted-redo');
-    await waitFor(renderer, relaunchBarOpen('launchReviewRun'), 'review-interrupted-bar', 30_000);
-    await assertRenderer(renderer, `${RELAUNCH_SUMMARY}===${JSON.stringify(JSON.stringify(interruptedPlan.relaunch.summary))}`, 'review-interrupted-summary');
+    const originalDeveloper = await renderer.evaluate(`document.documentElement.dataset.technicalLayerVisible==='true'`);
+    for (const developer of [!originalDeveloper, originalDeveloper]) {
+      const mode = `review-interrupted-${developer ? 'developer' : 'ordinary'}`;
+      await setDeveloperMode(renderer, waitFor, developer, mode, (page, selector, name) => pressReachable(page, waitFor, requireJourney, selector, name));
+      await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.destination('tasks'), `${mode}-tasks`);
+      await wheelIntoView(renderer, waitFor, `${interruptedCard} .task-overview-card-line`, `${mode}-source`);
+      await assertReachable(renderer, waitFor, requireJourney, `${interruptedCard} .task-overview-state`, `${mode}-pill-before`);
+      await assertRenderer(renderer, sourceReadable, `${mode}-source-before`);
+      await pressReachable(renderer, waitFor, requireJourney, `${interruptedCard} [data-task-action="redo"]`, `${mode}-redo`);
+      await waitFor(renderer, relaunchBarOpen('launchReviewRun'), `${mode}-bar`, 30_000);
+      await assertRenderer(renderer, `${RELAUNCH_SUMMARY}===${JSON.stringify(JSON.stringify(interruptedPlan.relaunch.summary))}`, 'review-interrupted-summary');
+      await waitFor(renderer, `document.getAnimations().every(a=>a.playState!=='running')`, `${mode}-drawer-settled`);
+      await assertRenderer(renderer, sourceReadable, `${mode}-source-open`);
+      if (await renderer.evaluate(`parseFloat(getComputedStyle(document.body).paddingRight)>0`)) {
+        await wheelIntoView(renderer, waitFor, `${interruptedCard} .task-overview-card-line`, `${mode}-docked-source`);
+        await assertReachable(renderer, waitFor, requireJourney, `${interruptedCard} .task-overview-state`, `${mode}-docked-pill`);
+        await assertReachable(renderer, waitFor, requireJourney, `${interruptedCard} .task-overview-card-line`, `${mode}-docked-reason`);
+      }
+      await pressReachable(renderer, waitFor, requireJourney, '#task-drawer [data-task-drawer-control="close"]', `${mode}-close`);
+      await waitFor(renderer, `document.getAnimations().every(a=>a.playState!=='running')`, `${mode}-close-settled`);
+      await assertRenderer(renderer, sourceReadable, `${mode}-source-closed`);
+    }
+    await tabTo({renderer, waitFor, assertRenderer}, `${interruptedCard} [data-task-action="redo"]`, 'review-interrupted-reopen');
+    await pressKey(renderer, 'Enter');
+    await waitFor(renderer, relaunchBarOpen('launchReviewRun'), 'review-interrupted-reopened');
+    await waitFor(renderer, `document.getAnimations().every(a=>a.playState!=='running')`, 'review-interrupted-reopen-settled');
     await wheelIntoView(renderer, waitFor, '#task-drawer .dispatch-chooser > summary', 'review-interrupted-chooser');
     await assertReachable(renderer, waitFor, requireJourney, '#task-drawer .dispatch-chooser > summary', 'review-interrupted-chooser');
     const chosenReviewModel = (await chooseDispatch(renderer, waitFor, '#task-drawer .dispatch-chooser', 'review-interrupted-model', {

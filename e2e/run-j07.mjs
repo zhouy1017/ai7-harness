@@ -5,7 +5,7 @@ import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { unzipSync } from 'fflate';
-import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx, addReadOnlySourceObjects } from './composed-docx.mjs';
 import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { openArchivePackageExport, openRemainingPackageExport } from './package-export-readiness.mjs';
-import { answer, dropFile, noImportDraft, pressReachable, questionOffers, reachable } from './import-entry-stages.mjs';
+import { answer, dropFile, holdEarlierNotice, noImportDraft, pressReachable, questionOffers, questionOutlastsNotice, reachable } from './import-entry-stages.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -3450,8 +3450,12 @@ async function main() {
       await pressReachable(dropIo, SIDEBAR.section('derivatives'), `${name}-management`);
     };
     // The page is where 删除类别 left it: 衍生稿件管理.
-    await dropFile(dropIo, SAMPLE1_PATH, managementPage, 'drop-management');
+    const longDropPath = resolve(runRoot, 'public-sample-import-question-with-a-long-filename-that-wraps-across-the-question-heading.docx');
+    await copyFile(SAMPLE1_PATH, longDropPath);
+    await holdEarlierNotice(dropIo, 'drop-management');
+    await dropFile(dropIo, longDropPath, managementPage, 'drop-management');
     await questionOffers(dropIo, ['update', 'derivative', 'cancel'], 'drop-management');
+    await questionOutlastsNotice(dropIo, 'drop-management');
     await noImportDraft(dropIo, 'drop-management-unanswered');
     await answer(dropIo, 'cancel', 'drop-management');
     await waitFor(renderer, `document.querySelector('[data-import-question]') === null`, 'drop-management-closed');

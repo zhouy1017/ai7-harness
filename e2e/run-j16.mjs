@@ -4,6 +4,8 @@ import { rightColumnGeometry } from './comments-pane.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
 import { assertReachable, pressReachable } from './task-card-reach.mjs';
+import { setDeveloperMode } from './ordinary-pages.mjs';
+import { tabTo, pressKey, pressReachable as pressWithoutFrames } from './import-entry-stages.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -442,9 +444,39 @@ async function openManuscriptOf(renderer, bookId, name) {
 }
 
 /** 任务 on the manuscript's right edge: the Book's panel in the side slot, read once it is ready. */
-async function openPanel(renderer, name) {
-  await clickSelector(renderer, '[data-edge-entry="tasks"]', `${name}-entry`);
-  return waitForPanel(renderer, (panel) => panel.state === 'ready', `${name}-panel`);
+async function openPanel(renderer, name, { heldFrames = false } = {}) {
+  if (heldFrames) await assertRenderer(renderer, `Array.isArray(globalThis.__ai7HeldCompletionFrames)`, `${name}-held-frame-contract`);
+  const press = (selector, label) => heldFrames
+    ? pressWithoutFrames({ renderer, waitFor, assertRenderer }, selector, label)
+    : pressReachable(renderer, waitFor, requireJourney, selector, label);
+  const view = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer && !drawer.hidden ? drawer.dataset.taskDrawerView : null; })()`);
+  if (view !== null && view !== 'panel') {
+    await press('#task-drawer [data-task-drawer-control="close"]', `${name}-close-covering-drawer`);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true && document.getAnimations().every(a=>a.playState!=='running')`, `${name}-drawer-closed`);
+  }
+  if (view !== 'panel') await press('[data-edge-entry="tasks"]', `${name}-entry`);
+  const panel = await waitForPanel(renderer, (panel) => panel.state === 'ready', `${name}-panel`);
+  await waitFor(renderer, `document.getAnimations().every(a=>a.playState!=='running')`, `${name}-panel-settled`);
+  await assertRenderer(renderer, `document.querySelectorAll('#task-drawer .task-panel-launch > summary').length===1 && !document.querySelector('#task-drawer [data-task-overview-start]')`, `${name}-one-launcher`);
+  return panel;
+}
+
+/** Empty and populated Book panels have one launch entry in each mode, reachable by the keyboard too. */
+async function panelLauncherModes(renderer, name) {
+  const original = await renderer.evaluate(`document.documentElement.dataset.technicalLayerVisible==='true'`);
+  for (const developer of [!original, original]) {
+    const label = `${name}-${developer ? 'developer' : 'ordinary'}`;
+    await setDeveloperMode(renderer, waitFor, developer, label, (page, selector, check) => pressReachable(page, waitFor, requireJourney, selector, check));
+    await pressReachable(renderer, waitFor, requireJourney, SIDEBAR.section('manuscript'), `${label}-manuscript`);
+    await waitFor(renderer, `document.querySelector('.editor-shell .ProseMirror')`, `${name}-${developer ? 'developer' : 'ordinary'}-editor`);
+    await openPanel(renderer, label);
+    await waitFor(renderer, `document.getAnimations().every(a=>a.playState!=='running')`, `${label}-settled`);
+    const summary = '#task-drawer .task-panel-launch > summary';
+    await tabTo({renderer, waitFor, assertRenderer}, summary, label);
+    await pressKey(renderer, 'Enter');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-panel-launch')?.open===true`, `${label}-keyboard-open`);
+    await pressReachable(renderer, waitFor, requireJourney, summary, `${label}-close-menu`);
+  }
 }
 
 /** One card's action, named by the Task's state and the action's key. */
@@ -1062,6 +1094,7 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === true && document.body.dataset.taskDrawer === 'open'`, 'panel-one-slot');
 
     at('panel-launch-menu');
+    await panelLauncherModes(renderer, 'panel-empty-launcher');
     const menu = '#task-drawer .task-panel-launch';
     await waitFor(renderer, `document.getAnimations().every(animation => animation.playState !== 'running')`, 'panel-transition-settled');
     await pressReachable(renderer, waitFor, requireJourney, menu + ' > summary', 'panel-menu-open');
@@ -1085,6 +1118,7 @@ async function main() {
       cardsOf(running, 'active')[0].time.startsWith('记录于 ') && cardsOf(running, 'active')[0].reason.length <= 60 &&
       JSON.stringify(cardsOf(running, 'active')[0].actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['cancel', '取消任务', 'enabled']]),
     'panel-running-card', running);
+    await panelLauncherModes(renderer, 'panel-populated-launcher');
 
     at('panel-pause');
     // 暂停 on the card, as the drawer's bar would: 正在暂停 while the range in flight finishes, then 已暂停 with 续行.
@@ -1966,7 +2000,7 @@ async function main() {
     const returnBefore = await renderer.evaluate(READ_RETURN_ENTRY);
     requireJourney(returnBefore === null, 'selection-task-gone-no-return-before', returnBefore);
     const goneLoadsBefore = await windowLoads();
-    const gonePanel = await openPanel(renderer, 'selection-task-gone');
+    const gonePanel = await openPanel(renderer, 'selection-task-gone', { heldFrames: true });
     const goneCard = cardsOf(gonePanel, 'recent').find((card) => card.state === 'review-completed');
     requireJourney(goneCard !== undefined && goneCard.title === '审阅 · 第 1 次 · 所选段落' && goneCard.actions.some(([key, label, state]) => key === 'jump' && label === '跳到所选文字' && state === 'enabled'), 'selection-task-gone-card', gonePanel);
     await cardAction(renderer, 'review-completed', 'jump', 'selection-task-gone-jump');

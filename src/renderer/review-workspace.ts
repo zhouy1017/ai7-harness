@@ -50,7 +50,7 @@ import {
   type ServiceWireJobProjection as ServiceJobProjection,
 } from '../shared/protocol.js';
 import { findingResearchLines, readFindingResearch, readFindingSources, type FindingSourceEntry } from './research-evidence-labels.js';
-import { findingEvidenceList } from './research-evidence.js';
+import { findingEvidenceList, findingRetainedSources } from './research-evidence.js';
 import { mountEvidenceWorkspace, type EvidenceWorkspaceSurface } from './evidence-workspace.js';
 import { FACT_SEVERITY_LABELS } from './evidence-workspace-labels.js';
 import { renderFactCard, renderFactLens as factLens } from './fact-card.js';
@@ -1979,7 +1979,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const attached = category.categoryId === 'factual-review' ? evidence.get(finding.findingId) ?? [] : [];
     const sources = attached.length > 0 || category.categoryId !== 'factual-review' || retained === undefined ? null : findingResearchLines(retained, finding, localInstantLabel);
     if (showEvidence && attached.length > 0) main.append(findingEvidenceList(attached, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
-    if (showEvidence) for (const line of sources ?? []) main.append(el('p', 'review-finding-source', line));
+    if (showEvidence && sources !== null && retained !== undefined) {
+      const list = findingRetainedSources(retained, finding, bookId);
+      if (list !== null) main.append(list);
+      else for (const line of sources) main.append(el('p', 'review-finding-source', line));
+    }
     // The settled detail says what the pill does not; a detail that only repeats it is left out (review N9).
     const settledDetail = serviceWords(finding.statusDetail);
     if (finding.status !== 'pending' && settledDetail !== serviceWords(finding.statusLabel)) main.append(el('p', 'review-finding-status-detail', settledDetail));
